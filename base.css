@@ -1,0 +1,154 @@
+/* ============================================================
+   base.css —— 全站唯一的设计令牌与基础样式来源
+   所有页面在各自 CSS 之前引入本文件，禁止在页面 CSS 中重复定义。
+   ============================================================ */
+
+/* ---- 设计令牌（含浅色/暗色主题）---- */
+:root {
+  --primary: #4a90d9;
+  --primary-hover: #3a7cc4;
+  --primary-soft: #4a90d91a;
+  --bg: #f0f2f5;
+  --card: #ffffff;
+  --text: #333333;
+  /* 对比度提升至 ≥4.5:1（原 #888 ≈3.5:1，#aaa ≈2.3:1，均不达 WCAG AA） */
+  --text-sub: #5f6b7a;
+  --text-faint: #6b7280;
+  --border: #e2e5ea;
+  --note-bg: #f6f7f9;
+  --star-on: #f5b942;
+  --star-off: #c3c8d0;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --danger: #e74c3c;
+  --success: #27ae60;
+  --focus-ring: rgba(74, 144, 217, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #5b9be0;
+    --primary-hover: #6ea9e5;
+    --primary-soft: #5b9be033;
+    --bg: #1b1d21;
+    --card: #26292e;
+    --text: #e3e5e8;
+    --text-sub: #9aa0a8;
+    --text-faint: #7d838b;
+    --border: #3a3f46;
+    --note-bg: #2f3339;
+    --star-on: #f5b942;
+    --star-off: #565b63;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
+    --danger: #e5604f;
+    --focus-ring: rgba(91, 155, 224, 0.55);
+  }
+}
+
+/* ---- 重置 ---- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- 统一焦点环（键盘可达性的核心）---- */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+[role="radio"]:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- 全局滚动条（细窄风格）---- */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ---- 通用工具类 ---- */
+.hidden {
+  display: none !important;
+}
+
+/* ---- Toast（popup / manager / userscripts 共用）---- */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%) translateY(16px);
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 10000;
+  max-width: 90vw;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+/* 撤销按钮需可点击，故 show 时允许指针事件 */
+#toast button {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 8px;
+  text-decoration: underline;
+  font-family: inherit;
+}
+
+#toast button:hover {
+  color: #fff;
+}
+
+/* ---- 尊重用户的减少动效偏好 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

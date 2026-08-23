@@ -2,6 +2,7 @@
 import { STATUS, ITEM_TYPES } from './lib/shared/constants.js';
 import {
   showToast,
+  debounce,
   starBarHtml,
   levelNameHtml,
   sortItems,
@@ -9,6 +10,7 @@ import {
   typeBadgeHtml,
   tagsHtml,
   fmtTime,
+  bindStarKeyboard,
   isWebUrl,
   normalizeUrl,
   cleanTitle,
@@ -34,7 +36,7 @@ let listQuery = '';
 const $ = (id) => document.getElementById(id);
 
 function toast(msg, undoFn) {
-  showToast(msg, { duration: 2600, undoFn });
+  showToast(msg, { duration: 4000, undoFn });
 }
 
 async function loadCache() {
@@ -112,7 +114,6 @@ function itemHtml(it) {
 
 async function init() {
   await loadCache();
-  renderTypePicker();
   renderList();
   renderScriptsBadge();
 
@@ -219,6 +220,28 @@ document.querySelector('#add-panel .star-picker').addEventListener('click', (e) 
   syncStatusHighlight();
 });
 
+// 星级键盘可达（popup 既有收藏面板，也有列表项）
+bindStarKeyboard(document, (v, cell) => {
+  const picker = cell.closest('#add-panel .star-picker');
+  if (picker) {
+    selectedStatus = v;
+    const nameEl = document.querySelector('#add-panel .star-picker-name');
+    if (nameEl) nameEl.innerHTML = levelNameHtml(v);
+    return;
+  }
+  const itemEl = cell.closest('.item');
+  if (itemEl) {
+    const id = itemEl.dataset.id;
+    if (bookCache[id]) {
+      bookCache[id].status = v;
+      bookCache[id].updatedAt = Date.now();
+      persist();
+      const lvl = itemEl.querySelector('.level-name');
+      if (lvl) lvl.outerHTML = levelNameHtml(v);
+    }
+  }
+});
+
 document.querySelectorAll('.filter-chip').forEach((c) => {
   c.addEventListener('click', () => {
     currentFilter = c.dataset.filter;
@@ -235,10 +258,10 @@ $('sort-select').addEventListener('change', (e) => {
   renderList();
 });
 
-$('list-search').addEventListener('input', (e) => {
-  listQuery = e.target.value;
+$('list-search').addEventListener('input', debounce(() => {
+  listQuery = $('list-search').value;
   renderList();
-});
+}, 200));
 
 $('toggle-add-panel').addEventListener('click', () => {
   const addPanel = $('add-panel');
@@ -300,7 +323,10 @@ $('list').addEventListener('click', async (e) => {
 
 const openManager = (e) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') });
+  // 带上当前条目 id，复用 manager 的 #focus 高亮定位，打通「收录→管理」闭环
+  const id = currentUrl && bookCache[currentUrl] ? currentUrl : null;
+  const url = chrome.runtime.getURL('manager.html') + (id ? `#focus=${encodeURIComponent(id)}` : '');
+  chrome.tabs.create({ url });
 };
 $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);

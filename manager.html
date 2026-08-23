@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
   <title>RecallFlow - 管理</title>
+  <link rel="stylesheet" href="base.css">
   <link rel="stylesheet" href="manager.css">
 </head>
 <body>
@@ -58,15 +60,15 @@
     <select id="sort-select" class="sort-select" title="排序方式">
       <option value="updated">最近更新</option>
       <option value="created">最近收录</option>
-      <option value="star-desc">星级高→低</option>
-      <option value="star-asc">星级低→高</option>
+      <option value="star-desc">重要度 高→低</option>
+      <option value="star-asc">重要度 低→高</option>
     </select>
   </div>
 
   <main id="list" class="list"></main>
   <div id="empty" class="empty hidden"></div>
 
-  <div class="confirm-overlay hidden" id="confirm-overlay">
+  <div class="confirm-overlay hidden" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-msg">
     <div class="confirm-dialog">
       <div class="confirm-msg" id="confirm-msg"></div>
       <div class="confirm-actions">

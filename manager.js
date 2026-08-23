@@ -12,6 +12,7 @@ import {
   esc,
   sortItems,
   parseTags,
+  bindStarKeyboard,
 } from './lib/shared/utils.js';
 import { getBook, setBook } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
@@ -153,6 +154,8 @@ function itemHtml(it) {
 }
 
 function render() {
+  const listEl = $('list');
+  const prevTop = listEl.scrollTop; // 记录滚动位置，避免编辑/改星后跳回顶部
   const items = filtered();
   const emptyEl = $('empty');
   emptyEl.classList.toggle('hidden', items.length > 0);
@@ -162,7 +165,8 @@ function render() {
       ? '<span class="empty-ico">🔍</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>知识库还是空的</p><p class="empty-hint">点击「新建笔记」或收藏网页开始收录</p>';
   }
-  $('list').innerHTML = items.map(itemHtml).join('');
+  listEl.innerHTML = items.map(itemHtml).join('');
+  listEl.scrollTop = prevTop; // 恢复滚动位置
   renderTypeTabs();
   renderTagFilter();
   renderStats();
@@ -222,14 +226,16 @@ async function createNote() {
 }
 
 function toast(msg, undoFn) {
-  showToast(msg, { undoFn, duration: 3000 });
+  showToast(msg, { undoFn, duration: 4000 });
 }
 
 function showConfirm(msg) {
   return new Promise((resolve) => {
     const overlay = $('confirm-overlay');
+    const dialog = overlay.querySelector('.confirm-dialog');
     $('confirm-msg').textContent = msg;
     overlay.classList.remove('hidden');
+    const prevFocus = document.activeElement;
     const yes = $('confirm-yes');
     const no = $('confirm-no');
     const cleanup = (result) => {
@@ -238,6 +244,7 @@ function showConfirm(msg) {
       document.removeEventListener('keydown', onKey);
       yes.removeEventListener('click', onYes);
       no.removeEventListener('click', onNo);
+      if (prevFocus && prevFocus.focus) prevFocus.focus();
       resolve(result);
     };
     const onYes = () => cleanup(true);
@@ -246,7 +253,24 @@ function showConfirm(msg) {
       if (e.target === overlay) cleanup(false);
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') cleanup(false);
+      if (e.key === 'Escape') {
+        cleanup(false);
+        return;
+      }
+      if (e.key === 'Tab') {
+        // 焦点陷阱：Tab/Shift+Tab 在对话框按钮间循环
+        const f = dialog.querySelectorAll('button:not([disabled])');
+        if (!f.length) return;
+        const first = f[0];
+        const last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     yes.addEventListener('click', onYes);
     no.addEventListener('click', onNo);
@@ -349,14 +373,14 @@ $('list').addEventListener('click', async (e) => {
   if (act) {
     const a = act.dataset.act;
     if (a === 'del') {
-      const ok = await showConfirm('确定删除"' + (bookCache[id].title || '此条目') + '"？');
-      if (!ok) return;
+      // 与 popup 统一为「即时删除 + 强撤销」，不再二次确认（批量删除仍保留确认）
       const backup = { ...bookCache[id] };
+      const title = bookCache[id].title || '此条目';
       delete bookCache[id];
       if (editingNoteId === id) editingNoteId = null;
       await persist();
       render();
-      toast('已删除', async () => {
+      toast('已删除「' + title + '」', async () => {
         bookCache[id] = backup;
         await persist();
         render();
@@ -388,6 +412,20 @@ $('list').addEventListener('click', async (e) => {
   if (e.target.closest('.item-title') && bookCache[id] && bookCache[id].url) {
     chrome.tabs.create({ url: bookCache[id].url });
   }
+});
+
+// 星级键盘可达：就地更新，避免整列表 render() 导致焦点/滚动丢失
+bindStarKeyboard($('list'), (v, cell) => {
+  const itemEl = cell.closest('.item');
+  if (!itemEl) return;
+  const id = itemEl.dataset.id;
+  if (!bookCache[id]) return;
+  bookCache[id].status = v;
+  bookCache[id].updatedAt = Date.now();
+  persist();
+  renderStats();
+  const lvl = itemEl.querySelector('.level-name');
+  if (lvl) lvl.outerHTML = levelNameHtml(v);
 });
 
 $('list').addEventListener('keydown', async (e) => {

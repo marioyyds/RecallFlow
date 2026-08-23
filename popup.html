@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
   <title>RecallFlow</title>
+  <link rel="stylesheet" href="base.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -39,7 +41,7 @@
   </section>
   <section id="page-unavailable" class="page-unavailable hidden" aria-live="polite"><span class="empty-ico">⊙</span><strong>当前页面无法收录</strong><span>请打开普通网页后再试</span></section>
 
-  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"></label></div>
+  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"><kbd>Ctrl K</kbd></label></div>
 
   <div class="toolbar">
     <nav class="filters" id="filters">
@@ -52,8 +54,8 @@
     <select id="sort-select" class="sort-select" title="排序方式">
       <option value="updated">最近更新</option>
       <option value="created">最近收录</option>
-      <option value="star-desc">星级高→低</option>
-      <option value="star-asc">星级低→高</option>
+      <option value="star-desc">重要度 高→低</option>
+      <option value="star-asc">重要度 低→高</option>
     </select>
   </div>
 
@@ -65,11 +67,11 @@
   </div>
 
   <footer>
-    <a id="open-manager" href="#">知识库</a>
+    <button id="open-manager" type="button" class="link-btn">知识库</button>
     <span class="sep">·</span>
-    <a id="open-scripts" href="#">脚本<span id="scripts-badge" class="nav-badge hidden"></span></a>
+    <button id="open-scripts" type="button" class="link-btn">脚本<span id="scripts-badge" class="nav-badge hidden"></span></button>
     <span class="sep">·</span>
-    <a id="open-settings" href="#">设置</a>
+    <button id="open-settings" type="button" class="link-btn">设置</button>
   </footer>
 
   <script type="module" src="popup.js"></script>

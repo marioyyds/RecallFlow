@@ -1,49 +1,4 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-:root {
-  --primary: #4a90d9;
-  --primary-hover: #3a7cc4;
-  --primary-soft: #4a90d91a;
-  --bg: #f0f2f5;
-  --card: #ffffff;
-  --text: #333333;
-  --text-sub: #888888;
-  --text-faint: #aaaaaa;
-  --border: #e2e5ea;
-  --note-bg: #f6f7f9;
-  --star-on: #f5b942;
-  --star-off: #c3c8d0;
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
-  --danger: #e74c3c;
-  --success: #27ae60;
-  --focus-ring: rgba(74, 144, 217, 0.4);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --primary: #5b9be0;
-    --primary-hover: #6ea9e5;
-    --primary-soft: #5b9be033;
-    --bg: #1b1d21;
-    --card: #26292e;
-    --text: #e3e5e8;
-    --text-sub: #9aa0a8;
-    --text-faint: #7d838b;
-    --border: #3a3f46;
-    --note-bg: #2f3339;
-    --star-on: #f5b942;
-    --star-off: #565b63;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
-    --danger: #e5604f;
-    --focus-ring: rgba(91, 155, 224, 0.55);
-  }
-}
+/* 设计令牌与基础样式（reset / 焦点环 / scrollbar / toast / reduced-motion）见 base.css */
 
 body {
   width: 420px;
@@ -54,20 +9,6 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.45;
-}
-
-button,
-input,
-select,
-textarea { -webkit-tap-highlight-color: transparent; }
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 header {
@@ -92,10 +33,6 @@ header h1 {
   padding: 3px 10px;
   border-radius: 999px;
   font-weight: 500;
-}
-
-.hidden {
-  display: none !important;
 }
 
 /* ---- 添加面板 ---- */
@@ -506,13 +443,19 @@ footer .sep {
   color: var(--text-faint);
 }
 
-footer a {
+footer button.link-btn {
   font-size: 11px;
   color: var(--primary);
   text-decoration: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-family: inherit;
 }
 
-footer a:hover {
+footer button.link-btn:hover {
   text-decoration: underline;
 }
 
@@ -529,31 +472,6 @@ footer a:hover {
   font-size: 9px;
   line-height: 1;
   vertical-align: 1px;
-}
-
-#toast {
-  position: fixed;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%) translateY(16px);
-  background: rgba(0, 0, 0, 0.82);
-  color: #fff;
-  font-size: 12px;
-  padding: 7px 16px;
-  border-radius: 999px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s, transform 0.25s;
-  z-index: 9999;
-}
-
-#toast.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* ---- Popup UX refresh ---- */
@@ -589,6 +507,7 @@ footer a:hover {
 .list-search { display:flex; align-items:center; gap:5px; min-width:132px; height:30px; padding:0 8px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--text-faint); }
 .list-search:focus-within { border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-soft); }
 .list-search input { width:100%; min-width:0; border:0; outline:0; background:transparent; color:var(--text); font:inherit; font-size:11px; }
+.list-search kbd { color:var(--text-faint); font-size:10px; font-family:inherit; background:var(--note-bg); border:1px solid var(--border); border-radius:4px; padding:1px 5px; white-space:nowrap; }
 .toolbar { gap:7px; margin-bottom:8px; }
 .filters { min-width:0; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
 .filters::-webkit-scrollbar { display:none; }
@@ -603,5 +522,4 @@ footer a:hover {
 .icon-btn.open { color:var(--primary); font-size:16px; }
 .icon-btn.open:hover { color:var(--primary-hover); background:var(--primary-soft); transform:none; }
 .platform-mini { max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 6px; border-radius:5px; background:var(--primary-soft); color:var(--primary); font-size:10px; }
-#toast button { margin-left:7px; padding:0; border:0; background:transparent; color:#8fc1ff; font:inherit; font-weight:600; cursor:pointer; }
 @media (max-width:360px) { .list-head { align-items:flex-start; flex-direction:column; } .list-search { width:100%; } }

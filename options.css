@@ -1,38 +1,4 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-:root {
-  --primary: #4a90d9;
-  --primary-hover: #3a7cc4;
-  --primary-soft: #4a90d91a;
-  --bg: #f0f2f5;
-  --card: #ffffff;
-  --text: #333333;
-  --text-sub: #888888;
-  --text-faint: #aaaaaa;
-  --border: #e2e5ea;
-  --danger: #e74c3c;
-  --success: #27ae60;
-  --focus-ring: rgba(74, 144, 217, 0.4);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --primary: #5b9be0;
-    --primary-hover: #6ea9e5;
-    --primary-soft: #5b9be033;
-    --bg: #1b1d21;
-    --card: #26292e;
-    --text: #e3e5e8;
-    --text-sub: #9aa0a8;
-    --text-faint: #7d838b;
-    --border: #3a3f46;
-    --focus-ring: rgba(91, 155, 224, 0.55);
-  }
-}
+/* 设计令牌与基础样式见 base.css */
 
 body {
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
@@ -140,20 +106,6 @@ body {
 .module-nav-item.active .module-nav-badge {
   background: rgba(255, 255, 255, 0.25);
   color: #fff;
-}
-
-button,
-input,
-select,
-textarea { -webkit-tap-highlight-color: transparent; }
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
 }
 
 main {

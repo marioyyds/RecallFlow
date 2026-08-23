@@ -10,6 +10,7 @@ let listQuery = '';
 let pendingInstall = null;
 let confirmResolve = null;
 let updatingAll = false;
+let lastFocus = null;
 
 function send(type, payload) {
   return new Promise((resolve) => {
@@ -20,7 +21,7 @@ function send(type, payload) {
 }
 
 function toast(msg) {
-  showToast(msg, { duration: 2600 });
+  showToast(msg, { duration: 4000 });
 }
 
 /* ---------- 视图切换 ---------- */
@@ -317,6 +318,7 @@ function showPreview(p) {
   $('us-preview-name').textContent = p.name + (p.version ? ' · v' + p.version : '');
   $('us-preview-meta').textContent = [p.author, p.homepageURL].filter(Boolean).join(' · ');
   $('us-preview-body').innerHTML = previewHtml(p);
+  lastFocus = document.activeElement;
   $('us-preview-overlay').classList.remove('hidden');
   $('us-preview-yes').focus();
 }
@@ -324,12 +326,14 @@ function showPreview(p) {
 function closePreview() {
   $('us-preview-overlay').classList.add('hidden');
   pendingInstall = null;
+  if (lastFocus && lastFocus.focus) { lastFocus.focus(); lastFocus = null; }
 }
 
 /* ---------- 通用确认弹窗 ---------- */
 function openConfirm(message, yesText) {
   $('us-confirm-msg').textContent = message;
   $('us-confirm-yes').textContent = yesText || '确认';
+  lastFocus = document.activeElement;
   $('us-confirm-overlay').classList.remove('hidden');
   $('us-confirm-yes').focus();
   return new Promise((resolve) => {
@@ -343,6 +347,7 @@ function closeConfirm(result) {
     confirmResolve(result);
     confirmResolve = null;
   }
+  if (lastFocus && lastFocus.focus) { lastFocus.focus(); lastFocus = null; }
 }
 
 /* ---------- 事件绑定 ---------- */
@@ -505,9 +510,31 @@ $('us-confirm-yes').addEventListener('click', () => closeConfirm(true));
 $('us-confirm-no').addEventListener('click', () => closeConfirm(false));
 
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (!$('us-preview-overlay').classList.contains('hidden')) closePreview();
-  if (!$('us-confirm-overlay').classList.contains('hidden')) closeConfirm(false);
+  if (e.key === 'Escape') {
+    if (!$('us-preview-overlay').classList.contains('hidden')) closePreview();
+    if (!$('us-confirm-overlay').classList.contains('hidden')) closeConfirm(false);
+    return;
+  }
+  if (e.key === 'Tab') {
+    // 焦点陷阱：对话框打开时 Tab / Shift+Tab 在按钮间循环
+    const trap = (id) => {
+      const ov = $(id);
+      if (ov.classList.contains('hidden')) return;
+      const f = ov.querySelectorAll('.confirm-dialog button:not([disabled])');
+      if (!f.length) return;
+      const first = f[0];
+      const last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    trap('us-preview-overlay');
+    trap('us-confirm-overlay');
+  }
 });
 
 document.querySelectorAll('.confirm-overlay').forEach((overlay) => {
