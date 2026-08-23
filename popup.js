@@ -18,6 +18,7 @@ import {
   parseTags,
 } from './lib/shared/utils.js';
 import { getBook, setBook, upsertItem } from './lib/shared/store.js';
+import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 let bookCache = {};
 let currentTab = null;
@@ -113,6 +114,7 @@ async function init() {
   await loadCache();
   renderTypePicker();
   renderList();
+  renderScriptsBadge();
 
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (t && t.url && isWebUrl(t.url)) {
@@ -145,6 +147,19 @@ async function init() {
   }
   renderTypePicker();
   syncStatusHighlight();
+}
+
+async function renderScriptsBadge() {
+  const badge = document.getElementById('scripts-badge');
+  if (!badge) return;
+  try {
+    const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
+    const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  } catch (e) {
+    badge.classList.add('hidden');
+  }
 }
 
 $('add-btn').addEventListener('click', async () => {
@@ -289,6 +304,11 @@ const openManager = (e) => {
 };
 $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);
+
+$('open-scripts').addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL('userscripts.html') });
+});
 
 $('open-settings').addEventListener('click', (e) => {
   e.preventDefault();

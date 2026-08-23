@@ -12,6 +12,7 @@
   --card: #ffffff;
   --text: #333333;
   --text-sub: #888888;
+  --text-faint: #aaaaaa;
   --border: #e2e5ea;
   --danger: #e74c3c;
   --success: #27ae60;
@@ -27,6 +28,7 @@
     --card: #26292e;
     --text: #e3e5e8;
     --text-sub: #9aa0a8;
+    --text-faint: #7d838b;
     --border: #3a3f46;
     --focus-ring: rgba(91, 155, 224, 0.55);
   }
@@ -36,9 +38,108 @@ body {
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
-  max-width: 640px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 0 16px 40px;
+}
+
+.app-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 20px;
+  margin: 0 -16px 0;
+  background: var(--card);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0 0 14px 14px;
+  box-shadow: 0 3px 14px rgba(30, 70, 110, 0.16);
+}
+
+.brand-group,
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--primary);
+  font-weight: 700;
+}
+
+.brand-group h1 {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.page-caption {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.module-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 860px;
+  margin: 14px auto 0;
+  padding: 0 16px;
+}
+
+.module-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.module-nav-item:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.module-nav-item.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 2px 10px var(--primary-soft);
+}
+
+.module-nav-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.module-nav-item.active .module-nav-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
 }
 
 button,
@@ -55,24 +156,9 @@ textarea:focus-visible,
   outline-offset: 2px;
 }
 
-header {
-  padding: 32px 0 24px;
-  text-align: center;
-}
-
-header h1 {
-  font-size: 24px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #4a90d9, #6aa5e0);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-header .sub {
-  font-size: 13px;
-  color: var(--text-sub);
-  margin-top: 6px;
+main {
+  max-width: 640px;
+  margin: 18px auto 0;
 }
 
 .card {
@@ -329,4 +415,67 @@ header .sub {
 .ghost-btn:hover {
   border-color: var(--primary);
   background: var(--primary-soft);
+}
+
+/* ---- 用户脚本卡片 ---- */
+.us-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  margin-bottom: 10px;
+}
+
+.us-summary-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.us-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.us-summary-meta {
+  font-size: 11px;
+  color: var(--text-sub);
+}
+
+.us-card-hint {
+  margin: -4px 0 14px;
+}
+
+.us-select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.us-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+@media (max-width: 620px) {
+  .app-header {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    padding: 12px 14px;
+  }
+  .module-nav {
+    padding-inline: 10px;
+  }
 }

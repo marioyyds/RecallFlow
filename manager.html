@@ -8,11 +8,20 @@
 <body>
   <header class="app-header">
     <div class="brand-group"><div class="brand-mark" aria-hidden="true">R</div><div><h1>RecallFlow</h1><span class="page-caption">资料库</span></div></div>
-    <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索标题、备注或标签" aria-label="搜索笔记"><kbd>Ctrl K</kbd></label>
     <div class="header-actions"><button id="add-note-btn" class="btn btn-primary"><span aria-hidden="true">＋</span> 新建笔记</button><details class="more-menu"><summary class="btn btn-secondary" aria-label="更多操作">⋯</summary><div class="more-menu-panel"><button id="import-btn">导入 JSON</button>
     <input id="import-file" type="file" accept=".json" style="display:none">
     <button id="export-btn">导出 JSON</button></div></details></div>
   </header>
+
+  <nav class="module-nav" aria-label="模块导航">
+    <a class="module-nav-item active" href="manager.html" aria-current="page">知识库</a>
+    <a class="module-nav-item" href="userscripts.html">脚本中心<span id="us-count-badge" class="module-nav-badge hidden">0</span></a>
+    <a class="module-nav-item" href="options.html">设置</a>
+  </nav>
+
+  <div class="kb-toolbar">
+    <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索标题、备注或标签" aria-label="搜索笔记"><kbd>Ctrl K</kbd></label>
+  </div>
 
   <div class="bulk-bar hidden" id="bulk-bar">
     <span class="bulk-count" id="bulk-count">0 项已选</span>

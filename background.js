@@ -5,6 +5,21 @@ import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
 import { logError } from './lib/shared/utils.js';
+import {
+  listScripts,
+  installFromUrl,
+  installFromCode,
+  previewScript,
+  previewCode,
+  updateScript,
+  updateAllScripts,
+  setScriptEnabled,
+  uninstallScript,
+  searchScripts,
+  runUserscriptOnTab,
+  userscriptXhr,
+  syncUserscriptRegistrations,
+} from './lib/userscript/manager.js';
 
 async function handleAi(request) {
   const settings = await getAISettings();
@@ -61,6 +76,110 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg && msg.type === 'userscript:list') {
+    listScripts()
+      .then((scripts) => sendResponse({ ok: true, scripts }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:install') {
+    installFromUrl(msg.url)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:preview') {
+    previewScript(msg.url)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:installCode') {
+    installFromCode(msg.code, msg.label)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:previewCode') {
+    previewCode(msg.code)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:update') {
+    updateScript(msg.id)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:updateAll') {
+    updateAllScripts()
+      .then((r) => sendResponse({ ok: true, ...r }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:toggle') {
+    setScriptEnabled(msg.id, msg.enabled)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:uninstall') {
+    uninstallScript(msg.id)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:search') {
+    searchScripts(msg.q)
+      .then((list) => sendResponse({ ok: true, list }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:runOnTab') {
+    chrome.tabs.query({ currentWindow: true }, (tabs) => {
+      // 优先当前激活的普通网页；若当前页是扩展页面（如脚本中心），回退到最近浏览的网页。
+      const webTabs = (tabs || []).filter((t) => t.url && /^https?:/i.test(t.url));
+      const tab = webTabs.find((t) => t.active) || webTabs[0];
+      if (!tab || !tab.id) {
+        sendResponse({ ok: false, error: '没有可运行的网页标签页' });
+        return;
+      }
+      runUserscriptOnTab(tab.id, msg.id)
+        .then((r) => sendResponse(r || { ok: false, error: '脚本执行无响应' }))
+        .catch((e) => sendResponse({ ok: false, error: e.message }));
+    });
+    return true;
+  }
+  if (msg && msg.type === 'userscript:xhr') {
+    userscriptXhr(msg.details)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'userscript:openTab') {
+    chrome.tabs.create({ url: msg.url, active: msg.active !== false });
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'userscript:notify') {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('docs/assets/recallflow-mark.svg'),
+      title: msg.title || 'RecallFlow',
+      message: msg.text || '',
+    });
+    sendResponse({ ok: true });
+    return false;
+  }
+});
+
+// 浏览器启动 / 扩展安装后，重新对齐脚本注册状态。
+chrome.runtime.onStartup.addListener(() => {
+  syncUserscriptRegistrations().catch(() => {});
+});
+chrome.runtime.onInstalled.addListener(() => {
+  syncUserscriptRegistrations().catch(() => {});
 });
 
 chrome.runtime.onConnect.addListener((port) => {

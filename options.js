@@ -1,6 +1,8 @@
 // 设置页（API Key/模型/RAG/工具审批/快捷语句/MCP）
 import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings } from './lib/shared/settings.js';
 import { esc } from './lib/shared/utils.js';
+import { getUserscriptSettings, saveUserscriptSettings } from './lib/userscript/settings.js';
+import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,6 +21,31 @@ async function load() {
   syncApprovalPreset();
   $('quick-prompts').value = (s.quickPrompts || AI_SETTINGS_DEFAULTS.quickPrompts).join('\n');
   renderMcp(s.mcpServers || []);
+
+  const us = await getUserscriptSettings();
+  $('us-agent-install').checked = us.agentCanInstall !== false;
+  $('us-auto-update').checked = !!us.autoCheckUpdates;
+  $('us-run-at').value = us.defaultRunAt || 'document-idle';
+  renderUserscriptSummary();
+}
+
+async function renderUserscriptSummary() {
+  const meta = $('us-summary-meta');
+  const navCount = $('us-nav-count');
+  if (!meta && !navCount) return;
+  try {
+    const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
+    const map = data[USERSCRIPTS_KEY] || {};
+    const list = Object.values(map);
+    const enabled = list.filter((s) => s.enabled).length;
+    if (meta) meta.textContent = `已安装 ${list.length} 个 · 启用 ${enabled} 个 · 停用 ${list.length - enabled} 个`;
+    if (navCount) {
+      navCount.textContent = list.length;
+      navCount.classList.toggle('hidden', list.length === 0);
+    }
+  } catch (e) {
+    if (meta) meta.textContent = '已安装 0 个 · 启用 0 个';
+  }
 }
 
 function renderMcp(list) {
@@ -70,6 +97,11 @@ $('save-btn').addEventListener('click', async () => {
     mcpServers: collectMcp(),
   };
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: settings });
+  await saveUserscriptSettings({
+    agentCanInstall: $('us-agent-install').checked,
+    autoCheckUpdates: $('us-auto-update').checked,
+    defaultRunAt: $('us-run-at').value || 'document-idle',
+  });
   toast('✓ 已保存', true);
 });
 

@@ -14,6 +14,7 @@ import {
   parseTags,
 } from './lib/shared/utils.js';
 import { getBook, setBook } from './lib/shared/store.js';
+import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 let bookCache = {};
 let currentType = 'all';
@@ -554,6 +555,20 @@ function focusItemFromHash() {
 
 (async function init() {
   await loadCache();
+  renderUserscriptBadge();
   render();
   focusItemFromHash();
 })();
+
+async function renderUserscriptBadge() {
+  const badge = $('us-count-badge');
+  if (!badge) return;
+  try {
+    const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
+    const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
+    badge.textContent = count;
+    badge.classList.toggle('hidden', count === 0);
+  } catch (e) {
+    badge.classList.add('hidden');
+  }
+}

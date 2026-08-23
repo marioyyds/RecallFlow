@@ -6,10 +6,19 @@
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
-  <header>
-    <h1>RecallFlow · AI 设置</h1>
-    <p class="sub">配置 DeepSeek 与 RecallFlow 行为</p>
+  <header class="app-header">
+    <div class="brand-group">
+      <div class="brand-mark" aria-hidden="true">R</div>
+      <div><h1>RecallFlow</h1><span class="page-caption">设置</span></div>
+    </div>
+    <div class="header-actions"></div>
   </header>
+
+  <nav class="module-nav" aria-label="模块导航">
+    <a class="module-nav-item" href="manager.html">知识库</a>
+    <a class="module-nav-item" href="userscripts.html">脚本中心<span id="us-nav-count" class="module-nav-badge hidden">0</span></a>
+    <a class="module-nav-item active" href="options.html" aria-current="page">设置</a>
+  </nav>
 
   <main>
     <section class="card">
@@ -69,6 +78,37 @@
         <span class="field-label">翻译目标语言</span>
         <input id="target-lang" type="text" placeholder="中文">
         <span class="hint">划词翻译的目标语言，如 中文 / English / 日本語</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2><span class="ico">🧩</span> 用户脚本</h2>
+      <div class="us-summary">
+        <div class="us-summary-main">
+          <span class="us-summary-title">脚本中心</span>
+          <span class="us-summary-meta" id="us-summary-meta">已安装 0 个 · 启用 0 个</span>
+        </div>
+        <a class="ghost-btn" href="userscripts.html">打开脚本管理</a>
+      </div>
+      <span class="hint us-card-hint">安装 GreasyFork 社区脚本，AI 可按需求搜索、安装并在当前页运行它们（下载视频、展开全文、去广告等）。</span>
+      <label class="field switch-field">
+        <span class="field-label">允许 Agent 安装脚本</span>
+        <span class="hint">关闭后，AI 助手将无法自动安装脚本（已安装脚本的运行不受影响）</span>
+        <input id="us-agent-install" type="checkbox" class="switch">
+      </label>
+      <label class="field switch-field">
+        <span class="field-label">打开脚本中心时检查更新</span>
+        <span class="hint">进入脚本中心时自动逐个检查已安装脚本是否有新版本</span>
+        <input id="us-auto-update" type="checkbox" class="switch">
+      </label>
+      <label class="field">
+        <span class="field-label">默认运行时机</span>
+        <select id="us-run-at" class="us-select">
+          <option value="document-start">页面加载前（document-start）</option>
+          <option value="document-end">DOM 就绪后（document-end）</option>
+          <option value="document-idle">页面空闲时（document-idle）</option>
+        </select>
+        <span class="hint">仅对未在脚本元信息中声明 @run-at 的脚本生效</span>
       </label>
     </section>
 
