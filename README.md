@@ -25,7 +25,7 @@
 
 ![RecallFlow 价值闭环：读 → 操作 → 记忆](docs/assets/read-operate-remember.svg)
 
-**隐私优先**：数据全部保存在本地，唯一外连是你自配的 DeepSeek API Key。
+**隐私优先**：数据全部保存在本地，默认仅连你自配的 DeepSeek API Key；仅在安装 SkillHub 技能时访问 `skillhub.cn`。
 
 ## 快速上手
 
@@ -41,20 +41,35 @@
 | AI 操作网页 | 「把标题变大」「高亮这段文字」「滚动到评论区」「打开 B 站搜索视频」 |
 | 知识库问答 | 「我的收藏里有什么」「基于我收藏的错题讲这道题」 |
 | 一键剪藏 | 工具栏一键把文章 / 题目 / Prompt 存进本地知识库 |
+| 发现 / 安装技能 | 点「检索一些好用的技能」，AI 从 SkillHub 找到并安装好用的技能 |
 
 ## 功能亮点
 
-- **读**：划词悬浮、多轮对话、整页上下文、RAG 检索、流式中断、对话撤销、可自定义快捷语句
+- **读**：划词悬浮、多轮对话、整页上下文、RAG 检索、流式中断、对话撤销（撤销时把原指令回填到输入框，方便修改重发）、可自定义快捷语句
 - **操作**：点击 / 输入 / 滚动 / 高亮 / 改样式；自动等待页面就绪、识别遮挡，穿透 iframe 与 shadow DOM，点击新标签页自动接管
 - **记忆**：错题 / 文章 / Prompt / 笔记四类知识库，支持星级、标签、搜索、导入导出，Agent 可读写
+- **技能**：SkillHub 风格「专家手册」提示层，含技能中心（增删改查 / 导入导出 / 分页）、内置技能与 `load_skill` / `install_skill` 工具，详见下节
 - **扩展**：支持 MCP 服务器，可接入文件系统、Notion 等外部能力（目标域名需加入 `manifest.json` 的 `host_permissions`）
 - **用户脚本**：内置轻量用户脚本运行时，可从 GreasyFork 搜索或粘贴 `.user.js` 链接安装社区脚本；Agent 可按需求自动搜索 / 安装 / 运行脚本来完成任务（下载视频、展开全文、去广告等），安装前展示权限预览
 - **安全**：写操作默认逐次审批，可按类别开启自动批准
+
+## 技能系统（SkillHub 风格）
+
+技能是一层「专家手册」提示层，把高频、跨意图的专项任务流（**怎么做**）从意图路由（**做什么**）中抽离，让 Agent 在需要时按 `load_skill` 加载并遵循。RecallFlow 完全兼容 [SkillHub](https://www.skillhub.cn/) 的 `SKILL.md` 标准。
+
+- **三层能力分工**：内置工具（`TOOL_REGISTRY`，能做什么）、MCP（外接什么）、技能（怎么做，纯提示层、不改工具签名）。
+- **技能中心**：`技能` 管理页支持增删改查、分页、导入 / 导出 `SKILL.md`；内置技能标「内置 · 只读」，用户自定义技能可自由编辑。
+- **模型自选 + 按需加载**：技能以目录形式进入系统提示，模型按语义自行决定是否调用 `load_skill("<name>")` 拉取完整说明——不靠关键词硬匹配，避免误触发。
+- **从 SkillHub 安装**：`install_skill` 工具可检索并安装技能；`find-skill-skillhub` 技能引导「检索 → install_skill → load_skill」流程。
+  - 注：SkillHub 匿名接口仅开放检索、不开放逐字 `SKILL.md` 下载，故 `install_skill` 为「基于元数据的生成式安装」（内容为摘要）；需要逐字本体时请到技能页用「导入」功能。
+- **内置技能**：`highlight-key-points`、`remove-ads`、`userscript-task`、`clip-to-knowledge`、`humanizer`（去 AI 味）、`find-skill-skillhub`、`summarize`。
+- **快捷指令**：「检索一些好用的技能」一键触发技能检索。
 
 ## 技术亮点
 
 - **统一工具注册表**：模型工具列表、权限策略、参数校验共用一份定义，不漂移
 - **意图路由**：浏览器 / 知识库 / 研究 / 对话自动分流，避免工具乱用；「继续 / 接着」继承上一轮意图
+- **技能路由（进阶版 A）**：技能以目录进入系统提示，模型按语义调用 `load_skill` 按需加载，而非关键词硬匹配；`chat_task` 默认只给只读工具集，写操作仍走审批
 - **明确收尾**：目标达成即调用 `complete_task` 结束任务，不空转
 - **对话时间线**：过程叙述与工具步骤交插呈现，边干边说
 - **可靠性**：Session 恢复、卡死检测、动作前后快照验证，SPA 异步渲染也能捕获变化
@@ -68,7 +83,10 @@ bookmark-sorter/
 ├── lib/
 │   ├── shared/        # 存储、设置、RAG、常量
 │   ├── assistant/     # Agent 循环、工具注册表、意图路由、MCP、卡死检测
+│   │   ├── tools.js / intent-router.js / agent.js / mcp.js
+│   │   └── skill-defs.js / skill-store.js / skill-md.js / skills.js   # 内置技能、技能存储、SKILL.md 解析、目录构建
 │   └── page/          # 正文提取、高亮浮层、页面命令、对话面板
+├── skills-page.js / skills.html / skills.css   # 技能中心 UI
 └── docs/assets/       # 文档配图与 Logo
 ```
 
