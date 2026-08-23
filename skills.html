@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="color-scheme" content="light dark">
+  <title>RecallFlow - 技能</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="manager.css">
+  <link rel="stylesheet" href="skills.css">
+</head>
+<body>
+  <div class="app-topbar">
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="brand-mark" aria-hidden="true">R</div>
+        <div><h1>RecallFlow</h1><span class="page-caption">技能</span></div>
+      </div>
+      <div class="header-tools">
+        <span class="skill-total" id="skill-count">0</span> 个已注册
+        <button id="import-toggle" class="btn btn-secondary" type="button">导入 SKILL.md</button>
+        <button id="new-skill-btn" class="btn btn-primary" type="button">＋ 新建技能</button>
+      </div>
+    </header>
+
+    <nav class="module-nav" aria-label="模块导航">
+      <a class="module-nav-item" href="manager.html">知识库</a>
+      <a class="module-nav-item" href="userscripts.html">脚本中心<span id="us-count-badge" class="module-nav-badge hidden">0</span></a>
+      <a class="module-nav-item active" href="skills.html" aria-current="page">技能</a>
+      <a class="module-nav-item" href="options.html">设置</a>
+    </nav>
+  </div>
+
+  <main class="skill-page">
+    <p class="skill-intro">技能采用 SkillHub 标准的 <code>SKILL.md</code> 形态（frontmatter + Markdown 正文）。内置技能为只读；你可新建、编辑、删除自定义技能，或从社区导入 / 导出 SKILL.md。</p>
+
+    <section id="import-section" class="skill-import hidden">
+      <h2 class="skill-import-title">导入 SKILL.md</h2>
+      <p class="skill-import-hint">粘贴标准 SKILL.md 文本（含 <code>---</code> frontmatter），或选择本地文件。导入会按 <code>name</code> 覆盖同名自定义技能。</p>
+      <textarea id="import-textarea" rows="8" placeholder="---&#10;name: my-skill&#10;description: 一句话描述&#10;---&#10;# 技能指令正文"></textarea>
+      <div class="skill-import-actions">
+        <input id="import-file" type="file" accept=".md,.txt" style="flex:1; min-width:0">
+        <button id="import-run" class="btn btn-primary" type="button">解析并添加</button>
+      </div>
+      <div id="import-msg" class="skill-import-msg hidden"></div>
+    </section>
+
+    <div id="skill-list" class="skill-list-wrap"></div>
+    <nav id="skill-pagination" class="skill-pagination" aria-label="分页"></nav>
+  </main>
+
+  <div class="confirm-overlay hidden" id="skill-form-overlay" role="dialog" aria-modal="true" aria-labelledby="skill-form-title">
+    <div class="confirm-dialog skill-form-dialog">
+      <h2 id="skill-form-title">新建技能</h2>
+      <div class="skill-form-body">
+        <label class="skill-field"><span>标识 name（kebab-case，唯一）</span><input id="f-name" type="text" placeholder="如 highlight-key-points"></label>
+        <label class="skill-field"><span>显示名 displayName</span><input id="f-display" type="text" placeholder="如：划重点 / 高亮关键信息"></label>
+        <label class="skill-field"><span>描述 description（何时使用）</span><textarea id="f-desc" rows="2" placeholder="一句话说明这个技能在什么情况下启用"></textarea></label>
+        <div class="skill-field-row">
+          <label class="skill-field"><span>版本 version</span><input id="f-version" type="text" placeholder="1.0.0"></label>
+          <label class="skill-field"><span>分类 category</span><input id="f-category" type="text" placeholder="如 reading"></label>
+        </div>
+        <label class="skill-field"><span>标签 tags（逗号分隔）</span><input id="f-tags" type="text" placeholder="高亮, 阅读"></label>
+        <label class="skill-field"><span>技能类型 skill_type</span>
+          <select id="f-type">
+            <option value="prompt-template">prompt-template（提示词模板）</option>
+            <option value="mcp-server">mcp-server（MCP 服务）</option>
+            <option value="api-tool">api-tool（API 工具）</option>
+            <option value="agent">agent（完整 Agent）</option>
+          </select>
+        </label>
+        <div class="skill-subtitle">RecallFlow 专用触发条件（写入 x-recallflow-* 扩展字段）</div>
+        <div class="skill-field"><span>触发意图</span>
+          <div class="skill-checks">
+            <label><input type="checkbox" value="browser_task"> 浏览器操作</label>
+            <label><input type="checkbox" value="knowledge_task"> 知识库</label>
+            <label><input type="checkbox" value="research_task"> 资料研究</label>
+            <label><input type="checkbox" value="chat_task"> 对话</label>
+          </div>
+        </div>
+        <label class="skill-field"><span>触发关键词（每行一组，组内用 | 分隔）</span><textarea id="f-keywords" rows="2" placeholder="划出|划重点|标出&#10;关键信息|重点内容"></textarea></label>
+        <label class="skill-field"><span>依赖工具（逗号分隔）</span><textarea id="f-tools" rows="2" placeholder="highlight_text, complete_task"></textarea></label>
+        <label class="skill-field"><span>正文 content（Markdown 指令）</span><textarea id="f-content" rows="8" placeholder="用 Markdown 写清技能的做法、步骤、约束…"></textarea></label>
+      </div>
+      <div class="confirm-actions">
+        <button class="mini" id="skill-form-cancel" type="button">取消</button>
+        <button class="mini primary" id="skill-form-save" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="confirm-overlay hidden" id="skill-del-overlay" role="dialog" aria-modal="true">
+    <div class="confirm-dialog">
+      <div class="confirm-msg" id="skill-del-msg"></div>
+      <div class="confirm-actions">
+        <button class="mini" id="skill-del-no" type="button">取消</button>
+        <button class="mini danger" id="skill-del-yes" type="button">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="skills-page.js"></script>
+</body>
+</html>

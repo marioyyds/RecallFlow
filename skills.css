@@ -1,0 +1,351 @@
+/* 技能页面：复用 base.css / manager.css 的 .app-header / .module-nav 等共享样式，
+   这里只定义技能列表与卡片相关样式。 */
+
+.skill-page {
+  padding: 16px 18px 40px;
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.skill-intro {
+  color: var(--text-dim, #6b7280);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 4px 0 16px;
+}
+
+.skill-total {
+  font-weight: 700;
+  color: var(--accent, #4f7cff);
+}
+
+.skill-list-wrap {
+  display: grid;
+  gap: 14px;
+}
+
+.skill-card {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: var(--card, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.skill-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.skill-status {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #4f7cff) 14%, transparent);
+  color: var(--accent, #4f7cff);
+}
+
+.skill-desc {
+  margin: 6px 0 12px;
+  color: var(--text-dim, #6b7280);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.skill-meta {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 4px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.skill-meta-k {
+  color: var(--text-dim, #6b7280);
+}
+
+.skill-meta-v {
+  color: var(--text, #1f2937);
+  word-break: break-word;
+}
+
+.skill-block {
+  margin-top: 10px;
+}
+
+.skill-block-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim, #6b7280);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.skill-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text, #1f2937);
+}
+
+.skill-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.skill-tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--chip, #f1f3f5);
+  color: var(--text-dim, #4b5563);
+}
+
+.skill-builtin-tag {
+  display: inline-block;
+  flex: none;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 1px 9px;
+  border-radius: 999px;
+  background: var(--chip, #f1f3f5);
+  color: var(--text-sub, #5f6b7a);
+  border: 1px solid var(--border, #e5e7eb);
+}
+
+.skill-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-title-wrap .skill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: none;
+}
+
+.skill-act {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--card, #fff);
+  color: var(--text, #1f2937);
+  cursor: pointer;
+}
+
+.skill-act.danger {
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.skill-act:hover {
+  background: var(--chip, #f1f3f5);
+}
+
+.skill-meta-line {
+  font-size: 12px;
+  color: var(--text-faint, #6b7280);
+  margin: 4px 0 8px;
+}
+
+.skill-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.skill-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft, #4a90d91a);
+  color: var(--primary, #4a90d9);
+}
+
+.skill-content-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--note-bg, #f6f7f9);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-sub, #5f6b7a);
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border, #e2e5ea);
+}
+
+/* 导入区域 */
+.skill-import {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  background: var(--card, #fff);
+}
+
+.skill-import-title {
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.skill-import-hint {
+  font-size: 12px;
+  color: var(--text-dim, #6b7280);
+  margin: 0 0 10px;
+}
+
+.skill-import textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--card, #fff);
+  color: var(--text, #1f2937);
+  resize: vertical;
+}
+
+.skill-import-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.skill-import-msg {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--primary, #4a90d9);
+}
+
+/* 分页 */
+.skill-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--card, #fff);
+  color: var(--text, #1f2937);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.page-btn.active {
+  background: var(--accent, #4f7cff);
+  border-color: var(--accent, #4f7cff);
+  color: #fff;
+}
+
+.page-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 模态表单 */
+.confirm-dialog.skill-form-dialog {
+  width: min(880px, 95vw);
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.skill-form-body {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.skill-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.skill-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim, #6b7280);
+  border-top: 1px dashed var(--border, #e5e7eb);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.skill-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.skill-field > span {
+  color: var(--text-dim, #6b7280);
+  font-weight: 600;
+}
+
+.skill-field input,
+.skill-field textarea,
+.skill-field select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--card, #fff);
+  color: var(--text, #1f2937);
+  resize: vertical;
+}
+
+.skill-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 13px;
+}
+
+.skill-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

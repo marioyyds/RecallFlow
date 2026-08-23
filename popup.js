@@ -336,6 +336,12 @@ $('open-scripts').addEventListener('click', (e) => {
   chrome.tabs.create({ url: chrome.runtime.getURL('userscripts.html') });
 });
 
+const openSkillsBtn = $('open-skills');
+if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL('skills.html') });
+});
+
 $('open-settings').addEventListener('click', (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
