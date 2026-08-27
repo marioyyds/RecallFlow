@@ -12,23 +12,7 @@ body {
   line-height: 1.45;
 }
 
-/* ---- 头部 ---- */
-header {
-  background: linear-gradient(135deg, #4a90d9, #6aa5e0);
-  color: #fff;
-  padding: 18px 22px;
-  border-radius: 0 0 14px 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 0 -16px 18px;
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  box-shadow: 0 3px 14px rgba(30, 70, 110, 0.16);
-}
-
+/* ---- 头部（底色 / 吸顶由 base.css 的 .app-topbar / .app-header 提供）---- */
 header h1 {
   font-size: 18px;
   font-weight: 600;

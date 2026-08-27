@@ -153,6 +153,21 @@ function itemHtml(it) {
   </div>`;
 }
 
+// 就地更新单条目星级（避免整列表 render() 丢失焦点 / 滚动位置）
+function updateItemStar(itemEl, v) {
+  const bar = itemEl.querySelector('.star-bar');
+  if (bar) {
+    bar.querySelectorAll('.star-cell').forEach((c, i) => {
+      const on = i < v;
+      c.classList.toggle('on', on);
+      c.tabIndex = i === v - 1 ? 0 : -1;
+      c.setAttribute('aria-checked', String(on));
+    });
+  }
+  const lvl = itemEl.querySelector('.level-name');
+  if (lvl) lvl.outerHTML = levelNameHtml(v);
+}
+
 function render() {
   const listEl = $('list');
   const prevTop = listEl.scrollTop; // 记录滚动位置，避免编辑/改星后跳回顶部
@@ -362,10 +377,12 @@ $('list').addEventListener('click', async (e) => {
 
   const starCell = e.target.closest('.star-cell[data-star]');
   if (starCell) {
-    bookCache[id].status = Number(starCell.dataset.star);
+    const v = Number(starCell.dataset.star);
+    bookCache[id].status = v;
     bookCache[id].updatedAt = Date.now();
     await persist();
-    render();
+    renderStats();
+    updateItemStar(itemEl, v);
     return;
   }
 

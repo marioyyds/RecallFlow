@@ -311,7 +311,11 @@ $('list').addEventListener('click', async (e) => {
       bookCache[id].status = a;
       bookCache[id].updatedAt = Date.now();
       await persist();
-      renderList();
+      // 就地更新，避免整列表 renderList() 导致焦点 / 滚动丢失
+      const bar = itemEl.querySelector('.star-bar');
+      if (bar) bar.querySelectorAll('.star-cell').forEach((c, i) => c.classList.toggle('on', i < a));
+      const lvl = itemEl.querySelector('.level-name');
+      if (lvl) lvl.outerHTML = levelNameHtml(a);
     }
     return;
   }

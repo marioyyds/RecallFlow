@@ -61,7 +61,7 @@
 - **技能中心**：`技能` 管理页支持增删改查、分页、导入 / 导出 `SKILL.md`；内置技能标「内置 · 只读」，用户自定义技能可自由编辑。
 - **模型自选 + 按需加载**：技能以目录形式进入系统提示，模型按语义自行决定是否调用 `load_skill("<name>")` 拉取完整说明——不靠关键词硬匹配，避免误触发。
 - **从 SkillHub 安装**：`install_skill` 工具可检索并安装技能；`find-skill-skillhub` 技能引导「检索 → install_skill → load_skill」流程。
-  - 注：SkillHub 匿名接口仅开放检索、不开放逐字 `SKILL.md` 下载，故 `install_skill` 为「基于元数据的生成式安装」（内容为摘要）；需要逐字本体时请到技能页用「导入」功能。
+  - `install_skill` 先尝试拉取 SkillHub 上的真实 `SKILL.md` 正文（接口 `/api/v1/skills/{slug}/file?path=SKILL.md&namespace=…`），成功则安装完整原文；若该接口不可用（团队命名空间需鉴权或波动），降级为基于元数据的生成式摘要，并提示可到技能页用「导入」获取完整版。
 - **内置技能**：`highlight-key-points`、`remove-ads`、`userscript-task`、`clip-to-knowledge`、`humanizer`（去 AI 味）、`find-skill-skillhub`、`summarize`。
 - **快捷指令**：「检索一些好用的技能」一键触发技能检索。
 

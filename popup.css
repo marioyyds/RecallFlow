@@ -11,15 +11,6 @@ body {
   line-height: 1.45;
 }
 
-header {
-  background: linear-gradient(135deg, #4a90d9, #6aa5e0);
-  color: #fff;
-  padding: 13px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 header h1 {
   font-size: 15px;
   font-weight: 600;
@@ -28,8 +19,8 @@ header h1 {
 
 .badge {
   font-size: 11px;
-  background: rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(4px);
+  background: var(--primary-soft);
+  color: var(--primary);
   padding: 3px 10px;
   border-radius: 999px;
   font-weight: 500;
@@ -214,34 +205,6 @@ header h1 {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
   background: var(--card);
-}
-
-.primary-btn {
-  width: 100%;
-  padding: 9px 0;
-  background: var(--primary);
-  color: #fff;
-  border: none;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-}
-
-.primary-btn:hover {
-  background: var(--primary-hover);
-  box-shadow: 0 3px 10px var(--primary-soft);
-}
-
-.primary-btn:active {
-  transform: scale(0.98);
-}
-
-.primary-btn:disabled {
-  background: #b9c6d4;
-  cursor: not-allowed;
-  box-shadow: none;
 }
 
 /* ---- 工具栏 ---- */
@@ -475,14 +438,13 @@ footer button.link-btn:hover {
 }
 
 /* ---- Popup UX refresh ---- */
-.app-header { position:sticky; top:0; z-index:10; min-height:56px; padding:10px 14px; background:linear-gradient(135deg,#2563eb,#4f8fdf); box-shadow:0 4px 14px rgba(30,70,110,.24),0 1px 2px rgba(10,35,70,.16); }
-@media (prefers-color-scheme: dark) { .app-header { box-shadow:0 4px 16px rgba(0,0,0,.42),0 1px 2px rgba(0,0,0,.28); } }
+.app-header { position:sticky; top:0; z-index:10; min-height:56px; padding:10px 14px; }
 .brand-group,.header-actions { display:flex; align-items:center; gap:9px; }
 .brand-logo { display:block; width:30px; height:30px; border-radius:9px; box-shadow:0 1px 4px rgba(8,35,74,.24); }
-.header-caption { display:block; margin-top:1px; color:rgba(255,255,255,.72); font-size:10px; }
+.header-caption { display:block; margin-top:1px; color:var(--text-faint); font-size:10px; }
 .header-actions { gap:7px; }
-.header-icon { display:grid; place-items:center; width:30px; height:30px; border:1px solid rgba(255,255,255,.36); border-radius:8px; color:#fff; background:rgba(255,255,255,.12); font-size:17px; line-height:1; cursor:pointer; }
-.header-icon:hover { background:rgba(255,255,255,.25); }
+.header-icon { display:grid; place-items:center; width:30px; height:30px; border:1px solid var(--border); border-radius:8px; color:var(--text-sub); background:var(--note-bg); font-size:17px; line-height:1; cursor:pointer; transition:background .15s, color .15s; }
+.header-icon:hover { background:var(--primary-soft); color:var(--primary); }
 .section-kicker { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; color:var(--text-sub); font-size:11px; font-weight:600; }
 .section-tools { display:flex; align-items:center; gap:8px; }
 .shortcut-hint { color:var(--text-faint); font-weight:400; }
@@ -497,7 +459,7 @@ footer button.link-btn:hover {
 .input-label { display:block; margin:1px 0 4px; color:var(--text-sub); font-size:11px; font-weight:600; }
 .input-label span { margin-left:4px; color:var(--text-faint); font-weight:400; }
 .note-input { min-height:36px; padding:8px 10px; margin-bottom:8px; }
-.primary-btn { min-height:38px; margin-top:2px; }
+  #add-btn.btn-primary { width:100%; margin-top:2px; }
 .page-unavailable { display:flex; flex-direction:column; align-items:center; gap:4px; margin:10px; padding:26px 16px; border:1px solid var(--border); border-radius:12px; background:var(--card); color:var(--text-sub); font-size:12px; text-align:center; }
 .page-unavailable strong { color:var(--text); font-size:13px; }
 .page-unavailable .empty-ico { font-size:28px; }
