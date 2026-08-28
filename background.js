@@ -42,6 +42,10 @@ async function handleAi(request) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'getTabId') {
+    sendResponse({ tabId: sender.tab ? sender.tab.id : null });
+    return false;
+  }
   if (msg && msg.type === 'ai') {
     handleAi(msg.payload || msg)
       .then((r) => sendResponse(r))
@@ -208,7 +212,13 @@ chrome.runtime.onConnect.addListener((port) => {
       const book = await getBook();
       if (payload.action === 'agent') {
         const tabId = port.sender && port.sender.tab && port.sender.tab.id;
-        await runAgentStream(port, payload, settings, book, controller.signal, tabId);
+        console.log('[RecallFlow] agent run start:', (payload.question || '').slice(0, 40), 'tabId=' + tabId);
+        try {
+          await runAgentStream(port, payload, settings, book, controller.signal, tabId);
+          console.log('[RecallFlow] agent run finished');
+        } catch (e) {
+          console.error('[RecallFlow] agent run error:', e);
+        }
         return;
       }
       const messages = buildAiMessages(payload.action, payload, settings, book);

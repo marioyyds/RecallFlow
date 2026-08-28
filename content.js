@@ -44,6 +44,10 @@ if (window.__kbAiLoaded) {
         Promise.resolve(commands.getAttribute(msg.params || {})).then(sendResponse);
         return true;
       }
+      if (msg && msg.type === 'kbRunJavaScript') {
+        Promise.resolve(commands.runJs(msg.params || {})).then(sendResponse);
+        return true;
+      }
       if (msg && msg.type === 'kbPageCommand') {
         Promise.resolve(commands.executePageCommand(msg.command, msg.params || {})).then(sendResponse);
         return true;

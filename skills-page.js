@@ -8,6 +8,7 @@ import {
   PAGE_SIZE,
 } from './lib/assistant/skill-store.js';
 import { mdToSkill, serializeSkillMd } from './lib/assistant/skill-md.js';
+import { TOOL_REGISTRY, TOOL_RENAME_MAP } from './lib/assistant/tools.js';
 
 const INTENT_LABEL = {
   browser_task: '浏览器操作',
@@ -159,6 +160,16 @@ async function saveForm() {
     alert('name 需为 kebab-case（小写字母/数字，连字符分隔），如 highlight-key-points');
     return;
   }
+  const tools = document.getElementById('f-tools').value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  // 依赖工具校验：未识别工具在运行时会被 Agent 静默忽略，保存前提示（含旧名→新名迁移）。
+  const knownTools = new Set(TOOL_REGISTRY.map((t) => t.name));
+  const badTools = tools.filter((tn) => !knownTools.has(tn));
+  if (badTools.length) {
+    const hint = badTools.map((tn) => TOOL_RENAME_MAP[tn] ? tn + ' → ' + TOOL_RENAME_MAP[tn] : tn).join('、');
+    if (!confirm('依赖工具中存在未识别项：' + hint + '\n\n未识别工具在 Agent 运行时会被忽略，功能可能不完整。仍要保存吗？（可先返回修改）')) {
+      return;
+    }
+  }
   const payload = {
     name,
     displayName: document.getElementById('f-display').value.trim(),
@@ -171,7 +182,7 @@ async function saveForm() {
     x: {
       intents: Array.from(document.querySelectorAll('.skill-checks input[type=checkbox]:checked')).map((cb) => cb.value),
       keywords: linesToArr(document.getElementById('f-keywords').value),
-      tools: document.getElementById('f-tools').value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
+      tools,
     },
   };
   if (editingName) {
