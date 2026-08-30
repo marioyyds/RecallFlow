@@ -84,6 +84,19 @@
         <input id="target-lang" type="text" placeholder="中文">
         <span class="hint">划词翻译的目标语言，如 中文 / English / 日本語</span>
       </label>
+      <div class="agent-budget">
+        <div class="approval-head"><div><span class="field-label">Agent 预算</span><span class="hint">单任务上限，留空 = 按意图自动分配（浏览器/资料研究任务更多）。</span></div></div>
+        <div class="budget-row">
+          <label class="field">
+            <span class="field-label">单任务工具调用上限</span>
+            <input id="budget-tools" type="number" min="0" placeholder="自动">
+          </label>
+          <label class="field">
+            <span class="field-label">单任务推理轮数上限</span>
+            <input id="budget-turns" type="number" min="0" placeholder="自动">
+          </label>
+        </div>
+      </div>
     </section>
 
     <section class="card">

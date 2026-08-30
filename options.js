@@ -19,6 +19,9 @@ async function load() {
   ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!policy[k]; });
   $('approval-notify').checked = s.toolApprovalNotify !== false;
   syncApprovalPreset();
+  const budget = s.agentBudget || {};
+  $('budget-tools').value = Number.isInteger(Number(budget.maxToolCalls)) && Number(budget.maxToolCalls) > 0 ? String(budget.maxToolCalls) : '';
+  $('budget-turns').value = Number.isInteger(Number(budget.maxModelTurns)) && Number(budget.maxModelTurns) > 0 ? String(budget.maxModelTurns) : '';
   $('quick-prompts').value = (s.quickPrompts || AI_SETTINGS_DEFAULTS.quickPrompts).join('\n');
   renderMcp(s.mcpServers || []);
 
@@ -95,6 +98,10 @@ $('save-btn').addEventListener('click', async () => {
     toolApprovalNotify: $('approval-notify').checked,
     quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
     mcpServers: collectMcp(),
+    agentBudget: {
+      ...(Number.isInteger(Number($('budget-tools').value)) && Number($('budget-tools').value) > 0 ? { maxToolCalls: Math.floor(Number($('budget-tools').value)) } : {}),
+      ...(Number.isInteger(Number($('budget-turns').value)) && Number($('budget-turns').value) > 0 ? { maxModelTurns: Math.floor(Number($('budget-turns').value)) } : {}),
+    },
   };
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: settings });
   await saveUserscriptSettings({

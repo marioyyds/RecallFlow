@@ -180,7 +180,11 @@ main {
 .approval-item b,.approval-notify b { display:block; font-size:13px; font-weight:500; }
 .approval-item small,.approval-notify small { display:block; color:var(--text-sub); font-size:11px; margin-top:2px; }
 .approval-notify { display:flex; align-items:center; gap:10px; border-top:1px solid var(--border); margin-top:10px; padding:14px 7px 2px; cursor:pointer; }
-@media (max-width:480px) { .approval-head { flex-direction:column; } .approval-head select { width:100%; } }
+.agent-budget { margin-top:14px; padding:14px; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+.agent-budget .approval-head { margin-bottom:10px; }
+.budget-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.budget-row .field input { min-width:0; }
+@media (max-width:480px) { .approval-head { flex-direction:column; } .approval-head select { width:100%; } .budget-row { grid-template-columns:1fr; } }
 
 .mcp-list {
   display: flex;
