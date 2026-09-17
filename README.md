@@ -65,6 +65,28 @@
 - **内置技能**：`highlight-key-points`、`remove-ads`、`userscript-task`、`clip-to-knowledge`、`humanizer`（去 AI 味）、`find-skill-skillhub`、`summarize`。
 - **快捷指令**：「检索一些好用的技能」一键触发技能检索。
 
+## 证据与引用
+
+回答里的每个 `[n]` 都可点击，落到**可复核的证据**：
+
+- **正文引用可点击**：点击引用徽章——同页则**就地高亮**证据片段；跨页则打开来源页并**自动滚动 + 高亮**证据文本（Chrome 文本片段深链 + RecallFlow 容错字符级匹配，双保险）。
+- **引用与来源一一对应**：全任务累计来源按 URL 去重、统一重编号，正文从 `[1]` 连续、与底部「参考来源」一致，杜绝错引；当前页分块与搜索候选不占来源编号。
+- **证据可归档复核**：读取过的页面会落盘为**带时间戳 + 哈希**的不可变快照，网页变更 / 404 后仍可复核。
+
+## 与 opencode 集成（证据 MCP）
+
+RecallFlow 可作为 **opencode 的「带证据的浏览器手」**：opencode 的 `webfetch` 读不到的 SPA / 登录态 / 内网页面，交给 RecallFlow 用**真实浏览器会话**读取，并返回**带时间戳 + 哈希**的证据。
+
+```text
+opencode ──(MCP stdio)──► recallflow-mcp ──(HTTP 长轮询 / WebSocket)──► RecallFlow 扩展
+                                └──► 证据归档 ~/.recallflow-evidence
+```
+
+- **工具**：`browser_read(url)`（真实会话读取 + 归档，返回 `url / fetchedAt / snapshotHash / text / quotes`）、`evidence_get(hash|url)`（复核引用）。
+- **只暴露不可替代的能力**：真实会话浏览 + 证据归档，不重复 opencode 已有的通用搜索 / 抓取。
+- **证据纪律**：随附 `recallflow-evidence` 技能，约束「有据才断、网页内容不可信（反注入）、不编造来源、证据不足就明说」。
+- **安装**：`integrations/opencode/recallflow-mcp` 执行 `npm install` → 在 `opencode.json` 配 `mcp.recallflow` → 技能放到 `~/.config/opencode/skills/`。详见 `integrations/opencode/`。
+
 ## 技术亮点
 
 - **统一工具注册表**：模型工具列表、权限策略、参数校验共用一份定义，不漂移
@@ -87,8 +109,10 @@ bookmark-sorter/
 │   ├── assistant/     # Agent 循环、工具注册表、意图路由、MCP、卡死检测
 │   │   ├── tools.js / intent-router.js / agent.js / mcp.js
 │   │   └── skill-defs.js / skill-store.js / skill-md.js / skills.js   # 内置技能、技能存储、SKILL.md 解析、目录构建
+│   ├── bridge/        # RecallFlow ↔ opencode 的本地中继（relay.js）
 │   └── page/          # 正文提取、高亮浮层、页面命令（含 run_javascript 沙箱）、对话面板
 ├── skills-page.js / skills.html / skills.css   # 技能中心 UI
+├── integrations/opencode/   # opencode 证据 MCP：recallflow-mcp 服务端 + SKILL.md + 工具契约
 └── docs/
     ├── tool-design.md   # 工具定义设计规范（粒度/参数/返回/风险分级）
     └── assets/          # 文档配图与 Logo
