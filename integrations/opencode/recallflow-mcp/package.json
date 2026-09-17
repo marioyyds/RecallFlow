@@ -1,0 +1,17 @@
+{
+  "name": "recallflow-mcp",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "RecallFlow evidence MCP server for opencode — browser_read + evidence_get",
+  "bin": {
+    "recallflow-mcp": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}

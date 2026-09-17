@@ -4,6 +4,7 @@ import { getAISettings } from './lib/shared/settings.js';
 import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
+import { startMcpRelay } from './lib/bridge/relay.js';
 import { logError } from './lib/shared/utils.js';
 import {
   listScripts,
@@ -310,3 +311,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   });
 });
+
+// 启动 RecallFlow ↔ opencode 的本地中继（连接本机 MCP server）。
+// 未运行 MCP server 时连接失败会自动重试，不影响扩展其它功能。
+startMcpRelay();
