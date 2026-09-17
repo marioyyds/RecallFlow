@@ -2,35 +2,142 @@
 // RecallFlow evidence MCP server (stdio) for opencode.
 //
 // 架构：
-//   opencode ──(MCP over stdio)──► 本进程 ──(本地 WebSocket)──► RecallFlow 扩展
+//   opencode ──(MCP over stdio)──► 本进程 ──┬──(WebSocket)──► RecallFlow 扩展
+//                                          └──(HTTP 长轮询)──► RecallFlow 扩展
+//   扩展两种通道都支持：WebSocket 优先，失败则退回 HTTP 长轮询（扩展 fetch 到本机更稳）。
 //   本进程负责证据归档（落盘），扩展负责用真实浏览器会话读取渲染后的页面。
 //
 // 环境变量：
-//   RECALLFLOW_MCP_PORT          本地 WebSocket 端口（默认 7801）
+//   RECALLFLOW_MCP_PORT          本地端口（默认 7801）
 //   RECALLFLOW_EXT_TIMEOUT_MS    等待扩展响应超时（默认 60000）
 //   RECALLFLOW_EVIDENCE_DIR      证据归档目录（默认 ~/.recallflow-evidence）
+import http from 'node:http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import { archive, get, getByUrl, dir } from './evidence-store.js';
 
-const WS_PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
+const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
 const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
-
-// ---------------- 扩展 WebSocket 桥 ----------------
-const wss = new WebSocketServer({ host: '127.0.0.1', port: WS_PORT });
-let extSocket = null;
-const pending = new Map();
-let seq = 0;
+const POLL_HOLD_MS = 25000;
 
 function log(msg) {
   process.stderr.write('[recallflow-mcp] ' + msg + '\n');
 }
 
+// ---------------- 与扩展的通道（WS + HTTP 长轮询） ----------------
+let extSocket = null;
+const pending = new Map(); // id -> { resolve, reject, timer }
+const queue = []; // 等待扩展处理的请求
+const pollWaiters = []; // 挂起的长轮询响应
+let seq = 0;
+
+function nextId() {
+  return ++seq;
+}
+
+// 由 MCP 工具调用：把请求排入队列，等扩展取走并回结果。
+function callExtension(method, params) {
+  return new Promise((resolve, reject) => {
+    const id = nextId();
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      const i = queue.findIndex((q) => q.id === id);
+      if (i >= 0) queue.splice(i, 1);
+      reject(new Error('等待扩展响应超时（' + EXT_TIMEOUT_MS + 'ms）'));
+    }, EXT_TIMEOUT_MS);
+    pending.set(id, { resolve, reject, timer });
+    const job = { id, method, params };
+    if (extSocket && extSocket.readyState === 1) {
+      try {
+        extSocket.send(JSON.stringify(job));
+      } catch (e) {
+        queue.push(job);
+      }
+    } else {
+      queue.push(job);
+    }
+    flushPollWaiters();
+  });
+}
+
+function resolvePending(id, payload) {
+  const p = pending.get(id);
+  if (!p) return;
+  pending.delete(id);
+  clearTimeout(p.timer);
+  if (payload && payload.error) p.reject(new Error(payload.error));
+  else p.resolve(payload ? payload.result : undefined);
+}
+
+function flushPollWaiters() {
+  while (pollWaiters.length && queue.length) {
+    const waiter = pollWaiters.shift();
+    waiter(queue.splice(0, queue.length));
+  }
+}
+
+// ---------------- HTTP 服务（/health, /poll, /result）+ WebSocket ----------------
+const httpServer = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  const url = new URL(req.url, 'http://127.0.0.1');
+  if (req.method === 'GET' && url.pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, ws: Boolean(extSocket), queued: queue.length }));
+    return;
+  }
+  if (req.method === 'GET' && url.pathname === '/poll') {
+    if (queue.length) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ requests: queue.splice(0, queue.length) }));
+      return;
+    }
+    const timer = setTimeout(() => {
+      const i = pollWaiters.indexOf(waiter);
+      if (i >= 0) pollWaiters.splice(i, 1);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ requests: [] }));
+    }, POLL_HOLD_MS);
+    const waiter = (requests) => {
+      clearTimeout(timer);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ requests }));
+    };
+    pollWaiters.push(waiter);
+    return;
+  }
+  if (req.method === 'POST' && url.pathname === '/result') {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+      if (body.length > 5 * 1024 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        const msg = JSON.parse(body || '{}');
+        resolvePending(msg.id, msg);
+      } catch (e) {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  res.writeHead(404);
+  res.end('not found');
+});
+
+const wss = new WebSocketServer({ server: httpServer });
 wss.on('connection', (socket) => {
   extSocket = socket;
-  log('extension connected');
+  log('extension connected (websocket)');
   socket.on('message', (raw) => {
     let msg;
     try {
@@ -38,43 +145,19 @@ wss.on('connection', (socket) => {
     } catch (e) {
       return;
     }
-    if (msg && msg.id !== undefined && pending.has(msg.id)) {
-      const p = pending.get(msg.id);
-      pending.delete(msg.id);
-      clearTimeout(p.timer);
-      if (msg.error) p.reject(new Error(msg.error));
-      else p.resolve(msg.result);
-    }
+    if (msg && msg.id !== undefined) resolvePending(msg.id, msg);
   });
   socket.on('close', () => {
     if (extSocket === socket) extSocket = null;
-    log('extension disconnected');
+    log('extension disconnected (websocket)');
   });
   socket.on('error', () => {});
 });
 
-// 向扩展发请求并等待响应。
-function callExtension(method, params) {
-  return new Promise((resolve, reject) => {
-    if (!extSocket || extSocket.readyState !== 1) {
-      reject(new Error('RecallFlow 扩展未连接。请确保扩展已安装、已启用，且浏览器正在运行。'));
-      return;
-    }
-    const id = ++seq;
-    const timer = setTimeout(() => {
-      pending.delete(id);
-      reject(new Error('等待扩展响应超时（' + EXT_TIMEOUT_MS + 'ms）'));
-    }, EXT_TIMEOUT_MS);
-    pending.set(id, { resolve, reject, timer });
-    try {
-      extSocket.send(JSON.stringify({ id, method, params }));
-    } catch (e) {
-      pending.delete(id);
-      clearTimeout(timer);
-      reject(e);
-    }
-  });
-}
+httpServer.on('error', (e) => log('http server error: ' + e.message));
+httpServer.listen(PORT, '127.0.0.1', () => {
+  log('listening on 127.0.0.1:' + PORT + ' (websocket + http long-poll)');
+});
 
 // ---------------- 工具实现 ----------------
 async function browserRead(args) {
@@ -154,4 +237,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-log('ready. WebSocket on 127.0.0.1:' + WS_PORT + ', evidence dir: ' + dir());
+log('ready. evidence dir: ' + dir());
