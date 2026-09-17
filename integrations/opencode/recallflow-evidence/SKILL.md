@@ -27,6 +27,8 @@ verifiable: `url + fetchedAt + snapshotHash`.
 | `kb_search(query, limit?)` | Search the user's personal knowledge base. |
 | `kb_get(id)` | Fetch a single knowledge-base entry by id. |
 | `evidence_get(hash?, url?)` | Retrieve an archived snapshot to re-verify a citation. |
+| `read_console(level?, limit?)` | Read the active tab's recent console output (error/warn/log/info) and uncaught exceptions — for frontend debugging. |
+| `read_network(filter?, limit?)` | Read the active tab's recent network requests (fetch/XHR: URL, method, status, ms, error) — for frontend debugging. |
 
 ## Evidence discipline (required)
 

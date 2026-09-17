@@ -8,12 +8,21 @@ if (window.__kbAiLoaded) {
     const chat = await import(chrome.runtime.getURL('lib/page/chat.js'));
     const pageText = await import(chrome.runtime.getURL('lib/page/page-text.js'));
     const commands = await import(chrome.runtime.getURL('lib/page/commands.js'));
+    const debugCapture = await import(chrome.runtime.getURL('lib/page/debug-capture.js'));
 
     // 响应后台的即时页面正文读取请求（Agent 工具 read_current_page）
     // 与页面命令请求（Agent 工具 page_command / 用户路径 API）
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg && msg.type === 'kbGetPageText') {
         sendResponse({ text: pageText.extractPageText(), title: document.title || '', url: location.href });
+        return true;
+      }
+      if (msg && msg.type === 'kbGetConsole') {
+        debugCapture.getDebugBuffer('console').then((entries) => sendResponse({ entries: entries || [] }));
+        return true;
+      }
+      if (msg && msg.type === 'kbGetNetwork') {
+        debugCapture.getDebugBuffer('network').then((entries) => sendResponse({ entries: entries || [] }));
         return true;
       }
       if (msg && msg.type === 'kbGetPageSnapshot') {

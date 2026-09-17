@@ -95,6 +95,21 @@ Output:
 }
 ```
 
+### `read_console`
+
+Read the **active tab's** recent console output (error/warn/log/info) and uncaught
+exceptions — frontend debugging. Captured from `document_start` by a main-world hook.
+
+Input: `{ "level": "error|warn|log|info?", "limit": "integer?" }`
+Output: `{ "ok": true, "text": "[error] ...\n[warn] ..." }`
+
+### `read_network`
+
+Read the **active tab's** recent network requests (fetch/XHR: URL, method, status, ms, error).
+
+Input: `{ "filter": "string?", "limit": "integer?" }`
+Output: `{ "ok": true, "text": "GET 500 https://api.x/users (320ms)\n..." }`
+
 ## Trust boundaries
 
 - **Permissions**: `browser_read` / `browser_search_read` touch the user's browser → gate

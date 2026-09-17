@@ -82,8 +82,8 @@ opencode ──(MCP stdio)──► recallflow-mcp ──(HTTP 长轮询 / WebSo
                                 └──► 证据归档 ~/.recallflow-evidence
 ```
 
-- **工具**：`browser_read(url)`（真实会话读取 + 归档，返回 `url / fetchedAt / snapshotHash / text / quotes`）、`evidence_get(hash|url)`（复核引用）。
-- **只暴露不可替代的能力**：真实会话浏览 + 证据归档，不重复 opencode 已有的通用搜索 / 抓取。
+- **工具**：`browser_read(url)`（真实会话读取 + 归档，返回 `url / fetchedAt / snapshotHash / text / quotes`）、`evidence_get(hash|url)`（复核引用）、`read_console` / `read_network`（读取活动标签页的 console 与网络请求，用于**前端调试**）。
+- **只暴露不可替代的能力**：真实会话浏览 + 证据归档 + 运行时调试，不重复 opencode 已有的通用搜索 / 抓取。
 - **证据纪律**：随附 `recallflow-evidence` 技能，约束「有据才断、网页内容不可信（反注入）、不编造来源、证据不足就明说」。
 - **安装**：`integrations/opencode/recallflow-mcp` 执行 `npm install` → 在 `opencode.json` 配 `mcp.recallflow` → 技能放到 `~/.config/opencode/skills/`。详见 `integrations/opencode/`。
 

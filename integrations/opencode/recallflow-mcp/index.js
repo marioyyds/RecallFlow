@@ -155,6 +155,7 @@ wss.on('connection', (socket) => {
 });
 
 httpServer.on('error', (e) => log('http server error: ' + e.message));
+wss.on('error', (e) => log('websocket server error: ' + e.message));
 httpServer.listen(PORT, '127.0.0.1', () => {
   log('listening on 127.0.0.1:' + PORT + ' (websocket + http long-poll)');
 });
@@ -186,6 +187,22 @@ async function evidenceGet(args) {
   return { found: true, snapshot: rec };
 }
 
+async function readConsole(args) {
+  const r = await callExtension('read_console', {
+    level: args && args.level,
+    limit: args && args.limit,
+  });
+  return { ok: true, text: (r && r.text) || '' };
+}
+
+async function readNetwork(args) {
+  const r = await callExtension('read_network', {
+    filter: args && args.filter,
+    limit: args && args.limit,
+  });
+  return { ok: true, text: (r && r.text) || '' };
+}
+
 const TOOLS = [
   {
     name: 'browser_read',
@@ -214,6 +231,30 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'read_console',
+    description:
+      '读取用户「当前活动标签页」最近的 console 输出（error/warn/log/info）与未捕获异常，用于前端调试。可选 level 过滤与 limit。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', description: '过滤级别：error / warn / log / info；不填返回全部' },
+        limit: { type: 'integer', description: '返回条数上限，默认 50，最大 200' },
+      },
+    },
+  },
+  {
+    name: 'read_network',
+    description:
+      '读取用户「当前活动标签页」最近的网络请求（fetch / XHR：URL、方法、状态码、耗时、错误），用于前端调试。可选 URL 子串过滤与 limit。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filter: { type: 'string', description: '按 URL 子串过滤' },
+        limit: { type: 'integer', description: '返回条数上限，默认 50，最大 200' },
+      },
+    },
+  },
 ];
 
 // ---------------- MCP server ----------------
@@ -228,6 +269,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result;
     if (name === 'browser_read') result = await browserRead(args);
     else if (name === 'evidence_get') result = await evidenceGet(args);
+    else if (name === 'read_console') result = await readConsole(args);
+    else if (name === 'read_network') result = await readNetwork(args);
     else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   } catch (e) {
