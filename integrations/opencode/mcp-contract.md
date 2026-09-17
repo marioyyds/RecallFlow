@@ -105,10 +105,26 @@ Output: `{ "ok": true, "text": "[error] ...\n[warn] ..." }`
 
 ### `read_network`
 
-Read the **active tab's** recent network requests (fetch/XHR: URL, method, status, ms, error).
+Read the **active tab's** recent network requests (fetch/XHR: URL, method, status, ms, error, initiator).
 
 Input: `{ "filter": "string?", "limit": "integer?" }`
 Output: `{ "ok": true, "text": "GET 500 https://api.x/users (320ms)\n..." }`
+
+### `get_element_source`
+
+Resolve a DOM element on the **active tab** to its framework source location (React `_debugSource`
+/ Vue `__file` / Svelte `__svelte_meta`; dev builds). The **page → code pointer**.
+
+Input: `{ "ref"?: "string", "selector"?: "string", "text"?: "string", "index"?: "integer" }`
+Output: `{ "ok": true, "text": "元素源码位置：src/components/Foo.tsx:42:7（react · Foo）" }`
+
+### `dev_session_get` / `dev_session_set`
+
+Shared dev context so the browser view and the code stay aligned. Stored server-side
+(`~/.recallflow-evidence/dev-session.json`).
+
+Input (`set`): `{ "projectRoot"?, "devUrl"?, "changedFiles"?: string[], "debugTabId"?, "note"? }`
+Output: the merged session object.
 
 ## Trust boundaries
 

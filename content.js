@@ -25,6 +25,18 @@ if (window.__kbAiLoaded) {
         debugCapture.getDebugBuffer('network').then((entries) => sendResponse({ entries: entries || [] }));
         return true;
       }
+      if (msg && msg.type === 'kbGetElementSource') {
+        const selector = commands.resolveElementSelector(msg.params || {});
+        if (!selector) {
+          sendResponse({ found: false, reason: '未找到目标元素' });
+          return true;
+        }
+        debugCapture.getElementSource(selector).then((src) => {
+          if (src && src.file) sendResponse({ found: true, source: src, selector });
+          else sendResponse({ found: false, selector, reason: '未检测到框架源码信息（可能不是 React/Vue/Svelte 开发构建）' });
+        });
+        return true;
+      }
       if (msg && msg.type === 'kbGetPageSnapshot') {
         sendResponse(pageText.extractPageSnapshot(msg.options || {}));
         return true;

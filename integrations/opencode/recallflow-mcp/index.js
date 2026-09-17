@@ -12,6 +12,8 @@
 //   RECALLFLOW_EXT_TIMEOUT_MS    等待扩展响应超时（默认 60000）
 //   RECALLFLOW_EVIDENCE_DIR      证据归档目录（默认 ~/.recallflow-evidence）
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -203,6 +205,33 @@ async function readNetwork(args) {
   return { ok: true, text: (r && r.text) || '' };
 }
 
+async function getElementSource(args) {
+  const r = await callExtension('get_element_source', {
+    ref: args && args.ref,
+    selector: args && args.selector,
+    text: args && args.text,
+    index: args && args.index,
+  });
+  return { ok: true, text: (r && r.text) || '' };
+}
+
+// ---- 共享「开发会话」：opencode 与 RecallFlow 都读写，用于把页面与代码对齐 ----
+const DEV_SESSION_FILE = path.join(dir(), 'dev-session.json');
+function readDevSession() {
+  try {
+    return JSON.parse(fs.readFileSync(DEV_SESSION_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+function writeDevSession(patch) {
+  const next = Object.assign(readDevSession(), patch, { updatedAt: new Date().toISOString() });
+  try {
+    fs.writeFileSync(DEV_SESSION_FILE, JSON.stringify(next, null, 2), 'utf8');
+  } catch (e) {}
+  return next;
+}
+
 const TOOLS = [
   {
     name: 'browser_read',
@@ -246,12 +275,46 @@ const TOOLS = [
   {
     name: 'read_network',
     description:
-      '读取用户「当前活动标签页」最近的网络请求（fetch / XHR：URL、方法、状态码、耗时、错误），用于前端调试。可选 URL 子串过滤与 limit。',
+      '读取用户「当前活动标签页」最近的网络请求（fetch / XHR：URL、方法、状态码、耗时、错误、发起位置），用于前端调试。可选 URL 子串过滤与 limit。',
     inputSchema: {
       type: 'object',
       properties: {
         filter: { type: 'string', description: '按 URL 子串过滤' },
         limit: { type: 'integer', description: '返回条数上限，默认 50，最大 200' },
+      },
+    },
+  },
+  {
+    name: 'get_element_source',
+    description:
+      '把用户「当前活动标签页」上的一个 DOM 元素（ref/selector/text）解析到框架源码位置（React/Vue/Svelte 开发构建），返回 file/line/column 与组件名——把页面元素对应到源码文件。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'DOM 快照中的元素引用，如 rf-3（优先）' },
+        selector: { type: 'string', description: 'CSS 选择器（与 ref/text 二选一）' },
+        text: { type: 'string', description: '元素文本片段（与 ref/selector 二选一）' },
+        index: { type: 'integer', description: '命中第几个（从 0 开始），默认 0' },
+      },
+    },
+  },
+  {
+    name: 'dev_session_get',
+    description: '读取共享的「开发会话」上下文（projectRoot / devUrl / changedFiles / debugTabId 等），用于把页面与代码对齐。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'dev_session_set',
+    description:
+      '写入/更新共享「开发会话」上下文。opencode 在改完代码后写入 changedFiles、devUrl、projectRoot 等，供 RecallFlow 重新验证；字段按需增量合并。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectRoot: { type: 'string', description: '项目根目录绝对路径' },
+        devUrl: { type: 'string', description: '开发服务器地址，如 http://localhost:5173' },
+        changedFiles: { type: 'array', items: { type: 'string' }, description: '本次改动的文件列表' },
+        debugTabId: { type: 'integer', description: '要调试的标签页 id（可选）' },
+        note: { type: 'string', description: '备注' },
       },
     },
   },
@@ -271,6 +334,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     else if (name === 'evidence_get') result = await evidenceGet(args);
     else if (name === 'read_console') result = await readConsole(args);
     else if (name === 'read_network') result = await readNetwork(args);
+    else if (name === 'get_element_source') result = await getElementSource(args);
+    else if (name === 'dev_session_get') result = readDevSession();
+    else if (name === 'dev_session_set') result = writeDevSession(args || {});
     else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   } catch (e) {

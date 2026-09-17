@@ -27,8 +27,10 @@ verifiable: `url + fetchedAt + snapshotHash`.
 | `kb_search(query, limit?)` | Search the user's personal knowledge base. |
 | `kb_get(id)` | Fetch a single knowledge-base entry by id. |
 | `evidence_get(hash?, url?)` | Retrieve an archived snapshot to re-verify a citation. |
-| `read_console(level?, limit?)` | Read the active tab's recent console output (error/warn/log/info) and uncaught exceptions — for frontend debugging. |
-| `read_network(filter?, limit?)` | Read the active tab's recent network requests (fetch/XHR: URL, method, status, ms, error) — for frontend debugging. |
+| `read_console(level?, limit?)` | Read the active tab's recent console output (error/warn/log/info, with stack traces) and uncaught exceptions — for frontend debugging. |
+| `read_network(filter?, limit?)` | Read the active tab's recent network requests (fetch/XHR: URL, method, status, ms, error, initiator) — for frontend debugging. |
+| `get_element_source(ref/selector/text, index?)` | Resolve a DOM element to its framework source (React/Vue/Svelte dev build): `file/line/column` + component. The **page → code pointer**: use it to tell the caller exactly which source file rendered an element. |
+| `dev_session_get()` / `dev_session_set({...})` | Shared dev context (`projectRoot`, `devUrl`, `changedFiles`, `debugTabId`) so the browser view and the code stay aligned. Write it after editing files; read it to know what changed. |
 
 ## Evidence discipline (required)
 
