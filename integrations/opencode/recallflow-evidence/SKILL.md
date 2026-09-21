@@ -30,6 +30,7 @@ verifiable: `url + fetchedAt + snapshotHash`.
 | `read_console(level?, limit?)` | Read the active tab's recent console output (error/warn/log/info, with stack traces) and uncaught exceptions — for frontend debugging. |
 | `read_network(filter?, limit?)` | Read the active tab's recent network requests (fetch/XHR: URL, method, status, ms, error, initiator) — for frontend debugging. |
 | `get_element_source(ref/selector/text, index?)` | Resolve a DOM element to its framework source (React/Vue/Svelte dev build): `file/line/column` + component. The **page → code pointer**: use it to tell the caller exactly which source file rendered an element. |
+| `get_picked_element()` | Return the element the user last **picked** in the browser (`selector` + `tag` + `label` + front-end source `file:line` when available). Use it to map "the thing I clicked" to front-end code. |
 | `dev_session_get()` / `dev_session_set({...})` | Shared dev context (`projectRoot`, `devUrl`, `changedFiles`, `debugTabId`) so the browser view and the code stay aligned. Write it after editing files; read it to know what changed. |
 
 ## Evidence discipline (required)

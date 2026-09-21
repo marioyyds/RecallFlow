@@ -118,6 +118,15 @@ Resolve a DOM element on the **active tab** to its framework source location (Re
 Input: `{ "ref"?: "string", "selector"?: "string", "text"?: "string", "index"?: "integer" }`
 Output: `{ "ok": true, "text": "元素源码位置：src/components/Foo.tsx:42:7（react · Foo）" }`
 
+### `get_picked_element`
+
+Return the element the user most recently **picked** in the browser (via the panel's「⊕ 选元素」
+picker). Lets opencode map "the thing I clicked" to front-end code.
+
+Input: `{}`
+Output: `{ "found": true, "picked": { "selector": "#submit", "tag": "button", "label": "登录", "source": { "framework": "react", "file": "src/Login.tsx", "line": 42, "column": 7, "component": "LoginButton" }, "pageUrl": "https://…", "tabId": 12, "ts": 1700000000000 } }`
+(`source` is `null` on production builds; `found: false` when nothing has been picked.)
+
 ### `dev_session_get` / `dev_session_set`
 
 Shared dev context so the browser view and the code stay aligned. Stored server-side

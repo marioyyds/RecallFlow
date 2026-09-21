@@ -243,6 +243,11 @@ async function getElementSource(args) {
   return { ok: true, text: (r && r.text) || '' };
 }
 
+async function getPickedElement() {
+  const r = await callExtension('get_picked_element', {});
+  return r || { found: false };
+}
+
 // ---- 共享「开发会话」：opencode 与 RecallFlow 都读写，用于把页面与代码对齐 ----
 const DEV_SESSION_FILE = path.join(dir(), 'dev-session.json');
 function readDevSession() {
@@ -327,6 +332,12 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_picked_element',
+    description:
+      '获取用户最近在浏览器里「选取」的元素：返回 selector、tag、label，以及前端源码位置 file:line（开发构建下）。用于把用户指的元素对应到具体前端代码。',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'dev_session_get',
     description: '读取共享的「开发会话」上下文（projectRoot / devUrl / changedFiles / debugTabId 等），用于把页面与代码对齐。',
     inputSchema: { type: 'object', properties: {} },
@@ -363,6 +374,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     else if (name === 'read_console') result = await readConsole(args);
     else if (name === 'read_network') result = await readNetwork(args);
     else if (name === 'get_element_source') result = await getElementSource(args);
+    else if (name === 'get_picked_element') result = await getPickedElement();
     else if (name === 'dev_session_get') result = readDevSession();
     else if (name === 'dev_session_set') result = writeDevSession(args || {});
     else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };

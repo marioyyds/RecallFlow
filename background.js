@@ -98,6 +98,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(() => sendResponse({ conversation: [] }));
     return true;
   }
+  // 元素拾取（跨域 iframe）：顶层发起 → 广播到所有 frame 进入拾取；任一 frame 命中/取消 → 全体停止。
+  if (msg && msg.type === 'pick:start') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: 'kbPickStart' }, () => void chrome.runtime.lastError);
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'pick:result') {
+    const tabId = sender.tab && sender.tab.id;
+    const picked = msg.picked || null;
+    if (picked) {
+      try {
+        chrome.storage.local.set({
+          'recallflow.lastPicked': Object.assign({}, picked, { tabId, pageUrl: (sender.tab && sender.tab.url) || '', ts: Date.now() }),
+        });
+      } catch (e) {}
+    }
+    if (tabId != null) {
+      chrome.tabs.sendMessage(tabId, { type: 'kbPickCancel' }, () => void chrome.runtime.lastError);
+      chrome.tabs.sendMessage(tabId, { type: 'kbPickResult', picked }, { frameId: 0 }, () => void chrome.runtime.lastError);
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'pick:cancel') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: 'kbPickCancel' }, () => void chrome.runtime.lastError);
+    sendResponse({ ok: true });
+    return false;
+  }
   if (msg && msg.type === 'pageCommand') {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs && tabs[0];

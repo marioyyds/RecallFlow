@@ -6,11 +6,12 @@ if (window.__kbAiLoaded) {
   window.__kbAiLoaded = true;
   (async () => {
     const isTopFrame = window.top === window;
-    // 所有框架都需要：正文/快照 + 页面命令（跨域 iframe 操作靠它）。
+    // 所有框架都需要：正文/快照 + 页面命令（跨域 iframe 操作靠它）+ 元素拾取。
     const pageText = await import(chrome.runtime.getURL('lib/page/page-text.js'));
     const commands = await import(chrome.runtime.getURL('lib/page/commands.js'));
-    // 仅顶层需要：调试捕获（console/network/元素源码）与助手 UI（大模块，避免在子框架加载）。
-    const debugCapture = isTopFrame ? await import(chrome.runtime.getURL('lib/page/debug-capture.js')) : null;
+    const picker = await import(chrome.runtime.getURL('lib/page/picker.js'));
+    // 调试捕获（console/network/元素源码）：所有框架都加载，以支持跨域 iframe 内的元素源码解析。
+    const debugCapture = await import(chrome.runtime.getURL('lib/page/debug-capture.js'));
 
     // 响应后台的即时页面正文读取请求（Agent 工具 read_current_page）
     // 与页面命令请求（Agent 工具 page_command / 用户路径 API）
@@ -52,6 +53,22 @@ if (window.__kbAiLoaded) {
       if (msg && msg.type === 'kbUndo') {
         sendResponse(commands.undoLast());
         return true;
+      }
+      if (msg && msg.type === 'kbPickStart') {
+        picker.startPicker(
+          (picked) => {
+            try { chrome.runtime.sendMessage({ type: 'pick:result', picked }); } catch (e) {}
+          },
+          () => {
+            try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e) {}
+          }
+        );
+        sendResponse({ ok: true });
+        return true;
+      }
+      if (msg && msg.type === 'kbPickCancel') {
+        picker.stopPicker();
+        return false;
       }
       if (msg && msg.type === 'kbTypeText') {
         Promise.resolve(commands.typeText(msg.params || {})).then(sendResponse);
