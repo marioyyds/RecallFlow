@@ -129,7 +129,7 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 - [ ] `ok:false` 的错误信息包含替代路径
 - [ ] `TOOL_METADATA` 的 `risk` 分级正确，`readOnly` / `alwaysRequireApproval` 已标注
 - [ ] 已加入合适意图的白名单（并考虑是否该出现在 `chat_task`）
-- [ ] `AGENT_SYSTEM_PROMPT` 的能力清单已同步
+- [ ] `buildSystemPrompt`（`intent-router.js`）的能力清单/工具名已同步（系统提示按意图动态生成）
 - [ ] 批量参数聚合返回，一次调用可完成重复子任务
 
 ## 12. 与现状的差距（待办）

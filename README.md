@@ -46,12 +46,18 @@
 ## 功能亮点
 
 - **读**：划词悬浮、多轮对话、整页上下文、RAG 检索、流式中断、对话撤销（撤销时把原指令回填到输入框，方便修改重发）、可自定义快捷语句
-- **操作**：点击 / 输入 / 滚动 / 高亮 / 改样式；自动等待页面就绪、识别遮挡，穿透 iframe 与 shadow DOM，点击新标签页自动接管；`open_tab` 自动复用已打开的标签页、任务结束自动清理多余的中间页；内置工具表达不了时，可让 AI 用 `run_javascript` 在受限沙箱里执行一段 JS（批量提取数据、复杂组件操作、页面测量）
+- **操作**：点击 / 输入 / 滚动 / 悬停 / 拖拽 / 文件上传 / 高亮 / 改样式；自动等待页面就绪、识别遮挡，穿透 iframe 与 shadow DOM，点击新标签页自动接管；`open_tab` 自动复用已打开的标签页、任务结束自动清理多余的中间页
+  - **CDP 可信输入（可选）**：合成事件无效的顽固站点，自动降级到 `chrome.debugger` 派发**可信事件**（`click_at` / `hover_element` / `drag_element` / `upload_file`），可操作 canvas、虚拟列表、复杂组件；`get_ax_snapshot` 读取可访问性树（role + 名称 + 坐标），配合坐标点击
+  - **页面世界 JS**：`run_javascript` 默认在受限沙箱执行（无 `chrome.*`）；需要访问页面自身 JS 状态时可用 `engine:"page"` 经 CDP 在页面主世界执行（不受页面 CSP 限制）
+  - **跨域 iframe**：内容脚本注入所有框架，`list_frames` 枚举框架，`get_page_snapshot` 支持 `frameId` / `includeFrames`（合并元素，ref 带 `f<frameId>:` 前缀），`click_element` / `type_text` / `run_javascript` 可自动路由到目标 iframe——嵌入编辑器、登录框、支付表单等跨域组件也能操作
+  - **站点记忆**：按域名记住成功定位过的元素选择器，下次任务直接复用，减少重复探索
+  - **宏与撤销**：说「记住这个流程」把一次成功的多步操作存成**宏**（按站点），以后说「跑一下 XX 流程」用 `run_macro` 一键回放、不再逐步走模型；说「撤销」可回退输入 / 勾选 / 选择 / 改样式 / 滚动
+  - **站点信任**：说「信任这个网站」后，该站点的写操作不再逐次确认（`run_javascript` 等高风险工具仍每次确认）
 - **记忆**：错题 / 文章 / Prompt / 笔记四类知识库，支持星级、标签、搜索、导入导出，Agent 可读写
 - **技能**：SkillHub 风格「专家手册」提示层，含技能中心（增删改查 / 导入导出 / 分页）、内置技能与 `load_skill` / `install_skill` 工具，详见下节
 - **扩展**：支持 MCP 服务器，可接入文件系统、Notion 等外部能力（目标域名需加入 `manifest.json` 的 `host_permissions`）
 - **用户脚本**：内置轻量用户脚本运行时，可从 GreasyFork 搜索或粘贴 `.user.js` 链接安装社区脚本；Agent 可按需求自动搜索 / 安装 / 运行脚本来完成任务（下载视频、展开全文、去广告等），安装前展示权限预览
-- **安全**：写操作默认逐次审批，可按类别开启自动批准；`run_javascript` 等高风险工具强制逐次审批，不允许自动放行或"本次会话允许"，仅暴露受限沙箱（页面 DOM），不提供 chrome.* 等高权限能力
+- **安全**：写操作默认逐次审批，可按类别开启自动批准；`run_javascript` 等高风险工具强制逐次审批，不允许自动放行或"本次会话允许"，且在受限作用域中执行（屏蔽 `chrome.*` / `fetch` / 扩展存储等的直接引用，仅暴露页面 DOM 与常规浏览器 API）
 
 ## 技能系统（SkillHub 风格）
 
@@ -89,6 +95,12 @@ opencode ──(MCP stdio)──► recallflow-mcp ──(HTTP 长轮询 / WebSo
 
 ## 技术亮点
 
+- **任务规划**：多步任务用 `update_plan` 维护子目标清单，进度实时渲染在对话里，避免长任务跑丢目标
+- **上下文 / token 管理**：大工具结果自动截断并把全文暂存（`expand_result` 按需分段读取），较早结果滚动折叠；API 用量实时计入并显示
+- **Locator 抽象**：元素定位按 `ref → role+name → testid → text → css` 逐级回退；`get_ax_snapshot` 给出 role/name，优先用语义定位而非脆弱的 CSS 路径
+- **统一 Target 管理**：集中处理标签页/框架 + JS 对话框（`handle_dialog`）/ 下载（`list_downloads`）等浏览器级事件
+- **结构化运行轨迹**：每个任务记录步骤/工具/耗时/token/错误码，`get_run_trace` 可查，便于排障与复盘
+- **Verifier 校验与反思**：声称完成前用一次独立模型调用核对目标是否真的达成，未达成则注入反思让 Agent 换做法继续；卡死时也注入反思而非空转（`lib/assistant/verifier.js`）
 - **统一工具注册表**：模型工具列表、权限策略、参数校验共用一份定义，不漂移
 - **意图路由**：浏览器 / 知识库 / 研究 / 对话自动分流，避免工具乱用；「继续 / 接着」继承上一轮意图
 - **技能路由（进阶版 A）**：技能以目录进入系统提示，模型按语义调用 `load_skill` 按需加载，而非关键词硬匹配；`chat_task` 默认只给只读工具集，写操作仍走审批
@@ -110,8 +122,10 @@ bookmark-sorter/
 │   │   ├── tools.js / intent-router.js / agent.js / mcp.js
 │   │   └── skill-defs.js / skill-store.js / skill-md.js / skills.js   # 内置技能、技能存储、SKILL.md 解析、目录构建
 │   ├── bridge/        # RecallFlow ↔ opencode 的本地中继（relay.js）
-│   └── page/          # 正文提取、高亮浮层、页面命令（含 run_javascript 沙箱）、对话面板
+│   ├── backend/       # 浏览器级输入层（cdp.js：可信事件 / 截图 / 可访问性树 / 页面世界执行）
+│   └── page/          # 正文提取与感知快照、高亮浮层、页面命令（含 run_javascript 沙箱）、对话面板
 ├── skills-page.js / skills.html / skills.css   # 技能中心 UI
+├── tests/                   # 单元测试（node --test）+ E2E 黄金任务（Playwright + 模拟 LLM）
 ├── integrations/opencode/   # opencode 证据 MCP：recallflow-mcp 服务端 + SKILL.md + 工具契约
 └── docs/
     ├── tool-design.md   # 工具定义设计规范（粒度/参数/返回/风险分级）

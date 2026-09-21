@@ -3,7 +3,7 @@
   "name": "RecallFlow",
   "version": "0.0.1",
   "description": "RecallFlow：浏览器里的统一 AI 助手——在任意网页上划词即问，让 AI 替你读、操作并记忆，支持基于知识库的 RAG 检索问答。",
-  "permissions": ["tabs", "storage", "contextMenus", "scripting", "notifications", "alarms"],
+  "permissions": ["tabs", "storage", "contextMenus", "scripting", "notifications", "alarms", "debugger"],
   "host_permissions": ["<all_urls>", "http://127.0.0.1/*", "http://localhost/*"],
   "action": {
     "default_popup": "popup.html",
@@ -33,7 +33,8 @@
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [

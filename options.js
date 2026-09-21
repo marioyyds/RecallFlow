@@ -14,6 +14,10 @@ async function load() {
   $('rag-enabled').checked = !!s.ragEnabled;
   $('target-lang').value = s.targetLang;
   $('page-context').checked = s.pageContext !== false;
+  $('cdp-enabled').checked = s.cdpEnabled !== false;
+  $('site-memory').checked = s.siteMemoryEnabled !== false;
+  $('verifier-enabled').checked = s.verifierEnabled !== false;
+  $('trusted-sites').value = (s.trustedSites || []).join('\n');
   $('tool-approval').checked = s.toolApproval !== false;
   const policy = Object.assign({ read: true, edit: false, commands: false, browser: false, mcp: false }, s.toolApprovalPolicy || {});
   ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!policy[k]; });
@@ -93,6 +97,10 @@ $('save-btn').addEventListener('click', async () => {
     ragEnabled: $('rag-enabled').checked,
     targetLang: $('target-lang').value.trim() || AI_SETTINGS_DEFAULTS.targetLang,
     pageContext: $('page-context').checked,
+    cdpEnabled: $('cdp-enabled').checked,
+    siteMemoryEnabled: $('site-memory').checked,
+    verifierEnabled: $('verifier-enabled').checked,
+    trustedSites: $('trusted-sites').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
     toolApproval: $('tool-approval').checked,
     toolApprovalPolicy: Object.fromEntries(['read', 'edit', 'commands', 'browser', 'mcp'].map((k) => [k, $('approval-' + k).checked])),
     toolApprovalNotify: $('approval-notify').checked,

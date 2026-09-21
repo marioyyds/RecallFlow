@@ -1,0 +1,14 @@
+{
+  "name": "recallflow",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "RecallFlow browser extension (MV3).",
+  "scripts": {
+    "test": "node --test tests/context.test.mjs tests/rag.test.mjs tests/utils.test.mjs tests/intent.test.mjs tests/registry.test.mjs tests/verifier.test.mjs",
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0"
+  }
+}

@@ -23,6 +23,13 @@ import { archive, get, getByUrl, dir } from './evidence-store.js';
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
 const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
 const POLL_HOLD_MS = 25000;
+// 本地桥接鉴权：仅接受来自扩展的请求。扩展 fetch 带 host_permissions 不受 CORS 限制，
+// 而网页脚本既无法绕过 Host 校验（防 DNS rebinding），也无法携带自定义头（无 CORS 预检放行），
+// 因此「Host 白名单 + 共享 token 头」即可把网页挡在门外。token 可用环境变量覆盖。
+const BRIDGE_TOKEN = process.env.RECALLFLOW_BRIDGE_TOKEN || 'recallflow-local-bridge-v1';
+const ALLOWED_HOSTS = new Set(['127.0.0.1:' + PORT, 'localhost:' + PORT, '[::1]:' + PORT]);
+// 无需鉴权的探活路径（只读、无副作用）。
+const OPEN_PATHS = new Set(['/health']);
 
 function log(msg) {
   process.stderr.write('[recallflow-mcp] ' + msg + '\n');
@@ -82,15 +89,22 @@ function flushPollWaiters() {
 
 // ---------------- HTTP 服务（/health, /poll, /result）+ WebSocket ----------------
 const httpServer = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
+  // 不做 CORS 放行：扩展凭 host_permissions 直连，网页脚本则被同源策略挡在门外。
+  const host = req.headers.host || '';
+  if (!ALLOWED_HOSTS.has(host)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('forbidden');
     return;
   }
   const url = new URL(req.url, 'http://127.0.0.1');
+  if (!OPEN_PATHS.has(url.pathname)) {
+    const token = req.headers['x-recallflow-token'] || url.searchParams.get('token') || '';
+    if (token !== BRIDGE_TOKEN) {
+      res.writeHead(401, { 'Content-Type': 'text/plain' });
+      res.end('unauthorized');
+      return;
+    }
+  }
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, ws: Boolean(extSocket), queued: queue.length }));
@@ -137,7 +151,21 @@ const httpServer = http.createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ server: httpServer });
-wss.on('connection', (socket) => {
+wss.on('connection', (socket, req) => {
+  // WebSocket 不受 CORS 约束，网页也能直连本机端口，故同样校验 Host + token。
+  let ok = false;
+  try {
+    const host = (req && req.headers && req.headers.host) || '';
+    const token = new URL(req.url, 'http://127.0.0.1').searchParams.get('token') || '';
+    ok = ALLOWED_HOSTS.has(host) && token === BRIDGE_TOKEN;
+  } catch (e) {
+    ok = false;
+  }
+  if (!ok) {
+    log('rejected websocket connection (bad host/token)');
+    try { socket.close(); } catch (e) {}
+    return;
+  }
   extSocket = socket;
   log('extension connected (websocket)');
   socket.on('message', (raw) => {

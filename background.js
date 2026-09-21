@@ -5,6 +5,7 @@ import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
 import { startMcpRelay } from './lib/bridge/relay.js';
+import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import {
   listScripts,
@@ -21,6 +22,17 @@ import {
   userscriptXhr,
   syncUserscriptRegistrations,
 } from './lib/userscript/manager.js';
+
+// 兜底日志：service worker 内未捕获的异常 / Promise 拒绝也打到 console，便于排障。
+try {
+  self.addEventListener('unhandledrejection', (e) => {
+    const r = e && e.reason;
+    console.error('[RecallFlow] unhandledrejection:', r && (r.stack || r.message) ? (r.stack || r.message) : r);
+  });
+  self.addEventListener('error', (e) => {
+    console.error('[RecallFlow] uncaught error:', e && e.message, e && e.filename, e && e.lineno);
+  });
+} catch (e) {}
 
 async function handleAi(request) {
   const settings = await getAISettings();
@@ -64,6 +76,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (msg && msg.type === 'conv:save') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId != null && Array.isArray(msg.conversation)) {
+      try {
+        chrome.storage.session.set({ ['recallflow.conv.' + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
+      } catch (e) {}
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (msg && msg.type === 'conv:get') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId == null) {
+      sendResponse({ conversation: [] });
+      return false;
+    }
+    chrome.storage.session
+      .get('recallflow.conv.' + tabId)
+      .then((d) => sendResponse({ conversation: (d['recallflow.conv.' + tabId] || {}).conversation || [] }))
+      .catch(() => sendResponse({ conversation: [] }));
+    return true;
+  }
   if (msg && msg.type === 'pageCommand') {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs && tabs[0];
@@ -71,7 +105,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: '无活动标签页' });
         return;
       }
-      chrome.tabs.sendMessage(tab.id, { type: 'kbPageCommand', command: msg.command, params: msg.params || {} }, (res) => {
+      chrome.tabs.sendMessage(tab.id, { type: 'kbPageCommand', command: msg.command, params: msg.params || {} }, { frameId: 0 }, (res) => {
         if (chrome.runtime.lastError) {
           sendResponse({ ok: false, error: chrome.runtime.lastError.message });
         } else {
@@ -187,6 +221,13 @@ chrome.runtime.onInstalled.addListener(() => {
   syncUserscriptRegistrations().catch(() => {});
 });
 
+// 标签页关闭时清理其对话持久化数据。
+chrome.tabs.onRemoved.addListener((tabId) => {
+  try {
+    chrome.storage.session.remove('recallflow.conv.' + tabId);
+  } catch (e) {}
+});
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'ai-stream') return;
 
@@ -205,6 +246,8 @@ chrome.runtime.onConnect.addListener((port) => {
     try {
       // 工具审批消息由 waitForToolApproval 的临时监听器处理，不能作为新的对话请求。
       if (payload && payload.type === 'tool-approval') return;
+      // 心跳：保持 service worker 存活（长任务期间），不触发新请求。
+      if (payload && payload.type === 'keepalive') return;
       const settings = await getAISettings();
       if (!settings.apiKey) {
         port.postMessage({ type: 'error', needSetup: true, error: '尚未配置 API Key，请点击插件图标 → 设置页填写。' });
@@ -218,7 +261,11 @@ chrome.runtime.onConnect.addListener((port) => {
           await runAgentStream(port, payload, settings, book, controller.signal, tabId);
           console.log('[RecallFlow] agent run finished');
         } catch (e) {
-          console.error('[RecallFlow] agent run error:', e);
+          const detail = e && e.stack ? e.stack : String(e);
+          console.error('[RecallFlow] agent run error:', detail);
+          // 把真实错误回传前端，避免只看到「转圈」或笼统报错。
+          try { port.postMessage({ type: 'error', error: 'Agent 运行出错：' + (e && e.message ? e.message : String(e)) }); } catch (err) {}
+          try { port.postMessage({ type: 'end' }); } catch (err) {}
         }
         return;
       }
@@ -315,3 +362,6 @@ chrome.runtime.onConnect.addListener((port) => {
 // 启动 RecallFlow ↔ opencode 的本地中继（连接本机 MCP server）。
 // 未运行 MCP server 时连接失败会自动重试，不影响扩展其它功能。
 startMcpRelay();
+
+// 初始化统一 Target 管理：订阅对话框 / 下载 / 文件选择等浏览器级事件。
+initTargetManager();

@@ -5,10 +5,12 @@ if (window.__kbAiLoaded) {
 } else {
   window.__kbAiLoaded = true;
   (async () => {
-    const chat = await import(chrome.runtime.getURL('lib/page/chat.js'));
+    const isTopFrame = window.top === window;
+    // 所有框架都需要：正文/快照 + 页面命令（跨域 iframe 操作靠它）。
     const pageText = await import(chrome.runtime.getURL('lib/page/page-text.js'));
     const commands = await import(chrome.runtime.getURL('lib/page/commands.js'));
-    const debugCapture = await import(chrome.runtime.getURL('lib/page/debug-capture.js'));
+    // 仅顶层需要：调试捕获（console/network/元素源码）与助手 UI（大模块，避免在子框架加载）。
+    const debugCapture = isTopFrame ? await import(chrome.runtime.getURL('lib/page/debug-capture.js')) : null;
 
     // 响应后台的即时页面正文读取请求（Agent 工具 read_current_page）
     // 与页面命令请求（Agent 工具 page_command / 用户路径 API）
@@ -18,16 +20,18 @@ if (window.__kbAiLoaded) {
         return true;
       }
       if (msg && msg.type === 'kbGetConsole') {
+        if (!debugCapture) { sendResponse({ entries: [] }); return true; }
         debugCapture.getDebugBuffer('console').then((entries) => sendResponse({ entries: entries || [] }));
         return true;
       }
       if (msg && msg.type === 'kbGetNetwork') {
+        if (!debugCapture) { sendResponse({ entries: [] }); return true; }
         debugCapture.getDebugBuffer('network').then((entries) => sendResponse({ entries: entries || [] }));
         return true;
       }
       if (msg && msg.type === 'kbGetElementSource') {
         const selector = commands.resolveElementSelector(msg.params || {});
-        if (!selector) {
+        if (!selector || !debugCapture) {
           sendResponse({ found: false, reason: '未找到目标元素' });
           return true;
         }
@@ -39,6 +43,14 @@ if (window.__kbAiLoaded) {
       }
       if (msg && msg.type === 'kbGetPageSnapshot') {
         sendResponse(pageText.extractPageSnapshot(msg.options || {}));
+        return true;
+      }
+      if (msg && msg.type === 'kbResolveTarget') {
+        sendResponse(commands.resolveTargetInfo(msg.params || {}));
+        return true;
+      }
+      if (msg && msg.type === 'kbUndo') {
+        sendResponse(commands.undoLast());
         return true;
       }
       if (msg && msg.type === 'kbTypeText') {
@@ -76,6 +88,11 @@ if (window.__kbAiLoaded) {
       return false;
     });
 
-    chat.initAssistant();
+    // 助手 UI 只在顶层文档初始化；子框架（含跨域 iframe）只保留消息处理，
+    // 供后台按 frameId 在对应框架内执行页面命令（跨域 iframe 打通的关键）。
+    if (isTopFrame) {
+      const chat = await import(chrome.runtime.getURL('lib/page/chat.js'));
+      chat.initAssistant();
+    }
   })();
 }
