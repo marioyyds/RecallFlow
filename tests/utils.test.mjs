@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -132,4 +132,57 @@ test('composeProgressText: 脏数据安全', () => {
   assert.equal(composeProgressText(NaN, NaN, null), '正在思考…');
   assert.equal(composeProgressText(-1, -5, undefined), '正在思考…');
   assert.equal(composeProgressText(1.7, 9.9, '  '), '第 1 / 9 步');
+});
+
+// ---------------------------------------------------------------- 截图
+
+test('screenshotAttempts: jpeg 阶梯逐级降质且有限', () => {
+  const a = screenshotAttempts('jpeg', 72);
+  assert.equal(a.length, 3);
+  assert.deepEqual(a[0], { format: 'jpeg', quality: 72 });
+  assert.equal(a[2].quality, 30);
+  // 质量必须单调不增，否则「降质重试」没有意义
+  assert.ok(a[0].quality >= a[1].quality && a[1].quality >= a[2].quality, JSON.stringify(a));
+});
+
+test('screenshotAttempts: quality 已很低时不重复无效档位', () => {
+  const a = screenshotAttempts('jpeg', 35);
+  const qualities = a.map((x) => x.quality);
+  assert.deepEqual(qualities, [...new Set(qualities)], '不应出现重复档位：' + JSON.stringify(qualities));
+  assert.ok(a.length <= 3);
+});
+
+test('screenshotAttempts: png 请求超限时会退到 jpeg', () => {
+  const a = screenshotAttempts('png', 72);
+  assert.equal(a[0].format, 'png');
+  assert.ok(a.slice(1).every((x) => x.format === 'jpeg'), '后续档位应退为 jpeg');
+});
+
+test('screenshotAttempts: 越界/脏 quality 被夹紧', () => {
+  assert.equal(screenshotAttempts('jpeg', 999)[0].quality, 100);
+  assert.equal(screenshotAttempts('jpeg', -5)[0].quality, 20);
+  assert.equal(screenshotAttempts('jpeg', 'abc')[0].quality, 72);
+});
+
+test('formatScreenshotSummary: 必须以「看不到图像」明确警示模型', () => {
+  const s = formatScreenshotSummary({ width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 });
+  assert.ok(s.includes('1280×720'), s);
+  assert.ok(s.includes('JPEG'), s);
+  assert.ok(s.includes('q72'), s);
+  assert.ok(s.includes('142KB'), s);
+  // 这两点最关键：防止模型凭「已截图」编造页面外观描述
+  assert.ok(s.includes('看不到图像'), s);
+  assert.ok(s.includes('get_page_snapshot'), s);
+});
+
+test('formatScreenshotSummary: 标注与降质提示', () => {
+  const s = formatScreenshotSummary({ width: 100, height: 50, format: 'jpeg', bytes: 2048, label: '修改后', degraded: true });
+  assert.ok(s.includes('修改后'), s);
+  assert.ok(s.includes('自动降质'), s);
+});
+
+test('formatScreenshotSummary: 尺寸缺失与脏数据安全', () => {
+  const s = formatScreenshotSummary({ format: 'png', bytes: 0 });
+  assert.ok(s.includes('尺寸未知'), s);
+  assert.equal(typeof formatScreenshotSummary(null), 'string');
 });

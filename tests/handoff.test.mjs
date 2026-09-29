@@ -10,6 +10,9 @@ import {
   buildHandoffRecord,
   updateHandoffIndex,
   formatHandoffPrompt,
+  deriveToolTrail,
+  handoffByteSize,
+  fitRecordToBudget,
 } from '../lib/shared/handoff.js';
 
 const BODY_RE = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
@@ -156,4 +159,146 @@ test('formatHandoffPrompt: 指令含标识与工具名，便于 agent 自动调�
   const p2 = formatHandoffPrompt('RF-7K2M9X');
   assert.ok(!p2.includes('（）'), p2);
   assert.equal(formatHandoffPrompt('bad'), '');
+});
+
+// ---------------------------------------------------------------- 工具轨迹
+// 交接包此前只留 {role, content}，把 parts（工具调用/结果）丢掉了 ——
+// 外部 agent 接手时看不到「前一个 AI 已经查过什么」，只能把同样的选择器再试一遍。
+
+test('deriveToolTrail: 把 tool-call 与 tool-result 按 callId 配对成一行', () => {
+  const trail = deriveToolTrail([
+    {
+      role: 'assistant',
+      content: '看完了',
+      parts: [
+        { type: 'narration', text: '先扫一遍' },
+        { type: 'tool-call', callId: 'c1', name: 'get_page_snapshot', args: { maxElements: 60 } },
+        { type: 'tool-result', callId: 'c1', name: 'get_page_snapshot', status: 'completed', result: '快照：…' },
+        { type: 'tool-call', callId: 'c2', name: 'set_element_style', args: { hide: true, selectors: ['.ad'] } },
+        { type: 'tool-result', callId: 'c2', name: 'set_element_style', status: 'completed', result: '已隐藏 2 个元素' },
+      ],
+    },
+  ]);
+  assert.equal(trail.length, 2);
+  assert.equal(trail[0].name, 'get_page_snapshot');
+  assert.equal(trail[0].status, 'completed');
+  assert.ok(trail[0].args.includes('maxElements'), trail[0].args);
+  assert.equal(trail[1].name, 'set_element_style');
+  assert.ok(trail[1].result.includes('已隐藏'), trail[1].result);
+});
+
+test('deriveToolTrail: 无结果的调用标记为 unknown（而不是假装成功）', () => {
+  const trail = deriveToolTrail([
+    { role: 'assistant', parts: [{ type: 'tool-call', callId: 'c1', name: 'run_javascript', args: {} }] },
+  ]);
+  assert.equal(trail.length, 1);
+  assert.equal(trail[0].status, 'unknown');
+  assert.equal(trail[0].result, '');
+});
+
+test('deriveToolTrail: 丢 user、容错脏数据、只留最近 N 步', () => {
+  const parts = [];
+  for (let i = 0; i < 40; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const trail = deriveToolTrail([{ role: 'user', content: 'hi', parts }, null, { role: 'assistant' }, { role: 'assistant', parts }]);
+  assert.equal(trail.length, 24, '应只保留最近 24 步');
+  assert.equal(trail[trail.length - 1].name, 'tool39');
+});
+
+test('buildHandoffRecord: 工具轨迹进入交接包（此前 parts 被 trimMessages 丢掉）', () => {
+  const rec = buildHandoffRecord({
+    id: 'RF-7K2M9X',
+    messages: [
+      { role: 'user', content: '去掉广告' },
+      {
+        role: 'assistant',
+        content: '好了',
+        parts: [
+          { type: 'tool-call', callId: 'c1', name: 'set_element_style', args: { hide: true } },
+          { type: 'tool-result', callId: 'c1', status: 'completed', result: '已隐藏 14 个元素' },
+        ],
+      },
+    ],
+  });
+  assert.ok(Array.isArray(rec.toolTrail), 'record 应含 toolTrail');
+  assert.equal(rec.toolTrail.length, 1);
+  assert.equal(rec.toolTrail[0].name, 'set_element_style');
+  // messages 仍只承载 {role, content}，轨迹是独立字段
+  assert.deepEqual(Object.keys(rec.messages[1]).sort(), ['content', 'role']);
+});
+
+test('buildHandoffRecord: 显式传入 toolTrail 时优先使用', () => {
+  const rec = buildHandoffRecord({
+    id: 'RF-7K2M9X',
+    messages: [],
+    toolTrail: [{ name: 'x', args: '{}', status: 'completed', result: 'ok' }],
+  });
+  assert.equal(rec.toolTrail.length, 1);
+  assert.equal(rec.toolTrail[0].name, 'x');
+});
+
+// ---------------------------------------------------------------- 字节预算
+// 条数上限（30 条）挡不住单条超长：最坏 20×4000 字符，而 chrome.storage.local
+// 默认约 10MB 由所有记录共享。
+
+test('handoffByteSize: 按 UTF-8 字节计（中文 3 字节）', () => {
+  assert.equal(handoffByteSize({}), 2); // "{}"
+  assert.equal(handoffByteSize('中'), 5); // '"中"' = 1 + 3 + 1
+  assert.equal(handoffByteSize('ab'), 4); // '"ab"' = 4
+});
+
+test('handoffByteSize: 不可序列化值返回极大值（触发收缩而非静默通过）', () => {
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.equal(handoffByteSize(cyclic), Number.MAX_SAFE_INTEGER);
+});
+
+test('fitRecordToBudget: 未超预算时原样返回', () => {
+  const rec = { id: 'RF-7K2M9X', messages: [{ role: 'user', content: 'hi' }] };
+  const out = fitRecordToBudget(rec, 100000);
+  assert.equal(out.record, rec);
+  assert.equal(out.truncated, '');
+});
+
+test('fitRecordToBudget: 超预算时收缩到预算内，并保留关键字段', () => {
+  const big = 'x'.repeat(50000);
+  const rec = {
+    id: 'RF-7K2M9X',
+    pageUrl: 'https://example.com',
+    messages: [{ role: 'user', content: big }, { role: 'assistant', content: big }],
+    consoleErrors: [{ level: 'error', text: 'boom', stack: big }],
+    toolTrail: [{ name: 'a', args: big, status: 'completed', result: big }],
+    pickedElements: [{ selector: '#a' }],
+  };
+  const out = fitRecordToBudget(rec, 20000);
+  assert.ok(out.bytes <= 20000, '收缩后应满足预算，实际 ' + out.bytes);
+  assert.ok(out.truncated, '应标记 truncated');
+  assert.equal(out.record.id, 'RF-7K2M9X');
+  assert.equal(out.record.pageUrl, 'https://example.com');
+});
+
+test('fitRecordToBudget: 第一级只砍控制台堆栈，保留正文与工具轨迹', () => {
+  // 堆栈本身必须超过预算，否则第一级不会被触发（记录本来就合规）。
+  const big = 'y'.repeat(50000);
+  const rec = {
+    id: 'RF-7K2M9X',
+    messages: [{ role: 'user', content: 'hi' }],
+    consoleErrors: [{ level: 'error', text: 'boom', stack: big }],
+    toolTrail: [{ name: 'a', args: '{}', status: 'completed', result: 'ok' }],
+  };
+  assert.ok(handoffByteSize(rec) > 40000, '前置条件：记录应超预算');
+  const out = fitRecordToBudget(rec, 40000);
+  assert.equal(out.truncated, 'console-stack');
+  assert.equal(out.record.consoleErrors[0].stack, '');
+  assert.equal(out.record.consoleErrors[0].text, 'boom', '错误正文应保留');
+  assert.equal(out.record.toolTrail.length, 1, '工具轨迹此时不应被动');
+});
+
+test('fitRecordToBudget: 脏数据安全', () => {
+  const out = fitRecordToBudget(null, 100);
+  assert.ok(out.record && typeof out.record === 'object');
+  const out2 = fitRecordToBudget({ id: 'RF-7K2M9X' }, 10);
+  assert.ok(out2.bytes > 0);
 });
