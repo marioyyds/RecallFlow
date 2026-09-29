@@ -99,6 +99,15 @@
         <input id="tool-approval" type="checkbox" hidden checked>
       </div>
       <label class="field">
+        <span class="field-label">run_javascript 审批</span>
+        <select id="runjs-approval" class="us-select">
+          <option value="each">每次都要确认</option>
+          <option value="session">本任务内允许一次（推荐）</option>
+          <option value="auto">自动批准（不再询问）</option>
+        </select>
+        <span class="hint">run_javascript 是高风险的页面 JS 逃生舱（受限沙箱）。设为「本任务内允许一次」可避免同一次任务里反复弹窗。</span>
+      </label>
+      <label class="field">
         <span class="field-label">翻译目标语言</span>
         <input id="target-lang" type="text" placeholder="中文">
         <span class="hint">划词翻译的目标语言，如 中文 / English / 日本語</span>

@@ -97,17 +97,21 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 
 `TOOL_METADATA` 的 `risk` 枚举与审批映射（`agent.js` `toolNeedsApproval` 已实现，新增工具须对号入座）：
 
-| risk | 含义 | 审批 |
-| --- | --- | --- |
-| `read` | 只读观察 | 不需要 |
-| `page` | 页面内写操作（点击/输入/标注） | 需审批，可按类别自动批准 |
-| `browser` | 浏览器级（开关标签页） | 需审批，可按类别自动批准 |
-| `network` | 网络请求 | 需审批，可按类别自动批准 |
-| `write` / `destructive` | 写/删本地数据 | 需审批，可按类别自动批准 |
-| `external` | MCP / 外部服务 | 需审批，可按类别自动批准 |
-| `high` | 任意代码执行等高危 | **永远逐次审批**，不允许自动批准或"本次会话允许" |
+| risk | 含义 | `toolApprovalPolicy` 键 | 审批 |
+| --- | --- | --- | --- |
+| `read` | 只读观察 | —（`requiresApproval` 未置位，直接放行） | 不需要 |
+| `page` | 页面内写操作（点击/输入/标注） | `commands` | 需审批，可按类别自动批准 |
+| `browser` | 浏览器级（开关标签页） | `browser` | 需审批，可按类别自动批准 |
+| `network` | 网络请求 | `browser` | 需审批，可按类别自动批准 |
+| `write` / `destructive` | 写/删本地数据 | `edit` | 需审批，可按类别自动批准 |
+| `external` | MCP / 外部服务 | `mcp` | 需审批，可按类别自动批准 |
+| `high` | 任意代码执行等高危 | —（改走 `runJavascriptApproval`） | 默认需确认一次后本任务内放行；可配为每次确认或自动批准 |
 
-- `alwaysRequireApproval: true` 用于 `high` 风险工具（如 `run_javascript`），`toolNeedsApproval` 会无视自动批准策略强制确认，且 `agent.js` 会把"本次会话允许"降级为"仅本次"。
+- `alwaysRequireApproval: true` 用于 `high` 风险工具（如 `run_javascript`）：它**不参与** `toolApprovalPolicy` 的分类自动批准，而由独立的 `runJavascriptApproval` 控制：
+  - `'each'`：每次调用都确认；
+  - `'session'`（默认）：确认一次后，本任务内后续调用直接放行；
+  - `'auto'`：完全不弹审批。
+- `toolApprovalPolicy` 默认值里的 `read: true` 实际不生效（只读工具在 `toolNeedsApproval` 开头就返回了），保留它只是为了 UI 勾选项的完整性。
 - `readOnly: true` 的工具不受失败摘除影响（交给 stuck detector 判定）。
 
 ## 10. 数量与可见性
@@ -142,5 +146,7 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 待办：
 
 - [ ] 视觉标注类（`highlight_text` / `outline_element` / `set_element_style` / `clear_page_overlays`）存在功能重叠，可评估合并为统一「标注」语义。
+- [ ] **内置工具已达 50 个，是 §10 目标（≤25）的两倍**，`BROWSER` 意图单轮即暴露约 40 个签名。工具过密会抬高误选率并浪费提示 token，应优先合并重叠工具，而不是继续新增。
+- [ ] 知识库检索目前是「字段加权词法匹配 + 中文 bigram 切分」（`lib/shared/rag.js`），**不含向量嵌入**：语义近义查询（问「跨域」而条目只写「CORS」）会漏召回。
 - [ ] 写操作批量参数（如 `set_element_style` 批量元素）尚未推广。
 - [ ] 表单值选择类（`select_option`）按设计以 `ref / selector + value / label / index` 定位，`text` 暂不追加（与 `label` 语义重叠），需在 §5 补充例外说明。

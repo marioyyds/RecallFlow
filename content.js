@@ -42,6 +42,10 @@ if (window.__kbAiLoaded) {
         });
         return true;
       }
+      if (msg && msg.type === 'kbVerifyTargets') {
+        sendResponse({ targets: commands.verifyTargets((msg.params && msg.params.targets) || []) });
+        return true;
+      }
       if (msg && msg.type === 'kbGetPageSnapshot') {
         sendResponse(pageText.extractPageSnapshot(msg.options || {}));
         return true;
@@ -56,8 +60,8 @@ if (window.__kbAiLoaded) {
       }
       if (msg && msg.type === 'kbPickStart') {
         picker.startPicker(
-          (picked) => {
-            try { chrome.runtime.sendMessage({ type: 'pick:result', picked }); } catch (e) {}
+          (pickedList) => {
+            try { chrome.runtime.sendMessage({ type: 'pick:result', pickedList }); } catch (e) {}
           },
           () => {
             try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e) {}

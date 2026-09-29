@@ -22,6 +22,7 @@ async function load() {
   const policy = Object.assign({ read: true, edit: false, commands: false, browser: false, mcp: false }, s.toolApprovalPolicy || {});
   ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!policy[k]; });
   $('approval-notify').checked = s.toolApprovalNotify !== false;
+  $('runjs-approval').value = s.runJavascriptApproval || 'session';
   syncApprovalPreset();
   const budget = s.agentBudget || {};
   $('budget-tools').value = Number.isInteger(Number(budget.maxToolCalls)) && Number(budget.maxToolCalls) > 0 ? String(budget.maxToolCalls) : '';
@@ -104,6 +105,7 @@ $('save-btn').addEventListener('click', async () => {
     toolApproval: $('tool-approval').checked,
     toolApprovalPolicy: Object.fromEntries(['read', 'edit', 'commands', 'browser', 'mcp'].map((k) => [k, $('approval-' + k).checked])),
     toolApprovalNotify: $('approval-notify').checked,
+    runJavascriptApproval: $('runjs-approval').value || 'session',
     quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
     mcpServers: collectMcp(),
     agentBudget: {

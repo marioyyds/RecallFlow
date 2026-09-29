@@ -120,8 +120,8 @@ Output: `{ "ok": true, "text": "元素源码位置：src/components/Foo.tsx:42:7
 
 ### `get_picked_element`
 
-Return the element the user most recently **picked** in the browser (via the panel's「⊕ 选元素」
-picker). Lets opencode map "the thing I clicked" to front-end code.
+Return the element the user most recently **picked** in the browser (via the panel's picker
+（鼠标指针图标按钮）). Lets opencode map "the thing I clicked" to front-end code.
 
 Input: `{}`
 Output: `{ "found": true, "picked": { "selector": "#submit", "tag": "button", "label": "登录", "source": { "framework": "react", "file": "src/Login.tsx", "line": 42, "column": 7, "component": "LoginButton" }, "pageUrl": "https://…", "tabId": 12, "ts": 1700000000000 } }`

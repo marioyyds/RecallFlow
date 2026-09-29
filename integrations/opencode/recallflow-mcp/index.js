@@ -14,11 +14,21 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import { archive, get, getByUrl, dir } from './evidence-store.js';
+import {
+  normalizeElementSource,
+  rewriteSourceUrls,
+  normalizePickedElement,
+  normalizationHint,
+} from './dev-paths.js';
+import { summarizePageHealth } from './page-health.js';
+import { evaluateTargets } from './verify-change.js';
 
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
 const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
@@ -30,13 +40,32 @@ const BRIDGE_TOKEN = process.env.RECALLFLOW_BRIDGE_TOKEN || 'recallflow-local-br
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + PORT, 'localhost:' + PORT, '[::1]:' + PORT]);
 // 无需鉴权的探活路径（只读、无副作用）。
 const OPEN_PATHS = new Set(['/health']);
+// MCP over Streamable HTTP 的端点路径。它与扩展桥接**共用同一端口**，
+// 因此多个 opencode 实例可以连同一个常驻进程（各自独立会话），无需各自拉起 MCP server。
+const MCP_PATH = '/mcp';
+// 传输模式：默认 stdio（兼容 opencode 直接拉起）；--http 或 RECALLFLOW_MCP_HTTP=1 时启用 HTTP 端点。
+const USE_HTTP_MCP =
+  process.argv.includes('--http') ||
+  /^(1|true|yes)$/i.test(String(process.env.RECALLFLOW_MCP_HTTP || '')) ||
+  /^http$/i.test(String(process.env.RECALLFLOW_MCP_TRANSPORT || ''));
 
 function log(msg) {
   process.stderr.write('[recallflow-mcp] ' + msg + '\n');
 }
 
+// 取 Authorization: Bearer <token> 里的 token（MCP 客户端惯用这种写法）。
+function bearerToken(req) {
+  const raw = String((req && req.headers && req.headers.authorization) || '');
+  const m = /^Bearer\s+(.+)$/i.exec(raw.trim());
+  return m ? m[1].trim() : '';
+}
+
 // ---------------- 与扩展的通道（WS + HTTP 长轮询） ----------------
 let extSocket = null;
+// 桥接端口绑定失败的原因（非空表示本进程永远收不到扩展连接）。
+// 多实例场景（多个 opencode 各自拉起一个 MCP server）下只有第一个能占用端口，
+// 其余进程必须快速失败，否则每次调用都要白等 60 秒超时且看不出原因。
+let bridgeBindError = '';
 const pending = new Map(); // id -> { resolve, reject, timer }
 const queue = []; // 等待扩展处理的请求
 const pollWaiters = []; // 挂起的长轮询响应
@@ -49,6 +78,12 @@ function nextId() {
 // 由 MCP 工具调用：把请求排入队列，等扩展取走并回结果。
 function callExtension(method, params) {
   return new Promise((resolve, reject) => {
+    // 本进程没能占用桥接端口 → 永远收不到扩展连接，立即给出可操作的原因，
+    // 而不是让调用方空等一个超时。
+    if (bridgeBindError && !(extSocket && extSocket.readyState === 1)) {
+      reject(new Error(bridgeBindError));
+      return;
+    }
     const id = nextId();
     const timer = setTimeout(() => {
       pending.delete(id);
@@ -98,12 +133,25 @@ const httpServer = http.createServer((req, res) => {
   }
   const url = new URL(req.url, 'http://127.0.0.1');
   if (!OPEN_PATHS.has(url.pathname)) {
-    const token = req.headers['x-recallflow-token'] || url.searchParams.get('token') || '';
+    // 接受自定义头或标准 Bearer 头。要求「自定义头」本身就是一道防线：
+    // 网页脚本无法在无 CORS 预检（我们从不放行预检）的情况下携带自定义头，
+    // 因此恶意页面即使能 POST 到本机端口，也拿不到鉴权。
+    const token = bearerToken(req) || req.headers['x-recallflow-token'] || url.searchParams.get('token') || '';
     if (token !== BRIDGE_TOKEN) {
       res.writeHead(401, { 'Content-Type': 'text/plain' });
       res.end('unauthorized');
       return;
     }
+  }
+  // MCP over Streamable HTTP（可选模式）：与桥接共用端口，按 mcp-session-id 隔离会话。
+  if (url.pathname === MCP_PATH) {
+    if (!USE_HTTP_MCP) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('MCP HTTP endpoint disabled; start this server with --http to enable it');
+      return;
+    }
+    handleMcpHttp(req, res);
+    return;
   }
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -184,11 +232,78 @@ wss.on('connection', (socket, req) => {
   socket.on('error', () => {});
 });
 
-httpServer.on('error', (e) => log('http server error: ' + e.message));
+httpServer.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE') {
+    bridgeBindError =
+      '本进程未能占用桥接端口 ' +
+      PORT +
+      '（已被其它 MCP 实例占用），因此无法接收 RecallFlow 扩展的连接。' +
+      '扩展只会连上占用该端口的那个实例。推荐改用「常驻单实例 + Streamable HTTP」：' +
+      '只启动一个进程（node index.js --http），其余 opencode 通过 url = http://127.0.0.1:' +
+      PORT +
+      MCP_PATH +
+      ' 连接它，这样所有实例都能读页面。';
+  } else {
+    bridgeBindError = '本地桥接服务启动失败：' + (e && e.message);
+  }
+  log('http server error: ' + (e && e.message));
+});
 wss.on('error', (e) => log('websocket server error: ' + e.message));
 httpServer.listen(PORT, '127.0.0.1', () => {
   log('listening on 127.0.0.1:' + PORT + ' (websocket + http long-poll)');
 });
+
+// ---------------- MCP over Streamable HTTP（可选模式） ----------------
+// 让多个 MCP 客户端（多个 opencode 实例）共用同一个常驻进程：
+// 每个客户端一条独立会话（mcp-session-id），互不干扰，因此不再需要「一个 opencode 一个 server」。
+const mcpSessions = new Map(); // sessionId -> transport
+
+async function handleMcpHttp(req, res) {
+  try {
+    const sid = req.headers['mcp-session-id'];
+    if (sid) {
+      const existing = mcpSessions.get(sid);
+      if (!existing) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: '未知会话：' + sid } }));
+        return;
+      }
+      await existing.handleRequest(req, res);
+      return;
+    }
+    // 无会话 ID 的 GET（SSE 长连接）我们不支持：工具都是请求/响应，用 JSON 响应即可。
+    if (req.method !== 'POST') {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('missing mcp-session-id (only POST may start a session)');
+      return;
+    }
+    // 新会话：独立的 transport + server 实例，避免多客户端共享状态。
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: (id) => {
+        mcpSessions.set(id, transport);
+        log('MCP 会话已建立：' + id + '（当前 ' + mcpSessions.size + ' 个）');
+      },
+    });
+    transport.onclose = () => {
+      const id = transport.sessionId;
+      if (id && mcpSessions.get(id) === transport) {
+        mcpSessions.delete(id);
+        log('MCP 会话已关闭：' + id + '（剩 ' + mcpSessions.size + ' 个）');
+      }
+    };
+    transport.onerror = (e) => log('MCP 传输错误：' + (e && e.message));
+    await createMcpServer().connect(transport);
+    await transport.handleRequest(req, res);
+  } catch (e) {
+    log('MCP HTTP 处理失败：' + (e && e.message));
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32603, message: String((e && e.message) || e) } }));
+    }
+  }
+}
 
 // ---------------- 工具实现 ----------------
 async function browserRead(args) {
@@ -222,7 +337,8 @@ async function readConsole(args) {
     level: args && args.level,
     limit: args && args.limit,
   });
-  return { ok: true, text: (r && r.text) || '' };
+  // 调用栈里含开发服务器 URL，一并转换为磁盘路径，让 agent 能直接定位源码文件。
+  return { ok: true, text: rewriteSourceUrls((r && r.text) || '', devCtx()) };
 }
 
 async function readNetwork(args) {
@@ -230,22 +346,161 @@ async function readNetwork(args) {
     filter: args && args.filter,
     limit: args && args.limit,
   });
-  return { ok: true, text: (r && r.text) || '' };
+  // initiator（发起位置）是调用栈，同样做源码 URL → 磁盘路径的转换。
+  return { ok: true, text: rewriteSourceUrls((r && r.text) || '', devCtx()) };
 }
 
 async function getElementSource(args) {
+  const ctx = devCtx();
   const r = await callExtension('get_element_source', {
     ref: args && args.ref,
     selector: args && args.selector,
     text: args && args.text,
     index: args && args.index,
   });
-  return { ok: true, text: (r && r.text) || '' };
+  if (!r || r.found === false) {
+    return {
+      ok: false,
+      found: false,
+      reason: (r && r.reason) || '未找到元素或框架源码信息（可能不是 React/Vue/Svelte 开发构建）。',
+    };
+  }
+  // 结构化归一化：直接处理 source 对象，不再按「元素源码位置：」文案反解。
+  const src = normalizeElementSource(r.source, ctx);
+  if (!src) {
+    return { ok: false, found: false, reason: '该元素没有可用的框架源码信息。' };
+  }
+  const loc =
+    String(src.file || '') + (src.line ? ':' + src.line + (src.column ? ':' + src.column : '') : '');
+  const text =
+    '元素源码位置：' +
+    loc +
+    (src.framework ? '（' + src.framework + (src.component ? ' · ' + src.component : '') + '）' : '') +
+    (r.selector ? '\n选择器：' + r.selector : '');
+  // 只有「没能转换」时才提示补 dev_session；原值已可对照时不必打扰。
+  const hint = src.originalFile ? '' : normalizationHint(ctx);
+  return {
+    ok: true,
+    found: true,
+    file: src.file || '',
+    line: src.line || 0,
+    column: src.column || 0,
+    framework: src.framework || '',
+    component: src.component || '',
+    selector: r.selector || '',
+    originalFile: src.originalFile || '',
+    text,
+    hint: hint || undefined,
+  };
 }
 
 async function getPickedElement() {
   const r = await callExtension('get_picked_element', {});
-  return r || { found: false };
+  if (!r) return { found: false };
+  // 该接口返回结构化对象（含 source.file），直接按字段归一化，比改写文本更可靠。
+  return normalizePickedElement(r, devCtx());
+}
+
+// page_health / verify_change 共用的增量诊断：以该标签页上次的检查位置为起点，并推进游标。
+// 两个工具共用同一游标，因此「验证改动」也会消费掉其间产生的错误，不会重复报警。
+const healthCursorByTab = new Map();
+
+function incrementalHealth(tabKey, r, overrides = {}) {
+  const ctx = devCtx();
+  const cursor = overrides.cursor !== undefined ? overrides.cursor : healthCursorByTab.get(tabKey) || '';
+  const result = summarizePageHealth({
+    consoleEntries: r.console,
+    networkEntries: r.network,
+    cursor,
+    since: overrides.since,
+    levels: overrides.levels,
+    limit: overrides.limit,
+    projectRoot: ctx.projectRoot,
+    devUrl: ctx.devUrl,
+  });
+  if (result.cursor) healthCursorByTab.set(tabKey, result.cursor);
+  return result;
+}
+
+// page_health：把「页面运行时诊断」变成增量信号。无参调用即「自上次检查以来有什么新问题」。
+async function pageHealth(args) {
+  const ctx = devCtx();
+  const r = await callExtension('page_health', {});
+  if (!r || r.found === false) {
+    return { ok: false, error: '未找到活动标签页：请先切到要调试的页面再调用 page_health。' };
+  }
+  const tabKey = String(r.tabId || r.pageUrl || 'default');
+  const explicit = args ? args.cursor : undefined;
+  const cursorOverride =
+    explicit !== undefined && explicit !== null
+      ? String(explicit) === 'all'
+        ? ''
+        : String(explicit)
+      : undefined;
+  const result = incrementalHealth(tabKey, r, {
+    cursor: cursorOverride,
+    since: args && args.since,
+    levels: args && args.levels,
+    limit: args && args.limit,
+  });
+  const hint = normalizationHint(ctx);
+  return Object.assign(
+    {
+      ok: true,
+      tabId: r.tabId,
+      pageUrl: r.pageUrl,
+      pageTitle: r.pageTitle,
+      consoleError: r.consoleError || undefined,
+      networkError: r.networkError || undefined,
+    },
+    result,
+    hint ? { hint } : {}
+  );
+}
+
+// verify_change：改完代码后的闭环验证 —— 目标元素的渲染态断言 + 是否引入新错误。
+async function verifyChange(args) {
+  const session = readDevSession();
+  const ctx = devCtx();
+  const fromArgs = args && Array.isArray(args.targets) && args.targets.length ? args.targets : null;
+  const targets = fromArgs || (Array.isArray(session.targets) ? session.targets : []);
+  if (!targets.length) {
+    return {
+      ok: false,
+      error:
+        '没有可验证的目标。请先用 dev_session_set 写入 targets（例如 ' +
+        '[{selector:"#submit", expect:{text:"已提交"}}]），或在本次调用直接传 targets。',
+    };
+  }
+  const r = await callExtension('verify_change', { targets });
+  if (!r || r.found === false) {
+    return { ok: false, error: '未找到活动标签页：请先切到要调试的页面再调用 verify_change。' };
+  }
+  const tabKey = String(r.tabId || r.pageUrl || 'default');
+  const evaluated = evaluateTargets(targets, r.targets);
+  const health = incrementalHealth(tabKey, r);
+  const hint = normalizationHint(ctx);
+  return Object.assign(
+    {
+      ok: true,
+      tabId: r.tabId,
+      pageUrl: r.pageUrl,
+      pageTitle: r.pageTitle,
+      targetsSource: fromArgs ? 'call-args' : 'dev-session',
+      targets: evaluated.results,
+      passed: evaluated.passed,
+      failed: evaluated.failed,
+      summary: evaluated.summary,
+      newIssues: {
+        summary: health.summary,
+        errors: health.errors,
+        warnings: health.warnings,
+        failedRequests: health.failedRequests,
+      },
+      targetsError: r.targetsError || undefined,
+    },
+    hint ? { hint } : {}
+  );
 }
 
 // ---- 共享「开发会话」：opencode 与 RecallFlow 都读写，用于把页面与代码对齐 ----
@@ -263,6 +518,13 @@ function writeDevSession(patch) {
     fs.writeFileSync(DEV_SESSION_FILE, JSON.stringify(next, null, 2), 'utf8');
   } catch (e) {}
   return next;
+}
+
+// 路径归一化所需的上下文（来自 dev_session_set）。扩展侧不知道磁盘布局，
+// 所以「源码 URL → 磁盘路径」只能在本进程完成。
+function devCtx() {
+  const s = readDevSession();
+  return { projectRoot: s.projectRoot || '', devUrl: s.devUrl || '' };
 }
 
 const TOOLS = [
@@ -296,7 +558,8 @@ const TOOLS = [
   {
     name: 'read_console',
     description:
-      '读取用户「当前活动标签页」最近的 console 输出（error/warn/log/info）与未捕获异常，用于前端调试。可选 level 过滤与 limit。',
+      '读取用户「当前活动标签页」最近的 console 输出（error/warn/log/info）与未捕获异常，用于前端调试。可选 level 过滤与 limit。' +
+      '若已配置 devUrl + projectRoot，调用栈里的本项目源码 URL 会被转换为磁盘路径（同源且为源码文件的 URL 才转换，接口 URL 不受影响）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -308,7 +571,8 @@ const TOOLS = [
   {
     name: 'read_network',
     description:
-      '读取用户「当前活动标签页」最近的网络请求（fetch / XHR：URL、方法、状态码、耗时、错误、发起位置），用于前端调试。可选 URL 子串过滤与 limit。',
+      '读取用户「当前活动标签页」最近的网络请求（fetch / XHR：URL、方法、状态码、耗时、错误、发起位置），用于前端调试。可选 URL 子串过滤与 limit。' +
+      '若已配置 devUrl + projectRoot，发起位置（调用栈）里的本项目源码 URL 会被转换为磁盘路径。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -318,9 +582,77 @@ const TOOLS = [
     },
   },
   {
+    name: 'page_health',
+    description:
+      '增量读取用户「当前活动标签页」的运行时健康度：自上次检查以来**新增**的 console 错误/警告与失败请求（HTTP ≥400 或网络错误），' +
+      '已按「级别 + 文案 + 首个项目内调用帧」去重并计数，源码位置转换为磁盘路径。' +
+      '前端调试的标准用法：改完代码后调用一次，即可判断这次改动是否引入新问题。' +
+      '无参调用自动沿用该标签页上次的检查位置；cursor 传 "all" 可从头读取；游标基于页面内 at 时间戳，同一毫秒的多条记录也不会漏。' +
+      '注意：数据取自页面内 150 条环形缓冲，两次检查间隔内若产生超过 150 条记录，最早的会被覆盖。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cursor: {
+          type: 'string',
+          description: '上次返回的 cursor，只返回其后的新记录；传 "all" 从头读。不填则自动沿用该标签页上次检查位置。',
+        },
+        since: { type: 'string', description: '或按时间起点过滤：epoch 毫秒或 ISO 时间串。' },
+        levels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '关注的级别，默认 ["error","warn"]。',
+        },
+        limit: { type: 'integer', description: '每类返回上限（去重后），默认 20，最大 100。' },
+      },
+    },
+  },
+  {
+    name: 'verify_change',
+    description:
+      '改完代码后的「闭环验证」：一次调用同时核对（a）目标元素改动后的真实渲染态是否满足断言，' +
+      '（b）自上次检查以来是否引入新的 console 错误 / 失败请求 —— 两部分证据取自同一时刻。' +
+      '目标是「文件 → 页面」的反向寻址：先 dev_session_set 写入 targets（如 [{selector:"#submit", expect:{text:"已提交"}}]），再调本工具；' +
+      '也可在本次调用直接传 targets。未提供 expect 时默认断言元素存在。' +
+      '断言支持 present / count / visible / text / textEquals / value / minWidth / minHeight / styles。' +
+      '跨域 iframe 内的元素同样支持：给目标加 frameId，或直接使用带 f<frameId>: 前缀的 ref（get_page_snapshot 的 includeFrames 产出）。' +
+      '未通过时返回具体是哪条断言、期望值与实际值，便于据此改代码而不是盲目重试。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targets: {
+          type: 'array',
+          description:
+            '要验证的目标列表；缺省时使用 dev_session 中已写入的 targets。每项形如 ' +
+            '{label?, selector?|ref?|role?+name?|testid?|text?, index?, styles?: ["display"], expect?: {present?, count?, visible?, text?, textEquals?, value?, minWidth?, minHeight?, styles?}}。',
+          items: { type: 'object' },
+        },
+      },
+    },
+  },
+  {
+    name: 'recallflow_session',
+    description:
+      '读取用户在 RecallFlow 浏览器面板里交接出来的会话。用户在网页面板上点一下「会话标识」芯片，' +
+      '就会复制一段带 RF-XXXXXX 标识的指令贴给你——**只要用户消息里出现这种标识，或说「看下这个会话 / 接手这个前端问题」，就应当调用本工具**。' +
+      '返回自包含的交接包：页面 URL 与标题、面板里的完整对话、用户拾取的元素（含前端源码 file:line）、' +
+      '以及用户复制那一刻的控制台错误/警告快照（错误之后再查往往已消失，因此快照才是定位问题的关键）。' +
+      '不传 id 时返回最近可用的会话标识列表，用于向用户确认要用哪一个。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: {
+          type: 'string',
+          description: '会话标识，形如 RF-7K2M9X（大小写、连字符与空格都可宽松处理）。不填则返回最近的标识列表。',
+        },
+        limit: { type: 'integer', description: '不填 id 时，返回多少条最近标识，默认 20，最大 50。' },
+      },
+    },
+  },
+  {
     name: 'get_element_source',
     description:
-      '把用户「当前活动标签页」上的一个 DOM 元素（ref/selector/text）解析到框架源码位置（React/Vue/Svelte 开发构建），返回 file/line/column 与组件名——把页面元素对应到源码文件。',
+      '把用户「当前活动标签页」上的一个 DOM 元素（ref/selector/text）解析到框架源码位置（React/Vue/Svelte 开发构建），返回 file/line/column 与组件名——把页面元素对应到源码文件。' +
+      '若已通过 dev_session_set 配置 projectRoot 与 devUrl，返回的 file 会被转换为**磁盘绝对路径**，可直接用于读取与编辑代码；未配置时返回原始开发服务器 URL 并附带提示。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -334,7 +666,7 @@ const TOOLS = [
   {
     name: 'get_picked_element',
     description:
-      '获取用户最近在浏览器里「选取」的元素：返回 selector、tag、label，以及前端源码位置 file:line（开发构建下）。用于把用户指的元素对应到具体前端代码。',
+      '获取用户最近在浏览器里「选取」的元素：返回 selector、tag、label、locator(role/name/testid/text/css)，以及前端源码位置 file:line（开发构建下）。多选取时 list 为全部元素。用于把用户指的元素对应到具体前端代码。',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -345,13 +677,21 @@ const TOOLS = [
   {
     name: 'dev_session_set',
     description:
-      '写入/更新共享「开发会话」上下文。opencode 在改完代码后写入 changedFiles、devUrl、projectRoot 等，供 RecallFlow 重新验证；字段按需增量合并。',
+      '写入/更新共享「开发会话」上下文。opencode 在改完代码后写入 changedFiles、devUrl、projectRoot 等，供 RecallFlow 重新验证；字段按需增量合并。' +
+      '写入 projectRoot + devUrl 后，get_element_source / read_console / read_network 返回的源码 URL 会自动转换为磁盘路径——这是「页面元素 → 源码文件」闭环的前置条件，建议接入项目时先写入一次。',
     inputSchema: {
       type: 'object',
       properties: {
         projectRoot: { type: 'string', description: '项目根目录绝对路径' },
         devUrl: { type: 'string', description: '开发服务器地址，如 http://localhost:5173' },
         changedFiles: { type: 'array', items: { type: 'string' }, description: '本次改动的文件列表' },
+        targets: {
+          type: 'array',
+          items: { type: 'object' },
+          description:
+            '改完代码后要验证的目标列表（verify_change 缺省使用它）。形如 ' +
+            '[{label:"提交按钮", selector:"#submit", expect:{text:"已提交", visible:true}}]。',
+        },
         debugTabId: { type: 'integer', description: '要调试的标签页 id（可选）' },
         note: { type: 'string', description: '备注' },
       },
@@ -359,31 +699,79 @@ const TOOLS = [
   },
 ];
 
-// ---------------- MCP server ----------------
-const server = new Server({ name: 'recallflow', version: '0.0.1' }, { capabilities: { tools: {} } });
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const name = request.params.name;
-  const args = request.params.arguments || {};
-  try {
-    let result;
-    if (name === 'browser_read') result = await browserRead(args);
-    else if (name === 'evidence_get') result = await evidenceGet(args);
-    else if (name === 'read_console') result = await readConsole(args);
-    else if (name === 'read_network') result = await readNetwork(args);
-    else if (name === 'get_element_source') result = await getElementSource(args);
-    else if (name === 'get_picked_element') result = await getPickedElement();
-    else if (name === 'dev_session_get') result = readDevSession();
-    else if (name === 'dev_session_set') result = writeDevSession(args || {});
-    else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-  } catch (e) {
-    return { content: [{ type: 'text', text: String((e && e.message) || e) }], isError: true };
+// recallflow_session：读取用户在浏览器面板里交接出来的会话。
+// 用户点一下面板上的标识芯片，就能复制一段带着 RF-XXXXXX 的指令贴给 AI；
+// 这个工具就是把那份「自包含交接包」取回来（对话 + 页面 + 拾取元素 + 控制台错误快照）。
+async function recallflowSession(args) {
+  const raw = args && (args.id || args.session || args.sessionId);
+  const hasId = raw !== undefined && raw !== null && String(raw).trim() !== '';
+  if (!hasId) {
+    const r = await callExtension('handoff_list', { limit: args && args.limit });
+    if (!r || r.ok === false) {
+      return { ok: false, error: (r && r.error) || '读取会话列表失败' };
+    }
+    const list = r.list || [];
+    return {
+      ok: true,
+      sessions: list,
+      note: list.length
+        ? '以上是最近的 RecallFlow 会话标识。请让用户确认要用哪一个，再用本工具传入对应的 id。'
+        : '目前没有已交接的 RecallFlow 会话。请让用户在网页的 RecallFlow 面板上点击会话标识芯片，把复制的指令发给你。',
+    };
   }
-});
+  const r = await callExtension('handoff_get', { id: raw });
+  if (!r || r.ok === false) {
+    return { ok: false, notFound: Boolean(r && r.notFound), error: (r && r.error) || '读取会话失败' };
+  }
+  return {
+    ok: true,
+    session: r.record,
+    hint:
+      '这是用户复制标识「那一刻」的快照。若对应标签页仍处于活动状态，可再调 page_health / read_console 获取实时状态；' +
+      '若快照里的 consoleErrors 已足够定位问题，直接据此分析即可。源码位置若为开发服务器 URL，需先 dev_session_set 写入 projectRoot 与 devUrl。',
+  };
+}
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+// ---------------- MCP server ----------------
+// 工厂：stdio 模式只需一个实例；HTTP 模式每个会话一个实例（会话间互不干扰）。
+function createMcpServer() {
+  const server = new Server({ name: 'recallflow', version: '0.0.1' }, { capabilities: { tools: {} } });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = request.params.arguments || {};
+    try {
+      let result;
+      if (name === 'browser_read') result = await browserRead(args);
+      else if (name === 'evidence_get') result = await evidenceGet(args);
+      else if (name === 'read_console') result = await readConsole(args);
+      else if (name === 'read_network') result = await readNetwork(args);
+      else if (name === 'get_element_source') result = await getElementSource(args);
+      else if (name === 'page_health') result = await pageHealth(args);
+      else if (name === 'verify_change') result = await verifyChange(args);
+    else if (name === 'recallflow_session') result = await recallflowSession(args);
+      else if (name === 'get_picked_element') result = await getPickedElement();
+      else if (name === 'dev_session_get') result = readDevSession();
+      else if (name === 'dev_session_set') result = writeDevSession(args || {});
+      else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: String((e && e.message) || e) }], isError: true };
+    }
+  });
+
+  return server;
+}
+
+if (USE_HTTP_MCP) {
+  // HTTP 模式：不连 stdio，由 httpServer 保活，等待 MCP 客户端连接。
+  log('MCP 传输模式：Streamable HTTP → http://127.0.0.1:' + PORT + MCP_PATH);
+  log('请勿再由 opencode 以 stdio 方式拉起本进程；把 opencode 的 recallflow 配置改为远程 URL：');
+  log('  url = http://127.0.0.1:' + PORT + MCP_PATH + '（需带 X-RecallFlow-Token 或 Authorization: Bearer <token> 头）');
+} else {
+  const transport = new StdioServerTransport();
+  await createMcpServer().connect(transport);
+}
 log('ready. evidence dir: ' + dir());

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>访问出错了 · RecallFlow</title>
+<style>
+  :root {
+    --primary: #4a90d9;
+    --primary-hover: #3a7cc4;
+    --primary-soft: #4a90d91a;
+    --bg: #f0f2f5;
+    --card: #ffffff;
+    --text: #333333;
+    --text-sub: #5f6b7a;
+    --text-faint: #6b7280;
+    --border: #e2e5ea;
+    --danger: #e74c3c;
+    --focus-ring: rgba(74, 144, 217, 0.4);
+    --radius-lg: 12px;
+    --radius-xl: 14px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    --shadow-hover: 0 8px 28px rgba(0, 0, 0, 0.12);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary: #5b9be0;
+      --primary-hover: #6ea9e5;
+      --primary-soft: #5b9be033;
+      --bg: #1b1d21;
+      --card: #26292e;
+      --text: #e3e5e8;
+      --text-sub: #9aa0a8;
+      --text-faint: #7d838b;
+      --border: #3a3f46;
+      --danger: #e5604f;
+      --focus-ring: rgba(91, 155, 224, 0.55);
+    }
+  }
+
+  *,
+  *::before,
+  *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .error-card {
+    width: min(480px, 100%);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow);
+    padding: 40px 36px 32px;
+    text-align: center;
+    animation: pop 0.25s ease-out;
+  }
+
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .error-icon {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 20px;
+    border-radius: 20px;
+    background: var(--primary-soft);
+    color: var(--danger);
+  }
+
+  .error-icon svg { width: 32px; height: 32px; }
+
+  .error-code {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 12px;
+    margin-bottom: 14px;
+    border-radius: 999px;
+    background: var(--primary-soft);
+    color: var(--primary);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+
+  h1 { font-size: 20px; line-height: 1.4; margin-bottom: 10px; }
+
+  p.message {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-sub);
+    margin-bottom: 26px;
+    word-break: break-word;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: 9px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    user-select: none;
+  }
+
+  .btn:active { transform: scale(0.98); }
+
+  .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+  .btn-secondary { background: var(--card); color: var(--text-sub); border-color: var(--border); }
+  .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
+
+  .btn:focus-visible,
+  .error-icon:focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .hint {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.6;
+  }
+
+  .checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--text-sub);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .checkbox input { accent-color: var(--primary); cursor: pointer; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+  <main class="error-card" role="alert">
+    <div class="error-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2a7 7 0 0 0-7 7v3.6l-1.7 3.3A1 1 0 0 0 4.2 18h15.6a1 1 0 0 0 .9-2.1L19 12.6V9a7 7 0 0 0-7-7zm0 4a3 3 0 0 1 3 3v3h-2V9a1 1 0 0 0-2 0v3H9V9a3 3 0 0 1 3-3zm0 12a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 18z"/>
+      </svg>
+    </div>
+
+    <span class="error-code" id="error-code">访问出错</span>
+    <h1 id="error-title">页面加载失败</h1>
+    <p class="message" id="error-message">请稍后重试，或返回上一页。</p>
+
+    <div class="actions">
+      <button class="btn btn-primary" type="button" id="btn-retry">重试</button>
+      <button class="btn btn-secondary" type="button" id="btn-back">返回上一页</button>
+      <button class="btn btn-secondary" type="button" id="btn-home">回到首页</button>
+    </div>
+
+    <label class="checkbox">
+      <input type="checkbox" id="auto-retry"> 自动重试
+    </label>
+
+    <p class="hint">如果问题持续出现，请检查网络连接，或到「设置」里查看 API 配置。</p>
+  </main>
+
+<script>
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+
+    var code = params.get("code") || "";
+    var msg = params.get("msg") || "";
+    var title = params.get("title") || "";
+
+    var ERRORS = {
+      "404": { title: "页面不存在", message: "你访问的页面可能已失效、被移动或删除。" },
+      "403": { title: "没有访问权限", message: "当前身份无权访问该资源，请确认权限后再试。" },
+      "401": { title: "登录已失效", message: "请先登录或重新授权后再访问。" },
+      "500": { title: "服务器开小差了", message: "服务暂时不可用，请稍后重试。" },
+      "502": { title: "网关异常", message: "上游服务响应超时，请稍后重试。" },
+      "503": { title: "服务暂不可用", message: "服务正在维护或过载，请稍后再试。" },
+      "504": { title: "请求超时", message: "服务器响应过慢，请稍后重试。" },
+      "offline": { title: "网络连接异常", message: "请检查网络连接后重试。" },
+      "timeout": { title: "请求超时", message: "请求超时，请稍后重试。" }
+    };
+
+    var known = ERRORS[code] || {};
+
+    document.getElementById("error-code").textContent = code
+      ? "错误 " + code
+      : "访问出错";
+
+    document.getElementById("error-title").textContent =
+      title || known.title || "页面加载失败";
+
+    document.getElementById("error-message").textContent =
+      msg || known.message ||
+      "抱歉，页面出了点问题，请稍后重试或返回上一页。";
+
+    function retry() {
+      window.location.reload();
+    }
+
+    function goBack() {
+      if (history.length > 1) {
+        history.back();
+      } else {
+        window.location.href = "/";
+      }
+    }
+
+    function goHome() {
+      window.location.href = "/";
+    }
+
+    document.getElementById("btn-retry").addEventListener("click", retry);
+    document.getElementById("btn-back").addEventListener("click", goBack);
+    document.getElementById("btn-home").addEventListener("click", goHome);
+
+    var auto = document.getElementById("auto-retry");
+    auto.addEventListener("change", function () {
+      if (auto.checked) {
+        setTimeout(function () {
+          if (auto.checked) window.location.reload();
+        }, 60000);
+      }
+    });
+
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") goBack();
+    });
+  })();
+</script>
+</body>
+</html>

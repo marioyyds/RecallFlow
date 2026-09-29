@@ -7,6 +7,7 @@ import { runAgentStream } from './lib/assistant/agent.js';
 import { startMcpRelay } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
+import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
 import {
   listScripts,
   installFromUrl,
@@ -98,6 +99,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch(() => sendResponse({ conversation: [] }));
     return true;
   }
+  // 交接包：面板复制「会话标识」时写入；外部 agent 凭标识经 MCP 取回。
+  if (msg && msg.type === 'handoff:save') {
+    saveHandoff(msg.record || {})
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'handoff:get') {
+    getHandoff(msg.id)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg && msg.type === 'handoff:list') {
+    listHandoffs(msg.limit)
+      .then((r) => sendResponse(r))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
   // 元素拾取（跨域 iframe）：顶层发起 → 广播到所有 frame 进入拾取；任一 frame 命中/取消 → 全体停止。
   if (msg && msg.type === 'pick:start') {
     const tabId = sender.tab && sender.tab.id;
@@ -107,17 +127,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'pick:result') {
     const tabId = sender.tab && sender.tab.id;
-    const picked = msg.picked || null;
-    if (picked) {
+    const list = Array.isArray(msg.pickedList) ? msg.pickedList : msg.picked ? [msg.picked] : [];
+    const pageUrl = (sender.tab && sender.tab.url) || '';
+    const ts = Date.now();
+    if (list.length) {
       try {
         chrome.storage.local.set({
-          'recallflow.lastPicked': Object.assign({}, picked, { tabId, pageUrl: (sender.tab && sender.tab.url) || '', ts: Date.now() }),
+          'recallflow.lastPicked': Object.assign({}, list[0], { tabId, pageUrl, ts }),
+          'recallflow.lastPickedList': list.map((p) => Object.assign({}, p, { tabId, pageUrl, ts })),
         });
       } catch (e) {}
     }
     if (tabId != null) {
       chrome.tabs.sendMessage(tabId, { type: 'kbPickCancel' }, () => void chrome.runtime.lastError);
-      chrome.tabs.sendMessage(tabId, { type: 'kbPickResult', picked }, { frameId: 0 }, () => void chrome.runtime.lastError);
+      chrome.tabs.sendMessage(tabId, { type: 'kbPickResult', pickedList: list }, { frameId: 0 }, () => void chrome.runtime.lastError);
     }
     sendResponse({ ok: true });
     return false;
