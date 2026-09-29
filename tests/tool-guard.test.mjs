@@ -84,3 +84,74 @@ test('snapshot and restore preserve guard state', () => {
   const decision = revived.observe({ name: 'click_element', args: { s: 1 }, result: okResult(), readOnly: false });
   assert.equal(decision.level, 'disable');
 });
+
+// ---------------------------------------------------------------- 按工具累计上限
+
+test('per-tool cap: 参数各异的重复调用也会触发（指纹去重抓不到的情形）', () => {
+  // 这正是 run_javascript 泛滥的场景：每次换选择器 → 指纹全不同，旧逻辑永不触发。
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  const levels = [];
+  for (let i = 0; i < 4; i++) {
+    const d = guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false });
+    levels.push(d.level);
+  }
+  assert.deepEqual(levels.slice(0, 3), ['ok', 'ok', 'ok']);
+  assert.equal(levels[3], 'disable');
+});
+
+test('per-tool cap: 报出累计次数与上限，并指明应换工具', () => {
+  // 语义：maxCallsPerTool: N = 允许 N 次，第 N+1 次拦截。
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false }).level, 'ok');
+  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'ok');
+  const d = guard.observe({ name: 'run_javascript', args: { code: 'c' }, result: okResult(), readOnly: false });
+  assert.equal(d.level, 'disable');
+  assert.equal(d.reason, 'maxCallsPerTool');
+  assert.equal(d.totalCalls, 3);
+  assert.ok(d.message.includes('3'), d.message);
+  assert.ok(d.message.includes('2'), d.message);
+  assert.ok(d.message.includes('换工具'), d.message);
+});
+
+test('per-tool cap: 只约束指定工具，其它工具不受影响', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false }).level, 'ok');
+  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'disable');
+  for (let i = 0; i < 5; i++) {
+    assert.notEqual(
+      guard.observe({ name: 'get_page_snapshot', args: {}, result: okResult(), readOnly: true }).level,
+      'disable',
+      '未配置上限的工具不应被摘除'
+    );
+  }
+});
+
+test('per-tool cap: 未配置上限时行为不变', () => {
+  const guard = createToolGuard({ maxSameToolCalls: 99, toolFailStreak: 99 });
+  for (let i = 0; i < 10; i++) {
+    const d = guard.observe({ name: 'run_javascript', args: { code: 'x' + i }, result: okResult(), readOnly: false });
+    assert.notEqual(d.level, 'disable');
+  }
+});
+
+test('per-tool cap: 累计次数随 snapshot/restore 保留（否则「继续」后闸门失效）', () => {
+  const opts = { maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 };
+  const guard = createToolGuard(opts);
+  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false });
+  guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false });
+  guard.observe({ name: 'run_javascript', args: { code: 'c' }, result: okResult(), readOnly: false });
+
+  const revived = createToolGuard(opts);
+  revived.restore(guard.snapshot());
+  // 恢复后已是第 4 次 → 超过上限 3。若计数没恢复，全新 guard 会判 ok。
+  const d = revived.observe({ name: 'run_javascript', args: { code: 'd' }, result: okResult(), readOnly: false });
+  assert.equal(d.level, 'disable');
+  assert.equal(d.totalCalls, 4);
+});
+
+test('per-tool cap: reset 会清零累计计数', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false });
+  guard.reset();
+  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'ok');
+});

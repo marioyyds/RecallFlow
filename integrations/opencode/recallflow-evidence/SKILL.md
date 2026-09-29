@@ -89,6 +89,54 @@ default assertion is that the element exists. Targets may use `selector`, `ref`,
 
 Note `count: 0` is how you assert an element is **gone** (loading spinners, error banners).
 
+## Verifying "removed / hidden" content
+
+When the goal is to hide or remove something (ads, promos, banners), **keyword presence is not
+evidence**: the page text is extracted as `textContent`, so it still contains hidden nodes and any
+annotations you injected yourself. Searching for the keyword will keep "finding" it long after it
+became invisible.
+
+Use the built-in visibility check instead:
+
+```
+read_current_page({ checkTexts: ["广告", "赞助内容", "为你精选更多内容"] })
+→ 【可见性核查】判断「文案是否还看得见」只能看可见次数；DOM 次数包含已隐藏节点的文字。
+  - 「广告」：可见 0 次 / DOM 4 次 —— DOM 中仍有 4 处，但均不可见（已隐藏或移除）
+```
+
+- `visible 0 / DOM > 0` = still in the DOM but **not visible** → for a hide/remove goal this is
+  **success**. Only `visible > 0` means it is genuinely still on screen.
+- Pass `visibleOnly: true` to `read_current_page` to get text filtered by real visibility.
+
+Three rules that prevent the usual mistakes:
+
+1. **Never hide a container that also holds the article body.** `get_page_snapshot` reports
+   `mainContent` (selector + text length) — do not hide it or any of its ancestors.
+2. **`document.querySelectorAll` does not cross shadow boundaries.** Many sites put ad cards in
+   Shadow DOM. `set_element_style` / `get_element_text` pierce open shadow roots, so use those
+   instead of hand-written selectors in `run_javascript` — that mismatch is the usual reason a
+   `run_javascript` loop "almost works" but never finishes.
+3. **Mark anything you inject** with `data-rf-injected` — that attribute is excluded from page text,
+   so your own annotations will not pollute the evidence (or the completion verifier).
+
+### Prefer hiding over removing
+
+**Hide with `display:none`; do not `remove()` nodes from the DOM.** Removing a node leaves the
+site's own bookkeeping pointing at something that is gone — its infinite scroll, content-visibility
+tracking and ad SDK all keep referencing it, and the page starts emitting telemetry errors such as
+`Scroll Content is incomplete`, `Content visibility isn't correctly set on infinite reading`, and ad
+requests returning 204. Hiding changes presentation only and leaves site state intact.
+
+Use the batch form so one call covers every ad slot:
+
+```
+set_element_style({ hide: true, selectors: [".native-ad-container", ".display-ads", "views-native-ad", "cs-card.card-outer"] })
+→ 已隐藏 14 个元素；未命中 1 个选择器：.ad-slot-placeholder（clear_highlights 还原）
+```
+
+`hide: false` restores. The aggregate result tells you what was **not** found, so you can fix the
+selector instead of blindly retrying.
+
 ## Evidence discipline (required)
 
 1. **No claim without evidence.** Every factual statement must trace to a tool result's

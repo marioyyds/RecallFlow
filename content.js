@@ -17,7 +17,21 @@ if (window.__kbAiLoaded) {
     // 与页面命令请求（Agent 工具 page_command / 用户路径 API）
     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (msg && msg.type === 'kbGetPageText') {
-        sendResponse({ text: pageText.extractPageText(), title: document.title || '', url: location.href });
+        const opt = (msg && msg.options) || {};
+        const texts = Array.isArray(opt.checkTexts) ? opt.checkTexts : [];
+        let payload;
+        try {
+          // 一次遍历同时产出「正文文本」与「可见性核查」，避免走两遍 DOM。
+          payload = pageText.readTextWithVisibility(texts, { visibleOnly: opt.visibleOnly === true });
+        } catch (e) {
+          payload = { text: pageText.extractPageText(), visibility: null };
+        }
+        sendResponse({
+          text: payload.text,
+          visibility: payload.visibility,
+          title: document.title || '',
+          url: location.href,
+        });
         return true;
       }
       if (msg && msg.type === 'kbGetConsole') {
