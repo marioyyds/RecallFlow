@@ -33,6 +33,41 @@ export function archive({ url, title, text, quotes }) {
   return record;
 }
 
+/**
+ * 归档一张截图：写 <hash>.<ext> 图片 + 同名 .json 记录。
+ *
+ * 与文本证据共用目录与命名规则，因此：
+ *  - evidence_get(hash) 能取回它的元数据；
+ *  - 图片本身留在磁盘上，客户端模型没有视觉能力时也能让用户打开查看。
+ * hash 里掺入 fetchedAt，保证同一页面多次截图不会互相覆盖。
+ */
+export function archiveImage({ buffer, mimeType, url, title, label }) {
+  const fetchedAt = new Date().toISOString();
+  const type = String(mimeType || 'image/jpeg');
+  const ext = type === 'image/png' ? 'png' : 'jpg';
+  const data = Buffer.isBuffer(buffer) ? buffer : Buffer.from(String(buffer || ''), 'base64');
+  const snapshotHash = hashOf(String(url || '') + '\n' + fetchedAt + '\n' + data.length);
+  const file = snapshotHash + '.' + ext;
+  const record = {
+    url: String(url || ''),
+    title: String(title || ''),
+    fetchedAt,
+    snapshotHash,
+    kind: 'screenshot',
+    label: String(label || ''),
+    mimeType: type,
+    bytes: data.length,
+    image: file,
+    text: '',
+    quotes: [],
+  };
+  try {
+    fs.writeFileSync(path.join(DIR, file), data);
+    fs.writeFileSync(path.join(DIR, snapshotHash + '.json'), JSON.stringify(record), 'utf8');
+  } catch (e) {}
+  return record;
+}
+
 // 按哈希取归档。
 export function get(hash) {
   const h = String(hash || '').replace(/[^a-f0-9]/gi, '');

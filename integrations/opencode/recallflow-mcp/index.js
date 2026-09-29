@@ -20,7 +20,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
-import { archive, get, getByUrl, dir } from './evidence-store.js';
+import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
 import {
   normalizeElementSource,
   rewriteSourceUrls,
@@ -326,6 +326,62 @@ async function browserRead(args) {
   };
 }
 
+// 截图：向扩展要一张图，归档后返回「文本元数据 + 可选图片块」。
+// 不能走通用的 JSON.stringify 包装 —— 图片必须是 MCP 的 image 内容块，因此本工具
+// 在 CallToolRequestSchema 里被单独分支处理。
+async function pageScreenshot(args) {
+  const a = args || {};
+  const r = await callExtension('screenshot_capture', {
+    fullPage: a.fullPage === true,
+    format: a.format === 'png' ? 'png' : 'jpeg',
+    quality: a.quality,
+  });
+  if (!r || r.ok === false) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            '截图失败：' +
+            ((r && r.error) || '扩展未响应（需要浏览器侧已加载 RecallFlow 扩展，且设置中开启 CDP）'),
+        },
+      ],
+      isError: true,
+    };
+  }
+  const img = r.image || {};
+  let archived = null;
+  try {
+    archived = archiveImage({
+      buffer: img.data,
+      mimeType: img.mimeType,
+      url: r.pageUrl || '',
+      title: r.pageTitle || '',
+      label: a.label,
+    });
+  } catch (e) {
+    archived = null;
+  }
+  const size = img.width && img.height ? img.width + '×' + img.height + ' CSS px' : '尺寸未知';
+  const lines = [];
+  if (a.label) lines.push('标注：' + String(a.label).slice(0, 60));
+  lines.push(
+    '已截图 ' + size + '（' + String(img.mimeType || 'image/jpeg').replace('image/', '').toUpperCase() +
+      '，' + Math.round((Number(img.bytes) || 0) / 1024) + 'KB' + (img.degraded ? '，为控制体积已自动降质' : '') + '）'
+  );
+  lines.push(
+    archived
+      ? '证据：' + archived.snapshotHash + '（文件 ' + archived.image + '，可用 evidence_get("' + archived.snapshotHash + '") 复核）'
+      : '（归档失败，仅本次返回图片）'
+  );
+  const content = [{ type: 'text', text: lines.join('\n') }];
+  // 视觉能力取决于客户端模型：默认给图，纯文本模型可传 includeImage:false 只取元数据。
+  if (a.includeImage !== false && img.data) {
+    content.push({ type: 'image', data: img.data, mimeType: img.mimeType || 'image/jpeg' });
+  }
+  return { content };
+}
+
 async function evidenceGet(args) {
   const rec = args && args.hash ? get(args.hash) : getByUrl(args && args.url);
   if (!rec) return { found: false };
@@ -544,6 +600,24 @@ const TOOLS = [
     },
   },
   {
+    name: 'page_screenshot',
+    description:
+      '给浏览器当前活动标签页截图，返回图片内容块（需浏览器侧已加载 RecallFlow 扩展并开启 CDP）。' +
+      '用于「需要看到渲染结果」的场景：视觉回归、布局问题、canvas/图表内容、以及给用户留档。' +
+      '图片同时归档到证据目录，可用 evidence_get(hash) 复核元数据。' +
+      '若你的模型没有视觉能力，传 includeImage:false 只取元数据与归档路径，避免把 base64 塞进上下文。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: '这次截图的用途说明，如「修改前」「修改后」。' },
+        fullPage: { type: 'boolean', description: '整页截图（默认 false 只截当前视口）。整页可能很大并触发自动降质。' },
+        format: { type: 'string', enum: ['jpeg', 'png'], description: '默认 jpeg（体积小）；需要无损细节用 png（超限会自动退为 jpeg）。' },
+        quality: { type: 'integer', description: 'jpeg 质量 20-100，默认 72。' },
+        includeImage: { type: 'boolean', description: '是否返回图片内容块，默认 true。纯文本模型建议传 false。' },
+      },
+    },
+  },
+  {
     name: 'evidence_get',
     description:
       '按 snapshotHash 或 URL 取回已归档的证据快照，用于复核某条引用。网页即使已变更/404，归档内容仍可取回。',
@@ -746,6 +820,7 @@ function createMcpServer() {
       let result;
       if (name === 'browser_read') result = await browserRead(args);
       else if (name === 'evidence_get') result = await evidenceGet(args);
+      else if (name === 'page_screenshot') return await pageScreenshot(args); // 返回 image 内容块，不走通用包装
       else if (name === 'read_console') result = await readConsole(args);
       else if (name === 'read_network') result = await readNetwork(args);
       else if (name === 'get_element_source') result = await getElementSource(args);
