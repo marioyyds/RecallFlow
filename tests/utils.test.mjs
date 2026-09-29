@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -90,4 +90,46 @@ test('isCspEvalBlockError: 普通 JS 错误不应误判（否则会无谓地改�
 
 test('isCspEvalBlockError: 只提 CSP 但与 eval 无关时不算（避免误触发兜底）', () => {
   assert.equal(isCspEvalBlockError('Content Security Policy: refused to load image'), false);
+});
+
+// ---------------------------------------------------------------- 进度条文案
+
+test('composeProgressText: 步数 + 状态标签', () => {
+  assert.equal(composeProgressText(3, 32, '查看结果'), '第 3 / 32 步 · 查看结果');
+});
+
+test('composeProgressText: 无状态标签时只显示步数', () => {
+  assert.equal(composeProgressText(3, 32, ''), '第 3 / 32 步');
+});
+
+test('composeProgressText: 未开始且无标签时显示「正在思考…」', () => {
+  assert.equal(composeProgressText(0, 0, ''), '正在思考…');
+  assert.equal(composeProgressText(0, 32, '准备中'), '准备中');
+});
+
+test('composeProgressText: **绝不累积** —— 连续调用只反映最后一次', () => {
+  // 回归用例：曾经的实现把上一帧文案当兜底值拼进来，
+  // 导致「第 4/32 步 · 第 3/32 步 · 第 3/32 步 · …」这样的累积串。
+  const seq = [
+    [1, 22, '规划步骤'],
+    [1, 22, '执行动作'],
+    [2, 22, '查看结果'],
+    [3, 32, '规划步骤'],
+    [4, 32, '已完成'],
+  ];
+  let out = '';
+  for (const [s, m, l] of seq) out = composeProgressText(s, m, l);
+  assert.equal(out, '第 4 / 32 步 · 已完成');
+  assert.equal(out.split('·').length, 2, '只应有两段：步数 + 状态');
+  assert.ok(!out.includes('第 3'), out);
+});
+
+test('composeProgressText: 总步数未知时省略分母', () => {
+  assert.equal(composeProgressText(2, 0, '执行动作'), '第 2 步 · 执行动作');
+});
+
+test('composeProgressText: 脏数据安全', () => {
+  assert.equal(composeProgressText(NaN, NaN, null), '正在思考…');
+  assert.equal(composeProgressText(-1, -5, undefined), '正在思考…');
+  assert.equal(composeProgressText(1.7, 9.9, '  '), '第 1 / 9 步');
 });
