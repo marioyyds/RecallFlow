@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renumberCitations } from '../lib/page/chat.js';
+import { renumberCitations } from '../lib/page/markdown.js';
 
 test('renumbers by body order and keeps only cited sources', () => {
   const cites = [
