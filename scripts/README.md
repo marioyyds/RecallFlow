@@ -158,3 +158,28 @@ POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码�
 
 已知未覆盖：真实 DSH 的 `agent.inject` 是否接受这个载荷（需重启 DSH 后看会话里是否
 出现该上下文）。
+
+## scripts/verify-panel-turns.mjs
+
+验证**反向通道的服务端两段**：写端（`POST /panel-turns`）、读端（`GET /panel-turns`）、
+以及 `panel_history` 工具 —— **用真实 MCP 协议调用工具**，不是只做文本层断言。
+
+为什么需要：契约测试只能证明"名字对得上"，证明不了"数据真能进去、能原样出来"。
+整条反向链路是 面板 → 后台 → 桥接(写) → 环形缓冲 → MCP 工具(读) → DSH 注入，
+这个脚本把**除"扩展那一跳"之外的全部**串起来。
+
+验证内容（隔离端口 7802）：
+- 无 token 被拒（与 `/event` 共用同一套鉴权）
+- 正常回合落库、空文本被拒且不污染缓冲
+- GET 原样读回、**中文无损**
+- 角色规整：未知取值归一为 `panel`
+- 工具已注册进 `tools/list`（工具名写给模型，拼错就永远调不到）
+- 工具返回面板对话，且带「面板 AI 与你不是同一个 agent」的说明
+- `role` 过滤生效
+
+  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
+  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
+  node scripts/verify-panel-turns.mjs
+
+已知未覆盖：扩展那一跳（面板 → 后台 → `POST /panel-turns`），需重载扩展后
+由真实面板产生回合。
