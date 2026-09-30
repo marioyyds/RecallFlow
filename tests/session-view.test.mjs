@@ -75,6 +75,41 @@ test('助手消息永远不去重（同一段话本来就该各说各的）', ()
   assert.equal(d.who, 'dsh');
 });
 
+test('回声去重优先用 rpcId 精确匹配（同一句话说两遍也能分清）', () => {
+  // 场景：同一句话说了两遍，两遍都从会话回声回来。
+  // 只靠文本匹配必然把两条回声都算到同一条本地回合上；rpcId 能分清。
+  const conversation = [
+    { role: 'user', content: '再读一遍', rpcId: 'r1' },
+    { role: 'user', content: '再读一遍', rpcId: 'r2' },
+  ];
+  const first = sessionEntryFromFrame(
+    frame({ type: 'user/message', role: 'user', sourceKind: 'user', rpcId: 'r2', text: '再读一遍' }),
+    conversation
+  );
+  assert.equal(first.action, 'mark-local');
+  assert.equal(first.index, 1, 'rpcId=r2 应指向第二条，而不是最近的同类文本');
+  assert.equal(first.reason, 'rpcId 精确匹配');
+
+  // 标记后，rpcId=r1 的回声应指向第一条
+  conversation[1].echoedFromSession = true;
+  const second = sessionEntryFromFrame(
+    frame({ type: 'user/message', role: 'user', sourceKind: 'user', rpcId: 'r1', text: '再读一遍' }),
+    conversation
+  );
+  assert.equal(second.action, 'mark-local');
+  assert.equal(second.index, 0);
+});
+
+test('rpcId 对不上时退回文本匹配（rpcId 尚未回填的过渡态）', () => {
+  const conversation = [{ role: 'user', content: '面板里说的话' }]; // 还没有 rpcId
+  const d = sessionEntryFromFrame(
+    frame({ type: 'user/message', role: 'user', sourceKind: 'user', rpcId: 'r9', text: '面板里说的话' }),
+    conversation
+  );
+  assert.equal(d.action, 'mark-local', 'rpcId 对不上时应退回文本匹配，而不是重复显示');
+  assert.equal(d.reason, '与本地用户回合同文，判为回声');
+});
+
 test('SESSION_SOURCE 是个稳定常量（面板用它区分"这条来自会话"）', () => {
   assert.equal(SESSION_SOURCE, 'session');
 });

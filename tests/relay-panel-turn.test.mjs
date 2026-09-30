@@ -96,7 +96,7 @@ test('发送端的 URL 路径与 server 的端点路径一致（改名会静默 
 
 test('sayToDsh: 请求形状与插件端点一致（URL/method/只有 text/不带 token）', async () => {
   const { result, calls } = await withStub(null, () => sayToDsh('你好'));
-  assert.equal(result, true);
+  assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, 'http://127.0.0.1:3080/recallflow/say');
   assert.equal(calls[0].init.method, 'POST');
@@ -107,19 +107,48 @@ test('sayToDsh: 请求形状与插件端点一致（URL/method/只有 text/不�
   assert.equal(body.text, '你好', '中文不能在这里被破坏');
 });
 
-test('sayToDsh: 空白文本不发请求；不可达/非 2xx 返回 false 且不抛', async () => {
+test('sayToDsh: 把插件回传的 rpcId 交给调用方（面板靠它精确对齐回声）', async () => {
+  const { result } = await withStub(
+    () => ({
+      ok: true,
+      json: async () => ({ ok: true, rpcId: 'recallflow-abc-123', sessionId: 's1' }),
+    }),
+    () => sayToDsh('你好')
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.rpcId, 'recallflow-abc-123', 'rpcId 必须原样带回来');
+});
+
+test('sayToDsh: body 解析不出来时仍按 HTTP 状态判定成功（只是拿不到 rpcId）', async () => {
+  const { result } = await withStub(
+    () => ({
+      ok: true,
+      json: async () => {
+        throw new Error('not json');
+      },
+    }),
+    () => sayToDsh('x')
+  );
+  assert.equal(result.ok, true, 'HTTP 2xx 就该算成功');
+  assert.equal(result.rpcId, '', '解析不出 body 时 rpcId 为空，而不是抛错');
+});
+
+test('sayToDsh: 空白文本不发请求；不可达/非 2xx 返回 !ok 且不抛', async () => {
   for (const bad of ['', '   ', '\n', null, undefined, 42]) {
     const { result, calls } = await withStub(null, () => sayToDsh(bad));
-    assert.equal(result, false, '非法输入应返回 false：' + JSON.stringify(bad));
+    assert.equal(result.ok, false, '非法输入应返回 ok:false：' + JSON.stringify(bad));
     assert.equal(calls.length, 0, '非法输入不应发请求：' + JSON.stringify(bad));
   }
   assert.equal(
-    await withStub(() => {
-      throw new Error('ECONNREFUSED');
-    }, () => sayToDsh('x')).then((r) => r.result),
+    await withStub(
+      () => {
+        throw new Error('ECONNREFUSED');
+      },
+      () => sayToDsh('x')
+    ).then((r) => r.result.ok),
     false
   );
-  assert.equal(await withStub(() => ({ ok: false }), () => sayToDsh('x')).then((r) => r.result), false);
+  assert.equal(await withStub(() => ({ ok: false }), () => sayToDsh('x')).then((r) => r.result.ok), false);
 });
 
 test('sayToDsh: 发送端路径与插件注册的路径逐字一致（改名会静默 404）', async () => {

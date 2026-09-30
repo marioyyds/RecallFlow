@@ -153,12 +153,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 新架构下回复本就来自这条会话，而把助手输出当成用户输入灌进去，
   // 才是真正的"冒充用户消息"。
   if (msg && msg.type === 'panel:turn') {
-    if (msg.role === 'user') {
-      const text = String(msg.text || '').slice(0, 4000);
-      if (text) Promise.resolve(sayToDsh(text)).catch(() => {});
+    if (msg.role !== 'user') {
+      sendResponse({ ok: true, rpcId: '' });
+      return false;
     }
-    sendResponse({ ok: true });
-    return false;
+    const text = String(msg.text || '').slice(0, 4000);
+    if (!text) {
+      sendResponse({ ok: false, rpcId: '' });
+      return false;
+    }
+    // 异步等待：把插件回传的 rpcId 交给面板，面板才能把"本地那条回合"与
+    // 从会话回声回来的那条**精确对齐**（否则只能靠文本猜）。
+    // 返回 true 表示"会异步回复" —— Chrome 要求这样保持消息通道。
+    sayToDsh(text)
+      .then((r) => sendResponse(r))
+      .catch(() => sendResponse({ ok: false, rpcId: '' }));
+    return true;
   }
   if (msg && msg.type === 'conv:get') {
     const tabId = sender.tab && sender.tab.id;

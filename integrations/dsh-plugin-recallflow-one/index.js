@@ -247,6 +247,9 @@ export function apply(ctx, config = {}) {
     const out = { type: String(ev.type) };
     if (data.role !== undefined) out.role = String(data.role);
     if (data.source && data.source.kind) out.sourceKind = String(data.source.kind);
+    // rpcId：面板自己发出去的那句话，回声回来时带着同一个 id。
+    // 面板靠它把"本地那条"与"回声那条"精确对齐，不必再靠文本猜。
+    if (data.source && data.source.rpcId) out.rpcId = String(data.source.rpcId);
     if (data.content) {
       const t = textOf(data.content);
       if (t) out.text = t;

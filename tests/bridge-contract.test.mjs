@@ -138,7 +138,10 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   //    面板助手的输出不再推给 DSH —— 新架构下回复本就来自那条会话，
   //    而把助手输出当用户输入灌进去，才是真正的"冒充用户消息"。
   //    （服务端对历史数据的规整仍然保留：旧数据里还有 panel 角色。）
-  assert.ok(/if \(msg\.role === 'user'\)/.test(bg), '后台应只转发 role 为 user 的面板输入');
+  assert.ok(
+    /if \(msg\.role !== 'user'\)/.test(bg),
+    '后台应只转发 role 为 user 的面板输入（非 user 直接返回，不推给 DSH）'
+  );
   assert.ok(/t\.role === 'user' \? 'user' : 'panel'/.test(mcp), '服务端应做同样的规整');
 
   // 5) 读取端工具齐备
