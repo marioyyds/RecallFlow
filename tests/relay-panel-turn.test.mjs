@@ -22,6 +22,24 @@ import { sayToDsh } from '../lib/bridge/relay.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
+// 「面板 → DSH」只能有**一条发送实现**。
+//
+// 这条是回归：我为了"先试 DSH、失败回退本地"复制了一份 sendMessage（forwardToDsh），
+// 而它没有 rpcId 回填（那份逻辑在 sendPanelTurn 里）。后果很隐蔽 ——
+// 消息照样送到、面板照样能用，只是**精确去重永远不生效**（退回按文本猜）。
+// 复制实现时最容易丢的就是这类"附带的副作用"。
+test('面板只有一条 panel:turn 发送实现（重复实现会绕过 rpcId 回填）', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const senders = (chat.match(/type: 'panel:turn'/g) || []).length;
+  assert.equal(senders, 1, 'panel:turn 只应有一处发送实现，实际 ' + senders + ' 处');
+  assert.ok(!/function forwardToDsh\(/.test(chat), 'forwardToDsh 已删除 —— 它绕过了 rpcId 回填');
+  assert.ok(/sendPanelTurn\(turn\)/.test(chat), 'run() 应复用 sendPanelTurn，让 rpcId 落在本地回合对象上');
+  // 先记后送：顺序反了就盖不到 rpcId
+  const pushAt = chat.indexOf('conversation.push(turn)');
+  const sendAt = chat.indexOf('sendPanelTurn(turn)');
+  assert.ok(pushAt > 0 && sendAt > pushAt, '必须先 push 本地回合再发送（否则 rpcId 没有落点）');
+});
+
 /** 在 stub 生效**期间**执行 fn，并返回它实际发出的请求。 */
 async function withStub(impl, fn) {
   const real = globalThis.fetch;
