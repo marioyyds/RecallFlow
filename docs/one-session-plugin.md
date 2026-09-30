@@ -134,6 +134,43 @@ this context can only target this live turn's next step."
 | 把页面工具给 DSH | `ctx.tools.register(ToolDefinition)` | ✅ 类型声明（形状待读全） |
 | 面板 ↔ 插件的传输 | `webServer.register(route)` + SSE | ✅ 类型声明 |
 
+## 端到端实测（真实 DSH 实例，隔离 profile）—— 11/11 通过
+
+单元测试用假 ctx 验证处理器逻辑，但有一类问题只有真实实例能回答：
+**插件注册的路由是否落在 DSH 的鉴权栅栏内**。做法是起一个完全隔离的实例。
+
+隔离实例的起法（脚本 `scripts/verify-one-plugin-e2e.mjs` 的头部注释里也写了）：
+
+```
+~/.dsh/profiles/rfprobe/package.json     ← {"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}
+~/.dsh/profiles/rfprobe/cordis.patch.yml ← 插入本插件
+node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
+```
+
+踩过的三个坑（都记在脚本注释里了）：
+- profile 不存在会直接报错，必须先用 `dsh plugin --profile <名> add <包>` 建、或手写最小模板
+- `web` **不是子命令**：`Usage: dsh --profile web [options]` 里的 `web` 就是 profile 名，profile 即应用
+- PowerShell 5.1 的 `Set-Content -Encoding UTF8` 会写 **BOM**，JSON 解析直接失败 —— 要用 write 工具写
+
+实测结果（`node scripts/verify-one-plugin-e2e.mjs 3099`，11/11，退出码 0）：
+
+```
+✓ GET /recallflow/stream 返回 200（未被鉴权栅栏拦下）
+✓ SSE 头正确（text/event-stream + no-cache）
+✓ 本机来源被放行（ACAO 回显 http://127.0.0.1:3080）
+✓ SSE 首帧是 hello（带会话列表）
+✓ POST /recallflow/say 到达处理器（不是 404/401）
+✓ 无活会话时给出明确业务错误（而不是静默）
+✓ 扩展来源的预检被放行（ACAO: chrome-extension://…）
+✓ 预检声明了 content-type 与 POST
+✓ 恶意来源不回 ACAO（已拒绝）
+✓ 对照：/ 仍在鉴权栅栏内（401）
+```
+
+**关键结论**：`/` 与 `/api/*` 都返回 401（在栅栏内），而 `/recallflow/*` 返回 200
+—— 插件注册的路由**不在鉴权栅栏内**，扩展可以直接连，不需要额外带 token。
+（这也是为什么不需要 `/api` 那条路：栅栏是给浏览器信任面用的，我们的路由是自己的面。）
+
 ## 选定方案
 
 ```
