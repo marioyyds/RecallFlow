@@ -4,6 +4,16 @@
 // 删掉 DSH 的 MCP client 就会静默失去「元素 → 源码文件」。现在两边共用同一份实现，
 // 而这里是它的行为契约。
 //
+// **输入的形状是核对过的，不是编的**（这一点我犯过一次：get_picked_element 那条
+// 一开始传的是 {selector, source}，而真实形状是 {found, picked, list} ——
+// 测试能过，却什么都没钉住）。核对来源：
+//   lib/bridge/relay.js 的 dispatch 与各实现：
+//     readActiveTab        → { text }
+//     readPageDiagnostics  → { found, tabId, pageUrl, console, network, consoleError, networkError }
+//     readVerifyChange     → { found, tabId, pageUrl, targets, console, network, … }
+//     getPickedElement     → { found, picked, list }
+//   lib/shared/dev-paths.js 的 normalizePickedElement → 只改 picked.source.file 与 list[].source.file
+//
 // 断言刻意选**稳的**：不依赖路径分隔符或具体拼法，而是断言"能力发生了"
 // （能转换时 file 变了、originalFile 保留原值；不能转换时原样返回 + 给出 hint）。
 import test from 'node:test';
@@ -82,11 +92,28 @@ test('shapeElementSourceResult: 转换不了时原样返回 + 给出 hint', () =
   assert.ok(r.hint, '★ 这种情况下必须给出"请用 dev_session_set 补上下文"的提示');
 });
 
-test('shapePickedElementResult: 走共享的归一化；null 退化成 {found:false}', () => {
+test('shapePickedElementResult: 真实形状是 {found, picked, list}（我第一版用了编的形状）', () => {
   assert.deepEqual(shapePickedElementResult(null, CTX), { found: false });
-  const r = shapePickedElementResult({ selector: '.a', source: { file: DEV_URL, line: 2 } }, CTX);
-  assert.equal(typeof r, 'object');
-  assert.equal(r.selector, '.a', '归一化后仍保留选择器');
+
+  // **真实形状**，量自两处代码而不是猜：
+  //   relay.js 的 getPickedElement → { found:true, picked, list }
+  //   dev-paths.js 的 normalizePickedElement → 只改 picked.source.file 与 list[].source.file
+  // 我第一版传的是 {selector, source} —— 那条测试能过，但什么都没钉住（真实路径根本没被走到）。
+  const real = {
+    found: true,
+    picked: { selector: '.a', source: { file: DEV_URL, line: 2 } },
+    list: [{ selector: '.b', source: { file: DEV_URL, line: 5 } }],
+  };
+  const r = shapePickedElementResult(real, CTX);
+  assert.equal(r.picked.selector, '.a', '选择器原样保留');
+  assert.notEqual(r.picked.source.file, DEV_URL, '★ 真实形状下 picked.source.file 必须被改写成磁盘路径');
+  assert.equal(r.picked.source.originalFile, DEV_URL, '并保留浏览器侧原值');
+  assert.notEqual(r.list[0].source.file, DEV_URL, 'list 里的元素同样要改写');
+
+  // 没有 projectRoot 时不猜测：原样返回
+  const noCtx = shapePickedElementResult(real, {});
+  assert.equal(noCtx.picked.source.file, DEV_URL);
+  assert.equal(noCtx.picked.source.originalFile, undefined);
 });
 
 test('cursorOverrideFrom: 未给 / all / 具体值三态', () => {
