@@ -58,21 +58,23 @@ test('加载历史时不得重推给 DSH（会话才是真相，面板里的只�
   assert.ok(/pushedSpeakTurns = countSpeakTurns\(conversation\)/.test(loadBody), '载入后仍要同步计数器');
 });
 
-// 序列化必须带上 kind，且不能只按条数截断。
+// 序列化必须带上**所有**参与裁剪与去重的字段，且不能只按条数截断。
 //
-// 两个都是"新加的东西忘了过持久化边界"：
-//  ① 不存 kind → 重载后工具行不再被认作工具行 → trimSessionEntries 的工具行限流静默失效
+// 三个洞都属于"新加的东西忘了过持久化边界"：
+//  ① 不存 kind → 重载后工具行不再被认作工具行 → 工具行限流静默失效
 //  ② 只 slice(-20) → 工具行会渲染之后，最后 20 条可能全是 ⚙ → 重载后对话整体消失
+//  ③ 不存 rpcId / echoedFromSession → 重载后回声去重退回"文本猜"，
+//     而那条路在同一句话说两遍时必然分不清
 // 这类问题只在重载后暴露，而重载恰好是每次改代码的必经步骤。
-test('序列化：带上 kind，且先按 kind 裁剪再截断（否则重载后对话会被 ⚙ 挤掉）', () => {
+test('序列化：带上 kind 与回声去重字段，且先裁剪再截断（复用同一套上限常量）', () => {
   const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
-  const body = chat.slice(chat.indexOf('function serializeConversation'), chat.indexOf('function serializeConversation') + 1400);
+  const body = chat.slice(chat.indexOf('function serializeConversation'), chat.indexOf('function serializeConversation') + 2000);
   assert.ok(body.length > 100, '应能找到 serializeConversation 的实现体');
-  assert.ok(/copy\.kind = m\.kind/.test(body), '序列化必须存 kind —— 不存则加载后工具行限流失效');
-  assert.ok(
-    /trimSessionEntries\(conversation, \{ maxExternal: 80, maxTool: 20 \}\)/.test(body),
-    '序列化前应先按 kind 裁剪，而不是只 slice(-N)'
-  );
+  for (const field of ['copy.kind = m.kind', 'copy.rpcId = m.rpcId', 'copy.echoedFromSession = true']) {
+    assert.ok(body.includes(field), '序列化必须包含 ' + field);
+  }
+  assert.ok(/trimSessionEntries\(conversation/.test(body), '序列化前应先按 kind 裁剪，而不是只 slice(-N)');
+  assert.ok(/maxExternal: MAX_EXTERNAL_TURNS/.test(body) && /maxTool: MAX_TOOL_TURNS/.test(body), '上限应复用同一套常量');
   assert.ok(!/conversation\.slice\(-20\)/.test(body), '不该再只按条数截断（工具行会把对话挤掉）');
 });
 
