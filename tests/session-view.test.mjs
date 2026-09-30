@@ -36,6 +36,34 @@ test('classifyFrame: 认 user/message、assistant/message 与工具调用，其�
   assert.equal(classifyFrame({ kind: 'tool-call' }).ok, false);
 });
 
+test('系统注入的上下文有两层防御：source.kind 与文本开头（kind 缺失时靠第二层兜住）', () => {
+  // 第一层：source.kind
+  assert.equal(
+    classifyFrame(frame({ type: 'user/message', role: 'user', sourceKind: 'runtime-context', text: '系统上下文' })).ok,
+    false
+  );
+  // 第二层：**没有 sourceKind** 时，靠文本开头识别。
+  // 这一条是这次补上的洞 —— 此前只有第一层，于是这种帧会被当成用户自己说的话，
+  // 以「你：Current runtime context…」显示在面板上。
+  assert.equal(
+    classifyFrame(
+      frame({ type: 'user/message', role: 'user', text: 'Current runtime context. This snapshot supersedes…' })
+    ).ok,
+    false,
+    '缺 sourceKind 时必须靠文本前缀兜住'
+  );
+  assert.equal(
+    classifyFrame(frame({ type: 'user/message', role: 'user', text: 'This snapshot supersedes anything earlier.' })).ok,
+    false
+  );
+  // 用户真的这么说话（前缀不在开头）时不误伤
+  assert.equal(
+    classifyFrame(frame({ type: 'user/message', role: 'user', text: '帮我看看 Current runtime context 是什么意思' })).ok,
+    true,
+    '前缀只在开头才算注入，不能误伤正常提问'
+  );
+});
+
 test('工具调用渲染成「⚙ 名字（k=v）」一行，参数只取最多两个短标量', () => {
   const d = sessionEntryFromFrame(
     frame({ type: 'tool/call', tool: 'page_screenshot', args: { label: '面板渲染检查', tabId: 1780111567, nested: { a: 1 } } }),
