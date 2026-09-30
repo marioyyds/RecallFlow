@@ -1,44 +1,46 @@
 /**
- * RecallFlow ↔ DSH 单插件集成（新架构的第一版）。
+ * RecallFlow ↔ DSH 单插件集成。
  *
  * 设计目标（用户原话）：
  *   「以 dsh 为主，recallflow 也可以对话，两者能够同步，但是确实应该是基于 dsh 的 session
  *     就行，根本不需存在着什么同步呢」
  *
- * 因此这里**没有同步**：只有一条会话。插件做三件事，全部在 DSH 进程内完成，
- * 不再需要任何外部中继进程：
+ * 所以这里**没有同步**：只有一条会话。整个集成只有一个进程（DSH 自己）、一个端口
+ * （DSH 自己的 3080），不需要任何外部中继。
  *
- *   1. GET  /recallflow/stream  → SSE：把这条会话的事件推给浏览器面板
- *   2. POST /recallflow/say     → 面板打的字变成**这条会话的真实用户消息**（能唤醒空闲会话）
- *   3. POST /recallflow/result  → 浏览器侧执行完工具后的回执
- *   4. ctx.tools.register       → 把浏览器能力直接注册成 DSH 工具（不需要 MCP 服务器）
+ * 对外只有两件事：
+ *   POST /recallflow/say   → 面板打的字变成**这条会话的真实用户消息**（能唤醒空闲会话）
+ *   WS   /recallflow/ws    → 一条双向通道：会话事件 + 工具调用/回执
  *
- * 依据（全部实测或读自类型声明，见 docs/one-session-plugin.md）：
- *   - `agent.send(message, 'next-turn', true)` 实测能：产生真 user/message + 唤醒空闲 driver + 开启新一轮
- *   - 载荷形状 `{id, role:'user', content:[{type:'text',text}], source:{kind:'user', rpcId}}`
- *     实测产生 `type=user/message, role=user, source.kind=user`
- *   - `webServer.register({kind,path,handler})` 的注释原文：
- *     "Owns the full response lifecycle (may hold the response open, e.g. SSE)"
- *   - `ctx.tools.register({name,description,parameters,output:{schema,render},execute})`
+ * 为什么是 WebSocket 而不是 SSE（我一度选了 SSE，后来推翻）：
+ *   浏览器扩展的 MV3 service worker 空闲约 30 秒会被回收，而 `fetch` 流**不能**阻止回收；
+ *   WebSocket 活动在 Chrome 里是明确的保活条件。工具调用必须**在面板关闭时也能用**，
+ *   所以那条通道只能由 service worker 持有 —— SSE 在这里是错的。
+ *   代价：要在 DSH 里实现 WS 握手。做法是借 DSH 自己依赖树里的 `ws`
+ *   （实测：createRequire(process.argv[1]).resolve('ws') 能解析到，见下方 resolveWs）。
  *
- * 服务依赖：三个都必须声明，否则 Cordis 会在读取时报
- * "cannot get property … without inject"（实测过）。
+ * 关键依据（均为实测或读自类型声明，详见 docs/one-session-plugin.md）：
+ *   - agent.send(msg, 'next-turn', true)：实测能产生真 user/message + 唤醒空闲 driver + 开启新一轮
+ *   - 载荷 source.kind 必须是 'user'：实测自定义 kind 只会落成模型侧上下文
+ *   - webServer.register(route)：注释原文 "may hold the response open, e.g. SSE"
+ *   - webServer.registerUpgrade(route)：handler 拿到 (req, socket, head)，**协议协商与 socket 归自己**
+ *   - ctx.tools.register({name,description,parameters,output:{schema,render},execute})
+ *   - inject 必须声明服务名，否则读取报 "cannot get property … without inject"
  */
 
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 export const name = 'recallflow-one';
 export const inject = ['agents', 'tools', 'webServer'];
 
-const STREAM_PATH = '/recallflow/stream';
+const WS_PATH = '/recallflow/ws';
 const SAY_PATH = '/recallflow/say';
-const RESULT_PATH = '/recallflow/result';
 
-/** SSE 心跳间隔：太短浪费，太长会被中间层掐断。 */
-const HEARTBEAT_MS = 15000;
 /** 工具调用等待浏览器回执的上限。 */
 const TOOL_TIMEOUT_MS = 30000;
-/** 只放行本机来源（与旧桥接同样的做法；不放行 * 以免任意网页读写本机）。 */
+/** 只放行本机来源与扩展来源（不放行 * ，否则任意网页都能读本机）。 */
 const LOCAL_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
 const EXTENSION_ORIGIN = /^chrome-extension:\/\//;
 
@@ -90,6 +92,63 @@ function textOf(content) {
     .trim();
 }
 
+function sessionIdOf(session) {
+  if (!session) return '';
+  if (typeof session === 'string') return session;
+  const id = session.id !== undefined ? session.id : session.sessionId;
+  return id === undefined || id === null ? '' : String(id);
+}
+
+/**
+ * 借 DSH 自己依赖树里的 `ws`。
+ *
+ * 为什么不直接 `import 'ws'`：插件是从本仓库链接进来的，Node 从**本仓库**往上找
+ * 找不到 ws（实测 ERR_MODULE_NOT_FOUND）。而插件运行在 DSH 进程内，
+ * 进程的 argv[1] 就是 DSH 的 bin —— 用 createRequire 从那里解析即可（实测成功）。
+ * 先试普通 import（万一以后 ws 被装到插件旁边），再退到借 DSH 的。
+ */
+async function resolveWs(log) {
+  const tried = [];
+  try {
+    const m = await import('ws');
+    if (m && (m.WebSocketServer || (m.default && m.default.WebSocketServer))) {
+      return m;
+    }
+    tried.push('import ws：拿到了模块但没有 WebSocketServer 导出');
+  } catch (e) {
+    tried.push('import ws：' + (e.code || e.message));
+  }
+
+  // 插件运行在 DSH 进程内，因此从进程自己的入口去解析它的依赖树。
+  // 注意：不同启动方式下 argv[1] 可能不是 DSH 的 bin，所以把候选与失败原因都记下来。
+  const anchors = [process.argv[1], process.argv[0], process.execPath].filter(Boolean);
+  for (const anchor of anchors) {
+    try {
+      const req = createRequire(anchor);
+      const p = req.resolve('ws');
+      // Windows 上 import() **不接受裸绝对路径**（会报 ERR_UNSUPPORTED_ESM_URL_SCHEME），
+      // 必须先转成 file:// URL。这个错误我第一次没发现，是因为早先的探针只做了 resolve、
+      // 没有真的 import —— 是插件里的诊断日志把它打出来的。
+      const m = await import(pathToFileURL(p).href);
+      if (m && (m.WebSocketServer || (m.default && m.default.WebSocketServer))) {
+        if (log) log('ws 解析成功（anchor=' + anchor + '）→ ' + p);
+        return m;
+      }
+      tried.push('anchor ' + anchor + '：解析到 ' + p + ' 但没有 WebSocketServer');
+    } catch (e) {
+      tried.push('anchor ' + anchor + '：' + (e.code || e.message));
+    }
+  }
+
+  if (log) {
+    log('resolveWs 全部失败');
+    log('  argv=' + JSON.stringify(process.argv.slice(0, 3)));
+    log('  execPath=' + process.execPath);
+    for (const t of tried) log('  · ' + t);
+  }
+  return null;
+}
+
 export function apply(ctx, config = {}) {
   const log = (m) => {
     try {
@@ -97,31 +156,40 @@ export function apply(ctx, config = {}) {
     } catch {}
   };
 
-  // --- 会话选择 ---------------------------------------------------------------
-  // 只有一条会话，所以插件要知道"面板说的是哪一条"。做法：跟踪最近有活动的会话
-  // （用户正在用的那条）。不引入额外的选择 UI —— 简单优先。
+  // --- 会话选择：只有一条会话，插件只需知道"面板说的是哪一条" -------------------
   /** sessionId → { agent, lastAt } */
   const sessions = new Map();
   let currentSessionId = '';
 
-  // --- SSE 客户端 -------------------------------------------------------------
-  /** @type {Set<{res: import('node:http').ServerResponse, sessionId: string}>} */
-  const clients = new Set();
-  /** 正在等待浏览器回执的工具调用：callId → { resolve, timer } */
-  const pendingTools = new Map();
+  function pickSession(preferred) {
+    if (preferred && sessions.has(preferred)) return sessions.get(preferred);
+    if (currentSessionId && sessions.has(currentSessionId)) return sessions.get(currentSessionId);
+    let best = null;
+    for (const entry of sessions.values()) {
+      if (!best || (entry.lastAt || 0) > (best.lastAt || 0)) best = entry;
+    }
+    return best;
+  }
 
-  function broadcast(event) {
-    const payload = 'data: ' + JSON.stringify(event) + '\n\n';
-    for (const c of clients) {
+  // --- WebSocket 通道 ---------------------------------------------------------
+  /** @type {Set<any>} */
+  const clients = new Set();
+  /** callId → { resolve, timer } */
+  const pendingTools = new Map();
+  let wss = null; // 懒建：第一次收到 upgrade 时才去解析 ws，避免 apply 变成异步
+
+  function broadcast(obj) {
+    const text = JSON.stringify(obj);
+    for (const ws of clients) {
       try {
-        c.res.write(payload);
-      } catch (e) {
-        clients.delete(c);
+        if (ws.readyState === 1) ws.send(text);
+      } catch {
+        clients.delete(ws);
       }
     }
   }
 
-  /** 把一条会话事件投影成面板需要的最小信息（不做任何截断/改写）。 */
+  /** 会话事件投影成面板需要的最小信息（不改写、不截断）。 */
   function projectEvent(ev) {
     if (!ev || !ev.type) return null;
     const data = ev.data || {};
@@ -132,12 +200,29 @@ export function apply(ctx, config = {}) {
       const t = textOf(data.content);
       if (t) out.text = t;
     }
-    // 工具事件：把工具名与参数带上，面板才画得出来
     if (data.tool) out.tool = String(data.tool);
     if (data.args !== undefined) out.args = data.args;
     if (ev.time !== undefined) out.time = ev.time;
     if (ev.seq !== undefined) out.seq = ev.seq;
     return out;
+  }
+
+  /** 处理浏览器侧发来的一条消息（抽出来是为了可单测，不需要真 WebSocket）。 */
+  function handleClientMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.kind === 'hello') {
+      broadcast({ kind: 'hello', sessionId: currentSessionId, sessions: [...sessions.keys()] });
+      return;
+    }
+    if (msg.kind === 'tool-result') {
+      const waiter = pendingTools.get(String(msg.callId || ''));
+      if (!waiter) return;
+      clearTimeout(waiter.timer);
+      pendingTools.delete(String(msg.callId));
+      waiter.resolve(msg.ok === false ? { error: msg.error || '浏览器侧失败' } : msg.value);
+      return;
+    }
+    // 其余消息暂不处理（保持简单）
   }
 
   ctx.on('session/event', (session, ev) => {
@@ -154,17 +239,12 @@ export function apply(ctx, config = {}) {
   ctx.on('agent/created', (payload) => {
     const agent = payload && payload.agent;
     if (!agent) return;
-    const sid = sessionIdOf(agent.session) || sessionIdOf(payload) || '';
-    if (sid) {
-      sessions.set(sid, { agent, lastAt: Date.now() });
-      currentSessionId = sid;
-      log('会话登记：' + sid);
-      broadcast({ kind: 'session-registered', sessionId: sid });
-    } else {
-      // 拿不到 id 也要能用：按插入顺序保留 agent（单会话场景下只有一个）
-      sessions.set('(agent-' + sessions.size + ')', { agent, lastAt: Date.now() });
-      log('会话登记：拿不到 id，按序号登记');
-    }
+    const sid = sessionIdOf(agent.session);
+    const key = sid || '(agent-' + sessions.size + ')';
+    sessions.set(key, { agent, lastAt: Date.now() });
+    if (sid) currentSessionId = sid;
+    log('会话登记：' + key);
+    broadcast({ kind: 'session-registered', sessionId: key });
   });
 
   ctx.on('agent/disposed', (payload) => {
@@ -172,73 +252,53 @@ export function apply(ctx, config = {}) {
     if (sid) sessions.delete(sid);
   });
 
-  function sessionIdOf(session) {
-    if (!session) return '';
-    if (typeof session === 'string') return session;
-    const id = session.id !== undefined ? session.id : session.sessionId;
-    return id === undefined || id === null ? '' : String(id);
-  }
-
-  function pickSession(preferred) {
-    if (preferred && sessions.has(preferred)) return sessions.get(preferred);
-    if (currentSessionId && sessions.has(currentSessionId)) return sessions.get(currentSessionId);
-    // 退路：最近有活动的那条
-    let best = null;
-    for (const entry of sessions.values()) {
-      if (!best || (entry.lastAt || 0) > (best.lastAt || 0)) best = entry;
-    }
-    return best;
-  }
-
-  // --- 路由 1：SSE 事件流 -----------------------------------------------------
-  ctx.webServer.register({
-    kind: 'exact',
-    path: STREAM_PATH,
-    handler: (req, res) => {
-      const origin = req.headers.origin;
-      const allow = corsHeaders(origin);
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204, allow);
-        res.end();
+  // --- WS 路由（挂到 DSH 自己的服务上）---------------------------------------
+  ctx.webServer.registerUpgrade({
+    path: WS_PATH,
+    handler: async (req, socket, head) => {
+      const origin = req.headers && req.headers.origin;
+      if (origin && !LOCAL_ORIGIN.test(origin) && !EXTENSION_ORIGIN.test(origin)) {
+        log('拒绝非本机来源的 WS：' + origin);
+        socket.destroy();
         return;
       }
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: '只支持 GET' }, origin);
-        return;
-      }
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-        ...allow,
-      });
-      if (typeof res.flushHeaders === 'function') res.flushHeaders();
-
-      const client = { res, sessionId: currentSessionId };
-      clients.add(client);
-      log('SSE 连接建立（当前 ' + clients.size + ' 个）');
-      res.write('data: ' + JSON.stringify({ kind: 'hello', sessionId: currentSessionId, sessions: [...sessions.keys()] }) + '\n\n');
-
-      const beat = setInterval(() => {
-        try {
-          res.write(': keepalive\n\n');
-        } catch {
-          /* 下面 close 会清理 */
+      if (!wss) {
+        const wsMod = await resolveWs(log);
+        if (!wsMod) {
+          log('✗ 解析不到 ws 模块，WS 通道不可用（工具与事件都推不出去）');
+          socket.destroy();
+          return;
         }
-      }, HEARTBEAT_MS);
-
-      const cleanup = () => {
-        clearInterval(beat);
-        clients.delete(client);
-        log('SSE 连接断开（剩 ' + clients.size + ' 个）');
-      };
-      req.on('close', cleanup);
-      req.on('error', cleanup);
+        const WS = wsMod.WebSocketServer || (wsMod.default && wsMod.default.WebSocketServer);
+        wss = new WS({ noServer: true });
+        log('ws 已就绪');
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        clients.add(ws);
+        log('浏览器侧已连接（当前 ' + clients.size + ' 个）');
+        try {
+          ws.send(JSON.stringify({ kind: 'hello', sessionId: currentSessionId, sessions: [...sessions.keys()] }));
+        } catch {}
+        ws.on('message', (raw) => {
+          let msg = null;
+          try {
+            msg = JSON.parse(String(raw));
+          } catch {
+            return;
+          }
+          handleClientMessage(msg);
+        });
+        const bye = () => {
+          clients.delete(ws);
+          log('浏览器侧断开（剩 ' + clients.size + ' 个）');
+        };
+        ws.on('close', bye);
+        ws.on('error', bye);
+      });
     },
   });
 
-  // --- 路由 2：面板输入 → 真用户消息 ------------------------------------------
+  // --- 面板输入（一次性 POST，内容脚本用起来最简单）---------------------------
   ctx.webServer.register({
     kind: 'exact',
     path: SAY_PATH,
@@ -279,8 +339,8 @@ export function apply(ctx, config = {}) {
         source: { kind: 'user', rpcId },
       });
       try {
-        // 实测：send(msg, 'next-turn', true) 同时做到 产生真 user/message + 唤醒空闲 driver + 开启新一轮。
-        // inject 只能引导进行中的那一轮，不唤醒空闲会话，因此这里不用它。
+        // 实测：send(msg,'next-turn',true) 同时做到 产生真 user/message + 唤醒空闲 driver + 开启新一轮。
+        // inject 只引导进行中的那一轮、不唤醒空闲会话，所以这里不用它。
         await picked.agent.send(message, 'next-turn', true);
         log('面板输入已送入会话：' + text.slice(0, 40));
         sendJson(res, 200, { ok: true, rpcId, sessionId: sessionIdOf(picked.agent.session) }, origin);
@@ -291,45 +351,12 @@ export function apply(ctx, config = {}) {
     },
   });
 
-  // --- 路由 3：浏览器侧工具回执 -----------------------------------------------
-  ctx.webServer.register({
-    kind: 'exact',
-    path: RESULT_PATH,
-    handler: async (req, res) => {
-      const origin = req.headers.origin;
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204, corsHeaders(origin));
-        res.end();
-        return;
-      }
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: '只支持 POST' }, origin);
-        return;
-      }
-      let body;
-      try {
-        body = JSON.parse((await readBody(req)) || '{}');
-      } catch (e) {
-        sendJson(res, 400, { ok: false, error: '请求体不是 JSON：' + e.message }, origin);
-        return;
-      }
-      const waiter = pendingTools.get(String(body.callId || ''));
-      if (!waiter) {
-        sendJson(res, 404, { ok: false, error: '没有等待中的工具调用：' + body.callId }, origin);
-        return;
-      }
-      clearTimeout(waiter.timer);
-      pendingTools.delete(String(body.callId));
-      waiter.resolve(body.ok === false ? { error: body.error || '浏览器侧失败' } : body.value);
-      sendJson(res, 200, { ok: true }, origin);
-    },
-  });
-
-  /** 通过 SSE 让浏览器执行一次能力调用，并等回执。 */
+  /** 通过 WS 让浏览器执行一次能力调用，并等回执。 */
   function callBrowser(op, payload) {
     const callId = 'call-' + randomUUID();
-    if (!clients.size) {
-      return Promise.reject(new Error('浏览器侧没有连接（扩展未打开或未连上 ' + STREAM_PATH + '）'));
+    const live = [...clients].filter((ws) => ws.readyState === 1);
+    if (!live.length) {
+      return Promise.reject(new Error('浏览器侧没有连接（扩展未打开或未连上 ' + WS_PATH + '）'));
     }
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -371,5 +398,5 @@ export function apply(ctx, config = {}) {
     execute: async (args) => callBrowser(String(args && args.op), args),
   });
 
-  log('已装载：' + [STREAM_PATH, SAY_PATH, RESULT_PATH].join(' / ') + ' + 工具 recallflow_browser');
+  log('已装载：' + SAY_PATH + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
 }
