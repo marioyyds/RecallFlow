@@ -226,6 +226,36 @@ const httpServer = http.createServer((req, res) => {
     });
     return;
   }
+  // 反向通道：面板对话 → DSH。扩展（经后台）把面板的每个对话回合 POST 到这里，
+  // 供 panel_history 工具读回 —— 此前面板自己的对话只能靠用户手动导出才能进 DSH。
+  if (req.method === 'POST' && url.pathname === '/panel-turns') {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+      if (body.length > 64 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      let t = null;
+      try {
+        t = JSON.parse(body || '{}');
+      } catch (e) {}
+      const turn =
+        t && typeof t.text === 'string' && t.text
+          ? {
+              role: t.role === 'user' ? 'user' : 'panel',
+              text: String(t.text).slice(0, 4000),
+              pageUrl: String(t.pageUrl || ''),
+              pageTitle: String(t.pageTitle || ''),
+              at: Number.isFinite(Number(t.at)) ? Number(t.at) : Date.now(),
+            }
+          : null;
+      const ok = recordPanelTurn(turn);
+      if (ok) log('[panel-turn] ' + turn.role + ' · ' + turn.text.slice(0, 40));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok }));
+    });
+    return;
+  }
   // 外部提交面板事件：DSH 的 hooks 经此把「会话里发生了什么」推给页面面板。
   // 为什么需要：MCP 是客户端发起的，本服务端只看得到自己的 MCP 工具调用；
   // 而 DSH 的 hooks 能看到每一个工具调用（bash / 读写文件 / 其它 MCP server）与用户提示词。
@@ -439,6 +469,36 @@ async function pageScreenshot(args) {
     content.push({ type: 'image', data: img.data, mimeType: img.mimeType || 'image/jpeg' });
   }
   return { content };
+}
+
+// 面板对话 → DSH 的落点（反向通道）。扩展经后台把每个回合 POST 到 /panel-turns，
+// 这里留一份环形缓冲供 panel_history 读回。
+const panelTurns = [];
+const MAX_PANEL_TURNS = 200;
+
+function recordPanelTurn(turn) {
+  if (!turn || typeof turn.text !== 'string' || !turn.text) return false;
+  panelTurns.push(turn);
+  if (panelTurns.length > MAX_PANEL_TURNS) panelTurns.splice(0, panelTurns.length - MAX_PANEL_TURNS);
+  return true;
+}
+
+function panelHistory(args) {
+  const a = args || {};
+  const raw = Number(a.limit);
+  const limit = Number.isFinite(raw) && raw > 0 ? Math.min(200, Math.floor(raw)) : 50;
+  const role = a.role === 'user' || a.role === 'panel' ? a.role : '';
+  const filtered = role ? panelTurns.filter((t) => t.role === role) : panelTurns;
+  return {
+    ok: true,
+    count: Math.min(limit, filtered.length),
+    total: panelTurns.length,
+    turns: filtered.slice(-limit),
+    note:
+      '这些是**浏览器里 RecallFlow 面板自己的**对话回合（用户在面板里的提问与面板 AI 的回答）。' +
+      '面板 AI 与你在 DSH 里是不同的 agent —— 不要把它说过的话当成你说过的。' +
+      '若为空，可能是面板还没产生对话，或浏览器侧扩展未重载（该通道需要新版扩展）。',
+  };
 }
 
 /**
@@ -702,6 +762,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'panel_history',
+    description:
+      '读回浏览器里 RecallFlow 面板**自己的**对话回合（用户在面板里的提问 + 面板 AI 的回答）。' +
+      '用于把「用户在页面上问了什么、面板 AI 答了什么」带进当前会话 —— ' +
+      '此前这些内容只能靠用户手动导出或点交接芯片才能被看到。' +
+      '注意：面板 AI 与你是两个不同的 agent，不要把它说过的话当成你说过的。' +
+      '默认返回最近 50 条（上限 200）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', description: '返回最近多少条，默认 50，上限 200。' },
+        role: { type: 'string', enum: ['user', 'panel'], description: '只看某一方；不填返回全部。' },
+      },
+    },
+  },
+  {
     name: 'panel_post',
     description:
       '把一段话显示到用户浏览器页面里的 RecallFlow 面板上（外部 agent 的出话口）。' +
@@ -939,6 +1015,7 @@ function createMcpServer() {
       else if (name === 'dev_session_get') result = readDevSession();
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
       else if (name === 'panel_post') result = panelPost(args);
+      else if (name === 'panel_history') result = panelHistory(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
       if (name !== 'panel_post') pushEvent(toolEndEvent(name, true, Date.now() - t0, '', Date.now()));
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };

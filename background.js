@@ -4,7 +4,7 @@ import { getAISettings } from './lib/shared/settings.js';
 import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
-import { startMcpRelay } from './lib/bridge/relay.js';
+import { startMcpRelay, postPanelTurn } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
@@ -142,6 +142,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         chrome.storage.local.set({ ['recallflow.conv.' + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
       } catch (e) {}
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+  // 面板对话 → DSH（反向通道）。此前只有 DSH→面板，面板自己的对话进不了 DSH，
+  // 只能靠用户手动导出、或点交接芯片拿 RF id 再让 AI 去读。
+  // 必须经后台转发：桥接无 CORS 头，内容脚本直连会被同源策略挡住。
+  if (msg && msg.type === 'panel:turn') {
+    const text = String(msg.text || '').slice(0, 4000);
+    if (text) {
+      Promise.resolve(
+        postPanelTurn({
+          role: msg.role === 'user' ? 'user' : 'panel',
+          text,
+          pageUrl: String(msg.pageUrl || ''),
+          pageTitle: String(msg.pageTitle || ''),
+          at: Date.now(),
+        })
+      ).catch(() => {});
     }
     sendResponse({ ok: true });
     return false;
