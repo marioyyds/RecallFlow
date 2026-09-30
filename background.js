@@ -95,7 +95,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   // 会话绑定：面板点「启动」时写入，按 tab 隔离（与 conv 同样的存储约定）。
-  // 内容脚本默认读不到 chrome.storage.session，因此必须经后台代理。
+  // 内容脚本默认读不到 chrome.storage.local，因此必须经后台代理。
   if (msg && msg.type === 'bind:save') {
     const tabId = sender.tab && sender.tab.id;
     const norm = normalizeBinding(msg.binding);
@@ -104,7 +104,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const b = norm && tabId != null ? Object.assign({}, norm, { tabId }) : norm;
     if (tabId != null && b) {
       try {
-        chrome.storage.session.set({ [bindingKey(tabId)]: b });
+        chrome.storage.local.set({ [bindingKey(tabId)]: b });
         sendResponse({ ok: true, binding: b });
       } catch (e) {
         sendResponse({ ok: false, error: e.message });
@@ -120,7 +120,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ binding: null });
       return false;
     }
-    chrome.storage.session
+    chrome.storage.local
       .get(bindingKey(tabId))
       .then((d) => sendResponse({ binding: normalizeBinding(d[bindingKey(tabId)]) }))
       .catch(() => sendResponse({ binding: null }));
@@ -130,7 +130,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab && sender.tab.id;
     if (tabId != null) {
       try {
-        chrome.storage.session.remove(bindingKey(tabId));
+        chrome.storage.local.remove(bindingKey(tabId));
       } catch (e) {}
     }
     sendResponse({ ok: true });
@@ -140,7 +140,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab && sender.tab.id;
     if (tabId != null && Array.isArray(msg.conversation)) {
       try {
-        chrome.storage.session.set({ ['recallflow.conv.' + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
+        chrome.storage.local.set({ ['recallflow.conv.' + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
       } catch (e) {}
     }
     sendResponse({ ok: true });
@@ -152,7 +152,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ conversation: [] });
       return false;
     }
-    chrome.storage.session
+    chrome.storage.local
       .get('recallflow.conv.' + tabId)
       .then((d) => sendResponse({ conversation: (d['recallflow.conv.' + tabId] || {}).conversation || [] }))
       .catch(() => sendResponse({ conversation: [] }));
@@ -336,7 +336,7 @@ chrome.runtime.onInstalled.addListener(() => {
 // 标签页关闭时清理其对话持久化数据。
 chrome.tabs.onRemoved.addListener((tabId) => {
   try {
-    chrome.storage.session.remove('recallflow.conv.' + tabId);
+    chrome.storage.local.remove('recallflow.conv.' + tabId);
   } catch (e) {}
 });
 
