@@ -40,6 +40,24 @@ test('面板只有一条 panel:turn 发送实现（重复实现会绕过 rpcId �
   assert.ok(pushAt > 0 && sendAt > pushAt, '必须先 push 本地回合再发送（否则 rpcId 没有落点）');
 });
 
+// 页面加载时**不得**把面板缓存的历史重推进 DSH。
+//
+// 这条是回归：loadConversation 原本会把最近 6 条重推一次，靠"服务端连续去重"兜住 ——
+// 而那个去重（recordPanelTurn）在第 4 步随桥接同步部分一起删掉了。
+// 后果：每次刷新页面，面板里缓存的旧消息都会以**真实用户消息**身份重新进入会话，
+// 还会唤醒空闲会话。这比旧版的"重复显示"严重得多。
+test('加载历史时不得重推给 DSH（会话才是真相，面板里的只是缓存）', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const loadBody = chat.slice(chat.indexOf('async function loadConversation'), chat.indexOf('async function loadConversation') + 1600);
+  assert.ok(loadBody.length > 100, '应能找到 loadConversation 的实现体');
+  assert.ok(
+    !/recentSpeakTurns\([^)]*\)\)\s*sendPanelTurn/.test(loadBody),
+    'loadConversation 不应把载入的历史推给 DSH'
+  );
+  // 计数器仍要同步，否则下一次增量推送会把老内容当新的发
+  assert.ok(/pushedSpeakTurns = countSpeakTurns\(conversation\)/.test(loadBody), '载入后仍要同步计数器');
+});
+
 /** 在 stub 生效**期间**执行 fn，并返回它实际发出的请求。 */
 async function withStub(impl, fn) {
   const real = globalThis.fetch;
