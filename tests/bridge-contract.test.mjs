@@ -96,9 +96,14 @@ test('面板事件链路两端对齐（服务端成形 + 扩展转发 + 面板�
   assert.ok(/name === 'panel_post'/.test(mcpSource), 'MCP 应暴露 panel_post（外部 agent 的出话口）');
 
   const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
-  assert.ok(/forwardBridgeEvent\(msg\.event\)/.test(relay), 'relay 应处理 WS 推来的事件');
-  assert.ok(/data\.events/.test(relay), 'relay 应从长轮询返回体里读事件');
-  assert.ok(/type: 'rfBridgeEvent'/.test(relay), 'relay 应把事件转发给标签页');
+  // 新架构：relay 处理的是插件推来的**会话事件**（kind 为 session-event），
+  // 不再是旧版的 say/tool 事件（那种形状随"两段对话"一起消失了）。
+  assert.ok(/msg\.kind === 'session-event'/.test(relay), 'relay 应处理 WS 推来的会话事件');
+  // 新架构只有 WebSocket 一条通道：长轮询已删除，事件从 WS 帧里来（kind 为 session-event）。
+  // 这里顺便断言长轮询确实**不再存在** —— 否则删了一半（留着死代码）不会被发现。
+  assert.ok(!/data\.events/.test(relay), 'relay 不应再有长轮询读取事件（那条通道已删除）');
+  assert.ok(!/fetch\(RELAY_HTTP \+ '\/poll'/.test(relay), 'relay 不应再轮询 /poll');
+  assert.ok(/type: 'rfSessionEvent'/.test(relay), 'relay 应把会话事件转发给标签页');
 
   const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
   assert.ok(/msg\.type === 'rfBridgeEvent'/.test(chat), '面板应处理 rfBridgeEvent');
@@ -117,21 +122,28 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   assert.ok(/type: 'panel:turn'/.test(chat), '面板应发出 panel:turn');
   assert.ok(/msg\.type === 'panel:turn'/.test(bg), '后台应处理 panel:turn');
   // 2) 后台 → relay：必须经 relay 的函数（而不是自己拼一份 URL/token，
-  //    否则 token 与主机名会出现第二份真相）
-  assert.ok(/postPanelTurn\(/.test(bg), '后台应调用 postPanelTurn');
-  assert.ok(/export async function postPanelTurn\(/.test(relay), 'relay 应导出 postPanelTurn');
+  //    否则主机名与路径会出现第二份真相）
+  //    注意：新架构里这一跳的目标已经从「桥接的 /panel-turns」换成
+  //    「DSH 插件的 /recallflow/say」——所以函数名也由 postPanelTurn 改为 sayToDsh。
+  assert.ok(/sayToDsh\(/.test(bg), '后台应调用 sayToDsh');
+  assert.ok(/export async function sayToDsh\(/.test(relay), 'relay 应导出 sayToDsh');
 
-  // 3) URL 路径契约：两端必须逐字一致（这是最容易在改名时漏掉的一处）
-  const relayPath = (relay.match(/RELAY_HTTP \+ '(\/[a-z-]+)'/g) || []).map((s) => s.match(/'(\/[a-z-]+)'/)[1]);
-  assert.ok(relayPath.includes('/panel-turns'), 'relay 应 POST 到 /panel-turns，实际：' + relayPath.join('、'));
-  assert.ok(/url\.pathname === '\/panel-turns'/.test(mcp), 'MCP server 应实现 /panel-turns');
+  // 3) URL 路径契约：发送端（relay 的 SAY_PATH）与接收端（插件注册的路径）必须逐字一致
+  //    —— 这是最容易在改名时漏掉的一处，错了只会静默 404。
+  const pluginSource = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  assert.match(relay, /const SAY_PATH = '\/recallflow\/say'/, 'relay 应把路径定义成 /recallflow/say');
+  assert.match(pluginSource, /const SAY_PATH = '\/recallflow\/say'/, '插件应注册同一路径');
+  assert.match(relay, /const RELAY_WS = 'ws:\/\/' \+ RELAY_HOST \+ '\/recallflow\/ws'/, 'relay 的 WS 目标应为 /recallflow/ws');
+  assert.match(pluginSource, /const WS_PATH = '\/recallflow\/ws'/, '插件应注册同一 WS 路径');
   // 读端与写端同路径成对（避免两处各自演化的形状漂移）
   const panelTurnsPaths = (mcp.match(/url\.pathname === '\/panel-turns'/g) || []).length;
   assert.ok(panelTurnsPaths >= 2, '应同时实现 POST（写）与 GET（读）两端，实际 ' + panelTurnsPaths + ' 处');
   assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), 'GET 读取端应存在');
 
-  // 4) 字段名契约：后台发出去的角色取值，服务端要认得（否则全部落成 panel）
-  assert.ok(/role: msg\.role === 'user' \? 'user' : 'panel'/.test(bg), '后台应把角色规整为 user/panel');
+  // 4) 新架构：后台**只转发用户自己说的话**。
+  //    面板助手的输出不再推给 DSH —— 新架构下面板助手不再产生回复（回复来自那条会话本身），
+  //    而把助手输出当用户输入灌进去，才是真正的"冒充用户消息"。
+  assert.ok(/if \(msg\.role === 'user'\)/.test(bg), '后台应只转发 role 为 user 的面板输入');
   assert.ok(/t\.role === 'user' \? 'user' : 'panel'/.test(mcp), '服务端应做同样的规整');
 
   // 5) 读取端工具齐备

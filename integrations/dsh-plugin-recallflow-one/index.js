@@ -222,6 +222,11 @@ export function apply(ctx, config = {}) {
       waiter.resolve(msg.ok === false ? { error: msg.error || '浏览器侧失败' } : msg.value);
       return;
     }
+    if (msg.kind === 'ping') {
+      // 扩展侧的心跳：回一条，保持双向可判活
+      broadcast({ kind: 'pong' });
+      return;
+    }
     // 其余消息暂不处理（保持简单）
   }
 
@@ -352,7 +357,7 @@ export function apply(ctx, config = {}) {
   });
 
   /** 通过 WS 让浏览器执行一次能力调用，并等回执。 */
-  function callBrowser(op, payload) {
+  function callBrowser(method, payload) {
     const callId = 'call-' + randomUUID();
     const live = [...clients].filter((ws) => ws.readyState === 1);
     if (!live.length) {
@@ -361,41 +366,50 @@ export function apply(ctx, config = {}) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pendingTools.delete(callId);
-        reject(new Error('浏览器侧超时（' + TOOL_TIMEOUT_MS + 'ms）：' + op));
+        reject(new Error('浏览器侧超时（' + TOOL_TIMEOUT_MS + 'ms）：' + method));
       }, TOOL_TIMEOUT_MS);
       pendingTools.set(callId, { resolve, timer });
-      broadcast({ kind: 'tool-call', callId, op, payload: payload === undefined ? null : payload });
+      broadcast({ kind: 'tool-call', callId, method, payload: payload === undefined ? null : payload });
     });
   }
+
+  /** 扩展侧 dispatch() 支持的方法名。列在这里是为了让模型知道能调什么，且不写死两份实现。 */
+  const BROWSER_METHODS = [
+    'browser_read',
+    'read_console',
+    'read_network',
+    'get_element_source',
+    'page_health',
+    'verify_change',
+    'get_picked_element',
+    'screenshot_capture',
+    'handoff_get',
+    'handoff_list',
+  ];
 
   // --- 工具注册：一个通用入口（第一版），后续按需拆成具体工具 -------------------
   ctx.tools.register({
     name: 'recallflow_browser',
     description:
-      '在用户当前打开的网页上执行一次操作（由浏览器扩展完成）。' +
-      'op 取值：read（读正文）、console（读控制台）、network（读网络）、screenshot（截图）、' +
-      'health（页面健康度）、eval（在页面里执行 JS）。' +
+      '在用户当前打开的网页上执行一次操作（由 RecallFlow 浏览器扩展完成，作用于当前活动标签页）。' +
+      'method 取值：browser_read（读正文）/ read_console（读控制台）/ read_network（读网络）/' +
+      'get_element_source（把元素对应到前端源码位置）/ page_health（页面健康度：新增报错与失败请求）/' +
+      'verify_change（改动后核对元素状态与新问题）/ get_picked_element（用户在页面里拾取的元素）/' +
+      'screenshot_capture（截图）/ handoff_get、handoff_list（读用户在面板里交接出来的会话）。' +
       '这是 RecallFlow 的页面能力，与 DSH 同处一条会话。',
     parameters: {
       type: 'object',
       properties: {
-        op: {
-          type: 'string',
-          enum: ['read', 'console', 'network', 'screenshot', 'health', 'eval'],
-          description: '要执行的操作',
-        },
-        url: { type: 'string', description: 'read 用：要读的地址（默认当前页）' },
-        code: { type: 'string', description: 'eval 用：要执行的 JS' },
-        filter: { type: 'string', description: 'network 用：URL 子串过滤' },
-        limit: { type: 'number', description: '条数上限' },
+        method: { type: 'string', enum: BROWSER_METHODS, description: '要执行的方法' },
+        params: { type: 'object', additionalProperties: true, description: '该方法的参数（可选）' },
       },
-      required: ['op'],
+      required: ['method'],
     },
     output: {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
     },
-    execute: async (args) => callBrowser(String(args && args.op), args),
+    execute: async (args) => callBrowser(String(args && args.method), args && args.params),
   });
 
   log('已装载：' + SAY_PATH + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');

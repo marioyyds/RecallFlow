@@ -133,7 +133,7 @@ test('装载：注册输入路由 + WS 升级路由 + 浏览器能力工具，�
   assert.ok(tools.has('recallflow_browser'), '缺少浏览器能力工具');
   const tool = tools.get('recallflow_browser');
   assert.equal(tool.parameters.type, 'object');
-  assert.deepEqual(tool.parameters.required, ['op']);
+  assert.deepEqual(tool.parameters.required, ['method']);
   assert.equal(typeof tool.execute, 'function');
   assert.equal(typeof tool.output.render, 'function');
   // 输出必须能被渲染成模型可读内容
