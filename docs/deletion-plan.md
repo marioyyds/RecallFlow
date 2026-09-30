@@ -112,25 +112,34 @@
 **谁在用它**：DSH 的模型侧工具表（也就是我）。删掉后我只有 `recallflow_browser`。
 **验证**：DSH 启动后工具表里没有 `mcp__recallflow__*`，而 `recallflow_browser` 可用。
 
-**删掉之后 DSH 侧会失去什么、由什么接手**（逐项核过，2026-10-01；**两处有实际损失，别当成纯赚**）：
+**删掉之后 DSH 侧会失去什么、由什么接手**（逐项核过；**下表已于 2026-10-01 更新过一次**）：
 
-| 原 MCP 工具 | 新架构下的对应物 | 差异（核过代码，不是推测） |
+| 原 MCP 工具 | 新架构下的对应物 | 差异 |
 |---|---|---|
-| `browser_read` / `read_console` / `read_network` / `page_health` / `verify_change` / `get_element_source` / `get_picked_element` / `screenshot_capture` | `recallflow_browser({method, params})` | 同一个 `dispatch`（`lib/shared/bridge-methods.js`）。**但桥接在 dispatch 结果上还做了源位置重写**（`rewriteSourceUrls` / `normalizeElementSource` / `normalizePickedElement`，11 处调用**只在桥接的处理器里**）→ 插件返回**未重写**的原始结果 |
+| `browser_read` / `read_console` / `read_network` / `page_health` / `verify_change` / `get_element_source` / `get_picked_element` / `screenshot_capture` | `recallflow_browser({method, params})` | **能力一致**（见下方"曾经的缺口"）。同一个 `dispatch`，同一套结果加工（`lib/shared/tool-results.js`），插件与桥接是**字面意义上的同一份代码** |
 | `recallflow_session`（读交接包） | `recallflow_browser({ method: 'handoff_get' \| 'handoff_list' })` | **能力仍在**（两个方法都在插件的 `BROWSER_METHODS` 里）。差异：没有"没给 id 就列清单 + 提示话术"那层包装 |
-| `dev_session_get` / `dev_session_set` | **没有** | 不在共享 dispatch 里，也不在插件的枚举里；它们是桥接自己的本地状态 |
+| `dev_session_get` / `dev_session_set` | **没有** | 不在共享 dispatch 里，也不在插件的枚举里 |
 | `evidence_get` | **没有** | 桥接自己的证据归档 |
 
-也就是说：**DSH 侧会失去「元素 → 源码文件」的路径重写能力**（它依赖
-`dev_session_set` 写入的 projectRoot/devUrl，而那一层只在桥接里）。
-这正是本项目最核心的**前端调试**用途，所以第 5 步不是"顺手删掉"。
+**曾经的缺口（现已补齐，留作记录）**：最初盘这份表时，源位置重写
+（`rewriteSourceUrls` / `normalizeElementSource` / `normalizePickedElement` /
+`summarizePageHealth` / `evaluateTargets`）**11 处调用只在桥接的处理器里**，
+插件返回未加工的原始 JSON —— 也就是说删掉 MCP client 会让 DSH **静默失去
+「元素 → 源码文件」**，而那正是本项目最核心的前端调试用途。
 
-三条出路（按推荐顺序）：
-1. **把源位置重写下沉到共享的 `dispatch`**（`lib/shared/bridge-methods.js`）——
-   两条通道就都有这个能力，且只维护一份。这是唯一能让 DSH 与 opencode 行为一致的改法。
-2. 把 `dev_session_*` 与重写逻辑**移植进插件**。可行但要复制桥接的 `dev-paths.js` 与存储位置，
-   等于把"一份真相"变成两份。
-3. 保留 DSH 的 MCP client，只用它做调试类调用。**但这与"删掉中继"的目标相抵**。
+补齐的方式（按当初列的"出路 1"做的）：
+- `dev-paths` / `dev-session` / `page-health` / `verify-change` 全部移到 `lib/shared/`
+- 新建 `lib/shared/tool-results.js`：把 8 处**按方法各异**的加工抽成共享函数
+  （`shapeTextResult` / `shapeElementSourceResult` / `shapePickedElementResult` /
+  `shapePageHealthResult` / `shapeVerifyChangeResult` / `resolveTargets` / `applyToolResult` …）
+- 插件与桥接**都**改成调用它；游标仍留在各自进程里
+  （语义是"自**我**上次检查以来"，共享会让一方吃掉另一方的增量）
+- 桥接的 index.js 因此净减 **96 行**（926 → 830，实测 `git show 8c54ce1` 与当前文件）
+
+**因此第 5 步现在是干净的删除**：不再有"删了就静默少一个能力"的地方。
+唯一剩下的差别是 `dev_session_*` 与 `evidence_get` 没有对应物 ——
+它们本来就是桥接自己的本地状态与归档，不是页面能力。
+（要这两样时说明该走 7801，那是 opencode 的链路。）
 
 **关键确认**：交接（handoff）这条路**不依赖桥接的服务端缓冲** ——
 `recallflow_session` 实现里走的是 `callExtension('handoff_list' / 'handoff_get')`，
