@@ -20,7 +20,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { WebSocketServer } from 'ws';
 // 证据库也已共享化：DSH 插件的 browser_read 要归档并给出 snapshotHash/fetchedAt
 // （工具描述里承诺了这两个字段），不能让它们只在桥接里存在。
-import { archive, archiveImage, get, getByUrl, dir } from '../../../lib/shared/evidence-store.js';
+import { archiveImage, get, getByUrl, dir } from '../../../lib/shared/evidence-store.js';
 // panel-events.js（say/tool 事件的成形与三档截断）已按删除清单第 4 步移除：
 // 那是"两段对话同步"的产物。面板现在直接渲染 DSH 会话本身的事件（由 DSH 插件推送），
 // 不再需要桥接替谁"成形"事件。桥接只剩一件事：把工具调用转给扩展。
@@ -36,6 +36,7 @@ import {
   shapeElementSourceResult,
   shapePageHealthResult,
   shapePickedElementResult,
+  shapeBrowserReadResult,
   shapeTextResult,
   shapeVerifyChangeResult,
   toolCursorKey,
@@ -427,22 +428,14 @@ async function handleMcpHttp(req, res) {
 // ---------------- 工具实现 ----------------
 async function browserRead(args) {
   const url = String((args && args.url) || '').trim();
-  if (!/^https?:\/\//i.test(url)) throw new Error('browser_read 仅支持 http/https URL');
   const r = await callExtension('browser_read', {
     url,
     waitFor: args && args.waitFor,
     maxChars: args && args.maxChars,
   });
-  const rec = archive({ url: (r && r.url) || url, title: r && r.title, text: r && r.text, quotes: r && r.quotes });
-  return {
-    ok: true,
-    url: rec.url,
-    title: rec.title,
-    fetchedAt: rec.fetchedAt,
-    snapshotHash: rec.snapshotHash,
-    text: rec.text,
-    quotes: rec.quotes,
-  };
+  // 归档 + 成形在共享模块里（插件也用它，否则 DSH 侧拿不到 fetchedAt / snapshotHash，
+  // 而工具描述里承诺了这两个字段）。URL 校验也在那里 —— 一份实现胜过两处各写一遍。
+  return shapeBrowserReadResult(r, url);
 }
 
 // 截图：向扩展要一张图，归档后返回「文本元数据 + 可选图片块」。

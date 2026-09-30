@@ -18,12 +18,16 @@
 // （能转换时 file 变了、originalFile 保留原值；不能转换时原样返回 + 给出 hint）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   applyToolResult,
   cursorOverrideFrom,
   normalizeToolResult,
   resolveTargets,
+  shapeBrowserReadResult,
   shapeElementSourceResult,
   shapePageHealthResult,
   shapePickedElementResult,
@@ -31,6 +35,58 @@ import {
   shapeVerifyChangeResult,
   toolCursorKey,
 } from '../lib/shared/tool-results.js';
+
+/** 把证据库指到临时目录跑一段代码，跑完清理。 */
+function withTempEvidenceDir(fn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-ev-'));
+  const prev = process.env.RECALLFLOW_EVIDENCE_DIR;
+  process.env.RECALLFLOW_EVIDENCE_DIR = tmp;
+  try {
+    return fn(tmp);
+  } finally {
+    if (prev === undefined) delete process.env.RECALLFLOW_EVIDENCE_DIR;
+    else process.env.RECALLFLOW_EVIDENCE_DIR = prev;
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch (e) {}
+  }
+}
+
+test('shapeBrowserReadResult: 归档并给出 fetchedAt / snapshotHash（工具描述承诺的字段）', () => {
+  // 证据库的目录是**惰性求值**的，所以这里能在测试里指到临时目录 ——
+  // 改造之前 env 在 import 那一刻就固化了，这块逻辑根本没法测。
+  withTempEvidenceDir((tmp) => {
+    const rec = shapeBrowserReadResult(
+      { url: 'https://example.com/a', title: 'T', text: '你好世界', quotes: [{ x: 1 }] },
+      ''
+    );
+    assert.equal(rec.ok, true);
+    assert.equal(rec.url, 'https://example.com/a');
+    assert.ok(rec.fetchedAt, '★ 工具描述承诺了 fetchedAt');
+    assert.ok(rec.snapshotHash, '★ 工具描述承诺了 snapshotHash');
+    assert.equal(rec.text, '你好世界', '中文原样（归档不能损坏数据）');
+
+    // 真的落盘了 —— 归档的意义就是"原页之后变更/404 也能复核"
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, rec.snapshotHash + '.json'), 'utf8'));
+    assert.equal(onDisk.url, rec.url);
+    assert.equal(onDisk.text, '你好世界');
+
+    // 扩展没回 url 时用调用方给的兜底
+    assert.equal(shapeBrowserReadResult({ title: 't', text: 'x' }, 'https://example.com/b').url, 'https://example.com/b');
+
+    // 非 http(s) 一律拒绝（这道守卫原来只在桥接里，插件侧没有）
+    assert.throws(() => shapeBrowserReadResult({ url: 'file:///etc/passwd' }, ''), /仅支持 http\/https/);
+  });
+});
+
+test('applyToolResult: browser_read 也走归档成形（插件因此也有 fetchedAt/snapshotHash）', () => {
+  withTempEvidenceDir(() => {
+    const r = applyToolResult('browser_read', { title: 't', text: 'x' }, CTX, { fallbackUrl: 'https://e.com/' });
+    assert.ok(r.result.snapshotHash, '★ 插件与桥接拿到的是同一形状（否则工具描述是假的）');
+    assert.equal(r.result.url, 'https://e.com/');
+    assert.equal(r.cursor, undefined, 'browser_read 不牵扯游标');
+  });
+});
 
 const CTX = { projectRoot: 'D:/proj', devUrl: 'http://localhost:5173' };
 const DEV_URL = 'http://localhost:5173/src/App.tsx';
@@ -182,8 +238,11 @@ test('applyToolResult: 一站式分派 —— 无状态的直接加工，有状�
   const text = applyToolResult('read_console', { text: 'at ' + DEV_URL }, CTX);
   assert.equal(text.result.ok, true);
   assert.equal(text.cursor, undefined, '无状态方法不该牵扯游标');
-  const pass = applyToolResult('browser_read', { text: 'raw' }, CTX);
-  assert.deepEqual(pass.result, { text: 'raw' }, '不在清单里的方法原样返回（不做加工）');
+  const pass = applyToolResult('handoff_get', { record: { id: 'RF-1' } }, CTX);
+  assert.deepEqual(pass.result, { record: { id: 'RF-1' } }, '不在清单里的方法原样返回（不做加工）');
+  // 注意：browser_read **不是**透传 —— 它会归档并补 fetchedAt/snapshotHash（见上面那条测试）。
+  // 我 round 48 写这条时用的正是 browser_read，这一轮它改了行为，于是这条红了：
+  // 测试抓住了变更，我把它换成一个真正的透传方法。
 
   // 有状态：page_health —— 游标通过 onCursor 交回调用方，本模块不私自存
   let saved = null;

@@ -676,6 +676,8 @@ export function apply(ctx, config = {}) {
         limit: params.limit,
         targets,
         targetsFromArgs,
+        // browser_read 需要它来补 URL（扩展有时不回 url）
+        fallbackUrl: params.url,
       });
       return result;
     },
