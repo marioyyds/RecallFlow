@@ -38,6 +38,7 @@ export const inject = ['agents', 'tools', 'webServer'];
 const WS_PATH = '/recallflow/ws';
 const SAY_PATH = '/recallflow/say';
 const STATUS_PATH = '/recallflow/status';
+const PROBE_TOOL_PATH = '/recallflow/probe-tool';
 
 /** 工具调用等待浏览器回执的上限。 */
 const TOOL_TIMEOUT_MS = 30000;
@@ -424,6 +425,51 @@ export function apply(ctx, config = {}) {
         return;
       }
       sendJson(res, 200, statusSnapshot(), origin);
+    },
+  });
+
+  // --- 工具往返探针：让"DSH ↔ 扩展 ↔ 页面"这条链路可被外部验证 ----------------
+  // 动机：recallflow_browser 只能由模型调用。要确认这条路真的通，要么等模型调一次，
+  // 要么有一个受控入口 —— 后者更可靠，也让排查不必依赖"模型有没有调"。
+  // 只允许 BROWSER_METHODS 里的方法（都是读页面信息的那几个），不接受任意代码。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: PROBE_TOOL_PATH,
+    handler: async (req, res) => {
+      const origin = req.headers.origin;
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(origin));
+        res.end();
+        return;
+      }
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { ok: false, error: '只支持 POST' }, origin);
+        return;
+      }
+      let body = {};
+      try {
+        body = JSON.parse((await readBody(req)) || '{}');
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: '请求体不是 JSON：' + e.message }, origin);
+        return;
+      }
+      const method = String(body.method || 'page_health');
+      if (!BROWSER_METHODS.includes(method)) {
+        sendJson(
+          res,
+          400,
+          { ok: false, error: '不允许的方法：' + method + '（只允许 ' + BROWSER_METHODS.join('/') + '）' },
+          origin
+        );
+        return;
+      }
+      try {
+        const value = await callBrowser(method, body.params || {});
+        sendJson(res, 200, { ok: true, method, value }, origin);
+      } catch (err) {
+        // 浏览器侧没连接时会走到这里 —— 明确报出来，而不是静默超时
+        sendJson(res, 503, { ok: false, method, error: String((err && err.message) || err) }, origin);
+      }
     },
   });
 

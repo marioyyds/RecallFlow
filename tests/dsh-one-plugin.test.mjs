@@ -287,3 +287,31 @@ test('工具：浏览器未连接时明确失败，而不是静默挂起', async
   const { tools } = await loadPlugin();
   await assert.rejects(() => tools.get('recallflow_browser').execute({ op: 'read' }), /没有连接/);
 });
+
+test('工具往返探针：注册了入口、只允许清单内的方法、无连接时明确报 503', async () => {
+  const { routes } = await loadPlugin();
+  assert.ok(routes.has('/recallflow/probe-tool'), '应注册工具往返探针');
+
+  // 非清单内的方法必须被拒 —— 这是一个**可从外部调用**的入口，
+  // 不能让它变成任意能力通道（recallflow_browser 只能由模型调，而这个是给排查用的）。
+  const bad = fakeRes();
+  await routes.get('/recallflow/probe-tool').handler(
+    fakeReq({ method: 'POST', body: JSON.stringify({ method: 'rm -rf' }) }),
+    bad
+  );
+  assert.equal(bad.statusCode, 400, bad.text);
+  assert.match(bad.text, /不允许的方法/);
+
+  const wrong = fakeRes();
+  await routes.get('/recallflow/probe-tool').handler(fakeReq({ method: 'GET' }), wrong);
+  assert.equal(wrong.statusCode, 405, wrong.text);
+
+  // 合法方法但没有浏览器连接 → 503 + 明确原因（不是挂起到超时）
+  const noClient = fakeRes();
+  await routes.get('/recallflow/probe-tool').handler(
+    fakeReq({ method: 'POST', body: JSON.stringify({ method: 'page_health' }) }),
+    noClient
+  );
+  assert.equal(noClient.statusCode, 503, noClient.text);
+  assert.match(noClient.text, /没有连接/, noClient.text);
+});
