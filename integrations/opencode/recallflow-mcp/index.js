@@ -242,6 +242,12 @@ const httpServer = http.createServer((req, res) => {
       } catch (e) {}
       const ev = normalizeExternalEvent(payload);
       const transport = ev ? pushEvent(ev) : 'invalid';
+      // 排查用仪表：有了它才能区分「事件根本没到服务端」与「到了但下游没显示」——
+      // 这两种情况此前只能靠猜，而它们指向完全不同的修法。
+      log(
+        '[event] ' + transport + ' · ' +
+          (ev ? ev.kind + (ev.who ? '/' + ev.who : '') + ' · ' + String(ev.text || ev.tool || '').slice(0, 40) : 'invalid')
+      );
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: Boolean(ev), transport }));
     });
