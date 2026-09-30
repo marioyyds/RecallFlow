@@ -11,6 +11,9 @@
 
 export const EVENT_KINDS = Object.freeze(['tool', 'say']);
 export const MAX_EVENT_TEXT = 400;
+/** 说话人不同，容忍的长度不同（见 sayEvent 的说明）。 */
+export const MAX_SPEAK_TEXT = 2000;
+export const MAX_USER_TEXT = 1200;
 export const MAX_ARG_CHARS = 160;
 
 /** 把任意值压成单行、限长的可读文本（面板是窄条，长了会很难看）。 */
@@ -83,14 +86,21 @@ export function toolEndEvent(tool, ok, ms, error, now) {
 }
 
 export function sayEvent(text, level, now, who) {
-  const body = oneLine(text, MAX_EVENT_TEXT);
+  const speaker = who === 'user' ? 'user' : 'dsh';
+  // 按说话人分级，而不是一律 400 字：
+  // 400 对"工具在干什么"够用（面板是窄条），但助手的一句话往往几百字，
+  // 一律截到 400 会把回答变成残句 —— 用户实测就撞到「面板上只有半截」。
+  // 用户自述通常不长，给 1200；助手的成文回答给 2000
+  // （面板侧 serializeConversation 存 4000，装得下）。
+  const cap = speaker === 'user' ? MAX_USER_TEXT : MAX_SPEAK_TEXT;
+  const body = oneLine(text, cap);
   return {
     kind: 'say',
     text: body,
     level: level === 'warn' ? 'warn' : 'info',
     // who 区分"谁在说话"：用户在 DSH 里的提问 / DSH 自己的留言。
     // 面板据此换前缀，避免把用户的话显示成 agent 的话。
-    who: who === 'user' ? 'user' : 'dsh',
+    who: speaker,
     at: Number.isFinite(Number(now)) ? Number(now) : 0,
   };
 }

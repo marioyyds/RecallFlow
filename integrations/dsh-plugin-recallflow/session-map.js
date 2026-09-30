@@ -32,8 +32,36 @@ export function textFromBlocks(content) {
   return parts.join('\n\n').trim();
 }
 
-/** tool/call 的 arguments 是 JSON 字符串；解析失败就原样给出（不吞掉信息）。 */
-export function parseToolArguments(raw) {
+/**
+ * DSH 会把**系统注入的运行时上下文**也作为 `user/message` 投递
+ * （实测文本以 "Current runtime context. This snapshot supersedes…" 开头）。
+ * 不过滤的话，面板会把一大段系统文本显示成「👤 你在 DSH：…」—— 用户从没说过这句话。
+ *
+ * 判别依据来自 DSH 的类型声明（非猜测）：
+ *   dsh-agent-loop/lib/types/runtime-context.d.ts
+ *     MessageSourceMap 里注册了 'runtime-context': { kind: 'runtime-context' } & ContextFormed
+ *
+ * 刻意用**拒绝名单**而不是允许名单：漏判的代价是面板上多一段噪音，
+ * 误判的代价是**吞掉用户真正说过的话** —— 后者严重得多。
+ */
+export const INJECTED_SOURCE_KINDS = Object.freeze(['runtime-context']);
+const INJECTED_TEXT_PREFIXES = Object.freeze(['Current runtime context', 'This snapshot supersedes']);
+
+export function isInjectedUserMessage(msg) {
+  if (!msg || typeof msg !== 'object') return false;
+  const src = msg.source;
+  const kind = src && typeof src === 'object' ? String(src.kind || '') : '';
+  if (kind && INJECTED_SOURCE_KINDS.includes(kind)) return true;
+  const text = textFromBlocks(msg.content);
+  // 没有任何用户可见文本的 user 消息没有显示价值（纯工具回填等）
+  if (!text) return true;
+  for (const p of INJECTED_TEXT_PREFIXES) {
+    if (text.startsWith(p)) return true;
+  }
+  return false;
+}
+
+/** tool/call 的 arguments 是 JSON 字符串；解析失败就原样给出（不吞掉信息）。 */ export function parseToolArguments(raw) {
   if (raw && typeof raw === 'object') return raw;
   const s = String(raw == null ? '' : raw).trim();
   if (!s) return {};
@@ -77,6 +105,9 @@ export function createMapper(options = {}) {
       }
 
       if (type === 'user/message') {
+        // 系统注入的运行时上下文也走 user/message（见 isInjectedUserMessage）——
+        // 不过滤就会把一大段系统文本显示成「👤 你在 DSH：…」。
+        if (isInjectedUserMessage(d)) return null;
         const text = textFromBlocks(d.content);
         if (!text) return null;
         return { text, who: 'user', level: 'info' };

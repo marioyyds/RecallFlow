@@ -5,15 +5,72 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX } from '../integrations/dsh-plugin-recallflow/session-map.js';
+import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX, isInjectedUserMessage } from '../integrations/dsh-plugin-recallflow/session-map.js';
 import { shortSessionId } from '../integrations/dsh-plugin-recallflow/index.js';
-import { normalizeExternalEvent, isValidEvent } from '../integrations/opencode/recallflow-mcp/panel-events.js';
+import { normalizeExternalEvent, isValidEvent, sayEvent, MAX_SPEAK_TEXT, MAX_USER_TEXT } from '../integrations/opencode/recallflow-mcp/panel-events.js';
 
 test('shortSessionId: 剥掉 session- 前缀，否则用户只看到 "session-" 等于没有区分信息', () => {
   assert.equal(shortSessionId('session-723c8b32-4ab3-489f-9f53-80958d29c5a9'), '723c8b32');
   assert.equal(shortSessionId('abc123'), 'abc123');
   assert.equal(shortSessionId(''), '');
   assert.equal(shortSessionId(null), '');
+});
+
+// -------------------------------------------- 系统注入的运行时上下文要被挡住
+// 用户实测：面板上出现「👤 你在 DSH：Current runtime context. This snapshot s…」，
+// 而他从没说过这句话 —— DSH 把系统注入的上下文也当成 user/message 投递了。
+
+test('isInjectedUserMessage: source.kind=runtime-context 要挡住（依据 DSH 的 MessageSourceMap）', () => {
+  assert.equal(
+    isInjectedUserMessage({ source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '随便什么' }] }),
+    true
+  );
+});
+
+test('isInjectedUserMessage: 文本前缀兜底（形状变了也不至于漏）', () => {
+  const mk = (t) => ({ content: [{ type: 'text', text: t }] });
+  assert.equal(isInjectedUserMessage(mk('Current runtime context. This snapshot supersedes earlier…')), true);
+  assert.equal(isInjectedUserMessage(mk('This snapshot supersedes earlier runtime-context snapshots.')), true);
+});
+
+test('isInjectedUserMessage: 用户真说的话绝不能被误判（拒绝名单的意义）', () => {
+  const mk = (t, src) => ({ source: src, content: [{ type: 'text', text: t }] });
+  assert.equal(isInjectedUserMessage(mk('你好')), false);
+  // 来源是 user 时，即使文本很长也要放行
+  assert.equal(isInjectedUserMessage(mk('很长的一段话'.repeat(500), { kind: 'user' })), false);
+  // 形状不认识时宁可显示（漏判只是噪音，误判是吞掉用户的话）
+  assert.equal(isInjectedUserMessage(mk('你好', { kind: 'unknown-future-kind' })), false);
+});
+
+test('mapper: 注入的运行时上下文不产出事件，真用户消息照常产出', () => {
+  const m = createMapper();
+  assert.equal(
+    m.map({ type: 'user/message', data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: 'Current runtime context…' }] } }),
+    null
+  );
+  const real = m.map({ type: 'user/message', data: { content: [{ type: 'text', text: '你好' }] } });
+  assert.deepEqual(real, { text: '你好', who: 'user', level: 'info' });
+});
+
+// ------------------------------------------- 助手的长回答不该被截成残句
+// 用户实测：面板上助手的话在 400 字处被砍断。
+
+test('sayEvent: 是按说话人分级的，助手比 400 宽、用户居中', () => {
+  const long = '字'.repeat(3000);
+  const dshEv = sayEvent(long, 'info', 1, 'dsh');
+  const userEv = sayEvent(long, 'info', 1, 'user');
+  assert.ok(dshEv.text.length > 1500, '助手回答应保留到 ' + MAX_SPEAK_TEXT + ' 附近，实际 ' + dshEv.text.length);
+  assert.ok(userEv.text.length > 800, '用户自述应保留到 ' + MAX_USER_TEXT + ' 附近，实际 ' + userEv.text.length);
+  assert.ok(dshEv.text.length > userEv.text.length, '助手额度应大于用户额度');
+  // 仍然必须限长（面板是窄条，且存储有上限）
+  assert.ok(dshEv.text.length <= MAX_SPEAK_TEXT + 1, '不得超上限');
+  assert.ok(userEv.text.length <= MAX_USER_TEXT + 1, '不得超上限');
+  assert.equal(sayEvent(null, 'info', 1, 'dsh').text, '');
+});
+
+test('sayEvent: 未知 who 归为 dsh（不能因为字段脏就丢内容）', () => {
+  assert.equal(sayEvent('x', 'info', 1, 'bogus').who, 'dsh');
+  assert.equal(sayEvent('x', 'info', 1, undefined).who, 'dsh');
 });
 
 // ---------------------------------------------------------------- 文本提取

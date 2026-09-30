@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {
   EVENT_KINDS,
   MAX_EVENT_TEXT,
+  MAX_SPEAK_TEXT,
   MAX_ARG_CHARS,
   oneLine,
   summarizeToolArgs,
@@ -92,8 +93,11 @@ test('sayEvent: 限长并规范 level', () => {
   assert.equal(s.level, 'warn');
   assert.equal(sayEvent('x', 'nonsense').level, 'info');
   assert.ok(isValidEvent(s));
-  const long = sayEvent('y'.repeat(999));
-  assert.ok(long.text.length <= MAX_EVENT_TEXT + 1);
+  // 上限按说话人分级（专项用例在 dsh-plugin.test.mjs）：
+  // 这里只钉住"仍然必须限长"这条不变式，并明确旧的 400 一刀切已经不再是行为。
+  const long = sayEvent('y'.repeat(5000));
+  assert.ok(long.text.length <= MAX_SPEAK_TEXT + 1, '不得超过助手上限');
+  assert.ok(long.text.length > MAX_EVENT_TEXT, '不应再被旧的 400 一刀切截断');
 });
 
 test('isValidEvent: 拒绝不成形的事件（投递前最后一道校验）', () => {
