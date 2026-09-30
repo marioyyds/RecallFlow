@@ -106,6 +106,17 @@ check('source.kind 满足 DSH 的准入形状（非空字符串、且不是已�
   assert.notEqual(kind, retired, '不得使用已退役的 plugin 包装语法（那恰好是被改写/拒绝的那种）');
 });
 
+check('载荷是**完整**消息（含 id、已冻结）—— inject 不会替你铸 id', () => {
+  const m = injected[0];
+  // 依据（读实现）：dsh-agent-loop 的 inject(input) 直接 send → inbox.splice，原样入队；
+  // 而 MessageBase 要求 id 必填、createMessage 才负责铸 id + structuredClone + deepFreeze。
+  // 少了 id 会静默失败（被本插件的 catch 吞掉），表现与"面板没对话"一模一样。
+  assert.ok(typeof m.id === 'string' && m.id.length > 0, 'id 必须存在且非空，实际 ' + JSON.stringify(m.id));
+  assert.ok(Object.isFrozen(m), '顶层应冻结（对齐 createMessage 的 deepFreeze 行为）');
+  assert.ok(Object.isFrozen(m.content), 'content 应冻结');
+  assert.ok(Object.isFrozen(m.source), 'source 应冻结');
+});
+
 check('注入内容带标记、带双向对话、写明是另一个 agent', () => {
   const text = injected[0].content[0].text;
   assert.ok(text.includes(PANEL_CONTEXT_MARKER), '缺标记');
@@ -115,6 +126,16 @@ check('注入内容带标记、带双向对话、写明是另一个 agent', () =
 
 check('确按 limit 请求面板回合（不无界拉取）', () => {
   assert.ok(requestedUrl.startsWith('/panel-turns?limit=' + PANEL_CONTEXT_TURNS), '请求 URL 不对：' + requestedUrl);
+});
+
+// --- 第二次创建：id 必须不同 --------------------------------------------------------
+const injectedSecond = [];
+ctx.fire('agent/created', { agent: { session: { id: 's2' }, inject: (m) => injectedSecond.push(m) }, source: 'fresh' });
+await new Promise((r) => setTimeout(r, 600));
+
+check('每次注入铸新 id（否则会话里两条注入会被当成同一条消息）', () => {
+  assert.equal(injectedSecond.length, 1, '第二次也应注入，实际 ' + injectedSecond.length);
+  assert.notEqual(injected[0].id, injectedSecond[0].id, '两次铸出的 id 相同');
 });
 
 // --- 桥接不可达时：安静失败，绝不抛 -------------------------------------------------

@@ -62,6 +62,30 @@ and refuses retired plugin wrappers."**
 
 约束只有一条：`kind` 必须是非空字符串（`assertV4MessageSources` 在会话装载时校验）。
 
+### `inject` 不会替你铸消息 id —— 必须传**完整**消息
+
+这是同一个"静默失败"家族的第二个陷阱，读实现才看得出来：
+
+```js
+// dsh-agent-loop/lib/index.js
+inject(input) { this.send(input, "next-step", false); }              // 原样透传
+send(message, target, wakeup) { … this.inbox.splice(…, [message]); }  // 原样入队
+```
+
+而 `dsh-llm/lib/types/message.d.ts`：
+
+```ts
+interface MessageBase { readonly id: MessageId; … }        // id 必填
+type NewMessage = Omit<…, 'id'>;                           // 「新消息」形状省略 id
+function createMessage(input) { … id: brandString(randomUUID()) }   // 官方在此铸 id + deepFreeze
+```
+
+**`inject` 并不调用 `createMessage`** —— 只给 `{ role, content, source }` 的话消息缺少稳定身份，
+下游抛错后被本插件的 `catch` 吞掉，**表现与「面板本来就没对话」完全一样**。
+
+因此本插件自己铸 id（`recallflow-panel-<uuid>`；`MessageId` 运行时就是字符串）并逐层冻结，
+对齐 `createMessage` 的行为。每次注入铸新 id —— 否则两次注入会被当成同一条消息。
+
 模型需要更多时，用 `panel_history` 工具（默认最近 50 条，上限 200）。
 
 ## 挂载点（都来自 DSH 的类型声明，非猜测）

@@ -12,10 +12,23 @@
 //   2. 跳过 mcp__* 工具（已由 MCP 服务端上报，避免面板画两遍）。
 //   3. 只显示用户可见的文本（忽略 reasoning 块）。
 
-import { createMapper, buildPanelContextMessage, PANEL_CONTEXT_SOURCE_KIND } from './session-map.js';
+import { createMapper, buildPanelContextPayload, PANEL_CONTEXT_SOURCE_KIND } from './session-map.js';
 
 /** 注入上下文时最多带面板的多少条回合（多了会挤占会话上下文预算）。 */
 export const PANEL_CONTEXT_TURNS = 20;
+
+/**
+ * 铸一个消息 id。
+ * DSH 用 `brandString(randomUUID())`（MessageId 在运行时就是字符串），
+ * 我们只要保证唯一即可 —— 但**必须**有，见 session-map.js 里 buildPanelContextPayload 的说明。
+ */
+function newMessageId() {
+  try {
+    return 'recallflow-panel-' + crypto.randomUUID();
+  } catch (e) {
+    return 'recallflow-panel-' + Date.now() + '-' + Math.floor(Math.random() * 1e9);
+  }
+}
 
 export const name = 'recallflow-panel-sync';
 export const PLUGIN_VERSION = '0.1.0';
@@ -120,10 +133,10 @@ export function apply(ctx, rawConfig) {
   // 它的文档写明「不出动 driver，在最近的步边界被认领」，因此**不会打断运行中的循环**；
   // 自行注入会话事件则可能破坏 agent loop 的状态机，拿用户正在用的 DSH 冒险。
   // 只在创建时注入一次：行为可预期，且不会在会话中途改变上下文。
-  ctx.on('agent/created', (payload) => {
+  ctx.on('agent/created', (ev) => {
     void (async () => {
       try {
-        const agent = payload && payload.agent;
+        const agent = ev && ev.agent;
         if (!agent || typeof agent.inject !== 'function') return;
         if (!wants(agent.session)) return;
         const res = await fetch(
@@ -132,15 +145,14 @@ export function apply(ctx, rawConfig) {
         );
         if (!res.ok) return;
         const data = await res.json();
-        const text = buildPanelContextMessage(data && data.turns);
-        if (!text) return;
-        // role:'user' + 自定义 source.kind：DSH 的运行时上下文正是这么做的
-        // （runtime-context 也用 user/message + 自定义 kind）。
-        agent.inject({
-          role: 'user',
-          content: [{ type: 'text', text }],
-          source: { kind: PANEL_CONTEXT_SOURCE_KIND },
+        // 变量名不能叫 payload：外层事件参数曾叫 payload，同作用域内再 const 同名会从作用域
+        // 开头就遮蔽它，导致上面读 `ev` 之前先撞 TDZ（ReferenceError 被 catch 吞成静默）。
+        const injected = buildPanelContextPayload(data && data.turns, newMessageId(), {
+          max: PANEL_CONTEXT_TURNS,
         });
+        if (!injected) return;
+        // 传**完整**消息（含 id）：inject 会原样放进 inbox，不替我们铸 id。见 session-map.js。
+        agent.inject(injected);
       } catch (e) {
         // 注入失败绝不影响会话创建
       }

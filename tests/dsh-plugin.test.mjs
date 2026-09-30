@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX, isInjectedUserMessage, buildPanelContextMessage, PANEL_CONTEXT_MARKER, PANEL_CONTEXT_SOURCE_KIND } from '../integrations/dsh-plugin-recallflow/session-map.js';
+import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX, isInjectedUserMessage, buildPanelContextMessage, buildPanelContextPayload, PANEL_CONTEXT_MARKER, PANEL_CONTEXT_SOURCE_KIND } from '../integrations/dsh-plugin-recallflow/session-map.js';
 import { shortSessionId } from '../integrations/dsh-plugin-recallflow/index.js';
 import { normalizeExternalEvent, isValidEvent, sayEvent, MAX_SPEAK_TEXT, MAX_USER_TEXT } from '../integrations/opencode/recallflow-mcp/panel-events.js';
 
@@ -80,8 +80,40 @@ test('buildPanelContextMessage: 只取最近 max 条，单条也限长（不能�
   assert.ok(one.length < 600, '总长应受控，实际 ' + one.length);
 });
 
-test('注入源不会被回推回面板（否则面板与 DSH 之间形成回环）', () => {
-  const injected = { source: { kind: 'recallflow-panel' }, content: [{ type: 'text', text: buildPanelContextMessage([{ role: 'user', text: 'hi' }]) }] };
+// --------------------------- 注入载荷必须是**完整**消息（含 id 且冻结）
+
+test('buildPanelContextPayload: 含 id、role、text 块、自定义 source.kind，且深度冻结', () => {
+  const p = buildPanelContextPayload([{ role: 'user', text: '面板一句' }], 'id-1');
+  assert.ok(p, '应产出载荷');
+  // id 必填：inject(input) 直接 send → inbox.splice 原样入队，不会替你调 createMessage 铸 id。
+  // 少了它会在下游抛错，再被插件的 catch 吞掉 —— 表现与"面板没对话"完全一样。
+  assert.equal(p.id, 'id-1');
+  assert.equal(p.role, 'user');
+  assert.equal(p.content.length, 1);
+  assert.equal(p.content[0].type, 'text');
+  assert.equal(p.source.kind, PANEL_CONTEXT_SOURCE_KIND);
+  // 对齐 createMessage 的 deepFreeze：DSH 的消息是不可变快照
+  assert.ok(Object.isFrozen(p), '顶层应冻结');
+  assert.ok(Object.isFrozen(p.content), 'content 应冻结');
+  assert.ok(Object.isFrozen(p.content[0]), 'text 块应冻结');
+  assert.ok(Object.isFrozen(p.source), 'source 应冻结');
+});
+
+test('buildPanelContextPayload: 没有可注入内容时返回 null（不产出空消息）', () => {
+  assert.equal(buildPanelContextPayload([], 'id-2'), null);
+  assert.equal(buildPanelContextPayload(null, 'id-3'), null);
+  assert.equal(buildPanelContextPayload([{ role: 'user', text: '' }], 'id-4'), null);
+});
+
+test('buildPanelContextPayload: id 原样透传（铸 id 是调用方的职责，这里不做隐式生成）', () => {
+  const a = buildPanelContextPayload([{ role: 'user', text: 'x' }], 'same');
+  const b = buildPanelContextPayload([{ role: 'user', text: 'x' }], 'same');
+  assert.equal(a.id, b.id, '同 id 传入应得到同 id（说明本函数不自行生成）');
+  const c = buildPanelContextPayload([{ role: 'user', text: 'x' }], 'other');
+  assert.notEqual(a.id, c.id);
+});
+
+test('注入源不会被回推回面板（否则面板与 DSH 之间形成回环）', () => {  const injected = { source: { kind: 'recallflow-panel' }, content: [{ type: 'text', text: buildPanelContextMessage([{ role: 'user', text: 'hi' }]) }] };
   assert.equal(isInjectedUserMessage(injected), true);
   const m = createMapper();
   assert.equal(m.map({ type: 'user/message', data: injected }), null, '注入的上下文不应再产出面板事件');

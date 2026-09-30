@@ -98,6 +98,34 @@ export function buildPanelContextMessage(turns, options = {}) {
   );
 }
 
+/**
+ * 拼出**完整的**注入载荷（纯函数：id 由调用方传入，便于测试）。
+ *
+ * 为什么必须自己补齐 `id` 并冻结 —— 这不是形式主义，是读实现得出的结论：
+ *   dsh-agent-loop/lib/index.js
+ *     inject(input) { this.send(input, "next-step", false); }   // 原样透传
+ *     send(message, target, wakeup) { … this.inbox.splice(…, [message]); }  // 原样入队
+ * 即 `inject` **不会**帮你调用 `createMessage`。而：
+ *   dsh-llm/lib/types/message.d.ts
+ *     interface MessageBase { readonly id: MessageId; … }        // id 必填
+ *     createMessage(input) { … id: brandString(randomUUID()) }   // 官方在此铸 id
+ *     …并 structuredClone + deepFreeze
+ * 所以只给 { role, content, source } 的话，消息**缺少稳定身份**，
+ * 下游抛错后被本插件的 catch 吞掉 —— 表现与"面板本来没对话"完全一样，无法察觉。
+ *
+ * `MessageId = Branded<'MessageId'>` 在运行时就是字符串，因此这里铸一个唯一字符串即可。
+ */
+export function buildPanelContextPayload(turns, id, options = {}) {
+  const text = buildPanelContextMessage(turns, options);
+  if (!text) return null;
+  return Object.freeze({
+    id: String(id || ''),
+    role: 'user',
+    content: Object.freeze([Object.freeze({ type: 'text', text })]),
+    source: Object.freeze({ kind: PANEL_CONTEXT_SOURCE_KIND }),
+  });
+}
+
 /** tool/call 的 arguments 是 JSON 字符串；解析失败就原样给出（不吞掉信息）。 */ export function parseToolArguments(raw) {
   if (raw && typeof raw === 'object') return raw;
   const s = String(raw == null ? '' : raw).trim();
