@@ -26,6 +26,58 @@ DSH（一条会话，唯一真相）
 **7801 桥接仍然存在，但不再是"中继"** —— 它是 **opencode 的页面能力出口**，不能删。
 详见 `docs/deletion-plan.md` 的保留清单。
 
+## 一条消息的完整路径（含字段形状）
+
+这张表是这次重构里**最贵的东西** —— 它是靠"读 DSH 自己的类型声明 + 实测"攒出来的，
+而重写时最容易丢的正是它（本会话丢了 12 次，每次的症状都是"什么都没报错，只是有东西不显示"）。
+
+**① 面板 → DSH**
+
+```
+面板 run(instruction)
+  → conversation.push({ role:'user', content, id }) + appendUserTurn()   ← 必须立刻画（回声只标记不追画）
+  → sendPanelTurn(turn)  → 后台 panel:turn → sayToDsh(text) → POST /recallflow/say
+  → 响应 {ok, rpcId, sessionId} → 把 rpcId 回填到**那个 turn 对象**上（顺序不能反）
+插件 agent.send({ id, role:'user', content:[{type:'text',text}], source:{kind:'user', rpcId} },
+                 'next-turn', true)                                      ← kind 必须是 'user'；第三参 true 才唤醒
+```
+
+**② DSH → 面板**（插件 `projectEvent` 的字段形状，全部来自 DSH 的类型声明）
+
+| 事件 | 文本/名字在哪个字段 | 投影成 |
+|---|---|---|
+| `user/message` | `data.content` | `{type,role,sourceKind,rpcId,text}` |
+| `assistant/message` | **`data.message.content`**（不是 `data.content`） | `{type,role,text}` |
+| `tool/call` | 名字在 **`data.name`**；参数在 **`data.arguments`**（**JSON 字符串**，要解析） | `{type,tool,args}` |
+| `tool/result` | `data.message.toolCallId` + `data.error`；**只在失败时投影** | `{type,tool,failed,error}` |
+
+```
+WS 广播 {kind:'session-event', sessionId, event}
+  → 扩展 handleDshMessage → forwardSessionEvent
+  → chrome.tabs.sendMessage({ type:'rfSessionEvent', frame })
+  → 面板 renderSessionEvent → sessionEntryFromFrame（纯函数，有单测）：
+      用户消息：先按 rpcId 精确匹配本地回合 → mark-local（只标记）
+      助手消息 / 工具行 → append（⚙ 名字（k=v） / ✗ 调用 X 失败：原因）
+      系统注入上下文（sourceKind 或文本前缀）→ 跳过
+```
+
+**③ 落盘**：先按同一套规则裁剪（工具行 ≤60、外部条目 ≤200）再截断，
+并**必须带上** `kind` / `rpcId` / `echoedFromSession` / `id`
+（不带 = 重载后限流与精确去重静默失效；这是踩过的坑）。
+
+### 这条路径的每一段分别被什么验证过（如实标注）
+
+| 段 | 验证方式 |
+|---|---|
+| ① 送进会话 | **实测**：`POST /say` 返回 `{ok:true,sessionId}`，那句话随后以**真用户消息**出现在会话里 |
+| ② 事件形状 | 单测（用从 DSH 类型声明恢复的真实形状 —— 不是猜的） |
+| ② 广播 | **实测**：`/status` 计数 12 进 12 出、零丢零错；且面板里出现过我工具调用的参数 |
+| ② 面板渲染逻辑 | 单测（`lib/shared/session-view.js` 全部纯函数） |
+| ② 面板 **DOM 观感** | ❌ **未实测**（需要重载扩展/刷新页面） |
+| ③ 落盘 | 单测（序列化契约） |
+| **端到端（一句话 → 会话 → 回复回到面板）** | ⏳ **未完成** —— 缺"重启 DSH + 重载扩展/刷新页面"这两步 |
+
+
 ## 改完代码要重启什么（这张表能省掉大量排查）
 
 | 改动位置 | 需要做什么 | 为什么 |
