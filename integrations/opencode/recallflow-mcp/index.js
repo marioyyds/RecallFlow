@@ -256,6 +256,9 @@ const httpServer = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/panel-turns') {
     const limitRaw = Number(url.searchParams.get('limit'));
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
+    // 仪表：插件的注入是**模型侧**的行为，界面上看不见 —— 而它每次注入前都会来读这个端点。
+    // 因此这行日志就是"注入确实发生了"的直接证据（在你启动桥接的终端里能看到）。
+    log('[panel-turns] GET limit=' + limit + ' → 返回 ' + Math.min(limit, panelTurns.length) + ' 条（累计 ' + panelTurns.length + '）');
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, total: panelTurns.length, turns: panelTurns.slice(-limit) }));
     return;
