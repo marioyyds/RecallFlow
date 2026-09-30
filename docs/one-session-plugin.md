@@ -154,6 +154,10 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 
 实测结果（`node scripts/verify-one-plugin-e2e.mjs 3099`，11/11，退出码 0）：
 
+> **这是 SSE 那一版的输出，保留下来是为了记录"当时是怎么验证的"。**
+> 那个脚本现在是 **14 项、走 WebSocket**（见 `integrations/dsh-plugin-recallflow-one/README.md`），
+> 所以你现在重跑会看到不同的输出 —— 不是这段错了，是它记录的是被推翻的那一版。
+
 ```
 ✓ GET /recallflow/stream 返回 200（未被鉴权栅栏拦下）
 ✓ SSE 头正确（text/event-stream + no-cache）
