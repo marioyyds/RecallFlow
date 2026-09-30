@@ -82,14 +82,47 @@ export function toolEndEvent(tool, ok, ms, error, now) {
   };
 }
 
-export function sayEvent(text, level, now) {
+export function sayEvent(text, level, now, who) {
   const body = oneLine(text, MAX_EVENT_TEXT);
   return {
     kind: 'say',
     text: body,
     level: level === 'warn' ? 'warn' : 'info',
+    // who 区分"谁在说话"：用户在 DSH 里的提问 / DSH 自己的留言。
+    // 面板据此换前缀，避免把用户的话显示成 agent 的话。
+    who: who === 'user' ? 'user' : 'dsh',
     at: Number.isFinite(Number(now)) ? Number(now) : 0,
   };
+}
+
+/**
+ * 归一化**外部提交**的事件（DSH 的 hooks 通过 POST /event 送进来）。
+ *
+ * 为什么要有外部入口：MCP 是客户端发起的，服务端只看得到 RecallFlow 自己的 MCP 工具调用；
+ * 而 DSH 的 hooks 能看到**每一个**工具调用（bash / 读写文件 / 其它 MCP server），
+ * 以及用户提交的提示词。两者合起来才是"这次会话到底发生了什么"。
+ *
+ * 接受几种宽松形态（hook 脚本来自 shell，容错优先）：
+ *   { text, level?, who? }               → say
+ *   { kind:'say', text, level?, who? }   → say
+ *   { kind:'tool', tool, phase?, args? } → tool
+ * @returns 成形的事件；无法识别时返回 null（调用方据此返回 ok:false，不静默吞掉）
+ */
+export function normalizeExternalEvent(payload, now) {
+  if (!payload || typeof payload !== 'object') return null;
+  const t = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  if (payload.kind === 'tool' || (payload.tool && !payload.text)) {
+    const tool = String(payload.tool || '').trim();
+    if (!tool) return null;
+    const phase = payload.phase === 'end' ? 'end' : 'start';
+    if (phase === 'end') {
+      return Object.assign(toolEndEvent(tool, payload.ok !== false, payload.ms, payload.error, t), { source: 'external' });
+    }
+    return Object.assign(toolStartEvent(tool, payload.args || {}, t), { source: 'external' });
+  }
+  const text = String(payload.text || '').trim();
+  if (!text) return null;
+  return Object.assign(sayEvent(text, payload.level, t, payload.who), { source: 'external' });
 }
 
 /** 事件是否成形可用（投递前最后一道校验，避免把垃圾推给面板）。 */
@@ -100,6 +133,8 @@ export function isValidEvent(ev) {
   if (ev.kind === 'tool') return typeof ev.tool === 'string' && ev.tool.length > 0;
   return false;
 }
+// 注意：显示文案（前缀、图标）**不在这里** —— 那是面板的职责。
+// 扩展侧不应依赖 integrations/ 目录，跨包共享只放"形状与取值域"，不放展示细节。
 
 /**
  * 事件队列的裁剪规则：只保留最近 max 条。

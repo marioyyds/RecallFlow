@@ -81,6 +81,30 @@ scripts/verify-mcp-shot-success.mjs
 已知未覆盖：面板实际渲染（DOM 路径无法在 node 中测），以及真实扩展的转发
 （需要重载扩展）。
 
+## scripts/verify-dsh-hook.mjs
+
+验证「DSH hook → 面板事件」的真实链路（隔离端口 7802，不需要重启 DSH）。
+
+链路：DSH 触发 hook → `integrations/dsh-hooks/recallflow-panel-hook.mjs` 读 stdin →
+POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码、跨包，只能在集成层面验证。
+
+验证内容：
+- 四种载荷（UserPromptSubmit / PreToolUse Bash / PreToolUse mcp__* / Stop）全部以退出码 0 结束
+  （hook **绝不能**阻塞 DSH，失败也必须静默成功退出）
+- 只产出 2 条事件：`mcp__*` 被跳过（避免与 MCP 服务端的上报重复）、Stop 无内容不产出
+- **中文原样无损**
+- `who=user` 与 `source=external` 正确
+
+用法：
+
+  $env:RECALLFLOW_MCP_PORT='7802'
+  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
+  node scripts/verify-dsh-hook.mjs
+
+> 为什么脚本用 node 的 fetch 而不是 PowerShell 的 Invoke-RestMethod：
+> 后者会把返回的 UTF-8 中文显示成乱码（按 Latin-1 解码），容易误判成数据损坏。
+> 编码问题必须区分「工具显示错」与「数据真坏」，否则会去修一个不存在的问题。
+
 ## scripts/mutation-check.mjs
 
 验证 `tests/page-debug-hook.test.mjs` 的断言**真的有牙齿**。

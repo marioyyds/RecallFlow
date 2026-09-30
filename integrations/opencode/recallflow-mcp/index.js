@@ -21,7 +21,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
-import { toolStartEvent, toolEndEvent, sayEvent, isValidEvent, trimEventQueue } from './panel-events.js';
+import { toolStartEvent, toolEndEvent, sayEvent, isValidEvent, trimEventQueue, normalizeExternalEvent } from './panel-events.js';
 import {
   normalizeElementSource,
   rewriteSourceUrls,
@@ -223,6 +223,27 @@ const httpServer = http.createServer((req, res) => {
       } catch (e) {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
+    });
+    return;
+  }
+  // 外部提交面板事件：DSH 的 hooks 经此把「会话里发生了什么」推给页面面板。
+  // 为什么需要：MCP 是客户端发起的，本服务端只看得到自己的 MCP 工具调用；
+  // 而 DSH 的 hooks 能看到每一个工具调用（bash / 读写文件 / 其它 MCP server）与用户提示词。
+  if (req.method === 'POST' && url.pathname === '/event') {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+      if (body.length > 64 * 1024) req.destroy();
+    });
+    req.on('end', () => {
+      let payload = null;
+      try {
+        payload = JSON.parse(body || '{}');
+      } catch (e) {}
+      const ev = normalizeExternalEvent(payload);
+      const transport = ev ? pushEvent(ev) : 'invalid';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: Boolean(ev), transport }));
     });
     return;
   }
