@@ -10,10 +10,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  cursorOverrideFrom,
   normalizeToolResult,
   shapeElementSourceResult,
+  shapePageHealthResult,
   shapePickedElementResult,
   shapeTextResult,
+  shapeVerifyChangeResult,
 } from '../lib/shared/tool-results.js';
 
 const CTX = { projectRoot: 'D:/proj', devUrl: 'http://localhost:5173' };
@@ -81,6 +84,67 @@ test('shapePickedElementResult: 走共享的归一化；null 退化成 {found:fa
   const r = shapePickedElementResult({ selector: '.a', source: { file: DEV_URL, line: 2 } }, CTX);
   assert.equal(typeof r, 'object');
   assert.equal(r.selector, '.a', '归一化后仍保留选择器');
+});
+
+test('cursorOverrideFrom: 未给 / all / 具体值三态', () => {
+  assert.equal(cursorOverrideFrom({}), undefined, '没给就不能当成空串（那是"从头读"的意思）');
+  assert.equal(cursorOverrideFrom({ cursor: 'all' }), '', 'all = 从头读');
+  assert.equal(cursorOverrideFrom({ cursor: 12345 }), '12345', '数字也归一成字符串');
+  assert.equal(cursorOverrideFrom(null), undefined);
+});
+
+const HEALTH_RAW = {
+  found: true,
+  tabId: 7,
+  pageUrl: 'http://x/',
+  pageTitle: 'T',
+  console: [{ level: 'error', text: 'boom', at: 100 }],
+  network: [],
+};
+
+test('shapePageHealthResult: 无标签页 → 明确错误，且不丢调用方的游标', () => {
+  const r = shapePageHealthResult({ found: false }, CTX, { cursor: 'c1' });
+  assert.equal(r.result.ok, false);
+  assert.match(r.result.error, /未找到活动标签页/);
+  assert.equal(r.cursor, 'c1', '失败时不能把调用方的游标清掉');
+});
+
+test('shapePageHealthResult: 返回 { result, cursor }，游标交给调用方推进', () => {
+  const r = shapePageHealthResult(HEALTH_RAW, CTX, {});
+  assert.equal(r.result.ok, true);
+  assert.equal(r.result.tabId, 7);
+  assert.ok(Array.isArray(r.result.errors), '结果里应带 errors 数组');
+  assert.equal(typeof r.cursor, 'string');
+  // 游标语义：带上它再查一次，同一批错误应被视为"已消费"
+  const again = shapePageHealthResult(HEALTH_RAW, CTX, { cursor: r.cursor });
+  assert.equal(again.result.errors.length, 0, '游标已推进 → 同一批不该重复报');
+});
+
+test('shapeVerifyChangeResult: 断言求值 + 增量新问题 + targetsSource', () => {
+  const targets = [{ selector: '#a', expect: { text: '好的' } }];
+  const raw = {
+    found: true,
+    tabId: 1,
+    pageUrl: 'u',
+    pageTitle: 'p',
+    targets: [{ selector: '#a', found: true, text: '好的', visible: true }],
+    console: [],
+    network: [],
+  };
+  const r = shapeVerifyChangeResult(raw, CTX, targets, { targetsFromArgs: true });
+  assert.equal(r.result.ok, true);
+  assert.equal(r.result.targetsSource, 'call-args');
+  assert.equal(r.result.passed, 1);
+  assert.equal(r.result.failed, 0);
+  assert.ok(r.result.newIssues, '应带增量新问题');
+  // targets 来自 dev-session 时标注不同（调用方通过 targetsFromArgs 告知）
+  const fromSession = shapeVerifyChangeResult(raw, CTX, targets, { targetsFromArgs: false });
+  assert.equal(fromSession.result.targetsSource, 'dev-session');
+  // 无标签页：出错但游标保留
+  const noTab = shapeVerifyChangeResult({ found: false }, CTX, targets, { cursor: 'k' });
+  assert.equal(noTab.result.ok, false);
+  assert.match(noTab.result.error, /未找到活动标签页/);
+  assert.equal(noTab.cursor, 'k');
 });
 
 test('normalizeToolResult: 只认无状态的方法，其余返回 null（交给调用方）', () => {
