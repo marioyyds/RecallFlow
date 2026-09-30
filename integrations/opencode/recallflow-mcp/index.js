@@ -134,6 +134,43 @@ function flushPollWaiters() {
  * 两边都做就会重复投递 —— 扩展会把同一次工具调用画两遍。
  * 返回实际走的通道，供调用方如实告知（不做「已送达」的过度承诺）。
  */
+/**
+ * 允许浏览器页面跨源**只读**本服务 —— 但只放行**本机来源**。
+ *
+ * 为什么需要：DSH 的 GUI 跑在 127.0.0.1:3080，与本服务（7801）**不同端口＝跨源**。
+ * 我为 DSH 写的客户端 UI 插件在浏览器里跑，直接 fetch 这里会被同源策略挡住；
+ * 不这么做就得去啃 DSH 的 RPC 机制，成本高得多。
+ *
+ * 为什么只放行本机来源（而不是 `*`）：
+ * 鉴权门那里原本有一条刻意设计 ——「从不放行预检」本身就是防线：网页脚本无法在
+ * 无预检的情况下携带自定义头，所以恶意页面即使能访问本机端口也拿不到鉴权。
+ * 而 BRIDGE_TOKEN 是**仓库里的公开常量**，一旦对任意来源放行预检，任何网页都能
+ * 带着它来读你的面板对话（面板内容可能含页面正文）。收窄到本机来源即可堵住远程页面：
+ * 远程页面的 Origin 是它自己的域名，无法伪装成本机。本机页面本来就在用户机器上。
+ *
+ * 仍然要求 token（纵深防御），且只给**只读**端点加；写端一律不放行。
+ */
+const CORS_ORIGIN_RE = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+
+function allowedOrigin(req) {
+  const o = String((req.headers && req.headers.origin) || '');
+  return CORS_ORIGIN_RE.test(o) ? o : '';
+}
+
+function applyCors(req, res) {
+  const origin = allowedOrigin(req);
+  if (!origin) return false;
+  res.setHeader('Access-Control-Allow-Origin', origin); // 回显具体来源，而不是 *
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'X-RecallFlow-Token, Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Max-Age', '600');
+  return true;
+}
+
+/** 允许跨源预检的路径（必须与下面 applyCors 的实际调用点保持一致）。 */
+const CORS_READ_PATHS = new Set(['/health', '/panel-turns']);
+
 function pushEvent(ev) {
   if (!isValidEvent(ev)) return 'invalid';
   // 可观测性：这几轮排查里最费时的就是"看不出来到底哪一段没动"。
@@ -171,10 +208,15 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
   const url = new URL(req.url, 'http://127.0.0.1');
-  if (!OPEN_PATHS.has(url.pathname)) {
+  // 跨源预检必须**绕过鉴权**：浏览器在预检请求里**不会带**自定义头（token），
+  // 若照常鉴权就必然 401 —— 实测踩到过，那会让浏览器侧的 fetch 永远失败，
+  // 且表现为一个与鉴权无关的 CORS 错误，极难定位。
+  // 只为「只读路径 + 本机来源」放行，其余维持原样。
+  const isCorsPreflight = req.method === 'OPTIONS' && CORS_READ_PATHS.has(url.pathname) && Boolean(allowedOrigin(req));
+  if (!OPEN_PATHS.has(url.pathname) && !isCorsPreflight) {
     // 接受自定义头或标准 Bearer 头。要求「自定义头」本身就是一道防线：
-    // 网页脚本无法在无 CORS 预检（我们从不放行预检）的情况下携带自定义头，
-    // 因此恶意页面即使能 POST 到本机端口，也拿不到鉴权。
+    // 远程网页脚本无法在无预检放行的情况下携带自定义头，因此即使能访问本机端口
+    // 也拿不到鉴权。（本机来源的只读预检是唯一例外，见 applyCors 的说明。）
     const token = bearerToken(req) || req.headers['x-recallflow-token'] || url.searchParams.get('token') || '';
     if (token !== BRIDGE_TOKEN) {
       res.writeHead(401, { 'Content-Type': 'text/plain' });
@@ -192,7 +234,17 @@ const httpServer = http.createServer((req, res) => {
     handleMcpHttp(req, res);
     return;
   }
+  // 跨源预检：带自定义头（X-RecallFlow-Token）的跨源 GET 会先发 OPTIONS。
+  // 只对只读路径应答，其它路径维持原样（不扩大暴露面）。
+  // 与鉴权门里的 isCorsPreflight 必须同条件 —— 否则会出现"鉴权放行了但这里不应答"或反之。
+  if (req.method === 'OPTIONS' && CORS_READ_PATHS.has(url.pathname) && Boolean(allowedOrigin(req))) {
+    applyCors(req, res);
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (req.method === 'GET' && url.pathname === '/health') {
+    applyCors(req, res);
     // 一次调用回答「两个方向各自通不通」：
     //   ws / queued         → 扩展侧（正向链路的最后一段）
     //   events.total/lastAt → 插件是否还在推（正向链路的第一段）
@@ -254,6 +306,7 @@ const httpServer = http.createServer((req, res) => {
   // 反向通道的读取端：插件在会话创建时拉取面板最近对话，注入 DSH 上下文。
   // 与 POST 同一路径、不同方法 —— 写与读成对，避免两处各自演化的形状漂移。
   if (req.method === 'GET' && url.pathname === '/panel-turns') {
+    applyCors(req, res);
     const limitRaw = Number(url.searchParams.get('limit'));
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
     // 仪表：插件的注入是**模型侧**的行为，界面上看不见 —— 而它每次注入前都会来读这个端点。
