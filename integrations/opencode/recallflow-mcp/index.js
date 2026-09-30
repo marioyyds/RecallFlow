@@ -21,6 +21,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
+import { toolStartEvent, toolEndEvent, sayEvent, isValidEvent, trimEventQueue } from './panel-events.js';
 import {
   normalizeElementSource,
   rewriteSourceUrls,
@@ -69,6 +70,10 @@ let bridgeBindError = '';
 const pending = new Map(); // id -> { resolve, reject, timer }
 const queue = []; // 等待扩展处理的请求
 const pollWaiters = []; // 挂起的长轮询响应
+// 服务端 → 扩展 的面板事件（DSH 的工具动作与主动留言）。
+// 用途：用户在页面里能看到「外部 agent 正在对这个页面做什么」，而不是一片空白。
+const eventQueue = [];
+const EVENT_QUEUE_MAX = 200;
 let seq = 0;
 
 function nextId() {
@@ -116,10 +121,37 @@ function resolvePending(id, payload) {
 }
 
 function flushPollWaiters() {
-  while (pollWaiters.length && queue.length) {
+  while (pollWaiters.length && (queue.length || eventQueue.length)) {
     const waiter = pollWaiters.shift();
-    waiter(queue.splice(0, queue.length));
+    waiter(queue.splice(0, queue.length), eventQueue.splice(0, eventQueue.length));
   }
+}
+
+/**
+ * 投递一个面板事件（服务端 → 扩展）。
+ *
+ * 与请求路径同样的取舍：WS 通就直发**且不入队**，否则入队等长轮询取走。
+ * 两边都做就会重复投递 —— 扩展会把同一次工具调用画两遍。
+ * 返回实际走的通道，供调用方如实告知（不做「已送达」的过度承诺）。
+ */
+function pushEvent(ev) {
+  if (!isValidEvent(ev)) return 'invalid';
+  if (extSocket && extSocket.readyState === 1) {
+    try {
+      extSocket.send(JSON.stringify({ event: ev }));
+      return 'ws';
+    } catch (e) {
+      /* 落到入队 */
+    }
+  }
+  eventQueue.push(ev);
+  if (eventQueue.length > EVENT_QUEUE_MAX) {
+    const kept = trimEventQueue(eventQueue, EVENT_QUEUE_MAX);
+    eventQueue.length = 0;
+    eventQueue.push(...kept);
+  }
+  flushPollWaiters();
+  return 'queue';
 }
 
 // ---------------- HTTP 服务（/health, /poll, /result）+ WebSocket ----------------
@@ -159,21 +191,21 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'GET' && url.pathname === '/poll') {
-    if (queue.length) {
+    if (queue.length || eventQueue.length) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests: queue.splice(0, queue.length) }));
+      res.end(JSON.stringify({ requests: queue.splice(0, queue.length), events: eventQueue.splice(0, eventQueue.length) }));
       return;
     }
     const timer = setTimeout(() => {
       const i = pollWaiters.indexOf(waiter);
       if (i >= 0) pollWaiters.splice(i, 1);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests: [] }));
+      res.end(JSON.stringify({ requests: [], events: [] }));
     }, POLL_HOLD_MS);
-    const waiter = (requests) => {
+    const waiter = (requests, events) => {
       clearTimeout(timer);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests }));
+      res.end(JSON.stringify({ requests, events: events || [] }));
     };
     pollWaiters.push(waiter);
     return;
@@ -380,6 +412,31 @@ async function pageScreenshot(args) {
     content.push({ type: 'image', data: img.data, mimeType: img.mimeType || 'image/jpeg' });
   }
   return { content };
+}
+
+/**
+ * 把一个页面里的 RecallFlow 面板当作「外部 agent 的出话口」。
+ *
+ * 为什么需要它：MCP 是客户端发起的，服务端**看不到 DSH 的对话文字**，
+ * 因此 DSH 想"在这个页面上说句话"，只能合作式地主动调用本工具。
+ * 被动镜像全部对话需要 DSH 侧插件（见 docs/plan-b-dsh-plugin.md），不在当前范围。
+ */
+function panelPost(args) {
+  const text = String((args && args.text) || '').trim();
+  if (!text) return { ok: false, error: 'text 为空，没有可投递的内容' };
+  const level = args && args.level === 'warn' ? 'warn' : 'info';
+  const ev = sayEvent(text, level, Date.now());
+  const transport = pushEvent(ev);
+  return {
+    ok: transport !== 'invalid',
+    transport: transport === 'ws' ? 'websocket' : transport === 'queue' ? 'poll-queue' : transport,
+    deliveredTo: 'browser-page-panel',
+    note:
+      transport === 'invalid'
+        ? '事件未通过校验'
+        : '已投递到桥接通道；若浏览器侧扩展未加载、或该标签页没有面板，事件会在队列里等待（上限 200 条）。' +
+          '本工具**不返回**用户是否真的看到了这段话。',
+  };
 }
 
 async function evidenceGet(args) {
@@ -618,6 +675,22 @@ const TOOLS = [
     },
   },
   {
+    name: 'panel_post',
+    description:
+      '把一段话显示到用户浏览器页面里的 RecallFlow 面板上（外部 agent 的出话口）。' +
+      '用于让用户在他正看着的页面上直接看到你的说明、结论或警告，而不必切回对话框。' +
+      '注意：MCP 是客户端发起的，服务端看不到你的对话，因此只有你主动调用本工具时用户才会在页面上看到文字；' +
+      '本工具也不返回用户是否真的看到了。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '要显示在面板上的文本（会折叠空白并截断到 400 字）。' },
+        level: { type: 'string', enum: ['info', 'warn'], description: '默认 info；warn 会用警示色显示。' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'evidence_get',
     description:
       '按 snapshotHash 或 URL 取回已归档的证据快照，用于复核某条引用。网页即使已变更/404，归档内容仍可取回。',
@@ -816,12 +889,20 @@ function createMcpServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
     const args = request.params.arguments || {};
+    const t0 = Date.now();
+    // 把「外部 agent 正在对这个页面做什么」投给页面里的面板。
+    // MCP 是客户端发起的，服务端看不见 DSH 的对话文字，但**看得见每一次工具调用** ——
+    // 这就是当前架构下能同步的那一半（另一半见 panel-events.js 顶部说明）。
+    if (name !== 'panel_post') pushEvent(toolStartEvent(name, args, t0));
     try {
       let result;
       if (name === 'browser_read') result = await browserRead(args);
       else if (name === 'evidence_get') result = await evidenceGet(args);
-      else if (name === 'page_screenshot') return await pageScreenshot(args); // 返回 image 内容块，不走通用包装
-      else if (name === 'read_console') result = await readConsole(args);
+      else if (name === 'page_screenshot') {
+        const shot = await pageScreenshot(args); // 返回 image 内容块，不走通用包装
+        pushEvent(toolEndEvent(name, true, Date.now() - t0, '', Date.now()));
+        return shot;
+      } else if (name === 'read_console') result = await readConsole(args);
       else if (name === 'read_network') result = await readNetwork(args);
       else if (name === 'get_element_source') result = await getElementSource(args);
       else if (name === 'page_health') result = await pageHealth(args);
@@ -830,9 +911,14 @@ function createMcpServer() {
       else if (name === 'get_picked_element') result = await getPickedElement();
       else if (name === 'dev_session_get') result = readDevSession();
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
+      else if (name === 'panel_post') result = panelPost(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
+      if (name !== 'panel_post') pushEvent(toolEndEvent(name, true, Date.now() - t0, '', Date.now()));
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
+      if (name !== 'panel_post') {
+        pushEvent(toolEndEvent(name, false, Date.now() - t0, e, Date.now()));
+      }
       return { content: [{ type: 'text', text: String((e && e.message) || e) }], isError: true };
     }
   });

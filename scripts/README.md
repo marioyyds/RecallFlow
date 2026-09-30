@@ -54,6 +54,33 @@ scripts/verify-mcp-shot-success.mjs
 
 已知未覆盖：真实扩展的 CDP 截图本身（screenshot_capture 的 relay 实现）需要重载扩展才能验证。
 
+## scripts/verify-panel-events.mjs
+
+验证「面板事件通道」的端到端：外部 agent（DSH）在浏览器页面里能看到它在做什么。
+
+为什么需要：这条链路跨越三个包（MCP server 成形事件 → 桥接投递 → 扩展转发 → 面板渲染），
+任一端改名都只会在运行时表现为「面板上什么都没有」，而没有任何静态检查能发现。
+
+验证内容（在隔离端口 7802 上，不触碰用户的常驻实例与扩展）：
+- `panel_post` 已登记，且投递走 `poll-queue`（隔离实例没有扩展连着 WS）
+- 留言事件成形且 level 正确
+- 真实的工具调用产生 start/end 事件，参数摘要挑中白名单字段
+- `panel_post` 不自我播报（否则用户会看到"我要说话了"这件事本身被播报一遍）
+
+用法（PowerShell）：
+
+  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
+  $env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-events"
+  node integrations/opencode/recallflow-mcp/index.js --http   # 后台起实例
+  node scripts/verify-panel-events.mjs
+
+退出码非零表示未通过。脚本刻意用 `process.exitCode` 而不是 `process.exit()`：
+后者会在 undici 的 socket 收尾时撞上 Windows 上的 libuv 断言（uv_async.c:94），
+把「验证通过」变成崩溃退出码 0xC0000409。
+
+已知未覆盖：面板实际渲染（DOM 路径无法在 node 中测），以及真实扩展的转发
+（需要重载扩展）。
+
 ## scripts/mutation-check.mjs
 
 验证 `tests/page-debug-hook.test.mjs` 的断言**真的有牙齿**。

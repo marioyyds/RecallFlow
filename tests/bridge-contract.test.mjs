@@ -71,7 +71,36 @@ test('截图链路两端对齐（relay 实现 + MCP 工具 + 归档函数都存�
   assert.ok(/async function screenshotCapture\(/.test(relaySource), 'relay 应实现 screenshotCapture');
   assert.ok(/name: 'page_screenshot'/.test(mcpSource), 'MCP 应暴露 page_screenshot 工具');
   assert.ok(/async function pageScreenshot\(/.test(mcpSource), 'MCP 应实现 pageScreenshot');
-  assert.ok(/name === 'page_screenshot'\)\s*return await pageScreenshot/.test(mcpSource), 'page_screenshot 必须在通用包装前单独分支（否则图片会被 JSON 化）');
+  // 断言要抓的是**语义**：page_screenshot 的结果必须直接返回，
+  // 不能掉进「JSON.stringify(result)」那条通用包装 —— 否则图片会变成一坨文本而静默失效。
+  // （早先这里用单行 return 的正则，为发事件改成多行块后就误报了；定长窗口不会因换行/缩进而失效。）
+  const shotAt = mcpSource.indexOf("else if (name === 'page_screenshot')");
+  assert.ok(shotAt >= 0, '应存在 page_screenshot 的独立分支');
+  const shotWindow = mcpSource.slice(shotAt, shotAt + 300);
+  assert.ok(/\breturn\b/.test(shotWindow), 'page_screenshot 分支必须直接 return：' + shotWindow.slice(0, 160));
+  assert.ok(
+    !/JSON\.stringify\(/.test(shotWindow),
+    'page_screenshot 分支不得把结果 JSON 化（图片必须是 image 内容块）：' + shotWindow.slice(0, 160)
+  );
   const store = fs.readFileSync(path.join(ROOT, 'integrations/opencode/recallflow-mcp/evidence-store.js'), 'utf8');
   assert.ok(/export function archiveImage\(/.test(store), 'evidence-store 应提供 archiveImage');
+});
+
+test('面板事件链路两端对齐（服务端成形 + 扩展转发 + 面板渲染）', () => {
+  // 这条链路跨越三个包，任一端改名都只会在运行时表现为"面板上什么都没有"。
+  const events = fs.readFileSync(path.join(ROOT, 'integrations/opencode/recallflow-mcp/panel-events.js'), 'utf8');
+  assert.ok(/export function toolStartEvent\(/.test(events), 'panel-events 应提供 toolStartEvent');
+  assert.ok(/export function sayEvent\(/.test(events), 'panel-events 应提供 sayEvent');
+  assert.ok(/pushEvent\(/.test(mcpSource), 'MCP server 应投递事件');
+  assert.ok(/events: eventQueue\.splice/.test(mcpSource), '长轮询返回体必须带 events（WS 未连通时的唯一通道）');
+  assert.ok(/name === 'panel_post'/.test(mcpSource), 'MCP 应暴露 panel_post（外部 agent 的出话口）');
+
+  const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
+  assert.ok(/forwardBridgeEvent\(msg\.event\)/.test(relay), 'relay 应处理 WS 推来的事件');
+  assert.ok(/data\.events/.test(relay), 'relay 应从长轮询返回体里读事件');
+  assert.ok(/type: 'rfBridgeEvent'/.test(relay), 'relay 应把事件转发给标签页');
+
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  assert.ok(/msg\.type === 'rfBridgeEvent'/.test(chat), '面板应处理 rfBridgeEvent');
+  assert.ok(/function renderBridgeEvent\(/.test(chat), '面板应实现 renderBridgeEvent');
 });

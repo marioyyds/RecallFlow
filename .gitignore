@@ -1,0 +1,10 @@
+# 依赖与产物
+node_modules/
+
+# DSH 运行时的附件暂存目录（不是本项目的产物，但会出现在 git status 里）
+.dsh-im/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.log
