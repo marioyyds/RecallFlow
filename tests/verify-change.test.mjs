@@ -1,5 +1,13 @@
 // verify-change 单元测试：断言语义与失败信息。
 // 断言语义最容易写错，尤其「元素不存在」与「count:0」的区别，这里逐条钉死。
+//
+// **state 的形状是核对过的**（不是编的）：checkTarget 读
+//   found / count / text / value / box / styles / selector / tag / visible
+// 而真实产出方（lib/page/commands.js 的 readElementState）给的是
+//   { selector, tag, visible, text, box:{x,y,w,h}, value?, styles? }
+// 加上调用方补的 found / count。两边的字段名逐个对过，一致。
+// （教训：tests/tool-results.test.mjs 里我曾给 get_picked_element 编过一个形状，
+//   那条测试能过却什么都没钉住。所以这类"输入从哪来"要落成注释。）
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
