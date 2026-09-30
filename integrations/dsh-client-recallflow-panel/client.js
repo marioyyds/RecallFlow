@@ -94,6 +94,12 @@
         }
       }
 
+      // **在模块加载时就启动轮询**，而不是等第一个卡片挂载。
+      // 原因：卡片挂在每轮末尾，而挂载才启动轮询的话，首批数据一定晚于那次挂载 ——
+      // 于是新装好的插件要等到**下一轮**才显示内容（我最初就是这样，也只能这样测）。
+      // 提前到页面加载时开始，第一次轮次挂载时数据通常已经就绪，卡片立刻可见。
+      ensurePolling();
+
       function newTurns() {
         return latest.filter(function (t) {
           return Number(t && t.at ? t.at : 0) > shownUpTo;
@@ -121,7 +127,7 @@
         }, 0)[1];
         React.useEffect(function () {
           listeners.add(force);
-          ensurePolling();
+          // 轮询已在模块加载时启动（见 ensurePolling 的调用点）；这里只订阅更新。
           return function () {
             listeners.delete(force);
           };

@@ -53,8 +53,13 @@ function makeFakeReact() {
 
 /**
  * 模拟一次「轮次末尾挂载」：渲染一次，然后等异步 fetch 落地。
- * 真实时序是：turnTail 在每轮末尾挂载一次 → 首轮挂载时数据可能还没到（返回 null）
- * → 轮询把数据拿到后，**下一轮**挂载时才会出卡片。所以这里按两次挂载来测。
+ *
+ * 出厂行为（每一条都实测过）：
+ *   · 轮询在**模块加载时**就启动（不再等第一个卡片挂载），因此真实页面上
+ *     第一次轮次挂载时数据通常已就绪，卡片立刻可见；
+ *   · 但测试是在 import 之后**立刻**调用组件的，此时首个 fetch 多半还没回来，
+ *     所以这里仍按「先等一轮数据、再渲染」的时序断言 —— 测的是去重语义，
+ *     不依赖网络快慢。
  */
 async function renderTurn(component) {
   const out = component({});
@@ -206,6 +211,14 @@ test('桥接返回非 2xx 时同样静默（例如远程来源被 CORS 挡住、
   const { component } = captureComponent(plugin);
   assert.equal(await renderTurn(component), null);
   assert.equal(component({}), null);
+});
+
+test('轮询在**模块加载时**就启动，不等第一个卡片挂载（否则卡片必然迟到一轮）', async () => {
+  intervalCalls.length = 0;
+  await loadPlugin({ fetchImpl: bridgeOk([{ role: 'user', text: 'x', at: 1 }]) });
+  // 注意：此处**还没有**调用任何组件。若轮询仍挂在组件 effect 里，这里会是 0。
+  assert.ok(intervalCalls.length >= 1, '模块加载后应立即开始轮询，实际 interval 调用数 ' + intervalCalls.length);
+  assert.equal(intervalCalls[0], 4000, '轮询间隔应为 4 秒，实际 ' + intervalCalls[0]);
 });
 
 test('装载时在控制台留一行（否则"没加载"与"加载了但没数据"外部无法区分）', async () => {
