@@ -163,6 +163,16 @@ export function apply(ctx, config = {}) {
   const sessions = new Map();
   let currentSessionId = '';
 
+  // 会话事件的计数：分辨"事件没来"与"事件来了但处理失败"（见下方 session/event 处理的注释）
+  const stats = {
+    eventsSeen: 0,
+    eventsBroadcast: 0,
+    eventsDropped: 0,
+    eventsErrors: 0,
+    lastEventType: '',
+    lastEventError: '',
+  };
+
   function pickSession(preferred) {
     if (preferred && sessions.has(preferred)) return sessions.get(preferred);
     if (currentSessionId && sessions.has(currentSessionId)) return sessions.get(currentSessionId);
@@ -215,11 +225,19 @@ export function apply(ctx, config = {}) {
       ok: true,
       wsPath: WS_PATH,
       sayPath: SAY_PATH,
+      probeToolPath: PROBE_TOOL_PATH,
       wsReady: !!wss,
       clients: [...clients].filter((ws) => ws.readyState === 1).length,
       sessions: [...sessions.keys()],
       currentSessionId,
       pendingTools: pendingTools.size,
+      // 会话事件的三项计数：用来分辨"事件没来"与"事件来了但处理失败"
+      eventsSeen: stats.eventsSeen,
+      eventsBroadcast: stats.eventsBroadcast,
+      eventsDropped: stats.eventsDropped,
+      eventsErrors: stats.eventsErrors,
+      lastEventType: stats.lastEventType,
+      lastEventError: stats.lastEventError,
     };
   }
 
@@ -286,14 +304,33 @@ export function apply(ctx, config = {}) {
   }
 
   ctx.on('session/event', (session, ev) => {
-    const sid = sessionIdOf(session);
-    if (sid) {
-      const entry = sessions.get(sid);
-      if (entry) entry.lastAt = Date.now();
-      currentSessionId = sid;
+    // 为什么这里要自己数、自己兜错：
+    // 我用 watch-session-events.mjs 观察新通道时，12 秒内只收到 hello 与 pong、
+    // **一条 session-event 都没有** —— 而当时我自己的回合正是活动的。
+    // 那说明这个处理函数要么没被调用、要么中途抛错被外层吞掉（Cordis 的事件分发会吞）。
+    // 光靠"外面看不到帧"无法区分这两种情况，所以这里把三件事都记下来并暴露到 /status：
+    // 进来了多少条、广播出去多少条、抛错多少次（附带最后一次的事件类型与错误）。
+    stats.eventsSeen++;
+    stats.lastEventType = ev && ev.type ? String(ev.type) : '(无 type)';
+    try {
+      const sid = sessionIdOf(session);
+      if (sid) {
+        const entry = sessions.get(sid);
+        if (entry) entry.lastAt = Date.now();
+        currentSessionId = sid;
+      }
+      const projected = projectEvent(ev);
+      if (projected) {
+        broadcast({ kind: 'session-event', sessionId: sid, event: projected });
+        stats.eventsBroadcast++;
+      } else {
+        stats.eventsDropped++;
+      }
+    } catch (e) {
+      stats.eventsErrors++;
+      stats.lastEventError = String((e && e.message) || e);
+      log('session/event 处理失败（不该发生，已计数）：' + stats.lastEventError);
     }
-    const projected = projectEvent(ev);
-    if (projected) broadcast({ kind: 'session-event', sessionId: sid, event: projected });
   });
 
   ctx.on('agent/created', (payload) => {
