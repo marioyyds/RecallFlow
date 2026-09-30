@@ -134,7 +134,18 @@
           // 带上当时缓存里有几条 —— 这能区分"组件挂载了但没数据"与"组件根本没挂载"。
           note('卡片组件已挂载（缓存面板数据 ' + latest.length + ' 条）');
         }
-        // 只订阅「有新数据」的通知；真正的刷新由模块级轮询驱动。
+        // 快照放进 state，这样**数据到达后可以在同一轮内出现**。
+        //
+        // 这里修的是一个实测出来的时序缺陷：组件挂载发生在页面初始渲染时，
+        // 而轮询刚启动、fetch 还没回来 —— 若快照只在挂载时用 useState 惰性初值算一次，
+        // 这一轮就永远不显示（控制台实测：「卡片组件已挂载（缓存面板数据 0 条）」
+        // 「首次计算展示内容：新回合 0 条」）。改为订阅更新后重算。
+        var setSnapRef = React.useState(function () {
+          return newTurns().slice(-MAX_ROWS);
+        });
+        var snap = setSnapRef[0];
+        var setSnap = setSnapRef[1];
+
         var force = React.useReducer(function (x) {
           return x + 1;
         }, 0)[1];
@@ -146,22 +157,37 @@
           };
         }, []);
 
-        // 关键：在**挂载时拍一次快照**并把进度推进，
-        // 这样同一批新内容只会出现在它到达的那一轮里，后续轮次自然返回 null。
-        // （若在 render 里推进进度，会引入渲染期副作用，StrictMode 下还会重复触发。）
-        var snap = React.useState(function () {
-          var fresh = newTurns();
-          if (fresh.length) {
-            shownUpTo = fresh.reduce(function (m, t) {
+        React.useEffect(
+          function () {
+            var onData = function () {
+              var fresh = newTurns();
+              if (!fresh.length) return;
+              if (!PanelTail.__snapLogged) {
+                PanelTail.__snapLogged = true;
+                note('数据到达后重算：新回合 ' + fresh.length + ' 条');
+              }
+              setSnap(fresh.slice(-MAX_ROWS));
+            };
+            listeners.add(onData);
+            return function () {
+              listeners.delete(onData);
+            };
+          },
+          [setSnap]
+        );
+
+        // 进度标记在**卡片真正展示之后**才推进（放在 effect 里，避免渲染期副作用）。
+        // 之所以不在算出快照时就推进：那样一旦重渲染就会把自己藏掉（闪烁）。
+        // 之所以不放在卸载时推进：DSH 的对话会保留历史轮次，卸载时机不可靠。
+        React.useEffect(
+          function () {
+            if (!snap.length) return;
+            shownUpTo = snap.reduce(function (m, t) {
               return Math.max(m, Number(t.at || 0));
             }, shownUpTo);
-          }
-          if (!PanelTail.__snapLogged) {
-            PanelTail.__snapLogged = true;
-            note('首次计算展示内容：新回合 ' + fresh.length + ' 条');
-          }
-          return fresh.slice(-MAX_ROWS);
-        })[0];
+          },
+          [snap]
+        );
 
         if (!snap.length) return null;
 
