@@ -4,7 +4,7 @@ import { getAISettings } from './lib/shared/settings.js';
 import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
-import { startMcpRelay, postPanelTurn } from './lib/bridge/relay.js';
+import { startMcpRelay, sayToDsh } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
@@ -146,21 +146,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
-  // 面板对话 → DSH（反向通道）。此前只有 DSH→面板，面板自己的对话进不了 DSH，
-  // 只能靠用户手动导出、或点交接芯片拿 RF id 再让 AI 去读。
-  // 必须经后台转发：桥接无 CORS 头，内容脚本直连会被同源策略挡住。
+  // 用户在面板里说的一句话 → 送进 DSH 的这条会话（新架构的输入通道）。
+  // 必须经后台转发：内容脚本所在网页不是 127.0.0.1，直连会被同源策略挡住。
+  //
+  // 只转发 role 为 user 的：面板助手自己的输出不再推过去。
+  // 新架构下回复本就来自这条会话，而把助手输出当成用户输入灌进去，
+  // 才是真正的"冒充用户消息"。
   if (msg && msg.type === 'panel:turn') {
-    const text = String(msg.text || '').slice(0, 4000);
-    if (text) {
-      Promise.resolve(
-        postPanelTurn({
-          role: msg.role === 'user' ? 'user' : 'panel',
-          text,
-          pageUrl: String(msg.pageUrl || ''),
-          pageTitle: String(msg.pageTitle || ''),
-          at: Date.now(),
-        })
-      ).catch(() => {});
+    if (msg.role === 'user') {
+      const text = String(msg.text || '').slice(0, 4000);
+      if (text) Promise.resolve(sayToDsh(text)).catch(() => {});
     }
     sendResponse({ ok: true });
     return false;

@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { postPanelTurn } from '../lib/bridge/relay.js';
+import { postPanelTurn, sayToDsh } from '../lib/bridge/relay.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -90,4 +90,72 @@ test('发送端的 URL 路径与 server 的端点路径一致（改名会静默 
   const relaySrc = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
   assert.match(relaySrc, /RELAY_HOST = '127\.0\.0\.1:7801'/, 'relay 的 host 应仍是硬编码的 127.0.0.1:7801');
   assert.equal(new URL(calls[0].url).host, '127.0.0.1:7801');
+});
+
+// ===================== 新架构的输入通道（sayToDsh） =====================
+
+test('sayToDsh: 请求形状与插件端点一致（URL/method/只有 text/不带 token）', async () => {
+  const { result, calls } = await withStub(null, () => sayToDsh('你好'));
+  assert.equal(result, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://127.0.0.1:3080/recallflow/say');
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+  assert.equal(calls[0].init.headers['X-RecallFlow-Token'], undefined, '新通道不带 token（插件按来源白名单放行）');
+  const body = JSON.parse(calls[0].init.body);
+  assert.deepEqual(Object.keys(body), ['text'], '请求体只应有 text');
+  assert.equal(body.text, '你好', '中文不能在这里被破坏');
+});
+
+test('sayToDsh: 空白文本不发请求；不可达/非 2xx 返回 false 且不抛', async () => {
+  for (const bad of ['', '   ', '\n', null, undefined, 42]) {
+    const { result, calls } = await withStub(null, () => sayToDsh(bad));
+    assert.equal(result, false, '非法输入应返回 false：' + JSON.stringify(bad));
+    assert.equal(calls.length, 0, '非法输入不应发请求：' + JSON.stringify(bad));
+  }
+  assert.equal(
+    await withStub(() => {
+      throw new Error('ECONNREFUSED');
+    }, () => sayToDsh('x')).then((r) => r.result),
+    false
+  );
+  assert.equal(await withStub(() => ({ ok: false }), () => sayToDsh('x')).then((r) => r.result), false);
+});
+
+test('sayToDsh: 发送端路径与插件注册的路径逐字一致（改名会静默 404）', async () => {
+  const { calls } = await withStub(null, () => sayToDsh('x'));
+  const sentPath = new URL(calls[0].url).pathname;
+  const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  assert.ok(pluginSrc.includes("const SAY_PATH = '" + sentPath + "'"), '插件应注册同一个路径：' + sentPath);
+  assert.ok(/path:\s*SAY_PATH/.test(pluginSrc), '插件应把 SAY_PATH 用在路由注册上');
+});
+
+// ===================== 并存：两条通道都必须存在 =====================
+// 这条是**防回归**用的，来自一次真实事故：我曾把扩展的桥接连接"换成"指向 DSH，
+// 于是 opencode 的页面工具静默失效（7801 桥接不只服务 DSH）。迁移不等于替换 ——
+// 在确认某个组件只有一个消费者之前不要换掉它。
+test('两条通道并存：7801（MCP 工具调用，服务 opencode）与 3080（DSH 会话）都在', () => {
+  const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
+  // 桥接那条：连接、长轮询、派发、上报，一个都不能少
+  assert.match(relay, /const RELAY_HOST = '127\.0\.0\.1:7801'/, '桥接通道的 host 不能被改掉');
+  assert.match(relay, /const RELAY_WS = 'ws:\/\/' \+ RELAY_HOST \+ '\/\?token='/, '桥接 WS 连接必须保留');
+  assert.match(relay, /async function httpLoop\(\)/, '桥接长轮询必须保留（WS 断开时的兜底）');
+  assert.match(relay, /function forwardBridgeEvent\(ev\)/, '桥接事件转发必须保留（旧插件在并存期仍推事件）');
+  assert.match(relay, /export async function postPanelTurn\(turn\)/, 'postPanelTurn 必须保留');
+  // DSH 那条：连接、事件转发、输入
+  assert.match(relay, /const DSH_HOST = '127\.0\.0\.1:3080'/, '缺 DSH 通道的 host');
+  assert.match(relay, /const DSH_WS = 'ws:\/\/' \+ DSH_HOST \+ '\/recallflow\/ws'/, '缺 DSH 通道的 WS 地址');
+  assert.match(relay, /function connectDshWs\(\)/, '缺 DSH 通道的连接函数');
+  assert.match(relay, /function forwardSessionEvent\(frame\)/, '缺会话事件转发');
+  assert.match(relay, /export async function sayToDsh\(text\)/, '缺 sayToDsh');
+  // 两条连接必须各自独立：DSH 通道要用自己的重连调度，不能复用桥接那个 ——
+  // 复用会导致两条通道互相打断（一条重连把另一条的定时器覆盖掉）。
+  assert.match(relay, /function scheduleReconnect\(\)/, '桥接应保留自己的重连调度');
+  assert.match(relay, /function scheduleDshReconnect\(\)/, 'DSH 通道应有自己的重连调度');
+  const dshBlock = relay.slice(relay.indexOf('function connectDshWs('), relay.indexOf('function handleDshMessage('));
+  assert.ok(dshBlock.length > 0, '应能找到 connectDshWs 的实现体');
+  assert.ok(
+    !/scheduleReconnect\(\)/.test(dshBlock),
+    'DSH 通道不应调用桥接的重连函数（会互相打断）—— 它只应用 scheduleDshReconnect()'
+  );
 });

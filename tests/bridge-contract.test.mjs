@@ -117,9 +117,13 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   assert.ok(/type: 'panel:turn'/.test(chat), '面板应发出 panel:turn');
   assert.ok(/msg\.type === 'panel:turn'/.test(bg), '后台应处理 panel:turn');
   // 2) 后台 → relay：必须经 relay 的函数（而不是自己拼一份 URL/token，
-  //    否则 token 与主机名会出现第二份真相）
-  assert.ok(/postPanelTurn\(/.test(bg), '后台应调用 postPanelTurn');
-  assert.ok(/export async function postPanelTurn\(/.test(relay), 'relay 应导出 postPanelTurn');
+  //    否则会多出第二份真相）。
+  //    输入通道已换成 sayToDsh（面板的话**直接进 DSH 会话**，不再是"上报回合"）；
+  //    postPanelTurn 连同 /panel-turns 一起**保留** —— 7801 桥接还服务 opencode，
+  //    旧插件在并存期仍读它。删它们要等删除清单那一步，不能在这里顺手删。
+  assert.ok(/sayToDsh\(/.test(bg), '后台应调用 sayToDsh');
+  assert.ok(/export async function sayToDsh\(/.test(relay), 'relay 应导出 sayToDsh');
+  assert.ok(/export async function postPanelTurn\(/.test(relay), 'relay 仍应导出 postPanelTurn（并存期保留）');
 
   // 3) URL 路径契约：两端必须逐字一致（这是最容易在改名时漏掉的一处）
   const relayPath = (relay.match(/RELAY_HTTP \+ '(\/[a-z-]+)'/g) || []).map((s) => s.match(/'(\/[a-z-]+)'/)[1]);
@@ -130,8 +134,11 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   assert.ok(panelTurnsPaths >= 2, '应同时实现 POST（写）与 GET（读）两端，实际 ' + panelTurnsPaths + ' 处');
   assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), 'GET 读取端应存在');
 
-  // 4) 字段名契约：后台发出去的角色取值，服务端要认得（否则全部落成 panel）
-  assert.ok(/role: msg\.role === 'user' \? 'user' : 'panel'/.test(bg), '后台应把角色规整为 user/panel');
+  // 4) 新架构：后台**只转发用户自己说的话**。
+  //    面板助手的输出不再推给 DSH —— 新架构下回复本就来自那条会话，
+  //    而把助手输出当用户输入灌进去，才是真正的"冒充用户消息"。
+  //    （服务端对历史数据的规整仍然保留：旧数据里还有 panel 角色。）
+  assert.ok(/if \(msg\.role === 'user'\)/.test(bg), '后台应只转发 role 为 user 的面板输入');
   assert.ok(/t\.role === 'user' \? 'user' : 'panel'/.test(mcp), '服务端应做同样的规整');
 
   // 5) 读取端工具齐备
