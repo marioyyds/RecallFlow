@@ -22,20 +22,22 @@ import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
 // panel-events.js（say/tool 事件的成形与三档截断）已按删除清单第 4 步移除：
 // 那是"两段对话同步"的产物。面板现在直接渲染 DSH 会话本身的事件（由 DSH 插件推送），
 // 不再需要桥接替谁"成形"事件。桥接只剩一件事：把工具调用转给扩展。
-import {
-  normalizeElementSource,
-  rewriteSourceUrls,
-  normalizePickedElement,
-  normalizationHint,
-} from '../../../lib/shared/dev-paths.js';
 // dev-session 的读写移到 lib/shared：桥接与 DSH 插件是两个进程，但必须读同一个文件，
 // 否则两边做出来的路径归一化会不一致。规则（环境变量或家目录）在那里算一次。
 import { readDevSession, writeDevSession, devCtx } from '../../../lib/shared/dev-session.js';
-// page-health 也已共享化：它是纯函数（只依赖 dev-paths），DSH 插件要用同一份
-// 才能让 recallflow_browser 的 page_health 有同样的增量诊断能力。
-import { summarizePageHealth } from '../../../lib/shared/page-health.js';
-// verify-change 同理（断言求值的纯逻辑）：插件要用同一份，DSH 与 opencode 的判定才一致。
-import { evaluateTargets } from '../../../lib/shared/verify-change.js';
+// 结果加工：改成调用共享模块，而不是在这里再写一份内联实现。
+// 原来这 8 处内联加工只有桥接有，插件拿不到 —— 那正是"删掉 MCP client 会静默丢掉
+// 「元素 → 源码文件」"的根源。现在两边是**同一份实现**。
+import {
+  cursorOverrideFrom,
+  resolveTargets,
+  shapeElementSourceResult,
+  shapePageHealthResult,
+  shapePickedElementResult,
+  shapeTextResult,
+  shapeVerifyChangeResult,
+  toolCursorKey,
+} from '../../../lib/shared/tool-results.js';
 
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
 const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
@@ -519,8 +521,8 @@ async function readConsole(args) {
     level: args && args.level,
     limit: args && args.limit,
   });
-  // 调用栈里含开发服务器 URL，一并转换为磁盘路径，让 agent 能直接定位源码文件。
-  return { ok: true, text: rewriteSourceUrls((r && r.text) || '', devCtx()) };
+  // 调用栈里含开发服务器 URL → 磁盘路径的改写（与插件共用同一份实现）
+  return shapeTextResult(r, devCtx());
 }
 
 async function readNetwork(args) {
@@ -528,161 +530,61 @@ async function readNetwork(args) {
     filter: args && args.filter,
     limit: args && args.limit,
   });
-  // initiator（发起位置）是调用栈，同样做源码 URL → 磁盘路径的转换。
-  return { ok: true, text: rewriteSourceUrls((r && r.text) || '', devCtx()) };
+  // initiator（发起位置）是调用栈，同样做源码 URL → 磁盘路径的转换
+  return shapeTextResult(r, devCtx());
 }
 
 async function getElementSource(args) {
-  const ctx = devCtx();
   const r = await callExtension('get_element_source', {
     ref: args && args.ref,
     selector: args && args.selector,
     text: args && args.text,
     index: args && args.index,
   });
-  if (!r || r.found === false) {
-    return {
-      ok: false,
-      found: false,
-      reason: (r && r.reason) || '未找到元素或框架源码信息（可能不是 React/Vue/Svelte 开发构建）。',
-    };
-  }
-  // 结构化归一化：直接处理 source 对象，不再按「元素源码位置：」文案反解。
-  const src = normalizeElementSource(r.source, ctx);
-  if (!src) {
-    return { ok: false, found: false, reason: '该元素没有可用的框架源码信息。' };
-  }
-  const loc =
-    String(src.file || '') + (src.line ? ':' + src.line + (src.column ? ':' + src.column : '') : '');
-  const text =
-    '元素源码位置：' +
-    loc +
-    (src.framework ? '（' + src.framework + (src.component ? ' · ' + src.component : '') + '）' : '') +
-    (r.selector ? '\n选择器：' + r.selector : '');
-  // 只有「没能转换」时才提示补 dev_session；原值已可对照时不必打扰。
-  const hint = src.originalFile ? '' : normalizationHint(ctx);
-  return {
-    ok: true,
-    found: true,
-    file: src.file || '',
-    line: src.line || 0,
-    column: src.column || 0,
-    framework: src.framework || '',
-    component: src.component || '',
-    selector: r.selector || '',
-    originalFile: src.originalFile || '',
-    text,
-    hint: hint || undefined,
-  };
+  return shapeElementSourceResult(r, devCtx());
 }
 
 async function getPickedElement() {
   const r = await callExtension('get_picked_element', {});
-  if (!r) return { found: false };
-  // 该接口返回结构化对象（含 source.file），直接按字段归一化，比改写文本更可靠。
-  return normalizePickedElement(r, devCtx());
+  return shapePickedElementResult(r, devCtx());
 }
 
-// page_health / verify_change 共用的增量诊断：以该标签页上次的检查位置为起点，并推进游标。
-// 两个工具共用同一游标，因此「验证改动」也会消费掉其间产生的错误，不会重复报警。
+// page_health / verify_change 共用的增量游标。
+// **两个工具共用同一游标是刻意的**：因此「验证改动」会消费掉其间产生的错误，不会重复报警。
+// 游标留在本进程（语义是"自**我**上次检查以来"）；加工逻辑与插件共用共享模块。
 const healthCursorByTab = new Map();
-
-function incrementalHealth(tabKey, r, overrides = {}) {
-  const ctx = devCtx();
-  const cursor = overrides.cursor !== undefined ? overrides.cursor : healthCursorByTab.get(tabKey) || '';
-  const result = summarizePageHealth({
-    consoleEntries: r.console,
-    networkEntries: r.network,
-    cursor,
-    since: overrides.since,
-    levels: overrides.levels,
-    limit: overrides.limit,
-    projectRoot: ctx.projectRoot,
-    devUrl: ctx.devUrl,
-  });
-  if (result.cursor) healthCursorByTab.set(tabKey, result.cursor);
-  return result;
-}
 
 // page_health：把「页面运行时诊断」变成增量信号。无参调用即「自上次检查以来有什么新问题」。
 async function pageHealth(args) {
-  const ctx = devCtx();
   const r = await callExtension('page_health', {});
-  if (!r || r.found === false) {
-    return { ok: false, error: '未找到活动标签页：请先切到要调试的页面再调用 page_health。' };
-  }
-  const tabKey = String(r.tabId || r.pageUrl || 'default');
-  const explicit = args ? args.cursor : undefined;
-  const cursorOverride =
-    explicit !== undefined && explicit !== null
-      ? String(explicit) === 'all'
-        ? ''
-        : String(explicit)
-      : undefined;
-  const result = incrementalHealth(tabKey, r, {
-    cursor: cursorOverride,
+  const key = toolCursorKey(r);
+  const override = cursorOverrideFrom(args);
+  const cursor = override === undefined ? healthCursorByTab.get(key) || '' : override;
+  const { result, cursor: next } = shapePageHealthResult(r, devCtx(), {
+    cursor,
     since: args && args.since,
     levels: args && args.levels,
     limit: args && args.limit,
   });
-  const hint = normalizationHint(ctx);
-  return Object.assign(
-    {
-      ok: true,
-      tabId: r.tabId,
-      pageUrl: r.pageUrl,
-      pageTitle: r.pageTitle,
-      consoleError: r.consoleError || undefined,
-      networkError: r.networkError || undefined,
-    },
-    result,
-    hint ? { hint } : {}
-  );
+  if (next && next !== cursor) healthCursorByTab.set(key, next);
+  return result;
 }
 
 // verify_change：改完代码后的闭环验证 —— 目标元素的渲染态断言 + 是否引入新错误。
 async function verifyChange(args) {
-  const session = readDevSession();
-  const ctx = devCtx();
-  const fromArgs = args && Array.isArray(args.targets) && args.targets.length ? args.targets : null;
-  const targets = fromArgs || (Array.isArray(session.targets) ? session.targets : []);
-  if (!targets.length) {
-    return {
-      ok: false,
-      error:
-        '没有可验证的目标。请先用 dev_session_set 写入 targets（例如 ' +
-        '[{selector:"#submit", expect:{text:"已提交"}}]），或在本次调用直接传 targets。',
-    };
-  }
-  const r = await callExtension('verify_change', { targets });
-  if (!r || r.found === false) {
-    return { ok: false, error: '未找到活动标签页：请先切到要调试的页面再调用 verify_change。' };
-  }
-  const tabKey = String(r.tabId || r.pageUrl || 'default');
-  const evaluated = evaluateTargets(targets, r.targets);
-  const health = incrementalHealth(tabKey, r);
-  const hint = normalizationHint(ctx);
-  return Object.assign(
-    {
-      ok: true,
-      tabId: r.tabId,
-      pageUrl: r.pageUrl,
-      pageTitle: r.pageTitle,
-      targetsSource: fromArgs ? 'call-args' : 'dev-session',
-      targets: evaluated.results,
-      passed: evaluated.passed,
-      failed: evaluated.failed,
-      summary: evaluated.summary,
-      newIssues: {
-        summary: health.summary,
-        errors: health.errors,
-        warnings: health.warnings,
-        failedRequests: health.failedRequests,
-      },
-      targetsError: r.targetsError || undefined,
-    },
-    hint ? { hint } : {}
-  );
+  // targets 的解析（本次调用优先 / dev-session 兜底 / 空目标报错）与插件共用同一条规则
+  const resolved = resolveTargets(args && args.targets, readDevSession());
+  if (resolved.error) return { ok: false, error: resolved.error };
+  const r = await callExtension('verify_change', { targets: resolved.targets });
+  const key = toolCursorKey(r);
+  // 与 page_health 共用同一个游标（刻意的：验证改动会消费掉其间产生的错误）
+  const cursor = healthCursorByTab.get(key) || '';
+  const { result, cursor: next } = shapeVerifyChangeResult(r, devCtx(), resolved.targets, {
+    targetsFromArgs: resolved.fromArgs,
+    cursor,
+  });
+  if (next && next !== cursor) healthCursorByTab.set(key, next);
+  return result;
 }
 
 // ---- 共享「开发会话」----
