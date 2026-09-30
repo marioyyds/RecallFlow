@@ -181,11 +181,12 @@ test('面板没有新回合时返回 null（插槽契约：无内容的条目返
   assert.equal(third, null, '同一批内容不应在后续轮次重复出现');
 });
 
-test('按用户要求：两侧消息只按 DSH 原生风格呈现，**不加任何来源标签**', async () => {
-  // 用户原话：「两边的消息，我更希望都基于 dsh 的样式，不用刻意说消息是那一边的」。
-  // 这条测试把"加标签"这个曾被实现过的行为钉死为**不许回退** ——
-  // 我最初做的是 📣 标题 + “与另一个助手 agent 的对话”说明 + 👤/💬 前缀，
-  // 与用户诉求正好相反。
+test('区分两条轴：去掉「哪一边」（来源），保留「谁在说」（角色）', async () => {
+  // 两条不同的轴，我曾经混为一谈：
+  //   ① 「哪一边」（面板 / DSH）—— 用户要求去掉：「不用刻意说消息是那一边的」→ 去掉了 ✓
+  //   ② 「谁在说」（用户 / 助手）—— 这是对话的**关系**。一起去掉就分不清谁说的了，
+  //      用户实测反馈：「在渲染的时候，用户和 ai 回复的关系消失了」→ 必须保留 ✓
+  // 这条测试把两条轴**同时**钉住：来源词一个都不许有，角色标记必须有。
   const { plugin } = await loadPlugin({
     fetchImpl: bridgeOk([
       { role: 'user', text: '面板里用户问的话', at: 2000 },
@@ -196,15 +197,18 @@ test('按用户要求：两侧消息只按 DSH 原生风格呈现，**不加任�
   await renderTurn(component); // 首轮把数据拉进来
   const tree = component({});
   const text = textOf(tree);
-  assert.ok(text.includes('面板里用户问的话'), text);
+  // 角色关系保留：用户的话有「你：」起头，助手的话直接呈现（就是"我"在说）
+  assert.ok(text.includes('你：面板里用户问的话'), '用户发言应带角色标记：' + text);
   assert.ok(text.includes('面板助手的回答'), text);
+  assert.ok(!text.includes('你：面板助手的回答'), '助手发言不应被标成用户：' + text);
+  // 来源一个都不许出现
   assert.ok(!text.includes('你在面板'), '不应有来源前缀：' + text);
   assert.ok(!text.includes('面板助手：'), '不应有来源前缀：' + text);
-  assert.ok(!/另一个|不是用户对/.test(text), '不应有"另一个 agent"的说明：' + text);
+  assert.ok(!/另一个|不是用户对|DSH/.test(text), '不应有来源说明：' + text);
   assert.ok(!text.includes('RecallFlow'), '不应有标题：' + text);
 });
 
-test('卡片排版与 DSH 原生一致（14px/24px），两侧差异只靠浓淡而非文字', async () => {
+test('卡片排版与 DSH 原生一致（14px/24px）；角色靠「你：」+ 浓淡，来源则完全不出现', async () => {
   const { plugin } = await loadPlugin({
     fetchImpl: bridgeOk([
       { role: 'user', text: '用户那句', at: 4000 },
@@ -215,16 +219,20 @@ test('卡片排版与 DSH 原生一致（14px/24px），两侧差异只靠浓淡
   await renderTurn(component);
   const tree = component({});
   assert.equal(tree.props.className, 'recallflow-panel-card');
-  // 实测原生消息：font-size 14px / line-height 24px / 无底色 —— 卡片必须一致
+  // 实测原生消息：font-size 14px / line-height 24px / 无底色 / 无边框 —— 卡片必须一致
   assert.equal(tree.props.style.fontSize, '14px');
   assert.equal(tree.props.style.lineHeight, '24px');
   assert.equal(tree.props.style.background, undefined, '不应有底色');
   assert.equal(tree.props.style.borderLeft, undefined, '不应有边框');
-  // 两侧只靠 opacity 区分，没有文字标签
-  const rows = tree.children.filter((c) => c && c.props && c.props.className === 'recallflow-panel-card-row');
-  assert.equal(rows.length, 2, '应有两行');
-  assert.ok(rows[0].props.style.opacity < 1, '面板里的用户发言应更淡');
+  // 角色：用户行带 -user 类名并更淡，且文字带「你：」；助手行不带类名、正文浓度
+  const rows = tree.children.filter(
+    (c) => c && c.props && String(c.props.className).includes('recallflow-panel-card-row')
+  );
+  assert.equal(rows.length, 2, '应有两行，实际 ' + rows.length);
+  assert.ok(String(rows[0].props.className).includes('recallflow-panel-card-row-user'), '用户行应带 -user 类名');
+  assert.ok(rows[0].props.style.opacity < 1, '用户发言应更淡');
   assert.equal(rows[1].props.style.opacity, 1, '助手发言用正文浓度');
+  assert.ok(!String(rows[1].props.className).includes('-user'), '助手行不应带 -user 类名');
 });
 
 test('已展示进度持久化到 localStorage（用户要"自动同步"，刷新不该重复展示同一批）', async () => {

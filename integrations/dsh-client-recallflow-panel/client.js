@@ -122,10 +122,12 @@
       }
 
       function row(t, i) {
-        // 用户的原话：「两边的消息，我更希望都基于 dsh 的样式，不用刻意说消息是那一边的」。
-        // 因此这里**不再加任何来源前缀**（原来写的是「👤 你在面板：」/「💬 面板助手：」）。
-        // 两侧的区分只靠 DSH 本身那种**视觉**差异：面板里的用户发言用略淡的颜色，
-        // 助手发言用正文色 —— 不加文字标签。
+        // 这里要区分**两条不同的轴**（我一度把它们混为一谈）：
+        //   ① 「哪一边」（面板 / DSH）—— 用户要求去掉，去掉了 ✓
+        //   ② 「谁在说」（用户 / 助手）—— 这是对话的**关系**，不能一起去掉。
+        //      用户实测反馈："在渲染的时候，用户和 ai 回复的关系消失了"。
+        // 所以现在：用户的话用「你：」起头（角色），助手的话直接呈现（就是"我"在说）。
+        // 仍然不写来源（不说这是在哪块屏幕上说的）。
         var isUser = t.role === 'user';
         var text = String(t.text == null ? '' : t.text).replace(/\s+/g, ' ').trim();
         if (text.length > ROW_CHARS) text = text.slice(0, ROW_CHARS) + '…';
@@ -133,18 +135,17 @@
           'div',
           {
             key: 'row' + i,
-            className: 'recallflow-panel-card-row',
+            className: 'recallflow-panel-card-row' + (isUser ? ' recallflow-panel-card-row-user' : ''),
             style: {
               // 与 DSH 原生正文一致：14px / 24px（实测值），行内自适应宽度
               fontSize: '14px',
               lineHeight: '24px',
               wordBreak: 'break-word',
-              // 只有"谁在说"的视觉区别，没有文字标签
               opacity: isUser ? 0.68 : 1,
               marginTop: i === 0 ? 0 : 2,
             },
           },
-          text
+          (isUser ? '你：' : '') + text
         );
       }
 
