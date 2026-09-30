@@ -31,7 +31,9 @@ import {
 // dev-session 的读写移到 lib/shared：桥接与 DSH 插件是两个进程，但必须读同一个文件，
 // 否则两边做出来的路径归一化会不一致。规则（环境变量或家目录）在那里算一次。
 import { readDevSession, writeDevSession, devCtx } from '../../../lib/shared/dev-session.js';
-import { summarizePageHealth } from './page-health.js';
+// page-health 也已共享化：它是纯函数（只依赖 dev-paths），DSH 插件要用同一份
+// 才能让 recallflow_browser 的 page_health 有同样的增量诊断能力。
+import { summarizePageHealth } from '../../../lib/shared/page-health.js';
 import { evaluateTargets } from './verify-change.js';
 
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;

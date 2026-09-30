@@ -10,7 +10,7 @@ import {
   filterSinceTime,
   extractTopFrame,
   summarizePageHealth,
-} from '../page-health.js';
+} from '../lib/shared/page-health.js';
 
 const ROOT = path.resolve('proj-root');
 const DEV = 'http://localhost:5173';
