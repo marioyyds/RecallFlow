@@ -1,0 +1,111 @@
+# 删除清单（可执行方案）
+
+> 状态：**方案已写好，尚未执行**。执行的前置条件见「闸门」。
+> 起因：这次重构的目标是"把中继删掉、只留一条会话"。但删除比新增危险得多 ——
+> 我曾在准备删除时才发现 7801 桥接**不只服务 DSH**（opencode 也在用），
+> 差点把 opencode 的页面工具静默删坏。所以这份清单的每一步都先写清：
+> **它会失去什么、谁在用它、怎么确认没删坏。**
+
+## 闸门：以下都成立之前，一步都不要删
+
+- [ ] 用户的 DSH 重启过（插件代码是最新的：`GET /recallflow/status` 返回 200 而不是 404）
+- [ ] 扩展重新加载过（`status` 里 `clients >= 1`，说明扩展连上了 3080 的新通道）
+- [ ] `POST /recallflow/say` 返回 `{ok:true, sessionId}`，且那句话**以真用户消息出现在会话里**
+- [ ] DSH 里调用 `recallflow_browser` 能拿回真实页面数据（工具往返闭环）
+- [ ] opencode 侧用一次页面工具（例如让它读当前页面）**仍然正常** —— 这是"没删坏"的基线
+
+## 保留清单（这些**不能**删，写在这里免得日后误删）
+
+| 保留项 | 为什么 |
+|---|---|
+| `integrations/opencode/recallflow-mcp/` 的 MCP 工具服务 | **opencode 的页面能力出口**，与 DSH 无关的那条链路 |
+| `lib/bridge/relay.js` 的桥接通道（7801：WS + 长轮询 + dispatch） | 同上，扩展仍要为 opencode 服务工具调用 |
+| `lib/bridge/relay.js` 的 DSH 通道（3080：WS + sayToDsh） | 新架构本体 |
+| `integrations/dsh-plugin-recallflow-one/` | 新架构本体（工具注册 + 输入 + 事件） |
+| `lib/shared/session-view.js` + 面板的 `rfSessionEvent` 渲染 | 新架构的视图层 |
+| `lib/shared/bridge-methods.js` + `dispatch` 的 10 个方法 | 两条通道**共用**的能力实现 |
+
+## 删除步骤
+
+每一步都要求：改完跑全套测试、并在真实环境确认那一栏的"验证"。
+
+### 第 1 步：面板退役自己的 agent
+
+**删什么**：面板不再调用本地 LLM 产生回复（`lib/page/chat.js` 的发送路径只调 `sayToDsh`，
+不再走 `runAgentStream`）。用户输入照旧显示，但回复只来自 DSH 那条会话。
+**会失去什么**：面板不再"自己回话"。**这正是用户要的**（"感觉 dsh 和 recallflow 是一个 ai"）。
+**谁在用它**：只有面板自己；DSH 不依赖。
+**验证**：面板里发一句话 → 它出现在 DSH 会话里 → DSH 的回复出现在面板上（靠 rfSessionEvent）。
+
+### 第 2 步：删掉客户端卡片插件
+
+**删什么**：`integrations/dsh-client-recallflow-panel/`（整包）+ profile 里的
+`dsh-client-recallflow-panel` 依赖与 bundle 条目 + `tests/dsh-client-panel.test.mjs`。
+**为什么安全**：它存在的理由是"在 DSH 里看到面板的对话"。现在只有一条会话，
+面板的输入**就是**会话里的用户消息，回复**就是**会话里的助手消息 —— 卡片成了同一件事的第二份画面。
+**谁在用它**：只有 DSH 的 UI；没有代码依赖它。
+**验证**：DSH 能正常启动；会话消息照常显示；`/recallflow/status` 正常。
+
+### 第 3 步：删掉旧 DSH 插件（注入那条路）
+
+**删什么**：`integrations/dsh-plugin-recallflow/`（整包）+ profile 里的 `recallflow-panel-sync`
+条目 + `tests/dsh-plugin.test.mjs` 与 `scripts/verify-panel-inject.mjs`（针对它的验证台）。
+**为什么安全**：它的全部职责（把面板对话注入模型上下文、把 DSH 事件推给面板）都被新架构取代 ——
+新架构里面板输入**本来就是**会话里的用户消息，不需要注入。
+**谁在用它**：profile 的 patch 层；桥接的 `/event` 端点接收它的上报。
+**验证**：DSH 能正常启动；`/say` 与 `recallflow_browser` 仍正常。
+
+### 第 4 步：删掉桥接里的"同步两段对话"部分
+
+**删什么**（都在 `integrations/opencode/recallflow-mcp/` 内）：
+- `panel-events.js`（say/tool 事件的成形与三档截断 400/1200/2000）
+- HTTP 端点 `/panel-turns`（GET 与 POST）
+- MCP 工具 `panel_history`（读面板回合）与 `panel_post`（往面板说话）
+- 桥接里为面板事件准备的 `events` 队列与 `/event` 端点
+
+**为什么安全**：这些都是"两个真相来源"的产物。新架构下只有一个来源（DSH 的会话），
+面板回合不再需要经过桥接。
+**谁在用它**：扩展的 `postPanelTurn`（第 6 步一起删）、旧插件（第 3 步已删）、
+以及我在会话里用的 `panel_history` 工具（它的数据来源已随第 1 步断掉）。
+**验证（这一步最重要）**：
+- opencode 侧用一次页面工具 → **仍然正常**
+- DSH 里调用 `recallflow_browser` → 正常
+- 桥接 `/health` 仍在、MCP 工具列表里再也看不到 panel_* 工具
+
+### 第 5 步：DSH 的 profile 里去掉 RecallFlow 的 MCP client
+
+**删什么**：profile patch 里的 `recallflow-mcp` 插入项（`@deepseek-ai/dsh-mcp-client` 指向 7801）。
+**为什么安全**：那些工具（browser_read / page_health / …）现在由 `recallflow_browser` 一个工具承担，
+能力没有减少 —— 只是**不再需要 DSH 走 MCP 去拿**。桥接仍为 opencode 保留。
+**谁在用它**：DSH 的模型侧工具表（也就是我）。删掉后我只有 `recallflow_browser`。
+**验证**：DSH 启动后工具表里没有 `mcp__recallflow__*`，而 `recallflow_browser` 可用。
+
+### 第 6 步：删掉扩展里的死代码
+
+**删什么**（`lib/bridge/relay.js` 与 `lib/page/chat.js`、`background.js`）：
+- `postPanelTurn` 与其测试
+- `forwardBridgeEvent` + 面板的 `rfBridgeEvent` 监听 + `renderBridgeEvent`（含那套标签逻辑）
+- `panel:turn` 里非 user 角色的分支（第 1 步后已无意义）
+
+**为什么安全**：生产者（旧插件、桥接端点）在前面的步骤里都没了。
+**验证**：全套测试通过；面板能收发；opencode 与 `recallflow_browser` 都正常。
+
+### 第 7 步：收尾
+
+- 更新 `docs/two-way-sync.md`（它描述的是旧架构）→ 改写成"单会话集成"的运维说明，
+  或直接删除并由 `docs/one-session-plugin.md` 取代
+- `integrations/dsh-plugin-recallflow-one/README.md` 记录最终形态与保留清单
+- 跑全套 + 两个验证台；确认 `7801` 仍可只作为**工具服务**存在（不再是"中继"）
+
+## 做完之后的形态
+
+```
+DSH（一条会话）
+  ├─ DSH Web GUI           主视图
+  ├─ RecallFlow 面板        同一个会话的另一个视图 + 输入口（退役自己的 agent）
+  └─ recallflow_browser     页面能力（插件注册，经 WS 转给扩展执行）
+      └─ 扩展 ──WS──▶ 7801 桥接 ──▶ opencode 的页面工具（与 DSH 无关的那条链路）
+```
+
+用户需要运行的只有 **DSH** 与**浏览器扩展**；桥接退化成"给 opencode 用的工具服务"，
+不再承担任何同步职责。
