@@ -94,8 +94,23 @@ function textOf(content) {
     .trim();
 }
 
-function sessionIdOf(session) {
-  if (!session) return '';
+/**
+ * tool/call 的 arguments 是 **JSON 字符串**（不是对象）—— 实测事实，见 DSH 自己的类型声明。
+ * 解析失败就原样给出（不吞掉信息），与旧实现同样的取舍。
+ */
+function parseToolArgs(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return {};
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? v : { value: v };
+  } catch (e) {
+    return { raw: s };
+  }
+}
+
+function sessionIdOf(session) {  if (!session) return '';
   if (typeof session === 'string') return session;
   const id = session.id !== undefined ? session.id : session.sessionId;
   return id === undefined || id === null ? '' : String(id);
@@ -292,8 +307,16 @@ export function apply(ctx, config = {}) {
       const t = textOf(content);
       if (t) out.text = t;
     }
-    if (data.tool) out.tool = String(data.tool);
-    if (data.args !== undefined) out.args = data.args;
+    // 工具调用的字段位置 —— 实测事实（DSH 自己的类型声明，旧实现 session-map.js 里写着）：
+    //   'tool/call': { turn, step, callId, name, arguments }   ← 名字在 name，且 arguments 是 **JSON 字符串**
+    //   'tool/result': { turn, step, message: ToolResultMessage, error? }
+    // 我第一版读的是 data.tool / data.args —— **两个都不存在**，于是工具行永远画不出来
+    // （面板上那些 ⚙ 行其实来自旧栈，不是这里）。这与"助手文本读错字段"是同一类错误：
+    // 重写时凭形状猜字段名，而不是把旧代码里已验证的事实搬过来。
+    if (data.name !== undefined) out.tool = String(data.name);
+    else if (data.tool !== undefined) out.tool = String(data.tool); // 兼容另一种形状
+    const rawArgs = data.arguments !== undefined ? data.arguments : data.args;
+    if (rawArgs !== undefined) out.args = parseToolArgs(rawArgs);
     if (ev.time !== undefined) out.time = ev.time;
     if (ev.seq !== undefined) out.seq = ev.seq;
     return out;

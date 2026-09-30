@@ -121,6 +121,42 @@ test('projectEvent：助手文本在 data.message.content，用户文本在 data
   assert.ok(!texts.includes('内心独白'), 'reasoning 不是用户可见的话，不能当回答显示');
 });
 
+/**
+ * tool/call 的字段名与类型 —— 这是"面板上看不到工具活动"那个 bug 的回归。
+ *
+ * 实测事实（DSH 自己的类型声明，旧实现 session-map.js 里写着）：
+ *   'tool/call': { turn, step, callId, name, arguments }   ← 名字在 name；arguments 是 **JSON 字符串**
+ *
+ * 第一版读的是 data.tool / data.args —— 两个都不存在，于是投影出的帧连工具名都没有，
+ * 面板侧的 classifyFrame 判"tool/call 但没有工具名"直接跳过。
+ * 表现与助手文字那次一样：什么都没报错，只是有东西不显示。
+ */
+test('projectEvent：tool/call 的工具名在 data.name、参数在 data.arguments（JSON 字符串）', async () => {
+  const mod = await import(PLUGIN_PATH + '?t=' + Date.now());
+  const bag = makeCtx();
+  mod.apply(bag.ctx, {});
+
+  bag.fire('session/event', { id: 's1' }, {
+    type: 'tool/call',
+    data: { turn: 1, step: 2, callId: 'c1', name: 'page_screenshot', arguments: '{"label":"面板渲染检查","tabId":1780111567}' },
+  });
+  // 参数不是合法 JSON 时也要留住原文（不吞信息）
+  bag.fire('session/event', { id: 's1' }, {
+    type: 'tool/call',
+    data: { callId: 'c2', name: 'weird_tool', arguments: '{不是 JSON' },
+  });
+
+  const res = fakeRes();
+  await bag.routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), res);
+  const recent = JSON.parse(res.text).recentEvents || [];
+  const calls = recent.filter((e) => e.type === 'tool/call');
+
+  assert.equal(calls.length, 2, '两条 tool/call 都应被投影：' + JSON.stringify(recent));
+  assert.equal(calls[0].tool, 'page_screenshot', '★ 工具名必须取到（读 data.tool 时这里会是 undefined）');
+  assert.equal(calls[0].args.label, '面板渲染检查', '★ arguments 是 JSON 字符串，必须解析成对象');
+  assert.equal(calls[1].args.raw, '{不是 JSON', '解析失败要留住原文，而不是丢掉');
+});
+
 function fakeReq({ method = 'GET', headers = {}, body = '' } = {}) {
   const listeners = new Map();
   const req = {
