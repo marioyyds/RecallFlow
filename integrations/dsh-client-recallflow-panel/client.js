@@ -114,7 +114,8 @@
           'div',
           {
             key: 'row' + i,
-            style: { marginTop: i === 0 ? 0 : 4, lineHeight: 1.5, wordBreak: 'break-word' },
+            className: 'recallflow-panel-card-row',
+            style: { lineHeight: '22px', wordBreak: 'break-word' },
           },
           who + text
         );
@@ -194,28 +195,36 @@
         return React.createElement(
           'div',
           {
+            // 对齐 DSH 原生消息的观感。实测原生消息的计算样式：
+            //   color rgb(15,17,21) / font-size 14px / line-height 24px / background 透明
+            // 最初我做成了"灰底 + 圆角 + 左侧粗竖线"的引用块，视觉上明显不是原生的，
+            // 而且因为多了内边距，整块比原生正文右移了 12px（实测 x=965 vs 953）。
+            // 现在：无底色、无圆角、只留一条细的左侧标记线；左内边距 12px 让文字与正文对齐。
+            // 颜色一律用 inherit / currentColor 与 rgba，以同时适配浅色与深色主题。
+            className: 'recallflow-panel-card',
             style: {
-              margin: '8px 0 4px',
-              padding: '8px 10px',
-              border: '1px solid rgba(127,143,164,.45)',
-              borderLeft: '3px solid #7f8fa4',
-              borderRadius: '6px',
-              background: 'rgba(127,143,164,.08)',
-              fontSize: '12px',
+              margin: '4px 0 8px',
+              padding: '0 0 0 12px',
+              borderLeft: '2px solid rgba(127,143,164,.55)',
+              fontSize: '14px',
+              lineHeight: '24px',
               color: 'inherit',
-              opacity: 0.92,
             },
             title: '来自浏览器里的 RecallFlow 面板（另一个助手 agent 的对话，不是用户对本会话说的话）',
           },
           [
             React.createElement(
               'div',
-              { key: 'head', style: { fontWeight: 600, marginBottom: 4 } },
+              { key: 'head', className: 'recallflow-panel-card-title', style: { fontWeight: 600 } },
               '📣 浏览器 RecallFlow 面板'
             ),
             React.createElement(
               'div',
-              { key: 'sub', style: { opacity: 0.7, marginBottom: 6 } },
+              {
+                key: 'sub',
+                className: 'recallflow-panel-card-sub',
+                style: { fontSize: '12px', lineHeight: '18px', opacity: 0.6, marginBottom: 4 },
+              },
               '与另一个助手 agent 的对话 · 不是用户对本会话说的话'
             ),
           ].concat(snap.map(row))
