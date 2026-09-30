@@ -168,6 +168,29 @@ export function apply(ctx, config = {}) {
     for (const entry of sessions.values()) {
       if (!best || (entry.lastAt || 0) > (best.lastAt || 0)) best = entry;
     }
+    if (best) return best;
+
+    // 兜底：从官方注册表里找。
+    //
+    // 为什么必须有这一步（实测缺陷）：插件只通过 'agent/created' 认识 agent，
+    // 而 **DSH 启动时恢复的会话，其 agent 在插件加载之前就已建好** —— 那个事件不会再发。
+    // 表现就是：路由通了、工具也注册上了，但 POST /recallflow/say 回
+    // "没有可用的会话"。我在旧插件里修过同一个问题，却没有把教训带进新插件。
+    try {
+      const list = ctx.agents && typeof ctx.agents.list === 'function' ? ctx.agents.list() : [];
+      for (const agent of list) {
+        const sid = sessionIdOf(agent && agent.session);
+        const key = sid || '(registry-' + sessions.size + ')';
+        sessions.set(key, { agent, lastAt: Date.now() });
+        if (sid) currentSessionId = sid;
+        log('从注册表补登记会话：' + key);
+      }
+      for (const entry of sessions.values()) {
+        if (!best || (entry.lastAt || 0) > (best.lastAt || 0)) best = entry;
+      }
+    } catch (e) {
+      log('读取 agents.list() 失败：' + String((e && e.message) || e));
+    }
     return best;
   }
 

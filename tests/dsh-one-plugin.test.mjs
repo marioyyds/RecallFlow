@@ -200,6 +200,50 @@ test('POST /recallflow/say：没有活会话时明确报 503，而不是静默�
   assert.match(res.text, /没有可用的会话/);
 });
 
+test('POST /recallflow/say：agent/created 没触发过时，从官方注册表 ctx.agents.list() 兜底', async () => {
+  // 实测缺陷：DSH 启动时**恢复**的会话，其 agent 在插件加载之前就建好了，
+  // 'agent/created' 不会再发 —— 于是路由通了、工具也注册上了，但发消息回"没有可用的会话"。
+  // 我在旧插件里修过同一个问题，却没把教训带进新插件；这条用例把它钉住。
+  const mod = await import(PLUGIN_PATH + '?t=' + Date.now());
+  const handlers = new Map();
+  const registryAgent = {
+    calls: [],
+    session: { id: 'session-restored-0001' },
+    async send(msg, mode, wake) {
+      this.calls.push({ msg, mode, wake });
+      return null;
+    },
+  };
+  const routes = new Map();
+  const ctx = {
+    on(name, fn) {
+      if (!handlers.has(name)) handlers.set(name, []);
+      handlers.get(name).push(fn);
+      return () => {};
+    },
+    agents: { get: () => undefined, list: () => [registryAgent] }, // 注册表里有，但事件没来过
+    tools: { register: () => () => {} },
+    webServer: {
+      register(r) {
+        routes.set(r.path, r);
+        return () => {};
+      },
+      registerUpgrade: () => () => {},
+    },
+  };
+  mod.apply(ctx, {});
+  const res = fakeRes();
+  await routes.get('/recallflow/say').handler(
+    fakeReq({ method: 'POST', body: JSON.stringify({ text: '从注册表找到的会话' }) }),
+    res
+  );
+  assert.equal(res.statusCode, 200, '应能从注册表兜底成功，实际：' + res.text);
+  assert.equal(registryAgent.calls.length, 1, '消息应送进注册表里的那个 agent');
+  assert.equal(registryAgent.calls[0].msg.source.kind, 'user');
+  assert.equal(registryAgent.calls[0].wake, true);
+  assert.match(res.text, /session-restored-0001/, '响应里应带上真实会话 id：' + res.text);
+});
+
 test('CORS：本机与扩展来源放行，其它来源不回 ACAO（预检 204）', async () => {
   const { routes } = await loadPlugin();
   const route = routes.get('/recallflow/say');
