@@ -38,6 +38,30 @@ DSH 的 Claude 风格 hook 载荷里**没有助手的成文回答**（实测：`
    这一点必须写在上下文里，不能只写在工具描述里（模型未必会去调工具）。
 3. 只在会话创建时注入一次：行为可预期，不会在会话中途改变上下文。
 
+### 自定义 source.kind 会不会被 DSH 拒掉？
+
+这是我一度无法确认、又只能静默失败的点 —— 注入被拒的话，我的 `catch` 会把它吞掉，
+表现和"面板没对话"完全一样。查过 DSH 的准入代码后确认**不会**：
+
+```js
+// dsh-session-format-v3-to-v4/lib/index.js
+function rewriteV3MessageSource(source, seq, role) {
+  const kind = source["kind"];
+  if (typeof kind !== "string" || kind.length === 0) throw new SessionFormatError(…);
+  if (kind === "plugin") return rewritePluginSource(source, seq, role);  // 只有这个已退役的包装会被改写
+  return source;                                                        // 直接 kind 原样保留
+}
+```
+
+该文件顶部的注释说得很直白：**"Native source admission preserves unknown attribution
+and refuses retired plugin wrappers."**
+
+结论：**未知的 `kind` 会被原样保留，没有取值白名单**；唯一会被拒/改写的是已退役的
+`"plugin"` 包装语法。因此用自定义 kind 是正确的做法，而**不能**改用
+`{ kind: 'plugin', plugin: … }` 那种旧包装 —— 那恰好是被拒的那种。
+
+约束只有一条：`kind` 必须是非空字符串（`assertV4MessageSources` 在会话装载时校验）。
+
 模型需要更多时，用 `panel_history` 工具（默认最近 50 条，上限 200）。
 
 ## 挂载点（都来自 DSH 的类型声明，非猜测）

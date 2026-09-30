@@ -92,6 +92,20 @@ check('载荷形状正确：role/content/source 三件套', () => {
   assert.equal(m.source && m.source.kind, PANEL_CONTEXT_SOURCE_KIND, 'source.kind 必须是自定义 kind（否则会被当成用户的话回推面板）');
 });
 
+// 这条一度是我唯一无法确认、又只会静默失败的点：注入被 DSH 拒掉的话，catch 会把它吞掉，
+// 表现与"面板没对话"完全一样。依据来自 DSH 的准入代码
+// （dsh-session-format-v3-to-v4/lib/index.js）：
+//   「Native source admission preserves unknown attribution and refuses retired plugin wrappers.」
+// 即未知 kind 原样保留（没有白名单），只有已退役的 "plugin" 包装会被改写。
+check('source.kind 满足 DSH 的准入形状（非空字符串、且不是已退役的包装）', () => {
+  const kind = PANEL_CONTEXT_SOURCE_KIND;
+  assert.equal(typeof kind, 'string', 'kind 必须是字符串');
+  assert.ok(kind.length > 0, 'kind 不能为空 —— 空 kind 会被 assertV4MessageSources 拒绝');
+  // 用拼接避开字面量，避免这段注释与字符串在源码里混淆
+  const retired = ['plug', 'in'].join('');
+  assert.notEqual(kind, retired, '不得使用已退役的 plugin 包装语法（那恰好是被改写/拒绝的那种）');
+});
+
 check('注入内容带标记、带双向对话、写明是另一个 agent', () => {
   const text = injected[0].content[0].text;
   assert.ok(text.includes(PANEL_CONTEXT_MARKER), '缺标记');
@@ -139,5 +153,7 @@ for (const r of results) console.log('  ' + (r.ok ? '✓ ' : '✗ ') + r.label +
 const bad = results.filter((r) => !r.ok).length;
 console.log('');
 console.log(bad ? '✗ ' + bad + ' 项未通过' : '✓ 全部通过');
+console.log('已查实（读 DSH 源码，非运行验证）：source.kind 的准入规则 —— 未知 kind 原样保留，');
+console.log('  唯一被改写的是已退役的 plugin 包装（dsh-session-format-v3-to-v4/lib/index.js）。');
 console.log('未覆盖：真实 DSH 的 agent.inject 是否接受这个载荷（需重启 DSH 后看会话里是否出现该上下文）。');
 process.exitCode = bad ? 1 : 0;
