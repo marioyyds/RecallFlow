@@ -120,3 +120,41 @@ POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码�
 
 返回非零退出码表示有变异未被抓住，即对应断言形同虚设。新增针对该文件的断言后，
 建议同时补一条变异。
+
+## scripts/verify-dsh-plugin.mjs
+
+验证「DSH 原生插件（方案 B）→ 面板」这条链路，**不需要重启 DSH**。
+
+为什么需要：hook 拿不到助手的成文回答（实测 `transcript_path` 是空串、`Stop` 只有
+`stop_hook_active`），只有会话事件里的 `assistant/message` 有 —— 这是方案 B 的立足点，
+而它跨进程、跨包，只能集成层面验证。
+
+做法：用**假的 Cordis context** 调 `apply()`，喂真实形状的会话事件，再确认它们经
+`/event` 落到桥接队列。含「助手成文回答已同步」「reasoning 块未被显示」
+「`mcp__*` 被跳过」「工具失败带工具名」等断言。
+
+  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
+  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
+  node scripts/verify-dsh-plugin.mjs
+
+已知未覆盖：DSH 的 loader 能否解析并挂载本包（`--dump-config` 只组合配置、不加载模块）。
+后来用「起一个隔离的 `dsh headless --patch <只含本插件的 patch>` 跑一次任务」补上了这一环：
+插件的**装载自报**事件会出现在桥接日志里，可据此直接判定装载与否。
+
+## scripts/verify-panel-inject.mjs
+
+验证「面板对话 → DSH 上下文」这一半（`Agent.inject` 路径），不需要重启 DSH。
+
+为什么需要：注入是**唯一会主动写进 DSH 会话**的行为。逻辑对了没价值，必须确认
+① 确实调的是官方 `agent.inject`，而不是我们自己去 append 会话事件
+（后者的文档依据是 `runtime-types.d.ts`：inject「不出动 driver、在最近的步边界被认领」，
+因此不会打断运行中的循环；自行注入会话事件则可能破坏 agent loop 的状态机）；
+② 载荷形状对（`role` / `content` / `source.kind`）；
+③ 桥接不可达时静默不注入、不抛错。
+
+做法：假 Cordis ctx + 假 agent + 一个只实现 `GET /panel-turns` 的临时 HTTP server。
+
+  node scripts/verify-panel-inject.mjs
+
+已知未覆盖：真实 DSH 的 `agent.inject` 是否接受这个载荷（需重启 DSH 后看会话里是否
+出现该上下文）。

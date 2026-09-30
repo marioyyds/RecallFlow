@@ -1,6 +1,7 @@
-# DSH 原生插件：会话同步到 RecallFlow 面板（方案 B）
+# DSH 原生插件：会话双向同步（方案 B）
 
-把 DSH 会话里的事同步到**你正在浏览的页面上的 RecallFlow 面板**。
+把 DSH 会话里的事同步到**你正在浏览的页面上的 RecallFlow 面板**，
+并把**面板里的对话**带回 DSH 的上下文（双向）。
 
 ## 为什么需要插件（而不是 hook）
 
@@ -14,6 +15,30 @@ DSH 的 Claude 风格 hook 载荷里**没有助手的成文回答**（实测：`
 | 用户提示词 | ✅ | ✅ |
 | 工具调用（bash / 读写文件 / 其它 MCP） | ✅ | ✅ |
 | **助手的成文回答** | ❌ | ✅ |
+
+## 反向：面板对话 → DSH 上下文
+
+会话创建时，插件拉取桥接的 `GET /panel-turns`，把面板最近的对话拼成一段上下文，
+用 DSH 官方的 **`Agent.inject(message)`** 注入本会话。
+
+**为什么是 inject 而不是自己往会话里 append 事件**（依据 `runtime-types.d.ts`）：
+
+> Queue model-facing context for the next pre-step **without waking the driver**.
+> A running driver claims it at the **nearest later step boundary**.
+> `@param message` - identified injected context and the source that supplied it.
+
+即：不出动 driver、在步边界被认领 —— **不会打断运行中的 agent loop**。
+自行注入会话事件则可能破坏 loop 的状态机，那是拿正在使用的 DSH 冒险，不做。
+
+三个要点：
+
+1. **`source.kind = 'recallflow-panel'`**，且该 kind 同时列进 `INJECTED_SOURCE_KINDS` ——
+   否则注入的这段会被当成"用户说的话"再推回面板，**形成回环**。
+2. 注入文本里写明「这是你在浏览器面板里与**另一个**助手的对话，不是用户对你说的」——
+   这一点必须写在上下文里，不能只写在工具描述里（模型未必会去调工具）。
+3. 只在会话创建时注入一次：行为可预期，不会在会话中途改变上下文。
+
+模型需要更多时，用 `panel_history` 工具（默认最近 50 条，上限 200）。
 
 ## 挂载点（都来自 DSH 的类型声明，非猜测）
 
