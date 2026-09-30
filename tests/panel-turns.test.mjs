@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { newSpeakTurns, countSpeakTurns, isSpeakTurn, SPEAK_ROLES, MAX_TURNS_PER_PUSH } from '../lib/shared/panel-turns.js';
+import { newSpeakTurns, countSpeakTurns, recentSpeakTurns, isSpeakTurn, SPEAK_ROLES, MAX_TURNS_PER_PUSH } from '../lib/shared/panel-turns.js';
 
 const u = (t) => ({ role: 'user', content: t });
 const a = (t) => ({ role: 'assistant', content: t });
@@ -75,6 +75,27 @@ test('countSpeakTurns: 用于载入历史后初始化计数（避免把旧内容
   assert.equal(countSpeakTurns([u('1'), ext('e'), a('2')]), 2);
   assert.equal(countSpeakTurns([]), 0);
   assert.equal(countSpeakTurns(null), 0);
+});
+
+test('recentSpeakTurns: 取**最近**若干条（与 newSpeakTurns 方向相反）', () => {
+  const c = [];
+  for (let i = 0; i < 20; i++) c.push(u('T' + i));
+  assert.deepEqual(recentSpeakTurns(c, 3).map((x) => x.content), ['T17', 'T18', 'T19'], '应取最近的，而不是最老的');
+  assert.equal(recentSpeakTurns([], 3).length, 0);
+  assert.equal(recentSpeakTurns(null, 3).length, 0);
+  // 非法上限退回默认，而不是返回空 —— 返回空会让「载入既有历史也该同步」这件事静默失效
+  assert.ok(recentSpeakTurns(c, 0).length > 0, '非法上限应退回默认');
+  // 只认 user/assistant
+  assert.deepEqual(recentSpeakTurns([u('a'), ext('e'), a('b')], 5).map((x) => x.content), ['a', 'b']);
+});
+
+test('载入历史与增量上报配合：不会把同一条推两遍', () => {
+  // 真实时序：页面载入 → 同步最近若干条（计数设为当前总数）→ 用户又聊一轮 → 增量只推新的
+  const loaded = [u('旧1'), a('旧2')];
+  assert.deepEqual(recentSpeakTurns(loaded, 6).map((m) => m.content), ['旧1', '旧2']);
+  const pushed = countSpeakTurns(loaded);
+  const after = loaded.concat([u('新3')]);
+  assert.deepEqual(newSpeakTurns(after, pushed).turns.map((m) => m.content), ['新3'], '增量不该重复推载入过的');
 });
 
 test('脏输入不炸：非数组、负数计数、非法上限都退回默认', () => {

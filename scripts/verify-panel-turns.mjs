@@ -109,6 +109,20 @@ await check('读端：角色被规整为 user/panel（未知取值归 panel）',
   assert.equal(t.role, 'panel', '未知 role 应归一为 panel');
 });
 
+// --- 连续去重（面板每次页面加载都会重推最近几条既有历史）---------------------------
+await check('连续相同的回合被服务端去重（否则每次刷新页面都灌一遍）', async () => {
+  const read = async () => (await (await fetch('http://127.0.0.1:' + PORT + '/panel-turns?limit=1', { headers: { 'X-RecallFlow-Token': TOKEN } })).json()).total;
+  const first = await postTurn({ role: 'user', text: '去重用例' });
+  assert.equal(first.body.ok, true, '第一条应写入');
+  const totalAfterFirst = await read();
+  const again = await postTurn({ role: 'user', text: '去重用例' });
+  assert.equal(again.body.ok, false, '连续重复应被拒（ok:false）');
+  assert.equal(await read(), totalAfterFirst, '重复不应增加总数');
+  // 但**不同**内容仍要写入（去重只针对连续重复，不能误伤正常对话）
+  const other = await postTurn({ role: 'user', text: '去重用例（不同内容）' });
+  assert.equal(other.body.ok, true, '不同内容不应被去重掉');
+});
+
 // --- /health 的可观测性（这几轮排查里最缺的就是"一眼看出哪一段没动"）-------------
 await check('/health 报出事件计数与面板回合数（一次调用看清两个方向）', async () => {
   // 注意 semantics：events 统计的是**正向**通道（POST /event）的事件；

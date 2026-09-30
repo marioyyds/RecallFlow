@@ -516,6 +516,10 @@ const startedAt = Date.now();
 
 function recordPanelTurn(turn) {
   if (!turn || typeof turn.text !== 'string' || !turn.text) return false;
+  // 连续去重：面板每次页面加载都会把最近几条既有历史同步一次，因此同一条会重复到达。
+  // 在服务端挡住比在面板侧挡更可靠 —— 面板每次加载都是全新内存，记不住上次推到哪。
+  const last = panelTurns[panelTurns.length - 1];
+  if (last && last.role === turn.role && last.text === turn.text) return false;
   panelTurns.push(turn);
   if (panelTurns.length > MAX_PANEL_TURNS) panelTurns.splice(0, panelTurns.length - MAX_PANEL_TURNS);
   return true;
