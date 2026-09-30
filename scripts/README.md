@@ -205,3 +205,24 @@ node scripts/probe-panel-turns.mjs --read   # 只读
 与其在文档里留一条跑不通的命令，不如给一个不经过 shell 引号的探针。
 
 用途：本探针通 = 桥接读写端没问题 → 若 DSH 仍读不到面板对话，问题只在"扩展那一跳"。
+
+## scripts/verify-reverse-live.mjs
+
+用**真实运行中的桥接与真实面板数据**验证反向链路的最后一段（**只读**，不写入任何东西）。
+
+与 `verify-panel-turns.mjs` 的分工：后者用隔离实例 + 自己塞的假数据，证明"服务端实现正确"；
+本脚本读用户真实面板产生的回合，并走一遍**插件真正会走的那两个消费端**：
+① `panel_history` 工具（真实 MCP 协议、真实数据）；② `buildPanelContextPayload`
+（插件在 `agent/created` 构造注入载荷用的那个纯函数）。
+因此它给出的是「如果重启 DSH，注入与工具读回的就是这个」的直接证据。
+
+```powershell
+node scripts/verify-reverse-live.mjs      # 默认对着 127.0.0.1:7801
+```
+
+实测输出（用户真实数据）：
+- 正向 `events.total=32`、通道 `ws`、扩展连接 `true`
+- 反向收到 `[user] 你好` 与 `[panel] 你好！我在。…`
+- 7 项全过，并打印出"若现在重启 DSH，新会话将注入的上下文"
+
+已知未覆盖：真实 DSH 的 `Agent.inject` 是否接受该载荷 —— 需要重启 DSH 才能看到会话里是否出现该上下文。
