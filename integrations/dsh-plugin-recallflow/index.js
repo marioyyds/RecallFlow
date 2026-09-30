@@ -179,7 +179,17 @@ export function apply(ctx, rawConfig) {
   }
 
   function keyFor(session) {
-    return session || sessionIdOf(session) || '(unknown)';
+    // **必须优先用稳定的 id**，不能用对象身份。
+    //
+    // 实测缺陷（用户连着说「你好」时暴露出来的）：注入了**同一批内容两次**，一字不差。
+    // 根因是键不稳定：agent/created 传进来的是 agent.session，
+    // session/event 传进来的是事件里的 session —— 同一个会话的**两个不同对象**。
+    // 于是 injectedUpTo 里出现两条记录：一条被推进、另一条永远是 0，
+    // 走另一条路径时就被判定为"从没注入过"，于是把整批内容又灌一遍。
+    //
+    // 用 id 作键之后两条路径共用同一条进度记录，重复注入消失。
+    // （agentsByKey 仍然双键登记 —— 那只是"找 agent"的兜底，不影响进度去重。）
+    return sessionIdOf(session) || '(no-id)';
   }
 
   async function injectPanelTurns(agent, session, reason) {

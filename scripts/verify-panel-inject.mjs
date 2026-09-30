@@ -264,6 +264,37 @@ check('被注入的上下文自身不会触发注入（否则会自己触发自�
   assert.equal(recoveredInjected.length, before, '注入源不应触发新的注入');
 });
 
+// --- 回归：同一会话的**两个不同对象**不得导致重复注入 -------------------------------
+// 实测缺陷：同一批内容被注入两次，一字不差（用户连着说「你好」时暴露出来）。
+// 根因：进度按**会话对象身份**作键 —— 而 agent/created 传的是 agent.session、
+// session/event 传的是事件里的 session，同一会话的两个不同对象 → 两条进度记录，
+// 一条被推进、另一条永远为 0；走后者时又被判定为"从没注入过"，于是整批再灌一遍。
+// 这条用例把当初会失败的那条序列完整走一遍。
+const twoId = 'session-two-objects-0001';
+const sessionFromAgent = { id: twoId }; // 假装是 agent.session
+const sessionFromEvent = { id: twoId }; // 假装是事件里的 session（不同对象、同 id）
+const twoInjected = [];
+const twoAgent = { session: sessionFromAgent, inject: (m) => twoInjected.push(m) };
+const ctx6 = makeCtx({ agents: { [twoId]: twoAgent } });
+apply(ctx6, { port, token: 't', timeoutMs: 1500 });
+ctx6.fire('agent/created', { agent: twoAgent, source: 'fresh' });
+await new Promise((r) => setTimeout(r, 700));
+const afterCreated = twoInjected.length;
+ctx6.fire('session/event', sessionFromEvent, {
+  type: 'user/message',
+  data: { role: 'user', content: [{ type: 'text', text: '再说一句' }] },
+});
+await new Promise((r) => setTimeout(r, 700));
+
+check('【待修】同一会话的两个不同对象（agent.session 与事件 session）不会重复注入同一批内容', () => {
+  assert.equal(afterCreated, 1, 'agent/created 应注入一次，实际 ' + afterCreated);
+  assert.equal(
+    twoInjected.length,
+    1,
+    '换一条路径（事件对象）又注入了 —— 说明进度键不稳定，实际注入 ' + twoInjected.length + ' 次'
+  );
+});
+
 server.close();
 
 console.log('');
