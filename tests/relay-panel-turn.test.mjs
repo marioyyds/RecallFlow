@@ -78,6 +78,24 @@ test('序列化：带上 kind 与回声去重字段，且先裁剪再截断（�
   assert.ok(!/conversation\.slice\(-20\)/.test(body), '不该再只按条数截断（工具行会把对话挤掉）');
 });
 
+// 用户回合的渲染必须两条路径共用一份实现，而且"直送 DSH"那条**必须画**。
+//
+// 这条是回归：runLocally 一直会画用户气泡，而我改成"先试 DSH"之后，
+// run() 只把回合记进 conversation、没有画 —— 回声回来时走的是 mark-local
+// （只标记、不追画），于是**用户自己说的话永远不显示**。
+// 又是"改了一处、漏了同一件事的另一处"：测试全绿，只有真实面板能看出来。
+test('用户回合的渲染：run() 必须画（回声只标记不追画），且两条路径共用一份实现', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const bubbles = (chat.match(/className = 'user-turn'/g) || []).length;
+  assert.equal(bubbles, 1, 'user-turn 只应有一处构造，实际 ' + bubbles + ' 处');
+  assert.ok(/function appendUserTurn\(/.test(chat), '应有共用的 appendUserTurn');
+  const runBody = chat.slice(chat.indexOf('  function run(instruction, opts)'), chat.indexOf('  function run(instruction, opts)') + 2400);
+  assert.ok(/appendUserTurn\(instruction/.test(runBody), 'run() 必须画用户回合（否则用户看不到自己说的话）');
+  const localBody = chat.slice(chat.indexOf('function runLocally('), chat.indexOf('function runLocally(') + 1200);
+  assert.ok(/appendUserTurn\(instruction/.test(localBody), 'runLocally 也要用同一个函数');
+  assert.ok(/el\.remove\(\)/.test(runBody), '送失败撤回时也要移除已画的气泡');
+});
+
 /** 在 stub 生效**期间**执行 fn，并返回它实际发出的请求。 */
 async function withStub(impl, fn) {
   const real = globalThis.fetch;
