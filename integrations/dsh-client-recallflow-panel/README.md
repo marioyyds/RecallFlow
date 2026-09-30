@@ -59,10 +59,23 @@ node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" plugin --profil
 
 ## 生效条件与已知限制
 
+- **需要先重启桥接**：客户端要跨源取数，而桥接的 CORS 支持是后加的。
+  若桥接还是旧进程，浏览器会直接挡住这次 fetch —— 表现是「卡片不出现」，
+  而**不会**有任何报错提示。判据：带 `Origin` 请求 `/panel-turns` 时应回
+  `Access-Control-Allow-Origin`（只对本机来源回）。
 - **需要重启 DSH**：客户端入口由服务端按「已启用 bundle 列表」组装成 combo
   （`/plugins/??<id>/client.js,…&rev=<hash>`），该列表在启动时确定。
+- **桥接重启会清空 `panelTurns`**：那是内存缓冲。所以重启桥接后，
+  要**在面板里再说一句**才会有内容可展示（不会自动回填历史）。
 - **一轮延迟**：`turnTail` 在每轮末尾挂载，而轮询在挂载后才启动 ——
   首批数据会在**下一轮**才显示。这是真实时序，测试里也是这么断言的。
 - 卡片只在**面板出现新消息**时出现；同一批内容不会在后续轮次重复。
 - 桥接不可达 / 非 2xx 时静默不出卡片（绝不因为拿不到面板数据而影响 DSH 界面）。
 - 本插件**不产生任何会话消息**，因此不存在"把面板的话算成用户说的"这个问题。
+
+## 推荐的启用顺序
+
+1. 重启桥接（终端 Ctrl+C → 重跑 `node integrations/opencode/recallflow-mcp/index.js --http`）
+2. 在面板里说一句话（让 `panelTurns` 有内容）
+3. 重启 DSH（加载客户端插件）
+4. 在 DSH 里完成一轮对话 → 轮次末尾应出现 `📣 浏览器 RecallFlow 面板` 卡片
