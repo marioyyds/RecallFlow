@@ -96,13 +96,16 @@ test('面板事件链路两端对齐（服务端成形 + 扩展转发 + 面板�
   assert.ok(/name === 'panel_post'/.test(mcpSource), 'MCP 应暴露 panel_post（外部 agent 的出话口）');
 
   const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
-  assert.ok(/forwardBridgeEvent\(msg\.event\)/.test(relay), 'relay 应处理 WS 推来的事件');
-  assert.ok(/data\.events/.test(relay), 'relay 应从长轮询返回体里读事件');
-  assert.ok(/type: 'rfBridgeEvent'/.test(relay), 'relay 应把事件转发给标签页');
+  // 旧的面板事件链路（桥接事件 → 扩展 → 面板 renderBridgeEvent）已按删除清单移除：
+  // 生产者（旧 DSH 插件）、消费者（面板）与转发函数三者都不在了。
+  // 这里断言它们**没有复活**，并确认新通道在。
+  assert.ok(!/forwardBridgeEvent\(msg\.event\)/.test(relay), 'relay 不应再处理桥接事件（已删除）');
+  assert.ok(!/data\.events/.test(relay), 'relay 不应再从长轮询返回体里读事件（已删除）');
 
   const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
-  assert.ok(/msg\.type === 'rfBridgeEvent'/.test(chat), '面板应处理 rfBridgeEvent');
-  assert.ok(/function renderBridgeEvent\(/.test(chat), '面板应实现 renderBridgeEvent');
+  assert.ok(!/msg\.type === 'rfBridgeEvent'/.test(chat), '面板不应再处理 rfBridgeEvent（已删除）');
+  assert.ok(/msg\.type === 'rfSessionEvent'/.test(chat), '面板应处理 rfSessionEvent（新通道）');
+  assert.ok(/function renderSessionEvent\(/.test(chat), '面板应实现 renderSessionEvent');
 });
 
 test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具），含 URL 路径契约', () => {
@@ -119,20 +122,21 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   // 2) 后台 → relay：必须经 relay 的函数（而不是自己拼一份 URL/token，
   //    否则会多出第二份真相）。
   //    输入通道已换成 sayToDsh（面板的话**直接进 DSH 会话**，不再是"上报回合"）；
-  //    postPanelTurn 连同 /panel-turns 一起**保留** —— 7801 桥接还服务 opencode，
-  //    旧插件在并存期仍读它。删它们要等删除清单那一步，不能在这里顺手删。
+  //    postPanelTurn 也已按删除清单第 6 步移除（职责被 sayToDsh 取代）。
+  //    但桥接那条通道**本身**（连接/长轮询/dispatch）必须保留 —— opencode 依赖它。
   assert.ok(/sayToDsh\(/.test(bg), '后台应调用 sayToDsh');
   assert.ok(/export async function sayToDsh\(/.test(relay), 'relay 应导出 sayToDsh');
-  assert.ok(/export async function postPanelTurn\(/.test(relay), 'relay 仍应导出 postPanelTurn（并存期保留）');
+  assert.ok(!/export async function postPanelTurn\(/.test(relay), 'postPanelTurn 已删除，不应复活');
+  assert.ok(/async function httpLoop\(\)/.test(relay), '桥接长轮询必须保留（opencode 依赖桥接）');
 
   // 3) URL 路径契约：两端必须逐字一致（这是最容易在改名时漏掉的一处）
+  //    注意：/panel-turns 已随第 4 步从桥接移除，所以这里只约束**剩下的**两条桥接路径 ——
+  //    它们是 opencode 依赖的部分，不能被顺手改掉。
   const relayPath = (relay.match(/RELAY_HTTP \+ '(\/[a-z-]+)'/g) || []).map((s) => s.match(/'(\/[a-z-]+)'/)[1]);
-  assert.ok(relayPath.includes('/panel-turns'), 'relay 应 POST 到 /panel-turns，实际：' + relayPath.join('、'));
-  assert.ok(/url\.pathname === '\/panel-turns'/.test(mcp), 'MCP server 应实现 /panel-turns');
-  // 读端与写端同路径成对（避免两处各自演化的形状漂移）
-  const panelTurnsPaths = (mcp.match(/url\.pathname === '\/panel-turns'/g) || []).length;
-  assert.ok(panelTurnsPaths >= 2, '应同时实现 POST（写）与 GET（读）两端，实际 ' + panelTurnsPaths + ' 处');
-  assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), 'GET 读取端应存在');
+  assert.ok(relayPath.includes('/poll'), 'relay 应轮询 /poll（工具调用入口），实际：' + relayPath.join('、'));
+  assert.ok(relayPath.includes('/result'), 'relay 应回传 /result，实际：' + relayPath.join('、'));
+  assert.ok(/url\.pathname === '\/poll'/.test(mcp), 'MCP server 应实现 /poll');
+  assert.ok(!relayPath.includes('/panel-turns'), '/panel-turns 已按删除清单移除，relay 不应再用它');
 
   // 4) 新架构：后台**只转发用户自己说的话**。
   //    面板助手的输出不再推给 DSH —— 新架构下回复本就来自那条会话，

@@ -113,20 +113,26 @@ node scripts/probe-say.mjs "测试文本"
 
 ## 已知限制 / 未验证
 
-- **⚠️ 需要追的线索：WS 通道上没观察到会话事件。** 用
-  `node scripts/watch-session-events.mjs 12` 连上新通道，收到了 `hello` 与 `pong`
-  （说明连接与判活都正常），但在**我自己的回合正在活动**的 12 秒里**一条 `session-event`
-  都没收到**。这与预期不符 —— `projectEvent` 对任何带 `type` 的事件都会广播。
-  可能的原因（都还没查）：`session/event` 的处理函数里某处抛错被 Cordis 吞掉；
-  事件名或形状与预期不同；或者工具调用并不产生 `session/event`。
-  **在查清之前，不要假定面板能看到会话事件的推送** —— 这条如果坏了，
-  面板就只会有"我方发出去的话"而没有"助手的回复"。
-- **`recallflow_browser` 的完整往返尚未由模型实测**：注册成功有强证据（工具 schema 出现在
-  模型工具表里），WS 升级与广播在隔离实例上验证过，但"调用它拿到真实页面数据"这一步
-  还没跑过。为此加了 `POST /recallflow/probe-tool`（只允许只读方法），
-  它**需要重启 DSH 才生效**，届时一条 curl 就能闭合这条闸门。
-- **opencode 那条链路此刻无法验证**：7801 桥接当前未运行。删除清单第 4、5 步**必须等它恢复**
-  才能做 —— 那两步要确认"opencode 的页面工具仍正常"。
+- **✅ 已解决（第 19 轮留下的线索）：会话事件的推送是健康的。**
+  当时观察 12 秒只收到 hello 与 pong、没有 session-event，我把它记成待查。
+  加上计数与兜错之后（`/recallflow/status` 暴露 `eventsSeen / eventsBroadcast /
+  eventsDropped / eventsErrors / lastEventType`），重启后一条 curl 就有答案：
+
+  ```
+  "eventsSeen":12, "eventsBroadcast":12, "eventsDropped":0, "eventsErrors":0,
+  "lastEventType":"tool/call"
+  ```
+
+  12 条事件全部广播成功、零丢零错 —— 处理函数被正常调用，广播也发出去了。
+  **诚实的保留**：第 19 轮那次观察为什么是空的，没有查清（当时跑的是更早的插件代码，
+  我没有逐版对照）。现在的结论基于当前代码的实测计数，而不是对那次现象的复现与解释。
+- **`recallflow_browser` 的往返已实测通过**：`node scripts/probe-tool.mjs page_health`
+  返回 HTTP 200 与真实页面数据（tabId / pageUrl / network 都对）；`browser_read` 那次
+  还带回了扩展自己的校验信息（"仅支持 http/https URL"）—— 说明**整条链**
+  （插件 → WS → 扩展 → 它自己的方法实现 → 回执）都是通的，而不只是"某处返回了 200"。
+- **opencode 那条链路**：桥接已恢复（`/health` 的 `ok` 与 `ws` 都为真）。
+  删除清单**第 4 步（移除桥接里的同步部分）还没做** —— 它牵动 index.js 里约 30 处，
+  改错会影响 opencode，因此单独一轮来做。
 - **面板侧渲染的观感未验证**：会话事件在面板里的显示（含对齐 DSH 原生气泡的样式）
   只在代码层核对过，需要真实面板确认。
 - 面板的本地 agent 仍保留为**退路**（DSH 送不进去时回退），这是过渡形态，不是最终形态。
