@@ -54,16 +54,18 @@ test('mapper: 注入的运行时上下文不产出事件，真用户消息照常
 
 // --------------------------------- 面板对话注入 DSH 上下文（Agent.inject 那一半）
 
-test('buildPanelContextMessage: 双向都带、写明是另一个 agent、空输入给空串', () => {
+test('buildPanelContextMessage: 双向都带、措辞是「同一个助手、另一个界面」、空输入给空串', () => {
   const msg = buildPanelContextMessage([
     { role: 'user', text: '这个页面为什么有报错' },
     { role: 'panel', text: '有两个错误。' },
   ]);
   assert.ok(msg.includes(PANEL_CONTEXT_MARKER), msg);
   assert.ok(msg.includes('用户：这个页面为什么有报错'), msg);
-  assert.ok(msg.includes('面板助手：有两个错误。'), msg);
-  // 必须写明是**另一个** agent：不写的话模型会把面板的结论当成自己的
-  assert.ok(msg.includes('另一个'), msg);
+  // 面板那一侧的发言标成「我（面板界面）」—— 用户明确要求不要制造"两个 AI"的割裂感，
+  // 而两个界面本来就在共享上下文，所以不再写成"另一个 agent 说的"。
+  assert.ok(msg.includes('我（面板界面）：有两个错误。'), msg);
+  assert.ok(msg.includes('同一个助手') || msg.includes('同一位助手'), msg);
+  assert.ok(!msg.includes('另一个 agent'), '不应再有两个 agent 的措辞：' + msg);
   assert.equal(buildPanelContextMessage([]), '');
   assert.equal(buildPanelContextMessage(null), '');
   assert.equal(buildPanelContextMessage([{ role: 'user', text: '' }]), '');

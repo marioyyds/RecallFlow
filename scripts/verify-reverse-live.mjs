@@ -97,9 +97,16 @@ check('panel_history 用真实数据读回了面板对话', () => {
   if (!toolText.includes(first)) throw new Error('工具返回里没有面板的第一条回合（找 ' + first + '）');
 });
 
-check('工具返回带「另一个 agent」的澄清（不澄清的话模型会把面板的话当成自己的）', () => {
+check('工具返回的措辞是「同一个助手、另一个界面」（不再制造两个 AI 的割裂感）', () => {
   if (!toolText) return;
-  if (!/另一个|不同的 agent/.test(toolText)) throw new Error('缺少「面板 AI 与你不是同一个 agent」的说明');
+  // 注意：这条断言依赖**正在运行的**服务端代码。若桥接还没重启，
+  // 拿到的仍是旧说明（含"不同的 agent"），这时本项会失败 —— 那说明部署没跟上，不是实现错。
+  if (/另一个 agent|不同的 agent/.test(toolText)) {
+    throw new Error('服务端仍在用旧措辞（两个 agent）—— 桥接需要重启才能加载新文案');
+  }
+  if (!/同一个助手|同一位助手|另一块屏幕|另一个界面/.test(toolText)) {
+    throw new Error('缺少「同一个助手、另一个界面」的说明：' + toolText.slice(0, 160));
+  }
 });
 
 // --- 3) 插件真正会注入的载荷 -------------------------------------------------------

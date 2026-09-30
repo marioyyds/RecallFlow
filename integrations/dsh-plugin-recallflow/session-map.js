@@ -76,11 +76,17 @@ function clip(s, max) {
  *
  * 用途：DSH 的 `Agent.inject(message)` 是官方给的注入口 —— 文档明确它
  * 「不出动 driver，在最近的步边界被认领」，因此不会打断运行中的循环。
- * 我们只在会话创建时注入一次，把"面板里刚聊过什么"带进新会话。
  *
- * 文本里刻意写明这是**另一个 agent** 的对话：面板助手与 DSH 里的 agent 是两个不同的
- * 实体，混为一谈会让模型把别人的结论当成自己的 —— 这一点必须写在上下文里，
- * 不能只写在工具描述里（模型未必会去调工具）。
+ * **措辞是产品决定，不是技术细节**（用户明确反馈过）：
+ * 用户的原话是「还是没有觉得 dsh 和 recallflow 是一个 ai，有点割裂」。
+ * 而两个界面实际上在**共享上下文**：
+ *   正向同步把 DSH 的对话推进面板的会话记录里（面板那边能看到我们说了什么）；
+ *   反向同步把面板的对话推给 DSH（就是这条注入）。
+ * 所以把它们描述成"另一个 agent"既过时、又正是割裂感的来源 ——
+ * 连模型说话的口吻都会跟着分开。现在统一成"同一个助手、另一个界面"。
+ *
+ * 仍然保留的准确性：面板那一侧的措辞与这里不完全同步（它是另一个界面实例），
+ * 因此不要把它的每句话都当成自己的原话去复述；但**不要**再自称是两个 agent。
  */
 export function buildPanelContextMessage(turns, options = {}) {
   const list = Array.isArray(turns) ? turns : [];
@@ -89,12 +95,12 @@ export function buildPanelContextMessage(turns, options = {}) {
   const perTurn = Number.isFinite(Number(options.perTurn)) && Number(options.perTurn) > 0 ? Math.floor(Number(options.perTurn)) : 400;
   const recent = list.filter((t) => t && typeof t.text === 'string' && t.text).slice(-max);
   if (!recent.length) return '';
-  const lines = recent.map((t) => (t.role === 'user' ? '用户：' : '面板助手：') + clip(t.text, perTurn));
+  const lines = recent.map((t) => (t.role === 'user' ? '用户：' : '我（面板界面）：') + clip(t.text, perTurn));
   return (
     PANEL_CONTEXT_MARKER + '\n' +
     lines.join('\n') + '\n' +
-    '（说明：这是用户在浏览器页面上的 RecallFlow 面板里，与**另一个**助手 agent 的对话，' +
-    '不是用户对你说的，也不是你说过的话。需要更多上下文时用 panel_history 工具读取。）'
+    '（说明：这是用户在与**你**的对话 —— 你在浏览器页面上的 RecallFlow 面板里也有一张面孔，' +
+    '两个界面共享对话记录，是同一位助手。请把它当作我们这段对话的延续，而不是别人的话。）'
   );
 }
 

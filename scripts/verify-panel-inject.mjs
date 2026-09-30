@@ -139,11 +139,13 @@ check('载荷是**完整**消息（含 id、已冻结）—— inject 不会替�
   assert.ok(Object.isFrozen(m.source), 'source 应冻结');
 });
 
-check('注入内容带标记、带双向对话、写明是另一个 agent', () => {
+check('注入内容带标记、带双向对话、措辞是「同一个助手、另一个界面」', () => {
   const text = injected[0].content[0].text;
   assert.ok(text.includes(PANEL_CONTEXT_MARKER), '缺标记');
   assert.ok(text.includes('面板里问的问题') && text.includes('面板 AI 的回答'), '缺对话内容');
-  assert.ok(text.includes('另一个'), '缺「另一个 agent」的澄清');
+  // 用户明确要求不要制造"两个 AI"的割裂感，而两个界面本来就在共享上下文。
+  assert.ok(!text.includes('另一个 agent'), '不应再有两个 agent 的措辞：' + text);
+  assert.ok(/同一个助手|同一位助手/.test(text), '应说明是同一个助手的另一个界面：' + text);
 });
 
 check('确按 limit 请求面板回合（不无界拉取）', () => {
