@@ -644,5 +644,5 @@ export function apply(ctx, config = {}) {
     execute: async (args) => callBrowser(String(args && args.method), args && args.params),
   });
 
-  log('已装载：' + [SAY_PATH, STATUS_PATH].join(' / ') + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
+  log('已装载：' + [SAY_PATH, STATUS_PATH, PROBE_TOOL_PATH].join(' / ') + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
 }

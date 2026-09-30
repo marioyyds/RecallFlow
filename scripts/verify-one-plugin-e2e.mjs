@@ -146,6 +146,32 @@ async function main() {
   const root = await req('/');
   check('对照：/ 仍在鉴权栅栏内（401）', root.status === 401, '实际 ' + root.status);
 
+  // 5) 工具往返探针（第 18 轮加的入口：让"工具链路是否通"可以从外部验证）
+  //    这里只验"路由真的注册了、且拒绝清单外的方法" ——
+  //    真正的往返要有浏览器侧连着，由真实环境验证（scripts/probe-tool.mjs）。
+  const probeBad = await req('/recallflow/probe-tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:3099' },
+    body: JSON.stringify({ method: 'rm -rf' }),
+  });
+  check(
+    '工具探针已注册且拒绝清单外的方法（不是 404）',
+    probeBad.status === 400,
+    '实际 ' + probeBad.status + ' ' + String(probeBad.text || '').slice(0, 90)
+  );
+  const probeOk = await req('/recallflow/probe-tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:3099' },
+    body: JSON.stringify({ method: 'page_health' }),
+  });
+  check(
+    '工具探针在无浏览器连接时明确报 503（不挂起到超时）',
+    probeOk.status === 503,
+    '实际 ' + probeOk.status + ' ' + String(probeOk.text || '').slice(0, 90)
+  );
+  const probeGet = await req('/recallflow/probe-tool');
+  check('工具探针只接受 POST', probeGet.status === 405, '实际 ' + probeGet.status);
+
   const bad = results.filter((r) => !r.ok).length;
   console.log('');
   console.log(bad ? '✗ ' + bad + ' 项未通过' : '✓ 全部通过（' + results.length + ' 项）');
