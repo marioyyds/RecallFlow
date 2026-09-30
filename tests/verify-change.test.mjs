@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkTarget, evaluateTargets, normalizeText } from '../verify-change.js';
+import { checkTarget, evaluateTargets, normalizeText } from '../lib/shared/verify-change.js';
 
 const found = (over = {}) =>
   Object.assign({ found: true, count: 1, visible: true, text: '提交', box: { x: 0, y: 0, w: 100, h: 40 } }, over);

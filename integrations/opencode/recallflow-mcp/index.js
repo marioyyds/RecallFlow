@@ -34,7 +34,8 @@ import { readDevSession, writeDevSession, devCtx } from '../../../lib/shared/dev
 // page-health 也已共享化：它是纯函数（只依赖 dev-paths），DSH 插件要用同一份
 // 才能让 recallflow_browser 的 page_health 有同样的增量诊断能力。
 import { summarizePageHealth } from '../../../lib/shared/page-health.js';
-import { evaluateTargets } from './verify-change.js';
+// verify-change 同理（断言求值的纯逻辑）：插件要用同一份，DSH 与 opencode 的判定才一致。
+import { evaluateTargets } from '../../../lib/shared/verify-change.js';
 
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
 const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
