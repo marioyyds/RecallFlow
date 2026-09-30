@@ -443,8 +443,26 @@ async function handleMcpHttp(req, res) {
     if (sid) {
       const existing = mcpSessions.get(sid);
       if (!existing) {
+        // 404 是按 MCP 规范的正确回应（"若会话已失效，服务端应回 404，客户端据此重新 initialize"）。
+        // 但实测：DSH 的 MCP 客户端收到 404 后**不会**自动重建会话，只会把响应体当错误抛出来。
+        // 于是桥接重启后，panel_history 这类 MCP 工具会一直失败到 DSH 重启为止。
+        // 我这边改不了客户端，但可以让失败**自己说清原因**（原来是裸的 -32001，看不出所以然）。
+        // 注意：这只影响 MCP 工具；两条同步链路走的是普通 HTTP，不受影响。
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: '未知会话：' + sid } }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: null,
+            error: {
+              code: -32001,
+              message:
+                '未知会话：' + sid +
+                '（桥接在客户端之后重启过，这个 MCP 会话已失效。' +
+                '按规范客户端应据 404 重新 initialize，但实测 DSH 不会 —— 需要重启 DSH 才能恢复本工具。' +
+                '同步功能不受影响；面板回合也可用 node scripts/probe-panel-turns.mjs --read 直接读。）',
+            },
+          })
+        );
         return;
       }
       await existing.handleRequest(req, res);
