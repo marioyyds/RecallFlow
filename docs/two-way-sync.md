@@ -78,6 +78,30 @@ WS 广播 {kind:'session-event', sessionId, event}
 | **端到端（一句话 → 会话 → 回复回到面板）** | ⏳ **未完成** —— 缺"重启 DSH + 重载扩展/刷新页面"这两步 |
 
 
+## 工具结果的加工在哪（一条容易重复实现的地方）
+
+扩展返回的是**原始 JSON**；给模型看的形状（磁盘路径、元素源码、增量诊断）全靠一层加工。
+这层加工**只有一份实现**：`lib/shared/tool-results.js`。桥接与 DSH 插件都调它。
+
+| 函数 | 用途 |
+|---|---|
+| `shapeTextResult` | read_console / read_network：调用栈里的源码 URL → 磁盘路径 |
+| `shapeElementSourceResult` | get_element_source：file/line/column/framework/component + selector + hint |
+| `shapePickedElementResult` | get_picked_element：走共享的字段归一化 |
+| `shapePageHealthResult` / `shapeVerifyChangeResult` | 增量摘要 / 断言求值 + newIssues |
+| `resolveTargets` / `cursorOverrideFrom` | verify_change 的 targets 解析、args.cursor 三态 |
+| `applyToolResult` | 一站式：按方法名分派，插件的 execute 调它 |
+
+**游标（"自上次检查以来"的起点）刻意留各自进程**：它的语义是"自**我**上次检查以来"，
+共享会让一方吃掉另一方的增量。所以这几个函数返回 `{ result, cursor }`，由调用方存。
+（桥接：`healthCursorByTab`；插件：`toolCursors`。桥接里 page_health 与 verify_change
+**共用**一个游标是刻意的 —— 验证改动会消费掉其间产生的错误，不会重复报警。）
+
+**为什么在意这件事**：这层加工原来**只在桥接里**，插件的工具返回原始 JSON ——
+也就是说删掉 DSH 的 MCP client 会让 DSH **静默失去「元素 → 源码文件」**（不报错，只是没路径）。
+现在两边是字面意义上的同一份代码，并有契约测试钉住"不许再各自内联写一份"
+（`tests/bridge-contract.test.mjs` 的"结果加工只有一份实现"）。
+
 ## 改完代码要重启什么（这张表能省掉大量排查）
 
 | 改动位置 | 需要做什么 | 为什么 |

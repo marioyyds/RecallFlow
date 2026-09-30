@@ -146,3 +146,44 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
 // 那条路已被新架构取代：面板输入**本来就是**这条会话的用户消息，不需要注入。
 // 新架构对应的契约在 tests/dsh-one-plugin.test.mjs（载荷 source.kind 必须是 'user'、
 // agent.send 的 mode/wake 参数）与 tests/relay-panel-turn.test.mjs（sendToDsh 的发送端形状）。
+
+// 结果加工只有一份实现 —— 这是"删掉 DSH 的 MCP client 会静默丢掉「元素 → 源码文件」"
+// 那个缺口的防回归。
+//
+// 背景：源位置重写/元素源码成形原本**只在桥接的处理器里**，插件返回未加工的原始 JSON。
+// 后来把这些抽到 lib/shared/（dev-paths / page-health / verify-change / tool-results），
+// 插件与桥接都改成调用它。这条测试钉住"不许再各自内联写一份"。
+//
+// 断言方式：不是查"有没有 import"（那太弱），而是查**底层归一化函数在业务文件里是否还被直接调用**。
+// 那些调用现在只应出现在 lib/shared 内部。数字是量过才写的（两个文件的实际计数）。
+test('结果加工只有一份实现：桥接与插件都不再内联调用底层归一化函数', () => {
+  const bridge = fs.readFileSync(MCP_INDEX, 'utf8');
+  const plugin = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+
+  // 两边都必须接入共享模块
+  assert.ok(/lib\/shared\/tool-results\.js/.test(bridge), '桥接应 import 共享的 tool-results');
+  assert.ok(/lib\/shared\/tool-results\.js/.test(plugin), '插件应 import 共享的 tool-results');
+
+  // 桥接里不得再出现这些底层调用（共享模块体内才有）
+  for (const fn of [
+    'rewriteSourceUrls(',
+    'normalizeElementSource(',
+    'normalizePickedElement(',
+    'normalizationHint(',
+    'summarizePageHealth(',
+    'evaluateTargets(',
+    'incrementalHealth',
+  ]) {
+    assert.ok(!bridge.includes(fn), '桥接不应再内联调用 ' + fn + '（应经 lib/shared/tool-results.js）');
+  }
+  // 桥接应通过共享函数成形
+  assert.ok(bridge.includes('shapeTextResult('), '桥接的 read_console/read_network 应调用 shapeTextResult');
+
+  // 插件同理：不直接碰底层归一化，只调 applyToolResult
+  for (const fn of ['rewriteSourceUrls(', 'normalizeElementSource(', 'normalizePickedElement(']) {
+    assert.ok(!plugin.includes(fn), '插件不应直接调用 ' + fn + '（应走 applyToolResult）');
+  }
+  assert.ok(plugin.includes('applyToolResult('), '插件的工具结果应经 applyToolResult');
+  // 有状态的两个方法必须拿调用方自己的游标（不是模块级全局）
+  assert.ok(plugin.includes('toolCursors'), '插件应自己持有 page_health/verify_change 的游标');
+});
