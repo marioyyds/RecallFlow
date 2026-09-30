@@ -8,6 +8,7 @@ import { startMcpRelay } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
+import { normalizeBinding, bindingKey } from './lib/shared/session-binding.js';
 import {
   listScripts,
   installFromUrl,
@@ -74,6 +75,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'openManager') {
     const focusId = msg.focusId || '';
     chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
+    sendResponse({ ok: true });
+    return false;
+  }
+  // 会话绑定：面板点「启动」时写入，按 tab 隔离（与 conv 同样的存储约定）。
+  // 内容脚本默认读不到 chrome.storage.session，因此必须经后台代理。
+  if (msg && msg.type === 'bind:save') {
+    const tabId = sender.tab && sender.tab.id;
+    const norm = normalizeBinding(msg.binding);
+    // tabId 以 sender 为准（存储键也按 tab 隔离）：面板不需要知道自己的 tabId，
+    // 但记录里带上它能让会话自描述，便于 DSH 侧将来按 tab 索引。
+    const b = norm && tabId != null ? Object.assign({}, norm, { tabId }) : norm;
+    if (tabId != null && b) {
+      try {
+        chrome.storage.session.set({ [bindingKey(tabId)]: b });
+        sendResponse({ ok: true, binding: b });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    } else {
+      sendResponse({ ok: false, error: b ? '拿不到标签页 id' : '绑定记录不合法' });
+    }
+    return false;
+  }
+  if (msg && msg.type === 'bind:get') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId == null) {
+      sendResponse({ binding: null });
+      return false;
+    }
+    chrome.storage.session
+      .get(bindingKey(tabId))
+      .then((d) => sendResponse({ binding: normalizeBinding(d[bindingKey(tabId)]) }))
+      .catch(() => sendResponse({ binding: null }));
+    return true;
+  }
+  if (msg && msg.type === 'bind:clear') {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId != null) {
+      try {
+        chrome.storage.session.remove(bindingKey(tabId));
+      } catch (e) {}
+    }
     sendResponse({ ok: true });
     return false;
   }
