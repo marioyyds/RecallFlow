@@ -149,24 +149,8 @@ test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具）�
   assert.ok(/name === 'panel_history'/.test(mcp), 'MCP 应实现 panel_history 分支');
 });
 
-test('注入端对齐（插件订阅 agent/created + 官方 inject + 读端 GET）', () => {
-  const plugin = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow/index.js'), 'utf8');
-  const map = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow/session-map.js'), 'utf8');
-  const mcp = fs.readFileSync(MCP_INDEX, 'utf8');
-
-  // 必须用官方的 Agent.inject，而不是自己去 append 会话事件
-  // （依据 runtime-types.d.ts：inject 不出动 driver、在步边界被认领，不打断运行中的循环）
-  assert.ok(/ctx\.on\('agent\/created'/.test(plugin), '插件应订阅 agent/created');
-  assert.ok(/agent\.inject\(/.test(plugin), '插件应调用官方 agent.inject');
-  assert.ok(!/session\.append\(/.test(plugin), '插件不得自行 append 会话事件（会破坏 agent loop 状态机）');
-  // 注入的 source.kind 必须同时列进 INJECTED_SOURCE_KINDS，否则会形成回环
-  const kind = (map.match(/PANEL_CONTEXT_SOURCE_KIND = '([a-z-]+)'/) || [])[1];
-  assert.ok(kind, '应导出 PANEL_CONTEXT_SOURCE_KIND');
-  assert.ok(
-    new RegExp("INJECTED_SOURCE_KINDS = Object\\.freeze\\(\\[[^\\]]*'" + kind + "'").test(map),
-    'PANEL_CONTEXT_SOURCE_KIND 必须在 INJECTED_SOURCE_KINDS 里（否则注入的上下文会被回推面板，形成回环）'
-  );
-  // 插件拉取的路径必须与服务端的读取端一致
-  assert.ok(/\/panel-turns\?limit=/.test(plugin), '插件应 GET /panel-turns 并带 limit');
-  assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), '服务端应实现该 GET 端');
-});
+// 「注入端对齐」那条测试已随旧插件一起删除（删除清单第 3 步）。
+// 它断言的是"插件用 Agent.inject 把面板对话注入模型上下文 + GET /panel-turns 读回合"——
+// 那条路已被新架构取代：面板输入**本来就是**这条会话的用户消息，不需要注入。
+// 新架构对应的契约在 tests/dsh-one-plugin.test.mjs（载荷 source.kind 必须是 'user'、
+// agent.send 的 mode/wake 参数）与 tests/relay-panel-turn.test.mjs（sendToDsh 的发送端形状）。

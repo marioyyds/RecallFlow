@@ -1,0 +1,41 @@
+feat!: 端到端最终确认；删除清单第 3 步执行 —— 旧 DSH 插件（注入那条路）移除
+
+## ★ 终极证据：那句自检文本以**真用户消息**回到了我面前
+
+我用 POST /recallflow/say 发出的文本，在下一轮以**我的输入**的形式出现 ——
+也就是"面板打的话 → 这条会话的真用户消息 → 模型读到的输入"这一整条链路成立。
+这是整个重构的目标，也是 ④ 端到端验证的完成标志。
+
+配合已确认的三条：插件新代码生效、扩展连上新通道（clients=1）、会话被认出（注册表兜底生效）。
+
+## 第 3 步：删除旧 DSH 插件
+
+删什么：
+- integrations/dsh-plugin-recallflow/（整包：注入 + session-map + 去重）
+- profile 里对应的 recallflow-panel-sync 插入项（**先备份 cordis.patch.yml.bak-20261001-011504**）
+- tests/dsh-plugin.test.mjs、scripts/verify-dsh-plugin.mjs、scripts/verify-panel-inject.mjs
+  （后两个就是为它写的验证台）
+- scripts/verify-reverse-live.mjs（它验证的是同一条已消失的反向通道）
+- tests/bridge-contract.test.mjs 里「注入端对齐」那条测试，换成说明注释指向新契约
+
+为什么安全：它的全部职责（把面板对话注入模型上下文、把 DSH 事件推给面板）都被新架构取代 ——
+新架构里面板输入**本来就是**这条会话的用户消息，不需要注入；而桥接那侧此刻是停的，
+它的上报本来就是空转。
+
+刻意留下没动的：panel-events.js 及其三处引用（panel-events.test / dsh-hooks.test /
+bridge-contract 的 pushEvent 断言）属于**第 4 步**。那一步必须能验证"opencode 的页面工具仍正常"，
+而桥接现在停着 —— 无法验证就不能盲删。
+
+## 安全校验（复制粘贴级的两条，这类改动必须查）
+
+```
+profile 仍可解析：node <dsh>/lib/bin.js --profile web --help → 退出码 0  ✓
+profile 里没有任何指向已删文件的条目                                        ✓
+```
+
+全套 478/478（随旧插件与两个验证台移除 26 条测试）。
+
+## 还剩
+
+第 4 步（桥接同步部分，**等桥接恢复**）、第 5 步（profile 里的 MCP client，依赖第 4 步的验证）、
+第 6 步（扩展死代码）、第 1 步（面板退役自己的 agent —— 现在端到端已通，可以做了）、第 7 步（文档）。
