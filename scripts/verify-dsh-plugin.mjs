@@ -32,6 +32,12 @@ const drain = async () => {
 
 await drain(); // 清空历史
 
+// 统计窗口下界：只用**本次**发出的事件做断言。
+// 为什么需要：drain() 只清掉"此刻"队列里的东西，而如果同一个隔离实例上刚跑过别的验证台，
+// 那些在飞的事件可能落进本脚本的统计窗口 —— 实测过一次，事件总数断言因此偶发红灯。
+// 会偶发误报的验证台比没有验证台更糟：它会侵蚀对整个套件的信任。
+const t0 = Date.now();
+
 const session = { id: 'session-abcdef12-3456' };
 
 // 会话开始
@@ -86,9 +92,11 @@ emit('session/event', session, {
 });
 
 await new Promise((r) => setTimeout(r, 600));
-const events = await drain();
+const all = await drain();
+// 只保留本次窗口内的事件（见 t0 的说明）
+const events = all.filter((e) => Number(e.at) >= t0);
 
-console.log('取到 ' + events.length + ' 条事件：');
+console.log('取到 ' + events.length + ' 条事件（本次窗口内；队列另有 ' + (all.length - events.length) + ' 条旁路事件已忽略）：');
 for (const e of events) console.log('  ' + JSON.stringify(e));
 
 const sayDsh = events.find((e) => e.kind === 'say' && e.who === 'dsh' && e.text.includes('广告脚本'));
