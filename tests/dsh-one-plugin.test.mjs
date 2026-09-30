@@ -10,6 +10,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const PLUGIN_PATH = '../integrations/dsh-plugin-recallflow-one/index.js';
 
@@ -247,6 +250,68 @@ async function loadPlugin() {
   bag.fire('agent/created', { agent: bag.agent, source: 'fresh' });
   return { mod, ...bag };
 }
+
+// 这三个方法**不经过浏览器**：读的是本机的共享文件。因此它们在这里能完整跑通 ——
+// 不需要真扩展、不需要 WS。这也是把它们补进插件的原因：
+// 删除计划一度把 dev_session_* 与 evidence_get 记为"没有对应物"，
+// 而它们的存储已经共享化，插件读的是同一份文件。
+test('本地方法：dev_session_get/set 与 evidence_get 不需要浏览器连接', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-loc-'));
+  const prev = process.env.RECALLFLOW_EVIDENCE_DIR;
+  process.env.RECALLFLOW_EVIDENCE_DIR = tmp;
+  try {
+    const { tools } = await loadPlugin();
+    const tool = tools.get('recallflow_browser');
+    const exec = (method, params) => tool.execute({ method, params });
+
+    // dev_session_get：没写过 → 空对象（不抛）
+    assert.deepEqual(await exec('dev_session_get', {}), {});
+
+    // dev_session_set：写入并回读；updatedAt 由共享实现补上
+    const written = await exec('dev_session_set', { projectRoot: 'D:/p', devUrl: 'http://localhost:5173' });
+    assert.equal(written.projectRoot, 'D:/p');
+    assert.ok(written.updatedAt, '应带 updatedAt（与桥接同一实现）');
+    assert.equal((await exec('dev_session_get', {})).devUrl, 'http://localhost:5173');
+
+    // ★ 落盘到**共享**位置：桥接读的是同一个文件（这是"一条真相"的关键）
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, 'dev-session.json'), 'utf8'));
+    assert.equal(onDisk.projectRoot, 'D:/p');
+
+    // evidence_get：先用共享归档造一条，再按 hash / url 取回
+    const { archive } = await import(new URL('../lib/shared/evidence-store.js', import.meta.url).href);
+    const rec = archive({ url: 'https://e.com/x', title: 'T', text: 'body' });
+    const byHash = await exec('evidence_get', { hash: rec.snapshotHash });
+    assert.equal(byHash.found, true);
+    assert.equal(byHash.snapshot.text, 'body');
+    assert.deepEqual(await exec('evidence_get', { hash: 'deadbeef' }), { found: false }, '取不到就是 found:false，不抛');
+    assert.equal((await exec('evidence_get', { url: 'https://e.com/x' })).found, true, '按 url 取最近一次');
+
+    // 方法表：本地三个必须在工具 enum 里
+    const enumList = tool.parameters.properties.method.enum;
+    for (const m of ['dev_session_get', 'dev_session_set', 'evidence_get']) {
+      assert.ok(enumList.includes(m), m + ' 应在工具的 enum 里');
+    }
+  } finally {
+    if (prev === undefined) delete process.env.RECALLFLOW_EVIDENCE_DIR;
+    else process.env.RECALLFLOW_EVIDENCE_DIR = prev;
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch (e) {}
+  }
+});
+
+// probe-tool 是**诊断入口**，白名单里不能出现写操作（dev_session_set）。
+// 这条钉住"本地方法不混进 BROWSER_METHODS"这个拆分。
+test('probe-tool 的白名单只读：不接受 dev_session_set 这类本地方法', async () => {
+  const { routes } = await loadPlugin();
+  const route = routes.get('/recallflow/probe-tool');
+  const res = fakeRes();
+  await route.handler(fakeReq({ method: 'POST', body: JSON.stringify({ method: 'dev_session_set', params: {} }) }), res);
+  assert.equal(res.statusCode, 400, 'probe-tool 不该接受写操作');
+  // 假响应把内容收在 chunks 里，用它的 text 取值器 —— 我第一版写的是 res.body（不存在），
+  // 于是断言拿到 undefined。又一次"没看接口就写断言"。
+  assert.match(res.text, /不允许的方法/);
+});
 
 test('装载：注册输入路由 + WS 升级路由 + 浏览器能力工具，并声明必需的服务依赖', async () => {
   const { mod, routes, upgrades, tools } = await loadPlugin();

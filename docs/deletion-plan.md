@@ -118,8 +118,8 @@
 |---|---|---|
 | `browser_read` / `read_console` / `read_network` / `page_health` / `verify_change` / `get_element_source` / `get_picked_element` / `screenshot_capture` | `recallflow_browser({method, params})` | **能力一致**（见下方"曾经的缺口"）。同一个 `dispatch`，同一套结果加工（`lib/shared/tool-results.js`），插件与桥接是**字面意义上的同一份代码** |
 | `recallflow_session`（读交接包） | `recallflow_browser({ method: 'handoff_get' \| 'handoff_list' })` | **能力仍在**（两个方法都在插件的 `BROWSER_METHODS` 里）。差异：没有"没给 id 就列清单 + 提示话术"那层包装 |
-| `dev_session_get` / `dev_session_set` | **没有** | 不在共享 dispatch 里，也不在插件的枚举里 |
-| `evidence_get` | **没有** | 桥接自己的证据归档 |
+| `dev_session_get` / `dev_session_set` | `recallflow_browser({ method: 'dev_session_get' \| 'dev_session_set' })` | **能力一致** —— 插件**本地**处理这两个：读/写同一个共享文件（`lib/shared/dev-session.js` 的 `dev-session.json`），不经过浏览器，因此面板关着也能用 |
+| `evidence_get` | `recallflow_browser({ method: 'evidence_get', params: { hash \| url } })` | **能力一致** —— 同样本地处理，读的是共享证据库（`lib/shared/evidence-store.js`）；`browser_read` 归档到同一个目录，所以插件自己就能复核 |
 
 **曾经的缺口（现已补齐，留作记录）**：最初盘这份表时，源位置重写
 （`rewriteSourceUrls` / `normalizeElementSource` / `normalizePickedElement` /
@@ -137,9 +137,14 @@
 - 桥接的 index.js 因此净减 **96 行**（926 → 830，实测 `git show 8c54ce1` 与当前文件）
 
 **因此第 5 步现在是干净的删除**：不再有"删了就静默少一个能力"的地方。
-唯一剩下的差别是 `dev_session_*` 与 `evidence_get` 没有对应物 ——
-它们本来就是桥接自己的本地状态与归档，不是页面能力。
-（要这两样时说明该走 7801，那是 opencode 的链路。）
+
+最初记为"没有对应物"的那两个（`dev_session_get/set`、`evidence_get`）也补上了 ——
+它们的存储共享化之后，插件**本地**就能读写同一份文件，不需要浏览器参与。
+（这两个方法放进工具的 enum，但**不放进 `BROWSER_METHODS`**：
+那个清单被 probe-tool 当白名单用，而 `dev_session_set` 是写操作，不该从诊断入口触发。
+这条由 tests/dsh-one-plugin.test.mjs 的一条测试钉住。）
+
+至此 DSH 与 opencode 在页面能力上**没有差别**。要 7801 的唯一理由是用 opencode 本身。
 
 **关键确认**：交接（handoff）这条路**不依赖桥接的服务端缓冲** ——
 `recallflow_session` 实现里走的是 `callExtension('handoff_list' / 'handoff_get')`，

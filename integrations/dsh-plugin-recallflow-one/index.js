@@ -36,7 +36,9 @@ import { pathToFileURL } from 'node:url';
 // 也就是删掉 DSH 的 MCP client 之后会静默失去「元素 → 源码文件」。
 import { applyToolResult, cursorOverrideFrom, resolveTargets, toolCursorKey } from '../../lib/shared/tool-results.js';
 // dev-session 也共用：桥接与插件必须读同一个文件，否则两边归一化不一致。
-import { devCtx, readDevSession } from '../../lib/shared/dev-session.js';
+import { devCtx, readDevSession, writeDevSession } from '../../lib/shared/dev-session.js';
+// 证据库同理：evidence_get 读的是同一份归档（插件本地就能答，不需要扩展参与）。
+import { get as getEvidence, getByUrl as getEvidenceByUrl } from '../../lib/shared/evidence-store.js';
 
 export const name = 'recallflow-one';
 export const inject = ['agents', 'tools', 'webServer'];
@@ -628,20 +630,39 @@ export function apply(ctx, config = {}) {
     'handoff_list',
   ];
 
+  /** 插件**本地**就能答的方法：读的是本机共享文件（dev-session 与证据库），不需要扩展。
+   *
+   * 这三个原来只存在于桥接里，删除计划一度把 dev_session_* 与 evidence_get 记为
+   * "没有对应物"。但它们的存储已经共享化了（lib/shared/dev-session.js、
+   * evidence-store.js），插件读的是同一份文件 —— 所以能补上，且不需要浏览器。
+   *
+   * **不放进 BROWSER_METHODS**：那个清单被 probe-tool 当白名单用，而 dev_session_set 是写操作，
+   * 不该从一个诊断入口触发。
+   */
+  const LOCAL_METHODS = ['dev_session_get', 'dev_session_set', 'evidence_get'];
+
+  /** 工具接受的完整方法表 = 扩展侧 + 本地。 */
+  const TOOL_METHODS = BROWSER_METHODS.concat(LOCAL_METHODS);
+
   // --- 工具注册：一个通用入口（第一版），后续按需拆成具体工具 -------------------
   ctx.tools.register({
     name: 'recallflow_browser',
     description:
-      '在用户当前打开的网页上执行一次操作（由 RecallFlow 浏览器扩展完成，作用于当前活动标签页）。' +
-      'method 取值：browser_read（读正文）/ read_console（读控制台）/ read_network（读网络）/' +
-      'get_element_source（把元素对应到前端源码位置）/ page_health（页面健康度：新增报错与失败请求）/' +
+      'RecallFlow 的入口：要么在用户当前打开的网页上执行一次操作（由浏览器扩展完成，作用于当前活动标签页），' +
+      '要么读写本机的共享「开发会话」与证据归档（这三个不需要浏览器连接）。' +
+      'method 取值：' +
+      'browser_read（读正文，返回 fetchedAt/snapshotHash 可复核）/ read_console（读控制台）/' +
+      'read_network（读网络）/ get_element_source（把元素对应到前端源码位置）/' +
+      'page_health（页面健康度：自上次检查以来**新增**的报错与失败请求）/' +
       'verify_change（改动后核对元素状态与新问题）/ get_picked_element（用户在页面里拾取的元素）/' +
-      'screenshot_capture（截图）/ handoff_get、handoff_list（读用户在面板里交接出来的会话）。' +
+      'screenshot_capture（截图）/ handoff_get、handoff_list（读用户在面板里交接出来的会话）/ ' +
+      'dev_session_get、dev_session_set（读/写 projectRoot 与 devUrl，以及 verify_change 的默认 targets）/ ' +
+      'evidence_get（按 hash 或 url 取回已归档的页面证据）。' +
       '这是 RecallFlow 的页面能力，与 DSH 同处一条会话。',
     parameters: {
       type: 'object',
       properties: {
-        method: { type: 'string', enum: BROWSER_METHODS, description: '要执行的方法' },
+        method: { type: 'string', enum: TOOL_METHODS, description: '要执行的方法' },
         params: { type: 'object', additionalProperties: true, description: '该方法的参数（可选）' },
       },
       required: ['method'],
@@ -653,6 +674,17 @@ export function apply(ctx, config = {}) {
     execute: async (args) => {
       const method = String((args && args.method) || '');
       const params = (args && args.params) || {};
+
+      // 本地方法要在 callBrowser **之前**处理：它们读的是本机的共享文件，
+      // 不需要浏览器连接 —— 否则会以"浏览器侧没有连接"失败（面板关着时尤其明显）。
+      if (method === 'dev_session_get') return readDevSession();
+      if (method === 'dev_session_set') return writeDevSession(params);
+      if (method === 'evidence_get') {
+        // 与桥接的 evidenceGet 逐字对齐：给 hash 按 hash 取，否则按 url 取最近一次。
+        const rec = params.hash ? getEvidence(params.hash) : getEvidenceByUrl(params.url);
+        return rec ? { found: true, snapshot: rec } : { found: false };
+      }
+
       const raw = await callBrowser(method, params);
 
       // verify_change 的 targets 解析（本次调用优先，其次 dev-session）与桥接共用同一条规则。
