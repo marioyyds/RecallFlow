@@ -21,7 +21,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
-import { toolStartEvent, toolEndEvent, sayEvent, isValidEvent, trimEventQueue, normalizeExternalEvent } from './panel-events.js';
+// panel-events.js（say/tool 事件的成形与三档截断）已按删除清单第 4 步移除：
+// 那是"两段对话同步"的产物。面板现在直接渲染 DSH 会话本身的事件（由 DSH 插件推送），
+// 不再需要桥接替谁"成形"事件。桥接只剩一件事：把工具调用转给扩展。
 import {
   normalizeElementSource,
   rewriteSourceUrls,
@@ -70,10 +72,9 @@ let bridgeBindError = '';
 const pending = new Map(); // id -> { resolve, reject, timer }
 const queue = []; // 等待扩展处理的请求
 const pollWaiters = []; // 挂起的长轮询响应
-// 服务端 → 扩展 的面板事件（DSH 的工具动作与主动留言）。
-// 用途：用户在页面里能看到「外部 agent 正在对这个页面做什么」，而不是一片空白。
-const eventQueue = [];
-const EVENT_QUEUE_MAX = 200;
+// （已删除）eventQueue / EVENT_QUEUE_MAX：服务端 → 扩展的面板事件队列。
+// 它服务的是"让用户在页面里看到 DSH 在做什么"，而这件事现在由 DSH 插件经自己的 WS
+// 直接推给面板 —— 桥接不再参与事件分发，只负责工具调用。
 let seq = 0;
 
 function nextId() {
@@ -121,19 +122,17 @@ function resolvePending(id, payload) {
 }
 
 function flushPollWaiters() {
-  while (pollWaiters.length && (queue.length || eventQueue.length)) {
+  // 只唤醒"有请求待取"的等待者 —— 事件那条路已删除（见 eventQueue 处的说明）。
+  while (pollWaiters.length && queue.length) {
     const waiter = pollWaiters.shift();
-    waiter(queue.splice(0, queue.length), eventQueue.splice(0, eventQueue.length));
+    waiter(queue.splice(0, queue.length));
   }
 }
 
-/**
- * 投递一个面板事件（服务端 → 扩展）。
- *
- * 与请求路径同样的取舍：WS 通就直发**且不入队**，否则入队等长轮询取走。
- * 两边都做就会重复投递 —— 扩展会把同一次工具调用画两遍。
- * 返回实际走的通道，供调用方如实告知（不做「已送达」的过度承诺）。
- */
+/* （已删除）投递面板事件的说明（原 pushEvent 的文档注释）。
+ * 与请求路径同样的取舍曾在这里：WS 通就直发且不入队，否则入队等长轮询取走。
+ * 整套已随第 4 步移除 —— 现在只有请求走桥接。 */
+
 /**
  * 允许浏览器页面跨源**只读**本服务 —— 但只放行**本机来源**。
  *
@@ -168,35 +167,18 @@ function applyCors(req, res) {
   return true;
 }
 
-/** 允许跨源预检的路径（必须与下面 applyCors 的实际调用点保持一致）。 */
-const CORS_READ_PATHS = new Set(['/health', '/panel-turns']);
+/** 允许跨源预检的路径（必须与下面 applyCors 的实际调用点保持一致）。
+ *  /panel-turns 已随第 4 步移除；面板不再向桥接取数（它由 DSH 插件推事件）。 */
+const CORS_READ_PATHS = new Set(['/health']);
 
-function pushEvent(ev) {
-  if (!isValidEvent(ev)) return 'invalid';
-  // 可观测性：这几轮排查里最费时的就是"看不出来到底哪一段没动"。
-  // 记下总量与最后一次的时间，让 /health 一眼能答"插件还在推吗"。
-  eventStats.total += 1;
-  eventStats.lastAt = Date.now();
-  eventStats.lastKind = ev.kind + (ev.who ? '/' + ev.who : '');
-  if (extSocket && extSocket.readyState === 1) {
-    try {
-      extSocket.send(JSON.stringify({ event: ev }));
-      eventStats.lastTransport = 'ws';
-      return 'ws';
-    } catch (e) {
-      /* 落到入队 */
-    }
-  }
-  eventQueue.push(ev);
-  if (eventQueue.length > EVENT_QUEUE_MAX) {
-    const kept = trimEventQueue(eventQueue, EVENT_QUEUE_MAX);
-    eventQueue.length = 0;
-    eventQueue.push(...kept);
-  }
-  flushPollWaiters();
-  eventStats.lastTransport = 'queue';
-  return 'queue';
-}
+/* （已删除）pushEvent 与 eventStats：服务端 → 扩展的面板事件投递。
+ *
+ * 它做的是"把 DSH 的工具动作与留言成形后推给面板"。这件事现在由 DSH 插件经它自己的
+ * WebSocket 直接完成 —— 而且做得更准：插件推的是**会话本身的事件**，不是桥接根据
+ * MCP 调用猜出来的动作。桥接因此只剩一件事：把工具调用转给扩展。
+ *
+ * 连带影响：/health 不再有 events 字段（它原本就是给这套事件做可观测性的）。
+ */
 
 // ---------------- HTTP 服务（/health, /poll, /result）+ WebSocket ----------------
 const httpServer = http.createServer((req, res) => {
@@ -245,44 +227,39 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && url.pathname === '/health') {
     applyCors(req, res);
-    // 一次调用回答「两个方向各自通不通」：
-    //   ws / queued         → 扩展侧（正向链路的最后一段）
-    //   events.total/lastAt → 插件是否还在推（正向链路的第一段）
-    //   panelTurns          → 面板是否上报过回合（反向链路的写端）
+    // 一次调用回答「扩展那一跳通不通」：
+    //   ws / queued → 扩展是否连着、有多少请求在排队
+    // 原来的 events.* 与 panelTurns 已随第 4 步移除：事件分发不再经桥接
+    // （DSH 插件直接推给面板），面板也不再向桥接上报回合。
+    // 判断新链路请看 DSH 插件的 GET /recallflow/status。
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
         ok: true,
         ws: Boolean(extSocket),
         queued: queue.length,
-        events: {
-          total: eventStats.total,
-          lastAt: eventStats.lastAt,
-          lastKind: eventStats.lastKind,
-          lastTransport: eventStats.lastTransport,
-        },
-        panelTurns: panelTurns.length,
         uptimeMs: Date.now() - startedAt,
       })
     );
     return;
   }
   if (req.method === 'GET' && url.pathname === '/poll') {
-    if (queue.length || eventQueue.length) {
+    // 只搬请求（工具调用）。事件那条路已随第 4 步移除。
+    if (queue.length) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests: queue.splice(0, queue.length), events: eventQueue.splice(0, eventQueue.length) }));
+      res.end(JSON.stringify({ requests: queue.splice(0, queue.length) }));
       return;
     }
     const timer = setTimeout(() => {
       const i = pollWaiters.indexOf(waiter);
       if (i >= 0) pollWaiters.splice(i, 1);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests: [], events: [] }));
+      res.end(JSON.stringify({ requests: [] }));
     }, POLL_HOLD_MS);
-    const waiter = (requests, events) => {
+    const waiter = (requests) => {
       clearTimeout(timer);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests, events: events || [] }));
+      res.end(JSON.stringify({ requests }));
     };
     pollWaiters.push(waiter);
     return;
@@ -303,76 +280,14 @@ const httpServer = http.createServer((req, res) => {
     });
     return;
   }
-  // 反向通道的读取端：插件在会话创建时拉取面板最近对话，注入 DSH 上下文。
-  // 与 POST 同一路径、不同方法 —— 写与读成对，避免两处各自演化的形状漂移。
-  if (req.method === 'GET' && url.pathname === '/panel-turns') {
-    applyCors(req, res);
-    const limitRaw = Number(url.searchParams.get('limit'));
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
-    // 仪表：插件的注入是**模型侧**的行为，界面上看不见 —— 而它每次注入前都会来读这个端点。
-    // 因此这行日志就是"注入确实发生了"的直接证据（在你启动桥接的终端里能看到）。
-    log('[panel-turns] GET limit=' + limit + ' → 返回 ' + Math.min(limit, panelTurns.length) + ' 条（累计 ' + panelTurns.length + '）');
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, total: panelTurns.length, turns: panelTurns.slice(-limit) }));
-    return;
-  }
-  // 反向通道：面板对话 → DSH。扩展（经后台）把面板的每个对话回合 POST 到这里，
-  // 供 panel_history 工具读回 —— 此前面板自己的对话只能靠用户手动导出才能进 DSH。
-  if (req.method === 'POST' && url.pathname === '/panel-turns') {
-    let body = '';
-    req.on('data', (c) => {
-      body += c;
-      if (body.length > 64 * 1024) req.destroy();
-    });
-    req.on('end', () => {
-      let t = null;
-      try {
-        t = JSON.parse(body || '{}');
-      } catch (e) {}
-      const turn =
-        t && typeof t.text === 'string' && t.text
-          ? {
-              role: t.role === 'user' ? 'user' : 'panel',
-              text: String(t.text).slice(0, 4000),
-              pageUrl: String(t.pageUrl || ''),
-              pageTitle: String(t.pageTitle || ''),
-              at: Number.isFinite(Number(t.at)) ? Number(t.at) : Date.now(),
-            }
-          : null;
-      const ok = recordPanelTurn(turn);
-      if (ok) log('[panel-turn] ' + turn.role + ' · ' + turn.text.slice(0, 40));
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok }));
-    });
-    return;
-  }
-  // 外部提交面板事件：DSH 的 hooks 经此把「会话里发生了什么」推给页面面板。
-  // 为什么需要：MCP 是客户端发起的，本服务端只看得到自己的 MCP 工具调用；
-  // 而 DSH 的 hooks 能看到每一个工具调用（bash / 读写文件 / 其它 MCP server）与用户提示词。
-  if (req.method === 'POST' && url.pathname === '/event') {
-    let body = '';
-    req.on('data', (c) => {
-      body += c;
-      if (body.length > 64 * 1024) req.destroy();
-    });
-    req.on('end', () => {
-      let payload = null;
-      try {
-        payload = JSON.parse(body || '{}');
-      } catch (e) {}
-      const ev = normalizeExternalEvent(payload);
-      const transport = ev ? pushEvent(ev) : 'invalid';
-      // 排查用仪表：有了它才能区分「事件根本没到服务端」与「到了但下游没显示」——
-      // 这两种情况此前只能靠猜，而它们指向完全不同的修法。
-      log(
-        '[event] ' + transport + ' · ' +
-          (ev ? ev.kind + (ev.who ? '/' + ev.who : '') + ' · ' + String(ev.text || ev.tool || '').slice(0, 40) : 'invalid')
-      );
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: Boolean(ev), transport }));
-    });
-    return;
-  }
+  // （已删除）反向通道的两端：GET /panel-turns（插件拉取面板对话用于注入）与
+  // POST /panel-turns（扩展上报面板回合）。
+  // 它们服务的是"把面板的对话搬进 DSH 的模型上下文"—— 而新架构里面板的输入**本来就是**
+  // DSH 那条会话的用户消息，不需要搬。对应地，注入与面板回合工具（panel_history）也没了。
+  //
+  // （已删除）POST /event：DSH 的 hooks 把"会话里发生了什么"推给桥接，再由桥接分发给面板。
+  // 新架构里这一步由 DSH 插件直接完成，而且推的是**会话本身的事件**（比桥接根据 MCP 调用
+  // 猜出来的动作准确得多）。桥接因此只剩工具调用一件事：/poll 取、/result 回。
   res.writeHead(404);
   res.end('not found');
 });
@@ -579,68 +494,16 @@ async function pageScreenshot(args) {
   return { content };
 }
 
-// 面板对话 → DSH 的落点（反向通道）。扩展经后台把每个回合 POST 到 /panel-turns，
-// 这里留一份环形缓冲供 panel_history 读回。
-const panelTurns = [];
-const MAX_PANEL_TURNS = 200;
+// （已删除）面板对话 → DSH 的落点：panelTurns 环形缓冲、recordPanelTurn、panelHistory，
+// 以及"外部 agent 往面板说话"的 panelPost。
+//
+// 它们共同支撑的是"两段对话互相同步"这个前提：面板里有一份对话，DSH 里有另一份，
+// 于是需要上报、需要缓冲、需要工具读回。现在只有**一条会话** —— 面板的话直接成为那条
+// 会话里的用户消息，桥接不再需要知道面板说过什么。
+//
+// 桥接的职责因此收敛到一件事：把 MCP 工具调用转给浏览器扩展执行。
 
-/** 事件侧的可观测性计数（供 /health 回答"插件还在推吗"）。 */
-const eventStats = { total: 0, lastAt: 0, lastKind: '', lastTransport: '' };
 const startedAt = Date.now();
-
-function recordPanelTurn(turn) {
-  if (!turn || typeof turn.text !== 'string' || !turn.text) return false;
-  // 连续去重：面板每次页面加载都会把最近几条既有历史同步一次，因此同一条会重复到达。
-  // 在服务端挡住比在面板侧挡更可靠 —— 面板每次加载都是全新内存，记不住上次推到哪。
-  const last = panelTurns[panelTurns.length - 1];
-  if (last && last.role === turn.role && last.text === turn.text) return false;
-  panelTurns.push(turn);
-  if (panelTurns.length > MAX_PANEL_TURNS) panelTurns.splice(0, panelTurns.length - MAX_PANEL_TURNS);
-  return true;
-}
-
-function panelHistory(args) {
-  const a = args || {};
-  const raw = Number(a.limit);
-  const limit = Number.isFinite(raw) && raw > 0 ? Math.min(200, Math.floor(raw)) : 50;
-  const role = a.role === 'user' || a.role === 'panel' ? a.role : '';
-  const filtered = role ? panelTurns.filter((t) => t.role === role) : panelTurns;
-  return {
-    ok: true,
-    count: Math.min(limit, filtered.length),
-    total: panelTurns.length,
-    turns: filtered.slice(-limit),
-    note:
-      '这些是你在**浏览器里的另一个界面**（RecallFlow 面板）里与用户的对话回合 —— ' +
-      '同一个助手、两块屏幕、共享记录，把它当作我们这段对话的延续，而不是别人的话。' +
-      '若为空，可能是面板还没产生对话，或浏览器侧扩展未重载（该通道需要新版扩展）。',
-  };
-}
-
-/**
- * 把一个页面里的 RecallFlow 面板当作「外部 agent 的出话口」。
- *
- * 为什么需要它：MCP 是客户端发起的，服务端**看不到 DSH 的对话文字**，
- * 因此 DSH 想"在这个页面上说句话"，只能合作式地主动调用本工具。
- * 被动镜像全部对话需要 DSH 侧插件（见 docs/plan-b-dsh-plugin.md），不在当前范围。
- */
-function panelPost(args) {
-  const text = String((args && args.text) || '').trim();
-  if (!text) return { ok: false, error: 'text 为空，没有可投递的内容' };
-  const level = args && args.level === 'warn' ? 'warn' : 'info';
-  const ev = sayEvent(text, level, Date.now());
-  const transport = pushEvent(ev);
-  return {
-    ok: transport !== 'invalid',
-    transport: transport === 'ws' ? 'websocket' : transport === 'queue' ? 'poll-queue' : transport,
-    deliveredTo: 'browser-page-panel',
-    note:
-      transport === 'invalid'
-        ? '事件未通过校验'
-        : '已投递到桥接通道；若浏览器侧扩展未加载、或该标签页没有面板，事件会在队列里等待（上限 200 条）。' +
-          '本工具**不返回**用户是否真的看到了这段话。',
-  };
-}
 
 async function evidenceGet(args) {
   const rec = args && args.hash ? get(args.hash) : getByUrl(args && args.url);
@@ -877,37 +740,10 @@ const TOOLS = [
       },
     },
   },
-  {
-    name: 'panel_history',
-    description:
-      '读回你在**浏览器里的另一个界面**（RecallFlow 面板）里的对话回合 —— ' +
-      '同一个助手、两块屏幕、共享记录。用于把「用户在页面上问了你什么、你答了什么」' +
-      '带进当前会话（此前只能靠用户手动导出或点交接芯片才能被看到）。' +
-      '默认返回最近 50 条（上限 200）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'integer', description: '返回最近多少条，默认 50，上限 200。' },
-        role: { type: 'string', enum: ['user', 'panel'], description: '只看某一方；不填返回全部。' },
-      },
-    },
-  },
-  {
-    name: 'panel_post',
-    description:
-      '把一段话显示到用户浏览器页面里的 RecallFlow 面板上（外部 agent 的出话口）。' +
-      '用于让用户在他正看着的页面上直接看到你的说明、结论或警告，而不必切回对话框。' +
-      '注意：MCP 是客户端发起的，服务端看不到你的对话，因此只有你主动调用本工具时用户才会在页面上看到文字；' +
-      '本工具也不返回用户是否真的看到了。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: '要显示在面板上的文本（会折叠空白并截断到 400 字）。' },
-        level: { type: 'string', enum: ['info', 'warn'], description: '默认 info；warn 会用警示色显示。' },
-      },
-      required: ['text'],
-    },
-  },
+  // （已删除）panel_history 与 panel_post 两个工具。
+  // 前者是"把面板的对话读回 DSH"，后者是"外部 agent 往面板说话"——
+  // 两者都建立在"有两份对话"之上。现在只有一条会话：面板里看到的用户消息与助手回复
+  // 就是这条会话的消息本身，读回与投递都不再有意义。
   {
     name: 'evidence_get',
     description:
@@ -1107,18 +943,15 @@ function createMcpServer() {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
     const args = request.params.arguments || {};
-    const t0 = Date.now();
-    // 把「外部 agent 正在对这个页面做什么」投给页面里的面板。
-    // MCP 是客户端发起的，服务端看不见 DSH 的对话文字，但**看得见每一次工具调用** ——
-    // 这就是当前架构下能同步的那一半（另一半见 panel-events.js 顶部说明）。
-    if (name !== 'panel_post') pushEvent(toolStartEvent(name, args, t0));
+    // （已删除）工具调用的事件投递：曾在这里把每次工具调用的开始/结束投给页面面板。
+    // 现在由 DSH 插件直接把会话事件推给面板 —— 那比这里"根据 MCP 调用猜动作"准确，
+    // 也不需要桥接维护事件队列。桥接只负责把调用转给扩展、把结果带回来。
     try {
       let result;
       if (name === 'browser_read') result = await browserRead(args);
       else if (name === 'evidence_get') result = await evidenceGet(args);
       else if (name === 'page_screenshot') {
         const shot = await pageScreenshot(args); // 返回 image 内容块，不走通用包装
-        pushEvent(toolEndEvent(name, true, Date.now() - t0, '', Date.now()));
         return shot;
       } else if (name === 'read_console') result = await readConsole(args);
       else if (name === 'read_network') result = await readNetwork(args);
@@ -1129,15 +962,9 @@ function createMcpServer() {
       else if (name === 'get_picked_element') result = await getPickedElement();
       else if (name === 'dev_session_get') result = readDevSession();
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
-      else if (name === 'panel_post') result = panelPost(args);
-      else if (name === 'panel_history') result = panelHistory(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
-      if (name !== 'panel_post') pushEvent(toolEndEvent(name, true, Date.now() - t0, '', Date.now()));
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
-      if (name !== 'panel_post') {
-        pushEvent(toolEndEvent(name, false, Date.now() - t0, e, Date.now()));
-      }
       return { content: [{ type: 'text', text: String((e && e.message) || e) }], isError: true };
     }
   });
