@@ -277,8 +277,19 @@ export function apply(ctx, config = {}) {
     // rpcId：面板自己发出去的那句话，回声回来时带着同一个 id。
     // 面板靠它把"本地那条"与"回声那条"精确对齐，不必再靠文本猜。
     if (data.source && data.source.rpcId) out.rpcId = String(data.source.rpcId);
-    if (data.content) {
-      const t = textOf(data.content);
+    // 文本在**哪个字段**按事件类型不同 —— 这是从已删的旧插件（session-map.js）里找回来的事实：
+    //   user/message      → data.content
+    //   assistant/message → data.message.content
+    // 我第一版只读 data.content，于是 assistant/message 永远取不到 text，
+    // classifyFrame 判"无文本"把它跳过 —— 表现就是**面板里看不见助手的回复**
+    // （用户的话与工具活动都正常，所以这个 bug 很能藏）。
+    // 教训：重写时把旧代码里"已验证的事实"一并丢掉，是这次真正的坑。
+    const content =
+      (Array.isArray(data.content) && data.content) ||
+      (data.message && Array.isArray(data.message.content) && data.message.content) ||
+      null;
+    if (content) {
+      const t = textOf(content);
       if (t) out.text = t;
     }
     if (data.tool) out.tool = String(data.tool);

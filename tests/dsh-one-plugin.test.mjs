@@ -67,6 +67,60 @@ function makeCtx() {
   return { ctx, routes, upgrades, tools, agent, fire: ctx.fire };
 }
 
+/**
+ * projectEvent 的取文本位置 —— 这条测试是"面板看不见助手回复"那个 bug 的回归。
+ *
+ * 事实（从已删的旧插件 session-map.js 里找回来的，DSH 的会话事件形状）：
+ *   user/message      → 文本在 data.content
+ *   assistant/message → 文本在 data.message.content      ← 第一版漏了这一个
+ *
+ * 当时的表现很能藏：用户的话正常（回声+渲染）、工具活动正常（有 tool 字段），
+ * 只有助手的**文字**不见了 —— 而 classifyFrame 要求 text 非空，于是静默跳过。
+ * 因此这里两种都断言，防止"只认一种字段"的写法再次蒙对。
+ *
+ * 顺便钉住：reasoning 块不是用户可见的话，不能当回答显示（旧实现也刻意忽略它）。
+ */
+test('projectEvent：助手文本在 data.message.content，用户文本在 data.content（取错字段=回复看不见）', async () => {
+  const mod = await import(PLUGIN_PATH + '?t=' + Date.now());
+  const bag = makeCtx();
+  mod.apply(bag.ctx, {});
+
+  bag.fire(
+    'session/event',
+    { id: 's1' },
+    {
+      type: 'user/message',
+      data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '用户说的话' }] },
+    }
+  );
+  bag.fire(
+    'session/event',
+    { id: 's1' },
+    {
+      type: 'assistant/message',
+      data: { message: { role: 'assistant', content: [{ type: 'text', text: '助手的回答' }] } },
+    }
+  );
+  bag.fire(
+    'session/event',
+    { id: 's1' },
+    {
+      type: 'assistant/message',
+      data: { message: { role: 'assistant', content: [{ type: 'reasoning', text: '内心独白' }] } },
+    }
+  );
+
+  const res = fakeRes();
+  await bag.routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), res);
+  const body = JSON.parse(res.text);
+  const recent = body.recentEvents || [];
+  const texts = recent.map((e) => e.text).filter(Boolean);
+
+  assert.ok(texts.includes('用户说的话'), '用户文本应取到：' + JSON.stringify(recent));
+  assert.ok(texts.includes('助手的回答'), '★ 助手文本必须取到（取错字段时这条会失败）：' + JSON.stringify(recent));
+  assert.ok(!texts.includes('内心独白'), 'reasoning 不是用户可见的话，不能当回答显示');
+});
+
 function fakeReq({ method = 'GET', headers = {}, body = '' } = {}) {
   const listeners = new Map();
   const req = {
