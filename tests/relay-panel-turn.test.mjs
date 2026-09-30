@@ -96,6 +96,26 @@ test('用户回合的渲染：run() 必须画（回声只标记不追画），�
   assert.ok(/el\.remove\(\)/.test(runBody), '送失败撤回时也要移除已画的气泡');
 });
 
+// 裁剪必须同时动 DOM。
+//
+// 这条是回归：trimSessionEntries 只裁数组，而 appendExternalEntry 每来一个事件就追加一个
+// DOM 节点 —— 数组被裁了、DOM 还在长。一条会话的 eventsSeen 已到四位数，
+// 面板开几小时就是上千个节点。
+// 症状（越用越卡）跟"数据不对"看起来毫无关系，所以单测/端到端都发现不了。
+//
+// **这条测试的能力边界（我实测过）**：它是"存在性检查" ——
+// 能抓住"这段逻辑被删掉"，**抓不住**"它还在但变成了死代码"（把条件改成 if(false) 它照样绿）。
+// 值断言才会咬人，存在性断言不会。DOM 的真实行为只能在浏览器里验，node 里没有 DOM。
+test('裁剪必须同时移除对应的 DOM 节点（存在性检查：抓删除，不抓死代码）', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const body = chat.slice(chat.indexOf('function renderSessionEvent'), chat.indexOf('function renderSessionEvent') + 3000);
+  assert.ok(/const removed = before - kept\.length/.test(body), 'renderSessionEvent 应计算被裁掉的条数');
+  assert.ok(/querySelectorAll\('\.msg\.ext'\)/.test(body), '应按 .msg.ext 找到要移除的节点');
+  assert.ok(/nodes\[i\]\.remove\(\)/.test(body), '应移除对应数量的节点');
+  // 移除的必须是**最旧的**那些（数组裁的也是最旧的）
+  assert.ok(/for \(let i = 0; i < removed && i < nodes\.length; i\+\+\)/.test(body), '应从最旧的节点开始移除');
+});
+
 /** 在 stub 生效**期间**执行 fn，并返回它实际发出的请求。 */
 async function withStub(impl, fn) {
   const real = globalThis.fetch;
