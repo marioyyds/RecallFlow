@@ -1,0 +1,74 @@
+# DSH 原生插件：会话同步到 RecallFlow 面板（方案 B）
+
+把 DSH 会话里的事同步到**你正在浏览的页面上的 RecallFlow 面板**。
+
+## 为什么需要插件（而不是 hook）
+
+DSH 的 Claude 风格 hook 载荷里**没有助手的成文回答**（实测：`transcript_path` 是空串、
+`Stop` 只有 `stop_hook_active`）。而会话事件里有 `assistant/message` —— 这是唯一干净的来源。
+
+两者对照：
+
+| 内容 | hook | 本插件 |
+|---|---|---|
+| 用户提示词 | ✅ | ✅ |
+| 工具调用（bash / 读写文件 / 其它 MCP） | ✅ | ✅ |
+| **助手的成文回答** | ❌ | ✅ |
+
+## 挂载点（都来自 DSH 的类型声明，非猜测）
+
+```
+dsh-session  SessionEvent = { type, data }
+  'assistant/message'  data.message.content: ContentBlock[]   ← 取 TextBlock 的 text
+  'user/message'       data 本身就是 UserMessage
+  'tool/call'          data.name / data.arguments(JSON 字符串) / data.callId
+  'tool/result'        data.message.toolCallId / data.error
+
+Cordis 事件  'session/event'(session, event)   ← 一个钩子点覆盖全部会话事件
+             'session/created'(session)
+```
+
+刻意忽略 `reasoning` 块：那是模型的思考，不是它说的话，显示出来会误导用户。
+
+## 安装
+
+插件需要被 DSH 的 loader 解析到。**推荐走 Plugin Manager**（侧边栏「插件」页），
+它按绝对路径读取包的 `package.json` 并处理解析 —— 这也是 DSH 官方推荐的安装方式。
+
+如果想手工写进 profile patch（`~/.dsh/profiles/<profile>/cordis.patch.yml`）：
+
+```yaml
+- insert:
+    - id: recallflow-panel-sync
+      name: 'dsh-plugin-recallflow-panel'   # 或包目录的绝对路径
+      config:
+        port: 7801
+        token: 'recallflow-local-bridge-v1'
+```
+
+> 解析方式实测（Node 侧）：
+> `require.resolve('D:/…/index.js')` ✅ ／ `import('file:///D:/…/index.js')` ✅
+> `require.resolve('file:///D:/…')` ❌ ／ `import('D:/…/index.js')` ❌
+> 也就是说**两种载入方式接受的写法不同**。我不确定 DSH loader 用哪一种，
+> 所以推荐用 Plugin Manager，而不是赌一个写法。
+
+## 生效条件
+
+- profile 未启用 HMR 时，**配置变更保留到重启** —— 加插件条目后需重启 DSH
+  （当前 profile 未提及 HMR，因此需要重启）。
+- 面板侧渲染代码已就位，但浏览器扩展仍需**重载**才能显示。
+
+## 验证（不需要重启 DSH）
+
+```powershell
+$env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
+$env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-plugin"
+node integrations/opencode/recallflow-mcp/index.js --http   # 后台
+node scripts/verify-dsh-plugin.mjs
+```
+
+该脚本用**假的 Cordis context** 调 `apply()`，喂真实形状的会话事件，确认它们经 `/event`
+落到桥接队列。实测 8/8 通过，其中包含「助手成文回答已同步」与「reasoning 块未被显示」。
+
+**未覆盖**：DSH 的 loader 能否解析并挂载本包 —— 那需要重启 DSH 才能验证。
+本插件因此**尚未在真实 DSH 中运行过**，只验证了它自身的逻辑与投递链路。

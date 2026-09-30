@@ -1,0 +1,110 @@
+// DSH 会话事件 → RecallFlow 面板事件（纯映射，可直测）。
+//
+// 这是方案 B 的核心：**hook 拿不到助手的话，会话事件能拿到**。
+// 依据（都来自 DSH 的类型声明，非猜测）：
+//   dsh-session/lib/types/types.d.ts
+//     SessionEvent = { type, data }            ← 载荷在 data
+//     'assistant/message': { turn, step, message: AssistantMessage, stream, usage?, interrupted? }
+//     'user/message': UserMessage             ← data 本身就是消息
+//     'tool/call': { turn, step, callId, name, arguments }   ← arguments 是 JSON 字符串
+//     'tool/result': { turn, step, message: ToolResultMessage, error? }
+//   dsh-llm/lib/types/types.d.ts
+//     TextBlock { type:'text', text }         ← 只取 text，忽略 reasoning / tool-call
+//     ReasoningBlock { type:'reasoning', text }  ← **不是**用户可见的话，不能当回答显示
+//   dsh-llm/lib/types/message.d.ts
+//     MessageBase.content: readonly ContentBlock[]；ToolResultMessage.toolCallId
+
+/** RecallFlow 自己的 MCP 工具已由 MCP 服务端以更细粒度上报，这里跳过以免面板画两遍。 */
+export const SKIP_TOOL_PREFIX = 'mcp__';
+
+/**
+ * 从内容块里取**用户可见的文本**。
+ * 刻意忽略 reasoning 块：那是模型的思考，不是它说的话，显示出来会误导用户。
+ */
+export function textFromBlocks(content) {
+  if (!Array.isArray(content)) return '';
+  const parts = [];
+  for (const b of content) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type !== 'text') continue;
+    if (typeof b.text === 'string' && b.text.trim()) parts.push(b.text);
+  }
+  return parts.join('\n\n').trim();
+}
+
+/** tool/call 的 arguments 是 JSON 字符串；解析失败就原样给出（不吞掉信息）。 */
+export function parseToolArguments(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return {};
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? v : { value: v };
+  } catch (e) {
+    return { raw: s };
+  }
+}
+
+/**
+ * 建立有状态的映射器。
+ * 需要状态的原因：`tool/result` 只带 `toolCallId`，工具名要从前面的 `tool/call` 里记。
+ */
+export function createMapper(options = {}) {
+  const skipPrefix = options.skipToolPrefix === undefined ? SKIP_TOOL_PREFIX : options.skipToolPrefix;
+  const callNames = new Map(); // callId → name
+  const MAX_TRACKED = 200;
+
+  function remember(callId, name) {
+    if (!callId) return;
+    callNames.set(callId, name);
+    // 上限：长会话里 callId 会累积；面板只关心最近的调用
+    while (callNames.size > MAX_TRACKED) {
+      const oldest = callNames.keys().next().value;
+      callNames.delete(oldest);
+    }
+  }
+
+  return {
+    /** @returns 面板事件（见 panel-events.js 的形状）或 null（本次没什么可显示的） */
+    map(event) {
+      const type = event && event.type;
+      const d = (event && event.data) || {};
+
+      if (type === 'assistant/message') {
+        const text = textFromBlocks(d.message && d.message.content);
+        if (!text) return null; // 纯工具调用的回合没有说话，不该产生一条空气泡
+        return { text, who: 'dsh', level: 'info' };
+      }
+
+      if (type === 'user/message') {
+        const text = textFromBlocks(d.content);
+        if (!text) return null;
+        return { text, who: 'user', level: 'info' };
+      }
+
+      if (type === 'tool/call') {
+        const name = String(d.name || '');
+        if (!name) return null;
+        if (skipPrefix && name.startsWith(skipPrefix)) return null;
+        remember(d.callId, name);
+        return { kind: 'tool', phase: 'start', tool: name, args: parseToolArguments(d.arguments) };
+      }
+
+      if (type === 'tool/result') {
+        const msg = d.message || {};
+        const name = callNames.get(msg.toolCallId) || '';
+        const failed = Boolean(d.error) || msg.isError === true;
+        // 成功的结束不产出事件（面板一次调用只画一行）；失败才值得单独一行。
+        if (!failed || !name) return null;
+        const reason = (d.error && (d.error.reason || d.error.code || d.error.name)) || '工具执行失败';
+        return { kind: 'tool', phase: 'end', tool: name, ok: false, ms: 0, error: String(reason) };
+      }
+
+      return null;
+    },
+    /** 供测试与诊断 */
+    trackedCount() {
+      return callNames.size;
+    },
+  };
+}
