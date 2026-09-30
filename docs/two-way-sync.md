@@ -130,9 +130,23 @@ node scripts/probe-say.mjs "测试文本"
   返回 HTTP 200 与真实页面数据（tabId / pageUrl / network 都对）；`browser_read` 那次
   还带回了扩展自己的校验信息（"仅支持 http/https URL"）—— 说明**整条链**
   （插件 → WS → 扩展 → 它自己的方法实现 → 回执）都是通的，而不只是"某处返回了 200"。
-- **opencode 那条链路**：桥接已恢复（`/health` 的 `ok` 与 `ws` 都为真）。
-  删除清单**第 4 步（移除桥接里的同步部分）还没做** —— 它牵动 index.js 里约 30 处，
-  改错会影响 opencode，因此单独一轮来做。
-- **面板侧渲染的观感未验证**：会话事件在面板里的显示（含对齐 DSH 原生气泡的样式）
-  只在代码层核对过，需要真实面板确认。
-- 面板的本地 agent 仍保留为**退路**（DSH 送不进去时回退），这是过渡形态，不是最终形态。
+- **opencode 那条链路**：桥接在跑（`/health` 的 `ok` 与 `ws` 都为真），但**跑的是旧代码** ——
+  `events` / `panelTurns` 字段还在、`/panel-turns` 仍返回 200。删除清单第 4 步的改动
+  （`c80fb0a`）要等用户重启桥接才会生效；重启后需先验证 opencode 仍正常，再做第 5 步。
+- **✅ 面板侧渲染已实测验证**（曾列为未验证，现已确认）：用浏览器工具读取面板里
+  `.msg.ext.ext-user` 与 `.msg.ext` 的**计算样式**，逐项等于 DSH 自己的值：
+
+  ```
+  background-color: rgb(237,243,254)   border-radius: 20px
+  padding: 10px 16px                   font-size: 14px / line-height: 22px
+  border-left-width: 0px               ← 旧的"哪一边"竖线确实没了
+  ```
+
+  更有说服力的是内容：面板里显示的是**当时正在发生的**工具调用
+  （`⚙ page_screenshot` / `⚙ verify_change`），也就是这条会话本身的事件 ——
+  "同一会话、两块屏幕"在真实环境里成立，而不只是设计意图。
+- **面板的本地 agent 仍保留为退路**（DSH 送不进去时回退），这是过渡形态，不是最终形态。
+- **旁注（与本项目无关）**：排查时看到 DSH 自己的 `/api/changes.summary` 返回 404。
+  它来自 DSH 自身的 `ctx.workspaceChanges.summary(...)`（在 DSH 的 bundle 里，
+  不在本仓库），报错里那个 `bookmark-sorter\plugins` 位置是源码映射的假位置。
+  记录在此只为避免下次重复排查。
