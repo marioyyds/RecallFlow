@@ -315,11 +315,45 @@ export function apply(ctx, config = {}) {
     // 重写时凭形状猜字段名，而不是把旧代码里已验证的事实搬过来。
     if (data.name !== undefined) out.tool = String(data.name);
     else if (data.tool !== undefined) out.tool = String(data.tool); // 兼容另一种形状
+    // 记住 callId → 名字，供后面的 tool/result 反查（结果事件只带 toolCallId）
+    rememberCall(data.callId, out.tool);
     const rawArgs = data.arguments !== undefined ? data.arguments : data.args;
     if (rawArgs !== undefined) out.args = parseToolArgs(rawArgs);
+
+    // 工具**结果**：只在失败时投影（成功不画 —— 面板里一次调用只占一行，这是旧实现的取舍）。
+    // 失败判定与取名同样照抄旧实现的事实：
+    //   const failed = Boolean(d.error) || msg.isError === true;
+    //   const name = callNames.get(msg.toolCallId)      ← 名字要从前面的 tool/call 里记
+    //   const reason = d.error.reason || d.error.code || d.error.name || '工具执行失败'
+    if (out.type === 'tool/result') {
+      const msg = data.message || {};
+      const failed = Boolean(data.error) || msg.isError === true;
+      if (!failed) return null;
+      const name = callNames.get(msg.toolCallId) || out.tool || '';
+      if (!name) return null; // 名字都不知道就画不出有信息量的一行
+      out.tool = String(name);
+      out.failed = true;
+      const e = data.error || {};
+      out.error = String(e.reason || e.code || e.name || '工具执行失败');
+    }
     if (ev.time !== undefined) out.time = ev.time;
     if (ev.seq !== undefined) out.seq = ev.seq;
     return out;
+  }
+
+  /**
+   * 记住 callId → 工具名，供 tool/result 反查（旧实现同样如此：结果事件只带 toolCallId）。
+   * 上限 200 条，超了丢最旧的 —— 长会话里调用数远超这个数，不设上限就是内存泄漏。
+   */
+  const callNames = new Map();
+  const MAX_TRACKED_CALLS = 200;
+  function rememberCall(callId, name) {
+    if (!callId || !name) return;
+    callNames.set(String(callId), String(name));
+    while (callNames.size > MAX_TRACKED_CALLS) {
+      const oldest = callNames.keys().next().value;
+      callNames.delete(oldest);
+    }
   }
 
   /** 处理浏览器侧发来的一条消息（抽出来是为了可单测，不需要真 WebSocket）。 */

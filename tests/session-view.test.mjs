@@ -19,8 +19,12 @@ test('classifyFrame: 认 user/message、assistant/message 与工具调用，其�
   // 当成了设计意图。实测依据：插件 /recallflow/status 的 lastEventType 长期是 tool/call，
   // 且用户手上的面板确实显示过 ⚙ 行。
   assert.equal(classifyFrame(frame({ type: 'tool/call', tool: 'page_screenshot' })).ok, true);
-  // 工具**结果**不画（一次调用只占一行）
+  // 工具**结果**：成功的不画（一次调用只占一行）；
+  // **失败**的画一行 —— 那是"出错"信号，混在成功里会被忽略。
   assert.equal(classifyFrame(frame({ type: 'tool/result', tool: 'page_screenshot', text: 'ok' })).ok, false);
+  assert.equal(classifyFrame(frame({ type: 'tool/result', tool: 'page_screenshot', failed: true })).ok, true);
+  // 说"失败"但不知道是谁失败 → 画不出有信息量的一行，宁可不画
+  assert.equal(classifyFrame(frame({ type: 'tool/result', failed: true })).ok, false);
   // 没有工具名的 tool/call 是坏的，别画一行空气泡
   assert.equal(classifyFrame(frame({ type: 'tool/call' })).ok, false);
 
@@ -78,6 +82,20 @@ test('工具调用渲染成「⚙ 名字（k=v）」一行，参数只取最多�
   assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'browser_read' }), []).line, '⚙ browser_read');
   assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'browser_read', args: {} }), []).line, '⚙ browser_read');
   assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'x', args: [1, 2] }), []).line, '⚙ x');
+});
+
+test('工具失败渲染成「✗ 调用 名字 失败：原因」一行（成功的结果不画）', () => {
+  const d = sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'verify_change', failed: true, error: '超时' }), []);
+  assert.equal(d.action, 'append');
+  assert.equal(d.who, 'dsh');
+  assert.equal(d.line, '✗ 调用 verify_change 失败：超时');
+  // 插件没给原因时也不能留空 —— 面板上要能看出"失败了但原因未提供"
+  assert.equal(
+    sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'x', failed: true }), []).line,
+    '✗ 调用 x 失败：未提供原因'
+  );
+  // 成功的结果整条跳过
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'x', text: 'ok' }), []).action, 'skip');
 });
 
 test('summarizeToolArgs: 长值截断、跳过多余字段（面板是窄条，一行不能变十行）', () => {

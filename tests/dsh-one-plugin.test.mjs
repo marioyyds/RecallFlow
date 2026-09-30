@@ -157,6 +157,41 @@ test('projectEvent：tool/call 的工具名在 data.name、参数在 data.argume
   assert.equal(calls[1].args.raw, '{不是 JSON', '解析失败要留住原文，而不是丢掉');
 });
 
+test('projectEvent：tool/result 只投影失败，且工具名要靠 callId 从 tool/call 反查', async () => {
+  const mod = await import(PLUGIN_PATH + '?t=' + Date.now());
+  const bag = makeCtx();
+  mod.apply(bag.ctx, {});
+
+  // 先来一次调用（记住 callId → name），再来一个**成功**结果（不该投影）
+  bag.fire('session/event', { id: 's1' }, {
+    type: 'tool/call',
+    data: { callId: 'c9', name: 'verify_change', arguments: '{"selector":".panel"}' },
+  });
+  bag.fire('session/event', { id: 's1' }, {
+    type: 'tool/result',
+    data: { message: { toolCallId: 'c9', isError: false } },
+  });
+
+  const mid = fakeRes();
+  await bag.routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), mid);
+  const midRecent = JSON.parse(mid.text).recentEvents || [];
+  assert.equal(midRecent.filter((e) => e.type === 'tool/result').length, 0, '成功的结果不该投影：' + JSON.stringify(midRecent));
+
+  // 再来一个**失败**结果：应当带上从映射反查到的名字与原因
+  bag.fire('session/event', { id: 's1' }, {
+    type: 'tool/result',
+    data: { message: { toolCallId: 'c9', isError: true }, error: { code: 'ETIMEDOUT' } },
+  });
+
+  const res = fakeRes();
+  await bag.routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), res);
+  const results = (JSON.parse(res.text).recentEvents || []).filter((e) => e.type === 'tool/result');
+  assert.equal(results.length, 1, '失败的结果应当被投影');
+  assert.equal(results[0].tool, 'verify_change', '工具名要从 tool/call 的 callId 反查（结果事件只带 toolCallId）');
+  assert.equal(results[0].failed, true);
+  assert.equal(results[0].error, 'ETIMEDOUT', '原因取 error.code —— 与旧实现同样的取值顺序');
+});
+
 function fakeReq({ method = 'GET', headers = {}, body = '' } = {}) {
   const listeners = new Map();
   const req = {
