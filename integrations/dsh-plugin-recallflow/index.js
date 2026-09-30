@@ -151,8 +151,23 @@ export function apply(ctx, rawConfig) {
           max: PANEL_CONTEXT_TURNS,
         });
         if (!injected) return;
-        // 传**完整**消息（含 id）：inject 会原样放进 inbox，不替我们铸 id。见 session-map.js。
-        agent.inject(injected);
+        // 把注入的**成败**变成面板上可见的一行。
+        // 原因：inject 是模型侧行为，界面上看不见；而失败会被下面的 catch 吞掉 ——
+        // 那样「注入没生效」与「面板本来没对话」在外部完全无法区分。
+        // 这条诊断本身也走同一条桥接，因此它能否出现在面板上，
+        // 顺带证明了正向链路此刻是通的。
+        try {
+          // 传**完整**消息（含 id）：inject 会原样放进 inbox，不替我们铸 id。见 session-map.js。
+          agent.inject(injected);
+          const n = (data && data.turns && data.turns.length) || 0;
+          void post({ text: '已将面板最近的 ' + n + ' 条对话注入本会话上下文。', who: 'dsh', level: 'info' });
+        } catch (err) {
+          void post({
+            text: '⚠ 面板上下文注入失败（' + String((err && err.message) || err) + '）—— 面板对话未能进入本会话。',
+            who: 'dsh',
+            level: 'warn',
+          });
+        }
       } catch (e) {
         // 注入失败绝不影响会话创建
       }

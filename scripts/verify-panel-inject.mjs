@@ -24,12 +24,27 @@ function check(label, fn) {
   }
 }
 
-// --- 假桥接：只实现 GET /panel-turns -------------------------------------
+// --- 假桥接：只实现 GET /panel-turns，并记录收到的 /event -------------------
 let requestedUrl = '';
+const postedEvents = [];
 const server = http.createServer((req, res) => {
   // 只记面板回合那次请求：插件在装载时还会 POST /event（装载自报），
   // 若无条件覆盖，断言拿到的会是最后一次请求而不是我们要看的那次。
   if (req.url.startsWith('/panel-turns')) requestedUrl = req.url;
+  if (req.method === 'POST' && req.url === '/event') {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+    });
+    req.on('end', () => {
+      try {
+        postedEvents.push(JSON.parse(body || '{}'));
+      } catch (e) {}
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
   if (req.method === 'GET' && req.url.startsWith('/panel-turns')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
@@ -136,6 +151,32 @@ await new Promise((r) => setTimeout(r, 600));
 check('每次注入铸新 id（否则会话里两条注入会被当成同一条消息）', () => {
   assert.equal(injectedSecond.length, 1, '第二次也应注入，实际 ' + injectedSecond.length);
   assert.notEqual(injected[0].id, injectedSecond[0].id, '两次铸出的 id 相同');
+});
+
+check('注入成功会推一行可见诊断（否则"注入没生效"与"面板本来没对话"外部无法区分）', () => {
+  const line = postedEvents.find((e) => typeof e.text === 'string' && e.text.includes('注入本会话上下文'));
+  assert.ok(line, '没有推出注入成功诊断：' + JSON.stringify(postedEvents.map((e) => e.text)));
+  assert.ok(line.text.includes('2 条'), '应报出注入了几条，实际：' + line.text);
+  assert.equal(line.who, 'dsh');
+});
+
+check('注入抛错时推 warn 诊断（把静默失败变成可见失败）', async () => {
+  const ctx4 = makeCtx();
+  const before = postedEvents.length;
+  apply(ctx4, { port, token: 't', timeoutMs: 1000 });
+  ctx4.fire('agent/created', {
+    agent: {
+      session: { id: 's4' },
+      inject: () => {
+        throw new Error('shape rejected');
+      },
+    },
+    source: 'fresh',
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  const warn = postedEvents.slice(before).find((e) => e.level === 'warn' && /注入失败/.test(String(e.text)));
+  assert.ok(warn, '注入抛错时应推出 warn 诊断，实际新增：' + JSON.stringify(postedEvents.slice(before).map((e) => e.text)));
+  assert.ok(String(warn.text).includes('shape rejected'), '诊断里应带原始错误信息');
 });
 
 // --- 桥接不可达时：安静失败，绝不抛 -------------------------------------------------
