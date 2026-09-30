@@ -6,16 +6,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyFrame, sessionEntryFromFrame, SESSION_SOURCE } from '../lib/shared/session-view.js';
+import { classifyFrame, sessionEntryFromFrame, summarizeToolArgs, SESSION_SOURCE } from '../lib/shared/session-view.js';
 
 const frame = (event) => ({ kind: 'session-event', sessionId: 's1', event });
 
-test('classifyFrame: 只认 user/message 与 assistant/message，其余一律不进面板', () => {
+test('classifyFrame: 认 user/message、assistant/message 与工具调用，其余一律不进面板', () => {
   assert.equal(classifyFrame(frame({ type: 'user/message', role: 'user', text: 'hi' })).ok, true);
   assert.equal(classifyFrame(frame({ type: 'assistant/message', text: 'yo' })).ok, true);
 
-  // 工具活动、inbox 变动、空文本都不该变成面板里的一行
-  assert.equal(classifyFrame(frame({ type: 'tool/start', tool: 'pwsh' })).ok, false);
+  // 工具调用**要**画一行（"agent 正在做什么"）。真实事件类型是 tool/call ——
+  // 这条本来写的是猜测的 'tool/start'，结果既没覆盖真实类型，也把"不画工具活动"
+  // 当成了设计意图。实测依据：插件 /recallflow/status 的 lastEventType 长期是 tool/call，
+  // 且用户手上的面板确实显示过 ⚙ 行。
+  assert.equal(classifyFrame(frame({ type: 'tool/call', tool: 'page_screenshot' })).ok, true);
+  // 工具**结果**不画（一次调用只占一行）
+  assert.equal(classifyFrame(frame({ type: 'tool/result', tool: 'page_screenshot', text: 'ok' })).ok, false);
+  // 没有工具名的 tool/call 是坏的，别画一行空气泡
+  assert.equal(classifyFrame(frame({ type: 'tool/call' })).ok, false);
+
+  // inbox 变动、空文本都不该变成面板里的一行
   assert.equal(classifyFrame(frame({ type: 'agent/inbox/spliced' })).ok, false);
   assert.equal(classifyFrame(frame({ type: 'assistant/message', text: '   ' })).ok, false);
   // user/message 但来源不是用户（例如 runtime-context 注入）不该当成人说的话
@@ -25,6 +34,32 @@ test('classifyFrame: 只认 user/message 与 assistant/message，其余一律不
   );
   assert.equal(classifyFrame(null).ok, false);
   assert.equal(classifyFrame({ kind: 'tool-call' }).ok, false);
+});
+
+test('工具调用渲染成「⚙ 名字（k=v）」一行，参数只取最多两个短标量', () => {
+  const d = sessionEntryFromFrame(
+    frame({ type: 'tool/call', tool: 'page_screenshot', args: { label: '面板渲染检查', tabId: 1780111567, nested: { a: 1 } } }),
+    []
+  );
+  assert.equal(d.action, 'append');
+  assert.equal(d.who, 'dsh');
+  assert.equal(d.line, '⚙ page_screenshot（label=面板渲染检查 tabId=1780111567）', '最多两个字段，对象字段跳过');
+  assert.equal(d.echoText, '', '工具行不参与回声去重');
+
+  // 参数为空 / 非对象 → 只留名字，不留空括号
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'browser_read' }), []).line, '⚙ browser_read');
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'browser_read', args: {} }), []).line, '⚙ browser_read');
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'x', args: [1, 2] }), []).line, '⚙ x');
+});
+
+test('summarizeToolArgs: 长值截断、跳过多余字段（面板是窄条，一行不能变十行）', () => {
+  assert.equal(summarizeToolArgs({ url: 'http://127.0.0.1:3080/'.repeat(10) }), '（url=' + 'http://127.0.0.1:3080/'.repeat(10).slice(0, 40) + '…）');
+  assert.equal(summarizeToolArgs({ a: '1', b: '2', c: '3' }), '（a=1 b=2）', '第三个字段不再进入摘要');
+  assert.equal(summarizeToolArgs({ ok: true, n: 3 }), '（ok=true n=3）');
+  assert.equal(summarizeToolArgs({ obj: { x: 1 }, arr: [1] }), '', '对象/数组一律跳过');
+  assert.equal(summarizeToolArgs(null), '');
+  assert.equal(summarizeToolArgs('str'), '');
+  assert.equal(summarizeToolArgs({ blank: '   ' }), '', '空白值不算一个字段');
 });
 
 test('用户消息渲染成「你：…」，助手消息不加前缀（角色可见、来源不可见）', () => {
