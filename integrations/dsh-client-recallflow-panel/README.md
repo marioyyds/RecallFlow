@@ -61,10 +61,13 @@ node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" plugin --profil
 
 - **需要先重启桥接**：客户端要跨源取数，而桥接的 CORS 支持是后加的。
   若桥接还是旧进程，浏览器会直接挡住这次 fetch —— 表现是「卡片不出现」，
-  而**不会**有任何报错提示。判据：带 `Origin` 请求 `/panel-turns` 时应回
+  而控制台会打出明确原因（见下）。判据：带 `Origin` 请求 `/panel-turns` 时应回
   `Access-Control-Allow-Origin`（只对本机来源回）。
-- **需要重启 DSH**：客户端入口由服务端按「已启用 bundle 列表」组装成 combo
-  （`/plugins/??<id>/client.js,…&rev=<hash>`），该列表在启动时确定。
+- **DSH 无需重启，刷新页面即可**（这条我最初判断错了，实测纠正）：
+  客户端入口由服务端按「已启用 bundle 列表」组装成 combo
+  （`/plugins/??<id>/client.js,…&rev=<hash>`）。实测：`dsh plugin add` 之后
+  **DSH 进程未重启**，但页面刷新后 combo 已包含本包，且控制台出现「已装载」。
+  `rev` 是 (id, rev) 对的哈希，会随内容变化 —— 因此刷新后拿到的就是最新代码。
 - **桥接重启会清空 `panelTurns`**：那是内存缓冲。所以重启桥接后，
   要**在面板里再说一句**才会有内容可展示（不会自动回填历史）。
 - **轮询在页面加载时就启动**（不是等第一个卡片挂载）：卡片挂在每轮末尾，若挂载才启动轮询，
@@ -72,12 +75,15 @@ node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" plugin --profil
   第一次轮次挂载时数据通常已就绪，卡片立刻可见。
 - 卡片只在**面板出现新消息**时出现；同一批内容不会在后续轮次重复
   （进度按"已展示到哪一条 at"记在模块级，并在挂载时推进）。
-- 桥接不可达 / 非 2xx 时静默不出卡片（绝不因为拿不到面板数据而影响 DSH 界面）。
+- **失败会写控制台**（这也是排查入口）：装载成功打 `[recallflow-panel-ui] 已装载…`；
+  取数失败打一行 warn，并把最可能的原因写进去（HTTP 404 → 桥接可能是旧代码；
+  `Failed to fetch` → 桥接未启动或没有开放只读 CORS）。同一种失败只打印一次。
+  浏览器扩展的 `read_console` 可以直接读到这些行 —— 排查不必靠猜。
 - 本插件**不产生任何会话消息**，因此不存在"把面板的话算成用户说的"这个问题。
 
 ## 推荐的启用顺序
 
 1. 重启桥接（终端 Ctrl+C → 重跑 `node integrations/opencode/recallflow-mcp/index.js --http`）
 2. 在面板里说一句话（让 `panelTurns` 有内容）
-3. 重启 DSH（加载客户端插件）
+3. **刷新 DSH 页面**（无需重启 DSH 进程）
 4. 在 DSH 里完成一轮对话 → 轮次末尾应出现 `📣 浏览器 RecallFlow 面板` 卡片
