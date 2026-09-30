@@ -24,6 +24,9 @@ globalThis.setInterval = (fn, ms) => {
 };
 globalThis.clearInterval = () => {};
 
+/** 控制台捕获缓冲（见 loadPlugin）。 */
+const consoleLines = [];
+
 /** 最小 React 替身。函数组件里用到的三个 hook 都实现为可直接求值的形式。 */
 function makeFakeReact() {
   return {
@@ -71,6 +74,15 @@ async function loadPlugin({ fetchImpl }) {
     addEventListener() {},
   };
   globalThis.fetch = fetchImpl;
+  // 捕获控制台输出：客户端的诊断是**外部唯一**能区分
+  // "插件没加载"/"加载了但取数失败"/"取数成功只是没内容" 的线索。
+  consoleLines.length = 0;
+  globalThis.console = {
+    info: (...a) => consoleLines.push({ level: 'info', text: a.join(' ') }),
+    warn: (...a) => consoleLines.push({ level: 'warn', text: a.join(' ') }),
+    log: () => {},
+    error: () => {},
+  };
 
   // 每次以全新模块装载，避免模块级状态（shownUpTo / latest）在用例之间串味
   const url = new URL(CLIENT_PATH + '?t=' + Math.random(), import.meta.url).href;
@@ -194,4 +206,54 @@ test('桥接返回非 2xx 时同样静默（例如远程来源被 CORS 挡住、
   const { component } = captureComponent(plugin);
   assert.equal(await renderTurn(component), null);
   assert.equal(component({}), null);
+});
+
+test('装载时在控制台留一行（否则"没加载"与"加载了但没数据"外部无法区分）', async () => {
+  const { plugin } = await loadPlugin({ fetchImpl: bridgeOk([]) });
+  captureComponent(plugin);
+  const info = consoleLines.find((l) => l.level === 'info' && l.text.includes('已装载'));
+  assert.ok(info, '装载时应有 info 日志，实际：' + JSON.stringify(consoleLines));
+  assert.ok(info.text.includes('conversation.chat.turnTail'), info.text);
+});
+
+test('取数失败时打印原因（404 特别指出可能是桥接旧代码）—— 这是外部唯一能看出原因的线索', async () => {
+  const { plugin } = await loadPlugin({ fetchImpl: async () => ({ ok: false, status: 404 }) });
+  const { component } = captureComponent(plugin);
+  await renderTurn(component);
+  const warn = consoleLines.find((l) => l.level === 'warn');
+  assert.ok(warn, '应打印警告，实际：' + JSON.stringify(consoleLines));
+  assert.ok(warn.text.includes('404'), warn.text);
+  assert.ok(warn.text.includes('旧代码'), '404 时应提示桥接可能是旧代码：' + warn.text);
+});
+
+test('跨源被挡时的报错要带上最可能的原因（浏览器只给笼统的 Failed to fetch）', async () => {
+  const { plugin } = await loadPlugin({
+    fetchImpl: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  });
+  const { component } = captureComponent(plugin);
+  await renderTurn(component);
+  const warn = consoleLines.find((l) => l.level === 'warn');
+  assert.ok(warn, '应打印警告');
+  assert.ok(warn.text.includes('CORS'), '应提示 CORS 这个最可能的原因：' + warn.text);
+});
+
+test('同一种失败只打印一次（轮询每 4 秒一次，不能刷屏）', async () => {
+  let calls = 0;
+  const { plugin } = await loadPlugin({
+    fetchImpl: async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    },
+  });
+  const { component } = captureComponent(plugin);
+  await renderTurn(component);
+  const first = consoleLines.filter((l) => l.level === 'warn').length;
+  // 再渲染几轮，触发更多次轮询
+  await renderTurn(component);
+  await renderTurn(component);
+  const after = consoleLines.filter((l) => l.level === 'warn').length;
+  assert.ok(calls >= 1, '应当真的尝试过取数');
+  assert.equal(after, first, '同样的失败不应重复打印（实测会刷屏）');
 });

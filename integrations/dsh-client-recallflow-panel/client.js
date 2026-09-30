@@ -38,11 +38,31 @@
       var shownUpTo = 0;
       var listeners = new Set();
       var timer = null;
+      // 失败原因只在**状态变化**时打印一次，避免每 4 秒刷屏。
+      // 为什么要打印：取数失败的原因（CORS 被挡 / 桥接没起来 / 桥接是旧代码没有该端点）
+      // 在界面上完全不可见 —— 表现只是"卡片不出现"。有这条日志，
+      // 排查者（包括通过扩展 read_console 的 AI）就能直接看出原因。
+      var lastFailReason = '';
+
+      function reportFail(reason) {
+        if (reason === lastFailReason) return;
+        lastFailReason = reason;
+        try {
+          console.warn('[recallflow-panel-ui] 面板取数失败：' + reason);
+        } catch (e) {}
+      }
 
       function pull() {
         return fetch(BRIDGE + '/panel-turns?limit=20', { headers: { 'X-RecallFlow-Token': TOKEN } })
           .then(function (r) {
-            return r.ok ? r.json() : null;
+            if (!r.ok) {
+              // 401 = token 不对；404 = 桥接是旧代码（没有这个端点）；
+              // 其它多半是 CORS / 未启动。
+              reportFail('HTTP ' + r.status + (r.status === 404 ? '（桥接可能是旧代码，没有 /panel-turns）' : ''));
+              return null;
+            }
+            lastFailReason = '';
+            return r.json();
           })
           .then(function (d) {
             if (d && Array.isArray(d.turns)) {
@@ -54,8 +74,10 @@
               });
             }
           })
-          .catch(function () {
-            // 桥接没起来 / 不是本机来源：静默。面板不出现即可，绝不影响 DSH 本体。
+          .catch(function (e) {
+            // 跨源被挡时浏览器只给一个笼统的 TypeError: Failed to fetch，
+            // 因此这里把"最可能的原因"一并写出来，而不是只丢一个原始错误。
+            reportFail(String((e && e.message) || e) + '（桥接未启动，或它还是旧代码、没有对 127.0.0.1/3080 开放只读 CORS）');
           });
       }
 
@@ -155,6 +177,11 @@
         name: 'recallflow-panel-ui',
         inject: ['slots'],
         apply: function (ctx) {
+          // 装载成功要在控制台留一行：否则"插件没被加载"与"加载了但没数据"
+          // 在外部完全无法区分（两种情况的界面表现都是"看不到卡片"）。
+          try {
+            console.info('[recallflow-panel-ui] 已装载，注册到 conversation.chat.turnTail');
+          } catch (e) {}
           ctx.slots.inject('conversation.chat.turnTail', function () {
             return ctx.slots.register(
               {
