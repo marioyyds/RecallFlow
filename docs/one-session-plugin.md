@@ -97,6 +97,43 @@ this context can only target this live turn's next step."
 对照：我们现在手搓的载荷是 `source: { kind: 'recallflow-panel' }` ——
 自定义 kind，因此只能落成模型侧上下文，界面上不是用户消息。
 
+## 探针 v3（决定性）：插件能在**空闲**会话上开启新一轮 —— 已实测通过
+
+脚本 `scripts/spike-wake-plugin.mjs`：等 CLI 那一轮跑完并**空闲**（`agent.whenIdle()`），
+再调 `agent.send(msg, 'next-turn', true)`，观察是否产生真用户消息与**新一轮**助手输出。
+
+实测输出（原文摘录）：
+
+```
+[spike] 已空闲。此时收到的 user/message 数=0，assistant/message 数=0
+[spike] ★ 已被接受：send(msg, 'next-turn', true)  返回=null
+[spike] user/message #1 text="WAKE-1790785531308"
+[spike] assistant/message #1 … #14
+[spike] === 结论 ===
+[spike] send 之后新增 assistant/message 数 = 15（>0 即证明：插件能在空闲会话上开启新一轮）
+[spike] 探针文本是否作为 user/message 出现 = 是（共 2 条 user/message）
+```
+
+结论：**`agent.send(message, 'next-turn', true)` 就是"外部输入进会话"的正确入口** ——
+它同时做到三件事：产生真正的 `user/message`、唤醒空闲的 driver、开启新一轮。
+（`agent.inject` 只做前一件的一半：能产生 user/message 但**不唤醒**空闲 driver，
+所以它只适合引导正在进行的那一轮。）
+
+顺带一条形状事实（v2 探针转储）：`agent` 原型上有
+`send / followup / steer / inject / cancel / wakeDriver / whenIdle / runMaintenance / turn / step`；
+`agent.session` 上只有 `append / snapshotEvents / deriveMessages` 等**日志侧**方法，没有 `prompt`。
+`ctx.session` / `ctx.sessions` 存在但**必须先 `inject` 声明**才能取用
+（不声明时报 `cannot get property "sessions" without inject`）。
+
+### 至此四块都有了证据
+
+| 需要的能力 | API | 证据 |
+|---|---|---|
+| 面板的话 → 真用户消息 + 唤醒空闲会话 | `agent.send(msg, 'next-turn', true)` | ✅ 隔离 headless 实测 |
+| 载荷形状 | `{id, role:'user', content:[…], source:{kind:'user', rpcId}}` | ✅ 实测产生 user/message |
+| 把页面工具给 DSH | `ctx.tools.register(ToolDefinition)` | ✅ 类型声明（形状待读全） |
+| 面板 ↔ 插件的传输 | `webServer.register(route)` + SSE | ✅ 类型声明 |
+
 ## 选定方案
 
 ```
