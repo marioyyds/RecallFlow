@@ -54,8 +54,17 @@ test('加载历史时不得重推给 DSH（会话才是真相，面板里的只�
     !/recentSpeakTurns\([^)]*\)\)\s*sendPanelTurn/.test(loadBody),
     'loadConversation 不应把载入的历史推给 DSH'
   );
-  // 计数器仍要同步，否则下一次增量推送会把老内容当新的发
-  assert.ok(/pushedSpeakTurns = countSpeakTurns\(conversation\)/.test(loadBody), '载入后仍要同步计数器');
+  // 计数器仍要同步，否则下一次增量推送会把老内容当新的发。
+  // 现在统一走 syncPushCursor()（一处实现）—— 断言 helper 的调用，
+  // 并顺带断言 helper 体内是**赋值**而不是自我调用：
+  // 我用批量替换时它曾被替换成 syncPushCursor()，成了自我递归又被 try/catch 吞掉，
+  // 变成一个静默空操作（与意图正好相反）。
+  assert.ok(/syncPushCursor\(\);/.test(loadBody), '载入后仍要同步计数器（走 syncPushCursor）');
+  const helperBody = chat.slice(chat.indexOf('function syncPushCursor()'), chat.indexOf('function syncPushCursor()') + 400);
+  assert.ok(
+    /pushedSpeakTurns = countSpeakTurns\(conversation\)/.test(helperBody),
+    'syncPushCursor 体内必须是赋值，不能是自我调用'
+  );
 });
 
 // 序列化必须带上**所有**参与裁剪与去重的字段，且不能只按条数截断。
