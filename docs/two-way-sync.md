@@ -133,20 +133,25 @@ node scripts/probe-say.mjs "测试文本"
 - **opencode 那条链路**：桥接在跑（`/health` 的 `ok` 与 `ws` 都为真），但**跑的是旧代码** ——
   `events` / `panelTurns` 字段还在、`/panel-turns` 仍返回 200。删除清单第 4 步的改动
   （`c80fb0a`）要等用户重启桥接才会生效；重启后需先验证 opencode 仍正常，再做第 5 步。
-- **✅ 面板侧渲染已实测验证**（曾列为未验证，现已确认）：用浏览器工具读取面板里
-  `.msg.ext.ext-user` 与 `.msg.ext` 的**计算样式**，逐项等于 DSH 自己的值：
-
-  ```
-  background-color: rgb(237,243,254)   border-radius: 20px
-  padding: 10px 16px                   font-size: 14px / line-height: 22px
-  border-left-width: 0px               ← 旧的"哪一边"竖线确实没了
-  ```
-
-  更有说服力的是内容：面板里显示的是**当时正在发生的**工具调用
-  （`⚙ page_screenshot` / `⚙ verify_change`），也就是这条会话本身的事件 ——
-  "同一会话、两块屏幕"在真实环境里成立，而不只是设计意图。
+- **面板渲染：一半已确认，一半仍未确认**（这一节被改过两次，因为它两次被我写过头）。
+  - ✅ **样式**：读面板里 `.msg.ext.ext-user` 与 `.msg.ext` 的计算样式，逐项等于 DSH 自己的值
+    （`background-color: rgb(237,243,254)` / `border-radius: 20px` / `padding: 10px 16px` /
+    `font-size: 14px` · `line-height: 22px` / `border-left-width: 0px` —— 旧的"哪一边"竖线确实没了）。
+  - ✅ **面板确实在收这条会话的事件**：面板里那两行工具活动的参数是我自己传的
+    （`⚙ page_screenshot（label=面板渲染检查）`、`⚙ verify_change（targets=[…]）`），
+    只可能来自会话事件。
+  - ❌ **但"助手的文字回复可见"仍未验证**：查面板正文全文，一行助手文字都没有。
+    根因已找到并修复（DSH 的 `assistant/message` 把文本放在 `data.message.content`，
+    而插件读的是 `data.content` —— 见 `c80fb0a` 之后的 `5a07de6`），但插件要重启 DSH 才生效。
+  - ⚠️ **另一个待复核项**：当前 `classifyFrame` 对**没有 text 的事件一律跳过**
+    （注释明写"工具活动等不进面板"），按当前代码那两行工具活动**不该出现** ——
+    说明运行中的扩展是更早的构建。重载扩展后需要复核：工具活动是否还在、
+    助手文字是否出现。**在复核之前，不要引用"面板渲染已完整验证"。**
 - **面板的本地 agent 仍保留为退路**（DSH 送不进去时回退），这是过渡形态，不是最终形态。
 - **旁注（与本项目无关）**：排查时看到 DSH 自己的 `/api/changes.summary` 返回 404。
   它来自 DSH 自身的 `ctx.workspaceChanges.summary(...)`（在 DSH 的 bundle 里，
   不在本仓库），报错里那个 `bookmark-sorter\plugins` 位置是源码映射的假位置。
   记录在此只为避免下次重复排查。
+- **旁注**：`~/.dsh/profiles/web/pnpm-lock.yaml` 里仍有 `dsh-client-recallflow-panel` 的条目
+  （该包已在第 2 步整包移除）。这是锁文件的正常滞后，下次 `pnpm install` 会 prune，
+  不影响启动（已实测 `--profile web --help` 退出码 0）。我不手改锁文件 —— 风险大于收益。
