@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyFrame, sessionEntryFromFrame, summarizeToolArgs, trimSessionEntries, SESSION_SOURCE } from '../lib/shared/session-view.js';
+import { classifyFrame, sessionEntryFromFrame, summarizeToolArgs, trimSessionEntries, resolveRewindIndex, SESSION_SOURCE } from '../lib/shared/session-view.js';
 
 const frame = (event) => ({ kind: 'session-event', sessionId: 's1', event });
 
@@ -126,6 +126,29 @@ test('sessionEntryFromFrame 带上 kind（裁剪与渲染都要用它，不能�
   assert.equal(sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'x', failed: true }), []).kind, 'tool');
   assert.equal(sessionEntryFromFrame(frame({ type: 'user/message', role: 'user', text: 'hi' }), []).kind, 'user');
   assert.equal(sessionEntryFromFrame(frame({ type: 'assistant/message', text: 'yo' }), []).kind, 'assistant');
+});
+
+test('resolveRewindIndex: 优先用稳定 id（裁剪会让下标前移，指向另一条回合）', () => {
+  const conv = [
+    { role: 'user', id: 'u1', content: '第一句' },
+    { role: 'external', kind: 'tool', content: '⚙ x' },
+    { role: 'user', id: 'u2', content: '第二句' },
+  ];
+  assert.equal(resolveRewindIndex(conv, 'u1', 99), 0, 'id 命中优先于下标');
+  assert.equal(resolveRewindIndex(conv, 'u2', 0), 2, 'id 命中时忽略错误的下标');
+
+  // 裁剪之后：第一条被删掉，原来下标 2 的 'u2' 变成下标 1 ——
+  // 老代码用捕获的下标就会撤销到**另一条**上。id 不会错。
+  const trimmed = conv.slice(1);
+  assert.equal(resolveRewindIndex(trimmed, 'u2', 2), 1, '裁剪后 id 仍能定位');
+
+  // 有 id 但对不上（这条已被裁掉/撤销过）→ 什么都不做，而不是退回下标乱撤
+  assert.equal(resolveRewindIndex(trimmed, 'u1', 1), -1);
+  // 老数据没有 id：退回下标，但仍然要求那一条是用户回合
+  assert.equal(resolveRewindIndex(conv, '', 2), 2);
+  assert.equal(resolveRewindIndex(conv, '', 1), -1, '下标落在 external 上时不能撤');
+  assert.equal(resolveRewindIndex(conv, '', 99), -1);
+  assert.equal(resolveRewindIndex(null, 'u1', 0), -1);
 });
 
 test('summarizeToolArgs: 长值截断、跳过多余字段（面板是窄条，一行不能变十行）', () => {
