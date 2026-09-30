@@ -112,6 +112,30 @@
 **谁在用它**：DSH 的模型侧工具表（也就是我）。删掉后我只有 `recallflow_browser`。
 **验证**：DSH 启动后工具表里没有 `mcp__recallflow__*`，而 `recallflow_browser` 可用。
 
+**删掉之后 DSH 侧会失去什么、由什么接手**（逐项核过，2026-10-01；**两处有实际损失，别当成纯赚**）：
+
+| 原 MCP 工具 | 新架构下的对应物 | 差异（核过代码，不是推测） |
+|---|---|---|
+| `browser_read` / `read_console` / `read_network` / `page_health` / `verify_change` / `get_element_source` / `get_picked_element` / `screenshot_capture` | `recallflow_browser({method, params})` | 同一个 `dispatch`（`lib/shared/bridge-methods.js`）。**但桥接在 dispatch 结果上还做了源位置重写**（`rewriteSourceUrls` / `normalizeElementSource` / `normalizePickedElement`，11 处调用**只在桥接的处理器里**）→ 插件返回**未重写**的原始结果 |
+| `recallflow_session`（读交接包） | `recallflow_browser({ method: 'handoff_get' \| 'handoff_list' })` | **能力仍在**（两个方法都在插件的 `BROWSER_METHODS` 里）。差异：没有"没给 id 就列清单 + 提示话术"那层包装 |
+| `dev_session_get` / `dev_session_set` | **没有** | 不在共享 dispatch 里，也不在插件的枚举里；它们是桥接自己的本地状态 |
+| `evidence_get` | **没有** | 桥接自己的证据归档 |
+
+也就是说：**DSH 侧会失去「元素 → 源码文件」的路径重写能力**（它依赖
+`dev_session_set` 写入的 projectRoot/devUrl，而那一层只在桥接里）。
+这正是本项目最核心的**前端调试**用途，所以第 5 步不是"顺手删掉"。
+
+三条出路（按推荐顺序）：
+1. **把源位置重写下沉到共享的 `dispatch`**（`lib/shared/bridge-methods.js`）——
+   两条通道就都有这个能力，且只维护一份。这是唯一能让 DSH 与 opencode 行为一致的改法。
+2. 把 `dev_session_*` 与重写逻辑**移植进插件**。可行但要复制桥接的 `dev-paths.js` 与存储位置，
+   等于把"一份真相"变成两份。
+3. 保留 DSH 的 MCP client，只用它做调试类调用。**但这与"删掉中继"的目标相抵**。
+
+**关键确认**：交接（handoff）这条路**不依赖桥接的服务端缓冲** ——
+`recallflow_session` 实现里走的是 `callExtension('handoff_list' / 'handoff_get')`，
+也就是**问活着的扩展**。所以第 4 步删掉 `panelTurns` 没有触及它（已核对：那些名字只出现在注释里）。
+
 ### 第 6 步：删掉扩展里的死代码
 
 **删什么**（`lib/bridge/relay.js` 与 `lib/page/chat.js`、`background.js`）：
