@@ -171,7 +171,13 @@ export function apply(ctx, config = {}) {
     eventsErrors: 0,
     lastEventType: '',
     lastEventError: '',
+    // 最近若干条**投影结果**（发给面板的原文）。
+    // 为什么留这个：面板上"看不到助手的文字"这类问题，从外面只能靠猜 ——
+    // 事件到底发了什么形状？text 取到了没有？留下投影原文就能直接看，
+    // 而不是再去加一轮"先怀疑 A 再怀疑 B"的往返。
+    recent: [],
   };
+  const RECENT_MAX = 20;
 
   function pickSession(preferred) {
     if (preferred && sessions.has(preferred)) return sessions.get(preferred);
@@ -238,6 +244,8 @@ export function apply(ctx, config = {}) {
       eventsErrors: stats.eventsErrors,
       lastEventType: stats.lastEventType,
       lastEventError: stats.lastEventError,
+      // 最近几条投影结果：用来回答"面板上为什么没有助手的话"
+      recentEvents: stats.recent.slice(-10),
     };
   }
 
@@ -323,6 +331,8 @@ export function apply(ctx, config = {}) {
       if (projected) {
         broadcast({ kind: 'session-event', sessionId: sid, event: projected });
         stats.eventsBroadcast++;
+        stats.recent.push(projected);
+        if (stats.recent.length > RECENT_MAX) stats.recent.shift();
       } else {
         stats.eventsDropped++;
       }
