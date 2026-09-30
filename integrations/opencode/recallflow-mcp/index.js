@@ -12,8 +12,6 @@
 //   RECALLFLOW_EXT_TIMEOUT_MS    等待扩展响应超时（默认 60000）
 //   RECALLFLOW_EVIDENCE_DIR      证据归档目录（默认 ~/.recallflow-evidence）
 import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -30,6 +28,9 @@ import {
   normalizePickedElement,
   normalizationHint,
 } from '../../../lib/shared/dev-paths.js';
+// dev-session 的读写移到 lib/shared：桥接与 DSH 插件是两个进程，但必须读同一个文件，
+// 否则两边做出来的路径归一化会不一致。规则（环境变量或家目录）在那里算一次。
+import { readDevSession, writeDevSession, devCtx } from '../../../lib/shared/dev-session.js';
 import { summarizePageHealth } from './page-health.js';
 import { evaluateTargets } from './verify-change.js';
 
@@ -681,29 +682,9 @@ async function verifyChange(args) {
   );
 }
 
-// ---- 共享「开发会话」：opencode 与 RecallFlow 都读写，用于把页面与代码对齐 ----
-const DEV_SESSION_FILE = path.join(dir(), 'dev-session.json');
-function readDevSession() {
-  try {
-    return JSON.parse(fs.readFileSync(DEV_SESSION_FILE, 'utf8'));
-  } catch (e) {
-    return {};
-  }
-}
-function writeDevSession(patch) {
-  const next = Object.assign(readDevSession(), patch, { updatedAt: new Date().toISOString() });
-  try {
-    fs.writeFileSync(DEV_SESSION_FILE, JSON.stringify(next, null, 2), 'utf8');
-  } catch (e) {}
-  return next;
-}
-
-// 路径归一化所需的上下文（来自 dev_session_set）。扩展侧不知道磁盘布局，
-// 所以「源码 URL → 磁盘路径」只能在本进程完成。
-function devCtx() {
-  const s = readDevSession();
-  return { projectRoot: s.projectRoot || '', devUrl: s.devUrl || '' };
-}
+// ---- 共享「开发会话」----
+// 实现已移到 lib/shared/dev-session.js（桥接与 DSH 插件必须读同一个文件，
+// 所以路径与环境变量的规则只能有一份）。这里只保留 import。
 
 const TOOLS = [
   {
