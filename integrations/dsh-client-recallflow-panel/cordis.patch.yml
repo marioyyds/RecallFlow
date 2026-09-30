@@ -1,6 +1,0 @@
-# 本包作为一个「bundle」被 profile 启用时，DSH 会应用这个 patch。
-# 服务端这一半是空的占位：数据由浏览器端直接向桥接取（桥接已对本机来源开放只读 CORS），
-# 因此不需要服务端插件去中转。保留它是因为 bundle 的加载路径要求有 main 入口。
-- insert:
-    - id: recallflow-panel-ui
-      name: 'dsh-client-recallflow-panel'
