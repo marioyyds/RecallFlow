@@ -174,15 +174,30 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 ## 选定方案
 
 ```
-浏览器扩展 ──HTTP/SSE──▶ DSH 插件（进程内，随 DSH 启动）
-                          ├─ webServer.register  GET  /recallflow/stream   (SSE)
-                          ├─ webServer.register  POST /recallflow/result
-                          ├─ webServer.register  POST /recallflow/say  → session.prompt(text,'queue')
-                          └─ ctx.tools.register   把页面能力注册成 DSH 工具
+浏览器扩展 ──WebSocket──▶ DSH 插件（进程内，随 DSH 启动）
+                          ├─ webServer.register / registerUpgrade
+                          │    ├─ POST /recallflow/say        → agent.send(msg,'next-turn',true)，变成真用户消息
+                          │    ├─ GET  /recallflow/status     （诊断：计数与 recentEvents）
+                          │    ├─ POST /recallflow/probe-tool （工具往返探针；白名单只读，不接受 dev_session_set）
+                          │    └─ WS   /recallflow/ws         （会话事件 + 工具调用/回执）
+                          └─ ctx.tools.register  recallflow_browser
+                               （页面能力 + 本地方法 dev_session_get/set、evidence_get）
 ```
 
-- **中继进程（7801）整个去掉** —— 同步职责消失，搬字节与工具暴露都由插件承担。
-- 用户需要运行的只剩 **DSH** 与**浏览器扩展**。
+- **7801 桥接保留** —— 它不是中继，而是 **opencode 的页面能力出口**。
+  我曾以为它能一起删掉，准备动手时才发现删了会让 opencode 的工具**静默失效**（已回退；
+  见 `docs/deletion-plan.md` 的保留清单）。DSH 侧不再需要它：页面能力已由插件直接提供。
+- 用户需要运行的：**DSH** + **浏览器扩展**；用 opencode 时**还要**那个 7801 桥接。
+
+> **这一段曾经是另一版**（SSE `/recallflow/stream` + `session.prompt(text,'queue')` +
+> "中继整个去掉"）。三处都被后续实测推翻：
+> ① 扩展是 MV3，service worker 空闲约 30 秒被回收，而 `fetch` 流**不能**阻止回收
+>   （WebSocket 活动才能）→ 改用 WS；
+> ② `session.prompt` **不是函数**（本文件下方的探针输出里就写着 `session.prompt 是函数=false`）
+>   → 改用 `agent.send(msg,'next-turn',true)`；
+> ③ 7801 是 opencode 的出口，不是中继 → 保留。
+>
+> 留这段记录是因为"被推翻的三条"比结论本身更容易忘。
 
 ## 探针实测结果（隔离 headless DSH，脚本 `scripts/spike-session-prompt-plugin.mjs`）
 
