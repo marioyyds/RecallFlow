@@ -45,6 +45,28 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
 git log -1 --format='%ci %s' <插件相关提交>   # 与上面的 CreationDate 比大小
 ```
 
+## 一眼体检（推荐先跑这个）
+
+```powershell
+curl.exe -s -H "X-RecallFlow-Token: recallflow-local-bridge-v1" http://127.0.0.1:7801/health
+```
+
+返回里的四组字段正好覆盖两个方向的四段：
+
+| 字段 | 回答的问题 | 判读 |
+|---|---|---|
+| `ws` / `queued` | 扩展连着吗 | `ws:true` = 扩展在线（正向的最后一段） |
+| `events.total` / `lastKind` / `lastAt` | **插件还在推吗** | `total` 在涨 = 插件活着（正向的第一段） |
+| `panelTurns` | **面板上报过回合吗** | `>0` = 反向链路的写端通了 |
+| `uptimeMs` | 这个桥接跑了多久 | 很小 = 刚重启过 |
+
+**若 `panelTurns` 一直是 0**：不是桥接的问题就是扩展没重载 —— 先确认 `/panel-turns` 不是 404，
+再重载扩展（旧扩展里根本没有上报这回事）。
+
+> **字段有没有，本身就是"新旧代码"的判据**：旧版 `/health` 只有
+> `{"ok":true,"ws":true,"queued":0}`。若你看到的就是这三个字段，说明桥接跑的是旧代码
+> （这与 `/panel-turns` 返回 404 是一致的）。新版会多出 `events`、`panelTurns`、`uptimeMs`。
+
 ## 验证（两个方向各自怎么确认）
 
 1. **正向**：让 DSH 说一句话，面板上应出现 `📣 DSH：…`。

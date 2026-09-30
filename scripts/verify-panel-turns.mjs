@@ -109,6 +109,26 @@ await check('读端：角色被规整为 user/panel（未知取值归 panel）',
   assert.equal(t.role, 'panel', '未知 role 应归一为 panel');
 });
 
+// --- /health 的可观测性（这几轮排查里最缺的就是"一眼看出哪一段没动"）-------------
+await check('/health 报出事件计数与面板回合数（一次调用看清两个方向）', async () => {
+  // 注意 semantics：events 统计的是**正向**通道（POST /event）的事件；
+  // panel-turns 走的是反向缓冲，不计入其中。所以这里必须先真的推一条正向事件，
+  // 否则断言的前提是错的（我第一版就写错了这一点）。
+  await fetch('http://127.0.0.1:' + PORT + '/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-RecallFlow-Token': TOKEN },
+    body: JSON.stringify({ text: '健康自检', who: 'dsh' }),
+  });
+  const h = await (await fetch('http://127.0.0.1:' + PORT + '/health', { headers: { 'X-RecallFlow-Token': TOKEN } })).json();
+  assert.ok(h.events && typeof h.events.total === 'number', 'events.total 缺失：' + JSON.stringify(h));
+  assert.ok(typeof h.panelTurns === 'number', 'panelTurns 缺失');
+  assert.ok(h.events.total >= 1, '推过一条正向事件后 total 应 ≥1，实际 ' + h.events.total);
+  assert.equal(h.events.lastKind, 'say/dsh', 'lastKind 应记下最近一条的形状，实际 ' + h.events.lastKind);
+  assert.ok(h.events.lastAt > 0, 'lastAt 应被记录');
+  assert.ok(h.panelTurns >= 1, '反向缓冲里的回合数应可见，实际 ' + h.panelTurns);
+  assert.equal(typeof h.uptimeMs, 'number');
+});
+
 // --- 工具端（真实 MCP 协议）---------------------------------------------------
 const init = await rpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'verify-panel-turns', version: '1.0.0' } });
 await rpc('notifications/initialized', undefined, true);

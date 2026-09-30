@@ -136,9 +136,15 @@ function flushPollWaiters() {
  */
 function pushEvent(ev) {
   if (!isValidEvent(ev)) return 'invalid';
+  // 可观测性：这几轮排查里最费时的就是"看不出来到底哪一段没动"。
+  // 记下总量与最后一次的时间，让 /health 一眼能答"插件还在推吗"。
+  eventStats.total += 1;
+  eventStats.lastAt = Date.now();
+  eventStats.lastKind = ev.kind + (ev.who ? '/' + ev.who : '');
   if (extSocket && extSocket.readyState === 1) {
     try {
       extSocket.send(JSON.stringify({ event: ev }));
+      eventStats.lastTransport = 'ws';
       return 'ws';
     } catch (e) {
       /* 落到入队 */
@@ -151,6 +157,7 @@ function pushEvent(ev) {
     eventQueue.push(...kept);
   }
   flushPollWaiters();
+  eventStats.lastTransport = 'queue';
   return 'queue';
 }
 
@@ -186,8 +193,26 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'GET' && url.pathname === '/health') {
+    // 一次调用回答「两个方向各自通不通」：
+    //   ws / queued         → 扩展侧（正向链路的最后一段）
+    //   events.total/lastAt → 插件是否还在推（正向链路的第一段）
+    //   panelTurns          → 面板是否上报过回合（反向链路的写端）
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, ws: Boolean(extSocket), queued: queue.length }));
+    res.end(
+      JSON.stringify({
+        ok: true,
+        ws: Boolean(extSocket),
+        queued: queue.length,
+        events: {
+          total: eventStats.total,
+          lastAt: eventStats.lastAt,
+          lastKind: eventStats.lastKind,
+          lastTransport: eventStats.lastTransport,
+        },
+        panelTurns: panelTurns.length,
+        uptimeMs: Date.now() - startedAt,
+      })
+    );
     return;
   }
   if (req.method === 'GET' && url.pathname === '/poll') {
@@ -484,6 +509,10 @@ async function pageScreenshot(args) {
 // 这里留一份环形缓冲供 panel_history 读回。
 const panelTurns = [];
 const MAX_PANEL_TURNS = 200;
+
+/** 事件侧的可观测性计数（供 /health 回答"插件还在推吗"）。 */
+const eventStats = { total: 0, lastAt: 0, lastKind: '', lastTransport: '' };
+const startedAt = Date.now();
 
 function recordPanelTurn(turn) {
   if (!turn || typeof turn.text !== 'string' || !turn.text) return false;
