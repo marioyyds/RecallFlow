@@ -18,7 +18,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
-import { archive, archiveImage, get, getByUrl, dir } from './evidence-store.js';
+// 证据库也已共享化：DSH 插件的 browser_read 要归档并给出 snapshotHash/fetchedAt
+// （工具描述里承诺了这两个字段），不能让它们只在桥接里存在。
+import { archive, archiveImage, get, getByUrl, dir } from '../../../lib/shared/evidence-store.js';
 // panel-events.js（say/tool 事件的成形与三档截断）已按删除清单第 4 步移除：
 // 那是"两段对话同步"的产物。面板现在直接渲染 DSH 会话本身的事件（由 DSH 插件推送），
 // 不再需要桥接替谁"成形"事件。桥接只剩一件事：把工具调用转给扩展。

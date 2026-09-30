@@ -82,7 +82,7 @@ test('截图链路两端对齐（relay 实现 + MCP 工具 + 归档函数都存�
     !/JSON\.stringify\(/.test(shotWindow),
     'page_screenshot 分支不得把结果 JSON 化（图片必须是 image 内容块）：' + shotWindow.slice(0, 160)
   );
-  const store = fs.readFileSync(path.join(ROOT, 'integrations/opencode/recallflow-mcp/evidence-store.js'), 'utf8');
+  const store = fs.readFileSync(path.join(ROOT, 'lib/shared/evidence-store.js'), 'utf8');
   assert.ok(/export function archiveImage\(/.test(store), 'evidence-store 应提供 archiveImage');
 });
 
