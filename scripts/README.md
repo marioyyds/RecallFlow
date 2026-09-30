@@ -54,56 +54,25 @@ scripts/verify-mcp-shot-success.mjs
 
 已知未覆盖：真实扩展的 CDP 截图本身（screenshot_capture 的 relay 实现）需要重载扩展才能验证。
 
-## scripts/verify-panel-events.mjs
+## （已删除）面板事件链路相关的四个脚本
 
-验证「面板事件通道」的端到端：外部 agent（DSH）在浏览器页面里能看到它在做什么。
+`verify-panel-events.mjs`、`verify-dsh-hook.mjs`、`verify-panel-turns.mjs`、`probe-panel-turns.mjs`
+已随**删除清单第 4 步**一起移除，连同它们验证的东西：
 
-为什么需要：这条链路跨越三个包（MCP server 成形事件 → 桥接投递 → 扩展转发 → 面板渲染），
-任一端改名都只会在运行时表现为「面板上什么都没有」，而没有任何静态检查能发现。
+- 桥接里的 `panel-events.js`（say/tool 事件的成形与三档截断 400/1200/2000）
+- 事件队列与 `/event` 端点（DSH hook 经它推事件）
+- `integrations/dsh-hooks/`（那个 hook 本体）
+- `/panel-turns` 两端与 `panel_history` / `panel_post` 两个 MCP 工具
 
-验证内容（在隔离端口 7802 上，不触碰用户的常驻实例与扩展）：
-- `panel_post` 已登记，且投递走 `poll-queue`（隔离实例没有扩展连着 WS）
-- 留言事件成形且 level 正确
-- 真实的工具调用产生 start/end 事件，参数摘要挑中白名单字段
-- `panel_post` 不自我播报（否则用户会看到"我要说话了"这件事本身被播报一遍）
+为什么可以整条删掉：它们服务的是**"两段对话互相同步"**这个前提 —— 面板里一份对话、
+DSH 里另一份，于是需要成形、排队、上报、读回。现在只有**一条会话**：面板的话直接成为
+那条会话里的用户消息，面板显示的就是会话本身的事件（由 DSH 插件经自己的 WS 推送）。
 
-用法（PowerShell）：
-
-  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
-  $env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-events"
-  node integrations/opencode/recallflow-mcp/index.js --http   # 后台起实例
-  node scripts/verify-panel-events.mjs
-
-退出码非零表示未通过。脚本刻意用 `process.exitCode` 而不是 `process.exit()`：
-后者会在 undici 的 socket 收尾时撞上 Windows 上的 libuv 断言（uv_async.c:94），
-把「验证通过」变成崩溃退出码 0xC0000409。
-
-已知未覆盖：面板实际渲染（DOM 路径无法在 node 中测），以及真实扩展的转发
-（需要重载扩展）。
-
-## scripts/verify-dsh-hook.mjs
-
-验证「DSH hook → 面板事件」的真实链路（隔离端口 7802，不需要重启 DSH）。
-
-链路：DSH 触发 hook → `integrations/dsh-hooks/recallflow-panel-hook.mjs` 读 stdin →
-POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码、跨包，只能在集成层面验证。
-
-验证内容：
-- 四种载荷（UserPromptSubmit / PreToolUse Bash / PreToolUse mcp__* / Stop）全部以退出码 0 结束
-  （hook **绝不能**阻塞 DSH，失败也必须静默成功退出）
-- 只产出 2 条事件：`mcp__*` 被跳过（避免与 MCP 服务端的上报重复）、Stop 无内容不产出
-- **中文原样无损**
-- `who=user` 与 `source=external` 正确
-
-用法：
-
-  $env:RECALLFLOW_MCP_PORT='7802'
-  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
-  node scripts/verify-dsh-hook.mjs
-
-> 为什么脚本用 node 的 fetch 而不是 PowerShell 的 Invoke-RestMethod：
-> 后者会把返回的 UTF-8 中文显示成乱码（按 Latin-1 解码），容易误判成数据损坏。
-> 编码问题必须区分「工具显示错」与「数据真坏」，否则会去修一个不存在的问题。
+新的验证入口：
+- `node scripts/verify-live-gate.mjs` —— 五项闸门（含"没删坏 opencode"的基线）
+- `node scripts/watch-session-events.mjs [秒]` —— 观察插件往面板推的会话事件
+- `node scripts/probe-tool.mjs [method]` —— 走完整链路验证工具往返
+- `node tests/*.test.mjs`（见 tests/bridge-contract.test.mjs 的反向断言：旧链路不得复活）
 
 ## scripts/mutation-check.mjs
 
@@ -121,108 +90,16 @@ POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码�
 返回非零退出码表示有变异未被抓住，即对应断言形同虚设。新增针对该文件的断言后，
 建议同时补一条变异。
 
-## scripts/verify-dsh-plugin.mjs
+## （已删除）为旧架构写的验证台
 
-验证「DSH 原生插件（方案 B）→ 面板」这条链路，**不需要重启 DSH**。
+`verify-dsh-plugin.mjs`（旧插件的装载与事件）、`verify-panel-inject.mjs`（注入载荷）、
+`verify-panel-turns.mjs` / `probe-panel-turns.mjs` / `verify-reverse-live.mjs`（反向通道）
+都已随它们验证的东西一起删除 —— 那些东西属于"插件注入上下文 + 两段对话同步"，
+已被单会话架构取代（面板输入直接成为会话的用户消息，面板显示会话本身的事件）。
 
-为什么需要：hook 拿不到助手的成文回答（实测 `transcript_path` 是空串、`Stop` 只有
-`stop_hook_active`），只有会话事件里的 `assistant/message` 有 —— 这是方案 B 的立足点，
-而它跨进程、跨包，只能集成层面验证。
-
-做法：用**假的 Cordis context** 调 `apply()`，喂真实形状的会话事件，再确认它们经
-`/event` 落到桥接队列。含「助手成文回答已同步」「reasoning 块未被显示」
-「`mcp__*` 被跳过」「工具失败带工具名」等断言。
-
-另含两条**修 bug 时的集成回归**（单测覆盖不到管线本身）：
-- ① 系统注入的运行时上下文（`source.kind === 'runtime-context'`，真实样本）**一条都不产出**
-- ② 助手的长回答经完整管线后仍保留到新额度（`>400 且 ≤2000`，而非旧的 400 一刀切）
-
-  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
-  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
-  node scripts/verify-dsh-plugin.mjs
-
-已知未覆盖：DSH 的 loader 能否解析并挂载本包（`--dump-config` 只组合配置、不加载模块）。
-后来用「起一个隔离的 `dsh headless --patch <只含本插件的 patch>` 跑一次任务」补上了这一环：
-插件的**装载自报**事件会出现在桥接日志里，可据此直接判定装载与否。
-
-## scripts/verify-panel-inject.mjs
-
-验证「面板对话 → DSH 上下文」这一半（`Agent.inject` 路径），不需要重启 DSH。
-
-为什么需要：注入是**唯一会主动写进 DSH 会话**的行为。逻辑对了没价值，必须确认
-① 确实调的是官方 `agent.inject`，而不是我们自己去 append 会话事件
-（后者的文档依据是 `runtime-types.d.ts`：inject「不出动 driver、在最近的步边界被认领」，
-因此不会打断运行中的循环；自行注入会话事件则可能破坏 agent loop 的状态机）；
-② 载荷形状对（`role` / `content` / `source.kind`）；
-③ 桥接不可达时静默不注入、不抛错。
-
-做法：假 Cordis ctx + 假 agent + 一个只实现 `GET /panel-turns` 的临时 HTTP server。
-
-  node scripts/verify-panel-inject.mjs
-
-已知未覆盖：真实 DSH 的 `agent.inject` 是否接受这个载荷（需重启 DSH 后看会话里是否
-出现该上下文）。
-
-## scripts/verify-panel-turns.mjs
-
-验证**反向通道的服务端两段**：写端（`POST /panel-turns`）、读端（`GET /panel-turns`）、
-以及 `panel_history` 工具 —— **用真实 MCP 协议调用工具**，不是只做文本层断言。
-
-为什么需要：契约测试只能证明"名字对得上"，证明不了"数据真能进去、能原样出来"。
-整条反向链路是 面板 → 后台 → 桥接(写) → 环形缓冲 → MCP 工具(读) → DSH 注入，
-这个脚本把**除"扩展那一跳"之外的全部**串起来。
-
-验证内容（隔离端口 7802）：
-- 无 token 被拒（与 `/event` 共用同一套鉴权）
-- 正常回合落库、空文本被拒且不污染缓冲
-- GET 原样读回、**中文无损**
-- 角色规整：未知取值归一为 `panel`
-- 工具已注册进 `tools/list`（工具名写给模型，拼错就永远调不到）
-- 工具返回面板对话，且带「面板 AI 与你不是同一个 agent」的说明
-- `role` 过滤生效
-
-  $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
-  node integrations/opencode/recallflow-mcp/index.js --http   # 后台
-  node scripts/verify-panel-turns.mjs
-
-已知未覆盖：扩展那一跳（面板 → 后台 → `POST /panel-turns`），需重载扩展后
-由真实面板产生回合。
-
-## scripts/probe-panel-turns.mjs
-
-**手工探针**（不是自动化验证台）：往桥接塞一个回合、再读回来，用于把反向链路切成两段排查。
-
-```powershell
-node scripts/probe-panel-turns.mjs          # 塞一条带时间戳的回合 + 读回
-node scripts/probe-panel-turns.mjs --read   # 只读
-```
-
-行为：先探读端是否存在（旧代码返回 404 时明确提示"需重启桥接"），再写入、读回、
-核对中文无损。退出码 0 = 通过，2 = 桥接是旧代码。
-
-**为什么需要它**：在 **PowerShell 5.1** 上把 JSON 传给 `curl.exe` 会被重引用，
-`-d '{"role":…}'` 与 `-d "{\"role\":…}"` 两种写法实测都失败（服务端收到后 `{"ok":false}`）。
-与其在文档里留一条跑不通的命令，不如给一个不经过 shell 引号的探针。
-
-用途：本探针通 = 桥接读写端没问题 → 若 DSH 仍读不到面板对话，问题只在"扩展那一跳"。
-
-## scripts/verify-reverse-live.mjs
-
-用**真实运行中的桥接与真实面板数据**验证反向链路的最后一段（**只读**，不写入任何东西）。
-
-与 `verify-panel-turns.mjs` 的分工：后者用隔离实例 + 自己塞的假数据，证明"服务端实现正确"；
-本脚本读用户真实面板产生的回合，并走一遍**插件真正会走的那两个消费端**：
-① `panel_history` 工具（真实 MCP 协议、真实数据）；② `buildPanelContextPayload`
-（插件在 `agent/created` 构造注入载荷用的那个纯函数）。
-因此它给出的是「如果重启 DSH，注入与工具读回的就是这个」的直接证据。
-
-```powershell
-node scripts/verify-reverse-live.mjs      # 默认对着 127.0.0.1:7801
-```
-
-实测输出（用户真实数据）：
-- 正向 `events.total=32`、通道 `ws`、扩展连接 `true`
-- 反向收到 `[user] 你好` 与 `[panel] 你好！我在。…`
+它们留下的教训仍然有效，并且已经写进 `docs/two-way-sync.md` 的「踩过的坑」：
+PowerShell 5.1 上把 JSON 交给 curl 会被重引用（所以探针用 node fetch）、
+中文乱码要区分「工具显示错」与「数据真坏」、常驻进程必须由用户在自己的终端启动。
 - 7 项全过，并打印出"若现在重启 DSH，新会话将注入的上下文"
 
 已知未覆盖：真实 DSH 的 `Agent.inject` 是否接受该载荷 —— 需要重启 DSH 才能看到会话里是否出现该上下文。

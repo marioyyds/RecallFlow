@@ -25,10 +25,10 @@
 > | 1 面板退役自己的 agent | ✅ 已完成（保留一条"DSH 不可达则回退本地"的过渡退路） | `f2fa81e` |
 > | 2 客户端卡片插件 | ✅ 已完成（整包 + profile 条目 + 测试） | `53dec61` |
 > | 3 旧 DSH 插件（注入那条路） | ✅ 已完成（整包 + profile 条目 + 两个验证台 + 一条契约测试） | `695a342` |
-> | 4 桥接里的同步部分 | ⏳ **等桥接恢复**（不能盲删：要能验证 opencode 仍正常） | — |
-> | 5 profile 里的 MCP client | ⏳ 依赖第 4 步 | — |
-> | 6 扩展里的死代码 | 可做 | — |
-> | 7 文档收尾 | 🔄 进行中（`docs/two-way-sync.md` 已改写为单会话架构的运维手册） | 本轮 |
+> | 4 桥接里的同步部分 | ✅ 已完成（panel-events.js / 事件队列 / `/panel-turns` / `/event` / panel_history / panel_post / dsh-hooks 全删；用**临时端口真启动**验证过，闸门 5/5 全绿） | `c80fb0a` |
+> | 5 profile 里的 MCP client | ⏳ **等用户重启桥接**：先验证 opencode 那条链路仍正常，再删 | — |
+> | 6 扩展里的死代码 | ✅ 已完成（postPanelTurn / forwardBridgeEvent / rfBridgeEvent / renderBridgeEvent） | `cd77cbe` |
+> | 7 文档收尾 | 🔄 进行中（运维手册已改写；文档/脚本里指向已删文件的引用在清理） | — |
 >
 > **每一步都必须先过**：`node scripts/verify-live-gate.mjs` + 全套测试 +
 > profile 可解析（`dsh --profile web --help` 退出码 0）。第 2、3 步都按这个做了。
