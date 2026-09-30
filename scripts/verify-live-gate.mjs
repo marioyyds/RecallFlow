@@ -126,10 +126,15 @@ async function main() {
   const failed = results.filter((r) => !r.ok).length;
   console.log('');
   console.log(failed ? '✗ ' + failed + ' 条未成立（端到端验证还不能开始）' : '✓ 闸门成立（' + results.length + ' 条）');
-  process.exit(failed ? 1 : 0);
+  // 用 process.exitCode 而**不是** process.exit()：
+  // 在 Windows 上，process.exit() 会在 undici 的 socket 收尾时撞上 libuv 断言
+  // （uv_async.c:94），把"验证通过"变成崩溃退出码 0xC0000409 ——
+  // 脚本自己打印 ✓、退出码却是崩溃，任何自动化都会把它判成失败。
+  // 这条经验仓库文档里早有记载，我第一版仍然用了 process.exit()，实测复现了 0xC0000409。
+  process.exitCode = failed ? 1 : 0;
 }
 
 main().catch((e) => {
   console.log('闸门脚本异常：' + (e && e.message));
-  process.exit(1);
+  process.exitCode = 1;
 });

@@ -86,7 +86,8 @@ async function main() {
   } catch (e) {
     check('实例在监听', false, e.message);
     console.log('\n✗ 实例没起来，后面的检查都无意义。');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // 1) 输入路由可达（不在栅栏内）
@@ -175,10 +176,12 @@ async function main() {
   const bad = results.filter((r) => !r.ok).length;
   console.log('');
   console.log(bad ? '✗ ' + bad + ' 项未通过' : '✓ 全部通过（' + results.length + ' 项）');
-  process.exit(bad ? 1 : 0);
+  // process.exitCode 而不是 process.exit()：后者在 Windows 上会在 undici 收尾时
+  // 撞 libuv 断言，把成功变成崩溃码 0xC0000409（见 verify-live-gate.mjs 的说明）。
+  process.exitCode = bad ? 1 : 0;
 }
 
 main().catch((e) => {
   console.log('探针异常：' + (e && e.message));
-  process.exit(1);
+  process.exitCode = 1;
 });

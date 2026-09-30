@@ -24,7 +24,10 @@ const done = () => {
   try {
     ws.close();
   } catch {}
-  process.exit(0);
+  // process.exitCode 而不是 process.exit()：Node 的 WebSocket 也是 undici 实现，
+  // 同样可能在收尾时撞上 Windows 上的 libuv 断言（0xC0000409）。
+  // 关掉 socket 之后事件循环会自然结束。
+  process.exitCode = 0;
 };
 
 ws.addEventListener('open', () => console.log('已连上 ' + url + '，观察 ' + seconds + ' 秒…'));
@@ -41,6 +44,6 @@ ws.addEventListener('message', (ev) => {
 });
 ws.addEventListener('error', (e) => {
   console.log('WS 错误：' + ((e && e.message) || 'unknown'));
-  process.exit(1);
+  process.exitCode = 1; // 同上的原因：不用 process.exit()
 });
 setTimeout(done, seconds * 1000);

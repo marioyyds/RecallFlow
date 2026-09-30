@@ -19,4 +19,6 @@ if (body && body.ok) {
 } else {
   console.log('  ✗ ' + JSON.stringify(body).slice(0, 260));
 }
-process.exit(body && body.ok ? 0 : 1);
+// 用 process.exitCode 而不是 process.exit()：后者在 Windows 上会在 undici 收尾时
+// 撞 libuv 断言，把成功变成崩溃码 0xC0000409（见 verify-live-gate.mjs 的说明）。
+process.exitCode = body && body.ok ? 0 : 1;
