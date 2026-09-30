@@ -226,6 +226,15 @@ const httpServer = http.createServer((req, res) => {
     });
     return;
   }
+  // 反向通道的读取端：插件在会话创建时拉取面板最近对话，注入 DSH 上下文。
+  // 与 POST 同一路径、不同方法 —— 写与读成对，避免两处各自演化的形状漂移。
+  if (req.method === 'GET' && url.pathname === '/panel-turns') {
+    const limitRaw = Number(url.searchParams.get('limit'));
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(200, Math.floor(limitRaw)) : 50;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, total: panelTurns.length, turns: panelTurns.slice(-limit) }));
+    return;
+  }
   // 反向通道：面板对话 → DSH。扩展（经后台）把面板的每个对话回合 POST 到这里，
   // 供 panel_history 工具读回 —— 此前面板自己的对话只能靠用户手动导出才能进 DSH。
   if (req.method === 'POST' && url.pathname === '/panel-turns') {

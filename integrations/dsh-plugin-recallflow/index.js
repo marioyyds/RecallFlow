@@ -12,7 +12,10 @@
 //   2. 跳过 mcp__* 工具（已由 MCP 服务端上报，避免面板画两遍）。
 //   3. 只显示用户可见的文本（忽略 reasoning 块）。
 
-import { createMapper } from './session-map.js';
+import { createMapper, buildPanelContextMessage, PANEL_CONTEXT_SOURCE_KIND } from './session-map.js';
+
+/** 注入上下文时最多带面板的多少条回合（多了会挤占会话上下文预算）。 */
+export const PANEL_CONTEXT_TURNS = 20;
 
 export const name = 'recallflow-panel-sync';
 export const PLUGIN_VERSION = '0.1.0';
@@ -108,6 +111,40 @@ export function apply(ctx, rawConfig) {
       if (!id) return;
       void post({ text: 'DSH 会话已开始（' + shortSessionId(id) + '），以下同步它的对话与工具活动。', who: 'dsh', level: 'info' });
     } catch (e) {}
+  });
+
+  // 反向通道（面板 → DSH）：会话创建时把面板最近的对话**注入**本会话的上下文，
+  // 这样不需要用户或模型主动想起去调 panel_history。
+  //
+  // 用 DSH 官方的 `Agent.inject(message)`，而不是自己往会话里 append 事件：
+  // 它的文档写明「不出动 driver，在最近的步边界被认领」，因此**不会打断运行中的循环**；
+  // 自行注入会话事件则可能破坏 agent loop 的状态机，拿用户正在用的 DSH 冒险。
+  // 只在创建时注入一次：行为可预期，且不会在会话中途改变上下文。
+  ctx.on('agent/created', (payload) => {
+    void (async () => {
+      try {
+        const agent = payload && payload.agent;
+        if (!agent || typeof agent.inject !== 'function') return;
+        if (!wants(agent.session)) return;
+        const res = await fetch(
+          'http://127.0.0.1:' + config.port + '/panel-turns?limit=' + PANEL_CONTEXT_TURNS,
+          { headers: { 'X-RecallFlow-Token': config.token }, signal: AbortSignal.timeout(config.timeoutMs) }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const text = buildPanelContextMessage(data && data.turns);
+        if (!text) return;
+        // role:'user' + 自定义 source.kind：DSH 的运行时上下文正是这么做的
+        // （runtime-context 也用 user/message + 自定义 kind）。
+        agent.inject({
+          role: 'user',
+          content: [{ type: 'text', text }],
+          source: { kind: PANEL_CONTEXT_SOURCE_KIND },
+        });
+      } catch (e) {
+        // 注入失败绝不影响会话创建
+      }
+    })();
   });
 }
 

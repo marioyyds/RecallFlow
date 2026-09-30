@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX, isInjectedUserMessage } from '../integrations/dsh-plugin-recallflow/session-map.js';
+import { textFromBlocks, parseToolArguments, createMapper, SKIP_TOOL_PREFIX, isInjectedUserMessage, buildPanelContextMessage, PANEL_CONTEXT_MARKER, PANEL_CONTEXT_SOURCE_KIND } from '../integrations/dsh-plugin-recallflow/session-map.js';
 import { shortSessionId } from '../integrations/dsh-plugin-recallflow/index.js';
 import { normalizeExternalEvent, isValidEvent, sayEvent, MAX_SPEAK_TEXT, MAX_USER_TEXT } from '../integrations/opencode/recallflow-mcp/panel-events.js';
 
@@ -50,6 +50,41 @@ test('mapper: 注入的运行时上下文不产出事件，真用户消息照常
   );
   const real = m.map({ type: 'user/message', data: { content: [{ type: 'text', text: '你好' }] } });
   assert.deepEqual(real, { text: '你好', who: 'user', level: 'info' });
+});
+
+// --------------------------------- 面板对话注入 DSH 上下文（Agent.inject 那一半）
+
+test('buildPanelContextMessage: 双向都带、写明是另一个 agent、空输入给空串', () => {
+  const msg = buildPanelContextMessage([
+    { role: 'user', text: '这个页面为什么有报错' },
+    { role: 'panel', text: '有两个错误。' },
+  ]);
+  assert.ok(msg.includes(PANEL_CONTEXT_MARKER), msg);
+  assert.ok(msg.includes('用户：这个页面为什么有报错'), msg);
+  assert.ok(msg.includes('面板助手：有两个错误。'), msg);
+  // 必须写明是**另一个** agent：不写的话模型会把面板的结论当成自己的
+  assert.ok(msg.includes('另一个'), msg);
+  assert.equal(buildPanelContextMessage([]), '');
+  assert.equal(buildPanelContextMessage(null), '');
+  assert.equal(buildPanelContextMessage([{ role: 'user', text: '' }]), '');
+});
+
+test('buildPanelContextMessage: 只取最近 max 条，单条也限长（不能挤爆上下文预算）', () => {
+  const turns = [];
+  for (let i = 0; i < 60; i++) turns.push({ role: 'user', text: 'T' + i });
+  const msg = buildPanelContextMessage(turns, { max: 3 });
+  assert.ok(!msg.includes('T56'), '旧的应被丢掉');
+  assert.ok(msg.includes('T57') && msg.includes('T58') && msg.includes('T59'), msg);
+  const one = buildPanelContextMessage([{ role: 'panel', text: 'x'.repeat(5000) }], { perTurn: 100 });
+  assert.ok(one.includes('…'), '超长单条应被截断');
+  assert.ok(one.length < 600, '总长应受控，实际 ' + one.length);
+});
+
+test('注入源不会被回推回面板（否则面板与 DSH 之间形成回环）', () => {
+  const injected = { source: { kind: 'recallflow-panel' }, content: [{ type: 'text', text: buildPanelContextMessage([{ role: 'user', text: 'hi' }]) }] };
+  assert.equal(isInjectedUserMessage(injected), true);
+  const m = createMapper();
+  assert.equal(m.map({ type: 'user/message', data: injected }), null, '注入的上下文不应再产出面板事件');
 });
 
 // ------------------------------------------- 助手的长回答不该被截成残句

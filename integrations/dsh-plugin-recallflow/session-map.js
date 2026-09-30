@@ -44,7 +44,7 @@ export function textFromBlocks(content) {
  * 刻意用**拒绝名单**而不是允许名单：漏判的代价是面板上多一段噪音，
  * 误判的代价是**吞掉用户真正说过的话** —— 后者严重得多。
  */
-export const INJECTED_SOURCE_KINDS = Object.freeze(['runtime-context']);
+export const INJECTED_SOURCE_KINDS = Object.freeze(['runtime-context', 'recallflow-panel']);
 const INJECTED_TEXT_PREFIXES = Object.freeze(['Current runtime context', 'This snapshot supersedes']);
 
 export function isInjectedUserMessage(msg) {
@@ -59,6 +59,43 @@ export function isInjectedUserMessage(msg) {
     if (text.startsWith(p)) return true;
   }
   return false;
+}
+
+/** 面板上下文注入时用的 source.kind。同时也把它列进 INJECTED_SOURCE_KINDS —— 否则
+ *  我们自己注入的这段上下文会被当成"用户说的话"再推回面板，形成回环。 */
+export const PANEL_CONTEXT_SOURCE_KIND = 'recallflow-panel';
+export const PANEL_CONTEXT_MARKER = '【浏览器 RecallFlow 面板最近的对话】';
+
+function clip(s, max) {
+  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  return t.length > max ? t.slice(0, max) + '…' : t;
+}
+
+/**
+ * 把面板的最近对话拼成一段**给模型看的上下文**（纯函数，可直测）。
+ *
+ * 用途：DSH 的 `Agent.inject(message)` 是官方给的注入口 —— 文档明确它
+ * 「不出动 driver，在最近的步边界被认领」，因此不会打断运行中的循环。
+ * 我们只在会话创建时注入一次，把"面板里刚聊过什么"带进新会话。
+ *
+ * 文本里刻意写明这是**另一个 agent** 的对话：面板助手与 DSH 里的 agent 是两个不同的
+ * 实体，混为一谈会让模型把别人的结论当成自己的 —— 这一点必须写在上下文里，
+ * 不能只写在工具描述里（模型未必会去调工具）。
+ */
+export function buildPanelContextMessage(turns, options = {}) {
+  const list = Array.isArray(turns) ? turns : [];
+  const raw = Number(options.max);
+  const max = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 20;
+  const perTurn = Number.isFinite(Number(options.perTurn)) && Number(options.perTurn) > 0 ? Math.floor(Number(options.perTurn)) : 400;
+  const recent = list.filter((t) => t && typeof t.text === 'string' && t.text).slice(-max);
+  if (!recent.length) return '';
+  const lines = recent.map((t) => (t.role === 'user' ? '用户：' : '面板助手：') + clip(t.text, perTurn));
+  return (
+    PANEL_CONTEXT_MARKER + '\n' +
+    lines.join('\n') + '\n' +
+    '（说明：这是用户在浏览器页面上的 RecallFlow 面板里，与**另一个**助手 agent 的对话，' +
+    '不是用户对你说的，也不是你说过的话。需要更多上下文时用 panel_history 工具读取。）'
+  );
 }
 
 /** tool/call 的 arguments 是 JSON 字符串；解析失败就原样给出（不吞掉信息）。 */ export function parseToolArguments(raw) {
