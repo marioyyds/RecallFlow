@@ -10,13 +10,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyToolResult,
   cursorOverrideFrom,
   normalizeToolResult,
+  resolveTargets,
   shapeElementSourceResult,
   shapePageHealthResult,
   shapePickedElementResult,
   shapeTextResult,
   shapeVerifyChangeResult,
+  toolCursorKey,
 } from '../lib/shared/tool-results.js';
 
 const CTX = { projectRoot: 'D:/proj', devUrl: 'http://localhost:5173' };
@@ -145,6 +148,76 @@ test('shapeVerifyChangeResult: 断言求值 + 增量新问题 + targetsSource', 
   assert.equal(noTab.result.ok, false);
   assert.match(noTab.result.error, /未找到活动标签页/);
   assert.equal(noTab.cursor, 'k');
+});
+
+test('applyToolResult: 一站式分派 —— 无状态的直接加工，有状态的用调用方的游标', () => {
+  // 无状态：read_console 会被加工（文本重写），其余方法原样返回
+  const text = applyToolResult('read_console', { text: 'at ' + DEV_URL }, CTX);
+  assert.equal(text.result.ok, true);
+  assert.equal(text.cursor, undefined, '无状态方法不该牵扯游标');
+  const pass = applyToolResult('browser_read', { text: 'raw' }, CTX);
+  assert.deepEqual(pass.result, { text: 'raw' }, '不在清单里的方法原样返回（不做加工）');
+
+  // 有状态：page_health —— 游标通过 onCursor 交回调用方，本模块不私自存
+  let saved = null;
+  const ph = applyToolResult('page_health', HEALTH_RAW, CTX, {
+    cursor: '',
+    onCursor: (c) => {
+      saved = c;
+    },
+  });
+  assert.equal(ph.result.ok, true);
+  assert.ok(ph.cursor, '应返回推进后的游标');
+  assert.equal(saved, ph.cursor, '★ 必须通过 onCursor 交回调用方（模块自己不存游标）');
+
+  // 游标没变时不该触发 onCursor（避免无意义的写）
+  let called = 0;
+  applyToolResult('page_health', HEALTH_RAW, CTX, { cursor: ph.cursor, onCursor: () => { called++; } });
+  assert.equal(called, 0, '游标未推进就不该回调');
+
+  // verify_change 也走同一条路
+  const vc = applyToolResult(
+    'verify_change',
+    { found: true, tabId: 1, pageUrl: 'u', pageTitle: 'p', targets: [{ selector: '#a', found: true, text: '好的', visible: true }], console: [], network: [] },
+    CTX,
+    { targets: [{ selector: '#a', expect: { text: '好的' } }], targetsFromArgs: true }
+  );
+  assert.equal(vc.result.ok, true);
+  assert.equal(vc.result.passed, 1);
+
+  // 未找到标签页：出错结果 + 游标原样带回
+  const bad = applyToolResult('page_health', { found: false }, CTX, { cursor: 'keep' });
+  assert.equal(bad.result.ok, false);
+  assert.equal(bad.cursor, 'keep');
+});
+
+test('resolveTargets: 本次调用优先，其次 dev-session；都没有时给出可操作的报错', () => {
+  const callArgs = [{ selector: '#a' }];
+  const session = { targets: [{ selector: '#b' }] };
+
+  const fromCall = resolveTargets(callArgs, session);
+  assert.deepEqual(fromCall.targets, callArgs, '传了就用传的（优先级最高）');
+  assert.equal(fromCall.fromArgs, true);
+  assert.equal(fromCall.error, null);
+
+  const fromSession = resolveTargets([], session);
+  assert.deepEqual(fromSession.targets, session.targets);
+  assert.equal(fromSession.fromArgs, false, '来自 dev-session 时要标注，调用方据此写 targetsSource');
+
+  const none = resolveTargets(null, {});
+  assert.deepEqual(none.targets, []);
+  assert.equal(none.fromArgs, false);
+  assert.match(none.error, /没有可验证的目标/, '报错必须直接告诉用户怎么办');
+  assert.match(none.error, /dev_session_set/, '……而且要给出具体做法');
+  // 空数组等同于"没给"（与桥接原来的判断一致：Array.isArray && length）
+  assert.equal(resolveTargets([], {}).error !== null, true);
+});
+
+test('toolCursorKey: 按标签页分组（切页不串台）', () => {
+  assert.equal(toolCursorKey({ tabId: 7, pageUrl: 'u' }), '7');
+  assert.equal(toolCursorKey({ pageUrl: 'u' }), 'u', '没有 tabId 就用 URL');
+  assert.equal(toolCursorKey(null), 'default');
+  assert.equal(toolCursorKey({}), 'default');
 });
 
 test('normalizeToolResult: 只认无状态的方法，其余返回 null（交给调用方）', () => {

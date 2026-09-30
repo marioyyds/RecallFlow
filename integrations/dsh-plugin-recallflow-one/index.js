@@ -31,6 +31,12 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+// 结果加工与桥接**共用同一份**（lib/shared/tool-results.js）：
+// 否则插件的 recallflow_browser 会返回未加工的原始 JSON —— 没有磁盘路径、没有 hint，
+// 也就是删掉 DSH 的 MCP client 之后会静默失去「元素 → 源码文件」。
+import { applyToolResult, cursorOverrideFrom, resolveTargets, toolCursorKey } from '../../lib/shared/tool-results.js';
+// dev-session 也共用：桥接与插件必须读同一个文件，否则两边归一化不一致。
+import { devCtx, readDevSession } from '../../lib/shared/dev-session.js';
 
 export const name = 'recallflow-one';
 export const inject = ['agents', 'tools', 'webServer'];
@@ -589,6 +595,9 @@ export function apply(ctx, config = {}) {
   });
 
   /** 通过 WS 让浏览器执行一次能力调用，并等回执。 */
+  /** 工具调用的增量游标（page_health / verify_change）：按标签页分组，本进程自己持有。 */
+  const toolCursors = new Map();
+
   function callBrowser(method, payload) {
     const callId = 'call-' + randomUUID();
     const live = [...clients].filter((ws) => ws.readyState === 1);
@@ -641,7 +650,35 @@ export function apply(ctx, config = {}) {
       schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
     },
-    execute: async (args) => callBrowser(String(args && args.method), args && args.params),
+    execute: async (args) => {
+      const method = String((args && args.method) || '');
+      const params = (args && args.params) || {};
+      const raw = await callBrowser(method, params);
+
+      // verify_change 的 targets 解析（本次调用优先，其次 dev-session）与桥接共用同一条规则。
+      let targets = null;
+      let targetsFromArgs = false;
+      if (method === 'verify_change') {
+        const resolved = resolveTargets(params.targets, readDevSession());
+        if (resolved.error) return { ok: false, error: resolved.error };
+        targets = resolved.targets;
+        targetsFromArgs = resolved.fromArgs;
+      }
+
+      // 游标由**本进程**持有（语义是"自我上次检查以来"，与桥接各推进各的）。
+      const key = toolCursorKey(raw);
+      const override = cursorOverrideFrom(params);
+      const { result } = applyToolResult(method, raw, devCtx(), {
+        cursor: override === undefined ? toolCursors.get(key) || '' : override,
+        onCursor: (c) => toolCursors.set(key, c),
+        since: params.since,
+        levels: params.levels,
+        limit: params.limit,
+        targets,
+        targetsFromArgs,
+      });
+      return result;
+    },
   });
 
   log('已装载：' + [SAY_PATH, STATUS_PATH, PROBE_TOOL_PATH].join(' / ') + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
