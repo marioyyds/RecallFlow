@@ -120,7 +120,20 @@
         );
       }
 
+      // 分层日志：卡片没出现时，必须能区分是「插槽回调没触发」还是「组件没被挂载」，
+      // 否则两种情况在外部完全一样（都只是"看不到卡片"）。
+      function note(msg) {
+        try {
+          console.info('[recallflow-panel-ui] ' + msg);
+        } catch (e) {}
+      }
+
       function PanelTail() {
+        if (!PanelTail.__mountedLogged) {
+          PanelTail.__mountedLogged = true;
+          // 带上当时缓存里有几条 —— 这能区分"组件挂载了但没数据"与"组件根本没挂载"。
+          note('卡片组件已挂载（缓存面板数据 ' + latest.length + ' 条）');
+        }
         // 只订阅「有新数据」的通知；真正的刷新由模块级轮询驱动。
         var force = React.useReducer(function (x) {
           return x + 1;
@@ -142,6 +155,10 @@
             shownUpTo = fresh.reduce(function (m, t) {
               return Math.max(m, Number(t.at || 0));
             }, shownUpTo);
+          }
+          if (!PanelTail.__snapLogged) {
+            PanelTail.__snapLogged = true;
+            note('首次计算展示内容：新回合 ' + fresh.length + ' 条');
           }
           return fresh.slice(-MAX_ROWS);
         })[0];
@@ -189,6 +206,7 @@
             console.info('[recallflow-panel-ui] 已装载，注册到 conversation.chat.turnTail');
           } catch (e) {}
           ctx.slots.inject('conversation.chat.turnTail', function () {
+            note('插槽 conversation.chat.turnTail 回调已触发，开始注册卡片');
             return ctx.slots.register(
               {
                 name: 'conversation.chat.turnTail',
