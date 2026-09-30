@@ -67,6 +67,24 @@ emit('session/event', session, { type: 'tool/call', data: { turn: 1, step: 1, ca
 // 工具失败（应上报一行错误）
 emit('session/event', session, { type: 'tool/result', data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', isError: true, content: [] }, error: { name: 'E', code: 'ENOENT', reason: '找不到文件' } } });
 
+// 系统注入的运行时上下文（**真实样本**：DSH 会把它也作为 user/message 投递）。
+// 必须被挡住 —— 否则面板上会出现「👤 你在 DSH：Current runtime context…」这种用户没说过的话。
+emit('session/event', session, {
+  type: 'user/message',
+  data: {
+    role: 'user',
+    source: { kind: 'runtime-context' },
+    content: [{ type: 'text', text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.' }],
+  },
+});
+
+// 助手的**长**回答：验证截断额度确实从 400 放宽了（面板侧曾只留 400 字，把回答砍成残句）。
+const LONG = '长回答内容'.repeat(400); // 2000 字
+emit('session/event', session, {
+  type: 'assistant/message',
+  data: { turn: 1, step: 2, message: { role: 'assistant', content: [{ type: 'text', text: LONG }] }, stream: [] },
+});
+
 await new Promise((r) => setTimeout(r, 600));
 const events = await drain();
 
@@ -78,6 +96,7 @@ const sayUser = events.find((e) => e.kind === 'say' && e.who === 'user');
 const start = events.find((e) => e.kind === 'tool' && e.phase === 'start');
 const fail = events.find((e) => e.kind === 'tool' && e.phase === 'end' && e.ok === false);
 const mcp = events.filter((e) => e.tool && String(e.tool).startsWith('mcp__'));
+const longEv = events.find((e) => e.kind === 'say' && e.text && e.text.startsWith('长回答内容'));
 
 const checks = [
   ['会话开始有开场事件', events.some((e) => e.kind === 'say' && e.text.includes('会话已开始'))],
@@ -87,7 +106,17 @@ const checks = [
   ['普通工具调用已上报', Boolean(start) && start.tool === 'Bash'],
   ['工具失败上报为一行错误且带工具名', Boolean(fail) && fail.tool === 'Bash' && fail.error === '找不到文件'],
   ['mcp__* 工具被跳过（不与 MCP 服务端重复）', mcp.length === 0],
-  ['事件总数符合预期（1 开场 + 1 用户 + 1 助手 + 1 工具 + 1 失败 = 5）', events.length === 5],
+  // ① 的集成验证：真实样本喂进来，必须一条都不产出
+  [
+    '① 系统注入的运行时上下文被挡住（不显示成"用户说的话"）',
+    !events.some((e) => e.text && e.text.includes('Current runtime context')),
+  ],
+  // ② 的集成验证：走完整管线（插件 → /event → 队列）后，长回答仍保留到新额度
+  [
+    '② 助手长回答按新额度保留（>400 且 ≤2000，不是旧的 400 一刀切）',
+    Boolean(longEv) && longEv.text.length > 400 && longEv.text.length <= 2001,
+  ],
+  ['事件总数符合预期（1 开场 + 1 用户 + 2 助手 + 1 工具 + 1 失败 = 6）', events.length === 6],
 ];
 
 console.log('\n--- 结论 ---');
@@ -96,5 +125,7 @@ for (const [label, ok] of checks) {
   if (!ok) allOk = false;
   console.log('  ' + (ok ? '✓' : '✗') + ' ' + label);
 }
-console.log('\n未覆盖：DSH 的 loader 能否解析并挂载本包（需重启 DSH 才能验证）。');
+console.log('\n未覆盖：DSH 的 loader 能否解析并挂载本包。');
+console.log('  （后来用「隔离的 dsh headless + 只含本插件的 --patch」补验过一次：装载自报事件出现了，');
+console.log('   说明能装载；但那不是这个脚本覆盖的，所以这里仍如实标注。）');
 process.exitCode = allOk ? 0 : 1;

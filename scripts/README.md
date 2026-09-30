@@ -133,6 +133,10 @@ POST 桥接 `/event` → 面板事件队列。这条链路跨进程、跨编码�
 `/event` 落到桥接队列。含「助手成文回答已同步」「reasoning 块未被显示」
 「`mcp__*` 被跳过」「工具失败带工具名」等断言。
 
+另含两条**修 bug 时的集成回归**（单测覆盖不到管线本身）：
+- ① 系统注入的运行时上下文（`source.kind === 'runtime-context'`，真实样本）**一条都不产出**
+- ② 助手的长回答经完整管线后仍保留到新额度（`>400 且 ≤2000`，而非旧的 400 一刀切）
+
   $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
   node integrations/opencode/recallflow-mcp/index.js --http   # 后台
   node scripts/verify-dsh-plugin.mjs
