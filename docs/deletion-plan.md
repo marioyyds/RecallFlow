@@ -112,6 +112,46 @@
 **谁在用它**：DSH 的模型侧工具表（也就是我）。删掉后我只有 `recallflow_browser`。
 **验证**：DSH 启动后工具表里没有 `mcp__recallflow__*`，而 `recallflow_browser` 可用。
 
+#### 确切操作（已在副本上干跑验证过，2026-10-01）
+
+文件是 `~/.dsh/profiles/web/cordis.patch.yml`。它里面有**两个** insert 条目：
+
+```
+第 4-13 行   其他 patch（ui-settings-general@4 / agent-default-model@8）—— 不动
+第 15-29 行  - insert: id: recallflow-mcp      （@deepseek-ai/dsh-mcp-client，url …/7801/mcp）  ← ★ 只删这段
+第 35-47 行  - insert: id: recallflow-one      （本项目的插件，绝对路径；insert 在 46、id 在 47） ← ★ 必须保留
+```
+
+干跑（把原件复制到临时文件、删掉 MCP 段、再用 **DSH 自己的 js-yaml** 解析对比）：
+
+```
+原文件: 4 个条目 → ["ui-settings-general","agent-default-model","recallflow-mcp","recallflow-one"]
+干跑后: 3 个条目 → ["ui-settings-general","agent-default-model","recallflow-one"]
+recallflow-mcp:  true → false  ✓ 已移除
+recallflow-one:  true → true   ✓ 保留
+被删条目: {name:"@deepseek-ai/dsh-mcp-client", url:"http://127.0.0.1:7801/mcp"}
+✓ YAML 可被 DSH 的解析器读出
+```
+
+**同时要改一句注释**：第 44 行原本写着"下面那条 MCP client 暂时保留（见删除清单第 5 步…）"，
+删掉之后这句就是假的，一并改掉。
+
+**回滚**：动手前把 `cordis.patch.yml` 复制一份带时间戳的备份（该目录本来就有 DSH 自己留的
+几个 `.bak-YYYYMMDD-HHMMSS`，沿用同样的命名）。回滚 = 复制回去 + 重启 DSH。
+
+**事后检查**（都在你重启 DSH 之后）：
+
+```powershell
+node scripts/verify-live-gate.mjs          # 五项闸门
+curl.exe -s http://127.0.0.1:3080/recallflow/status   # 插件仍在服务
+node scripts/probe-tool.mjs page_health 3080          # 工具仍能往返
+# 以及：工具表里 mcp__recallflow__* 消失、recallflow_browser 仍在
+```
+
+**先决条件**：验收 4)（面板上同时看得到你发的话、工具活动、助手的回复）通过之后再删 ——
+因为那一步需要读面板正文，而删除之后 DSH 就只剩插件的工具了。
+
+
 **删掉之后 DSH 侧会失去什么、由什么接手**（逐项核过；**下表已于 2026-10-01 更新过一次**）：
 
 | 原 MCP 工具 | 新架构下的对应物 | 差异 |
