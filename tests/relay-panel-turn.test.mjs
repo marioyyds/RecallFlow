@@ -58,6 +58,24 @@ test('加载历史时不得重推给 DSH（会话才是真相，面板里的只�
   assert.ok(/pushedSpeakTurns = countSpeakTurns\(conversation\)/.test(loadBody), '载入后仍要同步计数器');
 });
 
+// 序列化必须带上 kind，且不能只按条数截断。
+//
+// 两个都是"新加的东西忘了过持久化边界"：
+//  ① 不存 kind → 重载后工具行不再被认作工具行 → trimSessionEntries 的工具行限流静默失效
+//  ② 只 slice(-20) → 工具行会渲染之后，最后 20 条可能全是 ⚙ → 重载后对话整体消失
+// 这类问题只在重载后暴露，而重载恰好是每次改代码的必经步骤。
+test('序列化：带上 kind，且先按 kind 裁剪再截断（否则重载后对话会被 ⚙ 挤掉）', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const body = chat.slice(chat.indexOf('function serializeConversation'), chat.indexOf('function serializeConversation') + 1400);
+  assert.ok(body.length > 100, '应能找到 serializeConversation 的实现体');
+  assert.ok(/copy\.kind = m\.kind/.test(body), '序列化必须存 kind —— 不存则加载后工具行限流失效');
+  assert.ok(
+    /trimSessionEntries\(conversation, \{ maxExternal: 80, maxTool: 20 \}\)/.test(body),
+    '序列化前应先按 kind 裁剪，而不是只 slice(-N)'
+  );
+  assert.ok(!/conversation\.slice\(-20\)/.test(body), '不该再只按条数截断（工具行会把对话挤掉）');
+});
+
 /** 在 stub 生效**期间**执行 fn，并返回它实际发出的请求。 */
 async function withStub(impl, fn) {
   const real = globalThis.fetch;
