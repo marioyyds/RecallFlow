@@ -104,3 +104,59 @@ test('面板事件链路两端对齐（服务端成形 + 扩展转发 + 面板�
   assert.ok(/msg\.type === 'rfBridgeEvent'/.test(chat), '面板应处理 rfBridgeEvent');
   assert.ok(/function renderBridgeEvent\(/.test(chat), '面板应实现 renderBridgeEvent');
 });
+
+test('反向通道两端对齐（面板 → 后台 → 桥接 → MCP 工具），含 URL 路径契约', () => {
+  // 这条链路同样跨三个包，而且比正向更脆：任一端改名都只表现为"面板的对话读不回来"，
+  // 服务端还会静默 404（扩展侧刻意静默失败，不影响面板自身）。
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const bg = fs.readFileSync(path.join(ROOT, 'background.js'), 'utf8');
+  const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
+  const mcp = fs.readFileSync(MCP_INDEX, 'utf8');
+
+  // 1) 面板发出 → 后台接收：消息 type 必须一致
+  assert.ok(/type: 'panel:turn'/.test(chat), '面板应发出 panel:turn');
+  assert.ok(/msg\.type === 'panel:turn'/.test(bg), '后台应处理 panel:turn');
+  // 2) 后台 → relay：必须经 relay 的函数（而不是自己拼一份 URL/token，
+  //    否则 token 与主机名会出现第二份真相）
+  assert.ok(/postPanelTurn\(/.test(bg), '后台应调用 postPanelTurn');
+  assert.ok(/export async function postPanelTurn\(/.test(relay), 'relay 应导出 postPanelTurn');
+
+  // 3) URL 路径契约：两端必须逐字一致（这是最容易在改名时漏掉的一处）
+  const relayPath = (relay.match(/RELAY_HTTP \+ '(\/[a-z-]+)'/g) || []).map((s) => s.match(/'(\/[a-z-]+)'/)[1]);
+  assert.ok(relayPath.includes('/panel-turns'), 'relay 应 POST 到 /panel-turns，实际：' + relayPath.join('、'));
+  assert.ok(/url\.pathname === '\/panel-turns'/.test(mcp), 'MCP server 应实现 /panel-turns');
+  // 读端与写端同路径成对（避免两处各自演化的形状漂移）
+  const panelTurnsPaths = (mcp.match(/url\.pathname === '\/panel-turns'/g) || []).length;
+  assert.ok(panelTurnsPaths >= 2, '应同时实现 POST（写）与 GET（读）两端，实际 ' + panelTurnsPaths + ' 处');
+  assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), 'GET 读取端应存在');
+
+  // 4) 字段名契约：后台发出去的角色取值，服务端要认得（否则全部落成 panel）
+  assert.ok(/role: msg\.role === 'user' \? 'user' : 'panel'/.test(bg), '后台应把角色规整为 user/panel');
+  assert.ok(/t\.role === 'user' \? 'user' : 'panel'/.test(mcp), '服务端应做同样的规整');
+
+  // 5) 读取端工具齐备
+  assert.ok(/name: 'panel_history'/.test(mcp), 'MCP 应暴露 panel_history 工具');
+  assert.ok(/name === 'panel_history'/.test(mcp), 'MCP 应实现 panel_history 分支');
+});
+
+test('注入端对齐（插件订阅 agent/created + 官方 inject + 读端 GET）', () => {
+  const plugin = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow/index.js'), 'utf8');
+  const map = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow/session-map.js'), 'utf8');
+  const mcp = fs.readFileSync(MCP_INDEX, 'utf8');
+
+  // 必须用官方的 Agent.inject，而不是自己去 append 会话事件
+  // （依据 runtime-types.d.ts：inject 不出动 driver、在步边界被认领，不打断运行中的循环）
+  assert.ok(/ctx\.on\('agent\/created'/.test(plugin), '插件应订阅 agent/created');
+  assert.ok(/agent\.inject\(/.test(plugin), '插件应调用官方 agent.inject');
+  assert.ok(!/session\.append\(/.test(plugin), '插件不得自行 append 会话事件（会破坏 agent loop 状态机）');
+  // 注入的 source.kind 必须同时列进 INJECTED_SOURCE_KINDS，否则会形成回环
+  const kind = (map.match(/PANEL_CONTEXT_SOURCE_KIND = '([a-z-]+)'/) || [])[1];
+  assert.ok(kind, '应导出 PANEL_CONTEXT_SOURCE_KIND');
+  assert.ok(
+    new RegExp("INJECTED_SOURCE_KINDS = Object\\.freeze\\(\\[[^\\]]*'" + kind + "'").test(map),
+    'PANEL_CONTEXT_SOURCE_KIND 必须在 INJECTED_SOURCE_KINDS 里（否则注入的上下文会被回推面板，形成回环）'
+  );
+  // 插件拉取的路径必须与服务端的读取端一致
+  assert.ok(/\/panel-turns\?limit=/.test(plugin), '插件应 GET /panel-turns 并带 limit');
+  assert.ok(/req\.method === 'GET' && url\.pathname === '\/panel-turns'/.test(mcp), '服务端应实现该 GET 端');
+});
