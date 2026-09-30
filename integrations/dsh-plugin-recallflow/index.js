@@ -15,6 +15,7 @@
 import { createMapper } from './session-map.js';
 
 export const name = 'recallflow-panel-sync';
+export const PLUGIN_VERSION = '0.1.0';
 
 /** 允许在 config 里覆盖，便于测试与换端口。 */
 export const DEFAULT_CONFIG = Object.freeze({
@@ -24,6 +25,14 @@ export const DEFAULT_CONFIG = Object.freeze({
   /** 只同步这些会话（空 = 全部）。会话 id 可从 session/created 拿到。 */
   sessionIds: Object.freeze([]),
 });
+
+// 注意：**不能** import `@deepseek-ai/schemastery` 来声明 Config ——
+// 它只存在于 DSH 自己的 node_modules 里，而本插件位于用户仓库中，
+// 从插件文件位置向上查找**解析不到**，反而会让装载失败。
+// 因此这里不声明 Config；条目里的 config 由 apply(ctx, config) 自行容错读取
+// （normalizeConfig 对缺字段/脏值都有默认值）。
+/** 与 dsh-mcp-client 一致：本插件只订阅事件，不注入任何 service。 */
+export const inject = [];
 
 function normalizeConfig(raw) {
   const c = Object.assign({}, DEFAULT_CONFIG, raw || {});
@@ -70,6 +79,16 @@ export function apply(ctx, rawConfig) {
     if (!config.sessionIds.length) return true;
     return config.sessionIds.includes(sessionIdOf(session));
   }
+
+  // **装载自报**：apply 一被调用就推一条。
+  // 这是唯一能**直接**判定「插件是否真的被 loader 装载」的信号 ——
+  // 否则只能靠"没收到事件"间接推断，而它无法区分
+  // 「没装载」与「装载了但这次没产生会话事件」。
+  void post({
+    text: 'RecallFlow 同步插件已装载（v' + PLUGIN_VERSION + '，port ' + config.port + '）',
+    who: 'dsh',
+    level: 'info',
+  });
 
   ctx.on('session/event', (session, event) => {
     try {
