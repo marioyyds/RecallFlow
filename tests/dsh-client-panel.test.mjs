@@ -27,6 +27,17 @@ globalThis.clearInterval = () => {};
 /** 控制台捕获缓冲（见 loadPlugin）。 */
 const consoleLines = [];
 
+/** localStorage 替身：验证进度持久化（跨刷新不重复展示同一批）。 */
+const localStorageStub = (() => {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+    clear: () => map.clear(),
+  };
+})();
+
 /** 最小 React 替身。函数组件里用到的三个 hook 都实现为可直接求值的形式。 */
 function makeFakeReact() {
   return {
@@ -70,6 +81,9 @@ async function renderTurn(component) {
 /** 装载真实的 client.js，返回它的插件对象。 */
 async function loadPlugin({ fetchImpl }) {
   let captured = null;
+  // 每个用例都清空 localStorage：客户端在**模块加载时**就会读取已展示进度，
+  // 不清的话上一个用例写入的进度会让这个用例一开始就"没有新内容"（实测会串味）。
+  localStorageStub.clear();
   globalThis.window = {
     __ModuleLoader__: {
       load(cfg) {
@@ -77,6 +91,7 @@ async function loadPlugin({ fetchImpl }) {
       },
     },
     addEventListener() {},
+    localStorage: localStorageStub,
   };
   globalThis.fetch = fetchImpl;
   // 捕获控制台输出：客户端的诊断是**外部唯一**能区分
@@ -166,7 +181,11 @@ test('面板没有新回合时返回 null（插槽契约：无内容的条目返
   assert.equal(third, null, '同一批内容不应在后续轮次重复出现');
 });
 
-test('渲染内容标明「另一个 agent」且带角色前缀（不得让面板的话看起来像用户说的）', async () => {
+test('按用户要求：两侧消息只按 DSH 原生风格呈现，**不加任何来源标签**', async () => {
+  // 用户原话：「两边的消息，我更希望都基于 dsh 的样式，不用刻意说消息是那一边的」。
+  // 这条测试把"加标签"这个曾被实现过的行为钉死为**不许回退** ——
+  // 我最初做的是 📣 标题 + “与另一个助手 agent 的对话”说明 + 👤/💬 前缀，
+  // 与用户诉求正好相反。
   const { plugin } = await loadPlugin({
     fetchImpl: bridgeOk([
       { role: 'user', text: '面板里用户问的话', at: 2000 },
@@ -177,10 +196,48 @@ test('渲染内容标明「另一个 agent」且带角色前缀（不得让面�
   await renderTurn(component); // 首轮把数据拉进来
   const tree = component({});
   const text = textOf(tree);
-  assert.ok(text.includes('浏览器 RecallFlow 面板'), text);
-  assert.ok(text.includes('另一个助手 agent'), '必须标明是另一个 agent：' + text);
-  assert.ok(text.includes('👤 你在面板：面板里用户问的话'), text);
-  assert.ok(text.includes('💬 面板助手：面板助手的回答'), text);
+  assert.ok(text.includes('面板里用户问的话'), text);
+  assert.ok(text.includes('面板助手的回答'), text);
+  assert.ok(!text.includes('你在面板'), '不应有来源前缀：' + text);
+  assert.ok(!text.includes('面板助手：'), '不应有来源前缀：' + text);
+  assert.ok(!/另一个|不是用户对/.test(text), '不应有"另一个 agent"的说明：' + text);
+  assert.ok(!text.includes('RecallFlow'), '不应有标题：' + text);
+});
+
+test('卡片排版与 DSH 原生一致（14px/24px），两侧差异只靠浓淡而非文字', async () => {
+  const { plugin } = await loadPlugin({
+    fetchImpl: bridgeOk([
+      { role: 'user', text: '用户那句', at: 4000 },
+      { role: 'panel', text: '助手那句', at: 4001 },
+    ]),
+  });
+  const { component } = captureComponent(plugin);
+  await renderTurn(component);
+  const tree = component({});
+  assert.equal(tree.props.className, 'recallflow-panel-card');
+  // 实测原生消息：font-size 14px / line-height 24px / 无底色 —— 卡片必须一致
+  assert.equal(tree.props.style.fontSize, '14px');
+  assert.equal(tree.props.style.lineHeight, '24px');
+  assert.equal(tree.props.style.background, undefined, '不应有底色');
+  assert.equal(tree.props.style.borderLeft, undefined, '不应有边框');
+  // 两侧只靠 opacity 区分，没有文字标签
+  const rows = tree.children.filter((c) => c && c.props && c.props.className === 'recallflow-panel-card-row');
+  assert.equal(rows.length, 2, '应有两行');
+  assert.ok(rows[0].props.style.opacity < 1, '面板里的用户发言应更淡');
+  assert.equal(rows[1].props.style.opacity, 1, '助手发言用正文浓度');
+});
+
+test('已展示进度持久化到 localStorage（用户要"自动同步"，刷新不该重复展示同一批）', async () => {
+  const { plugin } = await loadPlugin({
+    fetchImpl: bridgeOk([{ role: 'user', text: '一批内容', at: 5000 }]),
+  });
+  const { component } = captureComponent(plugin);
+  await renderTurn(component);
+  const shown = component({});
+  assert.ok(shown, '应展示');
+  assert.equal(localStorageStub.getItem('recallflow-panel-ui.shownUpTo'), '5000', '应把进度写进 localStorage');
+  // 同一批再渲染不再出现
+  assert.equal(component({}), null);
 });
 
 test('只取最近若干条并对单条限长（面板是窄条，长回答会把对话撑爆）', async () => {

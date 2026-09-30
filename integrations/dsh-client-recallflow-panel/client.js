@@ -35,7 +35,22 @@
 
       // 模块级状态：所有轮次的卡片共享同一份"看到哪了"的进度。
       var latest = [];
+      // 进度（已展示到哪一条 at）持久化到 localStorage。
+      // 用户诉求是"自动同步最好"：每批新内容出现一次即可，不该因为刷新页面而重复出现。
+      // 只放在内存里的话，每次 F5 都会把最近一批重新展示一遍（实测会导致同一内容出现多份）。
+      var SHOWN_KEY = 'recallflow-panel-ui.shownUpTo';
       var shownUpTo = 0;
+      try {
+        var savedShown = window.localStorage && window.localStorage.getItem(SHOWN_KEY);
+        if (savedShown) shownUpTo = Number(savedShown) || 0;
+      } catch (e) {
+        /* 隐私模式等场景下 localStorage 可能不可用：退回纯内存进度 */
+      }
+      function persistShown() {
+        try {
+          window.localStorage.setItem(SHOWN_KEY, String(shownUpTo));
+        } catch (e) {}
+      }
       var listeners = new Set();
       var timer = null;
       // 失败原因只在**状态变化**时打印一次，避免每 4 秒刷屏。
@@ -107,7 +122,11 @@
       }
 
       function row(t, i) {
-        var who = t.role === 'user' ? '👤 你在面板：' : '💬 面板助手：';
+        // 用户的原话：「两边的消息，我更希望都基于 dsh 的样式，不用刻意说消息是那一边的」。
+        // 因此这里**不再加任何来源前缀**（原来写的是「👤 你在面板：」/「💬 面板助手：」）。
+        // 两侧的区分只靠 DSH 本身那种**视觉**差异：面板里的用户发言用略淡的颜色，
+        // 助手发言用正文色 —— 不加文字标签。
+        var isUser = t.role === 'user';
         var text = String(t.text == null ? '' : t.text).replace(/\s+/g, ' ').trim();
         if (text.length > ROW_CHARS) text = text.slice(0, ROW_CHARS) + '…';
         return React.createElement(
@@ -115,9 +134,17 @@
           {
             key: 'row' + i,
             className: 'recallflow-panel-card-row',
-            style: { lineHeight: '22px', wordBreak: 'break-word' },
+            style: {
+              // 与 DSH 原生正文一致：14px / 24px（实测值），行内自适应宽度
+              fontSize: '14px',
+              lineHeight: '24px',
+              wordBreak: 'break-word',
+              // 只有"谁在说"的视觉区别，没有文字标签
+              opacity: isUser ? 0.68 : 1,
+              marginTop: i === 0 ? 0 : 2,
+            },
           },
-          who + text
+          text
         );
       }
 
@@ -186,48 +213,31 @@
             shownUpTo = snap.reduce(function (m, t) {
               return Math.max(m, Number(t.at || 0));
             }, shownUpTo);
+            persistShown();
           },
           [snap]
         );
 
         if (!snap.length) return null;
 
+        // 观感目标是"就是 DSH 自己的消息"，因此这里**没有任何标签**：
+        // 没有标题、没有"这是另一个 agent"的说明、没有来源前缀、没有边框/底色/缩进。
+        // 只保留与原生一致的排版（14px / 24px，实测自原生消息），以及两侧发言的
+        // 视觉浓淡差别（见 row()）。
+        // 说明：模型侧的注入**仍然**带着"这是另一个 agent"的说明 —— 那是给模型看的、
+        // 界面上不可见，两者并不冲突：界面像原生，模型不失真。
         return React.createElement(
           'div',
           {
-            // 对齐 DSH 原生消息的观感。实测原生消息的计算样式：
-            //   color rgb(15,17,21) / font-size 14px / line-height 24px / background 透明
-            // 最初我做成了"灰底 + 圆角 + 左侧粗竖线"的引用块，视觉上明显不是原生的，
-            // 而且因为多了内边距，整块比原生正文右移了 12px（实测 x=965 vs 953）。
-            // 现在：无底色、无圆角、只留一条细的左侧标记线；左内边距 12px 让文字与正文对齐。
-            // 颜色一律用 inherit / currentColor 与 rgba，以同时适配浅色与深色主题。
             className: 'recallflow-panel-card',
             style: {
-              margin: '4px 0 8px',
-              padding: '0 0 0 12px',
-              borderLeft: '2px solid rgba(127,143,164,.55)',
+              margin: '2px 0',
               fontSize: '14px',
               lineHeight: '24px',
               color: 'inherit',
             },
-            title: '来自浏览器里的 RecallFlow 面板（另一个助手 agent 的对话，不是用户对本会话说的话）',
           },
-          [
-            React.createElement(
-              'div',
-              { key: 'head', className: 'recallflow-panel-card-title', style: { fontWeight: 600 } },
-              '📣 浏览器 RecallFlow 面板'
-            ),
-            React.createElement(
-              'div',
-              {
-                key: 'sub',
-                className: 'recallflow-panel-card-sub',
-                style: { fontSize: '12px', lineHeight: '18px', opacity: 0.6, marginBottom: 4 },
-              },
-              '与另一个助手 agent 的对话 · 不是用户对本会话说的话'
-            ),
-          ].concat(snap.map(row))
+          snap.map(row)
         );
       }
 
