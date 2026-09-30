@@ -12,7 +12,7 @@
 //   2. 跳过 mcp__* 工具（已由 MCP 服务端上报，避免面板画两遍）。
 //   3. 只显示用户可见的文本（忽略 reasoning 块）。
 
-import { createMapper, buildPanelContextPayload, PANEL_CONTEXT_SOURCE_KIND } from './session-map.js';
+import { createMapper, buildPanelContextPayload, isInjectedUserMessage, PANEL_CONTEXT_SOURCE_KIND } from './session-map.js';
 
 /** 注入上下文时最多带面板的多少条回合（多了会挤占会话上下文预算）。 */
 export const PANEL_CONTEXT_TURNS = 20;
@@ -47,8 +47,10 @@ export const DEFAULT_CONFIG = Object.freeze({
 // 从插件文件位置向上查找**解析不到**，反而会让装载失败。
 // 因此这里不声明 Config；条目里的 config 由 apply(ctx, config) 自行容错读取
 // （normalizeConfig 对缺字段/脏值都有默认值）。
-/** 与 dsh-mcp-client 一致：本插件只订阅事件，不注入任何 service。 */
-export const inject = [];
+/** 与 dsh-mcp-client 一致：本插件只订阅事件 + 按会话反查 agent，不注入其它 service。
+ *  `agents` 是必须声明的依赖：Cordis 会等它就绪再调用 apply，
+ *  否则访问 ctx.agents 会抛（未就绪的服务是抛错代理）。 */
+export const inject = ['agents'];
 
 function normalizeConfig(raw) {
   const c = Object.assign({}, DEFAULT_CONFIG, raw || {});
@@ -111,6 +113,16 @@ export function apply(ctx, rawConfig) {
       if (!wants(session)) return;
       const mapped = mapper.map(event);
       if (mapped) void post(mapped);
+      // 用户每次**真的说话**时补一次注入检查。两个可观测缺陷都由此修掉：
+      //   1. DSH 启动时**恢复**的会话，其 agent 可能在插件订阅之前就建好了 ——
+      //      只靠 agent/created 的话它永远拿不到注入（实测：用户当前会话注入 id 为 0，
+      //      而同机隔离新建的会话有 1）。
+      //   2. 此前"只在会话创建时注入一次"，会话中途面板有新内容也进不来。
+      // 必须排除被注入的上下文自身（isInjectedUserMessage），否则它会触发自己，形成回环。
+      if (event && event.type === 'user/message' && !isInjectedUserMessage(event.data)) {
+        const agent = lookupAgent(session);
+        if (agent) void injectPanelTurns(agent, session, '用户发言时').catch(() => {});
+      }
     } catch (e) {
       // 映射出错也不能影响会话
     }
@@ -126,52 +138,118 @@ export function apply(ctx, rawConfig) {
     } catch (e) {}
   });
 
-  // 反向通道（面板 → DSH）：会话创建时把面板最近的对话**注入**本会话的上下文，
-  // 这样不需要用户或模型主动想起去调 panel_history。
+  // 反向通道（面板 → DSH）：把面板最近的对话**注入**本会话的上下文。
   //
   // 用 DSH 官方的 `Agent.inject(message)`，而不是自己往会话里 append 事件：
   // 它的文档写明「不出动 driver，在最近的步边界被认领」，因此**不会打断运行中的循环**；
   // 自行注入会话事件则可能破坏 agent loop 的状态机，拿用户正在用的 DSH 冒险。
-  // 只在创建时注入一次：行为可预期，且不会在会话中途改变上下文。
+  //
+  // 去重按**每会话**记录"已注入到哪一条（at）"：面板没新内容就不重复注入，
+  // 多个会话也各自独立，不会互相抢走彼此的批次。
+  const agentsByKey = new Map(); // 会话对象 或 会话 id → agent
+  const injectedUpTo = new Map(); // 会话对象 或 会话 id → 已注入的最大 at
+
+  function rememberAgent(agent, session) {
+    // 同时按**对象身份**与**id**登记：我不确定 agent.session 在真实 DSH 里一定等于
+    // session/event 收到的那一个对象，也可能拿不到 id。两个键都放，回查时都试。
+    if (session) agentsByKey.set(session, agent);
+    const sid = sessionIdOf(session);
+    if (sid) agentsByKey.set(sid, agent);
+  }
+
+  function lookupAgent(session) {
+    // 首选官方注册表。依据 dsh-agent 的类型声明：
+    //   interface Context { agents: AgentRegistry }
+    //   /** Look up a live agent. @param id - the shared agent/session id to look up. */
+    //   get(id: SessionId): Agent | undefined;
+    // 注意 "shared agent/session id" 这个说法 —— 因此拿 session id 就能取到 agent，
+    // **完全不依赖 agent/created 是否触发过**。这正是「DSH 启动时恢复的会话拿不到注入」
+    // 的根因：恢复的会话在插件订阅之前就已建好，那个事件不会再发。
+    try {
+      const sid = sessionIdOf(session);
+      if (sid && ctx.agents && typeof ctx.agents.get === 'function') {
+        const found = ctx.agents.get(sid);
+        if (found) return found;
+      }
+    } catch (e) {
+      /* 服务不可用就退回登记表 */
+    }
+    if (!session) return undefined;
+    return agentsByKey.get(session) || agentsByKey.get(sessionIdOf(session));
+  }
+
+  function keyFor(session) {
+    return session || sessionIdOf(session) || '(unknown)';
+  }
+
+  async function injectPanelTurns(agent, session, reason) {
+    if (!agent || typeof agent.inject !== 'function') return;
+    if (!wants(session)) return;
+    const key = keyFor(session);
+    const res = await fetch(
+      'http://127.0.0.1:' + config.port + '/panel-turns?limit=' + PANEL_CONTEXT_TURNS,
+      { headers: { 'X-RecallFlow-Token': config.token }, signal: AbortSignal.timeout(config.timeoutMs) }
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    const all = (data && Array.isArray(data.turns) ? data.turns : []).filter(
+      (t) => t && typeof t.text === 'string' && t.text
+    );
+    if (!all.length) return;
+    const since = injectedUpTo.get(key) || 0;
+    // 该会话此前从未注入过（since===0）时把当前的都算作新的；之后只取真正新增的。
+    const fresh = since === 0 ? all : all.filter((t) => Number(t.at || 0) > since);
+    if (!fresh.length) return;
+    const injected = buildPanelContextPayload(fresh, newMessageId(), { max: PANEL_CONTEXT_TURNS });
+    if (!injected) return;
+    try {
+      // 先推进进度再注入：即使 inject 抛错，也不该在下一轮把同一批重复推给它。
+      injectedUpTo.set(key, all.reduce((m, t) => Math.max(m, Number(t.at || 0)), since));
+      // 传**完整**消息（含 id）：inject 会原样放进 inbox，不替我们铸 id。见 session-map.js。
+      agent.inject(injected);
+      // 注入的**成败**变成面板上可见的一行：inject 是模型侧行为、界面看不见，
+      // 而失败会被 catch 吞掉 —— 那样"注入没生效"与"面板本来没对话"外部无法区分。
+      void post({
+        text: '已将面板最近的 ' + fresh.length + ' 条对话注入本会话上下文（' + reason + '）。',
+        who: 'dsh',
+        level: 'info',
+      });
+    } catch (err) {
+      void post({
+        text: '⚠ 面板上下文注入失败（' + String((err && err.message) || err) + '）—— 面板对话未能进入本会话。',
+        who: 'dsh',
+        level: 'warn',
+      });
+    }
+  }
+
   ctx.on('agent/created', (ev) => {
     void (async () => {
       try {
         const agent = ev && ev.agent;
         if (!agent || typeof agent.inject !== 'function') return;
-        if (!wants(agent.session)) return;
-        const res = await fetch(
-          'http://127.0.0.1:' + config.port + '/panel-turns?limit=' + PANEL_CONTEXT_TURNS,
-          { headers: { 'X-RecallFlow-Token': config.token }, signal: AbortSignal.timeout(config.timeoutMs) }
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        // 变量名不能叫 payload：外层事件参数曾叫 payload，同作用域内再 const 同名会从作用域
-        // 开头就遮蔽它，导致上面读 `ev` 之前先撞 TDZ（ReferenceError 被 catch 吞成静默）。
-        const injected = buildPanelContextPayload(data && data.turns, newMessageId(), {
-          max: PANEL_CONTEXT_TURNS,
-        });
-        if (!injected) return;
-        // 把注入的**成败**变成面板上可见的一行。
-        // 原因：inject 是模型侧行为，界面上看不见；而失败会被下面的 catch 吞掉 ——
-        // 那样「注入没生效」与「面板本来没对话」在外部完全无法区分。
-        // 这条诊断本身也走同一条桥接，因此它能否出现在面板上，
-        // 顺带证明了正向链路此刻是通的。
-        try {
-          // 传**完整**消息（含 id）：inject 会原样放进 inbox，不替我们铸 id。见 session-map.js。
-          agent.inject(injected);
-          const n = (data && data.turns && data.turns.length) || 0;
-          void post({ text: '已将面板最近的 ' + n + ' 条对话注入本会话上下文。', who: 'dsh', level: 'info' });
-        } catch (err) {
-          void post({
-            text: '⚠ 面板上下文注入失败（' + String((err && err.message) || err) + '）—— 面板对话未能进入本会话。',
-            who: 'dsh',
-            level: 'warn',
-          });
-        }
+        rememberAgent(agent, agent.session);
+        await injectPanelTurns(agent, agent.session, '会话开始');
       } catch (e) {
         // 注入失败绝不影响会话创建
       }
     })();
+  });
+
+  // agent 离场时清掉登记与进度，避免长跑进程里 Map 无限增长。
+  ctx.on('agent/disposed', (ev) => {
+    try {
+      const session = ev && ev.agent && ev.agent.session;
+      if (session) {
+        agentsByKey.delete(session);
+        injectedUpTo.delete(session);
+      }
+      const sid = sessionIdOf(session);
+      if (sid) {
+        agentsByKey.delete(sid);
+        injectedUpTo.delete(sid);
+      }
+    } catch (e) {}
   });
 }
 

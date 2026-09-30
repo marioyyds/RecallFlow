@@ -66,8 +66,9 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const port = server.address().port;
 
 // --- 假 Cordis ctx：记录订阅，允许手动触发 --------------------------------
-function makeCtx() {
+function makeCtx(opts) {
   const handlers = new Map();
+  const byId = (opts && opts.agents) || {};
   return {
     on(name, fn) {
       if (!handlers.has(name)) handlers.set(name, []);
@@ -79,6 +80,12 @@ function makeCtx() {
     },
     has(name) {
       return handlers.has(name);
+    },
+    // 官方注册表的替身：按**共享的 agent/session id** 反查
+    agents: {
+      get(id) {
+        return byId[id];
+      },
     },
   };
 }
@@ -205,6 +212,54 @@ ctx3.fire('agent/created', { source: 'fresh' });
 await new Promise((r) => setTimeout(r, 300));
 check('agent 没有 inject 方法时静默跳过（不抛错）', () => {
   assert.ok(true);
+});
+
+// --- 关键回归：DSH 启动时**恢复**的会话也要能拿到注入 -------------------------------
+// 实测过的缺陷：恢复的会话其 agent 在插件订阅之前就建好了，agent/created 不会再发，
+// 于是它永远拿不到注入（用户当前会话注入 id 为 0，而同机隔离新建的会话有 1）。
+// 解法是官方注册表 ctx.agents.get(共享的 agent/session id) —— 不依赖那个事件是否触发过。
+const recoveredSession = { id: 'session-recovered-0001' };
+const recoveredInjected = [];
+const recoveredAgent = { session: recoveredSession, inject: (m) => recoveredInjected.push(m) };
+const ctx5 = makeCtx({ agents: { 'session-recovered-0001': recoveredAgent } });
+apply(ctx5, { port, token: 't', timeoutMs: 1500 });
+// 注意：**故意不触发 agent/created** —— 模拟恢复场景
+ctx5.fire('session/event', recoveredSession, {
+  type: 'user/message',
+  data: { role: 'user', content: [{ type: 'text', text: '恢复的会话里用户说话' }] },
+});
+await new Promise((r) => setTimeout(r, 700));
+
+check('恢复的会话（agent/created 从未触发）也能通过注册表反查到 agent 并注入', () => {
+  assert.equal(recoveredInjected.length, 1, '应注入一次，实际 ' + recoveredInjected.length);
+  assert.ok(
+    String(recoveredInjected[0].content[0].text).includes('面板里问的问题'),
+    '注入内容应来自桥接的面板回合'
+  );
+});
+
+check('面板没有新回合时不重复注入（否则每次发言都往上下文里灌同一批文本）', async () => {
+  const before = recoveredInjected.length;
+  ctx5.fire('session/event', recoveredSession, {
+    type: 'user/message',
+    data: { role: 'user', content: [{ type: 'text', text: '再说一句' }] },
+  });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(recoveredInjected.length, before, '没有新内容就不该再注入');
+});
+
+check('被注入的上下文自身不会触发注入（否则会自己触发自己，形成回环）', async () => {
+  const before = recoveredInjected.length;
+  ctx5.fire('session/event', recoveredSession, {
+    type: 'user/message',
+    data: {
+      role: 'user',
+      source: { kind: PANEL_CONTEXT_SOURCE_KIND },
+      content: [{ type: 'text', text: '【浏览器 RecallFlow 面板最近的对话】…' }],
+    },
+  });
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(recoveredInjected.length, before, '注入源不应触发新的注入');
 });
 
 server.close();
