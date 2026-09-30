@@ -56,6 +56,22 @@ async function handleAi(request) {
   return { ok: true, answer };
 }
 
+// SPA 导航（history.pushState / replaceState）不会重载页面，因此：
+//   - 内容脚本收不到任何"页面变了"的信号；
+//   - 隔离世界也钩不到页面的 history 对象（那是主世界的对象），
+//     而在主世界打补丁属于"修改页面行为"，与 debug-hook 的只读约定相悖。
+// chrome.webNavigation.onHistoryStateUpdated 是唯一干净的入口（也是为此新增 webNavigation 权限的原因）。
+// 用途：让面板发现自己正在讨论的页面已经换了，而不是静默继续。
+if (chrome.webNavigation && chrome.webNavigation.onHistoryStateUpdated) {
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    // 只看主框架：子框架导航不改变"这个会话在讨论哪个页面"。
+    if (!details || details.frameId !== 0 || details.tabId < 0) return;
+    try {
+      chrome.tabs.sendMessage(details.tabId, { type: 'rfUrlChanged', url: details.url }, () => void chrome.runtime.lastError);
+    } catch (e) {}
+  });
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'getTabId') {
     sendResponse({ tabId: sender.tab ? sender.tab.id : null });
