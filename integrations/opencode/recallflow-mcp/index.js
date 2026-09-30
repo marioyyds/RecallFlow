@@ -29,7 +29,7 @@ import {
   rewriteSourceUrls,
   normalizePickedElement,
   normalizationHint,
-} from './dev-paths.js';
+} from '../../../lib/shared/dev-paths.js';
 import { summarizePageHealth } from './page-health.js';
 import { evaluateTargets } from './verify-change.js';
 

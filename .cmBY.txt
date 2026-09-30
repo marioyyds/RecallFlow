@@ -1,0 +1,46 @@
+refactor(shared): 把 dev-paths 移到 lib/shared —— 为"让插件也有源位置重写"铺路
+
+## 为什么移
+
+上一轮核对代码时发现：源位置重写（rewriteSourceUrls / normalizeElementSource /
+normalizePickedElement / normalizationHint）**11 处调用全在桥接的工具处理器里**，
+而插件的 recallflow_browser 直接返回 dispatch 的原始结果。
+也就是说：删掉 DSH 的 MCP client（第 5 步）会让 DSH **静默失去「元素 → 源码文件」**，
+而那正是本项目最核心的前端调试用途。
+
+要让它变成共享能力，第一步就是把它放到**两边都能 import 的地方**。
+这个模块是纯函数（只依赖 node:path / node:url，全部通过 ctx 参数工作，不碰文件），
+所以移动是安全的。
+
+## 移动
+
+- `integrations/opencode/recallflow-mcp/dev-paths.js` → `lib/shared/dev-paths.js`
+- 它的单元测试也从 `integrations/.../test/` → `tests/`（被测模块在哪，测试就在哪）
+- 三处 import 跟着改（桥接 index.js、page-health.js、测试文件）
+
+## 我在这轮犯了两个错，都被抓住了
+
+**① 用 PowerShell 改文件，把三个文件写坏了。**
+`Get-Content -Raw` + `-replace` + `Set-Content` 的默认编码改变了文件，
+中文变乱码、结构破损（`Unexpected token '}'` / `Illegal return statement`）。
+从 git 恢复后改用 edit 工具重做。
+**这条我自己的笔记里写着**（"写内容必须用 write/edit 工具，PowerShell 会坏编码"）——
+第 12 类教训（知识在手里却没照做）的又一次。
+
+**② 相对路径算错一级。**
+`../../lib/shared/...` 从 recallflow-mcp 往上两级是 integrations/，要三级才是仓库根。
+`node --check` 看不出 import 路径对不对（那是运行时解析），
+**但桥接的测试抓住了**：那些测试会真的把桥接起起来，于是 12 项 401/403 断言全线失败。
+改成 `../../../lib/shared/dev-paths.js` 后恢复全绿。
+——这是一次"测试真的在验证行为而不是文本"的好例子。
+
+## 验证
+
+- 全套 475/475
+- 桥接用临时端口**真启动**：无错，`/health` 返回 `{"ok":true,"ws":false,"queued":0,"uptimeMs":5770}`
+
+## 下一步（才能让第 5 步安全）
+
+把 dev-session 的读取（`dev-session.json`，路径是 `RECALLFLOW_EVIDENCE_DIR` 或
+`~/.recallflow-evidence`，**确定性**的）也抽成共享读取，然后让插件的工具结果
+也过一遍这些改写函数。之后删 MCP client 才不会再丢能力。

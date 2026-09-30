@@ -11,7 +11,7 @@ import {
   rewriteSourceUrls,
   normalizePickedElement,
   normalizationHint,
-} from '../dev-paths.js';
+} from '../lib/shared/dev-paths.js';
 
 // 平台无关的项目根（Windows 上为盘符绝对路径，POSIX 上为 /…）。
 const ROOT = path.resolve('proj-root');
