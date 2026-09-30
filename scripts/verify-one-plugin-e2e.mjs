@@ -107,7 +107,20 @@ async function main() {
     '实际 ' + say.headers.get('access-control-allow-origin')
   );
 
-  // 2) CORS 预检
+  // 2) 状态路由：把"连没连上、会话找没找到"变成可观测的
+  const status = await req('/recallflow/status');
+  check('GET /recallflow/status 可用', status.status === 200, '实际 ' + status.status);
+  let snap = null;
+  try {
+    snap = JSON.parse(status.text);
+  } catch {}
+  check(
+    '状态里带 wsReady / clients / sessions（排查时不必靠猜）',
+    !!(snap && 'wsReady' in snap && 'clients' in snap && Array.isArray(snap.sessions)),
+    status.text.slice(0, 160)
+  );
+
+  // 3) CORS 预检
   const pre = await req('/recallflow/say', {
     method: 'OPTIONS',
     headers: { Origin: 'chrome-extension://abcdefg', 'Access-Control-Request-Method': 'POST' },

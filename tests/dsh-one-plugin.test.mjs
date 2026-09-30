@@ -186,6 +186,24 @@ test('POST /recallflow/say：空文本 / 非 POST / 非 JSON 都被拒，且不�
   assert.equal(agent.calls.length, 0, '被拒的请求不应发出消息');
 });
 
+test('GET /recallflow/status：把"连没连上、会话找没找到"变成可观测的', async () => {
+  const { routes, agent } = await loadPlugin();
+  assert.ok(routes.has('/recallflow/status'), '应有状态路由');
+  const res = fakeRes();
+  await routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), res);
+  assert.equal(res.statusCode, 200, res.text);
+  const body = JSON.parse(res.text);
+  assert.equal(body.ok, true);
+  assert.equal(body.wsPath, '/recallflow/ws');
+  assert.equal(body.sayPath, '/recallflow/say');
+  assert.equal(body.wsReady, false, '还没人升级过 WS，应为 false');
+  assert.equal(body.clients, 0, '没有浏览器侧连接');
+  assert.equal(body.currentSessionId, 'session-test-0001', '应登记了 agent/created 送来的会话');
+  assert.deepEqual(body.sessions, ['session-test-0001']);
+  assert.equal(body.pendingTools, 0);
+  assert.ok(agent, '会话对象存在（占位断言，避免 lint 误判未使用）');
+});
+
 test('POST /recallflow/say：没有活会话时明确报 503，而不是静默假装成功', async () => {
   const mod = await import(PLUGIN_PATH + '?t=' + Date.now());
   const bag = makeCtx();

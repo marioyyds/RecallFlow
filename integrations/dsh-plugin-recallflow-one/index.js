@@ -37,6 +37,7 @@ export const inject = ['agents', 'tools', 'webServer'];
 
 const WS_PATH = '/recallflow/ws';
 const SAY_PATH = '/recallflow/say';
+const STATUS_PATH = '/recallflow/status';
 
 /** 工具调用等待浏览器回执的上限。 */
 const TOOL_TIMEOUT_MS = 30000;
@@ -176,22 +177,49 @@ export function apply(ctx, config = {}) {
     // 而 **DSH 启动时恢复的会话，其 agent 在插件加载之前就已建好** —— 那个事件不会再发。
     // 表现就是：路由通了、工具也注册上了，但 POST /recallflow/say 回
     // "没有可用的会话"。我在旧插件里修过同一个问题，却没有把教训带进新插件。
+    //
+    // 两条路都试：先按 id 精确查（AgentRegistry.get(id) —— 类型声明里写明 id 是
+    // "agent 与 session 共享的 id"，旧插件里实测能查到恢复的会话），
+    // 再退回 list() 取最近的一条。
     try {
+      const sid = currentSessionId || sessionIdOf(preferred);
+      if (sid && ctx.agents && typeof ctx.agents.get === 'function') {
+        const found = ctx.agents.get(sid);
+        if (found) {
+          sessions.set(sid, { agent: found, lastAt: Date.now() });
+          log('从注册表按 id 补登记会话：' + sid);
+          return sessions.get(sid);
+        }
+      }
       const list = ctx.agents && typeof ctx.agents.list === 'function' ? ctx.agents.list() : [];
       for (const agent of list) {
-        const sid = sessionIdOf(agent && agent.session);
-        const key = sid || '(registry-' + sessions.size + ')';
+        const id = sessionIdOf(agent && agent.session);
+        const key = id || '(registry-' + sessions.size + ')';
         sessions.set(key, { agent, lastAt: Date.now() });
-        if (sid) currentSessionId = sid;
-        log('从注册表补登记会话：' + key);
+        if (id && !currentSessionId) currentSessionId = id;
+        log('从注册表 list() 补登记会话：' + key);
       }
       for (const entry of sessions.values()) {
         if (!best || (entry.lastAt || 0) > (best.lastAt || 0)) best = entry;
       }
     } catch (e) {
-      log('读取 agents.list() 失败：' + String((e && e.message) || e));
+      log('读取注册表失败：' + String((e && e.message) || e));
     }
     return best;
+  }
+
+  /** 连接与登记状态：让"扩展有没有连上、会话有没有找到"可以从外部观测，不必靠日志。 */
+  function statusSnapshot() {
+    return {
+      ok: true,
+      wsPath: WS_PATH,
+      sayPath: SAY_PATH,
+      wsReady: !!wss,
+      clients: [...clients].filter((ws) => ws.readyState === 1).length,
+      sessions: [...sessions.keys()],
+      currentSessionId,
+      pendingTools: pendingTools.size,
+    };
   }
 
   // --- WebSocket 通道 ---------------------------------------------------------
@@ -379,6 +407,23 @@ export function apply(ctx, config = {}) {
     },
   });
 
+  // --- 状态路由：把"连没连上、会话找没找到"变成可观测的 -------------------------
+  // 动机：排查时最费时间的不是修，而是不知道卡在哪一环。
+  // 有了这条，外部一条 curl 就能回答：WS 有没有客户端、登记了哪些会话、有没有在等的工具调用。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: STATUS_PATH,
+    handler: (req, res) => {
+      const origin = req.headers.origin;
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders(origin));
+        res.end();
+        return;
+      }
+      sendJson(res, 200, statusSnapshot(), origin);
+    },
+  });
+
   /** 通过 WS 让浏览器执行一次能力调用，并等回执。 */
   function callBrowser(method, payload) {
     const callId = 'call-' + randomUUID();
@@ -435,5 +480,5 @@ export function apply(ctx, config = {}) {
     execute: async (args) => callBrowser(String(args && args.method), args && args.params),
   });
 
-  log('已装载：' + SAY_PATH + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
+  log('已装载：' + [SAY_PATH, STATUS_PATH].join(' / ') + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
 }
