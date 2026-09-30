@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyFrame, sessionEntryFromFrame, summarizeToolArgs, SESSION_SOURCE } from '../lib/shared/session-view.js';
+import { classifyFrame, sessionEntryFromFrame, summarizeToolArgs, trimSessionEntries, SESSION_SOURCE } from '../lib/shared/session-view.js';
 
 const frame = (event) => ({ kind: 'session-event', sessionId: 's1', event });
 
@@ -96,6 +96,36 @@ test('工具失败渲染成「✗ 调用 名字 失败：原因」一行（成�
   );
   // 成功的结果整条跳过
   assert.equal(sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'x', text: 'ok' }), []).action, 'skip');
+});
+
+test('trimSessionEntries: 工具行用更紧的上限，用户与助手的话优先保留', () => {
+  const conv = [];
+  for (let i = 0; i < 300; i++) conv.push({ role: 'external', kind: 'tool', content: '⚙ t' + i });
+  conv.push({ role: 'user', content: '我说的话' });
+  conv.push({ role: 'external', kind: 'assistant', content: '助手的回答' });
+
+  const kept = trimSessionEntries(conv, { maxExternal: 200, maxTool: 60 });
+  assert.equal(kept.filter((m) => m.kind === 'tool').length, 60, '工具行应被压到单独的上限');
+  assert.ok(kept.some((m) => m.content === '我说的话'), '用户的话不能被工具行挤掉');
+  assert.ok(kept.some((m) => m.content === '助手的回答'), '助手的回复不能被工具行挤掉');
+  assert.ok(!kept.some((m) => m.content === '⚙ t0'), '删的应是最旧的工具行');
+  assert.ok(kept.some((m) => m.content === '⚙ t299'), '最新的工具行要留下');
+});
+
+test('trimSessionEntries: 非工具的外部条目仍按总上限裁（保留最新的）', () => {
+  const conv = [];
+  for (let i = 0; i < 250; i++) conv.push({ role: 'external', kind: 'assistant', content: 'a' + i });
+  const kept = trimSessionEntries(conv, { maxExternal: 200, maxTool: 60 });
+  assert.equal(kept.length, 200);
+  assert.equal(kept[kept.length - 1].content, 'a249', '保留最新的');
+  assert.equal(kept[0].content, 'a50');
+});
+
+test('sessionEntryFromFrame 带上 kind（裁剪与渲染都要用它，不能靠字符串猜）', () => {
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/call', tool: 'x' }), []).kind, 'tool');
+  assert.equal(sessionEntryFromFrame(frame({ type: 'tool/result', tool: 'x', failed: true }), []).kind, 'tool');
+  assert.equal(sessionEntryFromFrame(frame({ type: 'user/message', role: 'user', text: 'hi' }), []).kind, 'user');
+  assert.equal(sessionEntryFromFrame(frame({ type: 'assistant/message', text: 'yo' }), []).kind, 'assistant');
 });
 
 test('summarizeToolArgs: 长值截断、跳过多余字段（面板是窄条，一行不能变十行）', () => {
