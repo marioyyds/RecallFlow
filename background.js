@@ -165,26 +165,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // 异步等待：把插件回传的 rpcId 交给面板，面板才能把"本地那条回合"与
     // 从会话回声回来的那条**精确对齐**（否则只能靠文本猜）。
     // 返回 true 表示"会异步回复" —— Chrome 要求这样保持消息通道。
-    // msg.sessionId（2026-10-08）：面板选了"跟哪条会话说话"时带上；不传 = 旧行为。
-    sayToDsh(text, msg.sessionId)
+    sayToDsh(text)
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, rpcId: '', error: String((e && e.message) || e) }));
-    return true;
-  }
-  if (msg && msg.type === 'panel:sessions') {
-    // 面板要"选会话"：把插件 /status 里的会话列表取回来。
-    // 为什么由后台取：内容脚本所在网页不是 127.0.0.1，直连会被同源策略挡住（同 sayToDsh）。
-    fetch('http://127.0.0.1:3080/recallflow/status', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((s) =>
-        sendResponse({
-          ok: true,
-          // sessionList 是插件新给的（带 lastAt，可按最近活动排序）；旧字段 sessions 作为退路。
-          sessions: (s && s.sessionList) || (s && s.sessions ? s.sessions.map((id) => ({ id, lastAt: 0 })) : []),
-          currentSessionId: (s && s.currentSessionId) || '',
-        })
-      )
-      .catch((e) => sendResponse({ ok: false, error: String((e && e.message) || e), sessions: [] }));
     return true;
   }
   if (msg && msg.type === 'conv:get') {
