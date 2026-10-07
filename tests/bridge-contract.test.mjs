@@ -147,6 +147,25 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
 // 新架构对应的契约在 tests/dsh-one-plugin.test.mjs（载荷 source.kind 必须是 'user'、
 // agent.send 的 mode/wake 参数）与 tests/relay-panel-turn.test.mjs（sendToDsh 的发送端形状）。
 
+// 从 DSH 会话回声回来的**助手回答**必须走 Markdown 渲染器。
+//
+// 真实事故（用户实测：「recallflow 的 md 渲染不对」）：appendExternalEntry 原来无条件
+// `el.textContent = line`，于是从会话回显的 `**加粗**`、表格、代码块全部**原样露出来**，
+// 而同一段话在左边的 DSH GUI 里是正常渲染的 —— 两个界面对同一段内容的呈现不一致。
+// 修法：kind === 'assistant' 时交给 renderAnswer（面板本地回答用的同一个渲染器）。
+test('面板 appendExternalEntry：助手消息走 Markdown，用户/工具行保持纯文本', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const i = chat.indexOf('function appendExternalEntry(');
+  assert.ok(i > 0, '应能找到 appendExternalEntry');
+  const body = chat.slice(i, i + 1800);
+  assert.ok(/function appendExternalEntry\(who, level, line, kind\)/.test(body), '应接收 kind 参数');
+  assert.ok(/kind === 'assistant'/.test(body), "应对 kind === 'assistant' 走 Markdown");
+  assert.ok(/renderAnswer\(/.test(body), '助手消息应交给 renderAnswer 渲染');
+  assert.ok(/el\.textContent = line;/.test(body), '非助手行仍要保持纯文本（textContent）');
+  // 调用点必须把 kind 传下去，否则助手消息会静默退化成纯文本
+  assert.ok(/appendExternalEntry\(d\.who, '', d\.line, d\.kind\)/.test(chat), 'renderSessionEvent 应把 d.kind 传下去');
+});
+
 // 打开面板失败**不能让界面卡死**。
 //
 // openPanel 一开头就把悬浮气泡藏起来，然后在后面几百行里建面板 ——
