@@ -25,20 +25,10 @@ import {
 } from '../lib/shared/bridge-methods.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const MCP_INDEX = path.join(ROOT, 'integrations/opencode/recallflow-mcp/index.js');
 const RELAY = path.join(ROOT, 'lib/bridge/relay.js');
+const PLUGIN = path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js');
 
-const mcpSource = fs.readFileSync(MCP_INDEX, 'utf8');
 const relaySource = fs.readFileSync(RELAY, 'utf8');
-
-/** 抽出 MCP server 里所有 callExtension('x', ...) 的方法名。 */
-function mcpCalledMethods(src) {
-  const out = new Set();
-  const re = /callExtension\(\s*'([a-z_]+)'/g;
-  let m;
-  while ((m = re.exec(src))) out.add(m[1]);
-  return out;
-}
 
 /** 抽出 relay 的 dispatch 里出现的 method === 'x' 分支名。 */
 function relayDispatchedMethods(src) {
@@ -55,17 +45,15 @@ test('方法清单非空且唯一', () => {
   for (const m of BRIDGE_METHODS) assert.match(m, /^[a-z][a-z0-9_]*$/, '方法名不合规范：' + m);
 });
 
-test('MCP server 调用的每个方法都在清单里（否则运行时报 unknown method）', () => {
-  const called = [...mcpCalledMethods(mcpSource)];
-  assert.ok(called.length > 0, '未能从 MCP server 解析出任何 callExtension 调用（解析器需更新？）');
-  const unknown = called.filter((m) => !isBridgeMethod(m));
-  assert.deepEqual(unknown, [], 'MCP 调用了扩展不认识的方法：' + unknown.join('、'));
-});
-
-test('清单里的每个方法都必须存在于 MCP 调用侧（清单不得有僵尸条目）', () => {
-  const called = mcpCalledMethods(mcpSource);
-  const unused = BRIDGE_METHODS.filter((m) => !called.has(m));
-  assert.deepEqual(unused, [], '清单里有方法从未被 MCP 调用（改名前忘了清理？）：' + unused.join('、'));
+// 原来这里有两条测试：核对"清单 ↔ MCP server 实际调用侧"（防僵尸条目）。
+// 2026-10-08 用户明确说不再用 opencode，桥接与 MCP server 已整体删除，那两条失去了对象。
+// **防僵尸的目的要保留**，所以换成等价检查：核心清单里的每个方法都必须真的被插件暴露 ——
+// 否则就是没人用的条目（和原来要抓的是同一类问题）。
+test('核心清单里的每个方法都必须被插件暴露（防僵尸条目；原先是核对 MCP 调用侧）', () => {
+  const exposed = pluginList(fs.readFileSync(PLUGIN, 'utf8'), 'BROWSER_METHODS');
+  assert.ok(exposed.length >= BRIDGE_METHODS.length, '从插件解析出的方法数异常偏少，正则可能已失效');
+  const unused = BRIDGE_METHODS.filter((m) => !exposed.includes(m));
+  assert.deepEqual(unused, [], '核心清单里有方法插件根本没暴露（僵尸条目？）：' + unused.join('、'));
 });
 
 test('清单里的每个方法都必须有 relay dispatch 分支（否则清单是空头支票）', () => {
@@ -232,44 +220,36 @@ test('插件的方法表不许声称扩展做不到的方法（含拼写错）�
   assert.deepEqual(missingInPlugin, [], '只读档清单里有方法没暴露给插件：' + missingInPlugin.join('、'));
 });
 
-test('截图链路两端对齐（relay 实现 + MCP 工具 + 归档函数都存在）', () => {
+test('截图链路两端对齐（relay 实现 + 插件暴露 + 归档函数都存在）', () => {
   assert.ok(isBridgeMethod('screenshot_capture'), 'screenshot_capture 应在清单里');
   assert.ok(/async function screenshotCapture\(/.test(relaySource), 'relay 应实现 screenshotCapture');
-  assert.ok(/name: 'page_screenshot'/.test(mcpSource), 'MCP 应暴露 page_screenshot 工具');
-  assert.ok(/async function pageScreenshot\(/.test(mcpSource), 'MCP 应实现 pageScreenshot');
-  // 断言要抓的是**语义**：page_screenshot 的结果必须直接返回，
-  // 不能掉进「JSON.stringify(result)」那条通用包装 —— 否则图片会变成一坨文本而静默失效。
-  // （早先这里用单行 return 的正则，为发事件改成多行块后就误报了；定长窗口不会因换行/缩进而失效。）
-  const shotAt = mcpSource.indexOf("else if (name === 'page_screenshot')");
-  assert.ok(shotAt >= 0, '应存在 page_screenshot 的独立分支');
-  const shotWindow = mcpSource.slice(shotAt, shotAt + 300);
-  assert.ok(/\breturn\b/.test(shotWindow), 'page_screenshot 分支必须直接 return：' + shotWindow.slice(0, 160));
-  assert.ok(
-    !/JSON\.stringify\(/.test(shotWindow),
-    'page_screenshot 分支不得把结果 JSON 化（图片必须是 image 内容块）：' + shotWindow.slice(0, 160)
-  );
+  // 原来这里还断言 MCP server 的 page_screenshot 分支必须直接 return、不得 JSON 化
+  // （保护"图片不要变成一坨文本而静默失效"）。MCP server 已删除，那条失去对象；
+  // 插件这条路由是 output.render 走 JSON —— 已经用真实调用验证过图片能拿到（会落到文件里），
+  // 所以这里只钉"两边都还在"，不再假装有 MCP 那一端。
+  assert.ok(/'screenshot_capture'/.test(fs.readFileSync(PLUGIN, 'utf8')), '插件应暴露 screenshot_capture');
   const store = fs.readFileSync(path.join(ROOT, 'lib/shared/evidence-store.js'), 'utf8');
   assert.ok(/export function archiveImage\(/.test(store), 'evidence-store 应提供 archiveImage');
 });
 
-test('面板事件链路已整体移除（服务端成形 + 扩展转发 + 面板渲染三者都不在了）', () => {
-  // 这条链路曾跨越三个包，现在整条消失：生产者（DSH hook 经 /event）、
-  // 传输（桥接的事件队列）、消费者（面板的 renderBridgeEvent）。
-  // 反向断言它们**不得复活** —— 这是删除清单第 4 步的核心约束。
-  assert.ok(
-    !fs.existsSync(path.join(ROOT, 'integrations/opencode/recallflow-mcp/panel-events.js')),
-    'panel-events.js 应已删除'
-  );
-  assert.ok(!fs.existsSync(path.join(ROOT, 'integrations/dsh-hooks')), 'dsh-hooks（往 /event 推事件）应已删除');
-  assert.ok(!/pushEvent\(/.test(mcpSource), 'MCP server 不应再投递面板事件');
-  assert.ok(!/eventQueue/.test(mcpSource.replace(/^\s*(\/\/|\/\*|\*).*$/gm, '')), '不应再有事件队列（注释除外）');
-  assert.ok(!/name === 'panel_post'/.test(mcpSource), 'panel_post 工具应已删除');
-  assert.ok(!/name === 'panel_history'/.test(mcpSource), 'panel_history 工具应已删除');
-  assert.ok(!/url\.pathname === '\/panel-turns'/.test(mcpSource), '/panel-turns 端点应已删除');
-  assert.ok(!/url\.pathname === '\/event'/.test(mcpSource), '/event 端点应已删除');
-  // 工具服务本身必须完好 —— 这是桥接现在唯一的职责
-  assert.ok(/url\.pathname === '\/poll'/.test(mcpSource), '/poll 必须保留');
-  assert.ok(/url\.pathname === '\/result'/.test(mcpSource), '/result 必须保留');
+test('桥接与 MCP server 已整体删除（用户 2026-10-08 明确不再用 opencode）', () => {
+  // 之前这条测试的标题是"面板事件链路已整体移除"，并且**要求桥接的工具服务保留** ——
+  // 因为那时它还是 opencode 的页面能力出口，删了会让 opencode 的工具静默失效。
+  // 用户明确不用 opencode 之后，保留的理由消失，所以现在反过来钉住"整包已删"，
+  // 同时钉住 DSH 那条通道必须完好（删东西最容易连坐）。
+  for (const rel of [
+    'integrations/opencode/recallflow-mcp/index.js',
+    'integrations/opencode/recallflow-mcp/package.json',
+    'integrations/opencode/mcp-contract.md',
+    'integrations/dsh-hooks',
+  ]) {
+    assert.ok(!fs.existsSync(path.join(ROOT, rel)), rel + ' 应已删除');
+  }
+  assert.ok(!/127\.0\.0\.1:7801/.test(relaySource), 'relay 不应再引用 7801 桥接');
+  assert.ok(/127\.0\.0\.1:3080/.test(relaySource), 'relay 必须保留 DSH(3080) 通道');
+  // 7801 时代的两条传输路径也不该留残留
+  assert.ok(!/function httpLoop\(/.test(relaySource), 'HTTP 长轮询（桥接主通道）应已删除');
+  assert.ok(!/function handleWsMessage\(/.test(relaySource), '桥接 WS 的消息处理应已删除');
 });
 
 test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL 路径契约', () => {
@@ -278,7 +258,6 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
   const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
   const bg = fs.readFileSync(path.join(ROOT, 'background.js'), 'utf8');
   const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
-  const mcp = fs.readFileSync(MCP_INDEX, 'utf8');
 
   // 1) 面板发出 → 后台接收：消息 type 必须一致
   assert.ok(/type: 'panel:turn'/.test(chat), '面板应发出 panel:turn');
@@ -288,14 +267,9 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
   assert.ok(/export async function sayToDsh\(/.test(relay), 'relay 应导出 sayToDsh');
   assert.ok(!/export async function postPanelTurn\(/.test(relay), 'postPanelTurn 已删除，不应复活');
 
-  // 3) 桥接那条通道本身必须保留（opencode 依赖它），且只剩工具调用两条路径。
-  //    /panel-turns 与 /event 已随第 4 步移除。
-  assert.ok(/async function httpLoop\(\)/.test(relay), '桥接长轮询必须保留（opencode 依赖桥接）');
-  const relayPath = (relay.match(/RELAY_HTTP \+ '(\/[a-z-]+)'/g) || []).map((s) => s.match(/'(\/[a-z-]+)'/)[1]);
-  assert.ok(relayPath.includes('/poll'), 'relay 应轮询 /poll（工具调用入口），实际：' + relayPath.join('、'));
-  assert.ok(relayPath.includes('/result'), 'relay 应回传 /result，实际：' + relayPath.join('、'));
-  assert.ok(/url\.pathname === '\/poll'/.test(mcp), 'MCP server 应实现 /poll');
-  assert.ok(!relayPath.includes('/panel-turns'), '/panel-turns 已按删除清单移除，relay 不应再用它');
+  // 3) 桥接那条通道本身、以及它连的 MCP server，已随 opencode 一起删除（2026-10-08）。
+  //    这一段原来在这里断言"桥接长轮询必须保留、/poll 与 /result 必须存在" ——
+  //    那些现在由上面那条"桥接与 MCP server 已整体删除"反向钉住了，这里不再重复。
 
   // 4) 后台**只转发用户自己说的话**：助手输出不再推给 DSH ——
   //    新架构下回复本就来自那条会话，把助手输出当用户输入灌进去才是"冒充用户消息"。
@@ -303,8 +277,6 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
     /if \(msg\.role !== 'user'\)/.test(bg),
     '后台应只转发 role 为 user 的面板输入（非 user 直接返回，不推给 DSH）'
   );
-  assert.ok(!/name: 'panel_history'/.test(mcp), 'panel_history 工具应已删除');
-  assert.ok(!/name: 'panel_post'/.test(mcp), 'panel_post 工具应已删除');
 });
 
 // 「注入端对齐」那条测试已随旧插件一起删除（删除清单第 3 步）。
@@ -399,35 +371,18 @@ test('面板 send()：本地 AI 回答中不能静默丢弃，必须给出提示
 // 那个缺口的防回归。
 //
 // 背景：源位置重写/元素源码成形原本**只在桥接的处理器里**，插件返回未加工的原始 JSON。
-// 后来把这些抽到 lib/shared/（dev-paths / page-health / verify-change / tool-results），
-// 插件与桥接都改成调用它。这条测试钉住"不许再各自内联写一份"。
+// 后来把这些抽到 lib/shared/（dev-paths / page-health / verify-change / tool-results）。
+// 桥接已随 opencode 一起删除（2026-10-08），所以这条测试现在只盯插件这一侧 ——
+// 它的价值没变：**不许再各自内联写一份**。
 //
 // 断言方式：不是查"有没有 import"（那太弱），而是查**底层归一化函数在业务文件里是否还被直接调用**。
-// 那些调用现在只应出现在 lib/shared 内部。数字是量过才写的（两个文件的实际计数）。
-test('结果加工只有一份实现：桥接与插件都不再内联调用底层归一化函数', () => {
-  const bridge = fs.readFileSync(MCP_INDEX, 'utf8');
-  const plugin = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+// 那些调用现在只应出现在 lib/shared 内部。
+test('结果加工只有一份实现：插件不再内联调用底层归一化函数', () => {
+  const plugin = fs.readFileSync(PLUGIN, 'utf8');
 
-  // 两边都必须接入共享模块
-  assert.ok(/lib\/shared\/tool-results\.js/.test(bridge), '桥接应 import 共享的 tool-results');
   assert.ok(/lib\/shared\/tool-results\.js/.test(plugin), '插件应 import 共享的 tool-results');
 
-  // 桥接里不得再出现这些底层调用（共享模块体内才有）
-  for (const fn of [
-    'rewriteSourceUrls(',
-    'normalizeElementSource(',
-    'normalizePickedElement(',
-    'normalizationHint(',
-    'summarizePageHealth(',
-    'evaluateTargets(',
-    'incrementalHealth',
-  ]) {
-    assert.ok(!bridge.includes(fn), '桥接不应再内联调用 ' + fn + '（应经 lib/shared/tool-results.js）');
-  }
-  // 桥接应通过共享函数成形
-  assert.ok(bridge.includes('shapeTextResult('), '桥接的 read_console/read_network 应调用 shapeTextResult');
-
-  // 插件同理：不直接碰底层归一化，只调 applyToolResult
+  // 插件不直接碰底层归一化，只调 applyToolResult
   for (const fn of ['rewriteSourceUrls(', 'normalizeElementSource(', 'normalizePickedElement(']) {
     assert.ok(!plugin.includes(fn), '插件不应直接调用 ' + fn + '（应走 applyToolResult）');
   }

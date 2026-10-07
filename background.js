@@ -4,7 +4,7 @@ import { getAISettings } from './lib/shared/settings.js';
 import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
-import { startMcpRelay, sayToDsh } from './lib/bridge/relay.js';
+import { startRecallFlowRelay, sayToDsh } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
@@ -495,9 +495,10 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// 启动 RecallFlow ↔ opencode 的本地中继（连接本机 MCP server）。
-// 未运行 MCP server 时连接失败会自动重试，不影响扩展其它功能。
-startMcpRelay();
+// 启动 RecallFlow 的本地通道（只剩 DSH 这一条，走 127.0.0.1:3080）。
+// 原来这里还启动一条连 7801 桥接的通道 —— 用户 2026-10-08 明确不再用 opencode 之后，
+// 那条通道与桥接整包一起删除（见 docs/deletion-plan.md）。
+startRecallFlowRelay();
 
 // 初始化统一 Target 管理：订阅对话框 / 下载 / 文件选择等浏览器级事件。
 initTargetManager();

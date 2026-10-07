@@ -206,34 +206,39 @@ test('sayToDsh: 发送端路径与插件注册的路径逐字一致（改名会�
   assert.ok(/path:\s*SAY_PATH/.test(pluginSrc), '插件应把 SAY_PATH 用在路由注册上');
 });
 
-// ===================== 并存：两条通道都必须存在 =====================
-// 这条是**防回归**用的，来自一次真实事故：我曾把扩展的桥接连接"换成"指向 DSH，
-// 于是 opencode 的页面工具静默失效（7801 桥接不只服务 DSH）。迁移不等于替换 ——
-// 在确认某个组件只有一个消费者之前不要换掉它。
+// ===================== 只剩一条通道：3080（DSH 会话） =====================
 //
-// 注意：断言里**不再包含 postPanelTurn / forwardBridgeEvent** ——
-// 它们是"两段对话同步"的产物，已按删除清单第 4、6 步移除。
-// 桥接通道本身（连接、长轮询、dispatch）必须保留，那才是 opencode 依赖的部分。
-test('两条通道并存：7801（MCP 工具调用，服务 opencode）与 3080（DSH 会话）都在', () => {
+// 这条测试的历史值得留着：它原本断言"两条通道**必须并存**"，来自一次真实事故 ——
+// 我曾把扩展的桥接连接"换成"指向 DSH，于是 opencode 的页面工具静默失效（7801 不只服务 DSH）。
+// 教训是"迁移不等于替换：确认某个组件只有一个消费者之前别换掉它"。
+//
+// 2026-10-08 用户明确说不再用 opencode —— 7801 那个消费者不存在了，所以**这次**替换成立。
+// 于是断言反过来：7801 那条通路（常量、两条传输、消息处理）必须**已经消失**，
+// 而 3080 那条必须**一个部件都不少**。删东西最容易连坐，这条就是防连坐的。
+test('只剩 3080 一条通道：7801 桥接已删除，DSH 通道部件齐全', () => {
   const relay = fs.readFileSync(path.join(ROOT, 'lib/bridge/relay.js'), 'utf8');
-  // 桥接那条：连接、长轮询、派发 —— 一个都不能少
-  assert.match(relay, /const RELAY_HOST = '127\.0\.0\.1:7801'/, '桥接通道的 host 不能被改掉');
-  assert.match(relay, /const RELAY_WS = 'ws:\/\/' \+ RELAY_HOST \+ '\/\?token='/, '桥接 WS 连接必须保留');
-  assert.match(relay, /async function httpLoop\(\)/, '桥接长轮询必须保留（WS 断开时的兜底）');
-  assert.match(relay, /async function dispatch\(method, params\)/, 'dispatch 必须保留（两条通道共用）');
-  // DSH 那条：连接、事件转发、输入
+
+  // 7801 那条：常量、两条传输、消息处理都该没了
+  assert.ok(!/127\.0\.0\.1:7801/.test(relay), '不应再有 7801 的 host');
+  assert.ok(!/RELAY_TOKEN|RELAY_WS|RELAY_HTTP|RELAY_AUTH_HEADERS/.test(relay), '桥接的常量应已删除');
+  assert.ok(!/function connectWs\(/.test(relay), '桥接的 WS 连接应已删除');
+  assert.ok(!/function httpLoop\(/.test(relay), '桥接的长轮询应已删除');
+  assert.ok(!/function handleWsMessage\(/.test(relay), '桥接的消息处理应已删除');
+  assert.ok(!/scheduleReconnect\(/.test(relay), '桥接的重连调度应已删除');
+
+  // dispatch 必须保留：那是 DSH 通道的能力入口，58 个方法都经过它
+  assert.match(relay, /async function dispatch\(method, params\)/, 'dispatch 必须保留');
+
+  // DSH 那条：一个部件都不能少
   assert.match(relay, /const DSH_HOST = '127\.0\.0\.1:3080'/, '缺 DSH 通道的 host');
   assert.match(relay, /const DSH_WS = 'ws:\/\/' \+ DSH_HOST \+ '\/recallflow\/ws'/, '缺 DSH 通道的 WS 地址');
   assert.match(relay, /function connectDshWs\(\)/, '缺 DSH 通道的连接函数');
+  assert.match(relay, /function scheduleDshReconnect\(\)/, 'DSH 通道应有自己的重连调度');
+  assert.match(relay, /function handleDshMessage\(/, '缺 DSH 通道的消息处理');
   assert.match(relay, /function forwardSessionEvent\(frame\)/, '缺会话事件转发');
   assert.match(relay, /export async function sayToDsh\(text\)/, '缺 sayToDsh');
-  // 已删除的两条旧通道不应复活
+
+  // 已删除的旧通道不应复活
   assert.ok(!/export async function postPanelTurn\(/.test(relay), 'postPanelTurn 已删除，不应复活');
   assert.ok(!/function forwardBridgeEvent\(/.test(relay), 'forwardBridgeEvent 已删除，不应复活');
-  // 两条连接必须各自独立：DSH 通道不能复用桥接的重连调度（会互相打断）
-  assert.match(relay, /function scheduleReconnect\(\)/, '桥接应保留自己的重连调度');
-  assert.match(relay, /function scheduleDshReconnect\(\)/, 'DSH 通道应有自己的重连调度');
-  const dshBlock = relay.slice(relay.indexOf('function connectDshWs('), relay.indexOf('function handleDshMessage('));
-  assert.ok(dshBlock.length > 0, '应能找到 connectDshWs 的实现体');
-  assert.ok(!/scheduleReconnect\(\)/.test(dshBlock), 'DSH 通道不应调用桥接的重连函数（会互相打断）');
 });
