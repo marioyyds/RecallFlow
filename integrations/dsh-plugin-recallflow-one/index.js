@@ -50,6 +50,14 @@ const WS_PATH = '/recallflow/ws';
 const SAY_PATH = '/recallflow/say';
 const STATUS_PATH = '/recallflow/status';
 const PROBE_TOOL_PATH = '/recallflow/probe-tool';
+// 只读：把**任意一条**会话（含没载入的）的历史事件读出来。
+// 为什么要有它：① 已实测"插件不能载入一条没活着的会话"（`sessionController` 拿不到），
+// 所以"发消息"那半没法做；但 ② `readSession` 的注释写明参数是
+// *"live or persisted session id to read"* —— **读**这一半是允许的。
+// 把它做成可调用的路由，于是"面板能不能显示另一条会话"有一个**可实测**的答案
+// （这个路由自己就是那个实测），而且投影用的是面板那套 projectEvent，
+// 所以"形状能不能渲染成面板的行"由同一个函数回答。
+const SESSION_LOG_PATH = '/recallflow/session-log';
 
 /** 工具调用等待浏览器回执的上限。 */
 const TOOL_TIMEOUT_MS = 30000;
@@ -604,6 +612,7 @@ export function apply(ctx, config = {}) {
       wsPath: WS_PATH,
       sayPath: SAY_PATH,
       probeToolPath: PROBE_TOOL_PATH,
+      sessionLogPath: SESSION_LOG_PATH,
       wsReady: !!wss,
       clients: [...clients].filter((ws) => ws.readyState === 1).length,
       sessions: [...sessions.keys()],
@@ -956,6 +965,62 @@ export function apply(ctx, config = {}) {
   // 动机：recallflow_browser 只能由模型调用。要确认这条路真的通，要么等模型调一次，
   // 要么有一个受控入口 —— 后者更可靠，也让排查不必依赖"模型有没有调"。
   // 只允许 BROWSER_METHODS 里的方法（都是读页面信息的那几个），不接受任意代码。
+  // 只读：读**任意一条**会话（含没载入的）的历史事件。
+  // 这是目标 ② 的"最小可用版本"：`readSession` 的注释是
+  // *"@param sessionId - live or persisted session id to read"* +
+  // *"@returns cloned header and complete raw event log"*；投影用的是面板那套 `projectEvent`，
+  // 所以"形状能不能渲染成面板的行"由同一个函数回答。
+  // **只读**：不调用任何会改变会话状态的 API（不 resolveAgent / create / enter）。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: SESSION_LOG_PATH,
+    handler: async (req, res) => {
+      const origin = req.headers && req.headers.origin;
+      try {
+        const url = new URL(req.url || '/', 'http://127.0.0.1');
+        const id = String(url.searchParams.get('sessionId') || '').trim();
+        const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit') || 100)));
+        if (!id) {
+          sendJson(res, 400, { ok: false, error: '缺少 sessionId（例：?sessionId=session-…&limit=50）' }, origin);
+          return;
+        }
+        const q = ctx.get && ctx.get('sessionQuery', false);
+        if (!q || typeof q.readSession !== 'function') {
+          sendJson(
+            res,
+            503,
+            { ok: false, error: 'sessionQuery.readSession 不可用（见 /recallflow/status 的 sessionStore 自检）' },
+            origin
+          );
+          return;
+        }
+        const snap = await q.readSession(id);
+        const all = (snap && snap.events) || [];
+        const frames = [];
+        for (const ev of all.slice(-limit)) {
+          const f = projectEvent(ev);
+          if (f) frames.push(f);
+        }
+        sendJson(
+          res,
+          200,
+          {
+            ok: true,
+            sessionId: id,
+            total: all.length,
+            count: frames.length,
+            // 与面板从 WS 收到的**是同一个** projectEvent 产物：形状能直接渲染。
+            frames,
+          },
+          origin
+        );
+      } catch (err) {
+        // readSession 的注释写明会在持久化/头部兼容/重放校验失败时抛 —— 原样报出来。
+        sendJson(res, 503, { ok: false, error: String((err && err.message) || err) }, origin);
+      }
+    },
+  });
+
   ctx.webServer.register({
     kind: 'exact',
     path: PROBE_TOOL_PATH,

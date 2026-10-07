@@ -55,9 +55,10 @@ function makeCtx(agentsById, query) {
 }
 
 /** 直接调路由处理器，模仿真实 HTTP：req 发 data+end，res 收 status + body。 */
-async function callRoute(handler, body) {
+async function callRoute(handler, body, opts = {}) {
   const req = new EventEmitter();
-  req.method = 'POST';
+  req.method = opts.method || 'POST';
+  req.url = opts.url || '/';
   req.headers = { origin: 'http://example.test' };
   req.destroy = () => {};
   let status = 0;
@@ -220,4 +221,51 @@ test('SessionQuery：live / parentSession 要落进 sessionList，子会话**不
   assert.equal(s.json.sessionStore.queryUsed, 'listSessions', 'queryUsed 应记下用了哪个方法');
   assert.equal(s.json.sessionStore.queryCount, 3, 'queryCount 应是记录条数');
   assert.equal(s.json.sessionStore.queryError, '', 'queryError 应为空');
+});
+
+test('只读会话历史路由：读出任意会话的事件，并投影成**面板那套** frame', async () => {
+  // 这是目标 ② 的最小可用版本。依据是 readSession 的注释：
+  //   *"@param sessionId - **live or persisted** session id to read"*（不要求会话活着）
+  //   *"@returns cloned header and complete raw event log"*
+  // 投影用的是面板渲染同一个 projectEvent，所以"形状能不能渲染成面板的行"由同一个函数回答。
+  const parent = 'session-723c8b32-4ab3-489f-9f53-80958d29c5a9';
+  const events = [
+    { type: 'user/message', data: { text: '历史里的一句' } },
+    { type: 'assistant/message', data: { text: '历史里的回复' } },
+    { type: 'tool/call', data: { name: 'browser_read' } },
+  ];
+  let readWith = '';
+  const { routes } = await load(new Map(), {
+    listSessions: async () => [{ header: { id: parent }, live: true, persisted: true }],
+    readSession: async (id) => {
+      readWith = id;
+      return { session: { id }, events };
+    },
+  });
+
+  assert.ok(routes.has('/recallflow/session-log'), '应注册只读会话历史路由');
+  const r = await callRoute(routes.get('/recallflow/session-log'), undefined, {
+    method: 'GET',
+    url: '/recallflow/session-log?sessionId=' + parent + '&limit=2',
+  });
+
+  assert.equal(r.status, 200, '应成功：' + r.raw);
+  assert.equal(readWith, parent, '应把 sessionId 原样交给 readSession');
+  assert.equal(r.json.total, 3, 'total 是日志总条数');
+  assert.equal(r.json.count, 2, 'limit=2 应只投影最后两条');
+  assert.ok(Array.isArray(r.json.frames) && r.json.frames.length === 2, 'frames 应是投影后的行');
+  assert.ok(
+    r.json.frames.every((f) => f && typeof f.type === 'string'),
+    '每个 frame 至少要有 type —— 面板渲染要的就是这个形状'
+  );
+});
+
+test('只读会话历史路由：缺 sessionId 时明确报错，不瞎猜一条', async () => {
+  const { routes } = await load(new Map(), { readSession: async () => ({ events: [] }) });
+  const r = await callRoute(routes.get('/recallflow/session-log'), undefined, {
+    method: 'GET',
+    url: '/recallflow/session-log',
+  });
+  assert.equal(r.status, 400, '缺 sessionId 应是 400：' + r.raw);
+  assert.match(String(r.json.error), /sessionId/, '应说清缺什么');
 });
