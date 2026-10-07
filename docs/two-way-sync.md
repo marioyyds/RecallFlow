@@ -106,20 +106,61 @@ WS 广播 {kind:'session-event', sessionId, event}
 
 | 改动位置 | 需要做什么 | 为什么 |
 |---|---|---|
-| `lib/page/**`、`background.js`、`lib/bridge/**`、`manifest.json` | **重载扩展**（`edge://extensions` → RecallFlow → ↻），并刷新页面 | 扩展代码只在加载时读取 |
+| `lib/page/**`、`background.js`、`manifest.json` | **重载扩展**（`edge://extensions` → RecallFlow → ↻），并刷新页面 | 扩展代码只在加载时读取 |
 | `integrations/dsh-plugin-recallflow-one/**` | **重启 DSH**（`dsh plugin` 只转发给 pnpm，没有 reload 子命令） | 插件由 DSH 的 loader 在启动时载入 |
 | `~/.dsh/profiles/web/cordis.patch.yml` 或 `package.json` | **重启 DSH** | 这两个文件只在启动时读取 |
 | `integrations/opencode/recallflow-mcp/**` | **重启桥接**（必须在**你自己的终端**里跑，见踩坑第 1 条） | 常驻进程，代码在启动时载入 |
+| `lib/shared/**` | **看谁 import 它** —— 见下 | 同一份文件被两边（甚至三边）引用 |
 
-## 怎么确认跑的是新代码（别靠"应该重启过了"）
+**`lib/shared/**` 为什么单独一行**：这些文件被**三方**分别引用，改一个文件要重启哪几个进程，
+取决于**谁 import 了它**。下面这份清单是**量出来的**（不是凭印象）：
+
+| 谁 | 直接 import 的 `lib/shared/*` |
+|---|---|
+| 桥接（`integrations/opencode/recallflow-mcp/`，node 进程） | `dev-session`、`evidence-store`、`tool-results` |
+| DSH 插件（`integrations/dsh-plugin-recallflow-one/`） | `dev-session`、`evidence-store`、`tool-results` |
+| 扩展（`lib/page/**`、`lib/bridge/**`、`background.js`） | `bridge-methods`、`handoff`、`handoff-store`、`panel-turns`、`session-binding`、`session-view`、`settings`、`store`、`rag`、`table`、`utils` |
+
+（`dev-paths` / `page-health` / `verify-change` 不在桥接与插件的直接清单里 ——
+它们由 `tool-results` 传递引入。所以改它们要重启的是**同一个组合**：插件 + 桥接。）
+
+所以，举例：
+
+- 改 `tool-results.js` → **插件与桥接都要重启**，扩展不用动。
+  （量过：import 它的只有插件、桥接与两个测试文件。）
+- 改 `session-view.js` → **要重载扩展**，DSH 与桥接不用动。
+- 改 `dev-paths.js` → 经 `tool-results` 影响到插件与桥接 → **两边都要重启**。
+
+我踩过一次：在 `tool-results.js` 里改了东西、只重启了 DSH，然后纳闷桥接为什么没有那个改动。
+
+## 怎么确认跑的是新代码（别靠"应该重启过了"，也别靠比时间）
+
+**插件**：`/recallflow/status` 带一个 `build` 字段 —— 它是插件在**装载时**算的自身文件指纹
+（路径、字节数、mtime、内容 `sha256` 前 12 位）。拿它跟磁盘上的文件比即可：
 
 ```powershell
-# 插件：/recallflow/status 是新版才有的路由。404 = DSH 还没重启。
-curl.exe -s -o NUL -w "%{http_code}`n" http://127.0.0.1:3080/recallflow/status
+$want = (Get-FileHash 'D:\Desktop\workspace\code\ai\bookmark-sorter\integrations\dsh-plugin-recallflow-one\index.js' -Algorithm SHA256).Hash.ToLower().Substring(0,12)
+$got  = (curl.exe -s http://127.0.0.1:3080/recallflow/status | ConvertFrom-Json).build.sha256_12
+"磁盘=$want  已载入=$got  " + $(if ($want -eq $got) { '✓ 一致' } else { '✗ 需要重启 DSH' })
 ```
 
+三种结局的含义：
+
+- **`build` 字段不存在** → 跑的是加这个字段之前的旧代码，重启 DSH。
+- **两者不同** → 改了代码但还没重启（这正是最需要分辨的时刻 —— 磁盘与已载入**故意**在这里不同）。
+- **一致** → 已载入的就是磁盘上这一版。
+
+`node scripts/verify-live-gate.mjs` 的第 1 条做的就是这件事（它以前只看
+`/recallflow/status` 是否返回 200 —— 那个路由在任何近期版本里都有，所以**答不出**这个问题，
+我自己就被它误导过：看到 ✓ 以为跑的是新构建，实际差了一次重启）。
+
+**桥接与扩展没有等价的字段** —— 它们只能靠"进程/扩展是什么时候起来的"来推断：
+
 ```powershell
-# DSH 进程启动时间：与插件相关提交的时间比大小
+# 桥接：/health 的 uptimeMs 直接告诉你它跑了多久
+curl.exe -s -H "X-RecallFlow-Token: recallflow-local-bridge-v1" http://127.0.0.1:7801/health
+
+# DSH 进程启动时间（推断用；插件请优先用上面的 build 指纹）
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
   Where-Object { $_.CommandLine -match 'bin\.js' -and $_.CommandLine -match 'web' } |
   Select-Object ProcessId, CreationDate
