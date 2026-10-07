@@ -127,17 +127,41 @@ const m = await import(pathToFileURL(p).href);        // ← 必须转 file:// U
   为此专门加了 `findSessionStrict()`（`pickSession` 是"尽力而为"版本，只用于"没指定"的情形）。
 
 `GET /recallflow/status` 除 `sessions`（id 列表，**保留兼容**）外新增
-**`sessionList: [{ id, lastAt }]`** —— 面板的选择器按 `lastAt` 排序并标出"最近活跃"。
+**`sessionList: [{ id, lastAt, live, parentSession }]`** —— 面板的选择器按 `lastAt` 排序、
+标出"最近活跃"，并用另外两个字段把**发不进去/不该发**的会话标出来（见下）。
 
-### 列表能列多全（如实说明）
+### 列表能列多全（2026-10-08 实测后改写）
 
-`sessions` 这份登记由两处填充：**收到的会话事件**，以及兜底的 **`ctx.agents.list()`**
-（插件确实 `inject` 了 `agents`，所以**能枚举**，不是只能列"最近说过话的"）。但兜底
-只在**有人发消息时**才跑，因此：
+**能列全，走 `sessionQuery.listSessions()`。** 这一条是实测出来的，不是设计推演：
 
-- 插件刚起来、还没人发过消息时，列表可能是空的或只有一部分；
-- **刚建好、还没登记过的会话可能暂时不在列表里** —— 面板遇到这种情况会补一个
-  「（不在当前列表里）」的选项并标出来，而**不会**让它悄悄掉回"跟随最近活跃"。
+| 试过的来源 | 结果 |
+|---|---|
+| 会话事件 + `ctx.agents.list()` 兜底 | **只有 1 条** —— DSH 的类型声明写着 `list(): Agent[]` 是 *"All **live** agents"*，只有**活着的** |
+| `SessionStore.list()`（`sessions` 服务）| 可用，但方法名是 `enter / detachEntered / liveEntryFor / emitDisposed` —— 它是"**已载入的活会话**"登记表，不是历史索引 |
+| **`sessionQuery.listSessions()`** | **17 条** ✓（侧边栏那份列表就是从它来的；DSH 自己的插件也这么用：`inject: ['agents','sessionQuery','typert']`）|
+
+用的是 **`ctx.get('sessionQuery', false)` 而不是 `inject`**：cordis 的 inject 失败会让
+**整个插件不加载**，而这条只是"让选择器更全"，不该有这个权力（官方注释：
+*"Read a service from the store without the inject requirement"*）。`listSessions()` 是异步的，
+所以走**缓存 + 后台刷新**（启动刷一次、每次 `/status` 再刷一次），而不是让同步的
+`statusSnapshot()` 去 await。
+
+### 两个字段各管什么（都来自 DSH，不靠 id 形状猜）
+
+- **`live`**（`SessionRecord.live`）：`false` = 那条会话**没载入**。插件只能把消息送进
+  载入过的会话（那种才拿得到 agent）—— 面板会显示
+  「（未载入·发送前请先在 DSH 里打开它）」，让用户在**选择时**就看到，
+  而不是打完字才撞上 `503 没有可用的会话`。
+  **为什么不自动载入** ✗：`SessionStore` 的 `enter(session: Session)` 要的是**实例**而不是 id，
+  `create` 的注释是 *"Create a live child session from an exact prefix of a live source"* ——
+  都是 fork/子会话用的，硬用只会**动到用户的会话上下文**，所以按"不硬做"处理。
+- **`parentSession`**（`SessionHeader.parentSession`）：非空 = **子会话**（subagent / fork），
+  面板标成「（子会话）」。17 条里有 3 条是**裸 uuid**（`901e9a29…` / `0c2f31d3…` / `4bf8230e…`），
+  在磁盘上与正常会话同处一个 session store —— **光看 id 形状分不出语义**，所以用这个字段判。
+
+`/status` 里还有一个 `sessionStore` 自检字段（`available / methods / used / count / error`
+与 `queryAvailable / queryMethods / queryUsed / queryCount / queryError`）：
+面板在 shadow DOM 里、console 不一定读得到，**这个字段是把"为什么列不全"变成可观测事实的唯一窗口**。
 
 ## 调试入口
 

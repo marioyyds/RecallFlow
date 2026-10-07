@@ -298,9 +298,16 @@ node scripts/probe-say.mjs "测试文本"
 `docs/deletion-plan.md` 里记的那条教训同源 —— **"看起来成功了"的错误比报错难查得多**。
 消息进错对话不会报错，只会让人对不上话。
 
-**列表的限制**（插件 README 里也写了一份）：登记由会话事件 + `ctx.agents.list()` 兜底填充，
-而兜底只在有人发消息时才跑 —— 所以刚建好、还没登记过的会话可能暂时不在列表里。
-这种情况界面会明说，不假装列全。
+**列表能列全，走 `sessionQuery.listSessions()`**（实测：17 条；插件 README 里写了完整的排查表）——
+但要注意两件事，都是 DSH 的边界而不是本项目的 bug：
+
+- **`live: false` 的会话发不进去**：只有载入过的会话才拿得到 agent。面板会在选项里直接写
+  「（未载入·发送前请先在 DSH 里打开它）」—— 让用户在**选择时**就知道，而不是打完字才撞上
+  `503 没有可用的会话`。**不自动载入**：`SessionStore` 的 `enter` 要的是 `Session` 实例、
+  `create` 是 fork 子会话用的（注释：*"Create a live child session from an exact prefix of a live source"*），
+  硬用会动到用户的会话上下文。
+- **子会话会被标出来**：`SessionHeader.parentSession` 非空的标成「（子会话）」。
+  17 条里有 3 条是裸 uuid，在磁盘上与正常会话同一个 store —— 光看形状分不出来，所以用字段判。
 
 ## 已知限制 / 未验证
 
