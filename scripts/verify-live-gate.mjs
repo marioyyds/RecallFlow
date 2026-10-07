@@ -14,6 +14,19 @@
  * 说明：第 5 条（DSH 里调用 recallflow_browser 能往返）**脚本查不了** ——
  * 那个工具只能由模型调用。因此这里只打印提醒，不假装检查了。
  */
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+// 插件文件（status 的 build 字段与它比对，用来回答"新代码生效了没有"）
+const PLUGIN_FILE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'integrations',
+  'dsh-plugin-recallflow-one',
+  'index.js'
+);
 
 const args = process.argv.slice(2);
 const withSay = args.includes('--say');
@@ -39,7 +52,13 @@ async function get(url, init) {
 async function main() {
   console.log('--- 闸门检查（DSH :' + dshPort + '，桥接 :' + bridgePort + '）---');
 
-  // 1) 插件是不是新代码：/recallflow/status 只在新版里有
+  // 1) 插件是不是**已载入的**新代码。
+  //
+  // 这条以前只看 /recallflow/status 是否返回 200，标签却写着"插件是新代码" ——
+  // 那个路由在任何近期版本里都有，所以它其实答不出"新代码生效了没有"。
+  // 我自己就被它误导过一次（看到 ✓ 就以为跑的是新构建，实际差了一次重启）。
+  // 现在改成比**指纹**：status.build.sha256_12（装载时算的，反映**已载入**的代码）
+  // 对**磁盘上**的插件文件哈希。三种结局分别给出原因。
   let snap = null;
   try {
     const r = await get('http://127.0.0.1:' + dshPort + '/recallflow/status');
@@ -48,13 +67,31 @@ async function main() {
         snap = JSON.parse(r.text);
       } catch {}
     }
-    check(
-      '插件是新代码（GET /recallflow/status 返回 200）',
-      r.status === 200 && !!snap,
-      '实际 HTTP ' + r.status + ' ' + r.text.slice(0, 120) + '（404 = DSH 还没重启）'
-    );
+    const disk = createHash('sha256').update(readFileSync(PLUGIN_FILE)).digest('hex').slice(0, 12);
+    const loaded = snap && snap.build && snap.build.sha256_12;
+    if (!snap) {
+      check(
+        '插件是新代码（已载入的指纹 = 磁盘上的文件）',
+        false,
+        'HTTP ' + r.status + ' ' + r.text.slice(0, 100) + '（404 或解析失败 = DSH 还没重启）'
+      );
+    } else if (!loaded) {
+      check(
+        '插件是新代码（已载入的指纹 = 磁盘上的文件）',
+        false,
+        'status 里没有 build 字段 → 跑的是加 build 之前的旧代码；磁盘上是 ' + disk + '。请重启 DSH。'
+      );
+    } else {
+      check(
+        '插件是新代码（已载入的指纹 = 磁盘上的文件）',
+        loaded === disk,
+        loaded === disk
+          ? 'sha256_12 ' + loaded + ' 一致'
+          : '已载入 ' + loaded + ' ≠ 磁盘 ' + disk + ' → 改了代码但还没重启 DSH'
+      );
+    }
   } catch (e) {
-    check('插件是新代码（GET /recallflow/status 返回 200）', false, e.message);
+    check('插件是新代码（已载入的指纹 = 磁盘上的文件）', false, e.message);
   }
 
   // 2) 扩展是否连上了新通道
