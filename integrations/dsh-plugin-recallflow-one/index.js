@@ -192,7 +192,75 @@ export function apply(ctx, config = {}) {
   // SessionStore 的自检结果（见 listAllSessions）。**不是**给用户看的装饰：
   // 面板在 shadow DOM 里、console 也不一定读得到，而这个字段能从 /status 读到 ——
   // 于是"选择器为什么列不全"变成一个可观测的事实，而不是又一轮猜。
-  const sessionStoreDiag = { available: false, methods: [], used: '', count: 0, error: '' };
+  const sessionStoreDiag = {
+    available: false,
+    methods: [],
+    used: '',
+    count: 0,
+    error: '',
+    // ── SessionQueryEngine（**全部**会话在这里；侧边栏那份列表就是它给的）──
+    queryAvailable: false,
+    queryMethods: [],
+    queryUsed: '',
+    queryCount: 0,
+    queryError: '',
+  };
+
+  /**
+   * 后台刷新"**全部会话**"的登记：`sessionQuery.listSessions()`。
+   *
+   * 为什么是"缓存 + 后台刷新"而不是在 `statusSnapshot()` 里 await：
+   * `listSessions()` 是异步的，而 `statusSnapshot()` 是**同步**的。改成必须 await
+   * 会牵动整条路由（而且万一那个 handler 不是 async，`await` 就是语法错误 →
+   * **插件整个不加载**，那是最坏的后果）。用缓存则：这次请求可能看到上一次的刷新结果，
+   * 下一次就齐了 —— 面板点开选择器时会重新取一次，那点延迟被吸收掉了。
+   *
+   * 为什么用 `ctx.get` 而不是 `inject`：cordis 的 inject 失败会让**整个插件不加载**，
+   * 而这条只是"让选择器更全"，不该有这个权力。官方注释：
+   * "Read a service from the store **without the inject requirement**"。
+   */
+  async function refreshStoreSessions() {
+    try {
+      const q = ctx.get && ctx.get('sessionQuery', false);
+      if (!q) return;
+      sessionStoreDiag.queryAvailable = true;
+      const names = new Set();
+      for (let o = q; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+        for (const k of Object.getOwnPropertyNames(o)) {
+          if (k === 'constructor') continue;
+          try {
+            if (typeof q[k] === 'function') names.add(k);
+          } catch (e) {}
+        }
+      }
+      sessionStoreDiag.queryMethods = [...names].sort();
+      if (typeof q.listSessions !== 'function') {
+        sessionStoreDiag.queryError = '没有 listSessions 方法';
+        return;
+      }
+      const recs = await q.listSessions();
+      const arr = Array.isArray(recs) ? recs : [];
+      let added = 0;
+      for (const r of arr) {
+        const id = String((r && (r.id || r.sessionId || (r.header && r.header.id))) || '');
+        if (!id) continue;
+        if (!sessions.has(id)) {
+          // agent 未必拿得到（那条会话可能没活着）：findSessionStrict 会再查注册表，
+          // 找不到就**明确报错**，绝不把消息发到别的会话。
+          sessions.set(id, { agent: null, lastAt: 0 });
+          added++;
+        }
+      }
+      sessionStoreDiag.queryUsed = 'listSessions';
+      sessionStoreDiag.queryCount = arr.length;
+      sessionStoreDiag.queryError = '';
+      if (added) log('从 sessionQuery 补登记 ' + added + ' 条会话（共 ' + arr.length + ' 条）');
+    } catch (e) {
+      sessionStoreDiag.queryError = String((e && e.message) || e);
+    }
+  }
+  // 启动先刷一次；之后每次 /status 都会再刷（见那个路由里的调用）
+  refreshStoreSessions();
 
   // 装载时记录**自身文件**的指纹。为什么需要：
   // 插件代码在 DSH 启动时载入，没有热重载 —— 于是"现在跑的是哪个版本"只能靠
@@ -740,6 +808,10 @@ export function apply(ctx, config = {}) {
         res.end();
         return;
       }
+      // 每次问状态都顺手**后台**刷一次"全部会话"。刻意不 await：
+      // statusSnapshot() 是同步的，而且万一这个 handler 不是 async，await 就是语法错误。
+      // 于是这次看到的可能是上次刷新的结果；面板点开选择器时再取一次就齐了。
+      refreshStoreSessions();
       sendJson(res, 200, statusSnapshot(), origin);
     },
   });
