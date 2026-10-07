@@ -169,6 +169,30 @@ test('面板 openPanel：异常必须恢复悬浮按钮，而不是把界面卡�
   assert.ok(/ext-dead/.test(chat), '失效状态要标在悬浮按钮上（持续可见，而不是一闪而过的提示）');
 });
 
+// `escAttr` 必须**恰好一处定义、在模块顶层、且早于第一次使用**。
+//
+// 真实事故（用户实测）：它原来只定义在 openPanel 内部某个函数里（局部 const），
+// 而模块顶层的 userActionsHtml() 也用了它 → 面板一渲染对话就抛
+// `ReferenceError: escAttr is not defined` → 表现为「气泡还在、面板永远打不开」。
+// 这类"用了文件里别处存在的助手、但它在另一个作用域"的错，语法检查抓不到，
+// 只有真的跑到那行才会炸 —— 所以这里用静态规则把它钉住。
+test('chat.js：escAttr 恰好一处定义、在模块顶层、早于首次使用', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const lines = src.split('\n');
+  const decls = [];
+  lines.forEach((l, i) => {
+    if (/const\s+escAttr\s*=/.test(l)) decls.push({ n: i + 1, indent: (l.match(/^\s*/) || [''])[0].length });
+  });
+  assert.equal(decls.length, 1, 'escAttr 应恰好定义一处（实际 ' + JSON.stringify(decls) + '）');
+  assert.equal(decls[0].indent, 0, 'escAttr 必须在模块顶层（不能缩进在某个函数里）');
+  const uses = [];
+  lines.forEach((l, i) => {
+    if (/escAttr\s*\(/.test(l) && !/const\s+escAttr\s*=/.test(l) && !/^\s*(\/\/|\*)/.test(l)) uses.push(i + 1);
+  });
+  assert.ok(uses.length > 0, '应能用到 escAttr');
+  assert.ok(Math.min.apply(null, uses) > decls[0].n, '首次使用必须在定义之后（否则 const 的 TDZ 会抛）');
+});
+
 // 面板的发送按钮**不能静默丢弃**。
 //
 // 用户实测反馈：「点了发送没反应」—— 表现是字还留在输入框里、也没有任何提示，
