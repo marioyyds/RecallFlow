@@ -3,13 +3,14 @@
 > 目标：把 RecallFlow ↔ DSH 的集成从「桥接进程 + 两段对话同步」重构为
 > 「单个 DSH 插件 + 一条会话」，并删掉中继。
 >
-> 状态：**代码侧已完成**（仓库 **492/492** 全绿，工作区干净、全部已推送）。
-> 剩下的是**两件只有你能做的操作**，以及做完之后的验收。
+> 状态：**代码侧已完成**（仓库 **493/493** 全绿，已跟踪文件 0 改动、全部已推送）。
+> 剩下的是**只有你能做的操作**，以及做完之后的验收。
 >
 > （这里刻意不写提交数：它每提交一次就变，写下来就是错的 ——
 > 我在别处已经因为"先写数字后核实"错过两次。）
 >
-> **一条重要的未验证项**在下面单独列出 —— 我不会因为测试全绿就把它说成已完成。
+> 注：`docs/` 下有约 29 个**未跟踪**的新文件（JEV / 豆包元宝 / 小说 / 每日新闻等），
+> 那些是你在别的会话里创建的，与本次重构无关，我没有碰过它们。
 
 ## 你只需要做两件事
 
@@ -24,6 +25,35 @@ node D:\Desktop\workspace\code\ai\bookmark-sorter\integrations\opencode\recallfl
 
 > 为什么桥接必须由你启动：由 agent 会话起的常驻进程会被 Windows Job Object
 > 随会话一起回收（本会话实测踩过两次）。
+
+---
+
+## ★ 验收进展（2026-10-07，你已经做完上面两件事之后）
+
+**阻塞解除了。** 实测确认：
+
+| 项 | 证据 |
+|---|---|
+| DSH 已重启、新插件生效 | `/recallflow/status` 出现 `recentEvents` 字段；DSH 进程启动时间 10-07 22:39 晚于插件最后改动 10-01 07:56 |
+| 桥接已重启、新代码 | `/health` = `{ok, ws:true, queued:0, uptimeMs:…}`（旧代码会带 `panelTurns`） |
+| **助手的回复能被面板看到**（核心未验证项，现已成立） | `get_picked_element` 取回的面板 DOM：`class="msg ext ext-dsh"`，label 为 `📣 DSH：**验证通过 —— 三个都过…**` |
+| 会话事件的形状 | `recentEvents` 里 `assistant/message` **带 text**（`5a07de6` 修的根因，已实测成立）、`tool/call` 带 `tool`+`args`、`tool/result` 带 `failed` |
+| 本会话新增的本地方法可用 | `dev_session_get` 返回共享 dev-session；`evidence_get` 返回 `{found:false}`；`read_console` 返回加工后的 `{ok,text}` |
+
+### 还差**一次 DSH 重启**
+
+真调用时撞到一个 bug：`page_health` 报 `value is not lossless JSON`（DSH 会拒绝整次工具调用）。
+根因：加工层里的 `consoleError: r.consoleError || undefined` 是**显式 undefined 属性**，
+被 `JSON.stringify` 丢掉后往返不等。MCP 那条路从不会有这个问题（它序列化成 JSON 文本），
+所以这是**插件独有的约束**。
+
+已修（提交 `8e69e53`：出口统一 `stripUndefined`），并有契约测试钉住（全套 493/493）。
+但**插件代码在 DSH 启动时载入**，所以要你再重启一次 DSH。
+
+**只需要重启 DSH。** 扩展与桥接这次不必动（扩展不引用那个共享模块；
+桥接虽然引用，但它从来没有这个约束）。
+
+重启后我会：验证 `page_health` / `verify_change` → 然后**执行删除清单第 5 步** → 收口。
 
 ## 做完之后，我会按这个顺序验收
 
