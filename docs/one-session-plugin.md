@@ -324,9 +324,15 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 | 档 | 内容 | 策略 |
 |---|---|---|
 | **只读**（已接入 19 个） | 读页面/元素/无障碍树/列表/搜索 | **默认开**。不改页面、无副作用 |
-| **改页面**（已接入 15 个，**默认关闭**） | `click_element` `type_text` `press_key` `select_option` `check_box` `set_element_style` `highlight_text` `outline_element` `clear_page_overlays` `scroll_page` `undo_last_action` `click_at` `hover_element` `drag_element` `handle_dialog` | **显式开关**（见下）。默认**拒绝** |
-| 浏览器与网络 | `open_tab` `switch_tab` `fetch_webpage` `search_userscripts` `save_macro` `upload_file` `install_userscript` `trust_site` `add_entry` `remove_entry`(`destructive`) … | **尚未接入**。影响面不是"当前页面"（会开标签页、跑脚本、改存储），要单独定策略 |
-| 危险 | `run_javascript`（任意代码执行）`run_userscript` `run_macro` `install_skill` | **默认不开**。早先做探针时就刻意定了"不接受任意代码"，要开需用户明确要求 |
+| **改页面**（已接入 15 个） | `click_element` `type_text` `press_key` `select_option` `check_box` `set_element_style` `highlight_text` `outline_element` `clear_page_overlays` `scroll_page` `undo_last_action` `click_at` `hover_element` `drag_element` `handle_dialog` | **默认拒绝** → `allowPageActions: true` |
+| **浏览器与网络**（已接入 4 个） | `open_tab` `switch_tab` `fetch_webpage` `search_userscripts` | **默认拒绝** → `allowBrowserActions: true` |
+| **危险**（已接入 10 个） | `add_entry` `remove_entry` `save_macro` `upload_file` `trust_site` `install_userscript` `install_skill` `run_userscript` `run_macro` `run_javascript` | **默认拒绝** → `allowDangerousActions: true`；其中 `run_javascript` 是任意代码执行，早先探针里"不接受任意代码"的决定在此继承 |
+| **刻意不接**（4 个） | `update_plan` `expand_result` `complete_task` `load_skill` | 它们是**面板本地那个 agent 自己的循环/UI 控制**（自己的计划状态、自己的任务收尾、展开自己的结果卡片、往自己的上下文装技能），读的不是页面。DSH 这侧这些概念已经存在（todo 由 DSH 自己的工具管），硬接只会出现"两套计划状态互相打架"。已导出为 `EXCLUDED_AGENT_LOOP_METHODS` 并断言它们不在任何清单里 —— **明确记录，而不是悄悄漏掉** |
+
+合计：元数据 55 个 → 接入 **48**（= 只读 19 + 改页面 15 + 浏览器/网络 4 + 危险 10）、刻意排除 4、其余按档位归入上述表格。
+清单总数 **`EXTENSION_METHODS` = 58**（含 MCP 那 10 个）。
+
+### 三档审批：一张门禁表 + 三个开关
 
 ### 改页面档的审批：只能"显式开"，因为 DSH 没有批准弹窗
 

@@ -10,6 +10,11 @@ import path from 'node:path';
 
 import {
   BRIDGE_METHODS,
+  BROWSER_ACTION_METHODS,
+  DANGEROUS_BACKGROUND_METHODS,
+  DANGEROUS_CONTENT_METHODS,
+  DANGEROUS_METHODS,
+  EXCLUDED_AGENT_LOOP_METHODS,
   EXTENSION_METHODS,
   PAGE_ACTION_BACKGROUND_METHODS,
   PAGE_ACTION_CONTENT_METHODS,
@@ -86,7 +91,17 @@ const TIER_LISTS = [
   ['READONLY_BACKGROUND_METHODS', READONLY_BACKGROUND_METHODS],
   ['PAGE_ACTION_CONTENT_METHODS', PAGE_ACTION_CONTENT_METHODS],
   ['PAGE_ACTION_BACKGROUND_METHODS', PAGE_ACTION_BACKGROUND_METHODS],
+  ['BROWSER_ACTION_METHODS', BROWSER_ACTION_METHODS],
+  ['DANGEROUS_CONTENT_METHODS', DANGEROUS_CONTENT_METHODS],
+  ['DANGEROUS_BACKGROUND_METHODS', DANGEROUS_BACKGROUND_METHODS],
 ];
+
+/** 从插件源码里解析某个 `const NAME = [ … ];` 清单里的方法名。 */
+function pluginList(src, name) {
+  const m = src.match(new RegExp('const ' + name + ' = \\[([\\s\\S]*?)\\];'));
+  assert.ok(m, '应能从插件源码解析出 ' + name + ' 数组');
+  return [...m[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((x) => x[1]);
+}
 
 test('档位清单：互不重叠、不与 BRIDGE_METHODS 重叠，合起来正好是 EXTENSION_METHODS', () => {
   const seen = new Map();
@@ -104,38 +119,81 @@ test('档位清单：互不重叠、不与 BRIDGE_METHODS 重叠，合起来正�
   assert.deepEqual(missing, [], '档位清单里有方法没进 EXTENSION_METHODS：' + missing.join('、'));
 });
 
-test('档位清单：dispatch 必须真的查每一张表（否则清单是空头支票）', () => {
-  for (const [label] of TIER_LISTS) {
+test('档位清单：dispatch 必须真的查每一张表，且不许为它们写字面分支', () => {
+  for (const [label, list] of TIER_LISTS) {
     assert.ok(
       relaySource.includes(label + '.includes(method)'),
       'dispatch 必须查 ' + label + ' —— 加了清单却没让 dispatch 查表 = 运行时报 unknown method'
     );
+    // 字面分支会把"路由"知识藏进代码里，而且躲不过上面那条"清单 ↔ 分支"的检查
+    for (const m of list) {
+      assert.ok(
+        !relaySource.includes("method === '" + m + "'"),
+        '不要为档位方法写字面分支（' + m + '）—— 走清单查表，路由信息留在数据里'
+      );
+    }
   }
 });
 
-// 改页面档的**审批**是安全边界，所以要单独钉住：
-// ① 它不能进 probe-tool 的白名单（BRIDGE_METHODS）；② 插件默认必须拒绝它。
-test('改页面档：探针白名单不能触发它，且插件默认拒绝（批准只能显式开）', () => {
-  for (const m of [...PAGE_ACTION_CONTENT_METHODS, ...PAGE_ACTION_BACKGROUND_METHODS]) {
-    assert.ok(
-      !BRIDGE_METHODS.includes(m),
-      '改页面方法 ' + m + ' 不该在 probe-tool 的白名单里 —— 诊断入口永不触发页面动作'
-    );
+// 三档受审批门禁。这是**安全边界**，所以要单独钉住三件事：
+// ① 每一档都不能进 probe-tool 的白名单（BRIDGE_METHODS）；
+// ② 插件必须为每一档做 config 门禁，且默认（未显式开启）即拒绝；
+// ③ 拒绝信息里必须写清"怎么开"。
+test('受控档位：探针白名单不能触发它们，且插件必须逐档做 config 门禁（默认拒绝）', () => {
+  const gated = [
+    ...PAGE_ACTION_CONTENT_METHODS,
+    ...PAGE_ACTION_BACKGROUND_METHODS,
+    ...BROWSER_ACTION_METHODS,
+    ...DANGEROUS_METHODS,
+  ];
+  for (const m of gated) {
+    assert.ok(!BRIDGE_METHODS.includes(m), '受控方法 ' + m + ' 不该在 probe-tool 的白名单里');
   }
   const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
-  const m = pluginSrc.match(/const PAGE_ACTION_METHODS = \[([\s\S]*?)\];/);
-  assert.ok(m, '应能从插件源码解析出 PAGE_ACTION_METHODS 数组');
-  const inPlugin = [...m[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((x) => x[1]);
-  const expected = [...PAGE_ACTION_CONTENT_METHODS, ...PAGE_ACTION_BACKGROUND_METHODS].sort();
-  assert.deepEqual(inPlugin.slice().sort(), expected, '插件的改页面档清单必须与共享清单一致');
-  // 门禁必须真的存在：默认（config 里没有这个键）就走拒绝分支
-  assert.ok(
-    /PAGE_ACTION_METHODS\.includes\(method\)\s*&&\s*config\.allowPageActions\s*!==\s*true/.test(pluginSrc),
-    '插件必须对改页面档做 config.allowPageActions 门禁，且默认（未显式开启）即拒绝'
+
+  // 清单两端必须一致（任一侧改了而另一侧没改就红）
+  assert.deepEqual(
+    pluginList(pluginSrc, 'PAGE_ACTION_METHODS').sort(),
+    [...PAGE_ACTION_CONTENT_METHODS, ...PAGE_ACTION_BACKGROUND_METHODS].sort(),
+    '插件的改页面档清单必须与共享清单一致'
   );
+  assert.deepEqual(
+    pluginList(pluginSrc, 'BROWSER_ACTION_METHODS').sort(),
+    BROWSER_ACTION_METHODS.slice().sort(),
+    '插件的浏览器/网络档清单必须与共享清单一致'
+  );
+  assert.deepEqual(
+    pluginList(pluginSrc, 'DANGEROUS_METHODS').sort(),
+    DANGEROUS_METHODS.slice().sort(),
+    '插件的危险档清单必须与共享清单一致'
+  );
+
+  // 门禁机制本身：一张表 + 三个开关，且默认（config 里没这个键）即拒绝
+  assert.match(
+    pluginSrc,
+    /if \(gate\.list\.includes\(method\) && config\[gate\.key\] !== true\)/,
+    '插件必须用统一门禁表逐档检查，且默认（未显式开启）即拒绝'
+  );
+  for (const key of ['allowPageActions', 'allowBrowserActions', 'allowDangerousActions']) {
+    assert.ok(pluginSrc.includes("key: '" + key + "'"), '门禁表里应有 ' + key + ' 这一档');
+    assert.ok(pluginSrc.includes(key), '拒绝信息里要提到 ' + key + '（否则用户不知道开哪个）');
+  }
+  assert.ok(pluginSrc.includes('然后重启 DSH'), '拒绝信息要说明改完还需重启 DSH');
+});
+
+// 刻意不接入的那 4 个（面板 agent 自己的循环/UI 控制）必须真的没被接进来 ——
+// 否则会长出"两套计划状态互相打架"这种问题。
+test('刻意排除：面板 agent 的循环/UI 控制工具不得出现在任何清单或插件方法表里', () => {
+  const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  for (const m of EXCLUDED_AGENT_LOOP_METHODS) {
+    assert.ok(!isExtensionMethod(m), '被排除的方法 ' + m + ' 不该出现在 EXTENSION_METHODS 里');
+    for (const name of ['BROWSER_METHODS', 'PAGE_ACTION_METHODS', 'BROWSER_ACTION_METHODS', 'DANGEROUS_METHODS']) {
+      assert.ok(!pluginList(pluginSrc, name).includes(m), '被排除的方法 ' + m + ' 不该出现在插件的 ' + name + ' 里');
+    }
+  }
   assert.ok(
-    pluginSrc.includes('allowPageActions: true'),
-    '拒绝信息里要写清怎么开启（否则只会看到一句"不允许"然后反复重试）'
+    /EXCLUDED_AGENT_LOOP_METHODS/.test(fs.readFileSync(path.join(ROOT, 'lib/shared/bridge-methods.js'), 'utf8')),
+    '排除要有明确记录（导出的清单 + 注释说明为什么），不能靠"忘了"'
   );
 });
 

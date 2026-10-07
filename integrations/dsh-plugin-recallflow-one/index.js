@@ -726,6 +726,45 @@ export function apply(ctx, config = {}) {
     'handle_dialog', // 处理 alert/confirm
   ];
 
+  /** 浏览器/网络档（第三档）：会开标签页、抓网页、装用户脚本 —— 但**不改用户数据**。
+   * 开关：`config: { allowBrowserActions: true }`（默认拒绝）。 */
+  const BROWSER_ACTION_METHODS = [
+    'open_tab', // 新开标签页
+    'switch_tab', // 切到某个标签页
+    'fetch_webpage', // 抓取网页正文
+    'search_userscripts', // 搜索用户脚本
+  ];
+
+  /** 危险档（第四档）：**写用户数据**或**执行代码**。
+   * 开关：`config: { allowDangerousActions: true }`（默认拒绝）。
+   *
+   * `run_javascript` 是任意代码执行 —— 早先做探针时就刻意定了"不接受任意代码"，
+   * 这是**继承下来的决定**。要开这一档，请当成一次明确的授权来对待。 */
+  const DANGEROUS_METHODS = [
+    'run_javascript', // 任意代码执行
+    'run_userscript', // 执行用户脚本
+    'add_entry', // 写知识库
+    'remove_entry', // 删知识库条目
+    'save_macro', // 存宏
+    'upload_file', // 往页面上传文件
+    'trust_site', // 把站点标记为可信
+    'install_userscript', // 安装用户脚本
+    'install_skill', // 安装技能
+    'run_macro', // 执行宏
+  ];
+
+  /** 分档门禁表：审批逻辑集中一处，才审得清哪个开关管哪一档。
+   *
+   * DSH 这侧没有面板那样的批准弹窗，所以"批准"只能是用户在 profile 里**显式开的开关**。
+   * 拒绝时**必须说清怎么开** —— 否则模型只会换参数反复重试，
+   * 而多试几次里总有一次会真的点下去/写下去。
+   */
+  const TIER_GATES = [
+    { list: PAGE_ACTION_METHODS, key: 'allowPageActions', what: '改页面档：会修改用户正在看的页面' },
+    { list: BROWSER_ACTION_METHODS, key: 'allowBrowserActions', what: '浏览器/网络档：会开标签页、抓网页、装用户脚本' },
+    { list: DANGEROUS_METHODS, key: 'allowDangerousActions', what: '危险档：会写用户数据或执行代码' },
+  ];
+
   /** 插件**本地**就能答的方法：读的是本机共享文件（dev-session 与证据库），不需要扩展。
    *
    * 这三个原来只存在于桥接里，删除计划一度把 dev_session_* 与 evidence_get 记为
@@ -737,12 +776,17 @@ export function apply(ctx, config = {}) {
    */
   const LOCAL_METHODS = ['dev_session_get', 'dev_session_set', 'evidence_get'];
 
-  /** 工具接受的完整方法表 = 扩展侧只读档 + 改页面档 + 本地。
+  /** 工具接受的完整方法表 = 扩展侧只读档 + 改页面档 + 浏览器/网络档 + 危险档 + 本地。
    *
-   * 改页面档也在这里（所以模型**知道**它们存在、也能调用），但它是否**被执行**
-   * 由下面的 config 开关决定 —— 清单管"存在"，开关管"允许"。
+   * 受审批门禁的三档也在这里（所以模型**知道**它们存在、也能调用），但它们是否**被真正执行**
+   * 由 config 开关决定 —— 清单管"存在"，开关管"允许"，两件事不能混。
    */
-  const TOOL_METHODS = BROWSER_METHODS.concat(PAGE_ACTION_METHODS).concat(LOCAL_METHODS);
+  const TOOL_METHODS = BROWSER_METHODS.concat(
+    PAGE_ACTION_METHODS,
+    BROWSER_ACTION_METHODS,
+    DANGEROUS_METHODS,
+    LOCAL_METHODS
+  );
 
   // --- 工具注册：一个通用入口（第一版），后续按需拆成具体工具 -------------------
   ctx.tools.register({
@@ -767,6 +811,14 @@ export function apply(ctx, config = {}) {
       'take_screenshot（截图，与 screenshot_capture 同类）/ get_run_trace（读运行轨迹，诊断用）/ ' +
       'web_search（网页搜索）/ search_knowledge_base、list_knowledge_base、get_entry（知识库）/ ' +
       'list_macros、list_userscripts（列宏与用户脚本）。' +
+      // ---- 受审批门禁的三档：暴露给模型（知道存在），但默认拒绝执行 ----
+      '另有三个**默认关闭**的档位。它们都会"改变点什么"，而 DSH 这侧没有批准弹窗，' +
+      '所以批准只能是用户显式设置的开关：' +
+      '改页面档（allowPageActions：点击/输入/按键/下拉/勾选/滚动/高亮/描边/清除标注）、' +
+      '浏览器与网络档（allowBrowserActions：开标签页/切标签页/抓网页/查用户脚本）、' +
+      '危险档（allowDangerousActions：写或删知识库/存宏/上传文件/安装用户脚本与技能/执行 JS 与宏）。' +
+      '调用这些方法会收到 refused 以及**怎么开启**的说明 —— ' +
+      '**不要换参数反复重试**：那等于绕开用户的决定，而多试几次里总有一次会真的落下去。' +
       '这是 RecallFlow 的页面能力，与 DSH 同处一条会话。',
     parameters: {
       type: 'object',
@@ -784,19 +836,22 @@ export function apply(ctx, config = {}) {
       const method = String((args && args.method) || '');
       const params = (args && args.params) || {};
 
-      // 改页面档默认**拒绝**：DSH 这侧没有面板那样的批准弹窗，所以"批准"只能是用户在
-      // profile 里显式打开的开关。拒绝时要说清**怎么开**，否则模型只会看到一句"不允许"、
-      // 然后反复换参数重试 —— 那既浪费又危险（多试几次里总有一次会点下去）。
-      if (PAGE_ACTION_METHODS.includes(method) && config.allowPageActions !== true) {
-        return {
-          refused: true,
-          method,
-          reason:
-            '「' + method + '」属于改页面档：它会**修改用户正在看的页面**，因此默认关闭。' +
-            'DSH 这侧没有面板那样的批准弹窗，所以批准 = 在这个插件的 profile 条目里显式开启：' +
-            "config: { allowPageActions: true }，然后重启 DSH。" +
-            '只读档（读页面/元素/列表/搜索）不受影响，可以直接用。',
-        };
+      // 分档门禁：DSH 这侧没有面板那样的批准弹窗，所以"批准"只能是用户在 profile 里
+      // 显式打开的开关。拒绝时要说清**怎么开**，否则模型只会换参数反复重试 ——
+      // 那既浪费又危险（多试几次里总有一次会真的点下去/写下去）。
+      for (const gate of TIER_GATES) {
+        if (gate.list.includes(method) && config[gate.key] !== true) {
+          return {
+            refused: true,
+            method,
+            tier: gate.what,
+            reason:
+              '「' + method + '」属于' + gate.what + '，因此默认关闭。' +
+              'DSH 这侧没有批准弹窗，所以批准 = 在这个插件的 profile 条目里显式开启：' +
+              'config: { ' + gate.key + ': true }，然后重启 DSH。' +
+              '只读档（读页面/元素/列表/搜索）不受影响，可以直接用。',
+          };
+        }
       }
 
       // 本地方法要在 callBrowser **之前**处理：它们读的是本机的共享文件，
