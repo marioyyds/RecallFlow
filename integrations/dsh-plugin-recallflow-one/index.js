@@ -28,9 +28,10 @@
  *   - inject 必须声明服务名，否则读取报 "cannot get property … without inject"
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import fs from 'node:fs';
 // 结果加工与桥接**共用同一份**（lib/shared/tool-results.js）：
 // 否则插件的 recallflow_browser 会返回未加工的原始 JSON —— 没有磁盘路径、没有 hint，
 // 也就是删掉 DSH 的 MCP client 之后会静默失去「元素 → 源码文件」。
@@ -186,11 +187,33 @@ export function apply(ctx, config = {}) {
   const sessions = new Map();
   let currentSessionId = '';
 
+  // 装载时记录**自身文件**的指纹。为什么需要：
+  // 插件代码在 DSH 启动时载入，没有热重载 —— 于是"现在跑的是哪个版本"只能靠
+  // 进程启动时间 vs 提交时间去**推断**（我就为此绕了好几轮）。有了这个，一条 curl 就能确定。
+  // 刻意在装载时算一次（而不是每次 status 现算）：现算反映的是**磁盘现状**，
+  // 而我们要回答的是"**已经载入**的是哪一版" —— 这两个在改了代码还没重启时**正好不同**。
+  let build = null;
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const buf = fs.readFileSync(self);
+    build = {
+      file: self,
+      bytes: buf.length,
+      mtimeMs: Math.round(fs.statSync(self).mtimeMs),
+      sha256_12: createHash('sha256').update(buf).digest('hex').slice(0, 12),
+    };
+  } catch (e) {
+    build = { error: String((e && e.message) || e) };
+  }
+
   // 会话事件的计数：分辨"事件没来"与"事件来了但处理失败"（见下方 session/event 处理的注释）
   const stats = {
     eventsSeen: 0,
     eventsBroadcast: 0,
-    eventsDropped: 0,
+    // 名字原来叫 eventsDropped —— 那是个**误导**：它不是"丢包"，而是
+    // "投影不出可展示的信息"。主要来源是**成功的 tool/result**（面板只画失败的工具行，
+    // 这是刻意的）以及少数不认识的帧类型。改名后不会再让人误以为在丢事件。
+    eventsUnprojected: 0,
     eventsErrors: 0,
     lastEventType: '',
     lastEventError: '',
@@ -260,13 +283,15 @@ export function apply(ctx, config = {}) {
       sessions: [...sessions.keys()],
       currentSessionId,
       pendingTools: pendingTools.size,
-      // 会话事件的三项计数：用来分辨"事件没来"与"事件来了但处理失败"
+      // 会话事件的计数：用来分辨"事件没来"与"事件来了但处理失败"
       eventsSeen: stats.eventsSeen,
       eventsBroadcast: stats.eventsBroadcast,
-      eventsDropped: stats.eventsDropped,
+      eventsUnprojected: stats.eventsUnprojected,
       eventsErrors: stats.eventsErrors,
       lastEventType: stats.lastEventType,
       lastEventError: stats.lastEventError,
+      // 已载入代码的指纹：回答"现在跑的是哪个版本"，不用再比进程启动时间
+      build,
       // 最近几条投影结果：用来回答"面板上为什么没有助手的话"
       recentEvents: stats.recent.slice(-10),
     };
@@ -410,7 +435,7 @@ export function apply(ctx, config = {}) {
         stats.recent.push(projected);
         if (stats.recent.length > RECENT_MAX) stats.recent.shift();
       } else {
-        stats.eventsDropped++;
+        stats.eventsUnprojected++;
       }
     } catch (e) {
       stats.eventsErrors++;

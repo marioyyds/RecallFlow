@@ -199,14 +199,25 @@ node scripts/probe-say.mjs "测试文本"
 - **✅ 已解决（第 19 轮留下的线索）：会话事件的推送是健康的。**
   当时观察 12 秒只收到 hello 与 pong、没有 session-event，我把它记成待查。
   加上计数与兜错之后（`/recallflow/status` 暴露 `eventsSeen / eventsBroadcast /
-  eventsDropped / eventsErrors / lastEventType`），重启后一条 curl 就有答案：
+  eventsUnprojected / eventsErrors / lastEventType`），重启后一条 curl 就有答案：
 
   ```
   "eventsSeen":12, "eventsBroadcast":12, "eventsDropped":0, "eventsErrors":0,
   "lastEventType":"tool/call"
   ```
 
+  > 上面那段输出是**当时的原文**，保留了它当时的字段名。那个字段后来**改名为
+  > `eventsUnprojected`** —— 因为 `eventsDropped` 是个误导的名字：它不是"丢包"，
+  > 而是"投影不出可展示的信息"，实测会到几十，主要来源是**成功的 `tool/result`**
+  > （面板只画失败的工具行，这是刻意的）。当时的结论（零丢零错）不受影响。
+
   12 条事件全部广播成功、零丢零错 —— 处理函数被正常调用，广播也发出去了。
+
+  `/recallflow/status` 现在还带 **`build`**：插件文件路径、字节数、mtime、
+  以及**内容 sha256 的前 12 位**。用它可以确定"现在跑的是**已载入**的哪一版"——
+  拿它跟 `Get-FileHash` 比对即可。它刻意在**装载时**算一次而不是每次现算：
+  现算反映的是**磁盘现状**，而"改了代码但还没重启"时，这两者**正好不同**。
+
   **诚实的保留**：第 19 轮那次观察为什么是空的，没有查清（当时跑的是更早的插件代码，
   我没有逐版对照）。现在的结论基于当前代码的实测计数，而不是对那次现象的复现与解释。
 - **`recallflow_browser` 的往返已实测通过**：`node scripts/probe-tool.mjs page_health`

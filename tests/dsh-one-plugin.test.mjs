@@ -376,6 +376,30 @@ test('POST /recallflow/say：空文本 / 非 POST / 非 JSON 都被拒，且不�
   assert.equal(agent.calls.length, 0, '被拒的请求不应发出消息');
 });
 
+test('GET /recallflow/status：带"已载入代码的指纹"，且不再有误导的 eventsDropped', async () => {
+  const { routes } = await loadPlugin();
+  const res = fakeRes();
+  await routes.get('/recallflow/status').handler(fakeReq({ method: 'GET' }), res);
+  const j = JSON.parse(res.text);
+
+  // 指纹：回答"现在跑的是**已载入**的哪一版"。
+  // 为什么需要它：插件代码在 DSH 启动时载入、没有热重载，于是这个问题此前只能靠
+  // "进程启动时间 vs 提交时间"去**推断** —— 我为此绕了好几轮。
+  assert.ok(j.build, 'status 应带 build');
+  assert.ok(j.build.bytes > 1000, 'build.bytes 应是插件文件大小');
+  assert.match(String(j.build.sha256_12), /^[0-9a-f]{12}$/, 'build.sha256_12 应是 12 位十六进制');
+  // 注意：Windows 上是反斜杠。我第一版直接写 'dsh-plugin-recallflow-one/index.js' 断言 endsWith，
+  // 结果红了 —— 与我在别处记过的"断言不要依赖路径分隔符"是同一条。
+  const fileNorm = String(j.build.file).replace(/\\/g, '/');
+  assert.ok(fileNorm.endsWith('dsh-plugin-recallflow-one/index.js'), 'build.file 应指向插件自身：' + fileNorm);
+  assert.ok(!fileNorm.includes('?'), 'build.file 不该带 import 的 ?t= 缓存串：' + fileNorm);
+
+  // 计数：不能再叫 Dropped —— 它其实是"投影不出可展示信息"（主要来自成功的 tool/result）
+  assert.equal(typeof j.eventsUnprojected, 'number');
+  assert.ok(!('eventsDropped' in j), 'eventsDropped 这个误导的名字应已移除');
+  assert.ok(Array.isArray(j.recentEvents), 'recentEvents 应存在（诊断用）');
+});
+
 test('GET /recallflow/status：把"连没连上、会话找没找到"变成可观测的', async () => {
   const { routes, agent } = await loadPlugin();
   assert.ok(routes.has('/recallflow/status'), '应有状态路由');
