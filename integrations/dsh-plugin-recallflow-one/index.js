@@ -244,11 +244,21 @@ export function apply(ctx, config = {}) {
       for (const r of arr) {
         const id = String((r && (r.id || r.sessionId || (r.header && r.header.id))) || '');
         if (!id) continue;
-        if (!sessions.has(id)) {
+        // `SessionRecord` 自带 `live: boolean`（DSH 的类型里就是这么写的）——
+        // 于是"这条会话当前能不能收消息"是**现成的数据**，不必去碰 SessionStore 的
+        // enter/create（那两个都不是"把一条已存的会话载入"：`enter(session: Session)`
+        // 要的是**实例**，`create` 的注释是 "Create a live child session from an exact
+        // prefix of a live source" —— 硬用只会动到用户的会话上下文）。
+        const live = !!r.live;
+        const prev = sessions.get(id);
+        if (!prev) {
           // agent 未必拿得到（那条会话可能没活着）：findSessionStrict 会再查注册表，
           // 找不到就**明确报错**，绝不把消息发到别的会话。
-          sessions.set(id, { agent: null, lastAt: 0 });
+          sessions.set(id, { agent: null, lastAt: 0, live });
           added++;
+        } else {
+          // 会话可能刚被打开（或被关掉）：每次刷新都跟着更新，别让"未载入"标错了。
+          prev.live = live;
         }
       }
       sessionStoreDiag.queryUsed = 'listSessions';
@@ -428,7 +438,13 @@ export function apply(ctx, config = {}) {
       sessionStoreDiag.error = String((e && e.message) || e);
     }
 
-    return [...sessions.entries()].map(([id, e]) => ({ id, lastAt: e.lastAt || 0 }));
+    // `live` 一并给出去：面板据此把"未载入"的会话标出来（选中它能看见为什么发不出去，
+    // 而不是等发送时才撞上 503）。经 agents 注册表登记的条目本身就是活的。
+    return [...sessions.entries()].map(([id, e]) => ({
+      id,
+      lastAt: e.lastAt || 0,
+      live: e.live !== false,
+    }));
   }
 
   /**
