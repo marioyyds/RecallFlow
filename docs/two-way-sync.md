@@ -317,8 +317,11 @@ node scripts/probe-say.mjs "测试文本"
 `resolveAgent` 那条路（把消息送进没载入的会话）**走不通，也不是改插件能绕开的**。
 内容更全的表在插件 README 的「能不能"载入一条没活着的会话"？」一节。
 
-还剩一条门没测完：那个 controller 是 `TypertRemoteService`（*"backing … `ctx.remote.session`"*），
-探针已加上 `typertAvailable / remoteSession` 等字段（只读），要等下次重启 DSH 才有值。
+**代码级证据（同一天查到，解释了为什么拿不到）**：那个控制器的客户端面是经 `ctx.remote.session`
+用的，而 `ctx.remote` 在 DSH 类型里是 **`remote: ClientRemote`** —— **客户端面，服务端插件没有**。
+加上 `SessionStore.enter(session: Session)` 要的是一个 **`Session` 实例**（拿不到），
+三条路都关着。**想发消息给一条没载入的会话，只有先在 DSH 里把它打开一次**
+（点了它就变 `live`，`/status` 的 `sessionList[].live` 会跟着变）。
 
 ## 已知限制 / 未验证
 

@@ -175,6 +175,19 @@ const m = await import(pathToFileURL(p).href);        // ← 必须转 file:// U
 对插件是**关着**的 —— **"把消息送进一条没载入的会话"不是改插件能绕开的事**。
 这条结论也回答了本文开头那个现象：选了一条 `live:false` 的会话，消息**必然**发不出去（503）。
 
+**为什么拿不到（同一天在 DSH 自己的类型里查到，代码级证据）**：那个控制器的"客户端面"是经
+`ctx.remote.session` 用的，而 `ctx.remote` 在 DSH 的类型里声明为 **`remote: ClientRemote`** ——
+**`ctx.remote` 属于客户端**（GUI 自己的插件），**服务端插件没有它**。于是三条路都关着：
+
+| 路 | 为什么不通 |
+|---|---|
+| `ctx.get('sessionController', false)` | 取不到（**真机实测** `available:false`）|
+| `ctx.remote.session` | `ctx.remote` 是 `ClientRemote` —— **客户端面**，服务端插件没有 |
+| `SessionStore.enter(session: Session)` | 要的是一个 **`Session` 实例**，而拿不到已存会话的实例 |
+
+所以：**插件侧无法把一条没载入的会话载入**。想发消息给它，只有**先在 DSH 里打开它一次**
+（点了它就变 `live`，`/status` 的 `sessionList[].live` 会跟着变 true）。
+
 `dsh-api-session-controller` 声明的 **Host** 服务叫 **`sessionController`**（挂在 cordis 的
 `Context` 上，**不是**客户端那个 `ctx.sessions`；后者是 GUI 自己用的面）。它的方法：
 
