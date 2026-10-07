@@ -11,8 +11,12 @@
  * 混在人工核对里最容易漏掉后者 —— 而我恰恰干过一次（把扩展的桥接连接换成指向 DSH，
  * 差点让 opencode 的页面工具静默失效）。把它变成一条命令，就不会靠记忆。
  *
- * 说明：第 5 条（DSH 里调用 recallflow_browser 能往返）**脚本查不了** ——
- * 那个工具只能由模型调用。因此这里只打印提醒，不假装检查了。
+ * 说明（2026-10-07 更正）：这里原本写着"第 5 条（DSH 里调用 recallflow_browser 能往返）
+ * **脚本查不了** —— 那个工具只能由模型调用"。**工具**确实只有模型能调，但那条链路的
+ * **接线**是可以脚本验证的：插件把探针入口挂成了 `POST /recallflow/probe-tool`
+ * （路径由 `status.probeToolPath` 自己报出），只放行只读档白名单。见
+ * `scripts/verify-capability-tiers.mjs` —— 它同时验证"只读档被扩展认得"与
+ * "三档受控方法被白名单挡下"。本脚本仍只打印提醒，不重复那条检查。
  */
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
