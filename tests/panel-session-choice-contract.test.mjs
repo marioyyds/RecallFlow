@@ -59,6 +59,28 @@ test('后台不再为选择器服务；元素的第三个参数如实透传', ()
   assert.match(bg, /sayToDsh\(text, msg\.sessionId, msg\.elements\)/, 'panel:turn 应把 elements 透传给 sayToDsh');
 });
 
+test('直送前必须**先**推进推送游标 —— 否则回声会把你那句话再发一遍（真机：会话里出现两条）', () => {
+  // 真机 bug（2026-10-08）：用户在面板发一句话，会话里出现**两条**，
+  // 插件日志里 "[recallflow-one] 面板输入已送入会话" 打了两次。
+  // 机制：sendPanelTurn 是异步的，而 syncPushCursor() 原来只写在 `.then()` 里（响应回来之后）；
+  // 回声走的是 WS、可能先到 → renderSessionEvent(mark-local) → saveConversation() →
+  // pushPanelTurnIfNew() 看到的还是**发送前**的游标 → 这条被当成没推过 → 再发一遍。
+  const i = chat.indexOf('sendPanelTurn(turn)');
+  assert.ok(i > 0, '应能找到面板的直送调用 sendPanelTurn(turn)');
+  const before = chat.slice(Math.max(0, i - 900), i);
+  assert.match(
+    before,
+    /syncPushCursor\(\);/,
+    'syncPushCursor() 必须在 sendPanelTurn(turn) **之前**调用（否则 WS 回声先到时会重复发送）'
+  );
+  // 反向：不能把游标推进放在发送之后的 then 里当唯一防线
+  assert.ok(
+    !/sendPanelTurn\(turn\)\s*\n\s*\.then\([\s\S]{0,400}?syncPushCursor\(\);/.test(chat) ||
+      /syncPushCursor\(\);\s*\n\s*sendPanelTurn\(turn\)/.test(chat),
+    '发送前那处不能缺'
+  );
+});
+
 test('选择器的样式也撤了（不留死样式）', () => {
   assert.ok(!css.includes('rf-session-chooser'), 'panel-css.js 里不该再有 rf-session-chooser');
 });
