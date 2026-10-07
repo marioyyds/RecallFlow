@@ -334,33 +334,48 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 
 ### 三档审批：一张门禁表 + 三个开关
 
-### 改页面档的审批：只能"显式开"，因为 DSH 没有批准弹窗
-
-面板原本有批准弹窗（`requiresApproval: true`），而 DSH 这侧**没有** —— 所以"批准"必须落在
-一个用户**显式设置**的地方。做法是插件的 `config`：
+面板原本有批准弹窗（元数据里这三档全部 `requiresApproval: true`），而 **DSH 这侧没有** ——
+所以"批准"必须落在**用户显式设置**的地方。做法是插件的 `config`：
 
 ```yaml
 # ~/.dsh/profiles/<profile>/cordis.patch.yml
 - insert:
     - id: recallflow-one
       name: '…/integrations/dsh-plugin-recallflow-one/index.js'
-      config: { allowPageActions: true }     # ← 不加这行 = 默认拒绝
+      config:
+        allowPageActions: true         # 改页面档：会修改用户正在看的页面
+        # allowBrowserActions: true    # 浏览器与网络档：开标签页/抓网页/查用户脚本
+        # allowDangerousActions: true  # 危险档：写或删数据、装脚本、执行 JS 与宏
 ```
 
-插件在 `execute` 里门禁：`PAGE_ACTION_METHODS.includes(method) && config.allowPageActions !== true`
-→ 直接返回**拒绝**，并在 `reason` 里写清**怎么开**。这一点很重要：如果只说"不允许"，
-模型（我）只会换参数反复重试 —— 而多试几次里总有一次会真的点下去。
+代码侧是**一张门禁表**（而不是三个散落的 if —— 审批逻辑集中一处才审得清）：
 
-**还有一条可测试的安全性质**：改页面档**不进 `BRIDGE_METHODS`**，而那个清单是 probe-tool
-的白名单 —— 于是"**诊断探针永远不会触发页面动作**"成为契约测试里的一条断言
+```js
+const TIER_GATES = [
+  { list: PAGE_ACTION_METHODS,    key: 'allowPageActions',      what: '改页面档：会修改用户正在看的页面' },
+  { list: BROWSER_ACTION_METHODS, key: 'allowBrowserActions',   what: '浏览器/网络档：会开标签页、抓网页、装用户脚本' },
+  { list: DANGEROUS_METHODS,      key: 'allowDangerousActions', what: '危险档：会写用户数据或执行代码' },
+];
+// 默认（config 里没有这个键）= 拒绝
+if (gate.list.includes(method) && config[gate.key] !== true) return { refused: true, method, tier: gate.what, reason: … };
+```
+
+`reason` 里写清**开哪个开关** + 改完**要重启 DSH**。这一点很重要：如果只说"不允许"，
+模型（我）只会换参数反复重试 —— 而多试几次里总有一次会真的点下去/写下去。
+工具描述里也补了同一句约定。
+
+**还有一条可测试的安全性质**：这三档都**不进 `BRIDGE_METHODS`**，而那个清单是 probe-tool
+的白名单 —— 于是"**诊断探针永远不会触发有副作用的动作**"成为契约测试里的一条断言
 （把 `click_element` 塞进 `BRIDGE_METHODS` 会让 4 条测试变红，已用突变实验验证）。
 
 ### 怎么验证
 
 - 契约测试：`node --test tests/bridge-contract.test.mjs`
-  （清单唯一性、MCP ↔ 清单、清单 ↔ dispatch、只读档 ↔ dispatch ↔ 插件方法表）
+  （清单唯一性、MCP ↔ 清单、清单 ↔ dispatch、8 张档位清单互斥且合起来正好是 `EXTENSION_METHODS`、
+  dispatch 不许为档位方法写字面分支、三档逐档门禁存在且默认拒绝、两端清单一致、
+  刻意排除项不得出现）
 - 扩展侧的行为：`tests/tab-messaging.test.mjs`（内容脚本晚到时的重试语义）
 - 真机验证：插件里的 `recallflow_status` 带 `probe: true` 会对**白名单内**的方法做一次往返探针；
   只读档都在白名单里，所以可以直接探。
-  （写操作如 `dev_session_set` **不在**白名单里 —— 它不该从一个诊断入口被触发。）
+  （写操作如 `dev_session_set`、以及三档受控方法**都不在**白名单里 —— 它们不该从一个诊断入口被触发。）
 

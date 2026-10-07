@@ -11,6 +11,57 @@
 > 注：`docs/` 下有约 29 个**未跟踪**的新文件（JEV / 豆包元宝 / 小说 / 每日新闻等），
 > 那是你在别的会话里创建的，与本次重构无关，我没有碰过。
 
+---
+
+## 之后的新目标：把面板的页面能力接进插件（进行中）
+
+原来插件只暴露 10 个**被动读取**类方法。新目标是把 `lib/assistant/tools.js` 的 55 个工具
+按**元数据里的 `risk`** 分档接进来（分档由数据决定，不是拍脑袋）：
+
+| 档 | 数量 | 默认 | 开关（插件的 `config`） |
+|---|---|---|---|
+| 只读 | 19 | **开** | —— |
+| 改页面 | 15 | 关 | `allowPageActions` |
+| 浏览器与网络 | 4 | 关 | `allowBrowserActions` |
+| 危险 | 10 | 关 | `allowDangerousActions` |
+| **刻意不接** | 4 | —— | `update_plan` `expand_result` `complete_task` `load_skill` —— 它们是**面板那个 agent 自己的循环/UI 控制**，读的不是页面；DSH 这侧已有对应物，硬接会出现"两套计划状态互相打架"。导出为 `EXCLUDED_AGENT_LOOP_METHODS`，并有断言钉住它们不在任何清单里 |
+
+**审批策略**：DSH 这侧没有面板那样的批准弹窗，所以"批准"= 用户在 profile 的插件 `config` 里
+显式开开关。被拒时返回 `{refused, method, tier, reason}`，reason 写清**开哪个**、改完**要重启 DSH**。
+清单唯一来源是 `lib/shared/bridge-methods.js`（`EXTENSION_METHODS = 58`），
+契约测试核对"共享清单 ↔ 扩展 dispatch ↔ 插件方法表"三者对齐 —— 细节见
+`docs/one-session-plugin.md` 与 `integrations/dsh-plugin-recallflow-one/README.md`。
+
+新目标里还有两件事：
+
+- **`browser_read` 的 `Receiving end does not exist`**：内容脚本按 `document_idle` 注入，
+  而 `browser_read` 是 `open_tab` 之后立刻去读 —— 纯时序竞态；原来 `sendTabMessage` 只发一次，
+  于是竞态变成稳定失败，而且错误文本被当成"页面正文"返回。已修：新增
+  `lib/shared/tab-messaging.js`（可重试判断 + 循环，都有单测），`browser_read` 显式判 `ok`，
+  失败时带 `diag`（复用了哪个标签页 / 窗口状态 / 标签页 status）。
+- **把插件做成可被 DSH 插件管理器管理的包**：本目录已有 `package.json` 和自带的
+  `cordis.patch.yml`。根因是 DSH 的 `listPlugins()` 要求加载条目来自 `include`，
+  文件路径 insert 会被标成 `unaddressable`。**必须用 `pnpm add link:`** ——
+  拷贝式安装会坏（插件有 3 个 import 指向包外的共享模块；两种方式都实测过）。
+  切换要"备份 → 原子替换（同一次改动里删掉旧 insert，否则插件加载两次、路由冲突）→ 重启"，
+  回滚就是恢复 `.bak`。
+
+## 现在的状态与卡点
+
+```
+仓库 509/509 全绿   （上面那个 494 是旧数字；新增的是档位契约 + 内容脚本重试 + 面板三处修复）
+已跟踪文件 0 改动   分支 feat/session-binding
+
+闸门 2/5：
+  ✗ 插件是新代码（已载入指纹 ≠ 磁盘 —— 改了插件但还没重启 DSH）
+  ✓ 扩展已连上新通道 / ✓ 插件已认到会话
+  ✗ 桥接存活 / ✗ 桥接有客户端（那是 opencode 那条链路的基线，与本次改动无关）
+```
+
+**卡在同一个地方**：需要 **重启 DSH**（插件是启动时载入的）+ **重载扩展并刷新页面**
+（`relay.js` / `tools.js` 在扩展里）。这两步做完，能力档位与 `browser_read` 才能做**真机验证**；
+在那之前不要说它们"验证通过" —— 这一轮的目标明确要求"用真实调用证明，不能只看代码"。
+
 ## 实测证据（活实例，不是"测试通过"的转述）
 
 判据用**指纹**，不用"看 status 返回 200"那种答不出问题的检查：

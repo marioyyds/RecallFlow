@@ -197,6 +197,20 @@ test('刻意排除：面板 agent 的循环/UI 控制工具不得出现在任何
   );
 });
 
+// 三个审批开关的名字是**与用户的契约**：文档必须写清它们，否则用户不知道要开哪个，
+// 而唯一的开启方式就是去 profile 里写这个名字。这条钉住"文档与代码用同一套名字"。
+test('审批开关名：代码里有，文档里也写清了（否则用户不知道开哪个）', () => {
+  const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  const docs = [
+    fs.readFileSync(path.join(ROOT, 'docs/one-session-plugin.md'), 'utf8'),
+    fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/README.md'), 'utf8'),
+  ].join('\n');
+  for (const key of ['allowPageActions', 'allowBrowserActions', 'allowDangerousActions']) {
+    assert.ok(pluginSrc.includes("key: '" + key + "'"), '门禁表里应有 ' + key + ' 这一档');
+    assert.ok(docs.includes(key), '文档必须写清开关名 ' + key + ' —— 它是用户唯一能"批准"的方式');
+  }
+});
+
 test('插件的方法表不许声称扩展做不到的方法（含拼写错），且档位方法必须都暴露给插件', () => {
   const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
   const m = pluginSrc.match(/const BROWSER_METHODS = \[([\s\S]*?)\];/);
