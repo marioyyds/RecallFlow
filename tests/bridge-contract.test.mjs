@@ -162,6 +162,11 @@ test('面板 openPanel：异常必须恢复悬浮按钮，而不是把界面卡�
   assert.ok(/fab\.classList\.remove\('hidden'\)/.test(body), '异常路径必须把悬浮按钮放回去，否则界面卡在死状态');
   assert.ok(/showCitationHint\(/.test(body), '异常路径要把原因显示出来（扩展 console 捕获是空的，这是唯一能把错误带出来的路径）');
   assert.ok(chat.includes('function openPanelInner(x, y, docked)'), '内层实现应存在');
+  // 用户在"扩展已重载但页面没刷新"时点按钮，必须**每次都**得到提示。
+  // 原来 warnExtDead 只提示一次，之后完全静默 —— 用户实测就是"气泡不消失但面板打不开"。
+  assert.ok(/warnExtDead\(true\);/.test(chat), '点击触发的失效提示必须 force=true（只提示一次会让人卡在完全静默里）');
+  assert.ok(/if \(!force && extDeadWarned\) return;/.test(chat), 'warnExtDead 应支持 force 参数');
+  assert.ok(/ext-dead/.test(chat), '失效状态要标在悬浮按钮上（持续可见，而不是一闪而过的提示）');
 });
 
 // 面板的发送按钮**不能静默丢弃**。
