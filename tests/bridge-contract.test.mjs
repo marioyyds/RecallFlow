@@ -8,7 +8,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { BRIDGE_METHODS, isBridgeMethod } from '../lib/shared/bridge-methods.js';
+import {
+  BRIDGE_METHODS,
+  EXTENSION_METHODS,
+  READONLY_BACKGROUND_METHODS,
+  READONLY_CONTENT_METHODS,
+  isBridgeMethod,
+  isExtensionMethod,
+} from '../lib/shared/bridge-methods.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MCP_INDEX = path.join(ROOT, 'integrations/opencode/recallflow-mcp/index.js');
@@ -64,6 +71,70 @@ test('relay 的每个 dispatch 分支都必须登记在清单里（否则文档/
   const dispatched = [...relayDispatchedMethods(relaySource)];
   const undeclared = dispatched.filter((m) => !isBridgeMethod(m));
   assert.deepEqual(undeclared, [], 'relay 有分支但未登记到 BRIDGE_METHODS：' + undeclared.join('、'));
+});
+
+// ---- 只读档（插件第一批能力）的清单 ↔ 分发一致性 ----
+//
+// 上面那条"每个方法都要有 dispatch 分支"的正则只认 `method === 'x'` 字面分支，
+// 而只读档走的是**查表分发**（`READONLY_CONTENT_METHODS.includes(method)`）—— 看不见。
+// 所以这里补一组对称检查，否则"把方法加进清单、忘了让 dispatch 查那张表"
+// 会静默变成运行时的 unknown method（而这条链路最难手工回归）。
+test('只读档：两张清单与 BRIDGE_METHODS 互不重叠，且合起来正好是 EXTENSION_METHODS', () => {
+  const overlap = READONLY_CONTENT_METHODS.filter((m) => READONLY_BACKGROUND_METHODS.includes(m));
+  assert.deepEqual(overlap, [], '同一方法同时被归为 content 与 background：' + overlap.join('、'));
+
+  const intruding = [...READONLY_CONTENT_METHODS, ...READONLY_BACKGROUND_METHODS].filter((m) => isBridgeMethod(m));
+  assert.deepEqual(
+    intruding,
+    [],
+    '只读档不该出现在 BRIDGE_METHODS —— 那是 MCP 的清单，混进去会让"每个方法都被 MCP 调用过"变红：' + intruding.join('、')
+  );
+
+  // EXTENSION_METHODS 必须正好 = MCP 的 + 只读档，不能有第三个来源
+  const extra = EXTENSION_METHODS.filter(
+    (m) => !isBridgeMethod(m) && !READONLY_CONTENT_METHODS.includes(m) && !READONLY_BACKGROUND_METHODS.includes(m)
+  );
+  assert.deepEqual(extra, [], 'EXTENSION_METHODS 里有既不属于 MCP 也不属于只读档的方法：' + extra.join('、'));
+});
+
+test('只读档：dispatch 必须真的查那两张表（否则清单是空头支票）', () => {
+  assert.ok(
+    relaySource.includes('READONLY_CONTENT_METHODS.includes(method)'),
+    'dispatch 必须查 READONLY_CONTENT_METHODS —— 加了清单却没让 dispatch 查表 = 运行时 unknown method'
+  );
+  assert.ok(
+    relaySource.includes('READONLY_BACKGROUND_METHODS.includes(method)'),
+    'dispatch 必须查 READONLY_BACKGROUND_METHODS'
+  );
+  // 每个只读方法都必须能被两张表之一命中
+  for (const m of EXTENSION_METHODS) {
+    if (isBridgeMethod(m)) continue;
+    assert.ok(
+      READONLY_CONTENT_METHODS.includes(m) || READONLY_BACKGROUND_METHODS.includes(m),
+      '只读方法 ' + m + ' 不在任何一张只读清单里，dispatch 查表时不会命中它'
+    );
+  }
+});
+
+test('插件的方法表不许声称扩展做不到的方法（含拼写错），且只读档必须都暴露给插件', () => {
+  const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  const m = pluginSrc.match(/const BROWSER_METHODS = \[([\s\S]*?)\];/);
+  assert.ok(m, '应能从插件源码解析出 BROWSER_METHODS 数组');
+  const methods = [...m[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((x) => x[1]);
+  assert.ok(methods.length >= 10, '解析出的方法数太少，正则可能已失效：' + methods.length);
+  assert.equal(new Set(methods).size, methods.length, '插件方法表里有重复项');
+
+  const unknown = methods.filter((x) => !isExtensionMethod(x));
+  assert.deepEqual(
+    unknown,
+    [],
+    '插件声称支持、但扩展 dispatch 做不到的方法（拼错即属于此类）：' + unknown.join('、')
+  );
+
+  const missingInPlugin = [...READONLY_CONTENT_METHODS, ...READONLY_BACKGROUND_METHODS].filter(
+    (x) => !methods.includes(x)
+  );
+  assert.deepEqual(missingInPlugin, [], '只读档清单里有方法没暴露给插件：' + missingInPlugin.join('、'));
 });
 
 test('截图链路两端对齐（relay 实现 + MCP 工具 + 归档函数都存在）', () => {

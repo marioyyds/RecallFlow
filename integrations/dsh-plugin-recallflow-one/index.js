@@ -666,6 +666,29 @@ export function apply(ctx, config = {}) {
     'screenshot_capture',
     'handoff_get',
     'handoff_list',
+    // ---- 只读档：第一批从面板本地助手接过来的能力 ----
+    // 全部在 lib/assistant/tool-metadata.js 里标着 readOnly:true —— 只读，不改页面。
+    // 放进 BROWSER_METHODS 是安全的：这个清单同时被 probe-tool 当白名单用，
+    // 而"只读"正是那个白名单的语义（写操作如 dev_session_set 仍然排除在外）。
+    'read_current_page', // 读当前标签页正文
+    'get_page_snapshot', // 结构化页面快照（元素清单 + 内容指纹）
+    'get_attribute', // 取元素属性
+    'get_element_text', // 取元素文本
+    'inspect_element', // 元素体检
+    'extract_table', // 表格抽成结构化数据
+    'wait_for_element', // 等元素出现（只等待，不改页面）
+    'get_ax_snapshot', // 无障碍树快照
+    'list_tabs', // 列出标签页
+    'list_frames', // 列出框架
+    'list_downloads', // 列出下载
+    'take_screenshot', // 截图（与 screenshot_capture 同类的只读能力）
+    'get_run_trace', // 读运行轨迹（诊断用）
+    'web_search', // 网页搜索（readOnly，走网络）
+    'search_knowledge_base', // 检索知识库
+    'list_knowledge_base', // 列出知识库条目
+    'get_entry', // 读单条知识库条目
+    'list_macros', // 列出宏
+    'list_userscripts', // 列出用户脚本
   ];
 
   /** 插件**本地**就能答的方法：读的是本机共享文件（dev-session 与证据库），不需要扩展。
@@ -696,6 +719,15 @@ export function apply(ctx, config = {}) {
       'screenshot_capture（截图）/ handoff_get、handoff_list（读用户在面板里交接出来的会话）/ ' +
       'dev_session_get、dev_session_set（读/写 projectRoot 与 devUrl，以及 verify_change 的默认 targets）/ ' +
       'evidence_get（按 hash 或 url 取回已归档的页面证据）。' +
+      // ---- 只读档（从面板本地助手接过来的第一批能力）----
+      '只读档（都不修改页面，可以放心多调）：read_current_page（读当前标签页正文）/ ' +
+      'get_page_snapshot（结构化页面快照：元素清单 + 内容指纹，适合据此选选择器）/ ' +
+      'get_attribute、get_element_text、inspect_element（读元素属性/文本/体检）/ ' +
+      'extract_table（表格抽成结构化数据）/ wait_for_element（等元素出现，只等待）/ ' +
+      'get_ax_snapshot（无障碍树）/ list_tabs、list_frames、list_downloads（列标签页/框架/下载）/ ' +
+      'take_screenshot（截图，与 screenshot_capture 同类）/ get_run_trace（读运行轨迹，诊断用）/ ' +
+      'web_search（网页搜索）/ search_knowledge_base、list_knowledge_base、get_entry（知识库）/ ' +
+      'list_macros、list_userscripts（列宏与用户脚本）。' +
       '这是 RecallFlow 的页面能力，与 DSH 同处一条会话。',
     parameters: {
       type: 'object',

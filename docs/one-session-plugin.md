@@ -285,3 +285,55 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 - 三档文本截断（400/1200/2000）
 - 两套渲染文案与两次去标签
 - 那个尚未修好的重复注入缺陷 —— 随代码一起删除，不再修
+
+---
+
+## 把面板原有的页面能力接进插件（进行中）
+
+面板的**本地助手**原本自带约 55 个页面工具（`lib/assistant/tools.js`），
+而 DSH 这侧只暴露了 10 个被动读取类方法。这个改造把它们逐步接过来，
+让 DSH 会话直接用上同一套能力 —— 而不是"面板能用、DSH 不能用"。
+
+### 清单怎么分（`lib/shared/bridge-methods.js`）
+
+刻意分成**两套清单**，因为它们服务两个不同的消费者：
+
+| 清单 | 内容 | 谁用 |
+|---|---|---|
+| `BRIDGE_METHODS` | 原来那 10 个 | **MCP server**（opencode 链路）。契约测试会核对"每个方法都有 dispatch 分支"且"每个方法都被 MCP 真的调用过"（防僵尸条目）——所以插件专用的方法**不能**混进来 |
+| `READONLY_CONTENT_METHODS` | 7 个，作用于**活动标签页**、需要内容脚本 | DSH 插件的 `recallflow_browser` |
+| `READONLY_BACKGROUND_METHODS` | 12 个，不需要页面（或自己选标签页） | 同上 |
+| `EXTENSION_METHODS` | 上面三者之和 = 扩展 dispatch 必须支持的全部 | 契约测试核对"清单 ↔ 分支"不出现空洞 |
+
+分发在 `lib/bridge/relay.js` 的 `dispatch` 里：只读档走**查表**（`READONLY_*_METHODS.includes(method)`）
+而不是逐条 `if`，因为清单是唯一来源。契约测试因此补了两条对称检查：
+`dispatch` 必须真的引用那两张表，且插件的方法表不许声称扩展做不到的方法（**拼错也会被点名**）。
+
+### 已接入：只读档（19 个，全部 `readOnly: true`）
+
+```
+页面类(7)  read_current_page get_page_snapshot get_attribute get_element_text
+           inspect_element extract_table wait_for_element
+后台类(12) get_ax_snapshot list_tabs list_frames list_downloads take_screenshot
+           get_run_trace web_search search_knowledge_base list_knowledge_base
+           get_entry list_macros list_userscripts
+```
+
+### 批准策略（DSH 这侧**没有**面板那样的批准弹窗，所以必须显式设计）
+
+| 档 | 内容 | 策略 |
+|---|---|---|
+| **只读**（已接） | 读页面/元素/无障碍树/列表/搜索 | **默认开**。不改页面、无副作用 |
+| 改页面 | `highlight_text` `outline_element` `set_element_style` `clear_page_overlays` `scroll_page` `click_element` `type_text` `press_key` `select_option` `check_box` … | **需要明确策略**：DSH 侧没有弹窗可以问用户，所以要么做成"一次性授权"、要么按域白名单。**尚未接入** |
+| 浏览器与网络 | `open_tab` `switch_tab` `fetch_webpage` `run_macro` `run_userscript` `install_userscript` `install_skill` … | **单独一档**，与"改当前页面"影响面不同（会开标签页、会跑脚本）。**尚未接入** |
+| 危险 | `run_javascript`（任意代码执行） | **默认不开**。早先做探针时就刻意定了"不接受任意代码"，要开需用户明确要求 |
+
+### 怎么验证
+
+- 契约测试：`node --test tests/bridge-contract.test.mjs`
+  （清单唯一性、MCP ↔ 清单、清单 ↔ dispatch、只读档 ↔ dispatch ↔ 插件方法表）
+- 扩展侧的行为：`tests/tab-messaging.test.mjs`（内容脚本晚到时的重试语义）
+- 真机验证：插件里的 `recallflow_status` 带 `probe: true` 会对**白名单内**的方法做一次往返探针；
+  只读档都在白名单里，所以可以直接探。
+  （写操作如 `dev_session_set` **不在**白名单里 —— 它不该从一个诊断入口被触发。）
+
