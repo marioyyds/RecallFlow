@@ -265,22 +265,31 @@ const safe = sanitizeHref(url);           // url 来自 data-cite-url（页面/�
 
 ## 如何验证与回滚
 
+> **⚠️ 这一节是当时那一轮的记录**（"382 项测试"、`a460044..HEAD`）—— **下面命令里有几条今天跑不了。**
+> 2026-10-08 用户明确不再用 opencode 之后，`integrations/opencode/` 整包与两个验证台脚本
+> （`verify-mcp-shot.mjs` / `verify-mcp-shot-success.mjs`）已删除，7801 也不再有任何服务。
+> **现在的验证入口**见 `scripts/README.md`：`node --test "tests/*.test.mjs"`（498 项）、
+> `node scripts/verify-live-gate.mjs`（3 条 DSH 闸门）、
+> `node scripts/verify-capability-tiers.mjs`（逐方法探能力档位）。
+> 保留这一节是为了看清"**那轮是怎么验证的**"—— 方法（隔离实例、不碰运行中的服务）仍然有效。
+
 ```powershell
-# 跑全部测试（382 项）
-node --test "tests/*.test.mjs" "integrations/opencode/recallflow-mcp/test/*.test.mjs"
+# 【当时的记录；失效的行已注释掉，保留原样以便对照】
+# 跑全部测试（当时 382 项）
+node --test "tests/*.test.mjs"                              # ← 现在这样跑（498 项）
+# node --test "tests/*.test.mjs" "integrations/opencode/recallflow-mcp/test/*.test.mjs"   ← 目录已删除
 
-# 桥接层端到端验证（隔离端口，不碰运行中的 7801）
-$env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
-$env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-test"
-node integrations/opencode/recallflow-mcp/index.js --http   # 后台
-node scripts/verify-mcp-shot.mjs
-node scripts/verify-mcp-shot-success.mjs
+# 桥接层端到端验证（隔离端口 7802，不碰运行中的 7801）—— server 与两个脚本都已删除
+# $env:RECALLFLOW_MCP_PORT='7802'; $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'
+# $env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-test"
+# node integrations/opencode/recallflow-mcp/index.js --http
+# node scripts/verify-mcp-shot.mjs
+# node scripts/verify-mcp-shot-success.mjs
 
-# 让 page_screenshot 对真实扩展生效（两步都会打断现有 MCP 会话）
-#   1) 重载扩展（edge://extensions）
-#   2) 重启常驻 server：
-Get-NetTCPConnection -LocalPort 7801 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-node D:\Desktop\workspace\code\ai\bookmark-sorter\integrations\opencode\recallflow-mcp\index.js --http
+# 让 page_screenshot 对真实扩展生效（当时要重载扩展 + 重启常驻 server）
+#   7801 已不存在，下面两条不再有意义
+# Get-NetTCPConnection -LocalPort 7801 -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+# node D:\Desktop\workspace\code\ai\bookmark-sorter\integrations\opencode\recallflow-mcp\index.js --http
 ```
 
 **回滚**：本轮成果是 4 个本地提交（`a460044..HEAD`），**尚未 push**。

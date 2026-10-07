@@ -136,20 +136,22 @@ WS 广播 {kind:'session-event', sessionId, event}
 | `lib/page/**`、`background.js`、`manifest.json` | **重载扩展**（`edge://extensions` → RecallFlow → ↻），并刷新页面 | 扩展代码只在加载时读取 |
 | `integrations/dsh-plugin-recallflow-one/**` | **重启 DSH**（`dsh plugin` 只转发给 pnpm，没有 reload 子命令） | 插件由 DSH 的 loader 在启动时载入 |
 | `~/.dsh/profiles/web/cordis.patch.yml` 或 `package.json` | **重启 DSH** | 这两个文件只在启动时读取 |
-| `integrations/opencode/recallflow-mcp/**` | **重启桥接**（必须在**你自己的终端**里跑，见踩坑第 1 条） | 常驻进程，代码在启动时载入 |
-| `lib/shared/**` | **看谁 import 它** —— 见下 | 同一份文件被两边（甚至三边）引用 |
+| `lib/shared/**` | **看谁 import 它** —— 见下 | 同一份文件被两边引用 |
 
-**`lib/shared/**` 为什么单独一行**：这些文件被**三方**分别引用，改一个文件要重启哪几个进程，
+**`lib/shared/**` 为什么单独一行**：这些文件被**两方**分别引用，改一个文件要重启哪几个进程，
 取决于**谁 import 了它**。下面这份清单是**量出来的**（不是凭印象）：
 
 | 谁 | 直接 import 的 `lib/shared/*` |
 |---|---|
-| 桥接（`integrations/opencode/recallflow-mcp/`，node 进程） | `dev-session`、`evidence-store`、`tool-results` |
 | DSH 插件（`integrations/dsh-plugin-recallflow-one/`） | `dev-session`、`evidence-store`、`tool-results` |
 | 扩展（`lib/page/**`、`lib/bridge/**`、`background.js`） | `bridge-methods`、`handoff`、`handoff-store`、`panel-turns`、`session-binding`、`session-view`、`settings`、`store`、`rag`、`table`、`utils` |
 
-（`dev-paths` / `page-health` / `verify-change` 不在桥接与插件的直接清单里 ——
-它们由 `tool-results` 传递引入。所以改它们要重启的是**同一个组合**：插件 + 桥接。）
+（这里原本还有**第三方**：7801 桥接那个 node 进程，它同样 import `dev-session` / `evidence-store` /
+`tool-results`。用户 2026-10-08 明确不再用 opencode 后，桥接整包已删除，所以**改这三个文件现在
+只需要重启 DSH**（插件那侧），不必再重启什么常驻进程。）
+
+（`dev-paths` / `page-health` / `verify-change` 不在插件与扩展的直接清单里 ——
+它们由 `tool-results` 传递引入。所以改它们要重启的是**同一个组合**：DSH。）
 
 所以，举例：
 
@@ -181,11 +183,13 @@ $got  = (curl.exe -s http://127.0.0.1:3080/recallflow/status | ConvertFrom-Json)
 `/recallflow/status` 是否返回 200 —— 那个路由在任何近期版本里都有，所以**答不出**这个问题，
 我自己就被它误导过：看到 ✓ 以为跑的是新构建，实际差了一次重启）。
 
-**桥接与扩展没有等价的字段** —— 它们只能靠"进程/扩展是什么时候起来的"来推断：
+**桥接与扩展没有等价的字段** —— 它们只能靠"进程/扩展是什么时候起来的"来推断。
+（**2026-10-08 起只剩扩展与 DSH**：7801 桥接已删除，所以下面那条 `/health` 不再有意义；
+保留是说明"当时还多一个常驻进程要判断"。）
 
 ```powershell
-# 桥接：/health 的 uptimeMs 直接告诉你它跑了多久
-curl.exe -s -H "X-RecallFlow-Token: recallflow-local-bridge-v1" http://127.0.0.1:7801/health
+# （已删除）桥接：/health 的 uptimeMs 直接告诉你它跑了多久
+# curl.exe -s -H "X-RecallFlow-Token: recallflow-local-bridge-v1" http://127.0.0.1:7801/health
 
 # DSH 进程启动时间（推断用；插件请优先用上面的 build 指纹）
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
@@ -210,8 +214,10 @@ node scripts/verify-live-gate.mjs
 | `GET /recallflow/status` 是否 200 | 404 = DSH 还没重启（跑的是旧插件代码） |
 | `status.clients >= 1` | 扩展是否连上了新通道（0 = 扩展没重新加载） |
 | `status.sessions` 非空 | 插件是否找到了会话（空 = 注册表兜底也没找到 agent） |
-| 桥接 `/health` 的 `ok` | opencode 那条链路是否还活着 |
-| 桥接 `/health` 的 `ws` | 扩展是否还连着桥接（`false` 时 opencode 的页面工具拿不到结果） |
+（这一行原本还有两条：`桥接 /health 的 ok` = "opencode 那条链路是否还活着"、
+`桥接 /health 的 ws` = "扩展是否还连着桥接（false 时 opencode 的页面工具拿不到结果）"。
+**2026-10-08 起删除** —— 用户不再用 opencode，桥接已不存在，这两个信号随之消失；
+扩展现在只连 3080，判断"扩展在不在"用 `status.clients` 一条就够。）
 
 加 `--say` 会**真的发一句话进会话**（有副作用），用来验证输入通道。
 第 5 条闸门（"DSH 里调用 `recallflow_browser` 能往返"）脚本查不了 —— 那个工具只能由模型调用。
@@ -303,9 +309,12 @@ node scripts/probe-say.mjs "测试文本"
   返回 HTTP 200 与真实页面数据（tabId / pageUrl / network 都对）；`browser_read` 那次
   还带回了扩展自己的校验信息（"仅支持 http/https URL"）—— 说明**整条链**
   （插件 → WS → 扩展 → 它自己的方法实现 → 回执）都是通的，而不只是"某处返回了 200"。
-- **opencode 那条链路**：桥接在跑（`/health` 的 `ok` 与 `ws` 都为真），但**跑的是旧代码** ——
+- ~~**opencode 那条链路**：桥接在跑（`/health` 的 `ok` 与 `ws` 都为真），但**跑的是旧代码** ——
   `events` / `panelTurns` 字段还在、`/panel-turns` 仍返回 200。删除清单第 4 步的改动
-  （`c80fb0a`）要等用户重启桥接才会生效；重启后需先验证 opencode 仍正常，再做第 5 步。
+  （`c80fb0a`）要等用户重启桥接才会生效；重启后需先验证 opencode 仍正常，再做第 5 步。~~
+  **2026-10-08 更正**：这一条已经不存在 —— 用户明确不再用 opencode，桥接整包已删除。
+  （它当时记的是一个**真实状态**：桥接跑着旧代码，要等重启才生效。这个"空窗期"概念仍然成立，
+  只是现在只剩 DSH 一个进程需要重启。）
 - **面板渲染：一半已确认，一半仍未确认**（这一节被改过两次，因为它两次被我写过头）。
   - ✅ **样式**：读面板里 `.msg.ext.ext-user` 与 `.msg.ext` 的计算样式，逐项等于 DSH 自己的值
     （`background-color: rgb(237,243,254)` / `border-radius: 20px` / `padding: 10px 16px` /
