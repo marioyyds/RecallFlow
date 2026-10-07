@@ -329,11 +329,14 @@ node scripts/probe-say.mjs "测试文本"
 它就在插件**已经能拿到**的 `sessionQuery` 服务上（`listSessions()` 一直成功）。
 所以"真正的切视图"在设计上是允许的，"不能"的只有**发消息**那一半。
 
-**已经做成接口**（只读）：`GET /recallflow/session-log?sessionId=<id>&limit=<n>` →
+**已经做成接口，并且实测通过**（只读）：`GET /recallflow/session-log?sessionId=<id>&limit=<n>` →
 `{ ok, sessionId, total, count, frames }`，其中 `frames` 是插件自己那套 `projectEvent()` 的产物
 （**与面板从 WS 收到的是同一个函数**，所以形状能直接渲染）。它不碰任何会改变会话状态的 API。
-路径也报在 `/status` 的 `sessionLogPath`。**这就是"切视图"的地基**：
-读能读，发送只对已载入的会话有效。
+路径也报在 `/status` 的 `sessionLogPath`。
+
+真机实测（2026-10-08）：活的会话 `total=21969`、**没载入的** `total=1667`、子会话 `total=6359`，
+全部 `200`，末条 frame 形如 `{"type":"tool/call","tool":"pwsh","args":{…}}`。
+**所以"切视图"能读**（含没载入的会话），**发送只对已载入的会话有效** —— 这就是最终边界。
 
 ## 已知限制 / 未验证
 

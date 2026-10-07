@@ -204,17 +204,31 @@ const m = await import(pathToFileURL(p).href);        // ← 必须转 file:// U
 是**不通**。（探针里仍保留 `typertAvailable / typertMethods / remoteKeys / remoteSession`
 四个只读字段，作为"将来 DSH 改了"的观测点。）
 
-**② 的另一半（读历史）有代码级答案**：`readSession` 的文档注释写明参数是
-*"**live or persisted** session id to read"* —— **不要求会话活着**，
-*"@returns cloned header and complete raw event log"*；`listEvents` 同理
-（*"live-preferred"* 而非 required）。也就是说"**读出任意会话的历史**"在设计上就是允许的，
-而且它就在插件**已经能拿到**的 `sessionQuery` 服务上（`listSessions()` 一直成功，`queryCount=17`）。
+**② 的另一半（读历史）：能 —— 已在真机上实测（2026-10-08）**
 
-**顺带修掉一个我自己造的坑**：`readSessionOk` 第一版永远是 `false`，是**探针的时序 bug**
-（`refreshStoreSessions()` 是异步的，而读历史要用 `currentSessionId`/`sessions`；两句并列写在
-加载处 → 探针跑在登记表还空着的时候 → `id` 取到空串 → 读取被跳过）。已改成
-`refreshStoreSessions().then(() => probeController())`。
-**差的只是那一步实测**：`/status` 的 `readSessionOk / readEventsCount`（探针已就位，**要一次重启**）。
+`readSession` 的文档注释写明参数是 *"**live or persisted** session id to read"* ——
+**不要求会话活着**，*"@returns cloned header and complete raw event log"*；`listEvents` 同理
+（*"live-preferred"* 而非 required）。它就在插件**已经能拿到**的 `sessionQuery` 服务上。
+
+实测（重启后）：
+
+    /status 的探针:  readSessionOk = True    readEventsCount = 1667
+    GET /recallflow/session-log?sessionId=<活的>&limit=3   → 200  total=21969  count=2
+    GET /recallflow/session-log?sessionId=<没载入的>&limit=3 → 200  total=1667   count=3
+    GET /recallflow/session-log?sessionId=<子会话>&limit=3   → 200  total=6359   count=3
+    末条 frame 示例: {"type":"tool/call","tool":"pwsh","args":{…}}   ← 形状完整、能直接渲染
+
+**所以"切视图"那一半是可做的**（读任意会话的历史，包没载入的），
+产品化的前端还没做 —— 用户此前决定撤掉面板下拉，这一步留给他定。
+
+**顺带修掉一个我自己造的坑**：`readSessionOk` 第一版永远是 `false`，是**探针的两个 bug**
+（时序：`refreshStoreSessions()` 是异步的而探针并列写在加载处；以及**早退**：
+`if (!c) return;` 在 `sessionController` 拿不到时把整段读取跳过了）。
+两处都修了，并且**让"跳过"也写进 `error`** —— "没跑"与"跑了但失败"必须能分辨。
+
+**另一个旁证**：探针里试 `ctx.remote` 时 Cordis 直接抛
+`cannot get property "remote" without inject` —— **连"读"它都要求先在 `inject` 里声明**，
+所以那条路从语言层面就是关的（①的结论又多一重）。
 
 ## 调试入口
 
