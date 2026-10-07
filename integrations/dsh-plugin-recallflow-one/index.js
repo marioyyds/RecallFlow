@@ -99,6 +99,43 @@ function readBody(req, limit = 1_000_000) {
   });
 }
 
+/**
+ * 把面板拾取的元素拼成一段**自包含的文本**，附在用户消息后面。
+ *
+ * 为什么拼文本、而不是往 message 的 `content` 里加结构化块：
+ * 我只见过 `content: [{ type: 'text', text }]` 这一种被真正送进会话的形状，
+ * **没有证据**表明额外块会被模型侧读到 —— 而这个项目已经吃过"接口成功但效果没发生"的亏。
+ * 拼进 text 的另一个好处是：**它在会话里看得见**，所以可验证。看不见的路径不算数。
+ *
+ * 字段名参考插件自己的 `getPickedElement()`（注释写着"选择器 + 标签 + 文本 + 前端源码位置"），
+ * 并对常见别名做兜底 —— 面板侧的对象形状我没有逐个核实过，宁可多试几个键。
+ */
+function elementsDigest(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  const lines = [];
+  for (const el of list.slice(0, 8)) {
+    if (!el || typeof el !== 'object') continue;
+    const parts = [];
+    const add = (label, v) => {
+      const s = String(v == null ? '' : v).trim();
+      if (s) parts.push(label + '=' + s.slice(0, 200));
+    };
+    add('标签', el.tag || el.tagName);
+    add('选择器', el.selector || el.css || el.cssSelector);
+    add('语义', el.locator || el.semantic || el.accessibleName || el.role);
+    add('文本', el.text || el.textContent);
+    add('源码', el.source || el.sourcePos || el.file || el.fileLine);
+    if (parts.length) lines.push('  ' + (lines.length + 1) + '. ' + parts.join(' | '));
+  }
+  if (!lines.length) return '';
+  return (
+    '\n\n【页面元素】用户在页面上拾取了 ' +
+    lines.length +
+    ' 个元素（面板的拾取功能，随这条消息一起发出）：\n' +
+    lines.join('\n')
+  );
+}
+
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
   for (const child of Object.values(value)) deepFreeze(child);
@@ -878,11 +915,14 @@ export function apply(ctx, config = {}) {
         sendJson(res, 400, { ok: false, error: '请求体不是 JSON：' + e.message }, origin);
         return;
       }
-      const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if (!text) {
+      const rawText = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!rawText) {
         sendJson(res, 400, { ok: false, error: '缺少 text' }, origin);
         return;
       }
+      // 面板拾取的元素随消息一起进来 → 拼成文本附在后面。
+      // 这样它就以**真用户消息的一部分**进会话：模型一定读得到，用户也看得见。
+      const text = rawText + elementsDigest(body.elements);
       // 显式指定会话时用**严格**查找：找不到就明确报错，绝不悄悄发给别的会话。
       // （`pickSession()` 是会回退的"尽力而为"版本，只适合"没指定"的情况。）
       const wanted = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';

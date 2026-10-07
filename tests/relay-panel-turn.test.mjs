@@ -236,9 +236,14 @@ test('只剩 3080 一条通道：7801 桥接已删除，DSH 通道部件齐全',
   assert.match(relay, /function scheduleDshReconnect\(\)/, 'DSH 通道应有自己的重连调度');
   assert.match(relay, /function handleDshMessage\(/, '缺 DSH 通道的消息处理');
   assert.match(relay, /function forwardSessionEvent\(frame\)/, '缺会话事件转发');
-  // 2026-10-08：签名多了可选的 sessionId（面板"选择跟哪条会话说话"）。
-  // 这里不写死成 `sayToDsh(text)`，但必须**确实**接受这个第二参 —— 否则面板的选择传不进去。
-  assert.match(relay, /export async function sayToDsh\(text, sessionId\)/, '缺 sayToDsh（或它不再接受 sessionId）');
+  // 2026-10-08：签名多了可选的 sessionId（面板"选择跟哪条会话说话"），
+  // 随后又多了第三个参数 elements（面板拾取的元素随消息一起送给 AI）。
+  // 这里不写死成 `sayToDsh(text)`，但必须**确实**接受这两个参数 —— 否则面板的选择/元素传不进去。
+  assert.match(
+    relay,
+    /export async function sayToDsh\(text, sessionId, elements\)/,
+    '缺 sayToDsh（或它不再接受 sessionId / elements）'
+  );
 
   // 已删除的旧通道不应复活
   assert.ok(!/export async function postPanelTurn\(/.test(relay), 'postPanelTurn 已删除，不应复活');

@@ -43,25 +43,38 @@ test('面板里不应再有会话选择器的任何痕迹', () => {
   }
 });
 
-test('panel:turn 的消息体里不再有 sessionId', () => {
-  const m = chat.match(/type: 'panel:turn',[\s\S]{0,300}?\},/);
+test('panel:turn 的消息体：不带 sessionId（下拉已撤），但**带拾取的元素**', () => {
+  // 正则放宽：加了注释与 elements 之后，消息体比原来长得多（原来写死 300 字符，一改就红）。
+  const m = chat.match(/type: 'panel:turn',[\s\S]{0,900}?\n\s{8}\},/);
   assert.ok(m, '应能找到 panel:turn 的消息体');
   assert.ok(!/sessionId/.test(m[0]), 'panel:turn 的消息体里不该再有 sessionId：' + m[0]);
+  // 元素是**只在非空时**带的 —— 没拾取时请求体与改动前一模一样。
+  assert.match(
+    m[0],
+    /\.\.\.\(pickedElements\.length \? \{ elements: pickedElements \} : \{\}\)/,
+    '拾取的元素必须随消息发出去（且只在非空时带）'
+  );
 });
 
-test('后台也不再为选择器服务，且不再透传 sessionId', () => {
+test('后台不再为选择器服务；元素的第三个参数如实透传', () => {
   assert.ok(!bg.includes('panel:sessions'), 'background 不该再有 panel:sessions');
-  assert.match(bg, /sayToDsh\(text\)/, 'panel:turn 应回到只传 text');
-  assert.ok(!/sayToDsh\(text, msg\.sessionId\)/.test(bg), '不该再透传 msg.sessionId');
+  // 下拉撤掉之后 msg.sessionId 永远是 undefined，但参数位保留 —— 同一处调用也送 elements。
+  assert.match(bg, /sayToDsh\(text, msg\.sessionId, msg\.elements\)/, 'panel:turn 应把 elements 透传给 sayToDsh');
 });
 
 test('选择器的样式也撤了（不留死样式）', () => {
   assert.ok(!css.includes('rf-session-chooser'), 'panel-css.js 里不该再有 rf-session-chooser');
 });
 
-test('撤干净了：relay 与插件的会话能力**仍然保留**（默认路径不受影响）', () => {
+test('撤干净了：relay 与插件的会话/元素能力**仍然保留**（默认路径不受影响）', () => {
   const relay = read('lib/bridge/relay.js');
-  assert.match(relay, /export async function sayToDsh\(text, sessionId\)/, 'relay 仍接受可选的 sessionId');
+  assert.match(
+    relay,
+    /export async function sayToDsh\(text, sessionId, elements\)/,
+    'relay 仍接受可选的 sessionId 与 elements'
+  );
+  // elements 只在非空时进请求体（不拾取 = 请求体与以前一模一样）
+  assert.match(relay, /if \(els\.length\) payload\.elements = els;/, 'elements 不应无条件放进请求体');
   const plugin = read('integrations/dsh-plugin-recallflow-one/index.js');
   assert.match(plugin, /sessionList: listAllSessions\(\)/, '插件的 /status 仍报会话列表（面板不用，但它是可观测接口）');
   assert.match(plugin, /findSessionStrict/, '插件的严格查找仍在（默认路径不走它，但指定了不存在 id 时绝不回退）');

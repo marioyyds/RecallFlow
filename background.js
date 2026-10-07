@@ -165,7 +165,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // 异步等待：把插件回传的 rpcId 交给面板，面板才能把"本地那条回合"与
     // 从会话回声回来的那条**精确对齐**（否则只能靠文本猜）。
     // 返回 true 表示"会异步回复" —— Chrome 要求这样保持消息通道。
-    sayToDsh(text)
+    // msg.elements（2026-10-08）：面板拾取的元素，随这条消息一起送给 AI。
+    // 不传 = 旧行为（请求体不变）；插件负责把它拼成可被模型读到的文本。
+    sayToDsh(text, msg.sessionId, msg.elements)
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, rpcId: '', error: String((e && e.message) || e) }));
     return true;
