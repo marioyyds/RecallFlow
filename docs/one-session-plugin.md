@@ -202,10 +202,11 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
                                （页面能力 + 本地方法 dev_session_get/set、evidence_get）
 ```
 
-- **7801 桥接保留** —— 它不是中继，而是 **opencode 的页面能力出口**。
-  我曾以为它能一起删掉，准备动手时才发现删了会让 opencode 的工具**静默失效**（已回退；
-  见 `docs/deletion-plan.md` 的保留清单）。DSH 侧不再需要它：页面能力已由插件直接提供。
-- 用户需要运行的：**DSH** + **浏览器扩展**；用 opencode 时**还要**那个 7801 桥接。
+- **旧的 7801 桥接已删除**（2026-10-08）。它当年确实不是中继，而是 **opencode 的页面能力出口** ——
+  我曾以为它能一起删掉，准备动手时才发现删了会让 opencode 的工具**静默失效**（已回退）。
+  后来用户明确表示不再用 opencode，那个消费者消失，桥接整包与扩展侧通道才一起删掉。
+  见 `docs/deletion-plan.md` 的「已从保留清单移除」一节。
+- 用户需要运行的：**DSH** + **浏览器扩展**。就这两个进程，没有别的服务要起。
 
 > **这一段曾经是另一版**（SSE `/recallflow/stream` + `session.prompt(text,'queue')` +
 > "中继整个去掉"）。三处都被后续实测推翻：
@@ -213,7 +214,8 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 >   （WebSocket 活动才能）→ 改用 WS；
 > ② `session.prompt` **不是函数**（本文件下方的探针输出里就写着 `session.prompt 是函数=false`）
 >   → 改用 `agent.send(msg,'next-step',true)`；
-> ③ 7801 是 opencode 的出口，不是中继 → 保留。
+> ③ 7801 是 opencode 的出口，不是中继 → **当时**保留。
+>   （2026-10-08 追记：用户明确不再用 opencode 之后，这条保留也随之取消 —— 桥接已整体删除。）
 >
 > 留这段记录是因为"被推翻的三条"比结论本身更容易忘。
 
@@ -296,14 +298,15 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 
 ### 清单怎么分（`lib/shared/bridge-methods.js`）
 
-刻意分成**两套清单**，因为它们服务两个不同的消费者：
+刻意分成几组清单，把它们服务不同消费者的边界写在数据里：
 
 | 清单 | 内容 | 谁用 |
 |---|---|---|
-| `BRIDGE_METHODS` | 原来那 10 个 | **MCP server**（opencode 链路）。契约测试会核对"每个方法都有 dispatch 分支"且"每个方法都被 MCP 真的调用过"（防僵尸条目）——所以插件专用的方法**不能**混进来 |
+| `BRIDGE_METHODS` | 最早那 10 个 | **扩展 dispatch 的核心能力**（读正文/诊断/截图/交接…）。**2026-10-08 起 MCP server 已删除**，所以这条清单的消费者只剩 DSH 插件；契约测试原来核对"每个方法都被 MCP 真的调用过"，现在换成等价的"**每个都必须被插件暴露**"（同样防僵尸条目）|
 | `READONLY_CONTENT_METHODS` | 7 个，作用于**活动标签页**、需要内容脚本 | DSH 插件的 `recallflow_browser` |
 | `READONLY_BACKGROUND_METHODS` | 12 个，不需要页面（或自己选标签页） | 同上 |
-| `EXTENSION_METHODS` | 上面三者之和 = 扩展 dispatch 必须支持的全部 | 契约测试核对"清单 ↔ 分支"不出现空洞 |
+| `PAGE_ACTION_*` / `BROWSER_ACTION_*` / `DANGEROUS_*` | 19 + 4 + 10 个，按风险分档、默认关闭 | 同上（需 config 显式开）|
+| `EXTENSION_METHODS` | 上面全部之和 = 扩展 dispatch 必须支持的方法 | 契约测试核对"清单 ↔ 分支"不出现空洞 |
 
 分发在 `lib/bridge/relay.js` 的 `dispatch` 里：只读档走**查表**（`READONLY_*_METHODS.includes(method)`）
 而不是逐条 `if`，因为清单是唯一来源。契约测试因此补了两条对称检查：
