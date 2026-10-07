@@ -274,7 +274,10 @@ export function apply(ctx, config = {}) {
     }
   }
   // 启动先刷一次；之后每次 /status 都会再刷（见那个路由里的调用）
-  refreshStoreSessions();
+  // **顺序很重要**：refreshStoreSessions() 是异步的，而 probeController() 里读历史要用
+  // currentSessionId / sessions —— 上一版是两句并列，于是探针跑在登记表还空着的时候，
+  // `id` 取到空串、读取被跳过，readSessionOk 永远是 false（**那是探针的 bug，不是 DSH 的**）。
+  refreshStoreSessions().then(() => probeController());
 
   /**
    * 只读探针：DSH 的 Host 服务 **`sessionController`**（`dsh-api-session-controller`）
@@ -296,6 +299,14 @@ export function apply(ctx, config = {}) {
     readSessionOk: false,
     readEventsCount: -1,
     titleSample: '',
+    // 另一条可能的门：那个 controller 是 TypertRemoteService，注释说它
+    // "backing the generated `ctx.remote.session` namespace"，而 DSH 内置插件里也有
+    // `inject: ['agents','sessionQuery','typert']`。所以除了 ctx.get('sessionController')
+    // 之外，还要看 `typert` 与 `ctx.remote.session` 这两条路通不通。
+    typertAvailable: false,
+    typertMethods: [],
+    remoteKeys: [],
+    remoteSession: false,
     error: '',
   };
 
@@ -333,10 +344,34 @@ export function apply(ctx, config = {}) {
       }
     } catch (e) {
       controllerDiag.readSessionOk = false;
-      controllerDiag.error = (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'readSession: ' + String((e && e.message) || e);
+      controllerDiag.error =
+        (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'readSession: ' + String((e && e.message) || e);
+    }
+
+    // ③ 另一条可能的门（同 controllerDiag 声明处的说明）。
+    try {
+      const t = ctx.get && ctx.get('typert', false);
+      controllerDiag.typertAvailable = !!t;
+      if (t) {
+        const names = new Set();
+        for (let o = t; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+          for (const k of Object.getOwnPropertyNames(o)) {
+            if (k === 'constructor') continue;
+            try {
+              if (typeof t[k] === 'function') names.add(k);
+            } catch (e) {}
+          }
+        }
+        controllerDiag.typertMethods = [...names].sort();
+      }
+      const remote = ctx.remote;
+      controllerDiag.remoteKeys = remote && typeof remote === 'object' ? Object.keys(remote).sort() : [];
+      controllerDiag.remoteSession = !!(remote && remote.session);
+    } catch (e) {
+      controllerDiag.error =
+        (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'remote: ' + String((e && e.message) || e);
     }
   }
-  probeController();
 
   // 装载时记录**自身文件**的指纹。为什么需要：
   // 插件代码在 DSH 启动时载入，没有热重载 —— 于是"现在跑的是哪个版本"只能靠
