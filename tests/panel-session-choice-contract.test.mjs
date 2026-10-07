@@ -51,6 +51,20 @@ test('选择持久化，且默认（未指定）时存的是空串', () => {
   assert.match(chat, /chrome\.storage\.local\.get\(\['recallflow\.dshSession'\]/, '打开时要读回');
 });
 
+test('选择器要在 append 之后才创建（否则 bindingEl 没有 parentNode，选择器根本插不进去）', () => {
+  // 真实事故：芯片是 `const bindBtn = …; bindingEl = bindBtn; renderBindingChip();` 建的，
+  // 而 append 发生在几行之后。只靠 renderBindingChip 顺手调 ensureSessionChooser 的话，
+  // 那一刻 parentNode 还是 null → 选择器从未被创建 → 用户侧全部表现就是"不能选择"。
+  const iAppend = chat.indexOf('head.appendChild(bindBtn);');
+  assert.ok(iAppend > 0, '应能找到 head.appendChild(bindBtn)');
+  const iEnsure = chat.indexOf('ensureSessionChooser();', iAppend);
+  assert.ok(iEnsure > iAppend, 'ensureSessionChooser() 必须在 head.appendChild(bindBtn) **之后**被调用');
+  assert.ok(
+    iEnsure - iAppend < 400,
+    '两者应当紧挨着（插入位置就落在 append 这里），实际相隔 ' + (iEnsure - iAppend) + ' 字符'
+  );
+});
+
 test('选中的会话不在列表里时要看得见（不能悄悄掉回"跟随最近活跃"）', () => {
   assert.match(chat, /不在当前列表里/, '下拉里要补一个标明"不在当前列表里"的选项');
   assert.match(chat, /data-state', missing \? 'missing'/, '要用 data-state 标出这个状态（样式与排查都靠它）');
