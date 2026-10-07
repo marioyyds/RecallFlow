@@ -33,6 +33,7 @@ import {
   shapePickedElementResult,
   shapeTextResult,
   shapeVerifyChangeResult,
+  stripUndefined,
   toolCursorKey,
 } from '../lib/shared/tool-results.js';
 
@@ -297,6 +298,49 @@ test('resolveTargets: 本次调用优先，其次 dev-session；都没有时给�
   assert.match(none.error, /dev_session_set/, '……而且要给出具体做法');
   // 空数组等同于"没给"（与桥接原来的判断一致：Array.isArray && length）
   assert.equal(resolveTargets([], {}).error !== null, true);
+});
+
+test('applyToolResult / stripUndefined: 结果必须是无损 JSON（DSH 会拒绝并要求重试）', () => {
+  // 实测踩到的坑：扩展返回的 consoleError/networkError 是空串，
+  // 而成形函数写的是 `|| undefined` → 结果里出现**显式 undefined 属性**
+  // → DSH 报 `value is not lossless JSON` 并**拒绝整次工具调用**（page_health 整条不可用）。
+  // 桥接（MCP）从不会有这个问题（它把结果序列化成 JSON 文本，undefined 属性自然消失）。
+  const raw = {
+    found: true,
+    tabId: 7,
+    pageUrl: 'https://x/',
+    pageTitle: 'T',
+    console: [],
+    network: [],
+    consoleError: '',
+    networkError: '',
+  };
+  const cases = [
+    ['page_health', raw, {}],
+    ['verify_change', Object.assign({}, raw, { targets: [] }), { targets: [{ selector: '#a', expect: { present: true } }], targetsFromArgs: true }],
+    ['read_console', { text: 'x' }, {}],
+    ['browser_read', raw, { fallbackUrl: 'https://x/' }],
+  ];
+  withTempEvidenceDir(() => {
+    for (const [name, input, opts] of cases) {
+      const { result } = applyToolResult(name, input, CTX, opts);
+      assert.deepEqual(JSON.parse(JSON.stringify(result)), result, name + ' 的结果必须能无损往返');
+    }
+  });
+
+  // stripUndefined 本身：对象里的 undefined 删掉、数组里的换成 null（保住下标）、非有限数换 null
+  assert.deepEqual(stripUndefined({ a: 1, b: undefined, c: { d: undefined, e: 2 } }), { a: 1, c: { e: 2 } });
+  assert.deepEqual(stripUndefined([1, undefined, { x: undefined }]), [1, null, {}]);
+  assert.deepEqual(stripUndefined({ n: NaN, i: Infinity }), { n: null, i: null });
+  assert.deepEqual(
+    stripUndefined([1, undefined]),
+    JSON.parse(JSON.stringify(stripUndefined([1, undefined]))),
+    '数组这一支也必须无损（JSON.stringify 会把数组里的 undefined 变成 null）'
+  );
+  // 非对象原样返回（不误伤字符串/数字/布尔）
+  assert.equal(stripUndefined('s'), 's');
+  assert.equal(stripUndefined(0), 0);
+  assert.equal(stripUndefined(false), false);
 });
 
 test('toolCursorKey: 按标签页分组（切页不串台）', () => {
