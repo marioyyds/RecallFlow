@@ -256,6 +256,37 @@ curl.exe -s "http://127.0.0.1:3080/recallflow/session-log?sessionId=session-…&
 
 这是"切视图"那一半的地基：**读**能读（这一条），**发**不能发给没载入的会话（见上一节）。
 
+## 拾取的元素怎么送到 AI（2026-10-08 修好）
+
+**以前它从来不会送到**：`onPicked` 只做三件事 —— 存进 `pickedElements`、重画元素 chip、
+把焦点交给输入框；而 `panel:turn` 发出的载荷是
+`{ type, role, text, pageUrl, pageTitle }`，**没有元素字段**。
+唯一出口是「⧉ 复制交接包」（生成一段 prompt，要用户手动粘贴），
+可拾取按钮的 title 却写着"…**把它和对应的前端源码位置一起发给 AI**"——承诺与实现不符。
+
+现在是一条真链路（四层）：
+
+    chat.js  panel:turn 带上 elements（**只在拾取非空时**带 → 没拾取时请求体与改动前一模一样）
+      → background.js  透传 msg.elements
+      → relay.js       sayToDsh(text, sessionId, elements)（elements 只在非空时进请求体）
+      → 插件 /say      elementsDigest() 把它拼成自包含文本，附在用户消息后面
+                       → agent.send（作为**真用户消息**进会话）
+
+**为什么拼文本、而不是往 message 的 `content` 里加结构化块**：只见过
+`content: [{ type: 'text', text }]` 这一种被真正送进会话的形状，**没有证据**表明额外块会被
+模型侧读到 —— 而这个项目吃过"接口成功但效果没发生"的亏。拼进 text 还能在会话里**看得见**，
+所以可验证；看不见的路径不算数。
+
+**形状**（字段名参考插件自己的 `getPickedElement()` 注释"选择器 + 标签 + 文本 + 前端源码位置"，
+并对常见别名兜底 —— 面板侧的对象形状没有逐个核实过，宁可多试几个键）：
+
+    【页面元素】用户在页面上拾取了 1 个元素（面板的拾取功能，随这条消息一起发出）：
+      1. 标签=button | 选择器=div.toolbar > button.primary | 文本=提交 | 源码=src/components/Toolbar.tsx:123
+
+最多 8 个元素，每个字段截 200 字符。两条断言钉住它：
+**带 elements 时摘要必须出现在 agent 收到的文本里**；
+**不带 elements 时文本逐字不变**（默认路径不受影响）。
+
 ## 已知未验证 / 待办
 
 - ~~**端到端（面板 → 真用户消息 → 回复回面板）尚未在真实环境跑通**~~ →

@@ -269,3 +269,41 @@ test('只读会话历史路由：缺 sessionId 时明确报错，不瞎猜一条
   assert.equal(r.status, 400, '缺 sessionId 应是 400：' + r.raw);
   assert.match(String(r.json.error), /sessionId/, '应说清缺什么');
 });
+
+test('/say 带 elements：元素信息必须出现在 agent **真正收到**的文本里', async () => {
+  // 这是这条链路的核心保证：元素被**拼进消息文本**，所以模型一定读得到、会话里也看得见。
+  // 以前它从来没发出去过 —— onPicked 只把它存进本地变量、画个 chip，
+  // 而 panel:turn 的载荷里根本没有元素字段。
+  const a = fakeAgent('session-A');
+  const { routes } = await load(new Map([['session-A', a]]));
+
+  const r = await callRoute(routes.get(SAY), {
+    text: '这个按钮是干嘛的',
+    elements: [
+      {
+        tag: 'button',
+        selector: 'div.toolbar > button.primary',
+        text: '提交',
+        source: 'src/components/Toolbar.tsx:123',
+      },
+    ],
+  });
+
+  assert.equal(r.status, 200, '应成功：' + r.raw);
+  assert.equal(a.sent.length, 1, '应有一条消息进了会话');
+  const text = a.sent[0].content.map((c) => c.text).join('');
+  assert.match(text, /^这个按钮是干嘛的/, '用户原话必须在**最前面**（摘要附在后面）');
+  assert.match(text, /【页面元素】/, '元素摘要必须拼进文本 —— 否则模型看不到');
+  assert.match(text, /div\.toolbar > button\.primary/, '选择器要带上');
+  assert.match(text, /src\/components\/Toolbar\.tsx:123/, '前端源码位置要带上');
+  assert.match(text, /提交/, '元素文本要带上');
+  assert.equal(a.sent[0].source.kind, 'user', '仍是真用户消息（不是自定义 kind）');
+});
+
+test('/say 不带 elements：文本逐字不变（默认路径不受影响）', async () => {
+  const a = fakeAgent('session-A');
+  const { routes } = await load(new Map([['session-A', a]]));
+  await callRoute(routes.get(SAY), { text: '普通一句话' });
+  const text = a.sent[0].content.map((c) => c.text).join('');
+  assert.equal(text, '普通一句话', '没有元素时消息必须与改动前**逐字相同**');
+});
