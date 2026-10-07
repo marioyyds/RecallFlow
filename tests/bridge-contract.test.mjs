@@ -147,6 +147,23 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
 // 新架构对应的契约在 tests/dsh-one-plugin.test.mjs（载荷 source.kind 必须是 'user'、
 // agent.send 的 mode/wake 参数）与 tests/relay-panel-turn.test.mjs（sendToDsh 的发送端形状）。
 
+// 打开面板失败**不能让界面卡死**。
+//
+// openPanel 一开头就把悬浮气泡藏起来，然后在后面几百行里建面板 ——
+// 中途任何一步抛异常，用户看到的就是「气泡消失了、面板也没出来」，
+// 而且只能刷新页面才能再点开（用户实测报的正是这个现象）。
+// 修法：openPanel 变成带 try 的安全外壳，异常时把气泡放回去并把原因显示出来。
+test('面板 openPanel：异常必须恢复悬浮按钮，而不是把界面卡死', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const i = chat.indexOf('function openPanel(');
+  assert.ok(i > 0, '应能找到 openPanel');
+  const body = chat.slice(i, i + 1400);
+  assert.ok(/try\s*\{[\s\S]{0,200}openPanelInner\(/.test(body), 'openPanel 应是带 try 的安全外壳，内层叫 openPanelInner');
+  assert.ok(/fab\.classList\.remove\('hidden'\)/.test(body), '异常路径必须把悬浮按钮放回去，否则界面卡在死状态');
+  assert.ok(/showCitationHint\(/.test(body), '异常路径要把原因显示出来（扩展 console 捕获是空的，这是唯一能把错误带出来的路径）');
+  assert.ok(chat.includes('function openPanelInner(x, y, docked)'), '内层实现应存在');
+});
+
 // 面板的发送按钮**不能静默丢弃**。
 //
 // 用户实测反馈：「点了发送没反应」—— 表现是字还留在输入框里、也没有任何提示，
