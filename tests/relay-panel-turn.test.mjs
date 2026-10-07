@@ -236,6 +236,19 @@ test('只剩 3080 一条通道：7801 桥接已删除，DSH 通道部件齐全',
   assert.match(relay, /function scheduleDshReconnect\(\)/, 'DSH 通道应有自己的重连调度');
   assert.match(relay, /function handleDshMessage\(/, '缺 DSH 通道的消息处理');
   assert.match(relay, /function forwardSessionEvent\(frame\)/, '缺会话事件转发');
+  // 2026-10-08 真机 bug（用户报"没有同步 recallflow 的消息对话"，确认后是"完全没有"）：
+  // 事件原来只推给 `activeTab()` —— 用户切到 DSH 界面看回复，活动页就变了，
+  // 原来那个页面的面板**一条都收不到**（发送走 HTTP、不看活动页，所以"能发不能收"）。
+  // 现在必须广播给所有标签页：下面两条同时钉住"必须广播"和"不许再挑一个"。
+  assert.match(
+    relay,
+    /chrome\.tabs\.query\(\{\}, \(tabs\) => \{/,
+    '会话事件必须广播给所有标签页（chrome.tabs.query({})）'
+  );
+  assert.ok(
+    !/function forwardSessionEvent[\s\S]{0,400}?activeTab\(\)/.test(relay),
+    'forwardSessionEvent 不得再按"当前活动标签页"挑一个 —— 那正是"能发不能收"的根因'
+  );
   // 2026-10-08：签名多了可选的 sessionId（面板"选择跟哪条会话说话"），
   // 随后又多了第三个参数 elements（面板拾取的元素随消息一起送给 AI）。
   // 这里不写死成 `sayToDsh(text)`，但必须**确实**接受这两个参数 —— 否则面板的选择/元素传不进去。
