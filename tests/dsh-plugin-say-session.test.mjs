@@ -144,3 +144,29 @@ test('/status 暴露每个已知会话的 lastAt，供面板做选择器', async
   assert.ok(typeof entry.lastAt === 'number' && entry.lastAt > 0, 'lastAt 应是正数时间戳');
   assert.ok(Array.isArray(s.json.sessions) && s.json.sessions.includes('session-A'), '旧的 sessions id 列表必须保留（兼容）');
 });
+
+test('/status 的列表要**主动枚举注册表** —— 否则只有"说过话的那几条"', async () => {
+  // 真实事故（用户报"有一个下拉，但点了没反应"）：sessions 只从会话事件与"发消息时的兜底"里填，
+  // 而那个兜底只在找不到可用会话时才跑 → 只要有 1 条会话在说话，列表就永远只有那 1 条，
+  // 选择器看起来"点了没反应"（其实只有一个真选项）。
+  const a = fakeAgent('session-A');
+  const b = fakeAgent('session-B');
+  const c = fakeAgent('session-C');
+  const { routes } = await load(new Map([['session-A', a], ['session-B', b], ['session-C', c]]));
+
+  // **一次消息都不发、一个事件都不来**，直接问 /status
+  const s = await callRoute(routes.get(STATUS), undefined);
+
+  const ids = (s.json.sessionList || []).map((x) => x.id).sort();
+  assert.deepEqual(
+    ids,
+    ['session-A', 'session-B', 'session-C'],
+    '注册表里的三条都应出现在列表里（否则面板只能看到一个选项），实际：' + JSON.stringify(s.json.sessionList)
+  );
+  // 补登记进来的不能把"最近活动"刷成现在 —— 那会让排序变成瞎猜
+  const discovered = s.json.sessionList.filter((x) => ['session-B', 'session-C'].includes(x.id));
+  assert.ok(
+    discovered.every((x) => x.lastAt === 0),
+    '补登记的会话 lastAt 应为 0（没活动过就是没活动过），实际：' + JSON.stringify(discovered)
+  );
+});

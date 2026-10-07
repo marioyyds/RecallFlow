@@ -274,6 +274,35 @@ export function apply(ctx, config = {}) {
   }
 
   /**
+   * 面板要的会话清单：**先补登记官方注册表，再列**。
+   *
+   * 为什么必须补（2026-10-08 实测）：`sessions` 只从"收到的会话事件"和"发消息时的兜底"里填，
+   * 而那个兜底**只在 `sessions` 里找不到可用会话时才跑** —— 于是只要已经有 1 条会话在说话，
+   * 列表就永远只有那 1 条。面板的选择器因此看起来"点了没反应"（其实只有一个真选项）。
+   * 插件 inject 了 `agents`、确实能枚举，所以这里主动补一次。
+   */
+  function listAllSessions() {
+    try {
+      const list = ctx.agents && typeof ctx.agents.list === 'function' ? ctx.agents.list() : [];
+      for (const agent of list) {
+        const id = sessionIdOf(agent && agent.session);
+        if (!id) continue;
+        const prev = sessions.get(id);
+        if (!prev) {
+          // 新发现的补进来，但 `lastAt` 给 0：**不能刷成"现在"** ——
+          // 那是"最近活动"的真实依据，补登记把它刷掉会让排序变成瞎猜。
+          sessions.set(id, { agent, lastAt: 0 });
+        } else if (!prev.agent) {
+          prev.agent = agent;
+        }
+      }
+    } catch (e) {
+      log('枚举注册表失败：' + String((e && e.message) || e));
+    }
+    return [...sessions.entries()].map(([id, e]) => ({ id, lastAt: e.lastAt || 0 }));
+  }
+
+  /**
    * 严格按 id 找会话：**找不到就返回 null，绝不回退到别的会话**。
    *
    * 为什么需要单独一个（2026-10-08 加）：`pickSession` 的语义是"尽量找一个能用的会话"——
@@ -317,8 +346,9 @@ export function apply(ctx, config = {}) {
       clients: [...clients].filter((ws) => ws.readyState === 1).length,
       sessions: [...sessions.keys()],
       // 每个已知会话的最近活动时间：面板的"选择会话"用它排序与显示
-      // （原来只有 id 列表，选不出"哪条是刚才在说的那条"）
-      sessionList: [...sessions.entries()].map(([id, e]) => ({ id, lastAt: e.lastAt || 0 })),
+      // （原来只有 id 列表，选不出"哪条是刚才在说的那条"）。
+      // 走 listAllSessions()：它会**主动枚举注册表**，否则列表永远只有"说过话的那几条"。
+      sessionList: listAllSessions(),
       currentSessionId,
       pendingTools: pendingTools.size,
       // 会话事件的计数：用来分辨"事件没来"与"事件来了但处理失败"
