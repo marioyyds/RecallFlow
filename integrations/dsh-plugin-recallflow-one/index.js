@@ -189,6 +189,11 @@ export function apply(ctx, config = {}) {
   const sessions = new Map();
   let currentSessionId = '';
 
+  // SessionStore 的自检结果（见 listAllSessions）。**不是**给用户看的装饰：
+  // 面板在 shadow DOM 里、console 也不一定读得到，而这个字段能从 /status 读到 ——
+  // 于是"选择器为什么列不全"变成一个可观测的事实，而不是又一轮猜。
+  const sessionStoreDiag = { available: false, methods: [], used: '', count: 0, error: '' };
+
   // 装载时记录**自身文件**的指纹。为什么需要：
   // 插件代码在 DSH 启动时载入，没有热重载 —— 于是"现在跑的是哪个版本"只能靠
   // 进程启动时间 vs 提交时间去**推断**（我就为此绕了好几轮）。有了这个，一条 curl 就能确定。
@@ -282,6 +287,9 @@ export function apply(ctx, config = {}) {
    * 插件 inject 了 `agents`、确实能枚举，所以这里主动补一次。
    */
   function listAllSessions() {
+    // ① 先补登记 agents 注册表里的会话。
+    //    DSH 的类型声明写明了它的范围：`All **live** agents` —— 只有**活着的**，
+    //    不是侧边栏里的全部会话。所以这一步只能捞到"当前活着的那几条"。
     try {
       const list = ctx.agents && typeof ctx.agents.list === 'function' ? ctx.agents.list() : [];
       for (const agent of list) {
@@ -299,6 +307,59 @@ export function apply(ctx, config = {}) {
     } catch (e) {
       log('枚举注册表失败：' + String((e && e.message) || e));
     }
+
+    // ② 再问 **SessionStore**（DSH 的会话存储）要全部会话 —— 侧边栏那个列表就是从它来的。
+    //
+    // 为什么用 `ctx.get('sessions', false)` 而**不是** `inject: ['sessions']`：
+    // cordis 的 inject 失败会让**整个插件不加载**，而这一条只是"让选择器更全"，
+    // 不该有把插件拖下线的权力。官方对 ctx.get 的注释正是：
+    // "Read a service from the store **without the inject requirement**"。
+    //
+    // 而且不赌它的方法名：把服务上**实际存在的方法名**记进 /status（sessionStore 字段），
+    // 再逐个试几个常见签名。**看不到面板的时候，/status 就是我唯一的窗口。**
+    try {
+      const store = ctx.get && ctx.get('sessions', false);
+      if (store) {
+        sessionStoreDiag.available = true;
+        const names = new Set();
+        for (let o = store; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+          for (const k of Object.getOwnPropertyNames(o)) {
+            if (k === 'constructor') continue;
+            try {
+              if (typeof store[k] === 'function') names.add(k);
+            } catch (e) {}
+          }
+        }
+        sessionStoreDiag.methods = [...names].sort();
+        for (const name of ['list', 'all', 'headers', 'query', 'entries', 'values']) {
+          if (typeof store[name] !== 'function') continue;
+          try {
+            const r = store[name]();
+            const arr = Array.isArray(r) ? r : r && Array.isArray(r.items) ? r.items : null;
+            if (!arr) continue;
+            for (const it of arr) {
+              const id =
+                sessionIdOf(it && it.session) ||
+                String((it && (it.id || it.sessionId || it.sessionID)) || '');
+              if (!id) continue;
+              if (!sessions.has(id)) {
+                // agent 未必拿得到（那条会话可能没活着）：agent 为空时
+                // findSessionStrict 会继续去注册表找，找不到就明确报错，**不会乱发**。
+                sessions.set(id, { agent: null, lastAt: 0 });
+              }
+            }
+            sessionStoreDiag.used = name;
+            sessionStoreDiag.count = arr.length;
+            break;
+          } catch (e) {
+            sessionStoreDiag.error = name + ': ' + String((e && e.message) || e);
+          }
+        }
+      }
+    } catch (e) {
+      sessionStoreDiag.error = String((e && e.message) || e);
+    }
+
     return [...sessions.entries()].map(([id, e]) => ({ id, lastAt: e.lastAt || 0 }));
   }
 
@@ -347,8 +408,13 @@ export function apply(ctx, config = {}) {
       sessions: [...sessions.keys()],
       // 每个已知会话的最近活动时间：面板的"选择会话"用它排序与显示
       // （原来只有 id 列表，选不出"哪条是刚才在说的那条"）。
-      // 走 listAllSessions()：它会**主动枚举注册表**，否则列表永远只有"说过话的那几条"。
+      // 走 listAllSessions()：它会**主动枚举**（agents 注册表 + SessionStore），
+      // 否则列表永远只有"说过话的那几条"。
       sessionList: listAllSessions(),
+      // SessionStore 的自检：可不可用、有哪些方法、用了哪个、几条、什么错。
+      // 面板在 shadow DOM 里、console 又不一定读得到 —— 这个字段是把
+      // "选择器为什么列不全"变成可观测事实的唯一窗口。
+      sessionStore: sessionStoreDiag,
       currentSessionId,
       pendingTools: pendingTools.size,
       // 会话事件的计数：用来分辨"事件没来"与"事件来了但处理失败"
