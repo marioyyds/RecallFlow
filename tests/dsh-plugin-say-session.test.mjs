@@ -31,7 +31,7 @@ function fakeAgent(id) {
 }
 
 /** 最小 ctx：抓住路由 + 工具，并给一个假的 agents 注册表（插件确实 inject 了 'agents'）。 */
-function makeCtx(agentsById) {
+function makeCtx(agentsById, query) {
   const routes = new Map();
   const tools = [];
   const ctx = {
@@ -45,6 +45,9 @@ function makeCtx(agentsById) {
       list: () => [...agentsById.values()],
     },
     on: () => {},
+    // SessionQuery 桩。默认 undefined = 服务不可用 → 插件走安全分支（不报错、只是列不全）。
+    // 用 get 而不是 inject，是因为插件就是这么写的：inject 失败会让整个插件不加载。
+    get: (name) => (name === 'sessionQuery' ? query : undefined),
     effect: (f) => (typeof f === 'function' ? f() : undefined),
     logger: () => {},
   };
@@ -74,10 +77,10 @@ async function callRoute(handler, body) {
   return { status, json, raw: payload };
 }
 
-async function load(agentsById) {
+async function load(agentsById, query) {
   // 用带随机 query 的 URL 重新 import：避免模块缓存让多次装载互相串味
   const mod = await import(pathToFileURL(PLUGIN).href + '?case=' + Math.random());
-  const { ctx, routes, tools } = makeCtx(agentsById);
+  const { ctx, routes, tools } = makeCtx(agentsById, query);
   mod.apply(ctx, {});
   return { routes, tools };
 }
@@ -169,4 +172,52 @@ test('/status 的列表要**主动枚举注册表** —— 否则只有"说过�
     discovered.every((x) => x.lastAt === 0),
     '补登记的会话 lastAt 应为 0（没活动过就是没活动过），实际：' + JSON.stringify(discovered)
   );
+});
+
+test('SessionQuery：live / parentSession 要落进 sessionList，子会话**不能靠 id 形状判**', async () => {
+  // 真机实测过的事实（2026-10-08）：17 条里有 4 条是子会话，其中一条**带 `session-` 前缀**
+  // （session-c03c84c9…，parentSession = 当前会话）。所以判据必须是 DSH 给的
+  // `SessionRecord.live` 与 `SessionHeader.parentSession` —— 看 id 长什么样会漏掉它。
+  const parent = 'session-723c8b32-4ab3-489f-9f53-80958d29c5a9';
+  const records = [
+    { header: { id: parent }, live: true, persisted: true },
+    {
+      header: { id: 'session-c03c84c9-d915-4193-9296-7f234dfc7ce4', parentSession: parent },
+      live: false,
+      persisted: true,
+    },
+    {
+      header: { id: '4bf8230e-2bdb-42b3-bfe3-268b254ca3dd', parentSession: parent },
+      live: false,
+      persisted: true,
+    },
+  ];
+  const { routes } = await load(new Map(), { listSessions: async () => records });
+
+  // refreshStoreSessions 是后台跑的（刻意不 await：statusSnapshot 是同步的）——
+  // 所以第一次 /status 触发刷新，第二次就能读到。
+  await callRoute(routes.get(STATUS), undefined);
+  await new Promise((r) => setTimeout(r, 10));
+  const s = await callRoute(routes.get(STATUS), undefined);
+
+  const by = (id) => (s.json.sessionList || []).find((x) => x.id === id);
+  assert.ok(by(parent), '父会话应在列表里');
+  assert.equal(by(parent).live, true, 'live 要从 SessionRecord 带出来');
+  const child = by('session-c03c84c9-d915-4193-9296-7f234dfc7ce4');
+  assert.ok(child, '带 session- 前缀的子会话也要在列表里（它确实是一条会话）');
+  assert.equal(child.live, false, 'live:false 要如实带出来 —— 界面靠它提示"发送前先打开"');
+  assert.equal(
+    child.parentSession,
+    parent,
+    'parentSession 要带出来：**带前缀的那条也是子会话**，光看 id 形状会漏掉它'
+  );
+  assert.equal(
+    by('4bf8230e-2bdb-42b3-bfe3-268b254ca3dd').parentSession,
+    parent,
+    '裸 uuid 的子会话同样要有 parentSession'
+  );
+  assert.equal(s.json.sessionStore.queryAvailable, true, 'queryAvailable 应为 true');
+  assert.equal(s.json.sessionStore.queryUsed, 'listSessions', 'queryUsed 应记下用了哪个方法');
+  assert.equal(s.json.sessionStore.queryCount, 3, 'queryCount 应是记录条数');
+  assert.equal(s.json.sessionStore.queryError, '', 'queryError 应为空');
 });
