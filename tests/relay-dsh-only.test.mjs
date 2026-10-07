@@ -137,6 +137,21 @@ test('sayToDsh 打到 DSH 的 /recallflow/say，空文本不发请求', async ()
     await sayToDsh('再说一句', '   ');
     const sent3 = JSON.parse(stub.fetchCalls[2].init.body);
     assert.equal('sessionId' in sent3, false, '空白 sessionId 应视作未指定');
+
+    // elements（2026-10-08）：面板拾取的元素随消息一起送给 AI。
+    const els = [{ tag: 'button', selector: '.x', source: 'a.tsx:1' }];
+    await sayToDsh('看这个元素', '', els);
+    const sent4 = JSON.parse(stub.fetchCalls[3].init.body);
+    assert.deepEqual(sent4.elements, els, 'elements 必须真的进请求体（插件靠它拼摘要）');
+    assert.equal(sent4.text, '看这个元素');
+
+    // **空数组 / 不传** → 请求体里完全不出现 elements（不拾取时与改动前一模一样）
+    await sayToDsh('没有元素', '', []);
+    const sent5 = JSON.parse(stub.fetchCalls[4].init.body);
+    assert.equal('elements' in sent5, false, '空数组不该带 elements（默认路径必须不变）');
+    await sayToDsh('也没传', '');
+    const sent6 = JSON.parse(stub.fetchCalls[5].init.body);
+    assert.equal('elements' in sent6, false, '不传时更不该有 elements');
   } finally {
     stub.restore();
   }
