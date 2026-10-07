@@ -163,32 +163,39 @@ const m = await import(pathToFileURL(p).href);        // ← 必须转 file:// U
 与 `queryAvailable / queryMethods / queryUsed / queryCount / queryError`）：
 面板在 shadow DOM 里、console 不一定读得到，**这个字段是把"为什么列不全"变成可观测事实的唯一窗口**。
 
-### 能不能"载入一条没活着的会话"？（2026-10-08 查证）
+### 能不能"载入一条没活着的会话"？（2026-10-08 查证，**已在真机上测出来**）
 
-**结论：DSH 有这套 API，而且语义正对；但"插件拿不拿得到"还没在真机上确认** ——
-探针已就位（见下），等下一次重启 DSH。
+**结论：DSH 有这套 API、语义也正对，但插件拿不到那个服务 —— 这条路走不通。**
+探针实测（重启后读 `/status`）：
+
+    sessionController.available = False        ← 插件侧拿不到
+    methods = （空）
+
+也就是说 `resolveAgent`（*"Resolve or **resume** one ordinary Session … @returns **the live Agent**"*）
+对插件是**关着**的 —— **"把消息送进一条没载入的会话"不是改插件能绕开的事**。
+这条结论也回答了本文开头那个现象：选了一条 `live:false` 的会话，消息**必然**发不出去（503）。
 
 `dsh-api-session-controller` 声明的 **Host** 服务叫 **`sessionController`**（挂在 cordis 的
-`Context` 上，**不是**客户端那个 `ctx.sessions`）。它的方法正对着这两件事：
+`Context` 上，**不是**客户端那个 `ctx.sessions`；后者是 GUI 自己用的面）。它的方法：
 
 | 方法 | 注释原文 | 对我们的意义 |
 |---|---|---|
-| `resolveAgent(sessionId)` | *"Resolve or **resume** one ordinary Session … @returns **the live Agent**"* | **正是缺的那一步**：载入一条已存会话并拿到它的活 agent |
+| `resolveAgent(sessionId)` | *"Resolve or **resume** one ordinary Session … @returns **the live Agent**"* | 若能拿到就是缺的那一步 —— **但测出来拿不到** |
 | `inspect(sessionId, signal?)` | *"Inspect one attached or persisted Session **without activating its Agent**"* | **只读**读历史 —— "真正切视图"要的那一步 |
-| `create(request)` | *"Create or **idempotently adopt** one ordinary Session"*（客户端面写作 `create({ sessionId })`）| 也能"收养"一条已存会话，但不如 `resolveAgent` 直接 |
-| `list(request, signal)` | *"Read all visible Session rows **without resuming an Agent**"* | 只读列目录（我们现在用 `sessionQuery.listSessions()` 已经能列全）|
+| `create(request)` | *"Create or **idempotently adopt** one ordinary Session"*（客户端面写作 `create({ sessionId })`）| 也需要同一个服务 |
+| `list(request, signal)` | *"Read all visible Session rows **without resuming an Agent**"* | 只读列目录（现已用 `sessionQuery.listSessions()` 列全）|
 
-**两条前置事实，都还没在真机上确认**：
+**还剩一条门没测完**：那个 controller 是 `TypertRemoteService`，注释写着它
+*"backing the generated **`ctx.remote.session`** namespace"*，而 DSH 内置插件里确实有
+`inject: ['agents','sessionQuery','**typert**']`。探针已加上 `typertAvailable / typertMethods /
+remoteKeys / remoteSession` 四个字段（仍是**只读**）—— **要等下一次重启 DSH 才有值**。
 
-1. **插件能不能 `ctx.get('sessionController', false)` 拿到它** —— `/status` 的
-   `sessionController.available` 与 `.methods` 就是答案（探针**只读**：取服务、列方法名、
-   再对当前会话只读调一次 `readSession`；只记事件条数与一条事件的 `type`，**不记内容**）。
-   为什么用 `ctx.get` 而不用 `inject`：inject 失败会让**整个插件不加载**，这条不配拥有那个权力。
-2. **`resolveAgent` 会「resume」** —— 也就是**真的把那条会话激活**。它不销毁任何东西
-   （等同于你在侧边栏点开它一次），但会占资源、可能改变"最近活跃"，
-   而且**会不会把 GUI 的当前视图一起切走，我没有验证**。
-   所以这条**要用户明确同意才做** —— 不许偷偷调用（否则"选了一条会话"会产生看不见的副作用）。
-   **只读的 `inspect` 没有这个问题**，服务一旦确认可拿到就可以直接做。
+**顺带修掉一个我自己造的坑**：`readSessionOk` 第一版永远是 `false`，是**探针的时序 bug**
+（`refreshStoreSessions()` 是异步的，而读历史要用 `currentSessionId`/`sessions`；两句并列写在
+加载处 → 探针跑在登记表还空着的时候 → `id` 取到空串 → 读取被跳过）。已改成
+`refreshStoreSessions().then(() => probeController())`。
+**同一服务上的 `listSessions()` 是成功的**（`queryCount=17`），所以 `readSession` 大概率也能用 ——
+但那是推断，**实测值要等重启后的 `readSessionOk`**。
 
 ## 调试入口
 
