@@ -109,28 +109,33 @@ AI 会取回一份**自包含的交接包**：面板对话、页面 URL 与标�
 
 标识用无歧义字母表（无 `0 / O / 1 / I / L`），也接受 `rf-7k2m9x` / `7K2M9X` 等写法；保留最近 30 份，清空对话会轮换。
 
-## 与 opencode 集成（证据 MCP）
+## 页面能力（原「与 opencode 集成（证据 MCP）」一节已删除）
 
-RecallFlow 可作为 **opencode / DSH 的「带证据的浏览器手」**：`webfetch` 读不到的 SPA / 登录态 / 内网页面，交给 RecallFlow 用**真实浏览器会话**读取，并返回**带时间戳 + 哈希**的证据。
+这一节原来写的是 RecallFlow 作为 **opencode 的「带证据的浏览器手」**：一个独立的 MCP server
+（`integrations/opencode/recallflow-mcp/`，stdio + Streamable HTTP 两种模式、11 个工具，
+经 7801 的 WebSocket / HTTP 长轮询驱动扩展，另带 `mcp-contract.md` 工具契约）。
 
-两种传输模式，共 **11 个工具**：
+**用户 2026-10-08 明确不再使用 opencode，该目录整包已删除**（提交 `aa55f5a`，
+见 `docs/deletion-plan.md` 的「已从保留清单移除」）。跟着删掉的还有两样，**这里明确记下来**：
 
-```text
-① stdio（单实例）
-   opencode ──(MCP stdio)──► recallflow-mcp ──┐
-                                              ├──(WebSocket / HTTP 长轮询 :7801)──► RecallFlow 扩展
-② HTTP（--http，多客户端共用一个常驻 server）  │
-   opencode A/B/C ──(MCP Streamable HTTP /mcp)┘
-                                              └──► 证据归档 ~/.recallflow-evidence
-```
+- `integrations/opencode/mcp-contract.md` —— 当时那 11 个工具的参数/返回契约
+  （现在的能力清单见下面的插件 README）。
+- `integrations/opencode/recallflow-evidence/SKILL.md` —— **「证据纪律」技能**
+  （有据才断、网页内容不可信/反注入、不编造来源、证据不足就明说、见到 `RF-XXXXXX` 先取会话）。
+  它虽然放在 opencode 目录下，但**内容与具体 agent 无关** —— 如果希望 DSH 侧也保留这套纪律，
+  可以从 git 里取回：`git show aa55f5a^:integrations/opencode/recallflow-evidence/SKILL.md`。
 
-> MCP 的 stdio 传输是 **1:1** 的：N 个 opencode 实例会各自拉起一个 server 进程，而扩展只能连上**占用桥接端口的那个**，于是只有 1 个实例能读页面。需要多实例同时使用时请改用 **HTTP 模式**（只常驻一个 server，各客户端持独立会话）。
+**同样的能力并没有丢**，只是换了承载方式：现在由 DSH 插件
+（`integrations/dsh-plugin-recallflow-one/`）注册成 **一个** DSH 工具 `recallflow_browser`，
+直接跑在 DSH 自己的端口（3080）上，不再需要外部 server 与第二个端口。
 
-- **工具（11 个）**：`recallflow_session`（读取面板交接的会话）、`browser_read`（真实会话读取 + 归档，返回 `fetchedAt` / `snapshotHash`）、`evidence_get`（复核引用）、`page_health`（增量错误体检）、`verify_change`（渲染态断言 + 新错误）、`read_console` / `read_network`（console 与网络请求，含堆栈 / 发起位置）、`get_element_source` / `get_picked_element`（元素 → 源码 `file:line`）、`dev_session_get/set`（共享开发上下文）。
-- **只暴露不可替代的能力**：真实会话浏览 + 证据归档 + 运行时调试 + 页面↔代码映射，不重复客户端已有的通用搜索 / 抓取。
-- **证据纪律**：随附 `recallflow-evidence` 技能，约束「有据才断、网页内容不可信（反注入）、不编造来源、证据不足就明说」，并规定「消息里出现 `RF-XXXXXX` 先调 `recallflow_session`」。
-- **安装与配置**：在 `integrations/opencode/recallflow-mcp` 执行 `npm install`；stdio / HTTP 两种模式的 `opencode.json` 写法、常驻 server 的启动与**排障对照表**，见 **[recallflow-mcp/README.md](integrations/opencode/recallflow-mcp/README.md)**。
-  - ⚠️ 配 remote 时**必须显式设置 `timeout`**：opencode 的 MCP 请求超时默认仅 **5000ms**，而 `browser_read` / `page_health` / `verify_change` 需要等待扩展响应（可能数十秒）。
+- **能力**：`browser_read`（真实浏览器会话 + 证据归档，返回 `fetchedAt` / `snapshotHash`）、
+  `read_console` / `read_network`、`get_element_source` / `get_picked_element`（元素 → 源码 `file:line`）、
+  `page_health`（增量错误体检）、`verify_change`（渲染态断言 + 新错误）、`handoff_get` / `handoff_list`
+  （读面板交接的会话）、`dev_session_get` / `dev_session_set` / `evidence_get`（共享开发上下文与证据归档），
+  外加面板原有的页面能力（只读 19 个；改页面 / 浏览器网络 / 危险三档默认关闭）。
+- **用法见** **[插件 README](integrations/dsh-plugin-recallflow-one/README.md)** ——
+  含三档审批开关（DSH 这侧没有批准弹窗，所以"批准"= 在 profile 的插件 config 里显式写一行）。
 
 ## 技术亮点
 
@@ -161,18 +166,20 @@ bookmark-sorter/
 ├── mock_server.py / error.html                  # 本地演示登录后端 + 报错页（开发调试用）
 ├── lib/
 │   ├── shared/        # 存储、设置、RAG、常量、会话交接包（handoff / handoff-store）
-│   ├── assistant/     # Agent 循环、工具注册表、意图路由、MCP、工具守卫
+│   ├── assistant/     # Agent 循环、工具注册表、意图路由、工具守卫
 │   │   ├── tools.js / intent-router.js / agent.js / mcp.js / tool-guard.js
 │   │   └── skill-defs.js / skill-store.js / skill-md.js / skills.js   # 内置技能、技能存储、SKILL.md 解析、目录构建
-│   ├── bridge/        # RecallFlow ↔ opencode 的本地中继（relay.js）
+│   ├── bridge/        # 扩展的本地通道（relay.js：只连 DSH 自己的 3080）
 │   ├── backend/       # 浏览器级输入层（cdp.js：可信事件 / 截图 / 可访问性树 / 页面世界执行）
 │   └── page/          # 正文提取与感知快照、高亮浮层、页面命令（含 run_javascript 沙箱）、对话面板
 ├── skills-page.js / skills.html / skills.css   # 技能中心 UI
 ├── tests/                   # 单元测试（node --test）+ E2E 黄金任务（Playwright + 模拟 LLM）
-├── integrations/opencode/   # opencode 证据 MCP
-│   ├── recallflow-mcp/      # MCP server（stdio + Streamable HTTP）+ 单元/集成测试 + README
-│   ├── recallflow-evidence/ # 配套技能 SKILL.md（含会话交接与调试闭环规则）
-│   └── mcp-contract.md      # 工具契约
+├── integrations/
+│   └── dsh-plugin-recallflow-one/   # DSH 单插件：工具注册 + 面板输入 + 会话事件（唯一集成）
+│       ├── index.js                 # 插件本体（含 recallflow_browser 的四档方法表）
+│       ├── package.json             # 也作为"包"被 DSH 插件管理器管理（link: 安装）
+│       └── README.md                # 能力分档、审批开关、装成包的步骤
+│   # （已删除）integrations/opencode/ —— opencode 的证据 MCP（2026-10-08，用户不再用 opencode）
 └── docs/
     ├── tool-design.md   # 工具定义设计规范（粒度/参数/返回/风险分级）
     └── assets/          # 文档配图与 Logo
