@@ -115,6 +115,10 @@ function doApply() {
   console.log('--- 执行（--apply）---');
   backup(PATCH);
   backup(PROFILE_PKG);
+  // pnpm add 会**改写 lock 文件**，也一起备份 —— 这一步最容易漏，漏了就没法干净回滚。
+  const LOCK = path.join(PROFILE, 'pnpm-lock.yaml');
+  if (existsSync(LOCK)) backup(LOCK);
+  else say('备份', '（没有 pnpm-lock.yaml，跳过）');
 
   // 3) 安装
   say('安装', 'pnpm add link:' + PKG_DIR);
@@ -160,7 +164,8 @@ function doApply() {
 
 function doRollback() {
   console.log('--- 回滚：从最近的备份恢复 ---');
-  for (const f of [PATCH, PROFILE_PKG]) {
+  // 注意 pnpm-lock.yaml 也在列表里：`pnpm add` 会改写它。
+  for (const f of [PATCH, PROFILE_PKG, path.join(PROFILE, 'pnpm-lock.yaml')]) {
     const dir = path.dirname(f);
     const base = path.basename(f) + '.bak-';
     const baks = readdirSync(dir)
