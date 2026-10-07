@@ -323,6 +323,12 @@ node scripts/probe-say.mjs "测试文本"
 三条路都关着。**想发消息给一条没载入的会话，只有先在 DSH 里把它打开一次**
 （点了它就变 `live`，`/status` 的 `sessionList[].live` 会跟着变）。
 
+**而"读历史"这一半相反 —— 它是通的**：`readSession` 的注释写明参数是
+*"**live or persisted** session id to read"*（**不要求会话活着**），返回
+*"cloned header and complete raw event log"*；`listEvents` 同理（*"live-preferred"* 而非 required）。
+它就在插件**已经能拿到**的 `sessionQuery` 服务上（`listSessions()` 一直成功）。
+所以"真正的切视图"在设计上是允许的，"不能"的只有**发消息**那一半。
+
 ## 已知限制 / 未验证
 
 - **✅ 已解决（第 19 轮留下的线索）：会话事件的推送是健康的。**

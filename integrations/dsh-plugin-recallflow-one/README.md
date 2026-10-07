@@ -198,17 +198,23 @@ const m = await import(pathToFileURL(p).href);        // ← 必须转 file:// U
 | `create(request)` | *"Create or **idempotently adopt** one ordinary Session"*（客户端面写作 `create({ sessionId })`）| 也需要同一个服务 |
 | `list(request, signal)` | *"Read all visible Session rows **without resuming an Agent**"* | 只读列目录（现已用 `sessionQuery.listSessions()` 列全）|
 
-**还剩一条门没测完**：那个 controller 是 `TypertRemoteService`，注释写着它
-*"backing the generated **`ctx.remote.session`** namespace"*，而 DSH 内置插件里确实有
-`inject: ['agents','sessionQuery','**typert**']`。探针已加上 `typertAvailable / typertMethods /
-remoteKeys / remoteSession` 四个字段（仍是**只读**）—— **要等下一次重启 DSH 才有值**。
+**那条"typert 门"也关着**（查完了）：那个 controller 是 `TypertRemoteService`，注释写着它
+*"backing the generated **`ctx.remote.session`** namespace"* —— 但 `ctx.remote` 在 DSH 类型里是
+**`ClientRemote`**，**属于客户端**（GUI 自己的插件），服务端插件没有它。所以那条路不是"待测"，
+是**不通**。（探针里仍保留 `typertAvailable / typertMethods / remoteKeys / remoteSession`
+四个只读字段，作为"将来 DSH 改了"的观测点。）
+
+**② 的另一半（读历史）有代码级答案**：`readSession` 的文档注释写明参数是
+*"**live or persisted** session id to read"* —— **不要求会话活着**，
+*"@returns cloned header and complete raw event log"*；`listEvents` 同理
+（*"live-preferred"* 而非 required）。也就是说"**读出任意会话的历史**"在设计上就是允许的，
+而且它就在插件**已经能拿到**的 `sessionQuery` 服务上（`listSessions()` 一直成功，`queryCount=17`）。
 
 **顺带修掉一个我自己造的坑**：`readSessionOk` 第一版永远是 `false`，是**探针的时序 bug**
 （`refreshStoreSessions()` 是异步的，而读历史要用 `currentSessionId`/`sessions`；两句并列写在
 加载处 → 探针跑在登记表还空着的时候 → `id` 取到空串 → 读取被跳过）。已改成
 `refreshStoreSessions().then(() => probeController())`。
-**同一服务上的 `listSessions()` 是成功的**（`queryCount=17`），所以 `readSession` 大概率也能用 ——
-但那是推断，**实测值要等重启后的 `readSessionOk`**。
+**差的只是那一步实测**：`/status` 的 `readSessionOk / readEventsCount`（探针已就位，**要一次重启**）。
 
 ## 调试入口
 
