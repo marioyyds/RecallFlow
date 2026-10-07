@@ -250,15 +250,19 @@ export function apply(ctx, config = {}) {
         // 要的是**实例**，`create` 的注释是 "Create a live child session from an exact
         // prefix of a live source" —— 硬用只会动到用户的会话上下文）。
         const live = !!r.live;
+        // 子会话（subagent / fork）的头部带 `parentSession`。把它也暴露出来，
+        // **而不是靠 id 前缀去猜**（17 条里有 3 条是裸 uuid，形状猜不出语义）。
+        const parentSession = String((r.header && r.header.parentSession) || '');
         const prev = sessions.get(id);
         if (!prev) {
           // agent 未必拿得到（那条会话可能没活着）：findSessionStrict 会再查注册表，
           // 找不到就**明确报错**，绝不把消息发到别的会话。
-          sessions.set(id, { agent: null, lastAt: 0, live });
+          sessions.set(id, { agent: null, lastAt: 0, live, parentSession });
           added++;
         } else {
           // 会话可能刚被打开（或被关掉）：每次刷新都跟着更新，别让"未载入"标错了。
           prev.live = live;
+          prev.parentSession = parentSession;
         }
       }
       sessionStoreDiag.queryUsed = 'listSessions';
@@ -440,10 +444,13 @@ export function apply(ctx, config = {}) {
 
     // `live` 一并给出去：面板据此把"未载入"的会话标出来（选中它能看见为什么发不出去，
     // 而不是等发送时才撞上 503）。经 agents 注册表登记的条目本身就是活的。
+    // `parentSession` 非空 = 子会话（subagent/fork）：面板据此把它标出来 —— 那不是
+    // 用户该往里打字的对话。数据来自 DSH 的 SessionHeader，不是我猜的 id 形状。
     return [...sessions.entries()].map(([id, e]) => ({
       id,
       lastAt: e.lastAt || 0,
       live: e.live !== false,
+      parentSession: e.parentSession || '',
     }));
   }
 

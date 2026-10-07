@@ -48,6 +48,23 @@ test('选项按最近活动排序，带 isCurrent 标记，脏数据被滤掉', 
   assert.equal(sorted.find((x) => x.id === B).isCurrent, false);
 });
 
+test('live 与 parentSession 要一路带到选项上（界面靠它们标注"未载入 / 子会话"）', () => {
+  // 这两条是"发送前就能看见"的全部依据：live:false 的会话插件拿不到 agent，
+  // parentSession 非空的是子会话（不是用户该打字的对话）。丢掉任何一个，
+  // 用户就只能等到发送失败才知道。
+  const opts = sortSessionChoices([
+    { id: 'a', lastAt: 3, live: false },
+    { id: 'b', lastAt: 2, live: true, parentSession: 'a' },
+    { id: 'c', lastAt: 1 }, // 没给 live：经 agents 注册表登记的条目本身就是活的
+  ]);
+  const by = (id) => opts.find((x) => x.id === id);
+  assert.equal(by('a').live, false, 'live:false 不能被丢掉');
+  assert.equal(by('b').live, true);
+  assert.equal(by('c').live, true, '缺省 live 应视为活着');
+  assert.equal(by('b').isChild, true, 'parentSession 非空要认成子会话');
+  assert.equal(by('a').isChild, false, '没有 parentSession 就不是子会话');
+});
+
 test('同分时保持原顺序（稳定），没有 lastAt 的沉底', () => {
   const sorted = sortSessionChoices([
     { id: 'a', lastAt: 0 },
