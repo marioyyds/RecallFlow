@@ -94,6 +94,11 @@ this context can only target this live turn's next step."
 → `inject` 只能**引导正在进行的那一轮**，不能唤醒空闲会话。面板要能主动开口，
 必须走 `session.prompt`（GUI 发消息用的同一条路）。
 
+> ⚠️ **上面这句"必须走 `session.prompt`"是当时（v2）的假设，下面第 100 行的探针 v3 推翻了它** ——
+> `agent.session.prompt` **不是函数**（同一次探针的输出里就写着 `session.prompt 是函数=false`）。
+> 正确入口是 `agent.send(message, 'next-turn', true)`。留着这句是因为这段是**按时间顺序的调查记录**；
+> 但扫读时别把它当结论 —— 结论在第 117 行。
+
 对照：我们现在手搓的载荷是 `source: { kind: 'recallflow-panel' }` ——
 自定义 kind，因此只能落成模型侧上下文，界面上不是用户消息。
 
@@ -247,8 +252,23 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
    DSH 空闲时主动开启一轮"——需要找到真正的 prompt 入口（`ctx.session` 查找 / 会话控制器服务）。
 5. 扩展侧改动量（WS → SSE + POST）。
 
+> ⚠️ **上面这份"待解问题"是 spike 阶段的快照，现在每一条都有答案了**（逐条对照，别当成待办）：
+>
+> | 当时的问题 | 结论 | 依据 |
+> |---|---|---|
+> | 1 字段形状没读全 | 已读全并据此注册工具 | `docs/one-session-plugin.md` 上文 + 插件实现 |
+> | 2 路由是否在鉴权栅栏内 | **在栅栏之外**（`/recallflow/*` 返回 200 而 `/`、`/api/*` 401） | 隔离实例实测 |
+> | 3 跨源可达性 | 已解决：扩展从**后台**（host_permissions）发请求，不受页面同源限制 | `relay.js` 的注释与实现 |
+> | 4 空闲会话主动开口 | 已解决：入口是 `agent.send(msg,'next-turn',true)`，**不是** `session.prompt` | 探针 v3（第 105 行）+ 活实例实测 |
+> | 5 "WS → SSE" | **方向反了**：最终用 **WebSocket**，理由是 MV3 的 service worker 会被回收而 fetch 流不能保活 | 插件头部注释 + 第 196 行的历史说明 |
+
 
 ## 删除清单（实现完成并验证后执行）
+
+> ⚠️ **这是最初写的计划，其中一条与实际执行相反，以 `docs/deletion-plan.md` 为准。**
+> 差别最大的是：**桥接的 MCP 工具服务不能删** —— 它是 **opencode 的页面能力出口**，
+> 删了会让 opencode 的工具**静默失效**（我准备动手时才发现，已回退）。
+> 页面上第 4 条"DSH 插件里的 Agent.inject 注入…"指的是**旧插件**，它已按删除清单第 3 步整包移除。
 
 - 桥接进程（`integrations/opencode/recallflow-mcp`）里的同步部分：`panel-turns` 缓冲、CORS、MCP 工具服务
 - DSH 插件里的：`Agent.inject` 注入、`injectedUpTo` 去重、会话绑定诊断
