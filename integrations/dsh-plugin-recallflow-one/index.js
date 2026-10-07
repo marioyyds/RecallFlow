@@ -276,6 +276,68 @@ export function apply(ctx, config = {}) {
   // 启动先刷一次；之后每次 /status 都会再刷（见那个路由里的调用）
   refreshStoreSessions();
 
+  /**
+   * 只读探针：DSH 的 Host 服务 **`sessionController`**（`dsh-api-session-controller`）
+   * 插件到底拿不拿得到、它有哪些方法；以及 `sessionQuery` 的**历史读取**真的能不能调。
+   *
+   * 为什么必须探而不能猜：`sessionController` 的类型里挂着
+   * `resolveAgent(sessionId)`（注释：*"Resolve or **resume** one ordinary Session … @returns **the live Agent**"*）
+   * —— 那正是"把消息送进一条已存会话"所缺的那一步；`inspect(sessionId)`
+   * （注释：*"…**without activating its Agent**"*）则是只读看历史的那一步。
+   * 但"类型里有"不等于"插件拿得到"，所以这里只读地取一次服务、记下方法名。
+   *
+   * **只读**：这里**不调用** `resolveAgent` / `create` / `enter` 等任何会载入或改变会话状态的
+   * 写方法 —— 那些会真的把会话激活，必须用户明确同意之后再做。
+   * 只做两件事：① 拿到服务、列出方法名；② 对**当前这条**会话读一次事件（`readSession` / `listEvents`）。
+   */
+  const controllerDiag = {
+    available: false,
+    methods: [],
+    readSessionOk: false,
+    readEventsCount: -1,
+    titleSample: '',
+    error: '',
+  };
+
+  async function probeController() {
+    try {
+      const c = ctx.get && ctx.get('sessionController', false);
+      if (!c) return;
+      controllerDiag.available = true;
+      const names = new Set();
+      for (let o = c; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+        for (const k of Object.getOwnPropertyNames(o)) {
+          if (k === 'constructor') continue;
+          try {
+            if (typeof c[k] === 'function') names.add(k);
+          } catch (e) {}
+        }
+      }
+      controllerDiag.methods = [...names].sort();
+    } catch (e) {
+      controllerDiag.error = 'sessionController: ' + String((e && e.message) || e);
+    }
+
+    // ② 历史读取（只读）：对当前这条会话读事件，看形状能不能渲染成面板的行。
+    try {
+      const q = ctx.get && ctx.get('sessionQuery', false);
+      const id = currentSessionId || (sessions.keys().next().value ?? '');
+      if (q && id && typeof q.readSession === 'function') {
+        const snap = await q.readSession(id);
+        controllerDiag.readSessionOk = true;
+        const evs = (snap && snap.events) || [];
+        controllerDiag.readEventsCount = evs.length;
+        // 取一条看着像消息的事件，记下类型名 —— 只记类型，不记内容（那是用户的数据）。
+        const sample = evs.find((e) => e && typeof e.type === 'string');
+        controllerDiag.titleSample = sample ? String(sample.type) : '';
+      }
+    } catch (e) {
+      controllerDiag.readSessionOk = false;
+      controllerDiag.error = (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'readSession: ' + String((e && e.message) || e);
+    }
+  }
+  probeController();
+
   // 装载时记录**自身文件**的指纹。为什么需要：
   // 插件代码在 DSH 启动时载入，没有热重载 —— 于是"现在跑的是哪个版本"只能靠
   // 进程启动时间 vs 提交时间去**推断**（我就为此绕了好几轮）。有了这个，一条 curl 就能确定。
@@ -506,6 +568,9 @@ export function apply(ctx, config = {}) {
       // 面板在 shadow DOM 里、console 又不一定读得到 —— 这个字段是把
       // "选择器为什么列不全"变成可观测事实的唯一窗口。
       sessionStore: sessionStoreDiag,
+      // Host 服务 sessionController 的只读探针（能不能拿到、有哪些方法）+ 历史读取实测。
+      // 它是"把消息送进一条已存会话"（resolveAgent）与"只读看历史"（inspect）能不能做的前提。
+      sessionController: controllerDiag,
       currentSessionId,
       pendingTools: pendingTools.size,
       // 会话事件的计数：用来分辨"事件没来"与"事件来了但处理失败"
