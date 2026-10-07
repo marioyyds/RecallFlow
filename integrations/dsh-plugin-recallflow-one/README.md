@@ -223,13 +223,31 @@ node scripts/verify-one-plugin-e2e.mjs 3099     # 对隔离实例跑 11 项（�
 node scripts/verify-live-gate.mjs               # 对真实实例跑闸门五条
 node scripts/verify-live-gate.mjs --say         # 额外真的发一句话（有副作用）
 node scripts/probe-say.mjs "文本"               # 直接把一句话送进会话
+
+# 只读：读**任意一条**会话（含没载入的）的历史，并投影成面板那套 frame
+curl.exe -s "http://127.0.0.1:3080/recallflow/session-log?sessionId=session-…&limit=20"
 ```
+
+**新增的只读路由 `GET /recallflow/session-log`**（路径也报在 `/status` 的 `sessionLogPath`）：
+
+    /recallflow/session-log?sessionId=<id>&limit=<n>
+
+- **只读**：不调用 `resolveAgent` / `create` / `enter` 任何会改变会话状态的 API；
+- 用 `sessionQuery.readSession(sessionId)`（注释：*"live or persisted session id to read"*
+  —— **不要求会话活着**），返回 `{ ok, sessionId, total, count, frames }`；
+- `frames` 是插件自己那套 **`projectEvent()`** 的产物 —— **与面板从 WS 收到的是同一个函数**，
+  所以"形状能不能渲染成面板的行"由同一个函数回答，不需要另写一套判断；
+- 缺 `sessionId` → 400；`readSession` 不可用 → 503（指向 `/status` 的 `sessionStore` 自检）；
+  `readSession` 抛（注释说会在持久化/头部兼容/重放校验失败时抛）→ 503 并原样带出错误。
+
+这是"切视图"那一半的地基：**读**能读（这一条），**发**不能发给没载入的会话（见上一节）。
 
 ## 已知未验证 / 待办
 
-- **端到端（面板 → 真用户消息 → 回复回面板）尚未在真实环境跑通**：
-  需要用户重启 DSH（本插件代码生效）与重新加载扩展（连上新通道）。
-  闸门见 `scripts/verify-live-gate.mjs`。
+- ~~**端到端（面板 → 真用户消息 → 回复回面板）尚未在真实环境跑通**~~ →
+  **已跑通**（2026-10-08 实测）：用 `POST /recallflow/say` 带 `sessionId` 发的一句话
+  **以真用户消息出现在那条会话里**（三条分支的真实响应记在本文件「选会话」一节）。
+  仍需重启 DSH 才能生效的只是**后来新增**的探针与新路由。
 - **工具往返只验证到 socket 层**：`callBrowser` 的"无连接时明确失败"有单测，
   但"客户端已连接 → 广播 tool-call → 收到回执 → resolve"只有端到端能覆盖。
 - 回声去重已用 `rpcId` 精确匹配（见 `lib/shared/session-view.js`），
