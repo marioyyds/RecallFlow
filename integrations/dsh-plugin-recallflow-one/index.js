@@ -273,6 +273,33 @@ export function apply(ctx, config = {}) {
     return best;
   }
 
+  /**
+   * 严格按 id 找会话：**找不到就返回 null，绝不回退到别的会话**。
+   *
+   * 为什么需要单独一个（2026-10-08 加）：`pickSession` 的语义是"尽量找一个能用的会话"——
+   * 指定一个不存在的 id 时它会一路回退到"最近活跃的那条"。那对**面板选择会话**是危险行为：
+   * 用户以为消息进了 A 对话、实际进了 B，而且**没有任何报错**。消息进错对话比报错糟糕得多。
+   * 所以"显式指定 id"这条路必须用这个：先查已登记的，再查官方注册表，都没有就 null。
+   */
+  function findSessionStrict(id) {
+    const want = String(id || '').trim();
+    if (!want) return null;
+    if (sessions.has(want)) return sessions.get(want);
+    try {
+      if (ctx.agents && typeof ctx.agents.get === 'function') {
+        const found = ctx.agents.get(want);
+        if (found) {
+          sessions.set(want, { agent: found, lastAt: Date.now() });
+          log('按 id 从注册表补登记会话：' + want);
+          return sessions.get(want);
+        }
+      }
+    } catch (e) {
+      log('按 id 查注册表失败：' + String((e && e.message) || e));
+    }
+    return null;
+  }
+
   /** 连接与登记状态：让"扩展有没有连上、会话有没有找到"可以从外部观测，不必靠日志。 */
   // 工具注册的结果（2026-10-08 加）：实测过一次「路由都活着、工具却从模型工具表里消失」——
   // 而 DSH 没有日志目录、扩展的 console 捕获也是空的，**没有任何窗口能看到原因**。
@@ -289,6 +316,9 @@ export function apply(ctx, config = {}) {
       wsReady: !!wss,
       clients: [...clients].filter((ws) => ws.readyState === 1).length,
       sessions: [...sessions.keys()],
+      // 每个已知会话的最近活动时间：面板的"选择会话"用它排序与显示
+      // （原来只有 id 列表，选不出"哪条是刚才在说的那条"）
+      sessionList: [...sessions.entries()].map(([id, e]) => ({ id, lastAt: e.lastAt || 0 })),
       currentSessionId,
       pendingTools: pendingTools.size,
       // 会话事件的计数：用来分辨"事件没来"与"事件来了但处理失败"
@@ -544,7 +574,27 @@ export function apply(ctx, config = {}) {
         sendJson(res, 400, { ok: false, error: '缺少 text' }, origin);
         return;
       }
-      const picked = pickSession(body.sessionId);
+      // 显式指定会话时用**严格**查找：找不到就明确报错，绝不悄悄发给别的会话。
+      // （`pickSession()` 是会回退的"尽力而为"版本，只适合"没指定"的情况。）
+      const wanted = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+      const picked = wanted ? findSessionStrict(wanted) : pickSession();
+      if (wanted && !picked) {
+        sendJson(
+          res,
+          404,
+          {
+            ok: false,
+            error:
+              '找不到指定的会话：' +
+              wanted +
+              '（当前已知会话：' +
+              ([...sessions.keys()].join('、') || '无') +
+              '）。为避免消息进错对话，这里**不会**回退到别的会话。',
+          },
+          origin
+        );
+        return;
+      }
       if (!picked || !picked.agent || typeof picked.agent.send !== 'function') {
         sendJson(res, 503, { ok: false, error: '没有可用的会话（DSH 里还没有活着的 agent？）' }, origin);
         return;
