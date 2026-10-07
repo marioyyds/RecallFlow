@@ -147,6 +147,23 @@ test('输入通道两端对齐（面板 → 后台 → DSH 插件），含 URL �
 // 新架构对应的契约在 tests/dsh-one-plugin.test.mjs（载荷 source.kind 必须是 'user'、
 // agent.send 的 mode/wake 参数）与 tests/relay-panel-turn.test.mjs（sendToDsh 的发送端形状）。
 
+// 面板的发送按钮**不能静默丢弃**。
+//
+// 用户实测反馈：「点了发送没反应」—— 表现是字还留在输入框里、也没有任何提示，
+// 看起来像按钮坏了。根因：send() 里本地 AI 正在流式输出时写着 `if (streaming) return;`，
+// 直接返回，什么都不做。修法：改成给一条面板内提示并保留输入内容。
+// 这条契约钉住"那个分支必须给出提示"，防止以后又被简化回裸 return。
+test('面板 send()：本地 AI 回答中不能静默丢弃，必须给出提示', () => {
+  const chat = fs.readFileSync(path.join(ROOT, 'lib/page/chat.js'), 'utf8');
+  const i = chat.indexOf('function send()');
+  assert.ok(i > 0, '应能找到 send()');
+  const body = chat.slice(i, i + 1400);
+  assert.ok(/if \(streaming\) \{/.test(body), 'streaming 分支应是一个带提示的代码块，而不是裸 return');
+  assert.ok(/showCitationHint\(/.test(body), 'streaming 分支里必须给出提示（否则用户看到的就是"点了没反应"）');
+  assert.ok(!/if \(streaming\) return;/.test(body), '不要退回静默丢弃的老写法');
+  assert.ok(/cmdInput\.value = ''/.test(body), '正常路径仍要清空输入框');
+});
+
 // 结果加工只有一份实现 —— 这是"删掉 DSH 的 MCP client 会静默丢掉「元素 → 源码文件」"
 // 那个缺口的防回归。
 //
