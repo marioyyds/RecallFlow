@@ -59,6 +59,26 @@ test('后台不再为选择器服务；元素的第三个参数如实透传', ()
   assert.match(bg, /sayToDsh\(text, msg\.sessionId, msg\.elements\)/, 'panel:turn 应把 elements 透传给 sayToDsh');
 });
 
+test('恢复面板时，DSH 条目必须用 renderAnswer —— 否则 markdown 变成裸记号（真机：**粗体** / ###）', () => {
+  // 用户报的："刷新/关闭 recallflow 的对话，md 的渲染又不对了"，症状是**看到裸的 `**粗体**` / `###`**。
+  // 机制：恢复渲染器（panelBody.innerHTML = conversation.map(…)）里 external 那一支
+  // 用的是 `escHtml`（转义成纯文本），而**实时回声**那条路用的是 `renderAnswer`
+  // （renderSessionEvent 里就写着"回声这条必须用同一个渲染器"）。
+  // 同一个坑实时那条修过一次、恢复这条漏了 —— 这条断言把两边钉在一起。
+  const iExt = chat.indexOf("if (m.role === 'external')");
+  assert.ok(iExt > 0, '应能找到恢复渲染器里的 external 分支');
+  const branch = chat.slice(iExt, iExt + 900);
+  assert.match(branch, /renderAnswer\(/, 'external 分支必须用 renderAnswer 渲染（Markdown → HTML）');
+  assert.ok(
+    !/escHtml\(m\.content/.test(branch),
+    'external 分支不能再用 escHtml —— 那会把 markdown 转义成纯文本（真机症状）'
+  );
+  // 反向：实时回声那条也要是 renderAnswer（两边必须一致，不然又会只修一半）
+  const iEcho = chat.indexOf('回声这条必须用同一个渲染器');
+  assert.ok(iEcho > 0, '应能找到实时回声那段注释');
+  assert.match(chat.slice(iEcho, iEcho + 400), /renderAnswer\(/, '实时回声也必须用 renderAnswer');
+});
+
 test('发送成功后要**清掉拾取的元素并重画 chip**（真机：chip 不消失，之后每条消息都带着它）', () => {
   // 用户报的："虽然发送成功了，但是 chip 不会随发送消失"。
   // 机制：发送时把 pickedElements 带上去了，但从来没清空 —— 于是拾取一次之后
