@@ -129,3 +129,84 @@ node scripts/probe-say.mjs "文本"               # 直接把一句话送进会�
 - 回声去重已用 `rpcId` 精确匹配（见 `lib/shared/session-view.js`），
   但面板仍需在收到回执时回填 rpcId —— 实测待补。
 - 删除清单见 `docs/deletion-plan.md`，**执行前必须先过闸门**。
+
+## 页面的能力分档与审批策略
+
+`recallflow_browser` 的 `method` 按风险分档。分档**由 `lib/assistant/tool-metadata.js` 的 `risk` 决定**，
+不是拍脑袋；清单定义在 `lib/shared/bridge-methods.js`（扩展 dispatch 与插件方法表都以它为准，
+契约测试核对三者对齐）。
+
+| 档 | 数量 | 例子 | 默认 | 开关 |
+|---|---|---|---|---|
+| 只读 | 19 | `browser_read` `read_current_page` `get_page_snapshot` `list_tabs` `web_search` … | **开** | —— |
+| 改页面 | 15 | `click_element` `type_text` `press_key` `scroll_page` `highlight_text` `outline_element` … | 关 | `allowPageActions` |
+| 浏览器与网络 | 4 | `open_tab` `switch_tab` `fetch_webpage` `search_userscripts` | 关 | `allowBrowserActions` |
+| 危险 | 10 | `add_entry` `remove_entry` `upload_file` `install_userscript` `run_javascript` … | 关 | `allowDangerousActions` |
+
+另外**刻意不接** 4 个（`update_plan` `expand_result` `complete_task` `load_skill`）：它们读的不是页面，
+而是**面板本地那个 agent 自己的循环与 UI**；DSH 这侧这些概念已经存在，硬接只会出现"两套计划状态互相打架"。
+已导出为 `EXCLUDED_AGENT_LOOP_METHODS` 并断言它们不在任何清单里 —— **明确记录，而不是悄悄漏掉**。
+
+**为什么是"开关"而不是弹窗**：面板原本有批准弹窗（元数据里全部 `requiresApproval: true`），
+而 **DSH 这侧没有**。所以"批准"只能落在用户显式设置的地方 —— 插件的 `config`：
+
+```yaml
+- insert:
+    - id: recallflow-one
+      name: '…/integrations/dsh-plugin-recallflow-one/index.js'
+      config: { allowPageActions: true }   # 要用哪一档就开哪个
+```
+
+被拒时返回 `{refused, method, tier, reason}`，reason 写清**开哪个开关**、以及改完要重启 DSH。
+**给模型的约定**：被拒时**不要换参数反复重试** —— 那等于绕开用户的决定，而多试几次里总有一次会真的落下去。
+
+三档都**不在** `BRIDGE_METHODS` 里，而那个清单是诊断探针（`probe: true`）的白名单 ——
+于是「**诊断入口永远不会触发有副作用的动作**」是一条被契约测试钉住的性质
+（把 `click_element` 塞进 `BRIDGE_METHODS` 会让 4 条测试变红，已用突变实验验证）。
+
+## 装成包（这样 DSH 插件管理器才看得到它）
+
+**现象**：以文件路径 insert 时，插件在插件管理器里**看不到**。原因是 DSH 自己的判定：
+
+```js
+// dsh-plugin-manager/lib/types/index.js: listPlugins()
+if (candidate === undefined || … || actual?.parent.tree.ctx.fiber.entry?.id !== 'include')
+  return { ...entry, readOnlyReason: 'unaddressable' };
+```
+
+即：插件的加载条目必须来自 **include（bundle）**。文件路径 insert 的父条目是 `insert`，
+于是被标成 `unaddressable`。
+
+**做法**：本目录已带 `package.json`（`dsh.bundle.patch` → 自带的 `cordis.patch.yml`），
+规格对齐真实第三方 bundle（对照 `@xmanrui/dsh-im`：两行 patch —— `id` + **包名**）。
+
+```powershell
+cd ~/.dsh/profiles/web
+Copy-Item cordis.patch.yml "cordis.patch.yml.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
+Copy-Item package.json     "package.json.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
+
+# **必须 link:**。拷贝式会坏 —— 下面有实测
+pnpm add link:D:\Desktop\workspace\code\ai\bookmark-sorter\integrations\dsh-plugin-recallflow-one
+```
+
+然后 `package.json` 的 `dsh.profile.bundles` 加 `"recallflow-dsh-plugin"`，
+**并在同一次改动里删掉** `cordis.patch.yml` 里那条文件路径 insert ——
+同时存在会让插件**加载两次**，`/recallflow/*` 路由冲突。之后重启 DSH。
+回滚：恢复两个 `.bak`、重启。
+
+### 为什么必须 `link:`（两种方式都实测过）
+
+插件有 3 个 import 指向包外（指向仓库里的共享模块，刻意的：两侧共用一份实现，不复制）：
+
+    ../../lib/shared/tool-results.js  ../../lib/shared/dev-session.js  ../../lib/shared/evidence-store.js
+
+按 profile 布局（`<profile>/node_modules/<name>`）实测：
+
+```
+【A 拷贝式安装】✗ Cannot find module '…\copy-profile\lib\shared\tool-results.js'
+【B 链接式安装】✓ import 成功（导出 apply, inject, name）
+```
+
+原因：Node 默认跟随符号链接、按**真实路径**解析模块，于是那三个 `../../` 回到仓库里；
+拷贝式则解析到 `<profile>/lib/shared/*` —— 不存在。
+

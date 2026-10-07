@@ -1,0 +1,18 @@
+# 这个包自带的 patch：被当成 bundle include 时，DSH 用它把插件插进应用。
+#
+# **name 必须是包名**，不能是文件路径 —— 这正是 DSH 插件管理器判定"可管理"的条件：
+#   dsh-plugin-manager/lib/types/index.js: listPlugins()
+#     if (candidate === undefined || … || actual?.parent.tree.ctx.fiber.entry?.id !== 'include')
+#       return { ...entry, readOnlyReason: 'unaddressable' };
+# 也就是：插件的加载条目必须来自 include（bundle）。用文件路径 insert 时父条目是 insert，
+# 于是它被标成 unaddressable，在"可管理插件"那一栏里看不到（用户实测的正是这个现象）。
+#
+# 对照模板：@xmanrui/dsh-im 的 cordis.patch.yml 就是两行 —— id + 包名。
+- insert:
+    - id: recallflow-one
+      name: 'recallflow-dsh-plugin'
+      # 审批开关（默认全关，只读档不受影响）。要用哪一档就在这里显式打开：
+      #   allowPageActions      改页面档：点击/输入/按键/滚动/高亮/描边等
+      #   allowBrowserActions   浏览器与网络档：开标签页/抓网页/查用户脚本
+      #   allowDangerousActions 危险档：写或删知识库/上传文件/装脚本/执行 JS 与宏
+      # config: { allowPageActions: true }

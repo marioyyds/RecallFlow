@@ -1,0 +1,19 @@
+{
+  "name": "recallflow-dsh-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "description": "RecallFlow 的 DSH 插件：把浏览器扩展的页面能力接进 DSH 会话（一条会话，不再有桥接进程）。",
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "recallflow", "browser"],
+  "license": "MIT",
+  "files": ["index.js", "cordis.patch.yml", "README.md"],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "profiles": ["web"]
+    }
+  }
+}
