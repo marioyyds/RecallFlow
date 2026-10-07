@@ -307,3 +307,28 @@ test('/say 不带 elements：文本逐字不变（默认路径不受影响）', 
   const text = a.sent[0].content.map((c) => c.text).join('');
   assert.equal(text, '普通一句话', '没有元素时消息必须与改动前**逐字相同**');
 });
+
+test('/say 带 elements：**对象字段**要格式化，绝不能出现 [object Object]', async () => {
+  // 真机抓到的 bug：拾取对象里 `source` 是 {file,line}、`locator` 是 {role,name}，
+  // 而摘要用 String() 一撸 → `语义=[object Object]` —— 用户看到的就是这个。
+  // 上面那条测试喂的是**字符串**，所以一路绿；这条专门喂**对象形状**，把缺口补上。
+  const a = fakeAgent('session-A');
+  const { routes } = await load(new Map([['session-A', a]]));
+  await callRoute(routes.get(SAY), {
+    text: '看这个',
+    elements: [
+      {
+        tag: 'h2',
+        label: '顺带自查出并修掉的风险（这轮的价值）',
+        selector: '.flow > h2',
+        source: { file: 'src/components/Flow.tsx', line: 123 },
+        locator: { role: 'heading', name: '顺带自查出并修掉的风险' },
+      },
+    ],
+  });
+  const text = a.sent[0].content.map((c) => c.text).join('');
+  assert.ok(!/\[object Object\]/.test(text), '**绝不能**出现 [object Object]（真机上就这么丢过一次信息）');
+  assert.match(text, /名称=顺带自查出并修掉的风险（这轮的价值）/, '`label` 要带出来 —— 面板 chip 用的就是它');
+  assert.match(text, /源码=src\/components\/Flow\.tsx:123/, 'source 要格式化成 file:line');
+  assert.match(text, /语义=heading \/ 顺带自查出并修掉的风险/, 'locator 要格式化成 role / name');
+});

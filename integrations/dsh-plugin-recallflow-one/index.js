@@ -116,11 +116,33 @@ function elementsDigest(list) {
   for (const el of list.slice(0, 8)) {
     if (!el || typeof el !== 'object') continue;
     const parts = [];
+    // 拾取对象里的 `source` 是 `{file,line}`、`locator` 是 `{role,name}` —— 直接 `String()`
+    // 会得到 `[object Object]`，**真机上就这样丢过一次信息**
+    // （单测里我喂的是字符串，所以一路绿 —— 又一次"看不见的路径不算数"）。
+    // 这里按**面板自己 `renderPick` 的口径**格式化，而不是自己另编一套。
+    const fmt = (v) => {
+      if (v == null) return '';
+      if (typeof v === 'string') return v.trim();
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      if (typeof v === 'object') {
+        if (v.file) return String(v.file) + (v.line ? ':' + v.line : '');
+        if (v.role || v.name) return [v.role, v.name].filter(Boolean).join(' / ');
+        try {
+          return JSON.stringify(v);
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    };
     const add = (label, v) => {
-      const s = String(v == null ? '' : v).trim();
-      if (s) parts.push(label + '=' + s.slice(0, 200));
+      const s = fmt(v).slice(0, 200);
+      if (s) parts.push(label + '=' + s);
     };
     add('标签', el.tag || el.tagName);
+    // 面板 chip 上「」里的那个名字就是 **`label`**（`renderPick` 用的就是它）。
+    // 以前我去猜 `locator`/`semantic` —— 那是个对象，于是显示成 `[object Object]`。
+    add('名称', el.label);
     add('选择器', el.selector || el.css || el.cssSelector);
     add('语义', el.locator || el.semantic || el.accessibleName || el.role);
     add('文本', el.text || el.textContent);
