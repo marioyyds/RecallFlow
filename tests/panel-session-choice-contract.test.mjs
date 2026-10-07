@@ -59,6 +59,19 @@ test('后台不再为选择器服务；元素的第三个参数如实透传', ()
   assert.match(bg, /sayToDsh\(text, msg\.sessionId, msg\.elements\)/, 'panel:turn 应把 elements 透传给 sayToDsh');
 });
 
+test('发送成功后要**清掉拾取的元素并重画 chip**（真机：chip 不消失，之后每条消息都带着它）', () => {
+  // 用户报的："虽然发送成功了，但是 chip 不会随发送消失"。
+  // 机制：发送时把 pickedElements 带上去了，但从来没清空 —— 于是拾取一次之后
+  // **之后每一条消息都继续带着同一个元素**，chip 也一直挂着。
+  assert.match(chat, /pickedElements = \[\];\s*\n\s*renderPick\(\);/, '发送成功后必须清空并重画 chip');
+  // 顺序：清理要发生在**发送成功之后**（失败路径 return 掉，元素留着让用户重试）。
+  // 注意：文件里前面还有别的 pickedElements 清空处（清空对话、重开面板），
+  // 所以要从**直送调用之后**往后找，不能用 indexOf 拿第一个。
+  const iSend = chat.indexOf('sendPanelTurn(turn)');
+  const iClear = chat.indexOf('pickedElements = [];', iSend);
+  assert.ok(iSend > 0 && iClear > iSend, '清理必须在直送调用**之后**（即成功回调里）');
+});
+
 test('直送前必须**先**推进推送游标 —— 否则回声会把你那句话再发一遍（真机：会话里出现两条）', () => {
   // 真机 bug（2026-10-08）：用户在面板发一句话，会话里出现**两条**，
   // 插件日志里 "[recallflow-one] 面板输入已送入会话" 打了两次。
