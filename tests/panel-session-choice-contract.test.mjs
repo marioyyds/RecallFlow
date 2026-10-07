@@ -43,17 +43,14 @@ test('面板里不应再有会话选择器的任何痕迹', () => {
   }
 });
 
-test('panel:turn 的消息体：不带 sessionId（下拉已撤），但**带拾取的元素**', () => {
-  // 正则放宽：加了注释与 elements 之后，消息体比原来长得多（原来写死 300 字符，一改就红）。
-  const m = chat.match(/type: 'panel:turn',[\s\S]{0,900}?\n\s{8}\},/);
-  assert.ok(m, '应能找到 panel:turn 的消息体');
-  assert.ok(!/sessionId/.test(m[0]), 'panel:turn 的消息体里不该再有 sessionId：' + m[0]);
-  // 元素是**只在非空时**带的 —— 没拾取时请求体与改动前一模一样。
-  assert.match(
-    m[0],
-    /\.\.\.\(pickedElements\.length \? \{ elements: pickedElements \} : \{\}\)/,
-    '拾取的元素必须随消息发出去（且只在非空时带）'
-  );
+test('panel:turn 的消息体：不带 sessionId（下拉已撤），但**带拾取的元素**（且已在面板侧裁过）', () => {
+  // **不再靠"截取整段消息体"** —— 那个写法已经因为这个测试红过两次：
+  // 一加注释/字段，窗口就不够长（先 300、后 900），红的是测试而不是代码。
+  // 改成钉四条各自独立、不会被长度影响的事实：
+  assert.ok(!/sessionId/.test(chat), 'chat.js 里不该再出现 sessionId（下拉已撤）');
+  assert.match(chat, /\.\.\.\(pickedElements\.length/, '拾取的元素必须随消息发出去（只在非空时带）');
+  assert.match(chat, /pickedElements\.slice\(0, 8\)/, '面板侧必须先限制个数（防超长消息让 sendMessage 直接抛）');
+  assert.match(chat, /String\(el\.text\)\.slice\(0, 200\)/, '长文本要在面板侧截断');
 });
 
 test('后台不再为选择器服务；元素的第三个参数如实透传', () => {
