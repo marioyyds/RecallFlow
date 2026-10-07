@@ -1,27 +1,16 @@
-test(bridge): MCP 截图通道的端到端验证台
+## （已删除）MCP 截图通道的端到端验证台
 
-桥接层是整个项目最难手工回归的部分：它横跨扩展与 MCP 两个包，
-且真实调用需要「重载扩展 + 重启 server」，两者都会打断正在使用的 MCP 会话。
-因此这里提供一套**隔离验证台**，不需要触碰任何运行中的实例。
+`scripts/verify-mcp-shot.mjs` 与 `scripts/verify-mcp-shot-success.mjs` 已随 **7801 桥接与
+MCP server 整包**一起删除（用户 2026-10-08 明确不再用 opencode，见 `docs/deletion-plan.md`）。
 
-scripts/verify-mcp-shot.mjs
-  在隔离端口起一个 server 实例，用真实 MCP 协议（initialize / tools/list / tools/call）
-  核对：工具已注册、参数完整、扩展不可用时错误路径优雅、本地工具能正常往返。
+它们当时做的事值得记一句，因为**方法**仍然有用：在**隔离端口**（7802）起一个 server 实例，
+用真实 MCP 协议（initialize / tools/list / tools/call）核对工具注册与错误路径；
+第二个脚本还扮演「假扩展」经 /poll 领请求、/result 回结果，从而走通**成功路径**
+（图片以 image 内容块返回、落盘归档且字节一致）。核心思路是"**不触碰任何运行中的实例**"——
+重载扩展或重启 server 都会打断正在使用的会话，所以验证台必须是隔离的。
 
-scripts/verify-mcp-shot-success.mjs
-  额外扮演「假扩展」——通过 /poll 领取请求、经 /result 回结果，
-  从而走通**成功路径**：图片真的以 MCP image 内容块返回、includeImage 开关生效、
-  归档落盘且字节与源一致。
-
-用法（PowerShell）：
-  $env:RECALLFLOW_MCP_PORT='7802'            # 隔离端口，别用 7801
-  $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'      # 让依赖扩展的调用快速失败
-  $env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-test"   # 隔离证据目录
-  node integrations/opencode/recallflow-mcp/index.js --http  # 后台起实例
-  node scripts/verify-mcp-shot.mjs
-  node scripts/verify-mcp-shot-success.mjs
-
-两个脚本都返回非零退出码表示未通过，可直接用于改动后的回归。
+现在要验证的是同一类问题的 DSH 版本：`scripts/verify-one-plugin-e2e.mjs`（隔离实例起 DSH 插件）
+与 `scripts/verify-capability-tiers.mjs`（对真实实例逐方法探能力档位）。
 
 ## scripts/check-const-assign.mjs
 

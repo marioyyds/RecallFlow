@@ -18,7 +18,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOTS = ['lib', 'integrations/opencode/recallflow-mcp'];
+// 只扫 lib：原来还扫 `integrations/opencode/recallflow-mcp`（7801 桥接），
+// 那个包已随 opencode 一起删除（用户 2026-10-08 明确不再用 opencode，见 docs/deletion-plan.md）。
+const ROOTS = ['lib'];
 const SKIP = /node_modules|[\\/]test[\\/]|\.min\.js$/;
 
 function walk(dir, out = []) {

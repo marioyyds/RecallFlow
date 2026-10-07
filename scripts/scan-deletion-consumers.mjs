@@ -7,6 +7,11 @@
  * 教训是"删之前先核对消费者"，但靠人记会漏。所以把它变成一条命令：
  * 每个目标列出引用点，删除时对着这张表逐个处理，而不是凭印象。
  *
+ * **那条桥接后来真的删掉了**（2026-10-08，用户明确说不再用 opencode）——
+ * 但"删之前先核对消费者"这条教训与这个脚本都保留：它要防的是**下一个人**重犯。
+ * 所以下面这张表里保留的是**当时的判定依据**，路径可能已经不存在，关键词仍然有意义
+ * （它们同时也是"不得复活"的反向检查素材）。
+ *
  * 用法：node scripts/scan-deletion-consumers.mjs
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
@@ -29,14 +34,8 @@ const TARGETS = [
     keywords: ['dsh-plugin-recallflow/index.js', 'recallflow-panel-sync'],
   },
   {
-    step: '第 4 步',
-    what: '桥接里的同步部分（panel-events / panel-turns / panel_history / panel_post / event 队列）',
-    path: 'integrations/opencode/recallflow-mcp/panel-events.js',
-    keywords: ['panel-events.js', '/panel-turns', 'panel_history', 'panel_post', 'pushEvent'],
-  },
-  {
     step: '第 5 步',
-    what: 'DSH profile 里的 RecallFlow MCP client',
+    what: 'DSH profile 里的 RecallFlow MCP client（已执行 2026-10-07）',
     path: '(profile, 不在仓库内)',
     keywords: ['recallflow-mcp', 'dsh-mcp-client'],
   },
@@ -97,4 +96,5 @@ for (const t of TARGETS) {
 
 console.log('提醒：文件路径之外，还要看**运行时**消费者。7801 桥接就是典型 ——');
 console.log('  仓库里几乎找不到"opencode 在用它"的代码，因为 opencode 是另一个进程。');
-console.log('  这类消费者只能靠配置与文档确认（profile patch 第 17 行注释写了"opencode 与 DSH 可共用同一个 server"）。');
+console.log('  这类消费者只能靠配置与文档确认。（那条桥接已于 2026-10-08 按用户决定删除；');
+console.log('  这条提醒留着，是因为下一个待删目标同样可能有仓库外的运行时消费者。）');
