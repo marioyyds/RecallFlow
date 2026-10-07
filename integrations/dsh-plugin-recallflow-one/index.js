@@ -274,6 +274,12 @@ export function apply(ctx, config = {}) {
   }
 
   /** 连接与登记状态：让"扩展有没有连上、会话有没有找到"可以从外部观测，不必靠日志。 */
+  // 工具注册的结果（2026-10-08 加）：实测过一次「路由都活着、工具却从模型工具表里消失」——
+  // 而 DSH 没有日志目录、扩展的 console 捕获也是空的，**没有任何窗口能看到原因**。
+  // 注册失败不该静默，所以把结果暴露到 /recallflow/status 里。
+  let toolRegistered = false;
+  let toolError = '';
+
   function statusSnapshot() {
     return {
       ok: true,
@@ -294,6 +300,9 @@ export function apply(ctx, config = {}) {
       lastEventError: stats.lastEventError,
       // 已载入代码的指纹：回答"现在跑的是哪个版本"，不用再比进程启动时间
       build,
+      // 工具注册的结果：回答"为什么模型看不到 recallflow_browser"
+      toolRegistered,
+      toolError,
       // 最近几条投影结果：用来回答"面板上为什么没有助手的话"
       recentEvents: stats.recent.slice(-10),
     };
@@ -789,6 +798,10 @@ export function apply(ctx, config = {}) {
   );
 
   // --- 工具注册：一个通用入口（第一版），后续按需拆成具体工具 -------------------
+  // 包在 try/catch 里：这样注册失败时 apply 不会整个挂掉（路由已经注册好了，插件还有用），
+  // 而且失败原因会进 /recallflow/status。**块内缩进刻意没动** —— 为一个 try 重排 100 行
+  // 只会让 diff 无法阅读；JS 不在乎缩进，注释在这里说清楚就够了。
+  try {
   ctx.tools.register({
     name: 'recallflow_browser',
     description:
@@ -893,6 +906,11 @@ export function apply(ctx, config = {}) {
       return result;
     },
   });
+    toolRegistered = true;
+  } catch (e) {
+    toolError = String((e && e.message) || e);
+    console.error('[recallflow] 工具注册失败（原因会出现在 /recallflow/status 的 toolError 里）：', e);
+  }
 
   log('已装载：' + [SAY_PATH, STATUS_PATH, PROBE_TOOL_PATH].join(' / ') + ' + WS ' + WS_PATH + ' + 工具 recallflow_browser');
 }
