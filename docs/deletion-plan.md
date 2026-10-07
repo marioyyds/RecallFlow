@@ -1,23 +1,27 @@
 # 删除清单（可执行方案）
 
-> 状态：**执行中**。第 1、2、3 步已完成；第 4、5 步**等 7801 桥接恢复**（那两步要确认
-> opencode 的页面工具仍正常，桥接停着就无法验证，不盲删）；第 6、7 步可做。
+> 状态：**全部执行完毕（2026-10-07）**。七步都做了。
 >
-> ## 进度（2026-10-01）
+> ## 最终进度（2026-10-07，用户第二次重启 DSH 之后）
 >
-> **闸门：核心三条已通过**（用户重启了 DSH 并重载了扩展之后）：
->
-> ```
-> ✓ 插件是新代码（GET /recallflow/status 返回 200）
-> ✓ 扩展连上新通道（status.clients = 1）
-> ✓ 插件认到会话（注册表兜底生效）
-> ```
->
-> **端到端已验证** —— 这是整个重构的目标：
+> 用**指纹**确认新代码真的载入了（不再是"看 status 返回 200"那种答不出问题的检查）：
 >
 > ```
-> POST /recallflow/say → {"ok":true,"rpcId":"recallflow-…","sessionId":"session-723c8b32-…"}
-> 那句自检文本随后以**真用户消息**出现在该会话里，并成为模型的输入。
+> 磁盘上插件 sha256_12 = 072c863ac746
+> 已载入 build.sha256_12 = 072c863ac746     ← 一致，且 status 里有 build 字段
+> 闸门：✓ 5/5 成立（退出码 0）
+> ```
+>
+> **端到端全部验证**（活实例实测）：
+>
+> ```
+> /recallflow/say            → {"ok":true,…}，那句自检文本以**真用户消息**出现在会话里
+> assistant/message          → 带 text（5a07de6 修的根因，实测成立）
+> 面板显示 DSH 的回复         → get_picked_element 取回的 DOM：class="msg ext ext-dsh"
+> recallflow_browser         → page_health 返回加工后的形状（summary/counts/errors/…，
+>                              ★ 且 failedRequests[].location 已是**磁盘路径**）
+>                              verify_change 读 dev-session 的 targets、断言求值正常
+> dev_session_get / evidence_get → 插件本地读写共享文件，正常
 > ```
 >
 > | 步骤 | 状态 | 提交 |
@@ -25,18 +29,27 @@
 > | 1 面板退役自己的 agent | ✅ 已完成（保留一条"DSH 不可达则回退本地"的过渡退路） | `f2fa81e` |
 > | 2 客户端卡片插件 | ✅ 已完成（整包 + profile 条目 + 测试） | `53dec61` |
 > | 3 旧 DSH 插件（注入那条路） | ✅ 已完成（整包 + profile 条目 + 两个验证台 + 一条契约测试） | `695a342` |
-> | 4 桥接里的同步部分 | ✅ 已完成（panel-events.js / 事件队列 / `/panel-turns` / `/event` / panel_history / panel_post / dsh-hooks 全删；用**临时端口真启动**验证过，闸门 5/5 全绿） | `c80fb0a` |
-> | 5 profile 里的 MCP client | ⏳ **等用户重启桥接**：先验证 opencode 那条链路仍正常，再删 | — |
+> | 4 桥接里的同步部分 | ✅ 已完成（panel-events.js / 事件队列 / `/panel-turns` / `/event` / panel_history / panel_post / dsh-hooks 全删；用**临时端口真启动**验证过） | `c80fb0a` |
+> | 5 profile 里的 MCP client | ✅ **已执行（2026-10-07）** —— 删掉 `recallflow-mcp` 那个 insert 条目；干跑 + 执行后都用**DSH 自己的 js-yaml** 验证：4 条目 → 3 条目，`recallflow-one` 完好；备份留 `cordis.patch.yml.bak-20261007-225820` | — |
 > | 6 扩展里的死代码 | ✅ 已完成（postPanelTurn / forwardBridgeEvent / rfBridgeEvent / renderBridgeEvent） | `cd77cbe` |
-> | 7 文档收尾 | 🔄 进行中（运维手册已改写；文档/脚本里指向已删文件的引用在清理） | — |
+> | 7 文档收尾 | ✅ 已完成 | 多处 |
+>
+> **第 5 步的一个如实说明**：配置文件只在 DSH 启动时读取，所以**本次会话里
+> `mcp__recallflow__*` 这些工具仍然存在**，要等**下一次重启 DSH** 才消失。
+> 在那之前两条路并存（插件那条已实测可用），所以这个空窗期是安全的 ——
+> 这也正是当初把第 5 步放在最后的原因。
 >
 > **每一步都必须先过**：`node scripts/verify-live-gate.mjs` + 全套测试 +
-> profile 可解析（`dsh --profile web --help` 退出码 0）。第 2、3 步都按这个做了。
+> profile 可解析（用 DSH 自己的 js-yaml）。第 2、3、5 步都按这个做了。
 >
 > 起因：这次重构的目标是"把中继删掉、只留一条会话"。但删除比新增危险得多 ——
 > 我曾在准备删除时才发现 7801 桥接**不只服务 DSH**（opencode 也在用），
 > 差点把 opencode 的页面工具静默删坏。所以这份清单的每一步都先写清：
 > **它会失去什么、谁在用它、怎么确认没删坏。**
+>
+> 另有一条**只会在真实调用时暴露**的教训：删之前必须先实测插件那条路。
+> `page_health` 曾经报 `value is not lossless JSON`（加工层里的显式 undefined 属性，
+> MCP 那条路没有这个约束）—— 如果先删了 MCP client，这个工具就**完全没有可用路径**了。
 
 ## 闸门：以下都成立之前，一步都不要删
 
