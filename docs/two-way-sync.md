@@ -104,6 +104,26 @@ WS 广播 {kind:'session-event', sessionId, event}
 
 ## 改完代码要重启什么（这张表能省掉大量排查）
 
+> **先看这条**：DSH **自己**有一套插件重载生命周期，而且它可能不需要整进程重启。
+> `dsh-plugin-manager` 里的 `reload()` 长这样（源码，`lib/types/index.js:809, 819`）：
+>
+> ```js
+> application: this.ownerContext.get('hmr') !== undefined ? 'applied' : 'restart-required'
+> ```
+>
+> 也就是说：**如果 DSH 装了并启用了 `dsh-hmr`，插件改动可以直接热生效**（返回 `applied`）；
+> 否则它明确告诉你 `restart-required` —— 两种情况都**不会**硬重启进程，所以试着触发它是安全的。
+> DSH 的包里**确实有** `dsh-hmr`（服务端）与 `dsh-client-hmr`（客户端，我实测到它在运行实例里被加载）。
+>
+> 触发入口是 **GUI 的插件管理器**（或它的 TypertRemoteService API，那个在鉴权栅栏后面）。
+> 两点如实说明：
+> - `dsh plugin` **不能**重载 —— 它是 pnpm 的转发（`lib/bin.js:115-119` 原文：
+>   "forwarding the remaining arguments to pnpm in the profile directory"，且要求至少一个 pnpm 参数）。
+> - 这个 profile **没有**把 `plugin_manager` 暴露成 agent 工具，所以我（模型）**不能**替你触发它。
+>
+> 所以：**先看插件管理器里有没有"应用/重载"的入口**；没有，或者显示 `restart-required`，
+> 就按下面的表重启对应进程。
+
 | 改动位置 | 需要做什么 | 为什么 |
 |---|---|---|
 | `lib/page/**`、`background.js`、`manifest.json` | **重载扩展**（`edge://extensions` → RecallFlow → ↻），并刷新页面 | 扩展代码只在加载时读取 |
