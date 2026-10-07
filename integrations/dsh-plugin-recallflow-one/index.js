@@ -311,29 +311,42 @@ export function apply(ctx, config = {}) {
   };
 
   async function probeController() {
+    // ① 取 Host 服务。**注意别在这里 return 早退** ——
+    // 第一版就是 `if (!c) return;`，于是 `sessionController` 拿不到（实测就是拿不到）时，
+    // 整个函数立刻结束，**下面的 ② 历史读取从来没跑过**，`readSessionOk` 永远 false。
+    // 两件独立的事不该共用一次早退：这是探针自己的 bug，不是 DSH 的。
     try {
       const c = ctx.get && ctx.get('sessionController', false);
-      if (!c) return;
-      controllerDiag.available = true;
-      const names = new Set();
-      for (let o = c; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-        for (const k of Object.getOwnPropertyNames(o)) {
-          if (k === 'constructor') continue;
-          try {
-            if (typeof c[k] === 'function') names.add(k);
-          } catch (e) {}
+      controllerDiag.available = !!c;
+      if (c) {
+        const names = new Set();
+        for (let o = c; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+          for (const k of Object.getOwnPropertyNames(o)) {
+            if (k === 'constructor') continue;
+            try {
+              if (typeof c[k] === 'function') names.add(k);
+            } catch (e) {}
+          }
         }
+        controllerDiag.methods = [...names].sort();
       }
-      controllerDiag.methods = [...names].sort();
     } catch (e) {
       controllerDiag.error = 'sessionController: ' + String((e && e.message) || e);
     }
 
     // ② 历史读取（只读）：对当前这条会话读事件，看形状能不能渲染成面板的行。
+    // **跳过也要留痕** —— "没跑"和"跑了但失败"必须能分辨，否则又是一轮瞎猜。
     try {
       const q = ctx.get && ctx.get('sessionQuery', false);
       const id = currentSessionId || (sessions.keys().next().value ?? '');
-      if (q && id && typeof q.readSession === 'function') {
+      if (!q) {
+        controllerDiag.error = (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'sessionQuery 不可用';
+      } else if (!id) {
+        controllerDiag.error = (controllerDiag.error ? controllerDiag.error + ' | ' : '') + '没有可用于读取的会话 id';
+      } else if (typeof q.readSession !== 'function') {
+        controllerDiag.error =
+          (controllerDiag.error ? controllerDiag.error + ' | ' : '') + 'sessionQuery 上没有 readSession';
+      } else {
         const snap = await q.readSession(id);
         controllerDiag.readSessionOk = true;
         const evs = (snap && snap.events) || [];
