@@ -691,6 +691,41 @@ export function apply(ctx, config = {}) {
     'list_userscripts', // 列出用户脚本
   ];
 
+  /** 改页面档（第二档）：会**修改用户正在看的页面**。
+   *
+   * **审批策略**：DSH 这侧没有面板那样的批准弹窗，所以"批准"只能是**用户显式开的开关** ——
+   * 这一档默认**拒绝**，除非 profile 里这个插件的 config 写了 `allowPageActions: true`：
+   *
+   *     - insert:
+   *         - id: recallflow-one
+   *           name: '…/integrations/dsh-plugin-recallflow-one/index.js'
+   *           config: { allowPageActions: true }
+   *
+   * 这一档**刻意不放进 BROWSER_METHODS**：那个清单是 probe-tool 的白名单，
+   * 于是"诊断探针永远不会触发改页面动作"成为一条可测试的性质（见 bridge-contract.test.mjs）。
+   * 本清单必须与 lib/shared/bridge-methods.js 的 PAGE_ACTION_CONTENT_METHODS +
+   * PAGE_ACTION_BACKGROUND_METHODS 一致（契约测试核对）。
+   */
+  const PAGE_ACTION_METHODS = [
+    // route: content —— 对当前活动标签页动手
+    'click_element', // 点元素
+    'type_text', // 输入文本
+    'press_key', // 按键
+    'select_option', // 选下拉
+    'check_box', // 勾选框
+    'set_element_style', // 改元素样式
+    'highlight_text', // 高亮页面里的关键句
+    'outline_element', // 给元素描边
+    'clear_page_overlays', // 清除上述标注/样式
+    'scroll_page', // 滚动页面
+    'undo_last_action', // 撤销上一次页面动作
+    // route: background —— 自己决定对哪个标签页动手
+    'click_at', // 按坐标点击
+    'hover_element', // 悬停
+    'drag_element', // 拖拽
+    'handle_dialog', // 处理 alert/confirm
+  ];
+
   /** 插件**本地**就能答的方法：读的是本机共享文件（dev-session 与证据库），不需要扩展。
    *
    * 这三个原来只存在于桥接里，删除计划一度把 dev_session_* 与 evidence_get 记为
@@ -702,8 +737,12 @@ export function apply(ctx, config = {}) {
    */
   const LOCAL_METHODS = ['dev_session_get', 'dev_session_set', 'evidence_get'];
 
-  /** 工具接受的完整方法表 = 扩展侧 + 本地。 */
-  const TOOL_METHODS = BROWSER_METHODS.concat(LOCAL_METHODS);
+  /** 工具接受的完整方法表 = 扩展侧只读档 + 改页面档 + 本地。
+   *
+   * 改页面档也在这里（所以模型**知道**它们存在、也能调用），但它是否**被执行**
+   * 由下面的 config 开关决定 —— 清单管"存在"，开关管"允许"。
+   */
+  const TOOL_METHODS = BROWSER_METHODS.concat(PAGE_ACTION_METHODS).concat(LOCAL_METHODS);
 
   // --- 工具注册：一个通用入口（第一版），后续按需拆成具体工具 -------------------
   ctx.tools.register({
@@ -744,6 +783,21 @@ export function apply(ctx, config = {}) {
     execute: async (args) => {
       const method = String((args && args.method) || '');
       const params = (args && args.params) || {};
+
+      // 改页面档默认**拒绝**：DSH 这侧没有面板那样的批准弹窗，所以"批准"只能是用户在
+      // profile 里显式打开的开关。拒绝时要说清**怎么开**，否则模型只会看到一句"不允许"、
+      // 然后反复换参数重试 —— 那既浪费又危险（多试几次里总有一次会点下去）。
+      if (PAGE_ACTION_METHODS.includes(method) && config.allowPageActions !== true) {
+        return {
+          refused: true,
+          method,
+          reason:
+            '「' + method + '」属于改页面档：它会**修改用户正在看的页面**，因此默认关闭。' +
+            'DSH 这侧没有面板那样的批准弹窗，所以批准 = 在这个插件的 profile 条目里显式开启：' +
+            "config: { allowPageActions: true }，然后重启 DSH。" +
+            '只读档（读页面/元素/列表/搜索）不受影响，可以直接用。',
+        };
+      }
 
       // 本地方法要在 callBrowser **之前**处理：它们读的是本机的共享文件，
       // 不需要浏览器连接 —— 否则会以"浏览器侧没有连接"失败（面板关着时尤其明显）。

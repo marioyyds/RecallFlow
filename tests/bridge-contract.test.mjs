@@ -11,6 +11,8 @@ import path from 'node:path';
 import {
   BRIDGE_METHODS,
   EXTENSION_METHODS,
+  PAGE_ACTION_BACKGROUND_METHODS,
+  PAGE_ACTION_CONTENT_METHODS,
   READONLY_BACKGROUND_METHODS,
   READONLY_CONTENT_METHODS,
   isBridgeMethod,
@@ -73,50 +75,71 @@ test('relay 的每个 dispatch 分支都必须登记在清单里（否则文档/
   assert.deepEqual(undeclared, [], 'relay 有分支但未登记到 BRIDGE_METHODS：' + undeclared.join('、'));
 });
 
-// ---- 只读档（插件第一批能力）的清单 ↔ 分发一致性 ----
+// ---- 插件档位（只读档 + 改页面档）的清单 ↔ 分发一致性 ----
 //
 // 上面那条"每个方法都要有 dispatch 分支"的正则只认 `method === 'x'` 字面分支，
-// 而只读档走的是**查表分发**（`READONLY_CONTENT_METHODS.includes(method)`）—— 看不见。
+// 而这些档位走的是**查表分发**（`XXX_METHODS.includes(method)`）—— 看不见。
 // 所以这里补一组对称检查，否则"把方法加进清单、忘了让 dispatch 查那张表"
 // 会静默变成运行时的 unknown method（而这条链路最难手工回归）。
-test('只读档：两张清单与 BRIDGE_METHODS 互不重叠，且合起来正好是 EXTENSION_METHODS', () => {
-  const overlap = READONLY_CONTENT_METHODS.filter((m) => READONLY_BACKGROUND_METHODS.includes(m));
-  assert.deepEqual(overlap, [], '同一方法同时被归为 content 与 background：' + overlap.join('、'));
+const TIER_LISTS = [
+  ['READONLY_CONTENT_METHODS', READONLY_CONTENT_METHODS],
+  ['READONLY_BACKGROUND_METHODS', READONLY_BACKGROUND_METHODS],
+  ['PAGE_ACTION_CONTENT_METHODS', PAGE_ACTION_CONTENT_METHODS],
+  ['PAGE_ACTION_BACKGROUND_METHODS', PAGE_ACTION_BACKGROUND_METHODS],
+];
 
-  const intruding = [...READONLY_CONTENT_METHODS, ...READONLY_BACKGROUND_METHODS].filter((m) => isBridgeMethod(m));
-  assert.deepEqual(
-    intruding,
-    [],
-    '只读档不该出现在 BRIDGE_METHODS —— 那是 MCP 的清单，混进去会让"每个方法都被 MCP 调用过"变红：' + intruding.join('、')
-  );
-
-  // EXTENSION_METHODS 必须正好 = MCP 的 + 只读档，不能有第三个来源
-  const extra = EXTENSION_METHODS.filter(
-    (m) => !isBridgeMethod(m) && !READONLY_CONTENT_METHODS.includes(m) && !READONLY_BACKGROUND_METHODS.includes(m)
-  );
-  assert.deepEqual(extra, [], 'EXTENSION_METHODS 里有既不属于 MCP 也不属于只读档的方法：' + extra.join('、'));
+test('档位清单：互不重叠、不与 BRIDGE_METHODS 重叠，合起来正好是 EXTENSION_METHODS', () => {
+  const seen = new Map();
+  for (const [label, list] of TIER_LISTS) {
+    for (const m of list) {
+      assert.ok(!seen.has(m), '方法 ' + m + ' 同时出现在 ' + seen.get(m) + ' 与 ' + label + '（归类必须唯一）');
+      seen.set(m, label);
+      assert.ok(!isBridgeMethod(m), '档位方法不该出现在 BRIDGE_METHODS（那是 MCP 的清单）：' + m);
+    }
+  }
+  const extra = EXTENSION_METHODS.filter((m) => !isBridgeMethod(m) && !seen.has(m));
+  assert.deepEqual(extra, [], 'EXTENSION_METHODS 里有既不属于 MCP 也不属于任何档位的方法：' + extra.join('、'));
+  // 反向：每个档位方法都必须出现在 EXTENSION_METHODS 里
+  const missing = [...seen.keys()].filter((m) => !isExtensionMethod(m));
+  assert.deepEqual(missing, [], '档位清单里有方法没进 EXTENSION_METHODS：' + missing.join('、'));
 });
 
-test('只读档：dispatch 必须真的查那两张表（否则清单是空头支票）', () => {
-  assert.ok(
-    relaySource.includes('READONLY_CONTENT_METHODS.includes(method)'),
-    'dispatch 必须查 READONLY_CONTENT_METHODS —— 加了清单却没让 dispatch 查表 = 运行时 unknown method'
-  );
-  assert.ok(
-    relaySource.includes('READONLY_BACKGROUND_METHODS.includes(method)'),
-    'dispatch 必须查 READONLY_BACKGROUND_METHODS'
-  );
-  // 每个只读方法都必须能被两张表之一命中
-  for (const m of EXTENSION_METHODS) {
-    if (isBridgeMethod(m)) continue;
+test('档位清单：dispatch 必须真的查每一张表（否则清单是空头支票）', () => {
+  for (const [label] of TIER_LISTS) {
     assert.ok(
-      READONLY_CONTENT_METHODS.includes(m) || READONLY_BACKGROUND_METHODS.includes(m),
-      '只读方法 ' + m + ' 不在任何一张只读清单里，dispatch 查表时不会命中它'
+      relaySource.includes(label + '.includes(method)'),
+      'dispatch 必须查 ' + label + ' —— 加了清单却没让 dispatch 查表 = 运行时报 unknown method'
     );
   }
 });
 
-test('插件的方法表不许声称扩展做不到的方法（含拼写错），且只读档必须都暴露给插件', () => {
+// 改页面档的**审批**是安全边界，所以要单独钉住：
+// ① 它不能进 probe-tool 的白名单（BRIDGE_METHODS）；② 插件默认必须拒绝它。
+test('改页面档：探针白名单不能触发它，且插件默认拒绝（批准只能显式开）', () => {
+  for (const m of [...PAGE_ACTION_CONTENT_METHODS, ...PAGE_ACTION_BACKGROUND_METHODS]) {
+    assert.ok(
+      !BRIDGE_METHODS.includes(m),
+      '改页面方法 ' + m + ' 不该在 probe-tool 的白名单里 —— 诊断入口永不触发页面动作'
+    );
+  }
+  const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
+  const m = pluginSrc.match(/const PAGE_ACTION_METHODS = \[([\s\S]*?)\];/);
+  assert.ok(m, '应能从插件源码解析出 PAGE_ACTION_METHODS 数组');
+  const inPlugin = [...m[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((x) => x[1]);
+  const expected = [...PAGE_ACTION_CONTENT_METHODS, ...PAGE_ACTION_BACKGROUND_METHODS].sort();
+  assert.deepEqual(inPlugin.slice().sort(), expected, '插件的改页面档清单必须与共享清单一致');
+  // 门禁必须真的存在：默认（config 里没有这个键）就走拒绝分支
+  assert.ok(
+    /PAGE_ACTION_METHODS\.includes\(method\)\s*&&\s*config\.allowPageActions\s*!==\s*true/.test(pluginSrc),
+    '插件必须对改页面档做 config.allowPageActions 门禁，且默认（未显式开启）即拒绝'
+  );
+  assert.ok(
+    pluginSrc.includes('allowPageActions: true'),
+    '拒绝信息里要写清怎么开启（否则只会看到一句"不允许"然后反复重试）'
+  );
+});
+
+test('插件的方法表不许声称扩展做不到的方法（含拼写错），且档位方法必须都暴露给插件', () => {
   const pluginSrc = fs.readFileSync(path.join(ROOT, 'integrations/dsh-plugin-recallflow-one/index.js'), 'utf8');
   const m = pluginSrc.match(/const BROWSER_METHODS = \[([\s\S]*?)\];/);
   assert.ok(m, '应能从插件源码解析出 BROWSER_METHODS 数组');

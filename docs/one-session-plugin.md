@@ -323,10 +323,31 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 
 | 档 | 内容 | 策略 |
 |---|---|---|
-| **只读**（已接） | 读页面/元素/无障碍树/列表/搜索 | **默认开**。不改页面、无副作用 |
-| 改页面 | `highlight_text` `outline_element` `set_element_style` `clear_page_overlays` `scroll_page` `click_element` `type_text` `press_key` `select_option` `check_box` … | **需要明确策略**：DSH 侧没有弹窗可以问用户，所以要么做成"一次性授权"、要么按域白名单。**尚未接入** |
-| 浏览器与网络 | `open_tab` `switch_tab` `fetch_webpage` `run_macro` `run_userscript` `install_userscript` `install_skill` … | **单独一档**，与"改当前页面"影响面不同（会开标签页、会跑脚本）。**尚未接入** |
-| 危险 | `run_javascript`（任意代码执行） | **默认不开**。早先做探针时就刻意定了"不接受任意代码"，要开需用户明确要求 |
+| **只读**（已接入 19 个） | 读页面/元素/无障碍树/列表/搜索 | **默认开**。不改页面、无副作用 |
+| **改页面**（已接入 15 个，**默认关闭**） | `click_element` `type_text` `press_key` `select_option` `check_box` `set_element_style` `highlight_text` `outline_element` `clear_page_overlays` `scroll_page` `undo_last_action` `click_at` `hover_element` `drag_element` `handle_dialog` | **显式开关**（见下）。默认**拒绝** |
+| 浏览器与网络 | `open_tab` `switch_tab` `fetch_webpage` `search_userscripts` `save_macro` `upload_file` `install_userscript` `trust_site` `add_entry` `remove_entry`(`destructive`) … | **尚未接入**。影响面不是"当前页面"（会开标签页、跑脚本、改存储），要单独定策略 |
+| 危险 | `run_javascript`（任意代码执行）`run_userscript` `run_macro` `install_skill` | **默认不开**。早先做探针时就刻意定了"不接受任意代码"，要开需用户明确要求 |
+
+### 改页面档的审批：只能"显式开"，因为 DSH 没有批准弹窗
+
+面板原本有批准弹窗（`requiresApproval: true`），而 DSH 这侧**没有** —— 所以"批准"必须落在
+一个用户**显式设置**的地方。做法是插件的 `config`：
+
+```yaml
+# ~/.dsh/profiles/<profile>/cordis.patch.yml
+- insert:
+    - id: recallflow-one
+      name: '…/integrations/dsh-plugin-recallflow-one/index.js'
+      config: { allowPageActions: true }     # ← 不加这行 = 默认拒绝
+```
+
+插件在 `execute` 里门禁：`PAGE_ACTION_METHODS.includes(method) && config.allowPageActions !== true`
+→ 直接返回**拒绝**，并在 `reason` 里写清**怎么开**。这一点很重要：如果只说"不允许"，
+模型（我）只会换参数反复重试 —— 而多试几次里总有一次会真的点下去。
+
+**还有一条可测试的安全性质**：改页面档**不进 `BRIDGE_METHODS`**，而那个清单是 probe-tool
+的白名单 —— 于是"**诊断探针永远不会触发页面动作**"成为契约测试里的一条断言
+（把 `click_element` 塞进 `BRIDGE_METHODS` 会让 4 条测试变红，已用突变实验验证）。
 
 ### 怎么验证
 
