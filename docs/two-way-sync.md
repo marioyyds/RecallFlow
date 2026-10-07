@@ -309,6 +309,14 @@ node scripts/probe-say.mjs "测试文本"
 - **子会话会被标出来**：`SessionHeader.parentSession` 非空的标成「（子会话）」。
   17 条里有 3 条是裸 uuid，在磁盘上与正常会话同一个 store —— 光看形状分不出来，所以用字段判。
 
+**"载入一条没活着的会话"这条路查清了（2026-10-08）**：DSH 的 Host 服务
+**`sessionController`**（`dsh-api-session-controller`）里有两条正对的方法 ——
+`resolveAgent(sessionId)`（*"Resolve or **resume**… @returns **the live Agent**"*，即载入并拿到活 agent）
+与 `inspect(sessionId)`（*"…**without activating its Agent**"*，只读读历史）。
+**但"插件拿不拿得到这个服务"还没在真机上确认**：`/status` 的 `sessionController` 探针字段就是答案
+（只读：取服务、列方法名、只读读一次事件）。注意 `resolveAgent` **会激活会话**（不销毁东西，
+但会占资源、可能改变"最近活跃"，且**会不会切走 GUI 视图我没验证**）→ 要用户明确同意才做。
+
 ## 已知限制 / 未验证
 
 - **✅ 已解决（第 19 轮留下的线索）：会话事件的推送是健康的。**
