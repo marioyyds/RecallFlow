@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
- * 闸门检查：端到端验证开始之前，这五条必须成立（见 docs/deletion-plan.md）。
+ * 闸门检查：端到端验证开始之前，这几条必须成立（见 docs/deletion-plan.md）。
  *
  * 用法：
  *   node scripts/verify-live-gate.mjs                # 只做无副作用的检查
  *   node scripts/verify-live-gate.mjs --say          # 额外真的发一句话进会话（有副作用！）
- *   node scripts/verify-live-gate.mjs 3080 7801      # 指定 DSH 端口与桥接端口
+ *   node scripts/verify-live-gate.mjs 3080           # 指定 DSH 端口
+ *
+ * 注：这里原本还有两条检查是"7801 桥接必须活着、且有客户端连着"（opencode 的基线）。
+ * 用户 2026-10-08 明确不再用 opencode、桥接整包已删除，所以闸门现在**只描述 DSH 这一条链路**。
  *
  * 为什么单独写一个：闸门里既有"新通道好了没"也有"旧链路有没有被弄坏"，
  * 混在人工核对里最容易漏掉后者 —— 而我恰恰干过一次（把扩展的桥接连接换成指向 DSH，
@@ -36,7 +39,6 @@ const args = process.argv.slice(2);
 const withSay = args.includes('--say');
 const ports = args.filter((a) => /^\d+$/.test(a));
 const dshPort = Number(ports[0] || 3080);
-const bridgePort = Number(ports[1] || 7801);
 
 const results = [];
 function check(label, ok, detail) {
@@ -54,7 +56,7 @@ async function get(url, init) {
 }
 
 async function main() {
-  console.log('--- 闸门检查（DSH :' + dshPort + '，桥接 :' + bridgePort + '）---');
+  console.log('--- 闸门检查（DSH :' + dshPort + '）---');
 
   // 1) 插件是不是**已载入的**新代码。
   //
@@ -115,26 +117,8 @@ async function main() {
     check('插件已认到会话（status.sessions 非空）', false, '拿不到 status，无法判断');
   }
 
-  // 3) 旧链路没被弄坏：桥接还活着，而且有客户端连着
-  //    这一条是"没删坏"的基线 —— 桥接服务 opencode，不能因为新架构把它晾着。
-  try {
-    const r = await get('http://127.0.0.1:' + bridgePort + '/health', {
-      headers: { 'X-RecallFlow-Token': 'recallflow-local-bridge-v1' },
-    });
-    let health = null;
-    try {
-      health = JSON.parse(r.text);
-    } catch {}
-    check('桥接存活（/health ok）', !!(health && health.ok), 'HTTP ' + r.status + ' ' + r.text.slice(0, 120));
-    check(
-      '桥接有客户端连着（opencode 那条链路的基线）',
-      !!(health && health.ws),
-      'health.ws=' + (health ? health.ws : '(无)') + ' —— false 时 opencode 的页面工具会拿不到结果'
-    );
-  } catch (e) {
-    check('桥接存活（/health ok）', false, e.message);
-    check('桥接有客户端连着（opencode 那条链路的基线）', false, e.message);
-  }
+  // 3) 原来的第三条是"旧链路没被弄坏：7801 桥接还活着且有客户端连着"（opencode 的基线）。
+  //    桥接已随 opencode 一起删除（2026-10-08），那两条随之移除 —— 闸门现在只描述 DSH 这一条链路。
 
   // 4) 输入通道（有副作用，需显式开启）
   if (withSay) {
@@ -160,9 +144,10 @@ async function main() {
     console.log('  · 跳过输入通道检查（加 --say 才会真的发一句话，那有副作用）');
   }
 
-  // 5) 脚本查不了的那一条，明确说出来
-  console.log('  · 第 5 条（DSH 里调用 recallflow_browser 能往返）脚本查不了：');
-  console.log('    那个工具只能由模型调用。请在会话里让它读一次当前页面来确认。');
+  // 5) 工具往返：**工具**只有模型能调，但那条链路的接线是可以脚本验证的
+  console.log('  · 工具往返（recallflow_browser）：工具本身只有模型能调，但接线能脚本查 ——');
+  console.log('    跑 node scripts/verify-capability-tiers.mjs：它逐方法探一遍');
+  console.log('    （只读档应被扩展认得、三档受控方法应被白名单挡下），比在这里打印一句提醒有用。');
 
   const failed = results.filter((r) => !r.ok).length;
   console.log('');
