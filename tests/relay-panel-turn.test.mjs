@@ -9,7 +9,9 @@
 //   旧版把「面板的一个对话回合」POST 到桥接的 /panel-turns（带 token、带 role/pageUrl/at），
 //   属于"同步两段对话"；那部分已按删除清单第 4、6 步移除（postPanelTurn 已删除）。
 //   现在只做一件事：把**用户自己说的一句话**送进 DSH 的这条会话 —— 插件用
-//   agent.send(msg,'next-turn',true) 把它变成真用户消息。
+//   agent.send(msg,'next-step',true) 把它变成真用户消息。
+//   （第二参用 'next-step' 而非 'next-turn'：后者要等整轮结束、且可能在轮次边界被清掉，
+//    用户反馈"发了没反应"就是它 —— 见 docs/two-way-sync.md 踩坑第 13 条。）
 //
 // 覆盖不到：Chrome 是否真的把内容脚本的 sendMessage 送到后台（浏览器行为），
 //   以及面板 UI 的实际观感（需要真实页面）。

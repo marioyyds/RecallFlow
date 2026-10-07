@@ -20,7 +20,7 @@
 
 路径均在 `…/npm/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/…`。
 
-### 1. 发消息进会话：`agent.send(msg, 'next-turn', true)`
+### 1. 发消息进会话：`agent.send(msg, 'next-step', true)`
 
 ```js
 const message = deepFreeze({
@@ -29,7 +29,7 @@ const message = deepFreeze({
   content: [{ type: 'text', text }],
   source: { kind: 'user', rpcId },   // ← kind 必须是 'user'
 });
-await agent.send(message, 'next-turn', true);
+await agent.send(message, 'next-step', true);
 ```
 
 - **`source.kind` 决定一切**：实测 `kind:'user'` 会产生 `type=user/message, role=user,
@@ -39,6 +39,12 @@ await agent.send(message, 'next-turn', true);
   `agent.inject(...)`，但同一份源码的注释写明：
   "inject() never wakes an idle driver. … this context can only target this live turn's next step."
   即 inject 只引导**进行中**的那一轮，面板要主动开口必须用 send。
+- **第二参用 `'next-step'` 而不是 `'next-turn'`**（2026-10-07 修，来自用户反馈
+  "recallflow 不能发消息"）。`InboxTarget = 'next-turn' | 'next-step'`，而 `send` 的注释写着
+  cancel 之后 "…even when its **message is cleared before the driver claims** it"。
+  `'next-turn'` 要等**整轮结束**才可能被取走；DSH 连续跑轮次时，消息会在轮次边界被清掉 ——
+  表现就是 `/say` 返回 `ok:true` 但会话里看不到。`'next-step'` 是**当前这一轮的下一个步骤**
+  就取走。这一条由 `tests/dsh-one-plugin.test.mjs` 钉住（并且验证过改回去会让它失败）。
 - 实测（隔离 headless，`scripts/spike-wake-plugin.mjs`）：空闲会话上的一次 `send`
   同时做到三件事 —— 产生真 user/message、唤醒 driver、开启新一轮
   （send 之后新增 assistant/message 15 条）。

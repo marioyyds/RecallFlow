@@ -96,7 +96,7 @@ this context can only target this live turn's next step."
 
 > ⚠️ **上面这句"必须走 `session.prompt`"是当时（v2）的假设，下面第 100 行的探针 v3 推翻了它** ——
 > `agent.session.prompt` **不是函数**（同一次探针的输出里就写着 `session.prompt 是函数=false`）。
-> 正确入口是 `agent.send(message, 'next-turn', true)`。留着这句是因为这段是**按时间顺序的调查记录**；
+> 正确入口是 `agent.send(message, 'next-step', true)`（`'next-turn'` 的坑见下方 2026-10-07 补充）。留着这句是因为这段是**按时间顺序的调查记录**；
 > 但扫读时别把它当结论 —— 结论在第 117 行。
 
 对照：我们现在手搓的载荷是 `source: { kind: 'recallflow-panel' }` ——
@@ -119,10 +119,19 @@ this context can only target this live turn's next step."
 [spike] 探针文本是否作为 user/message 出现 = 是（共 2 条 user/message）
 ```
 
-结论：**`agent.send(message, 'next-turn', true)` 就是"外部输入进会话"的正确入口** ——
+结论：**`agent.send(message, 'next-step', true)` 就是"外部输入进会话"的正确入口** ——
 它同时做到三件事：产生真正的 `user/message`、唤醒空闲的 driver、开启新一轮。
 （`agent.inject` 只做前一件的一半：能产生 user/message 但**不唤醒**空闲 driver，
 所以它只适合引导正在进行的那一轮。）
+
+> **2026-10-07 补充：第二个参数的选择也是坑。** 原来写的是 `'next-turn'` ——
+> 而 `InboxTarget = 'next-turn' | 'next-step'`（`dsh-agent/lib/types/types.d.ts`），
+> `'next-turn'` 要等**整轮结束**才可能被取走，并且 `send` 的注释写明 cancel 之后
+> "…even when its **message is cleared before the driver claims** it"。
+> 用户反馈"recallflow 不能发消息"（`/say` 返回 `ok:true`、会话里却看不到）就是它：
+> 这个会话连续跑轮次，消息在轮次边界被清掉了。现已改成 `'next-step'`
+> （当前这一轮的下一个步骤就取走），并由 `tests/dsh-one-plugin.test.mjs` 钉住 ——
+> 验证过把它改回 `'next-turn'` 会让那条测试失败。
 
 顺带一条形状事实（v2 探针转储）：`agent` 原型上有
 `send / followup / steer / inject / cancel / wakeDriver / whenIdle / runMaintenance / turn / step`；
@@ -134,7 +143,7 @@ this context can only target this live turn's next step."
 
 | 需要的能力 | API | 证据 |
 |---|---|---|
-| 面板的话 → 真用户消息 + 唤醒空闲会话 | `agent.send(msg, 'next-turn', true)` | ✅ 隔离 headless 实测 |
+| 面板的话 → 真用户消息 + 唤醒空闲会话 | `agent.send(msg, 'next-step', true)` | ✅ 隔离 headless 实测（target 的坑见上方 2026-10-07 补充） |
 | 载荷形状 | `{id, role:'user', content:[…], source:{kind:'user', rpcId}}` | ✅ 实测产生 user/message |
 | 把页面工具给 DSH | `ctx.tools.register(ToolDefinition)` | ✅ 类型声明（形状待读全） |
 | 面板 ↔ 插件的传输 | `webServer.register(route)` + SSE | ✅ 类型声明 |
@@ -185,7 +194,7 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 ```
 浏览器扩展 ──WebSocket──▶ DSH 插件（进程内，随 DSH 启动）
                           ├─ webServer.register / registerUpgrade
-                          │    ├─ POST /recallflow/say        → agent.send(msg,'next-turn',true)，变成真用户消息
+                          │    ├─ POST /recallflow/say        → agent.send(msg,'next-step',true)，变成真用户消息
                           │    ├─ GET  /recallflow/status     （诊断：计数与 recentEvents）
                           │    ├─ POST /recallflow/probe-tool （工具往返探针；白名单只读，不接受 dev_session_set）
                           │    └─ WS   /recallflow/ws         （会话事件 + 工具调用/回执）
@@ -203,7 +212,7 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 > ① 扩展是 MV3，service worker 空闲约 30 秒被回收，而 `fetch` 流**不能**阻止回收
 >   （WebSocket 活动才能）→ 改用 WS；
 > ② `session.prompt` **不是函数**（本文件下方的探针输出里就写着 `session.prompt 是函数=false`）
->   → 改用 `agent.send(msg,'next-turn',true)`；
+>   → 改用 `agent.send(msg,'next-step',true)`；
 > ③ 7801 是 opencode 的出口，不是中继 → 保留。
 >
 > 留这段记录是因为"被推翻的三条"比结论本身更容易忘。
@@ -259,7 +268,7 @@ node <dsh>/lib/bin.js --profile rfprobe --port 3099 --no-open
 > | 1 字段形状没读全 | 已读全并据此注册工具 | `docs/one-session-plugin.md` 上文 + 插件实现 |
 > | 2 路由是否在鉴权栅栏内 | **在栅栏之外**（`/recallflow/*` 返回 200 而 `/`、`/api/*` 401） | 隔离实例实测 |
 > | 3 跨源可达性 | 已解决：扩展从**后台**（host_permissions）发请求，不受页面同源限制 | `relay.js` 的注释与实现 |
-> | 4 空闲会话主动开口 | 已解决：入口是 `agent.send(msg,'next-turn',true)`，**不是** `session.prompt` | 探针 v3（第 105 行）+ 活实例实测 |
+> | 4 空闲会话主动开口 | 已解决：入口是 `agent.send(msg,'next-step',true)`，**不是** `session.prompt` | 探针 v3（第 105 行）+ 活实例实测 |
 > | 5 "WS → SSE" | **方向反了**：最终用 **WebSocket**，理由是 MV3 的 service worker 会被回收而 fetch 流不能保活 | 插件头部注释 + 第 196 行的历史说明 |
 
 

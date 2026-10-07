@@ -19,7 +19,7 @@ DSH（一条会话，唯一真相）
 
 | 端点 | 作用 |
 |---|---|
-| `POST /recallflow/say` | 面板打的字 → **这条会话的真实用户消息**（`agent.send(msg,'next-turn',true)`） |
+| `POST /recallflow/say` | 面板打的字 → **这条会话的真实用户消息**（`agent.send(msg,'next-step',true)`） |
 | `WS /recallflow/ws` | 会话事件往下推；工具调用/回执来回走 |
 | `GET /recallflow/status` | 连接与登记状态（排查用） |
 
@@ -39,7 +39,9 @@ DSH（一条会话，唯一真相）
   → sendPanelTurn(turn)  → 后台 panel:turn → sayToDsh(text) → POST /recallflow/say
   → 响应 {ok, rpcId, sessionId} → 把 rpcId 回填到**那个 turn 对象**上（顺序不能反）
 插件 agent.send({ id, role:'user', content:[{type:'text',text}], source:{kind:'user', rpcId} },
-                 'next-turn', true)                                      ← kind 必须是 'user'；第三参 true 才唤醒
+                 'next-step', true)                                      ← kind 必须是 'user'；第三参 true 才唤醒
+                 // 第二参用 'next-step'：'next-turn' 要等整轮结束、且可能在轮次边界被清掉
+                 // （用户反馈"发了没反应"就是这个；见 docs/one-session-plugin.md 末尾）
 ```
 
 **② DSH → 面板**（插件 `projectEvent` 的字段形状，全部来自 DSH 的类型声明）
@@ -226,7 +228,9 @@ node scripts/probe-say.mjs "测试文本"
    教训：**验证要走到"真的用一次"，别停在"能解析"。**
 3. **`inject` 不会唤醒空闲会话。** 参考实现源码注释原文：
    "inject() never wakes an idle driver … can only target this live turn's next step."
-   要让外部输入**开启**一轮，必须用 `agent.send(msg,'next-turn',true)`。
+   要让外部输入**开启**一轮，必须用 `agent.send(msg,'next-step',true)`。
+   （这里原本写的是 `'next-turn'` —— 那个 target 要等**整轮结束**、且可能在轮次边界被清掉，
+   用户反馈"发了没反应"就是它；见踩坑第 13 条。）
 4. **`source.kind` 决定消息性质。** `kind:'user'` 才是真用户消息；自定义 kind 只会落成
    模型侧上下文（界面上看不见）。实测过两种，差别就在这一个字段。
 5. **`ctx.tools.register` / `ctx.webServer.register` 之前必须先 `inject` 声明服务名**，
@@ -254,6 +258,15 @@ node scripts/probe-say.mjs "测试文本"
     这是与"引用型消费者"不同的**行为型依赖**：`scripts/scan-deletion-consumers.mjs`
     只能扫引用，扫不到这一类 —— 线索往往只写在一句注释里（"由服务端去重兜住"）。
     **判断能不能删，不能只看"有没有人 import"。**
+13. **同一条 API 的"目标"参数不同，语义差很远 —— 而两种都能返回成功。**
+    面板消息最初用 `agent.send(msg, 'next-turn', true)`：`/say` 返回 `ok:true`、会话里却看不到。
+    原因埋在 DSH 自己的类型声明里（`dsh-agent/lib/types/runtime-types.d.ts`）：
+    `InboxTarget = 'next-turn' | 'next-step'`，而 `send` 的注释写着 cancel 之后
+    "…even when its **message is cleared before the driver claims** it"。
+    `'next-turn'` 要等**整轮结束**才可能被取走；这个会话连续跑目标轮时，消息在轮次边界被清掉。
+    改成 `'next-step'`（当前这一轮的下一个步骤就取走）后正常。已由
+    `tests/dsh-one-plugin.test.mjs` 钉住 —— 并**验证过**改回 `'next-turn'` 会让它失败。
+    教训：**"接口返回成功"和"效果发生"是两件事**，尤其当参数是枚举时，要把每个取值的语义读全。
 
 ## 已知限制 / 未验证
 

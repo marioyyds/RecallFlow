@@ -20,7 +20,9 @@
  *   （实测：createRequire(process.argv[1]).resolve('ws') 能解析到，见下方 resolveWs）。
  *
  * 关键依据（均为实测或读自类型声明，详见 docs/one-session-plugin.md）：
- *   - agent.send(msg, 'next-turn', true)：实测能产生真 user/message + 唤醒空闲 driver + 开启新一轮
+ *   - agent.send(msg, 'next-step', true)：实测能产生真 user/message + 唤醒空闲 driver + 开启新一轮
+ *     （target 用 'next-step' 而非 'next-turn'：后者要等整轮结束、且轮次边界可能把它清掉 ——
+ *      用户反馈"发了没反应"就是它。详见下方 /say 处的注释。）
  *   - 载荷 source.kind 必须是 'user'：实测自定义 kind 只会落成模型侧上下文
  *   - webServer.register(route)：注释原文 "may hold the response open, e.g. SSE"
  *   - webServer.registerUpgrade(route)：handler 拿到 (req, socket, head)，**协议协商与 socket 归自己**
@@ -547,9 +549,20 @@ export function apply(ctx, config = {}) {
         source: { kind: 'user', rpcId },
       });
       try {
-        // 实测：send(msg,'next-turn',true) 同时做到 产生真 user/message + 唤醒空闲 driver + 开启新一轮。
+        // 实测：send(msg, <target>, true) 同时做到 产生真 user/message + 唤醒空闲 driver + 开启新一轮。
         // inject 只引导进行中的那一轮、不唤醒空闲会话，所以这里不用它。
-        await picked.agent.send(message, 'next-turn', true);
+        //
+        // **target 用 'next-step' 而不是 'next-turn'** —— 2026-10-07 从用户反馈
+        // （"recallflow 不能发消息"）查出来的：/say 返回 ok:true，但消息在会话里看不到。
+        // 依据是 DSH 自己的类型声明（dsh-agent/lib/types/runtime-types.d.ts）：
+        //   export type InboxTarget = 'next-turn' | 'next-step';
+        //   send(message, target /* "the preferred next-turn or next-step inbox boundary" */, wakeup)
+        //   还有一句关键的：cancel 之后 "…even when its **message is cleared before the driver claims** it"
+        // 'next-turn' 要等到**整轮结束**才可能被取走；而这个会话连续跑目标轮时，
+        // 消息会在轮次边界被清掉 —— 面板那边看起来就是"发了、没反应"。
+        // 'next-step' 是**当前这一轮的下一个步骤**就取走。保留 send + wakeup：
+        // 那条唤醒行为是我在隔离实例里实测过的。
+        await picked.agent.send(message, 'next-step', true);
         log('面板输入已送入会话：' + text.slice(0, 40));
         sendJson(res, 200, { ok: true, rpcId, sessionId: sessionIdOf(picked.agent.session) }, origin);
       } catch (err) {

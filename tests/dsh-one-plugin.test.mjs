@@ -353,7 +353,11 @@ test('POST /recallflow/say：走 agent.send，载荷必须是真用户输入（s
   assert.equal(msg.source.kind, 'user', 'kind 必须是 user —— 自定义 kind 只会落成上下文');
   assert.ok(msg.source.rpcId, 'rpcId 用于回显归属');
   assert.ok(Object.isFrozen(msg), '载荷应冻结（与官方输入路径一致）');
-  assert.equal(mode, 'next-turn');
+  // ★ target 必须是 'next-step'，不能是 'next-turn' —— 这条是 2026-10-07 用户反馈
+  // （"recallflow 不能发消息"）查出来的：'next-turn' 要等**整轮结束**才可能被取走，
+  // 而连续跑轮次时它会在轮次边界被清掉（DSH 自己的声明里写着 "…cleared before the driver claims"），
+  // 于是 /say 返回 ok:true 但会话里什么都看不到。'next-step' 是当前这轮的下一个步骤就取走。
+  assert.equal(mode, 'next-step', "target 用 'next-step'：'next-turn' 会等到整轮结束、且可能被清掉");
   assert.equal(wake, true, '必须唤醒空闲 driver，否则面板在 DSH 空闲时叫不动它');
 });
 
