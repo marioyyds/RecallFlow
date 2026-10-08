@@ -29,17 +29,30 @@
 ## 架构
 
 ```mermaid
+%%{init: {"flowchart":{"curve":"basis","nodeSpacing":38,"rankSpacing":70,"padding":10},"themeVariables":{"fontSize":"14px"}}}%%
 flowchart LR
-    U["用户指令"] --> R["意图路由"]
-    R --> L["Agent 循环<br/>上下文 · 预算 · 反思"]
-    L --> T["工具注册表<br/>工具 · 权限 · 参数校验"]
-    T --> P["页面感知与操作<br/>内容脚本 + CDP"]
-    T --> K["本地知识库 / RAG"]
-    T --> S["技能提示层"]
-    T --> M["MCP 外部工具"]
-    T --> US["用户脚本"]
+    Q(["用户指令"])
+    subgraph BG["扩展后台"]
+        R["意图路由"]
+        L["Agent 循环<br/>上下文 · 预算 · 反思"]
+        T["工具注册表<br/>工具 · 权限 · 参数校验"]
+        G["工具守卫<br/>完成校验"]
+    end
+    subgraph EX["执行与能力"]
+        P["页面感知与操作<br/>内容脚本 + CDP"]
+        K["本地知识库 / RAG"]
+        S["技能提示层"]
+        M["MCP 外部工具"]
+        US["用户脚本"]
+    end
+    Q --> R --> L --> T
+    T --> P
+    T --> K
+    T --> S
+    T --> M
+    T --> US
     P -.-> L
-    G["工具守卫 + 完成校验"] -.->|软着陆 / 反思| L
+    G -.->|软着陆 / 反思| L
 ```
 
 ## 快速上手
@@ -68,7 +81,9 @@ flowchart LR
 前端问题的难点不在修改代码，而在确认修改正确。RecallFlow 是该闭环的验证端：
 
 ```mermaid
+%%{init: {"sequence":{"mirrorActors":false,"actorMargin":70,"messageMargin":28,"boxMargin":6,"noteMargin":8},"themeVariables":{"fontSize":"14px"}}}%%
 sequenceDiagram
+    autonumber
     participant RF as RecallFlow
     participant AI as AI / opencode
     participant Dev as 本地开发服务器
@@ -81,6 +96,7 @@ sequenceDiagram
     else 全部通过
         AI->>RF: page_health：增量错误体检
     end
+    Note over RF,AI: 断言与错误体检使用与点击 / 输入同一套定位语义
 ```
 
 `verify_change` 支持 `present / count / visible / text / value / minWidth / minHeight / styles` 断言，跨域 iframe 内元素同样适用。需先调用 `dev_session_set({ projectRoot, devUrl })`，源码位置才会由开发服务器 URL 转换为磁盘绝对路径。
@@ -88,7 +104,9 @@ sequenceDiagram
 ## 会话交接
 
 ```mermaid
+%%{init: {"sequence":{"mirrorActors":false,"actorMargin":60,"messageMargin":28},"themeVariables":{"fontSize":"14px"}}}%%
 sequenceDiagram
+    autonumber
     participant U as 用户
     participant P as 对话面板
     participant AI as 外部 AI
@@ -99,6 +117,7 @@ sequenceDiagram
     U->>AI: 粘贴指令
     AI->>M: recallflow_session(RF-7K2M9X)
     M-->>AI: 面板对话 + 页面信息 + 拾取元素 + 错误快照
+    Note over U,P: 标识为无歧义字母表，最多保留最近 30 份
 ```
 
 错误在事后往往已无法复现，该快照通常是最关键的证据。标识采用无歧义字母表（不含 `0 / O / 1 / I / L`），最多保留最近 30 份。
@@ -108,6 +127,7 @@ sequenceDiagram
 `webfetch` 无法读取的 SPA、登录态或内网页面，交由 RecallFlow 以真实浏览器会话读取，并返回带时间戳与哈希的证据。共 **12 个工具**：
 
 ```mermaid
+%%{init: {"flowchart":{"curve":"basis","nodeSpacing":34,"rankSpacing":60,"padding":10},"themeVariables":{"fontSize":"14px"}}}%%
 flowchart LR
     subgraph S1["stdio：单实例"]
         A1["opencode"] -->|MCP stdio| B1["recallflow-mcp"]
@@ -115,10 +135,11 @@ flowchart LR
     subgraph S2["HTTP：多客户端共用一个常驻 server"]
         A2["opencode A / B / C"] -->|Streamable HTTP /mcp| B2["recallflow-mcp --http"]
     end
-    B1 --> BR["桥接端口 :7801"]
+    BR(["桥接端口 :7801"])
+    B1 --> BR
     B2 --> BR
     BR --> EXT["RecallFlow 扩展"]
-    BR --> AR["证据归档 ~/.recallflow-evidence"]
+    BR --> AR["证据归档<br/>~/.recallflow-evidence"]
 ```
 
 > stdio 传输为 1:1：N 个 opencode 实例各启动一个 server 进程，而扩展只能连接占用桥接端口的那个，因此仅一个实例可读取页面。多实例并发请改用 HTTP 模式。
@@ -137,16 +158,17 @@ flowchart LR
 ## Agent 设计
 
 ```mermaid
+%%{init: {"flowchart":{"curve":"basis","nodeSpacing":40,"rankSpacing":55,"padding":10},"themeVariables":{"fontSize":"14px"}}}%%
 flowchart TD
-    A["组装上下文：意图路由 + 系统提示 + 历史 + 预算"] --> B["模型推理"]
-    B --> C{"输出类型"}
+    A(["收到指令"]) --> B["组装上下文<br/>意图路由 · 系统提示 · 历史 · 预算"]
+    B --> C{"模型输出"}
     C -->|工具调用| D["工具守卫判定"]
     D --> E["审批：按风险与站点信任分级"]
     E --> F["执行工具"]
-    F --> A
-    C -->|最终答复| G["交付回答"]
-    C -->|complete_task| H["完成校验：独立模型调用"]
-    H -->|未达成| A
+    F --> B
+    C -->|最终答复| G(["交付回答"])
+    C -->|complete_task| H["完成校验<br/>独立模型调用"]
+    H -->|未达成，注入反思| B
     H -->|达成| G
 ```
 

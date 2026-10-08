@@ -24,7 +24,12 @@ test('README 至少包含一个 mermaid 图', () => {
 
 test('每个 mermaid 块的首行是受支持的图类型', () => {
   blocks.forEach((b, i) => {
-    const head = b.split('\n').map((l) => l.trim()).filter(Boolean)[0] || '';
+    // 首个非空且**非指令**的行才是图类型声明（%%{init}%% 等指令可以出现在最前面）
+    const head =
+      b
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('%%'))[0] || '';
     assert.match(head, SUPPORTED_HEAD, '第 ' + (i + 1) + ' 个图的首行不是受支持的图类型：' + head);
   });
 });
@@ -57,11 +62,50 @@ test('不含制表符与 CR（mermaid 对这两者敏感）', () => {
   });
 });
 
-test('多行标签用 <br/> 而不是裸换行（裸换行会截断节点定义）', () => {
+test('%%{init}%% 指令里的 JSON 必须可解析（写错会让整张图渲染失败）', () => {
+  const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
+  let seen = 0;
+  blocks.forEach((b, i) => {
+    const m = /^%%\{init:\s*([\s\S]*?)\}%%\s*$/m.exec(b);
+    if (!m) return;
+    seen += 1;
+    assert.doesNotThrow(
+      () => JSON.parse(m[1]),
+      '第 ' + (i + 1) + ' 个图的 init 指令不是合法 JSON：' + m[1]
+    );
+  });
+  assert.ok(seen >= 1, '没有任何图使用 init 指令，这条断言会变成恒真');
+});
+
+test('init 指令只调布局与排版，不写死配色', () => {
+  // GitHub 会跟随用户主题（明/暗）渲染 mermaid。一旦写死 fill / stroke 之类的颜色，
+  // 暗色主题下就会出现浅底浅字。这里把这条约定钉住。
+  const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const COLOR_KEYS = /"(fill|stroke|background|primaryColor|mainBkg|nodeBorder|lineColor|textColor|clusterBkg)"\s*:/;
+  blocks.forEach((b, i) => {
+    const m = /^%%\{init:\s*([\s\S]*?)\}%%\s*$/m.exec(b);
+    if (!m) return;
+    assert.ok(
+      !COLOR_KEYS.test(m[1]),
+      '第 ' + (i + 1) + ' 个图的 init 指令写死了配色，暗色主题下会不可读：' + m[1]
+    );
+  });
+});
+
+test('不使用 classDef / style 写死颜色（同上）', () => {
+  const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
+  blocks.forEach((b, i) => {
+    const bad = /(classDef\s+\w+[^\n]*\b(fill|stroke)\s*:\s*#|style\s+\w+\s+[^\n]*\b(fill|stroke)\s*:\s*#)/.exec(b);
+    assert.equal(bad, null, '第 ' + (i + 1) + ' 个图写死了颜色：' + (bad && bad[0]));
+  });
+});
+
+test('节点标签的括号在行内闭合（未闭合会截断节点定义）', () => {
+  const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
   blocks.forEach((b, i) => {
     for (const line of b.split('\n')) {
       const t = line.trim();
-      if (!t || BLOCK_OPENERS.test(t) || t === 'end') continue;
+      if (!t || BLOCK_OPENERS.test(t) || t === 'end' || t.startsWith('%%')) continue;
       // 节点定义行应当在一行内闭合：左右括号数量一致
       const open = (t.match(/[\[\(\{]/g) || []).length;
       const close = (t.match(/[\]\)\}]/g) || []).length;
