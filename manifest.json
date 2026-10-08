@@ -9,10 +9,10 @@
     "default_popup": "popup.html",
     "default_title": "RecallFlow",
     "default_icon": {
-      "16": "docs/assets/recallflow-mark.svg",
-      "32": "docs/assets/recallflow-mark.svg",
-      "48": "docs/assets/recallflow-mark.svg",
-      "128": "docs/assets/recallflow-mark.svg"
+      "16": "docs/assets/icon-16.png",
+      "32": "docs/assets/icon-32.png",
+      "48": "docs/assets/icon-48.png",
+      "128": "docs/assets/icon-128.png"
     }
   },
   "background": {
@@ -49,9 +49,9 @@
     }
   ],
   "icons": {
-    "16": "docs/assets/recallflow-mark.svg",
-    "32": "docs/assets/recallflow-mark.svg",
-    "48": "docs/assets/recallflow-mark.svg",
-    "128": "docs/assets/recallflow-mark.svg"
+    "16": "docs/assets/icon-16.png",
+    "32": "docs/assets/icon-32.png",
+    "48": "docs/assets/icon-48.png",
+    "128": "docs/assets/icon-128.png"
   }
 }

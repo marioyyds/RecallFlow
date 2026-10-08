@@ -257,7 +257,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'userscript:notify') {
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: chrome.runtime.getURL('docs/assets/recallflow-mark.svg'),
+      // 通知图标同样只接受位图（与 manifest 的 icons 一个道理）：
+      // 指向 .svg 时通知会静默地不出图，而不是报错。
+      iconUrl: chrome.runtime.getURL('docs/assets/icon-128.png'),
       title: msg.title || 'RecallFlow',
       message: msg.text || '',
     });
