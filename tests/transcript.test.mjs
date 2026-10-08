@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson, alreadyCommittedAsText } from '../lib/page/transcript.js';
+import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -460,4 +460,85 @@ test('空候选与空 parts 安全', () => {
 
 test('只看文字类 part，工具 part 单独存在时不算重复', () => {
   assert.equal(alreadyCommittedAsText([{ type: 'tool-result', result: '已完成。' }], '已完成。'), false);
+});
+
+// ---------------------------------------------------------------- 进行中 / 失败的一轮
+//
+// 实测缺陷：助手条目只在 'end' 收尾时入库，于是任务进行中导出/交接只能拿到用户消息；
+// 错误更是只写进 DOM、从不入库，面板一刷新就没了。
+
+test('buildPartialTurn: 把进行中的叙述与工具轨迹一起带上', () => {
+  const parts = [{ type: 'tool-result', callId: 'c1', name: 'read_current_page', status: 'completed', result: '页面正文' }];
+  const m = buildPartialTurn(parts, '正在挑选关键句');
+  assert.equal(m.role, 'assistant');
+  assert.equal(m.partial, true);
+  assert.match(m.content, /正在挑选关键句/);
+  assert.match(m.content, /尚未结束/, '必须说明这一段还没结束，否则外部 AI 会当它读成完整答复');
+  assert.equal(m.parts.length, 1, '进行中的工具轨迹不能丢 —— 交接包里最值钱的就是「它试过什么」');
+});
+
+test('buildPartialTurn: 标记放在 content 里（交接包的 trimMessages 只保留 role/content）', () => {
+  const m = buildPartialTurn([], '半句话');
+  assert.ok(m.content.includes(PARTIAL_TURN_NOTE), '标记必须在 content 中，否则交接包里会消失');
+});
+
+test('buildPartialTurn: 没有任何内容时返回 null（不产生空消息）', () => {
+  assert.equal(buildPartialTurn([], ''), null);
+  assert.equal(buildPartialTurn(null, null), null);
+  assert.equal(buildPartialTurn([], '   '), null);
+});
+
+test('buildPartialTurn: parts 是副本，不污染面板状态', () => {
+  const parts = [{ type: 'tool-result', callId: 'c1', name: 'x', result: 'y' }];
+  buildPartialTurn(parts, '文本');
+  assert.equal(parts.length, 1, '不应修改传入数组');
+});
+
+test('buildFailedTurn: 错误文本进 content，并标记 failed', () => {
+  const m = buildFailedTurn([{ type: 'narration', text: '我先读取页面' }], '任务失败：请求超时');
+  assert.equal(m.role, 'assistant');
+  assert.equal(m.failed, true);
+  assert.equal(m.content, '任务失败：请求超时');
+  assert.equal(m.parts.length, 1, '失败前的工具/叙述必须保留');
+});
+
+test('buildFailedTurn: 错误只放 content，不额外塞 text part', () => {
+  // 塞进去的话导出侧会判定「已内联展示过」而跳过「### 失败」标题
+  const m = buildFailedTurn([], '出错了');
+  assert.equal(m.parts.length, 0);
+  assert.ok(!m.parts.some((p) => p.type === 'text'), '不应额外插入 text part');
+});
+
+test('buildFailedTurn: 没有错误信息时也要有可读文本', () => {
+  assert.match(buildFailedTurn([], '').content, /任务失败/);
+  assert.match(buildFailedTurn([], null).content, /任务失败/);
+});
+
+test('导出：进行中的一轮用「### 进行中」而不是「### 结论」', () => {
+  const text = wrap([{ role: 'user', content: '划出关键信息' }, buildPartialTurn([], '正在挑选关键句')]);
+  assert.match(text, /### 进行中/);
+  assert.ok(!text.includes('### 结论'), '尚未结束的一轮不该叫结论');
+  assert.match(text, /尚未结束/);
+});
+
+test('导出：失败的一轮用「### 失败」，且保留失败前的叙述与工具行', () => {
+  const text = wrap([
+    { role: 'user', content: '划出关键信息' },
+    buildFailedTurn(
+      [
+        { type: 'narration', text: '我先读取页面' },
+        { type: 'tool-result', callId: 'c1', name: 'highlight_text', status: 'failed', result: '未找到文本' },
+      ],
+      '任务失败：请求超时'
+    ),
+  ]);
+  assert.match(text, /### 失败/);
+  assert.match(text, /任务失败：请求超时/);
+  assert.match(text, /我先读取页面/, '失败前的叙述必须保留');
+  assert.match(text, /highlight_text/, '失败前的工具轨迹必须保留');
+});
+
+test('导出：正常收尾的一轮仍然是「### 结论」（不误伤）', () => {
+  const text = wrap([{ role: 'user', content: '问' }, { role: 'assistant', content: '答', parts: [] }]);
+  assert.match(text, /### 结论/);
 });
