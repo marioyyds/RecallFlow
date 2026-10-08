@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -185,4 +185,96 @@ test('formatScreenshotSummary: 尺寸缺失与脏数据安全', () => {
   const s = formatScreenshotSummary({ format: 'png', bytes: 0 });
   assert.ok(s.includes('尺寸未知'), s);
   assert.equal(typeof formatScreenshotSummary(null), 'string');
+});
+
+test('formatScreenshotSummary: 必须声明截图不能作为 complete_task 的证据', () => {
+  // 实测会话里 agent 为了「取证」连拍 4 张截图，而完成前校验只读文本证据 ——
+  // 那些截图对达成判定毫无帮助，纯属浪费。
+  const s = formatScreenshotSummary({ width: 1280, height: 720, format: 'jpeg', bytes: 1024 });
+  assert.match(s, /不能作为 complete_task 的 evidence/);
+});
+
+// ---------------------------------------------------------------- inspect_element 摘要
+//
+// 原实现先 slice(0, 8) 再把 matches.length 当命中数报出去 → 任何命中 ≥8 个元素的
+// 选择器都恒返回「命中 8 个元素」。调用方无法区分「正好 8」与「至少 8」，
+// 一个截断上限就这样被当成了答案。
+
+test('formatInspectSummary: 截断时必须报**命中总数**，并说明只列出了一部分', () => {
+  const s = formatInspectSummary({ total: 36, listed: 8, visibleCount: 8, truncated: true });
+  assert.match(s, /命中 36 个元素/, '必须报真实命中数：' + s);
+  assert.match(s, /仅列出前 8 个/);
+  assert.ok(!/^命中 8 个元素/.test(s), '绝不能把截断上限当成命中数');
+});
+
+test('formatInspectSummary: 未截断时给出确定的数量', () => {
+  const s = formatInspectSummary({ total: 3, listed: 3, visibleCount: 2, truncated: false });
+  assert.match(s, /命中 3 个元素/);
+  assert.match(s, /可见 2 个，不可见 1 个/);
+  assert.ok(!s.includes('仅列出'), '未截断就不该出现截断文案');
+});
+
+test('formatInspectSummary: 截断时可见性结论限定在列出的部分内', () => {
+  // 否则「可见 8 个」会被读成「全部 36 个里有 8 个可见」
+  const s = formatInspectSummary({ total: 36, listed: 8, visibleCount: 5, truncated: true });
+  assert.match(s, /列出部分中可见 5 个/);
+});
+
+test('formatInspectSummary: 正文容器提醒只在命中项确实触到它时出现', () => {
+  const main = { selector: '#root', textLength: 12103 };
+  const withMain = formatInspectSummary({ total: 1, listed: 1, visibleCount: 1, truncated: false, touchesMain: true, main });
+  assert.match(withMain, /疑似正文容器 #root/);
+  const without = formatInspectSummary({ total: 8, listed: 8, visibleCount: 8, truncated: false, touchesMain: false, main });
+  assert.match(without, /命中 8 个元素/);
+  assert.ok(!without.includes('正文容器'), '无关查询不该收到正文容器提醒：' + without);
+});
+
+test('formatInspectSummary: 脏数据安全', () => {
+  assert.equal(typeof formatInspectSummary(null), 'string');
+  assert.equal(typeof formatInspectSummary({ total: 'x', listed: -5, visibleCount: NaN }), 'string');
+  assert.doesNotThrow(() => formatInspectSummary({ total: 1, listed: 1, touchesMain: true, main: null }));
+});
+
+// ---------------------------------------------------------------- read_current_page 结果
+
+test('formatCurrentPageResult: 传了 checkTexts 就只回核查结论，不回正文', () => {
+  const body = '正文'.repeat(4000);
+  const s = formatCurrentPageResult({
+    title: 'T',
+    url: 'http://x/',
+    text: body,
+    chunks: [body],
+    visReport: '【可见性核查】\n- 「广告」：可见 0 次 / DOM 0 次 —— DOM 中已无此文本',
+    checkTexts: ['广告'],
+  });
+  assert.match(s, /可见性核查/);
+  assert.ok(!s.includes(body), '核查模式必须省略页面正文');
+  assert.ok(s.length < 500, '结果应当很短，实际 ' + s.length);
+  assert.match(s, /如需正文/);
+});
+
+test('formatCurrentPageResult: 空白的 checkTexts 不算核查模式', () => {
+  const s = formatCurrentPageResult({ title: 'T', url: 'u', text: '页面正文', chunks: ['页面正文'], visReport: '报告', checkTexts: ['  ', ''] });
+  assert.match(s, /当前页面正文/);
+  assert.match(s, /页面正文/);
+});
+
+test('formatCurrentPageResult: 不传 checkTexts 时行为与原来一致（含 visibleOnly 说明与核查报告）', () => {
+  const s = formatCurrentPageResult({
+    title: 'T',
+    url: 'u',
+    text: '正文',
+    chunks: ['正文'],
+    visReport: '报告',
+    visibleOnly: true,
+  });
+  assert.match(s, /页面标题：T/);
+  assert.match(s, /当前页面正文：\n正文/);
+  assert.match(s, /报告/);
+  assert.match(s, /去掉 visibleOnly/);
+});
+
+test('formatCurrentPageResult: 有核查报告但正文为空时仍可返回核查结论', () => {
+  const s = formatCurrentPageResult({ title: 'T', url: 'u', text: '', visReport: '报告', checkTexts: ['甲'] });
+  assert.match(s, /报告/);
 });
