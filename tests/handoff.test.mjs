@@ -150,11 +150,18 @@ test('updateHandoffIndex: 脏输入安全', () => {
   assert.deepEqual(r.dropped, []);
 });
 
-test('formatHandoffPrompt: 指令含标识与工具名，便于 agent 自动调用', () => {
+test('formatHandoffPrompt: 带标识与页面，但**不许指挥 AI 调用不存在的方法**', () => {
   const p = formatHandoffPrompt('rf-7k2m9x', { pageTitle: '购物车' });
   assert.ok(p.includes('RF-7K2M9X'), p);
-  assert.ok(p.includes('recallflow_session'), p);
   assert.ok(p.includes('购物车'), p);
+  // 2026-10-08 收口：这条断言原来写的是 `p.includes('recallflow_session')` ——
+  // 它把一句**假话**钉成了契约：那个方法在 `recallflow_browser` 的方法表里根本不存在，
+  // 而 RF-xxxxxx 只是面板本地登记号。用户把这段贴给任何 AI，对方都会去找一个不存在的工具。
+  // 现在反向钉住：**不得**出现工具名，也**不得**出现"调用 recallflow_*"这种指挥。
+  assert.ok(!/recallflow_session/.test(p), '不得让 AI 去调用不存在的 recallflow_session：' + p);
+  assert.ok(!/调用\s*recallflow/i.test(p), '不得出现"调用 recallflow_*"这类指挥：' + p);
+  // 改后的指令必须说清真相：上下文就在正文里（交接包的价值在正文，不在一个 id）
+  assert.ok(/正文/.test(p), '应说明完整上下文就在正文里：' + p);
   // 无页面标题时不出现空的括号
   const p2 = formatHandoffPrompt('RF-7K2M9X');
   assert.ok(!p2.includes('（）'), p2);

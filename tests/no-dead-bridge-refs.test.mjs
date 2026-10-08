@@ -38,6 +38,11 @@ const LIVE_PATTERNS = [
   [/\b(connectWs|httpLoop|handleWsMessage|scheduleReconnect|startMcpRelay)\b/, '桥接函数'],
   [/callExtension\(/, 'MCP 的 callExtension 调用'],
   [/integrations\/opencode/, '桥接包路径'],
+  // 2026-10-08 收口：**承诺了但没提供**的那两处（与拾取按钮 title 同类病）。
+  // 写法注意：这两条正则**不能匹配到自己这一行**，否则测试自己就红了 ——
+  // 所以第一条用 `[n]` 拆字，第二条的描述里不写那句原话。
+  [/recallflow_sessio[n]\s*\(/, '不存在的 recallflow_session 方法'],
+  [/经\s*MCP\s*读取/, '桥接已删除，那个说法早就不成立'],
 ];
 
 test('代码里不得复活 7801 桥接（剥掉注释后按可执行形态判定）', () => {
