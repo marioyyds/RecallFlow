@@ -284,3 +284,88 @@ test('console 钩子记录 error/warn 且带 stack，并仍调用原始 console'
   assert.equal(calls.length, 1, '原始 console.error 必须仍被调用');
   assert.equal(calls[0][0], 'error');
 });
+
+// ---------------------------------------------------------------- 序列化上界
+//
+// 钩子挂在 console.log 这种页面里最热的函数上，而且注入到每一个页面的每一个 frame。
+// 原实现是把每个参数**完整** JSON.stringify 之后才截断，等于
+// `console.log(hugeObject)` 会把整个对象图走一遍再丢掉。
+// 下面这组用「读到的文本长度」和「属性读取次数」两种方式验证遍历确实有界。
+
+/** 加载钩子并返回可读取 console 缓冲的沙箱；调用 ctx.console.log 即模拟页面打日志。 */
+function loggedText(...args) {
+  const env = loadHook();
+  env.ctx.console.log(...args);
+  const buf = readBuffer(env, 'console');
+  assert.ok(Array.isArray(buf) && buf.length, 'console 缓冲应有记录');
+  return buf[buf.length - 1].text;
+}
+
+test('超长字符串参数被截断，不再先完整持有再丢', () => {
+  const text = loggedText('x'.repeat(1_000_000));
+  assert.ok(text.length <= 2000, '记录文本应受限，实际 ' + text.length);
+  assert.ok(text.length <= 420, '单条参数有自己的预算，实际 ' + text.length);
+  assert.ok(text.endsWith('…'), '应带截断标记');
+});
+
+test('多参数合计也受限（不会因为参数多就线性膨胀）', () => {
+  const args = Array.from({ length: 50 }, () => 'y'.repeat(100_000));
+  const text = loggedText(...args);
+  assert.ok(text.length <= 2000, '实际 ' + text.length);
+});
+
+test('巨大数组：只展开前几项并标注总数', () => {
+  const big = Array.from({ length: 100000 }, (_, i) => i);
+  const text = loggedText(big);
+  assert.ok(text.includes('共 100000 项'), text.slice(0, 200));
+  assert.ok(text.length <= 2000);
+});
+
+test('属性读取次数有硬上界——这才是「有界遍历」的直接证据', () => {
+  // 用 Proxy 数出钩子实际读了多少个属性。对象再大，读取次数也必须封顶。
+  let reads = 0;
+  const wide = {};
+  for (let i = 0; i < 5000; i++) wide['k' + i] = { v: i, nested: { deep: { deeper: i } } };
+  const spy = new Proxy(wide, {
+    get(t, k) {
+      reads += 1;
+      return t[k];
+    },
+  });
+  const text = loggedText(spy);
+  assert.ok(text.length <= 2000);
+  assert.ok(reads <= 200, '属性读取 ' + reads + ' 次，节点预算没生效');
+});
+
+test('循环引用不抛错也不无限递归', () => {
+  const a = { name: 'a' };
+  a.self = a;
+  let text;
+  assert.doesNotThrow(() => { text = loggedText(a); });
+  assert.ok(text.includes('self'), text);
+});
+
+test('抛错的 getter 不会让日志记录本身抛错', () => {
+  const hostile = {
+    ok: 1,
+    get boom() { throw new Error('nope'); },
+  };
+  let text;
+  assert.doesNotThrow(() => { text = loggedText(hostile); });
+  assert.ok(text.includes('boom'), text);
+  assert.ok(text.includes('unreadable'), '读不到的字段应如实标注，而不是整条丢掉：' + text);
+});
+
+test('非常规参数类型不会抛错', () => {
+  assert.doesNotThrow(() => loggedText(undefined, null, 1, true, Symbol('s'), 10n, function named() {}, () => {}));
+  const text = loggedText(function myFn() {});
+  assert.ok(text.includes('Function'), text);
+});
+
+test('普通对象仍然被正常记录（上界不能把可用性一起砍掉）', () => {
+  const text = loggedText('用户点击了', { selector: '#submit', count: 3 });
+  assert.ok(text.includes('用户点击了'), text);
+  assert.ok(text.includes('#submit'), text);
+  assert.ok(text.includes('count'), text);
+});
+
