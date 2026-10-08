@@ -28,6 +28,7 @@ HTTP 模式下只常驻**一个** server，N 个客户端各持一条独立会�
 | --- | --- |
 | `recallflow_session(id?, limit?)` | **读取用户从浏览器面板交接出来的会话**（标识形如 `RF-7K2M9X`）：页面、面板对话、拾取元素（含源码 `file:line`）、以及复制那一刻的控制台错误快照。不传 id 时列出最近可用的标识。 |
 | `browser_read(url, waitFor?, maxChars?)` | 用真实浏览器会话读取页面，归档并返回 `{url, title, fetchedAt, snapshotHash, text, quotes}` |
+| `page_screenshot(label?, fullPage?, format?, quality?, includeImage?)` | 给活动标签页截图并归档，返回图片内容块；纯文本模型可传 `includeImage:false` 只取元数据与归档路径，避免把 base64 塞进上下文 |
 | `evidence_get(hash?, url?)` | 按哈希或 URL 取回已归档快照，用于复核引用 |
 | `read_console(level?, limit?)` | 读取活动标签页最近的 console 输出与未捕获异常；栈内本项目源码 URL 会转成磁盘路径 |
 | `read_network(filter?, limit?)` | 读取活动标签页最近的 fetch/XHR（状态码、耗时、发起位置） |
