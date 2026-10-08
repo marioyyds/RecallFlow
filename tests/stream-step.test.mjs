@@ -66,6 +66,37 @@ const contentLines = (...texts) => [
   'data: [DONE]',
 ];
 
+// ---------------------------------------------------------------- 分阶段计时
+
+test('streamAgentStep: 返回 ttfb / prefill / decode 分段计时', async () => {
+  globalThis.fetch = async () => {
+    // 模拟真实 SSE：响应头先到（这段是网络+排队），首 token 再晚一点到（这段才是 prefill）
+    await new Promise((r) => setTimeout(r, 40));
+    return sseResponse(contentLines('你好', '世界'));
+  };
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], () => {});
+  assert.ok(out.timing, '必须返回 timing —— 没有它就只能靠猜「慢在哪一段」');
+  for (const k of ['ttfbMs', 'prefillMs', 'decodeMs', 'totalMs']) {
+    assert.equal(typeof out.timing[k], 'number', k + ' 应为数字');
+  }
+  assert.ok(out.timing.ttfbMs >= 30, '到响应头的等待必须计入 ttfb，实际 ' + out.timing.ttfbMs);
+  assert.ok(out.timing.totalMs >= out.timing.ttfbMs);
+  assert.ok(out.timing.ttfbMs + out.timing.prefillMs + out.timing.decodeMs <= out.timing.totalMs + 5);
+});
+
+test('streamAgentStep: 只有工具调用的轮次也算出 prefill 分界点', async () => {
+  globalThis.fetch = async () => {
+    await new Promise((r) => setTimeout(r, 30));
+    return sseResponse([
+      'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 't1', function: { name: 'f', arguments: '{}' } }] } }] }),
+      'data: [DONE]',
+    ]);
+  };
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], () => {});
+  assert.equal(out.toolCalls.length, 1);
+  assert.ok(out.timing.ttfbMs >= 20, '工具调用分片同样标志 prefill 结束');
+});
+
 // ---------------------------------------------------------------- 重试
 
 test('streamAgentStep: 5xx 会重试，随后成功则正常返回', async () => {
@@ -115,6 +146,42 @@ test('streamAgentStep: 4xx（非 429）不重试，直接返回错误详情', as
   assert.equal(calls, 1, '400 不应重试');
   assert.ok(out.error.includes('400'), out.error);
   assert.ok(out.error.includes('bad request'), out.error);
+});
+
+// 400 一定是「请求本身有问题」，但服务端常常不给原因（实测会返回空响应体），
+// 于是错误信息在冒号后面空着，完全没法定位。这里把「请求形状」补进错误信息 ——
+// 只有角色序列与计数，不含任何消息内容，可以安全地显示给用户。
+test('streamAgentStep: 400 且响应体为空时，错误信息带上请求形状', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 400,
+    async json() {
+      throw new Error('empty body');
+    },
+    async text() {
+      return '';
+    },
+  });
+  const messages = [
+    { role: 'system', content: 's' },
+    { role: 'user', content: 'u' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 't1', type: 'function', function: { name: 'f', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 't1', content: 'r' },
+  ];
+  const tools = [{ type: 'function', function: { name: 'f' } }];
+  const out = await streamAgentStep(null, SETTINGS, messages, undefined, tools, () => {});
+  assert.ok(out.error.includes('请求形状'), out.error);
+  assert.ok(out.error.includes('messages=4'), out.error);
+  assert.ok(out.error.includes('system,user,asst(tc),tool'), '角色序列要能看出 tool 配对形态：' + out.error);
+  assert.ok(out.error.includes('tools=1'), out.error);
+  assert.ok(out.error.includes('tool_choice=auto'), out.error);
+  assert.ok(!out.error.includes('"content"'), '只报形状，不报内容');
+});
+
+test('streamAgentStep: 非 400 的错误不附加请求形状（信息保持精简）', async () => {
+  globalThis.fetch = async () => errorResponse(500, 'server boom');
+  const out = await streamAgentStep(null, SETTINGS, [{ role: 'user', content: 'x' }], undefined, [], () => {});
+  assert.ok(!out.error.includes('请求形状'), out.error);
 });
 
 test('streamAgentStep: 重试耗尽后返回最后一次的错误', async () => {
@@ -214,6 +281,19 @@ test('streamAgentStep: 有工具时附带 tools 与 tool_choice', async () => {
   await streamAgentStep(null, SETTINGS, [], undefined, tools, () => {});
   assert.equal(seenBody.tools.length, 1);
   assert.equal(seenBody.tool_choice, 'auto');
+});
+
+test("streamAgentStep: toolChoice='none' 时仍然发出完整 tools（保住前缀缓存，只禁调用）", async () => {
+  let seenBody = null;
+  globalThis.fetch = async (url, opts) => {
+    seenBody = JSON.parse(opts.body);
+    return sseResponse(contentLines('ok'));
+  };
+  const tools = [{ type: 'function', function: { name: 'x' } }];
+  await streamAgentStep(null, SETTINGS, [], undefined, tools, () => {}, 'none');
+  // 收尾请求必须与前几轮逐字节一致才可能命中前缀缓存，所以 tools 照发不误
+  assert.equal(seenBody.tools.length, 1, 'tools 必须照发，否则请求从 token 0 就变了');
+  assert.equal(seenBody.tool_choice, 'none', '用 tool_choice 禁止调用，而不是删掉 tools');
 });
 
 // ---------------------------------------------------------------- 中断

@@ -22,6 +22,42 @@ test('collapseOldToolResults keeps the last N full', () => {
   assert.ok(msgs[0].content.length < 400);
 });
 
+// 折叠会改写历史中部 → 从改写点起的前缀缓存全部失效。
+// 因此「折叠过一次就不再变」是硬要求：否则同一批消息每轮都被重新拼接，前缀持续抖动。
+test('collapseOldToolResults: 已折叠的消息不会被二次改写（前缀只失效一次）', () => {
+  const msgs = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: 'tool', content: 'x'.repeat(1000) + i });
+  assert.equal(collapseOldToolResults(msgs, 6, 300), 4);
+  const before = msgs.map((m) => m.content);
+
+  // 模拟下一轮：又追加两条工具结果，折叠窗口右移
+  msgs.push({ role: 'tool', content: 'y'.repeat(1000) });
+  msgs.push({ role: 'tool', content: 'z'.repeat(1000) });
+  const changed = collapseOldToolResults(msgs, 6, 300);
+
+  assert.equal(changed, 2, '只应折叠刚刚越出窗口的两条');
+  for (let i = 0; i < 4; i++) {
+    assert.equal(msgs[i].content, before[i], '第 ' + i + ' 条被二次改写 → 前缀会再次失效');
+  }
+});
+
+test('collapseOldToolResults: 无可折叠内容时返回 0（重复调用不虚报）', () => {
+  const msgs = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: 'tool', content: 'x'.repeat(1000) + i });
+  collapseOldToolResults(msgs, 6, 300);
+  assert.equal(collapseOldToolResults(msgs, 6, 300), 0, '第二次调用不应报告任何折叠');
+});
+
+test('collapseOldToolResults: 幂等 —— 连续调用后内容逐字节不变', () => {
+  const msgs = [];
+  for (let i = 0; i < 10; i++) msgs.push({ role: 'tool', content: 'x'.repeat(1000) + i });
+  collapseOldToolResults(msgs, 6, 300);
+  const snapshot = JSON.stringify(msgs);
+  collapseOldToolResults(msgs, 6, 300);
+  collapseOldToolResults(msgs, 6, 300);
+  assert.equal(JSON.stringify(msgs), snapshot);
+});
+
 // ---------------------------------------------------------------- normalizeHistory
 
 test('normalizeHistory: 只保留有内容的 user/assistant', () => {

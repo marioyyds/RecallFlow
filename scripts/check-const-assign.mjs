@@ -32,7 +32,7 @@ function walk(dir, out = []) {
 }
 
 /** 把字符串/模板/注释内容替换成等长空白（保持行列结构），返回按行数组。 */
-function stripStringsAndComments(src) {
+export function stripStringsAndComments(src) {
   const out = [];
   let mode = null; // null | "'" | '"' | '`' | '//' | '/*'
   let line = '';

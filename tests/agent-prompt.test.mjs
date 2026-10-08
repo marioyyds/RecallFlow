@@ -7,15 +7,21 @@ import assert from 'node:assert/strict';
 import { promoteToResearch, toolNeedsApproval, sanitizeToolPairing, compactSessionMessages } from '../lib/assistant/agent.js';
 
 // ---------------------------------------------------------------- 画像提升
+//
+// 缓存契约：promoteToResearch 必须用「追加 system 消息」的方式应用 RESEARCH 画像，
+// 绝不能改写 messages[0]。messages[0] 是整段请求前缀的起点，改写它会让此前累积的
+// 全部前缀缓存失效、整段历史重新 prefill。下面每个用例都同时断言这两件事。
 
 const EXTRAS =
   '\n\n【本站点记忆】按钮「提交」→ #submit' +
   '\n\n【本站点已保存的宏】登录流程（3 步）';
 
+const lastMessage = (messages) => messages[messages.length - 1];
+
 test('promoteToResearch: 保留附加段（站点记忆 / 宏目录）', () => {
   const messages = [{ role: 'system', content: '基础系统提示' }];
   promoteToResearch([], messages, '打开页面', [], EXTRAS);
-  const content = messages[0].content;
+  const content = lastMessage(messages).content;
   assert.ok(content.includes('【本站点记忆】'), content);
   assert.ok(content.includes('【本站点已保存的宏】'), content);
   assert.ok(content.includes('#submit'), content);
@@ -24,8 +30,8 @@ test('promoteToResearch: 保留附加段（站点记忆 / 宏目录）', () => {
 test('promoteToResearch: 无附加段时不引入 undefined 或多余换行', () => {
   const messages = [{ role: 'system', content: '基础系统提示' }];
   promoteToResearch([], messages, 'x', [], '');
-  assert.ok(!messages[0].content.includes('undefined'), messages[0].content);
-  assert.ok(messages[0].content.length > 3);
+  assert.ok(!lastMessage(messages).content.includes('undefined'), lastMessage(messages).content);
+  assert.ok(lastMessage(messages).content.length > 3);
 });
 
 test('promoteToResearch: 补齐 RESEARCH 工具，且重复调用不重复添加', () => {
@@ -40,18 +46,25 @@ test('promoteToResearch: 补齐 RESEARCH 工具，且重复调用不重复添加
   assert.equal(tools.length, before, '已是 RESEARCH 工具集时不应再增长');
 });
 
-test('promoteToResearch: 把系统提示换成 RESEARCH 画像', () => {
-  const messages = [{ role: 'system', content: '旧提示' }];
+test('promoteToResearch: 追加 RESEARCH 画像，不改写 messages[0]', () => {
+  const original = { role: 'system', content: '旧提示' };
+  const messages = [original, { role: 'user', content: '你好' }];
   promoteToResearch([], messages, 'x', [], '');
-  assert.notEqual(messages[0].content, '旧提示');
-  assert.ok(messages[0].role === 'system');
+  assert.equal(messages.length, 3, '应追加一条而不是替换');
+  assert.equal(messages[0], original, 'messages[0] 是请求前缀起点，必须原样保留');
+  assert.equal(messages[0].content, '旧提示');
+  const added = lastMessage(messages);
+  assert.equal(added.role, 'system');
+  assert.notEqual(added.content, '旧提示', '新画像确实写进了追加的消息');
 });
 
-test('promoteToResearch: 首条不是 system 时不误改消息', () => {
+test('promoteToResearch: 首条不是 system 时同样只追加', () => {
   const messages = [{ role: 'user', content: '你好' }];
   promoteToResearch([], messages, 'x', [], '');
   assert.equal(messages[0].role, 'user');
   assert.equal(messages[0].content, '你好');
+  assert.equal(messages.length, 2);
+  assert.equal(lastMessage(messages).role, 'system');
 });
 
 // ---------------------------------------------------------------- 审批映射

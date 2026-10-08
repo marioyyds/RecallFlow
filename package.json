@@ -6,7 +6,9 @@
   "description": "RecallFlow browser extension (MV3).",
   "scripts": {
     "test": "node --test \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.mjs"
+    "test:e2e": "playwright test -c tests/e2e/playwright.config.mjs",
+    "check:prefix": "node scripts/check-prefix-stability.mjs",
+    "check:const": "node scripts/check-const-assign.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0"
