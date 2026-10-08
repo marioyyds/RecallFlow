@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, SNAPSHOT_CHAR_BUDGET } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -345,4 +345,51 @@ test('trimElementsToBudget: 脏数据与循环引用安全', () => {
   const cyc = {};
   cyc.self = cyc;
   assert.doesNotThrow(() => trimElementsToBudget([cyc], 0));
+});
+
+// ---------------------------------------------------------------- 高亮结果文案
+//
+// 实测缺陷：实现里 .slice(0, 20) 之后再报 texts.length，于是传 25 条会返回
+// 「已高亮 20 / 20 处关键信息」——「少做了 5 条」看起来像「全部完成」。
+
+test('formatHighlightResult: 正常情况只报命中数', () => {
+  const s = formatHighlightResult({ hit: 8, attempted: 8, requested: 8, limit: 20 });
+  assert.equal(s, '已高亮 8 / 8 处关键信息');
+});
+
+test('formatHighlightResult: 未找到的条目要列出来', () => {
+  const s = formatHighlightResult({ hit: 1, attempted: 2, requested: 2, misses: ['推送完成 ✓'], limit: 20 });
+  assert.match(s, /已高亮 1 \/ 2 处/);
+  assert.match(s, /未找到 1 条：推送完成 ✓/);
+});
+
+test('formatHighlightResult: 超上限时必须写明还剩多少条**未处理**', () => {
+  const s = formatHighlightResult({ hit: 20, attempted: 20, requested: 25, limit: 20 });
+  assert.match(s, /未处理/);
+  assert.match(s, /共收到 25 条/);
+  assert.match(s, /5 条/, '必须给出未处理的条数：' + s);
+  assert.match(s, /再调用一次 highlight_text/);
+  // 关键：这句话绝不能被读成「25 条全做完了」
+  assert.ok(!/^已高亮 25/.test(s));
+});
+
+test('formatHighlightResult: 未超上限时不得出现「未处理」字样', () => {
+  const s = formatHighlightResult({ hit: 3, attempted: 3, requested: 3, limit: 20 });
+  assert.ok(!s.includes('未处理'), s);
+  assert.ok(!s.includes('超出单次上限'), s);
+});
+
+test('formatHighlightResult: 脏数据安全', () => {
+  assert.equal(typeof formatHighlightResult(null), 'string');
+  assert.equal(typeof formatHighlightResult({ hit: 'x', attempted: -5, requested: NaN, misses: null }), 'string');
+});
+
+test('formatCurrentPageResult: 报出正文字数（技能分档要用的锚点）', () => {
+  const s = formatCurrentPageResult({ title: 'T', url: 'u', text: '正文', textLength: 7243, chunks: ['正文'] });
+  assert.match(s, /正文约 7243 字/, '缺少字数锚点，技能无法按规模分档');
+});
+
+test('formatCurrentPageResult: 字数未知时不编造', () => {
+  const s = formatCurrentPageResult({ title: 'T', url: 'u', text: '正文', chunks: ['正文'] });
+  assert.ok(!/正文约/.test(s), s);
 });
