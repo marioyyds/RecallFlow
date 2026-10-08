@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, SNAPSHOT_CHAR_BUDGET } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -277,4 +277,72 @@ test('formatCurrentPageResult: 不传 checkTexts 时行为与原来一致（含 
 test('formatCurrentPageResult: 有核查报告但正文为空时仍可返回核查结论', () => {
   const s = formatCurrentPageResult({ title: 'T', url: 'u', text: '', visReport: '报告', checkTexts: ['甲'] });
   assert.match(s, /报告/);
+});
+
+// ---------------------------------------------------------------- 快照体积预算
+//
+// 实测缺陷：maxText 只约束 text 字段，elements 是另算的。maxText:8000 + maxElements:40
+// 产出了 27428 字符的结果 —— 调用方无法预估体积，只能靠 expand_result 翻 4 次页。
+
+/** 造一个接近线上最坏情况的元素描述（长 label + 长 nth-of-type 选择器）。 */
+const fatElement = (i) => ({
+  ref: 'rf-' + i,
+  index: i,
+  tag: 'summary',
+  role: '',
+  type: '',
+  label: 'x'.repeat(180),
+  selector:
+    'div.panel:nth-of-type(1) > div.p-body:nth-of-type(3) > div.msg:nth-of-type(3) > div.agent-flow:nth-of-type(1) > details.agent-step:nth-of-type(2) > summary:nth-of-type(1)',
+  rect: { x: 1021, y: 481, width: 545, height: 17 },
+  center: { x: 1294, y: 489 },
+  inViewport: true,
+});
+
+test('trimElementsToBudget: 体积不足预算时一个都不裁', () => {
+  const list = [fatElement(1), fatElement(2)];
+  const r = trimElementsToBudget(list, 100);
+  assert.equal(r.elements.length, 2);
+  assert.equal(r.omittedBySize, 0);
+});
+
+test('trimElementsToBudget: 超出预算时裁掉尾部并如实报告省略数', () => {
+  const list = Array.from({ length: 40 }, (_, i) => fatElement(i + 1));
+  const r = trimElementsToBudget(list, 8000);
+  assert.ok(r.elements.length < 40, '应当被裁剪');
+  assert.equal(r.elements.length + r.omittedBySize, 40, '保留数 + 省略数 = 总数');
+  assert.equal(r.elements[0].index, 1, '保留的是前缀（视口优先排序），顺序不能乱');
+});
+
+test('trimElementsToBudget: 裁剪后的总体积落在预算内（这正是修复目标）', () => {
+  const list = Array.from({ length: 40 }, (_, i) => fatElement(i + 1));
+  const textLen = 8000;
+  const r = trimElementsToBudget(list, textLen);
+  const body = textLen + r.elements.reduce((a, e) => a + JSON.stringify(e).length + 1, 0);
+  assert.ok(body <= SNAPSHOT_CHAR_BUDGET + 600, '含固定字段预留仍应受控，实际 ' + body);
+  // 修复前同样的输入约 27k
+  assert.ok(body < 15000, '实际 ' + body);
+});
+
+test('trimElementsToBudget: 单个元素就超预算时仍保留一个（不清空结果）', () => {
+  const huge = { label: 'y'.repeat(20000) };
+  const r = trimElementsToBudget([huge], 8000);
+  assert.equal(r.elements.length, 1);
+  assert.equal(r.omittedBySize, 0);
+});
+
+test('trimElementsToBudget: 预算随 text 变长而收紧（两者共享同一预算）', () => {
+  const list = Array.from({ length: 40 }, (_, i) => fatElement(i + 1));
+  const small = trimElementsToBudget(list, 500).elements.length;
+  const large = trimElementsToBudget(list, 8000).elements.length;
+  assert.ok(large < small, '正文越长，能放下的元素越少：' + large + ' vs ' + small);
+});
+
+test('trimElementsToBudget: 脏数据与循环引用安全', () => {
+  assert.deepEqual(trimElementsToBudget(null, 0).elements, []);
+  assert.deepEqual(trimElementsToBudget('not-an-array', 0).elements, []);
+  assert.equal(trimElementsToBudget([{}], -100).elements.length, 1);
+  const cyc = {};
+  cyc.self = cyc;
+  assert.doesNotThrow(() => trimElementsToBudget([cyc], 0));
 });

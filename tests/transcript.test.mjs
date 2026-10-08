@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson } from '../lib/page/transcript.js';
+import { buildTranscript, previewArgsJson, alreadyCommittedAsText } from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -395,4 +395,69 @@ test('输出不以多余空行开头或结尾', () => {
   assert.ok(text.endsWith('\n'));
   assert.ok(!text.endsWith('\n\n'), '结尾不应有多余空行');
   assert.ok(!/\n{3,}/.test(text), '不应出现连续 3 个换行');
+});
+
+// ---------------------------------------------------------------- 最终答复去重
+//
+// 实测缺陷（RF-27A7CA）：导出记录末尾同一句话连着出现两遍。
+// 原判定是「紧邻的最后一个 part 是 narration 且文字相同」，两种情况下都会失效 ——
+// 本轮最后一步是工具调用（complete_task 就是工具）时，最后一个是 tool-result；
+// 上一次收尾已 push 过同内容的 text part 时，类型不是 narration。
+
+test('已作为 narration 固化过：判定为重复', () => {
+  const parts = [{ type: 'narration', text: '已完成。' }];
+  assert.equal(alreadyCommittedAsText(parts, '已完成。'), true);
+});
+
+test('已作为 text 固化过：同样判定为重复（这正是漏掉的一类）', () => {
+  const parts = [{ type: 'text', text: '已完成。' }];
+  assert.equal(alreadyCommittedAsText(parts, '已完成。'), true, '类型是 text 时原实现会漏判 → 记录两遍');
+});
+
+test('中间夹着工具 part 时仍能识别（本轮最后一步是工具调用）', () => {
+  const parts = [
+    { type: 'narration', text: '已确认页面内容。' },
+    { type: 'tool-call', callId: 'c1', name: 'complete_task' },
+    { type: 'tool-result', callId: 'c1', name: 'complete_task', result: '任务已完成' },
+  ];
+  assert.equal(alreadyCommittedAsText(parts, '已确认页面内容。'), true, '工具类 part 夹在中间不应影响判定');
+});
+
+test('截图 part 也要跳过', () => {
+  const parts = [
+    { type: 'narration', text: '已完成。' },
+    { type: 'screenshot', id: 's1' },
+  ];
+  assert.equal(alreadyCommittedAsText(parts, '已完成。'), true);
+});
+
+test('内容不同则不算重复', () => {
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '甲' }], '乙'), false);
+});
+
+test('隔了另一段文字之后再说一遍同一句话，是有意重复，不该被吞掉', () => {
+  const parts = [
+    { type: 'narration', text: '甲' },
+    { type: 'text', text: '乙' },
+  ];
+  assert.equal(alreadyCommittedAsText(parts, '甲'), false, '只比较最近的一段文字');
+});
+
+test('空白差异不影响判定', () => {
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '  已完成。  ' }], '已完成。'), true, '首尾空白被归一');
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '已完成。\r\n' }], '已完成。'), true, '换行被归一');
+  // 内部空白只压成一个空格、不会凭空消失（norm 的语义）——不把「已 完成」当成「已完成」
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '已 完成。' }], '已完成。'), false);
+});
+
+test('空候选与空 parts 安全', () => {
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '甲' }], ''), false);
+  assert.equal(alreadyCommittedAsText([{ type: 'narration', text: '甲' }], '   '), false);
+  assert.equal(alreadyCommittedAsText([], '甲'), false);
+  assert.equal(alreadyCommittedAsText(null, '甲'), false);
+  assert.equal(alreadyCommittedAsText([null, undefined, {}], '甲'), false);
+});
+
+test('只看文字类 part，工具 part 单独存在时不算重复', () => {
+  assert.equal(alreadyCommittedAsText([{ type: 'tool-result', result: '已完成。' }], '已完成。'), false);
 });
