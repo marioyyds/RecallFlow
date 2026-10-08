@@ -126,6 +126,64 @@ test('叙述与工具结果只是碰巧相似时不会被误删', () => {
   assert.ok(text.includes('已清除页面高亮与样式的叠加问题'), '不同文本的叙述不能被去重掉：\n' + text);
 });
 
+// 去重的前提是「那段文字已经**完整**出现在上面」。工具行会按 maxResultLen 截断，
+// 所以拿它当去重依据时，一段超长的最终答复会被叙述与结论两处同时挡掉，
+// 而工具行只留了前 500 字 —— 尾部整段丢失，且记录里看不出丢了东西。
+test('超长最终答复必须完整出现在记录里（不能因为工具行截断而被去重掉）', () => {
+  const tail = '【这段尾部是关键】';
+  const long = '任务已完成：' + '很长的结论内容。'.repeat(80) + tail;
+  assert.ok(long.length > 500, '前置：必须超过 maxResultLen');
+
+  // 情形一：面板同时把它作为叙述推了一次
+  const withNarration = wrap([
+    {
+      role: 'assistant',
+      content: long,
+      parts: [
+        { type: 'narration', text: '过程中的话' },
+        { type: 'tool-call', callId: 'd', name: 'complete_task', args: { summary: 's' } },
+        { type: 'tool-result', callId: 'd', name: 'complete_task', status: 'completed', result: long },
+        { type: 'narration', text: long },
+      ],
+    },
+  ]);
+  assert.ok(withNarration.includes(tail), '尾部丢失了：\n' + withNarration);
+
+  // 情形二：没有完成叙述，只能靠「### 结论」补全文
+  const withoutNarration = wrap([
+    {
+      role: 'assistant',
+      content: long,
+      parts: [
+        { type: 'narration', text: '过程中的话' },
+        { type: 'tool-call', callId: 'd', name: 'complete_task', args: { summary: 's' } },
+        { type: 'tool-result', callId: 'd', name: 'complete_task', status: 'completed', result: long },
+      ],
+    },
+  ]);
+  assert.ok(withoutNarration.includes('### 结论'), '工具行放不下全文时必须给出结论小节：\n' + withoutNarration);
+  assert.ok(withoutNarration.includes(tail), '尾部丢失了：\n' + withoutNarration);
+});
+
+test('超长最终答复只出现一次（补全文不等于重复）', () => {
+  const long = '任务已完成：' + '内容。'.repeat(200);
+  const text = wrap([
+    {
+      role: 'assistant',
+      content: long,
+      parts: [
+        { type: 'narration', text: long },
+        { type: 'tool-call', callId: 'd', name: 'complete_task', args: {} },
+        { type: 'tool-result', callId: 'd', name: 'complete_task', status: 'completed', result: long },
+      ],
+    },
+  ]);
+  // 完整长度的那一份只能有一处：要么是叙述，要么是结论
+  const fullOnes = text.split('\n').filter((l) => l.trim() === long.trim()).length;
+  assert.equal(fullOnes, 1, '全文应恰好出现一次，实际 ' + fullOnes + ' 次');
+  assert.ok(!text.includes('### 结论'), '叙述已经带出全文时，结论不该再重复一遍：\n' + text);
+});
+
 test('复刻用户贴出的那条记录：叙述与工具必须交错，而不是叙述全在前', () => {
   // 取用户实际导出记录的形状：4 段叙述 + 4 个工具调用
   const mk = (id, name, args, result) => [
