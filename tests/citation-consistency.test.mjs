@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { extractCiteNum, renumberCitations } from '../lib/page/markdown.js';
+import { extractCiteNum, renumberCitations, renumberCitationsAcross } from '../lib/page/markdown.js';
 
 const read = (p) => fs.readFileSync(p, 'utf8');
 
@@ -100,4 +100,76 @@ test('渲染层：非数字方括号不会变成可点击的引用徽章', () =>
 test('渲染层：编号对不上来源时也原样返回（不许错配到别的来源）', () => {
   const src = read('lib/page/markdown.js');
   assert.ok(/if \(!c\) return match;/.test(src), '编号超出参考来源区时必须原样返回，不能错配');
+});
+
+// ---------------------------------------------------------------- 跨段一致（「参考来源还是不对」的根因）
+//
+// 一条助手消息往往由多段文字组成（若干 narration + 最终答复），而渲染时**每一段都按位置
+// 对齐同一份 citations**（renderAnswer 用 citations[idx-1]）。原先只对「等于最终答复的
+// 那一段」重编号，其余段落里的 [n] 仍是全局编号 —— 一旦压缩后的来源列表与全局编号不同，
+// 那些 [n] 就指到错误的来源。症状就是：参考来源列的东西与正文说的不是一回事。
+
+const CITES = [
+  { index: 1, title: '源A（正文从未引用）' },
+  { index: 2, title: '源B' },
+  { index: 3, title: '源C' },
+];
+
+test('跨段重编号：两段文字必须映射到同一张表（旧实现只重编号其中一段）', () => {
+  const narration = '先说 B：见 [2]。';
+  const finalText = '结论：又是 B [2]，还有 C [3]。';
+  const r = renumberCitationsAcross([narration, finalText], CITES);
+
+  assert.equal(r.citations.length, 2, '只应列出被引用的两个来源');
+  assert.deepEqual(r.citations.map((c) => c.title), ['源B', '源C']);
+  // 按位置对齐：两段里的 [1] 都必须等于来源表第 1 条。
+  assert.ok(r.apply(narration).includes('[1]'), r.apply(narration));
+  assert.ok(r.apply(finalText).includes('[1]') && r.apply(finalText).includes('[2]'), r.apply(finalText));
+  for (const text of [r.apply(narration), r.apply(finalText)]) {
+    const nums = [...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
+    for (const n of nums) {
+      assert.ok(n >= 1 && n <= r.citations.length, '编号 ' + n + ' 超出来源表范围：' + text);
+    }
+  }
+});
+
+test('回归：旧写法会让 narration 指错来源（这正是被报的 bug）', () => {
+  const narration = '先说 B：见 [2]。';
+  const finalText = '结论：又是 B [2]，还有 C [3]。';
+  const old = renumberCitations(finalText, CITES); // 旧路径：只重编号最终答复
+  // narration 没被重编号，仍是全局的 [2]；而渲染时按位置取 old.citations[2-1] —— 那是「源C」。
+  assert.ok(narration.includes('[2]'), '前提：narration 保持全局编号');
+  assert.equal(old.citations[1].title, '源C', '位置对齐后 narration 的 [2] 会指向 源C，而它想说的是 源B');
+  // 新路径下不再有这种错位。
+  const now = renumberCitationsAcross([narration, finalText], CITES);
+  assert.ok(now.apply(narration).includes('[1]'), '重编号后 narration 的 [2] 应变成 [1]');
+  assert.equal(now.citations[0].title, '源B', '位置 1 必须是 源B');
+});
+
+test('跨段重编号：首次出现顺序跨段累计（顺序决定编号）', () => {
+  const r = renumberCitationsAcross(['先提 C [3]', '再提 B [2]'], CITES);
+  assert.deepEqual(r.citations.map((c) => c.title), ['源C', '源B'], '按跨段首次出现顺序编号');
+  assert.ok(r.apply('先提 C [3]').includes('[1]'));
+  assert.ok(r.apply('再提 B [2]').includes('[2]'));
+});
+
+test('跨段重编号：无人引用时来源表为空，文本原样返回', () => {
+  const r = renumberCitationsAcross(['没有任何引用', '[页面] 也不算'], CITES);
+  assert.equal(r.citations.length, 0);
+  assert.equal(r.apply('没有任何引用'), '没有任何引用');
+  assert.equal(r.apply('[页面] 也不算'), '[页面] 也不算', '非数字标签不该被改写');
+});
+
+test('跨段重编号：不可解析的编号原样保留，不硬凑', () => {
+  const r = renumberCitationsAcross(['存在 [9]，但来源表里没有'], CITES);
+  assert.equal(r.citations.length, 0);
+  assert.equal(r.apply('存在 [9]，但来源表里没有'), '存在 [9]，但来源表里没有');
+});
+
+test('跨段重编号：不改动传入的 citations（流式每 chunk 都会重编号，改动会破坏幂等）', () => {
+  const input = CITES.map((c) => Object.assign({}, c));
+  const before = JSON.stringify(input);
+  const r = renumberCitationsAcross(['引 [2]'], input);
+  assert.equal(JSON.stringify(input), before, '传入数组不得被改写');
+  assert.notEqual(r.citations, input);
 });
