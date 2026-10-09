@@ -369,3 +369,95 @@ test('普通对象仍然被正常记录（上界不能把可用性一起砍掉�
   assert.ok(text.includes('count'), text);
 });
 
+// ---------------------------------------------------------------- 不被误认成页面的 bug
+//
+// 实测（GitHub 页面）：页面自身抛 `Cannot read properties of undefined (reading 'mutations')`，
+// 报错栈里出现了我们这一帧：
+//   extensions://…/lib/page/debug-hook.js (console.<computed>):131:27
+// `console.<computed>` 是浏览器对 `console[level] = function () {}` 这种**计算属性赋值**
+// 推断出的名字 —— 既看不出是扩展（反而像浏览器内部帧），又让人误以为扩展是肇事者。
+//
+// 同一类问题本文件已经为 fetch 修过一次（命名 rfFetchHook，注释里记着 MSN 的实例），
+// 但 console 包装器一直是匿名的。
+//
+// 注意：钩子打的是**沙箱全局** console（普通脚本里的 `console`），不是 window.console，
+// 因此这里查 env.ctx.console —— 一开始查错对象，5 条测试全红。
+
+test('console 包装器必须是具名的，栈里不能显示成 console.<computed>', () => {
+  const env = loadHook({ fetch: () => Promise.resolve({ status: 200, ok: true }) });
+  for (const level of ['error', 'warn', 'log', 'info']) {
+    assert.equal(
+      env.ctx.console[level].name,
+      'rfConsoleHook',
+      'console.' + level + ' 应具名为 rfConsoleHook —— 否则页面报错栈里会显示成 console.<computed>，看起来像扩展在肇事'
+    );
+  }
+});
+
+test('具名之后，栈里出现的就是可辨识的 rfConsoleHook', () => {
+  const env = loadHook({ fetch: () => Promise.resolve({ status: 200, ok: true }) });
+  const name = env.ctx.console.error.name;
+  assert.ok(/^rf/.test(name), '函数名应以 rf 开头（扩展自己的命名约定，便于在页面栈里一眼认出）：' + name);
+  assert.ok(!/computed/.test(name), '不能是浏览器推断出的 <computed> 形式');
+});
+
+test('console 包装器仍然原样透传参数与返回值（改坏它会污染所有站点的日志）', () => {
+  const env = loadHook({ fetch: () => Promise.resolve({ status: 200, ok: true }) });
+  const wrapped = env.ctx.console.error;
+  assert.equal(typeof wrapped, 'function');
+  const sentinel = { tag: 'sentinel' };
+  assert.equal(wrapped('a', sentinel, 3), undefined, 'console.error 本身返回 undefined，包装后也应如此');
+  assert.doesNotThrow(() => wrapped('仍可调用'));
+});
+
+// ---------------------------------------------------------------- 不消费流
+
+test('fetch 钩子绝不读取响应体 —— 读了就会消费掉流，页面随即报「读取查询流失败」', async () => {
+  const accessed = [];
+  const resp = new Proxy(
+    { status: 200, ok: true, url: 'https://example.com/api' },
+    {
+      get(target, key) {
+        accessed.push(String(key));
+        return target[key];
+      },
+    }
+  );
+  const env = loadHook({ fetch: () => Promise.resolve(resp) });
+  await env.win.fetch('https://example.com/api');
+  for (const forbidden of ['body', 'json', 'text', 'arrayBuffer', 'blob', 'clone', 'bodyUsed']) {
+    assert.ok(
+      !accessed.includes(forbidden),
+      'fetch 钩子碰了 response.' + forbidden + ' —— 这会把页面正在读的流消费掉。实际访问过：' + accessed.join(',')
+    );
+  }
+  // `then` 由 promise 的 thenable 判定机制自己读取（Promise.resolve 会读它），不是钩子读的，
+  // 因此显式放行；其余字段必须只限于状态类纯读属性。
+  for (const k of accessed) {
+    assert.ok(['status', 'ok', 'url', 'then'].includes(k), '读了不该读的字段：' + k);
+  }
+});
+
+test('fetch 钩子返回的是页面原本那个 promise（不派生、不 await）', () => {
+  const inner = Promise.resolve({ status: 200, ok: true });
+  const env = loadHook({ fetch: () => inner });
+  assert.equal(env.win.fetch('https://example.com/api'), inner);
+});
+
+// ---------------------------------------------------------------- 自身帧必须从记录的栈里剥掉
+
+test('记录的栈里不得残留本文件的帧（路径或函数名两种形式都要剥）', () => {
+  const env = loadHook({ fetch: () => Promise.resolve({ status: 200, ok: true }) });
+  env.ctx.console.error('页面自己的一次报错');
+  const data = readBuffer(env, 'console');
+  const entries = Array.isArray(data) ? data : (data && (data.entries || data.items || data.records)) || [];
+  const entry = entries.find((e) => e && String(e.text || '').includes('页面自己的一次报错'));
+  assert.ok(entry, '前提：这条日志确实被记录了。实际返回：' + JSON.stringify(data).slice(0, 200));
+  const stack = String(entry.stack || '');
+  assert.ok(!/debug-hook\.js/.test(stack), '记录的栈里不该出现本文件路径：' + stack.slice(0, 200));
+  assert.ok(
+    !/rfConsoleHook|rfFetchHook|stackOf/.test(stack),
+    '也不该出现我们自己的函数名（某些引擎/格式下栈帧只给函数名，按路径剥会漏掉）：' + stack.slice(0, 200)
+  );
+});
+
