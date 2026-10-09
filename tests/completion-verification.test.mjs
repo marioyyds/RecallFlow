@@ -32,6 +32,12 @@ test('提示词明确禁止「证据里没出现 X 就判 X 是编造的」', ()
   assert.match(VERIFIER_SYSTEM, /未列出的部分不代表不存在/, '要说明未列出不等于不存在');
 });
 
+test('提示词禁止用页面标题推断页面状态（实测被「MCP SDK package missing error」带偏）', () => {
+  assert.match(VERIFIER_SYSTEM, /不要用「页面标题」推断页面状态/);
+  assert.match(VERIFIER_SYSTEM, /会话名/, '要说明标题常常只是会话名');
+  assert.match(VERIFIER_SYSTEM, /MCP SDK package missing error/, '要给出实测反例，否则模型仍会凭直觉判断');
+});
+
 test('提示词保留既有的「可见性不能用关键词否定」规则', () => {
   assert.match(VERIFIER_SYSTEM, /可见性证据/);
   assert.match(VERIFIER_SYSTEM, /textContent/);
@@ -79,11 +85,23 @@ test('留存全文必须发生在截断之前', () => {
 });
 
 test('完成校验改用按事实定位片段，而不是固定窗口', () => {
-  const fn = sliceBetween('async function runCompletionVerification', '// 任务结束时清理');
+  const fn = sliceBetween('export function buildVerificationEvidence', '// 用最近页面证据做一次独立校验');
   assert.match(fn, /selectEvidence\(/, '必须走 selectEvidence');
   assert.match(fn, /fullText: ctx\.lastReadFullText/, '要把全文交给证据选择');
   assert.ok(!/lastEvidence\)\.slice\(0, 2500\)/.test(fn), '不应再退回到固定窗口截断');
   assert.match(fn, /coverage/, '覆盖率标注必须一并给出（否则校验方会高估证据完整度）');
+});
+
+test('证据必须**同时**含动作回执与页面片段（曾经只用后者，回执被挤掉）', () => {
+  const fn = sliceBetween('export function buildVerificationEvidence', '// 用最近页面证据做一次独立校验');
+  assert.match(fn, /ctx\.lastEvidence/, '动作回执必须进证据 —— 它回答「刚刚做了什么」');
+  assert.match(fn, /selectEvidence\(/, '页面片段也必须进证据 —— 它回答「结论与页面是否一致」');
+  assert.match(fn, /最近一次动作的回执/, '两份证据要标注来源，否则校验方分不清哪句是页面原文');
+});
+
+test('校验调用的入口走 buildVerificationEvidence', () => {
+  const fn = sliceBetween('async function runCompletionVerification', '// 任务结束时清理');
+  assert.match(fn, /buildVerificationEvidence\(/, 'runCompletionVerification 应通过它组装证据');
 });
 
 test('要告诉校验方本次任务的性质（决定用哪套判据）', () => {

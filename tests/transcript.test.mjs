@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
+import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, stripTrailingSources, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -541,4 +541,69 @@ test('导出：失败的一轮用「### 失败」，且保留失败前的叙述�
 test('导出：正常收尾的一轮仍然是「### 结论」（不误伤）', () => {
   const text = wrap([{ role: 'user', content: '问' }, { role: 'assistant', content: '答', parts: [] }]);
   assert.match(text, /### 结论/);
+});
+
+// ---------------------------------------------------------------- 参考来源去重
+//
+// 实测导出末尾连着出现两段「参考来源」：模型自己在答复末尾写了一份，导出器又按
+// citations 追加了一份。两份内容相同、格式不同（模型那份标题后没有空行）。
+
+test('stripTrailingSources: 去掉模型自己写的末尾来源段', () => {
+  const s = stripTrailingSources('结论正文。\n\n### 参考来源\n- [1] 标题 — http://x/');
+  assert.equal(s, '结论正文。');
+});
+
+test('stripTrailingSources: 保留正文，只删末尾那一段', () => {
+  const s = stripTrailingSources('正文提到参考来源这个概念。\n\n还有别的内容。\n\n## 参考来源\n- [1] a\n- [2] b');
+  assert.match(s, /正文提到参考来源这个概念/);
+  assert.match(s, /还有别的内容/);
+  assert.ok(!s.includes('- [1] a'), '末尾来源列表应被去掉');
+});
+
+test('stripTrailingSources: 正文里讨论「参考来源」但不带来源列表时不误删', () => {
+  const t = '### 参考来源\n这一节我打算讲讲来源是怎么登记的，还没有写列表。';
+  assert.equal(stripTrailingSources(t), t, '标题后不是来源条目列表，不能删');
+});
+
+test('stripTrailingSources: 通篇只有来源列表时保留（不为了去重把内容清空）', () => {
+  const t = '### 参考来源\n- [1] a';
+  assert.equal(stripTrailingSources(t), t);
+});
+
+test('stripTrailingSources: 支持编号列表与 [n] 开头两种来源写法', () => {
+  assert.equal(stripTrailingSources('正文\n\n参考来源\n1. 甲\n2. 乙'), '正文');
+  assert.equal(stripTrailingSources('正文\n\n### 参考来源\n[1] 甲'), '正文');
+});
+
+test('stripTrailingSources: 标题的几种写法都认（# 标题 / 加粗 / 冒号 / 裸行）', () => {
+  for (const head of ['### 参考来源', '**参考来源**', '参考来源：', '参考来源']) {
+    assert.equal(stripTrailingSources('正文\n\n' + head + '\n- [1] 甲'), '正文', '未识别：' + head);
+  }
+});
+
+test('stripTrailingSources: 标题后混进非来源行时不删（避免误伤正文）', () => {
+  const t = '正文\n\n### 参考来源\n- [1] 甲\n这一段是解释文字，不是来源条目。';
+  assert.equal(stripTrailingSources(t), t);
+});
+
+test('stripTrailingSources: 空输入与脏数据安全', () => {
+  assert.equal(stripTrailingSources(''), '');
+  assert.equal(stripTrailingSources(null), '');
+  assert.equal(typeof stripTrailingSources(undefined), 'string');
+});
+
+test('导出：模型自带来源段时不与导出器追加的那份重复', () => {
+  const text = wrap([
+    { role: 'user', content: '问' },
+    {
+      role: 'assistant',
+      content: '答复正文。\n\n### 参考来源\n- [1] 模型自己写的',
+      citations: [{ index: 1, title: '页面', url: 'http://x/' }],
+      parts: [],
+    },
+  ]);
+  const count = (text.match(/### 参考来源/g) || []).length;
+  assert.equal(count, 1, '参考来源只应出现一次，实际 ' + count + ' 次');
+  assert.ok(!text.includes('模型自己写的'), '模型那份应被去掉，保留导出器统一格式的那份');
+  assert.match(text, /\[1\] 页面 — http:\/\/x\//, '导出器那份要在');
 });
