@@ -1,10 +1,11 @@
-// 执行计划条位置的源码级门禁。
+// 执行计划条位置与折叠态的源码级门禁。
 //
-// 为什么需要：把计划从「助手消息开头」挪到「输入框上方」时，有三处很容易漏，
+// 为什么需要：计划条的位置与生命周期里有几处很容易漏，
 // 而漏掉都不会报错、测试也不会红，只是功能静默失效：
 //   ① 元素创建晚于 renderConversation() —— 回填落空，重开面板时计划条是空的；
 //   ② 忘记从消息正文里摘掉 planHtml —— 计划会同时出现在消息和计划条里（重复）；
-//   ③ 忘记在 removePanel 里置空 —— 面板隐藏期间助手仍在跑，renderPlan 会写进脱离文档的节点。
+//   ③ 忘记在 removePanel 里置空 —— 面板隐藏期间助手仍在跑，renderPlan 会写进脱离文档的节点；
+//   ④ 挂载点挪错位置 —— 掉到对话下方，或又挤回输入框上方那堆条里。
 // 与前几轮的「对 const 赋值」「请求前缀稳定性」同一类：静态可查、但没人查。
 //
 // 按行切源码前先剥 \r（Windows 工作区是 CRLF，精确比较会因为行尾 \r 全部落空）。
@@ -33,14 +34,35 @@ test('计划渲染到输入框上方的计划条，而不是助手消息里', ()
   assert.ok(!/pendingAiMsg/.test(fn), 'renderPlan 不应再往助手消息里插计划');
 });
 
-test('计划条必须挂到输入框（cmd-box）之前', () => {
-  const cmdAreaStart = indexOfLine('const cmdArea = document.createElement');
-  const planAppend = indexOfLine('cmdArea.appendChild(planBar)', cmdAreaStart);
-  const cmdWrapAppend = indexOfLine('cmdArea.appendChild(cmdWrap)', cmdAreaStart);
+test('计划条挂在**对话区顶部**：panelBody 之前、且不再挂在输入框那一堆里', () => {
+  // 位置改过一次：原先贴在输入框上方，但那里已经堆了审批 / 快捷指令 / 自动批准 / 拾取栏四条，
+  // 只有输入框真正属于「输入」；而计划是**任务级状态**，描述的是「这段对话在做什么」，
+  // 所以移到对话区顶部（header 之下、panelBody 之上）。
+  // 用带分号的精确串匹配：上面的注释里也出现了 `panel.appendChild(planBar)`（句号结尾），
+  // 用子串匹配会命中注释那一行，判据就废了。
+  const planAppend = indexOfLine('panel.appendChild(planBar);');
+  const bodyAppend = indexOfLine('panel.appendChild(panelBody);');
+  assert.notEqual(planAppend, -1, '找不到计划条的挂载点');
+  assert.notEqual(bodyAppend, -1, '找不到 panelBody 的挂载点');
+  assert.ok(planAppend < bodyAppend, '计划条应在 panelBody 之前 —— 否则它会掉到对话下方');
   assert.ok(
-    planAppend < cmdWrapAppend,
-    '计划条必须 appendChild 在 cmdWrap（输入框）之前，否则它会显示在输入框下方'
+    !lines.some((l) => l.includes('cmdArea.appendChild(planBar)')),
+    '不该再挂在输入框上方那堆条里（那里最多 132px，会把对话区压扁）'
   );
+});
+
+test('计划条全部完成后折叠成一行（同样的内容对话里已经有了，不该继续占高度）', () => {
+  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  assert.match(fn, /allDone/, '需要判断「是否全部完成」');
+  assert.match(fn, /classList\.toggle\('collapsed'/, '完成态应加 collapsed 类');
+  assert.match(fn, /步已完成/, '折叠后仍要能看出做了多少');
+  assert.ok(!/\bplanExpanded = true;\s*\n\s*if \(allDone\)/.test(fn), '不该无条件展开');
+});
+
+test('计划条：新一轮 run 出现未完成步骤时自动展开回来', () => {
+  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  // 只要还有未完成的步骤就展开 —— 否则用户上一轮手动折叠过，这一轮的计划就看不见了。
+  assert.match(fn, /if \(!allDone\) planExpanded = true;/, '未完成时应强制展开');
 });
 
 test('计划条元素必须在构造期的 renderConversation() 之前创建（否则回填落空）', () => {
