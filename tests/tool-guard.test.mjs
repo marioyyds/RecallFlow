@@ -155,3 +155,54 @@ test('per-tool cap: reset 会清零累计计数', () => {
   guard.reset();
   assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'ok');
 });
+
+// 上限的语义是「**自上次产出可观察进展以来**连续调用了多少次」，不是「本任务累计」。
+// 起因：实测一次正常的 DOM 排查会调用 run_javascript 十几次，而每一次都返回了新内容 ——
+// 那不是失控，是干活，不该被闸门掐掉。
+
+test('per-tool cap: 有进展的调用会清零计数，长探索不会被误拦', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  // 每一次都换选择器（指纹全不同）且都产出新信息 → 永远不该被摘除
+  for (let i = 0; i < 50; i++) {
+    const d = guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false, progress: true });
+    assert.notEqual(d.level, 'disable', '第 ' + (i + 1) + ' 次有进展的调用不该触发上限');
+  }
+});
+
+test('per-tool cap: 连续无进展才累计（真正的空转仍会被拦）', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  const noProgress = (i) => guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false, progress: false });
+  assert.equal(noProgress(0).level, 'ok');
+  assert.equal(noProgress(1).level, 'ok');
+  assert.equal(noProgress(2).level, 'ok');
+  assert.equal(noProgress(3).level, 'disable');
+});
+
+test('per-tool cap: 进展只清零自己的计数，不影响其它工具', () => {
+  // 上限语义：允许 N 次，第 N+1 次拦截。
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2, set_element_style: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  const js = (code, progress) => guard.observe({ name: 'run_javascript', args: { code }, result: okResult(), readOnly: false, progress });
+  const style = (selector) => guard.observe({ name: 'set_element_style', args: { selector }, result: okResult(), readOnly: false, progress: false });
+
+  assert.equal(js('a', false).level, 'ok'); // run_javascript 第 1 次
+  assert.equal(style('#x').level, 'ok'); // set_element_style 第 1 次（上限 1）
+  assert.equal(js('b', true).level, 'ok'); // 有进展 → 计数清零后记为第 1 次
+  assert.equal(js('c', false).level, 'ok', 'run_javascript 被自己的进展清零过，尚在上限内');
+  assert.equal(style('#y').level, 'disable', 'set_element_style 没有进展，应照常累计到上限');
+});
+
+test('per-tool cap: 有进展时计为第 1 次而不是 0 次', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  const d = guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false, progress: true });
+  assert.equal(d.level, 'ok');
+  assert.equal(d.totalCalls, 1, '本次调用本身要计入，清零发生在它之前');
+});
+
+test('per-tool cap: 文案说明是「连续无进展」，而不是「累计调用」', () => {
+  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
+  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false, progress: false });
+  const d = guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false, progress: false });
+  assert.equal(d.level, 'disable');
+  assert.match(d.message, /没有产生可观察进展/, '文案必须说明这是无进展连击，否则模型不知道自己为什么被摘除');
+  assert.match(d.message, /换工具/);
+});
