@@ -50,29 +50,32 @@ test('计划条挂在**底部控件区的第一格**（快捷指令之上）', (
   );
 });
 
-test('计划条的展开状态必须是**三态**，否则自动折叠永远不触发', () => {
-  // 踩过的坑：写成单一布尔且初值 true，于是 `collapsed = allDone && !planExpanded`
-  // 恒为 false —— 折叠永远不会发生。截图里 8/8 全划掉却仍整块铺开，就是这个 bug。
+test('计划条的展开状态必须是**三态**，且默认收起', () => {
+  // 踩过的坑（截图实证）：写成「单一布尔 + 初值 true」时，
+  // `collapsed = allDone && !planExpanded` 恒为 false —— 收起分支永远进不去，
+  // 8/8 全划掉却仍整块铺开。
+  //
+  // 现在的契约更进一步：**默认就是收起的一行**（不再依赖「全部完成」才收）——
+  // 因为它先前用「限高 + 内层滚动条」处理步骤过多，那个方案已被否掉。
   assert.match(src, /let planExpanded = null;/, '初值必须是「未表态」的 null，不能是 true');
   const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
-  assert.match(fn, /if \(!allDone\) planExpanded = null;/, '新一轮开始要清掉手动状态，否则这一轮跑完不会折叠');
-  assert.match(fn, /const collapsed = allDone && planExpanded !== true;/, '未表态时完成即折叠');
+  assert.match(fn, /const collapsed = planExpanded !== true;/, '未表态时必须收起');
   // 点击处理器在 openPanel 里（不在 renderPlan 内），所以对全文断言。
   assert.match(src, /planExpanded = planBar\.classList\.contains\('collapsed'\);/, '点击切换要写回显式选择');
 });
 
-test('计划条全部完成后折叠成一行（同样的内容对话里已经有了，不该继续占高度）', () => {
+test('计划条只在「完成 ↔ 进行中」切换时回到默认，不打断用户的展开', () => {
   const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
-  assert.match(fn, /allDone/, '需要判断「是否全部完成」');
-  assert.match(fn, /classList\.toggle\('collapsed'/, '完成态应加 collapsed 类');
-  assert.match(fn, /步已完成/, '折叠后仍要能看出做了多少');
-  assert.ok(!/\bplanExpanded = true;\s*\n\s*if \(allDone\)/.test(fn), '不该无条件展开');
+  // 若写成 `if (!allDone) planExpanded = null;`，用户展开后每一次计划更新都会把它收回去。
+  assert.match(fn, /if \(allDone !== planWasAllDone\) planExpanded = null;/, '只在状态切换时归零');
+  assert.ok(!/if \(!allDone\) planExpanded = null;/.test(fn), '不该每次未完成都强制归零');
 });
 
-test('计划条：未完成时保持展开（不能因为上一轮折叠过就看不见这一轮的计划）', () => {
+test('计划条：收起那一行必须带上「进度 + 当前步骤」（信息量不能因收起而丢）', () => {
   const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
-  assert.match(fn, /if \(!allDone\) planExpanded = null;/, '未完成时应清掉手动折叠状态');
-  assert.match(fn, /const collapsed = allDone && planExpanded !== true;/, '未完成时 collapsed 必为 false');
+  assert.match(fn, /doneCount \+\s*'\/' \+\s*total/, '要显示进度');
+  assert.match(fn, /current \? ' · ▶ ' \+/, '要显示当前正在做的那一步');
+  assert.match(fn, /步已完成/, '全部完成时给出完成文案');
 });
 
 test('计划条元素必须在构造期的 renderConversation() 之前创建（否则回填落空）', () => {
@@ -121,10 +124,15 @@ test('新一轮开始时先清掉上一轮的计划条', () => {
   assert.match(before, /renderPlan\(\[\]\)/, '新一轮开始应清空计划条，等本轮的 update_plan 到达再显示');
 });
 
-test('计划条样式存在且限制高度（步骤多时不能把输入框顶下去）', () => {
+test('计划条样式**不得**限定高度或内层滚动 —— 改为收起/展开处理步骤过多', () => {
+  // 原先 `.agent-plan-bar { max-height: 132px; overflow-y: auto }`：
+  // 步骤一多它就变成一个小滚动框，既难看又要二次滚动。
+  // 用户明确要求「换一种」，于是改为「默认收成一行 / 点击展开全部」，
+  // 展开时不设高度上限 —— 因此任何情况下都不该再有内层滚动条。
   const css = fs.readFileSync('lib/page/panel-css.js', 'utf8');
-  assert.match(css, /\.agent-plan-bar\s*\{/, '缺少 .agent-plan-bar 样式');
   const block = /\.agent-plan-bar\s*\{([^}]*)\}/.exec(css);
-  assert.match(block[1], /max-height/, '计划条应限制高度并允许自身滚动');
-  assert.match(block[1], /overflow-y\s*:\s*auto/, '计划条应允许自身滚动');
+  assert.ok(block, '缺少 .agent-plan-bar 样式');
+  assert.ok(!/max-height/.test(block[1]), '计划条不该再限高：' + block[1].trim());
+  assert.ok(!/overflow-y\s*:\s*auto/.test(block[1]), '不该再有内层滚动条：' + block[1].trim());
+  assert.match(css, /\.agent-plan-bar\.collapsed \.agent-plan-items \{ display: none; \}/, '靠收起隐藏列表，而不是滚动');
 });
