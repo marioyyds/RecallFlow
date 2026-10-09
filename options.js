@@ -25,8 +25,9 @@ async function load() {
   $('runjs-approval').value = s.runJavascriptApproval || 'session';
   syncApprovalPreset();
   const budget = s.agentBudget || {};
-  $('budget-tools').value = Number.isInteger(Number(budget.maxToolCalls)) && Number(budget.maxToolCalls) > 0 ? String(budget.maxToolCalls) : '';
-  $('budget-turns').value = Number.isInteger(Number(budget.maxModelTurns)) && Number(budget.maxModelTurns) > 0 ? String(budget.maxModelTurns) : '';
+  // 工具调用次数与推理轮数上限已移除（对齐 DSH：不限制做了多少件事），
+  // 因此那两个输入框不再存在 —— 留一个没人读的设置就是"静默无效"。
+  $('budget-tokens').value = Number.isInteger(Number(budget.maxTotalTokens)) && Number(budget.maxTotalTokens) > 0 ? String(budget.maxTotalTokens) : '';
   $('quick-prompts').value = (s.quickPrompts || AI_SETTINGS_DEFAULTS.quickPrompts).join('\n');
   renderMcp(s.mcpServers || []);
 
@@ -109,8 +110,7 @@ $('save-btn').addEventListener('click', async () => {
     quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
     mcpServers: collectMcp(),
     agentBudget: {
-      ...(Number.isInteger(Number($('budget-tools').value)) && Number($('budget-tools').value) > 0 ? { maxToolCalls: Math.floor(Number($('budget-tools').value)) } : {}),
-      ...(Number.isInteger(Number($('budget-turns').value)) && Number($('budget-turns').value) > 0 ? { maxModelTurns: Math.floor(Number($('budget-turns').value)) } : {}),
+      ...(Number.isInteger(Number($('budget-tokens').value)) && Number($('budget-tokens').value) > 0 ? { maxTotalTokens: Math.floor(Number($('budget-tokens').value)) } : {}),
     },
   };
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: settings });

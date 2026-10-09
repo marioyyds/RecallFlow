@@ -118,17 +118,14 @@
         <span class="hint">这些站点的写操作不再逐次确认（run_javascript 等高风险工具仍每次确认）。也可在对话中说「信任这个网站」由助手添加。</span>
       </label>
       <div class="agent-budget">
-        <div class="approval-head"><div><span class="field-label">Agent 预算</span><span class="hint">单任务上限，留空 = 按意图自动分配（浏览器/资料研究任务更多）。</span></div></div>
+        <div class="approval-head"><div><span class="field-label">Agent 预算</span><span class="hint">不限制单任务的工具调用次数与推理轮数 —— 只保留成本兜底。</span></div></div>
         <div class="budget-row">
           <label class="field">
-            <span class="field-label">单任务工具调用上限</span>
-            <input id="budget-tools" type="number" min="0" placeholder="自动">
-          </label>
-          <label class="field">
-            <span class="field-label">单任务推理轮数上限</span>
-            <input id="budget-turns" type="number" min="0" placeholder="自动">
+            <span class="field-label">单任务 token 成本上限</span>
+            <input id="budget-tokens" type="number" min="0" step="100000" placeholder="6000000">
           </label>
         </div>
+        <span class="hint">工具调用次数与推理轮数<b>不再设上限</b>：重复与空转由守卫提醒模型（只提醒、不阻止），任务靠 complete_task 或最终回答结束。这里只兜住花费 —— 留空或 0 表示不限制。</span>
       </div>
     </section>
 

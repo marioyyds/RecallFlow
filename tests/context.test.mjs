@@ -18,8 +18,45 @@ test('collapseOldToolResults keeps the last N full', () => {
   for (let i = 0; i < 10; i++) msgs.push({ role: 'tool', content: 'x'.repeat(1000) + i });
   const collapsed = collapseOldToolResults(msgs, 6, 300);
   assert.equal(collapsed, 4);
-  assert.ok(msgs[9].content.length > 300);
-  assert.ok(msgs[0].content.length < 400);
+  assert.ok(msgs[9].content.length > 300, '最近 6 条保持完整');
+  // 折叠后是「头 300 + 提示 + 尾 150」≈ 500 字符 —— 比原先的「只留头 300」长，
+  // 这是刻意付出的代价：尾部常带结论，丢掉它比多花 200 字符贵得多。
+  assert.ok(msgs[0].content.length < 700, '折叠结果仍应是有界的，实际 ' + msgs[0].content.length);
+  assert.match(msgs[0].content, /【已折叠】/);
+  assert.ok(msgs[0].content.endsWith('0'), '尾部应被保留（第 0 条的末尾是字符 0）');
+});
+
+test('折叠时保留的是**正文**的尾部，不是截断通知的碎片', () => {
+  // 踩过的坑：正则只匹配 `id=res-N`，于是 body 的结尾落在通知内部（「…完整内容 」），
+  // 正文真正的尾部被当成通知切掉了。正则必须匹配**整条通知**并锚定在末尾。
+  const notice = '\n…（结果共 9999 字符，已截断；完整内容 id=res-7，可用 expand_result(id="res-7") 分段读取）';
+  const msgs = [];
+  for (let i = 0; i < 8; i++) msgs.push({ role: 'tool', content: 'H'.repeat(3000) + 'TAIL_END' + notice });
+  collapseOldToolResults(msgs, 6, 300);
+  assert.ok(msgs[0].content.endsWith('TAIL_END'), '结尾应是正文尾部，实际 …' + JSON.stringify(msgs[0].content.slice(-24)));
+  assert.match(msgs[0].content, /id=res-7/);
+});
+
+test('折叠必须保住可恢复的 id —— 否则等于压缩掉了可恢复性', () => {
+  // agent 对大结果会写成：正文…（完整内容 id=res-7，可用 expand_result(id="res-7") 分段读取）
+  // id 在 3000 字之后，而旧实现无脑 slice(0, 300)，把 id 切掉了：
+  // resultStore 里还留着全文，模型却再也拿不到 —— DSH 的 spill 特意保证「可恢复路径」。
+  const body = 'A'.repeat(3000);
+  const notice = '\n…（结果共 9999 字符，已截断；完整内容 id=res-7，可用 expand_result(id="res-7") 分段读取）';
+  const msgs = [];
+  for (let i = 0; i < 8; i++) msgs.push({ role: 'tool', content: body + notice });
+  collapseOldToolResults(msgs, 6, 300);
+  assert.match(msgs[0].content, /id=res-7/, '折叠后必须仍能看到 id');
+  assert.match(msgs[0].content, /expand_result/, '并说明怎么取回');
+});
+
+test('折叠后不再变长（保住「折叠」这个性质）', () => {
+  // 头尾阈值合计 300 + 150，再加 40 的余量：短于这个长度的内容不值得折叠。
+  const msgs = [{ role: 'tool', content: 'x'.repeat(900) }];
+  for (let i = 0; i < 6; i++) msgs.push({ role: 'tool', content: 'keep' });
+  const before = msgs[0].content.length;
+  collapseOldToolResults(msgs, 6, 300);
+  assert.ok(msgs[0].content.length < before, '折叠应让内容变短：' + before + ' → ' + msgs[0].content.length);
 });
 
 // 折叠会改写历史中部 → 从改写点起的前缀缓存全部失效。

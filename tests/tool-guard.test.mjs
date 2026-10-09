@@ -1,208 +1,245 @@
+// 工具守卫的新契约：**只提醒，不否决**（对齐 DSH 的 repeat-tool-reminder）。
+//
+// 旧契约是 ok / reflect / disable / stop —— 命中阈值即摘除工具或终止任务。
+// 实测代价：一次冒烟测试里 outline_element 因「连续失败熔断」被停用，
+// agent 只能在报告里解释「不是页面问题，是策略所致」。守卫不该替模型做决定：
+// 只有模型知道这次重复是空转还是幂等轮询。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createToolGuard, canonicalize } from '../lib/assistant/tool-guard.js';
+import {
+  createToolGuard,
+  canonicalize,
+  REPEAT_THRESHOLDS,
+  FAIL_THRESHOLDS,
+  NO_PROGRESS_THRESHOLDS,
+  ARGS_PREVIEW_CHARS,
+  DEFAULT_EXCLUDED_TOOLS,
+} from '../lib/assistant/tool-guard.js';
 
 const okResult = (extra = {}) => Object.assign({ ok: true, result: 'done' }, extra);
 const failResult = (extra = {}) => Object.assign({ ok: false, result: 'boom' }, extra);
+const LEVELS = ['ok', 'reflect'];
 
 test('canonicalize is key-order insensitive', () => {
   assert.equal(canonicalize({ a: 1, b: 2 }), canonicalize({ b: 2, a: 1 }));
   assert.notEqual(canonicalize({ a: 1 }), canonicalize({ a: 2 }));
 });
 
-test('repeated identical write call soft-lands with disable at the limit', () => {
-  const guard = createToolGuard({ maxSameToolCalls: 3 });
-  const call = () => guard.observe({ name: 'click_element', args: { selector: '#a' }, result: okResult(), readOnly: false });
-  assert.equal(call().level, 'ok');
-  assert.equal(call().level, 'ok');
-  assert.equal(call().level, 'reflect');
-  assert.equal(call().level, 'disable');
-});
+// ---------------------------------------------------------------- 核心契约
 
-test('read-only repeats are tolerated longer than writes', () => {
-  const guard = createToolGuard({ maxSameToolCalls: 2, readOnlySameToolCalls: 4 });
-  const call = () => guard.observe({ name: 'get_page_snapshot', args: {}, result: okResult(), readOnly: true });
-  assert.equal(call().level, 'ok');
-  assert.equal(call().level, 'ok');
-  assert.equal(call().level, 'reflect');
-  assert.equal(call().level, 'reflect');
-  assert.equal(call().level, 'disable');
-});
-
-test('consecutive failures disable a write tool', () => {
-  const guard = createToolGuard({ toolFailStreak: 2 });
-  assert.equal(guard.observe({ name: 'edit', args: { i: 1 }, result: failResult(), readOnly: false }).level, 'ok');
-  const second = guard.observe({ name: 'edit', args: { i: 2 }, result: failResult(), readOnly: false });
-  assert.equal(second.level, 'disable');
-  assert.equal(second.reason, 'toolFailStreak');
-});
-
-test('read-only failures are also caught (higher threshold)', () => {
-  const guard = createToolGuard({ toolFailStreak: 2, readOnlyFailStreak: 3 });
-  assert.equal(guard.observe({ name: 'read_console', args: {}, result: failResult(), readOnly: true }).level, 'ok');
-  assert.equal(guard.observe({ name: 'read_console', args: {}, result: failResult(), readOnly: true }).level, 'reflect');
-  assert.equal(guard.observe({ name: 'read_console', args: {}, result: failResult(), readOnly: true }).level, 'disable');
-});
-
-test('validation failure counts as a failure', () => {
-  const guard = createToolGuard({ toolFailStreak: 2 });
-  assert.equal(guard.observe({ name: 'click_at', args: {}, result: { ok: false, result: 'missing x' }, validationFailed: true }).level, 'ok');
-  assert.equal(guard.observe({ name: 'click_at', args: {}, result: { ok: false, result: 'missing x' }, validationFailed: true }).level, 'disable');
-});
-
-test('observable progress resets the repeat window', () => {
-  const guard = createToolGuard({ maxSameToolCalls: 4, stuckWarnThreshold: 2 });
-  const call = (progress = false) => guard.observe({ name: 'scroll_page', args: { to: 'bottom' }, result: okResult(), readOnly: false, progress });
-  assert.equal(call().level, 'ok');
-  assert.equal(call().level, 'reflect');
-  const after = call(true);
-  assert.equal(after.repeated, 1);
-  assert.equal(after.level, 'ok');
-});
-
-test('a rejected call accumulates no-progress but never disables the tool', () => {
-  const guard = createToolGuard({ toolFailStreak: 2, stuckStopThreshold: 3, stuckWarnThreshold: 2 });
-  const reject = () => guard.observe({ name: 'run_javascript', args: { code: 'x' }, result: { ok: false }, rejected: true, readOnly: false });
-  assert.equal(reject().level, 'ok');
-  assert.equal(reject().level, 'reflect');
-  assert.equal(reject().level, 'stop');
-});
-
-test('alternating distinct failing tools still trip the no-progress stop', () => {
-  const guard = createToolGuard({ stuckStopThreshold: 3, stuckWarnThreshold: 2, toolFailStreak: 9 });
-  assert.equal(guard.observe({ name: 'a', args: {}, result: failResult(), readOnly: false }).level, 'ok');
-  assert.equal(guard.observe({ name: 'b', args: {}, result: failResult(), readOnly: false }).level, 'reflect');
-  assert.equal(guard.observe({ name: 'c', args: {}, result: failResult(), readOnly: false }).level, 'stop');
-});
-
-test('snapshot and restore preserve guard state', () => {
-  const guard = createToolGuard({ maxSameToolCalls: 2 });
-  guard.observe({ name: 'click_element', args: { s: 1 }, result: okResult(), readOnly: false });
-  guard.observe({ name: 'click_element', args: { s: 1 }, result: okResult(), readOnly: false });
-  const revived = createToolGuard({ maxSameToolCalls: 2 });
-  revived.restore(guard.snapshot());
-  const decision = revived.observe({ name: 'click_element', args: { s: 1 }, result: okResult(), readOnly: false });
-  assert.equal(decision.level, 'disable');
-});
-
-// ---------------------------------------------------------------- 按工具累计上限
-
-test('per-tool cap: 参数各异的重复调用也会触发（指纹去重抓不到的情形）', () => {
-  // 这正是 run_javascript 泛滥的场景：每次换选择器 → 指纹全不同，旧逻辑永不触发。
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  const levels = [];
-  for (let i = 0; i < 4; i++) {
-    const d = guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false });
-    levels.push(d.level);
-  }
-  assert.deepEqual(levels.slice(0, 3), ['ok', 'ok', 'ok']);
-  assert.equal(levels[3], 'disable');
-});
-
-test('per-tool cap: 报出累计次数与上限，并指明应换工具', () => {
-  // 语义：maxCallsPerTool: N = 允许 N 次，第 N+1 次拦截。
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false }).level, 'ok');
-  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'ok');
-  const d = guard.observe({ name: 'run_javascript', args: { code: 'c' }, result: okResult(), readOnly: false });
-  assert.equal(d.level, 'disable');
-  assert.equal(d.reason, 'maxCallsPerTool');
-  assert.equal(d.totalCalls, 3);
-  assert.ok(d.message.includes('3'), d.message);
-  assert.ok(d.message.includes('2'), d.message);
-  assert.ok(d.message.includes('换工具'), d.message);
-});
-
-test('per-tool cap: 只约束指定工具，其它工具不受影响', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false }).level, 'ok');
-  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'disable');
-  for (let i = 0; i < 5; i++) {
-    assert.notEqual(
-      guard.observe({ name: 'get_page_snapshot', args: {}, result: okResult(), readOnly: true }).level,
-      'disable',
-      '未配置上限的工具不应被摘除'
-    );
-  }
-});
-
-test('per-tool cap: 未配置上限时行为不变', () => {
-  const guard = createToolGuard({ maxSameToolCalls: 99, toolFailStreak: 99 });
-  for (let i = 0; i < 10; i++) {
-    const d = guard.observe({ name: 'run_javascript', args: { code: 'x' + i }, result: okResult(), readOnly: false });
-    assert.notEqual(d.level, 'disable');
-  }
-});
-
-test('per-tool cap: 累计次数随 snapshot/restore 保留（否则「继续」后闸门失效）', () => {
-  const opts = { maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 };
-  const guard = createToolGuard(opts);
-  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false });
-  guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false });
-  guard.observe({ name: 'run_javascript', args: { code: 'c' }, result: okResult(), readOnly: false });
-
-  const revived = createToolGuard(opts);
-  revived.restore(guard.snapshot());
-  // 恢复后已是第 4 次 → 超过上限 3。若计数没恢复，全新 guard 会判 ok。
-  const d = revived.observe({ name: 'run_javascript', args: { code: 'd' }, result: okResult(), readOnly: false });
-  assert.equal(d.level, 'disable');
-  assert.equal(d.totalCalls, 4);
-});
-
-test('per-tool cap: reset 会清零累计计数', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false });
-  guard.reset();
-  assert.equal(guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false }).level, 'ok');
-});
-
-// 上限的语义是「**自上次产出可观察进展以来**连续调用了多少次」，不是「本任务累计」。
-// 起因：实测一次正常的 DOM 排查会调用 run_javascript 十几次，而每一次都返回了新内容 ——
-// 那不是失控，是干活，不该被闸门掐掉。
-
-test('per-tool cap: 有进展的调用会清零计数，长探索不会被误拦', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  // 每一次都换选择器（指纹全不同）且都产出新信息 → 永远不该被摘除
+test('永不摘除工具、永不终止任务 —— 重复 50 次也只出 ok / reflect', () => {
+  const guard = createToolGuard();
+  const seen = new Set();
   for (let i = 0; i < 50; i++) {
-    const d = guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false, progress: true });
-    assert.notEqual(d.level, 'disable', '第 ' + (i + 1) + ' 次有进展的调用不该触发上限');
+    const d = guard.observe({ name: 'click_element', args: { selector: '#a' }, result: okResult(), readOnly: false });
+    seen.add(d.level);
   }
+  assert.deepEqual([...seen].sort(), LEVELS, '出现 ok / reflect 之外的等级：' + [...seen].join(','));
 });
 
-test('per-tool cap: 连续无进展才累计（真正的空转仍会被拦）', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 3 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  const noProgress = (i) => guard.observe({ name: 'run_javascript', args: { code: 'sel' + i }, result: okResult(), readOnly: false, progress: false });
-  assert.equal(noProgress(0).level, 'ok');
-  assert.equal(noProgress(1).level, 'ok');
-  assert.equal(noProgress(2).level, 'ok');
-  assert.equal(noProgress(3).level, 'disable');
+test('永不摘除工具 —— 连续失败 30 次也只出 ok / reflect', () => {
+  const guard = createToolGuard();
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) {
+    seen.add(guard.observe({ name: 'edit', args: { i }, result: failResult(), readOnly: false }).level);
+  }
+  assert.deepEqual([...seen].sort(), LEVELS);
 });
 
-test('per-tool cap: 进展只清零自己的计数，不影响其它工具', () => {
-  // 上限语义：允许 N 次，第 N+1 次拦截。
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 2, set_element_style: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  const js = (code, progress) => guard.observe({ name: 'run_javascript', args: { code }, result: okResult(), readOnly: false, progress });
-  const style = (selector) => guard.observe({ name: 'set_element_style', args: { selector }, result: okResult(), readOnly: false, progress: false });
-
-  assert.equal(js('a', false).level, 'ok'); // run_javascript 第 1 次
-  assert.equal(style('#x').level, 'ok'); // set_element_style 第 1 次（上限 1）
-  assert.equal(js('b', true).level, 'ok'); // 有进展 → 计数清零后记为第 1 次
-  assert.equal(js('c', false).level, 'ok', 'run_javascript 被自己的进展清零过，尚在上限内');
-  assert.equal(style('#y').level, 'disable', 'set_element_style 没有进展，应照常累计到上限');
+test('永不终止任务 —— 跨工具连续无进展 30 次也只出 ok / reflect', () => {
+  const guard = createToolGuard();
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) {
+    seen.add(guard.observe({ name: 'tool' + i, args: {}, result: failResult(), readOnly: false }).level);
+  }
+  assert.deepEqual([...seen].sort(), LEVELS);
 });
 
-test('per-tool cap: 有进展时计为第 1 次而不是 0 次', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  const d = guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false, progress: true });
-  assert.equal(d.level, 'ok');
-  assert.equal(d.totalCalls, 1, '本次调用本身要计入，清零发生在它之前');
+// ---------------------------------------------------------------- 重复链：分级 + 精确跨越
+
+test('重复链只在**精确达到**阈值时提醒（3 / 5 / 8）', () => {
+  const guard = createToolGuard();
+  const call = () => guard.observe({ name: 'read_current_page', args: {}, result: okResult(), readOnly: true });
+  const warnedAt = [];
+  for (let i = 1; i <= 12; i++) {
+    const d = call();
+    if (d.level === 'reflect') warnedAt.push(i);
+  }
+  assert.deepEqual(warnedAt, REPEAT_THRESHOLDS.slice(), '提醒次数点应为 ' + REPEAT_THRESHOLDS.join('/'));
 });
 
-test('per-tool cap: 文案说明是「连续无进展」，而不是「累计调用」', () => {
-  const guard = createToolGuard({ maxCallsPerTool: { run_javascript: 1 }, maxSameToolCalls: 99, toolFailStreak: 99 });
-  guard.observe({ name: 'run_javascript', args: { code: 'a' }, result: okResult(), readOnly: false, progress: false });
-  const d = guard.observe({ name: 'run_javascript', args: { code: 'b' }, result: okResult(), readOnly: false, progress: false });
-  assert.equal(d.level, 'disable');
-  assert.match(d.message, /没有产生可观察进展/, '文案必须说明这是无进展连击，否则模型不知道自己为什么被摘除');
-  assert.match(d.message, /换工具/);
+test('超过最高阈值后不再打扰（DSH 的已知限制，照做）', () => {
+  const guard = createToolGuard({ repeatThresholds: [3, 5] });
+  const call = () => guard.observe({ name: 'x', args: {}, result: okResult() });
+  const warnedAt = [];
+  for (let i = 1; i <= 10; i++) if (call().level === 'reflect') warnedAt.push(i);
+  assert.deepEqual(warnedAt, [3, 5], '超过最高阈值后不该继续提醒');
+});
+
+test('首次提醒简短，后续提醒详细并列出重复的参数', () => {
+  const guard = createToolGuard();
+  const call = () => guard.observe({ name: 'click_element', args: { selector: '#submit' }, result: okResult() });
+  let first = null;
+  let later = null;
+  for (let i = 1; i <= 5; i++) {
+    const d = call();
+    if (d.repeated === 3) first = d;
+    if (d.repeated === 5) later = d;
+  }
+  assert.ok(first && first.message, '第 3 次应有提醒');
+  assert.ok(!/连续次数/.test(first.message), '首次提醒应简短，不该带详细模板');
+  assert.ok(later && /连续次数/.test(later.message), '后续提醒应带「连续次数」');
+  assert.ok(later.message.includes('#submit'), '后续提醒应列出重复的参数');
+});
+
+test('参数预览有上限，超长时标注省略了多少字符', () => {
+  const guard = createToolGuard({ repeatThresholds: [3, 5] });
+  const long = { q: 'x'.repeat(ARGS_PREVIEW_CHARS * 2) };
+  let msg = '';
+  for (let i = 1; i <= 5; i++) {
+    const d = guard.observe({ name: 'search', args: long, result: okResult() });
+    if (d.repeated === 5) msg = d.message;
+  }
+  assert.ok(msg.length < ARGS_PREVIEW_CHARS * 2, '提醒不该把超长参数整段塞进上下文');
+  assert.match(msg, /\(\+\d+ more chars\)/, '应标注被省略的字符数');
+});
+
+test('参数不同就不算重复（精确匹配，不做模糊）', () => {
+  const guard = createToolGuard();
+  assert.equal(guard.observe({ name: 'x', args: { a: 1 }, result: okResult() }).repeated, 1);
+  assert.equal(guard.observe({ name: 'x', args: { a: 2 }, result: okResult() }).repeated, 1, '换了参数 → 链重置');
+  assert.equal(guard.observe({ name: 'x', args: { a: 1 }, result: okResult() }).repeated, 1, '换回来也算新链');
+});
+
+test('换成另一个被跟踪的工具 → 链重置为 1', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'a', args: {}, result: okResult() });
+  guard.observe({ name: 'a', args: {}, result: okResult() });
+  assert.equal(guard.observe({ name: 'b', args: {}, result: okResult() }).repeated, 1);
+  assert.equal(guard.observe({ name: 'b', args: {}, result: okResult() }).repeated, 2);
+});
+
+test('被排除的工具对链**透明**：穿插其间不能掩盖循环', () => {
+  const guard = createToolGuard({ repeatThresholds: [3] });
+  const tracked = () => guard.observe({ name: 'grep', args: { q: 'x' }, result: okResult() });
+  assert.equal(tracked().repeated, 1);
+  guard.observe({ name: 'update_plan', args: {}, result: okResult() }); // 默认排除
+  assert.equal(tracked().repeated, 2, '穿插的记录类工具不该打断链');
+  assert.equal(tracked().repeated, 3);
+});
+
+test('默认排除 update_plan（对应 DSH 默认排除 todo_write）', () => {
+  assert.ok(DEFAULT_EXCLUDED_TOOLS.includes('update_plan'));
+  const guard = createToolGuard();
+  const d = guard.observe({ name: 'update_plan', args: {}, result: okResult() });
+  assert.equal(d.repeated, 0, '被排除的工具不参与链计数');
+});
+
+test('被拒绝的调用也计入重复链（模型反复尝试被拒的调用正是要打破的循环）', () => {
+  const guard = createToolGuard({ repeatThresholds: [3] });
+  const call = () => guard.observe({ name: 'run_javascript', args: { code: 'x' }, result: null, rejected: true });
+  assert.equal(call().repeated, 1);
+  assert.equal(call().repeated, 2);
+  const third = call();
+  assert.equal(third.repeated, 3);
+  assert.equal(third.level, 'reflect', '被拒绝的重复也应触发提醒');
+});
+
+test('有进展就断开重复链', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'x', args: {}, result: okResult() });
+  guard.observe({ name: 'x', args: {}, result: okResult() });
+  assert.equal(guard.observe({ name: 'x', args: {}, result: okResult(), progress: true }).repeated, 1);
+});
+
+// ---------------------------------------------------------------- 失败与无进展：同样只提醒
+
+test('连续失败只提醒，不摘除工具', () => {
+  const guard = createToolGuard();
+  const warnedAt = [];
+  for (let i = 1; i <= 6; i++) {
+    const d = guard.observe({ name: 'edit', args: { i }, result: failResult(), readOnly: false });
+    if (d.level === 'reflect' && d.reason === 'toolFailStreak') warnedAt.push(i);
+  }
+  assert.deepEqual(warnedAt, FAIL_THRESHOLDS.slice());
+  assert.ok(FAIL_THRESHOLDS.length > 0);
+});
+
+test('校验失败也算失败', () => {
+  const guard = createToolGuard();
+  const d = guard.observe({ name: 'edit', args: {}, result: okResult(), validationFailed: true });
+  assert.equal(d.failStreak, 1);
+});
+
+test('无进展连击只提醒，不停止任务', () => {
+  const guard = createToolGuard();
+  const warnedAt = [];
+  for (let i = 1; i <= 9; i++) {
+    const d = guard.observe({ name: 't' + i, args: {}, result: failResult(), readOnly: false });
+    if (d.level === 'reflect' && /重新读取页面/.test(d.message)) warnedAt.push(i);
+  }
+  assert.deepEqual(warnedAt, NO_PROGRESS_THRESHOLDS.slice());
+});
+
+test('可观察进展清空无进展连击', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'a', args: {}, result: failResult() });
+  guard.observe({ name: 'b', args: {}, result: failResult() });
+  const d = guard.observe({ name: 'c', args: {}, result: okResult(), progress: true });
+  assert.equal(d.noProgressStreak, 0);
+});
+
+// ---------------------------------------------------------------- 状态
+
+test('snapshot / restore 保留重复链', () => {
+  const guard = createToolGuard({ repeatThresholds: [3] });
+  guard.observe({ name: 'x', args: { a: 1 }, result: okResult() });
+  guard.observe({ name: 'x', args: { a: 1 }, result: okResult() });
+  const state = guard.getState();
+  assert.equal(state.chain.count, 2, '前置：链应记到 2');
+
+  const revived = createToolGuard({ repeatThresholds: [3] });
+  revived.restore(state);
+  assert.equal(revived.observe({ name: 'x', args: { a: 1 }, result: okResult() }).repeated, 3, '链应跨恢复延续');
+});
+
+test('snapshot / restore 保留失败连击', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'edit', args: { i: 1 }, result: failResult() });
+  const revived = createToolGuard();
+  revived.restore(guard.getState());
+  assert.equal(revived.observe({ name: 'edit', args: { i: 2 }, result: failResult() }).failStreak, 2);
+});
+
+test('链的语义是「当前连续链」：调另一个工具本就该结束它（不是历史累计）', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'x', args: {}, result: okResult() });
+  guard.observe({ name: 'x', args: {}, result: okResult() });
+  guard.observe({ name: 'y', args: {}, result: okResult() });
+  assert.equal(guard.observe({ name: 'x', args: {}, result: okResult() }).repeated, 1, 'x 的链已被 y 打断');
+});
+
+test('reset 清空全部状态', () => {
+  const guard = createToolGuard();
+  guard.observe({ name: 'x', args: {}, result: failResult() });
+  guard.reset();
+  const d = guard.observe({ name: 'x', args: {}, result: failResult() });
+  assert.equal(d.repeated, 1);
+  assert.equal(d.failStreak, 1);
+  assert.equal(d.noProgressStreak, 1);
+});
+
+test('脏输入安全：空 / null / 缺字段都不抛', () => {
+  const guard = createToolGuard();
+  assert.doesNotThrow(() => guard.observe());
+  assert.doesNotThrow(() => guard.observe(null));
+  assert.doesNotThrow(() => guard.observe({ name: '', args: null }));
+  assert.equal(guard.observe({}).level, 'ok');
+});
+
+test('非法阈值配置回落到默认，不静默变成"永不提醒"', () => {
+  const guard = createToolGuard({ repeatThresholds: [] });
+  const call = () => guard.observe({ name: 'x', args: {}, result: okResult() });
+  for (let i = 1; i < 3; i++) call();
+  assert.equal(call().level, 'reflect', '空阈值应回落到默认 [3,5,8] 而不是永不提醒');
 });
