@@ -368,7 +368,9 @@ test('用户消息与参考来源', () => {
 
 test('会话标识出现在头部，便于 AI 取回上下文', () => {
   const text = wrap([{ role: 'user', content: 'x' }], { handoffId: 'RF-E2F7ZH' });
-  assert.ok(text.includes('recallflow_session("RF-E2F7ZH")'), text);
+  assert.ok(text.includes('RF-E2F7ZH'), text);
+  // 不写死工具名：opencode 侧是 recallflow_session，DSH 侧是 recallflow_browser 的 handoff_get
+  assert.ok(!text.includes('recallflow_session'), '导出头部不该点名某一侧的工具');
   const without = wrap([{ role: 'user', content: 'x' }]);
   assert.ok(!without.includes('会话标识'), without);
 });

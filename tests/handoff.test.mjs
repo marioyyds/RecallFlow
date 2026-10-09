@@ -150,15 +150,30 @@ test('updateHandoffIndex: 脏输入安全', () => {
   assert.deepEqual(r.dropped, []);
 });
 
-test('formatHandoffPrompt: 指令含标识与工具名，便于 agent 自动调用', () => {
+test('formatHandoffPrompt: 指令含标识与页面，便于对方识别', () => {
   const p = formatHandoffPrompt('rf-7k2m9x', { pageTitle: '购物车' });
   assert.ok(p.includes('RF-7K2M9X'), p);
-  assert.ok(p.includes('recallflow_session'), p);
   assert.ok(p.includes('购物车'), p);
   // 无页面标题时不出现空的括号
   const p2 = formatHandoffPrompt('RF-7K2M9X');
   assert.ok(!p2.includes('（）'), p2);
   assert.equal(formatHandoffPrompt('bad'), '');
+});
+
+test('formatHandoffPrompt: 不得写死具体工具名（它随集成而变）', () => {
+  // 原先是「请调用 recallflow_session("RF-…")」——那是 opencode 侧 MCP 的名字；
+  // DSH 侧叫 recallflow_browser（method=handoff_get），其它 AI 两个都没有。
+  // 写死任何一个，粘到不具备该工具的 AI 那里就是静默失效（实测粘给 DSH 正是如此）。
+  const p = formatHandoffPrompt('RF-7K2M9X', { pageTitle: '购物车' });
+  assert.ok(!p.includes('recallflow_session'), '不该点名 opencode 侧的工具：' + p);
+  assert.ok(!p.includes('recallflow_browser'), '也不该点名 DSH 侧的工具');
+  assert.ok(!/MCP/i.test(p), '连 MCP 这个概念都不该出现 —— 对方未必有');
+});
+
+test('formatHandoffPrompt: 必须给出「没有该能力」时的退路', () => {
+  const p = formatHandoffPrompt('RF-7K2M9X', { pageTitle: '购物车' });
+  assert.ok(/若没有/.test(p), '要说清没有能力时怎么办：' + p);
+  assert.ok(p.includes('导出记录'), '退路是让用户改用面板的「导出记录」');
 });
 
 // ---------------------------------------------------------------- 工具轨迹

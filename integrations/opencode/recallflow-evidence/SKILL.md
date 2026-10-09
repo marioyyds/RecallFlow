@@ -16,8 +16,15 @@ The user can click the **session id chip** in the RecallFlow panel on a page. Th
 line like:
 
 ```
-读取 RecallFlow 会话 RF-7K2M9X（页面：…）：请调用 recallflow_session("RF-7K2M9X") 取回该会话上下文，然后帮我解决其中的前端问题。
+读取 RecallFlow 会话 RF-7K2M9X（页面：…），然后帮我解决其中的前端问题。
+若你有 RecallFlow 的会话读取工具，请先取回该会话上下文再动手；若没有这个能力，请直接说明，我会改用面板的「导出记录」把内容粘贴给你。
 ```
+
+Note the copied text deliberately does **not** name a specific tool: the reading tool is called
+`recallflow_session` here in opencode, while other integrations expose it under a different
+name (e.g. DSH's `recallflow_browser` with `method: "handoff_get"`). Naming one of them made
+the text silently unusable for every other client. The trigger is therefore **the `RF-XXXXXX`
+id, not the tool name** — if you have a session-reading tool, use it.
 
 **When a user message contains an `RF-XXXXXX` id, or asks you to take over a frontend
 problem from their panel — call `recallflow_session(id)` before anything else.** Do not ask
