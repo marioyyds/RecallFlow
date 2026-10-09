@@ -34,21 +34,31 @@ test('计划渲染到输入框上方的计划条，而不是助手消息里', ()
   assert.ok(!/pendingAiMsg/.test(fn), 'renderPlan 不应再往助手消息里插计划');
 });
 
-test('计划条挂在**对话区顶部**：panelBody 之前、且不再挂在输入框那一堆里', () => {
-  // 位置改过一次：原先贴在输入框上方，但那里已经堆了审批 / 快捷指令 / 自动批准 / 拾取栏四条，
-  // 只有输入框真正属于「输入」；而计划是**任务级状态**，描述的是「这段对话在做什么」，
-  // 所以移到对话区顶部（header 之下、panelBody 之上）。
-  // 用带分号的精确串匹配：上面的注释里也出现了 `panel.appendChild(planBar)`（句号结尾），
-  // 用子串匹配会命中注释那一行，判据就废了。
-  const planAppend = indexOfLine('panel.appendChild(planBar);');
-  const bodyAppend = indexOfLine('panel.appendChild(panelBody);');
+test('计划条挂在**底部控件区的第一格**（快捷指令之上）', () => {
+  // 位置试过四轮：助手消息开头（会滚走）→ 对话区顶部（压住内容）→ 紧贴输入框
+  // （和 4 条挤在一起）→ 现在是底部控件区的第一格。
+  const cmdAreaStart = indexOfLine('const cmdArea = document.createElement');
+  const planAppend = indexOfLine('cmdArea.appendChild(planBar);', cmdAreaStart);
+  const quickAppend = indexOfLine('cmdArea.appendChild(quickWrap);', cmdAreaStart);
   assert.notEqual(planAppend, -1, '找不到计划条的挂载点');
-  assert.notEqual(bodyAppend, -1, '找不到 panelBody 的挂载点');
-  assert.ok(planAppend < bodyAppend, '计划条应在 panelBody 之前 —— 否则它会掉到对话下方');
+  assert.notEqual(quickAppend, -1, '找不到快捷指令的挂载点');
+  assert.ok(planAppend < quickAppend, '计划条应在快捷指令之上');
+  // 也不该挂在 panel 上：那会压在对话**内容**上方（计划是过程，过程不该占内容区的版面）。
   assert.ok(
-    !lines.some((l) => l.includes('cmdArea.appendChild(planBar)')),
-    '不该再挂在输入框上方那堆条里（那里最多 132px，会把对话区压扁）'
+    !lines.some((l) => l.trim() === 'panel.appendChild(planBar);'),
+    '不该挂在 panel 上 —— 那会压住对话内容'
   );
+});
+
+test('计划条的展开状态必须是**三态**，否则自动折叠永远不触发', () => {
+  // 踩过的坑：写成单一布尔且初值 true，于是 `collapsed = allDone && !planExpanded`
+  // 恒为 false —— 折叠永远不会发生。截图里 8/8 全划掉却仍整块铺开，就是这个 bug。
+  assert.match(src, /let planExpanded = null;/, '初值必须是「未表态」的 null，不能是 true');
+  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  assert.match(fn, /if \(!allDone\) planExpanded = null;/, '新一轮开始要清掉手动状态，否则这一轮跑完不会折叠');
+  assert.match(fn, /const collapsed = allDone && planExpanded !== true;/, '未表态时完成即折叠');
+  // 点击处理器在 openPanel 里（不在 renderPlan 内），所以对全文断言。
+  assert.match(src, /planExpanded = planBar\.classList\.contains\('collapsed'\);/, '点击切换要写回显式选择');
 });
 
 test('计划条全部完成后折叠成一行（同样的内容对话里已经有了，不该继续占高度）', () => {
@@ -59,10 +69,10 @@ test('计划条全部完成后折叠成一行（同样的内容对话里已经�
   assert.ok(!/\bplanExpanded = true;\s*\n\s*if \(allDone\)/.test(fn), '不该无条件展开');
 });
 
-test('计划条：新一轮 run 出现未完成步骤时自动展开回来', () => {
+test('计划条：未完成时保持展开（不能因为上一轮折叠过就看不见这一轮的计划）', () => {
   const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
-  // 只要还有未完成的步骤就展开 —— 否则用户上一轮手动折叠过，这一轮的计划就看不见了。
-  assert.match(fn, /if \(!allDone\) planExpanded = true;/, '未完成时应强制展开');
+  assert.match(fn, /if \(!allDone\) planExpanded = null;/, '未完成时应清掉手动折叠状态');
+  assert.match(fn, /const collapsed = allDone && planExpanded !== true;/, '未完成时 collapsed 必为 false');
 });
 
 test('计划条元素必须在构造期的 renderConversation() 之前创建（否则回填落空）', () => {
