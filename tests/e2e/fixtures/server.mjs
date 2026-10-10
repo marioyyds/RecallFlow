@@ -377,6 +377,61 @@ function recoverPage() {
 </body></html>`;
 }
 
+// 表格页：一个**朴素读法必然错位**的表格（用来验"合并单元格还原"）。
+//
+// 难点是**错位**，不是"表格里有没有数据"：
+//   · 表头是**两级**的（`上半年` 用 colspan 跨 Q1/Q2）；
+//   · 首列 `区域` 用 **rowspan** 跨两行 —— 于是第 2、4 行在 DOM 里**少一个 td**，
+//     朴素做法（逐行 `querySelectorAll('td')` 拼数组）会让「商品」列的值落到「区域」列上，
+//     整张表**整体左移一格**，下游按列取值全错；
+//   · 还有一个单元格里带换行（真实表格常见），用来验空白归一化。
+//
+// 判据因此是**具体某一行文本**（例如 `华东` 与 `B` 同行），
+// 那是朴素读法**不可能**产出的形态。
+function tablePage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具表格页</title></head>
+<body>
+  <h1>区域销量</h1>
+  <table id="sales">
+    <thead>
+      <tr>
+        <th rowspan="2">区域</th>
+        <th rowspan="2">商品</th>
+        <th colspan="2">上半年</th>
+      </tr>
+      <tr>
+        <th>Q1</th>
+        <th>Q2</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td rowspan="2">华东</td>
+        <td>阿拉比卡</td>
+        <td>10</td>
+        <td>20</td>
+      </tr>
+      <tr>
+        <td>罗布斯塔</td>
+        <td>30</td>
+        <td>40</td>
+      </tr>
+      <tr>
+        <td rowspan="2">华南</td>
+        <td>耶加雪菲</td>
+        <td>50</td>
+        <td>60</td>
+      </tr>
+      <tr>
+        <td>小粒咖啡<br>（云南）</td>
+        <td>70</td>
+        <td>80</td>
+      </tr>
+    </tbody>
+  </table>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -821,6 +876,19 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：表格合并单元格提取（playbook id = 'extract-merged-table'）。
+    //
+    // 一步就够：`inspect_element({op:'table'})` 会走 expandTableGrid 把 rowspan/colspan
+    // 还原成矩形网格。这条剧本同时是**数据是否真的交到模型手上**的探针 ——
+    // 该命令原先把网格放在 markdown 字段、而投递层只取 result，于是模型只收到一句摘要。
+    if (userText.includes(PLAYBOOKS['extract-merged-table'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'table', selector: '#sales' }); return; }
+      finalText(res, '表已还原为 4 行 × 4 列：华东/阿拉比卡 10、20；华东/罗布斯塔 30、40；华南/耶加雪菲 50、60；华南/小粒咖啡（云南）70、80。上半年 = Q1+Q2。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -848,7 +916,8 @@ const main = http.createServer((req, res) => {
             : req.url && req.url.startsWith('/debug') ? debugPage()
               : req.url && req.url.startsWith('/blocked') ? blockedPage()
                 : req.url && req.url.startsWith('/recover') ? recoverPage()
-                  : mainPage()
+                  : req.url && req.url.startsWith('/table') ? tablePage()
+                    : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

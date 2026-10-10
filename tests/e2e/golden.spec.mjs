@@ -562,3 +562,50 @@ test('golden: 失败恢复 —— 被拒后读懂原因、补齐、重试成功�
 
   await page.close();
 });
+
+// 能力验收（复杂场景）：**合并单元格表格提取**（playbook 'extract-merged-table'）。
+//
+// 难点是**错位**，不是"表格里有没有数据"：
+//   首列「区域」用 rowspan 跨两行 → 第 2、4 行在 DOM 里**少一个 td** →
+//   朴素做法（逐行 querySelectorAll('td')）会让「商品」列的值落到「区域」列上，
+//   整张表左移一格，按列取值全错。
+//
+// 这条用例同时是两个缺陷的探针：
+//   ① 还原算法（expandTableGrid）是否正确展开；
+//   ② **数据是否真的交到了模型手上** —— 该命令原先把网格放在 `markdown` 字段，
+//      而页面命令走到模型的那条路只取 `result` 字符串，于是模型只收到一句
+//      「4 行 × 4 列（含 4 个合并单元格，已展开对齐）」的摘要，**表格数据被整份丢掉**。
+//      所以断言必须落在**具体某一行文本**上，而不是"工具返回了 ok"。
+test('golden: 表格 —— rowspan/colspan 被正确展开，且数据真的到了模型手上', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/table');
+
+  // 基线：页面确实带着合并单元格，否则这个场景不成立
+  // 共 5 个：区域/商品 各 rowspan=2（表头）+ 上半年 colspan=2 + 华东/华南 各 rowspan=2（表体）
+  await expect(page.locator('#sales td[rowspan], #sales th[rowspan], #sales th[colspan]')).toHaveCount(5);
+
+  resetLlmRequests();
+  await sendInstruction(page, '把页面上的销量表提取出来，整理成规整的表格给我。');
+
+  // ① 表头按 colspan 正确展开；两列表头名来自第二级表头
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('| 区域 | 商品 | Q1 | Q2 |');
+
+  // ② rowspan 的「区域」被重复到合并行的每一行 —— 这是对齐的**正向**证据
+  const seen = toolResultsText();
+  expect(seen).toContain('| 华东 | 罗布斯塔 | 30 | 40 |');
+  // 带 <br> 的单元格：innerText 把 <br> 渲染成换行，再经空白归一化变成**空格**，
+  // 所以这里是「小粒咖啡 （云南）」而不是「小粒咖啡（云南）」。
+  // 断言拆成"行首"与"行尾"两段：既证明对齐，又不把空白细节写死（那属于渲染细节，不是能力）。
+  expect(seen).toContain('| 华南 | 小粒咖啡');
+  expect(seen).toContain('（云南） | 70 | 80 |');
+
+  // ③ **反向**证据：错位形态必须不存在。
+  // 朴素逐行读法会产出以 `| 罗布斯塔` 开头的一行（整体左移一格）。
+  // 注意不能直接断言子串不存在 —— 正确行 `| 华东 | 罗布斯塔 | 30 | 40 |` 里也含
+  // `| 罗布斯塔 | 30 | 40 |`，那会误判。必须按**行首**判断。
+  const lines = seen.split('\n').map((l) => l.trim());
+  expect(lines.some((l) => l.startsWith('| 罗布斯塔')), '出现了错位行（区域列被吃掉）').toBe(false);
+  expect(lines.some((l) => l.startsWith('| 小粒咖啡')), '出现了错位行（区域列被吃掉）').toBe(false);
+
+  await page.close();
+});

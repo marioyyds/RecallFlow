@@ -168,6 +168,40 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['邀请码', 'RF2026'],
     },
   },
+
+  'extract-merged-table': {
+    id: 'extract-merged-table',
+    title: '复杂场景：合并单元格表格 —— 还原成对齐网格（朴素读法必然错位）',
+    trigger: '表格',
+    tools: ['get_page_snapshot', 'inspect_element'],
+    success: '表格被还原成矩形网格：rowspan 的「区域」重复到合并行的每一行、colspan 的表头正确展开，且**数据本身**到了模型手上',
+    eval: {
+      url: '/table',
+      instruction: '把页面上的销量表提取出来，整理成规整的表格给我。',
+      pageChecks: [
+        // 页面是只读的，没有可变状态可断言；真正的判据在"模型收到了什么"那一侧：
+        // 这一条只是确认页面确实带着合并单元格（否则本场景不成立）。
+        {
+          expr: "document.querySelectorAll('#sales td[rowspan], #sales th[rowspan], #sales th[colspan]').length === 5",
+          label: '页面确实有 5 个合并单元格（场景成立）',
+        },
+      ],
+      // ★ 本场景的核心判据：**具体某一行的文本形态**。
+      // `| 华东 | 罗布斯塔 | 30 | 40 |` 只有在 rowspan 被正确展开后才可能出现 ——
+      // 朴素逐行读法会把它读成 `| 罗布斯塔 | 30 | 40 |`（整体左移一格）。
+      //
+      // ⚠ 带 `<br>` 的单元格写成两段：`innerText` 把 `<br>` 渲染成换行、再经空白归一化
+      // 变成**空格**，所以实际是「小粒咖啡 （云南）」而不是「小粒咖啡（云南）」。
+      // 一开始这里写成了后者，**真模型 eval 立刻报了出来** —— 而脚本化 E2E 因为断言已改对
+      // 所以是绿的：这正好演示了两层各自能抓到什么（脚本层验代码，真模型层验"我们声称的判据是否成立"）。
+      mustSeeInToolResults: [
+        '| 区域 | 商品 | Q1 | Q2 |',
+        '| 华东 | 罗布斯塔 | 30 | 40 |',
+        '| 华南 | 小粒咖啡',
+        '（云南） | 70 | 80 |',
+      ],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
