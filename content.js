@@ -1830,7 +1830,14 @@
   }
   function firstTarget(params, includeText = true) {
     const source = params || {};
-    const target = { ref: source.ref, selector: source.selector };
+    const target = {
+      ref: source.ref,
+      role: source.role,
+      name: source.name,
+      testid: source.testid,
+      selector: source.selector,
+      index: source.index
+    };
     if (includeText) target.text = source.text;
     const els = findElementsFor(target);
     return els.length ? els[0] : null;
@@ -1922,7 +1929,7 @@
     el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
   async function cmdTypeText(params) {
-    const el = firstTarget(params, false);
+    const el = firstTarget(params);
     if (!el) return { ok: false, error: "\u672A\u627E\u5230\u53EF\u8F93\u5165\u7684\u76EE\u6807\u5143\u7D20" };
     const isEditable = el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT";
     if (!isEditable) return { ok: false, error: "\u76EE\u6807\u5143\u7D20\u4E0D\u662F input\u3001textarea \u6216 contenteditable" };
