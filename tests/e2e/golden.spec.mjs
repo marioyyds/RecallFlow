@@ -846,6 +846,44 @@ test('golden: canvas —— DOM 路线点不动，按可访问性树坐标点击
   await page.close();
 });
 
+// 能力验收（复杂场景）：**宏保存 + 回放**（playbook 'macro-save-replay'）。
+//
+// 难点是**两次执行要能分开数**：手动做一次（`__runs`=1），回放再做一次（`__runs`=2）。
+// 如果回放只是"报告成功"而没在页面上真重放动作，计数就会停在 1 ——
+// 所以判据是**计数**，不是"工具返回了 ok"。
+//
+// 另外钉住一条**契约**：宏只记录白名单内的可回放工具
+// （见 lib/assistant/macros.js 的 REPLAYABLE_TOOLS），
+// 所以 `get_page_snapshot` 与 `macro` 自身都不该进宏 —— 存下来应**恰好 3 步**。
+test('golden: 宏 —— 保存后回放真的在页面上重放了动作（计数可证）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/macro');
+
+  // 基线：还没执行过
+  expect(await page.evaluate(() => window.__runs)).toBe(0);
+  await expect(page.locator('#status')).toHaveText('尚未执行');
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我用「咖啡」和「仅标题」查一次，然后把这个操作存成宏「咖啡查询」，再回放一次确认。');
+
+  // ① **计数**：手动一次 + 回放一次 = 2
+  await expect.poll(() => page.evaluate(() => window.__runs), { timeout: 40_000 }).toBe(2);
+  const last = await page.evaluate(() => window.__last);
+  expect(last).toEqual({ kw: '咖啡', scope: 'title' });
+  // 页面自己的读数也同步了
+  expect(await page.textContent('#status')).toContain('已执行第 2 次');
+
+  // ② 模型视角：保存与回放的结果都要到它手里，且**步数恰好 3**
+  const seen = toolResultsText();
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已回放宏');
+  expect(seen).toContain('已保存宏');
+  expect(seen, '宏里应恰好记录白名单内的 3 步（快照与 macro 自身不应进宏）').toContain('（3 步）');
+  // 回放的分步日志也要在（证明每一步都执行了，而不是只报了个总数）
+  expect(seen).toContain('[3/3] click_element');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

@@ -348,6 +348,30 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['可访问性树', '保存'],
     },
   },
+
+  'macro-save-replay': {
+    id: 'macro-save-replay',
+    title: '复杂场景：宏保存 + 回放（零 token 复用已验证的多步操作）',
+    // 触发词取「存成宏」而不是单字「宏」：门禁要求触发词 ≥2 字
+    //（单字太泛，容易在无关指令里误命中）。
+    trigger: '存成宏',
+    // 先手动做一遍 → 存成宏 → 回放。存下来的应恰好是白名单内的 3 步。
+    tools: ['get_page_snapshot', 'type_text', 'select_option', 'click_element', 'macro', 'inspect_element'],
+    success: '宏被保存（3 步），回放真的在页面上重放了动作（页面累计执行 2 次）',
+    eval: {
+      url: '/macro',
+      instruction: '帮我用「咖啡」和「仅标题」查一次，然后把这个操作存成宏「咖啡查询」，再回放一次确认。',
+      pageChecks: [
+        // ★ 判据是**计数**：回放若只是报告成功、没真重放动作，这里会停在 1
+        { expr: 'window.__runs === 2', label: '页面被执行了两次（手动一次 + 回放一次）' },
+        { expr: "window.__last && window.__last.kw === '咖啡'", label: '回放时关键词被重新填入' },
+        { expr: "window.__last && window.__last.scope === 'title'", label: '回放时范围被重新选中' },
+      ],
+      // 保存结果里的「（3 步）」是**契约锚点**：只有白名单内的可回放工具会被记录，
+      // 一旦有人把不可回放的工具写进流程，步数就会变，这条会红。
+      mustSeeInToolResults: ['已保存宏', '（3 步）', '已回放宏'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

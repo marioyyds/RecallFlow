@@ -810,6 +810,46 @@ function canvasPage() {
 </body></html>`;
 }
 
+// 宏页：一个"做一次 → 存成宏 → 回放一次"的最小可控场景。
+//
+// 难点是**两次执行要能分开数**：
+//   · 手动做一次（`__runs` 变 1）；
+//   · 回放宏再做一次（`__runs` 变 2）——
+//     如果回放只是"报告成功"而没真在页面上重放动作，`__runs` 就会停在 1。
+// 所以判据是**计数**，不是"工具返回了 ok"。
+//
+// 另外：宏按**站点**存储，且只记录白名单内的可回放工具
+// （见 lib/assistant/macros.js 的 REPLAYABLE_TOOLS）——
+// 所以剧本里 `get_page_snapshot` / `macro` 本身都不会进宏，
+// 存下来的应当**恰好是 3 步**（填词 / 选范围 / 点执行）。
+function macroPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具宏演示</title></head>
+<body>
+  <h1>宏演示</h1>
+  <label for="kw">关键词</label>
+  <input id="kw" role="textbox" aria-label="关键词">
+  <label for="scope">范围</label>
+  <select id="scope" role="combobox" aria-label="范围">
+    <option value="">全部</option>
+    <option value="title">仅标题</option>
+  </select>
+  <button id="go" type="button" role="button" aria-label="执行">执行</button>
+  <div id="status" role="status">尚未执行</div>
+  <script>
+    window.__runs = 0;
+    window.__last = null;
+    document.getElementById('go').addEventListener('click', function () {
+      window.__runs += 1;
+      var kw = document.getElementById('kw').value;
+      var scope = document.getElementById('scope').value;
+      window.__last = { kw: kw, scope: scope };
+      document.getElementById('status').textContent =
+        '已执行第 ' + window.__runs + ' 次：' + (scope || '全部') + ' / ' + kw;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1395,6 +1435,24 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：宏保存 + 回放（playbook id = 'macro-save-replay'）。
+    //
+    // 先手动做一遍（`__runs` = 1），存成宏，再回放一次（`__runs` = 2）。
+    // 存下来的应当**恰好 3 步** —— `get_page_snapshot` 与 `macro` 自身都不在
+    // REPLAYABLE_TOOLS 白名单里，不会被记录。
+    if (userText.includes(PLAYBOOKS['macro-save-replay'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '关键词', value: '咖啡', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'select_option', { selector: '#scope', label: '仅标题' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '执行' }); return; }
+      if (done === 4) { toolStep(res, 'macro', { op: 'save', name: '咖啡查询', description: '填关键词+选范围+执行' }); return; }
+      if (done === 5) { toolStep(res, 'macro', { op: 'run', name: '咖啡查询' }); return; }
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已执行一次并把「填词→选范围→执行」存成宏「咖啡查询」（3 步），随后回放了一次，页面累计执行 2 次。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1430,7 +1488,8 @@ const main = http.createServer((req, res) => {
                             : req.url && req.url.startsWith('/shadow') ? shadowPage()
                               : req.url && req.url.startsWith('/drag') ? dragPage()
                                 : req.url && req.url.startsWith('/canvas') ? canvasPage()
-                                  : mainPage()
+                                  : req.url && req.url.startsWith('/macro') ? macroPage()
+                                    : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {
