@@ -77,6 +77,12 @@ function sse(res, chunks) {
 function textDelta(content) {
   return { choices: [{ delta: { content } }] };
 }
+// 思维链增量：只有推理模型（deepseek-reasoner）会发这个字段。
+// 单独造一个 helper，是为了让「思考记录」这条路径能在**真实浏览器**里被验证 ——
+// 单测只能证明代码接了线，证明不了面板上真的出现了一块可折叠的记录。
+function reasoningDelta(content) {
+  return { choices: [{ delta: { reasoning_content: content } }] };
+}
 function toolCallDelta(name, args) {
   return {
     choices: [{
@@ -203,6 +209,22 @@ const llm = http.createServer((req, res) => {
       } else {
         sse(res, [textDelta('已按坐标点击。'), { choices: [{ delta: {}, finish_reason: 'stop' }] }, { usage: { total_tokens: 42 } }]);
       }
+      return;
+    }
+
+    // 场景 F：思考记录（思维链）。
+    // 为什么需要：`reasoning_content` 是**推理模型独有**的字段，此前全仓库没有任何地方读它，
+    // 于是「模型在思考时界面一片空白」这个问题既没被测过、也没被看见过。
+    // 这里让模拟模型先吐思维链、再吐正文，用来验证面板真的渲染出可折叠的思考记录、
+    // 并且在正文开始时自动收起。
+    if (userText.includes('思考')) {
+      sse(res, [
+        reasoningDelta('先确认页面结构，'),
+        reasoningDelta('再决定点击哪个按钮。'),
+        textDelta('我想好了：结论如下。'),
+        { choices: [{ delta: {}, finish_reason: 'stop' }] },
+        { usage: { total_tokens: 42 } },
+      ]);
       return;
     }
 

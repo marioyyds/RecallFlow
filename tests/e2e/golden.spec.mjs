@@ -197,3 +197,44 @@ test('golden: CDP 坐标点击真的落到页面上（可信输入）', async ()
 
   await page.close();
 });
+
+// 思考记录（思维链）的端到端验证。
+//
+// 为什么必须有这一条：`reasoning_content` 是推理模型独有的字段，而本仓库此前**完全没有读它** ——
+// 也就是说「模型在思考时界面一片空白」这件事既没有实现、也没有任何测试能发现。
+// 单测能证明 agent 发了事件、面板认了事件类型，但证明不了**面板上真的出现了一块记录**：
+// DOM 结构、CSS 类名、折叠状态、自动收起时机，任何一环错都只有真浏览器能看出来。
+test('golden: 思考记录渲染出来、可展开、并在正文开始时自动收起', async () => {
+  await configure(baseSettings());
+  const page = await context.newPage();
+  await page.goto('http://127.0.0.1:7802/');
+
+  await page.locator('#__kb-ai-host .fab').click();
+  await page.locator('#__kb-ai-host .cmd-input').fill('说说你的思考');
+  await page.locator('#__kb-ai-host .cmd-send').click();
+
+  const block = page.locator('#__kb-ai-host .think-block');
+  await expect(block).toHaveCount(1, { timeout: 30_000 });
+
+  // 思维链文本真的进了记录（模拟模型分两片发，拼起来应是完整句子）
+  const body = page.locator('#__kb-ai-host .think-block .think-body');
+  await expect(body).toContainText('先确认页面结构', { timeout: 30_000 });
+  await expect(body).toContainText('再决定点击哪个按钮', { timeout: 30_000 });
+
+  // 正文应当**不在**思考记录里（混在一起就再也分不出哪段是思考、哪段是回答）
+  await expect(body).not.toContainText('我想好了：结论如下');
+
+  // 回答已经开始 → 记录自动收起（data-open="false"），但仍留在面板里作为记录
+  await expect(block).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  await expect(block).toHaveAttribute('data-open', 'false', { timeout: 30_000 });
+  // 收起时正文区不可见（display:none 由 CSS 负责，这里断言计算样式真的生效）
+  await expect(body).toBeHidden();
+
+  // 用户手动点开后应能读到完整思维链 —— 这就是「可以显示思考记录」
+  await page.locator('#__kb-ai-host .think-block .think-head').click();
+  await expect(block).toHaveAttribute('data-open', 'true');
+  await expect(body).toBeVisible();
+  await expect(body).toContainText('先确认页面结构，再决定点击哪个按钮。');
+
+  await page.close();
+});

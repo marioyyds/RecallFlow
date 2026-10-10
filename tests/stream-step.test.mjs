@@ -260,6 +260,72 @@ test('streamAgentStep: tool_calls 分片增量拼接成完整参数', async () =
   assert.equal(out.assistantMessage.tool_calls.length, 1);
 });
 
+// ---------------------------------------------------------------- 思维链（思考记录）
+
+test('思维链：reasoning_content 流式转发为独立事件，且**不混进正文**', async () => {
+  const events = [];
+  const lines = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '先看' } }] }),
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '再看' } }] }),
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '结论' } }] }),
+    'data: [DONE]',
+  ];
+  globalThis.fetch = async () => sseResponse(lines);
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], (e) => events.push(e));
+
+  // 思维链走单独事件类型：面板要把它渲染成可折叠的思考记录，并在正文开始时收起。
+  const reasoning = events.filter((e) => e.type === 'reasoning');
+  assert.equal(reasoning.length, 2, '两段思维链应发两条 reasoning 事件');
+  assert.equal(reasoning.map((e) => e.text).join(''), '先看再看');
+  assert.equal(out.reasoning, '先看再看', '累积结果应随本步返回（供导出/交接用）');
+
+  // 正文与思维链必须分开：混在一起面板就再也分不出哪段是思考、哪段是回答。
+  assert.equal(out.assistantMessage.content, '结论', '正文里不得混入思维链');
+  assert.equal(events.filter((e) => e.type === 'chunk').length, 1);
+  assert.equal(events.filter((e) => e.type === 'chunk')[0].text, '结论');
+});
+
+test('思维链：**绝不写回 messages**（写回会改写请求前缀，且该字段不可回传）', async () => {
+  const lines = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '一大段思考' } }] }),
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '答案' } }] }),
+    'data: [DONE]',
+  ];
+  globalThis.fetch = async () => sseResponse(lines);
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], () => {});
+  // assistantMessage 是要被 push 进历史、下一轮**原样发回**的东西。
+  assert.ok(!('reasoning_content' in out.assistantMessage), 'assistantMessage 不得带 reasoning_content');
+  assert.ok(!('reasoning' in out.assistantMessage), 'assistantMessage 不得带 reasoning');
+  assert.deepEqual(Object.keys(out.assistantMessage).sort(), ['content', 'role'], 'assistant 消息只应有 role 与 content');
+});
+
+test('思维链：算作「首个增量」——否则整段思考会被错算进 prefill 耗时', async () => {
+  const lines = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '思考中' } }] }),
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '答' } }] }),
+    'data: [DONE]',
+  ];
+  globalThis.fetch = async () => sseResponse(lines);
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], () => {});
+  // 有首个 token 才会计算 decodeMs；若思维链不计入，decodeMs 会恒为 0，
+  // 而「慢在 prefill 还是 decode」正是这套分段计时存在的唯一理由。
+  assert.ok(out.timing.decodeMs >= 0);
+  assert.ok(out.timing.prefillMs >= 0);
+});
+
+test('思维链：没有 reasoning_content 的模型（deepseek-chat）行为完全不变', async () => {
+  const events = [];
+  const lines = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { content: '普通回答' } }] }),
+    'data: [DONE]',
+  ];
+  globalThis.fetch = async () => sseResponse(lines);
+  const out = await streamAgentStep(null, SETTINGS, [], undefined, [], (e) => events.push(e));
+  assert.equal(events.filter((e) => e.type === 'reasoning').length, 0);
+  assert.equal(out.reasoning, '', '没有思维链时应是空串，而不是 undefined');
+  assert.equal(out.assistantMessage.content, '普通回答');
+});
+
 test('streamAgentStep: 空工具集不附带 tools 字段（避免 API 400）', async () => {
   let seenBody = null;
   globalThis.fetch = async (url, opts) => {

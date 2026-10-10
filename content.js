@@ -3877,6 +3877,40 @@
     .typing span:nth-child(2) { animation-delay: .15s; }
     .typing span:nth-child(3) { animation-delay: .3s; }
     @keyframes kb-bounce { 0%,60%,100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-4px); opacity: 1; } }
+    /* ---- \u601D\u8003\u8BB0\u5F55\uFF08\u601D\u7EF4\u94FE\uFF09----
+       \u53EA\u6709**\u63A8\u7406\u6A21\u578B**\u4F1A\u4EA7\u51FA\u5185\u5BB9\uFF08deepseek-reasoner\uFF09\uFF1Bdeepseek-chat \u4E0B\u8FD9\u4E00\u5757\u4E0D\u4F1A\u51FA\u73B0\uFF0C
+       \u7528\u6237\u770B\u5230\u7684\u4ECD\u662F\u4E0A\u9762\u90A3\u4E09\u4E2A\u70B9 + FAB \u547C\u5438\u52A8\u753B\u3002
+       \u5C55\u5F00/\u6536\u8D77\u7531 data-open \u63A7\u5236\uFF1B\u8FDB\u884C\u4E2D\u7684\u52A8\u753B\u53EA\u5728 data-state="running" \u65F6\u8DD1 \u2014\u2014
+       \u9759\u6B62\u7684\u601D\u8003\u8BB0\u5F55\u4E0D\u8BE5\u7EE7\u7EED\u95EA\uFF0C\u5426\u5219\u7528\u6237\u4F1A\u8BEF\u4EE5\u4E3A\u8FD8\u5728\u751F\u6210\u3002 */
+    .think-block { margin: 6px 0 8px; border-left: 2px solid rgba(74,144,217,.35); border-radius: 4px; background: rgba(74,144,217,.05); overflow: hidden; }
+    .panel.dark .think-block { border-left-color: rgba(106,165,224,.45); background: rgba(106,165,224,.07); }
+    .think-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 8px; background: none; border: 0; cursor: pointer; font: inherit; font-size: 12px; color: #6b7c8f; text-align: left; }
+    .panel.dark .think-head { color: #9aa0a8; }
+    .think-head:hover { color: #4a90d9; }
+    .think-label { flex: 1 1 auto; }
+    .think-caret { flex: 0 0 auto; font-size: 10px; transition: transform .15s ease; }
+    .think-block[data-open="true"] .think-caret { transform: rotate(180deg); }
+    .think-dots { display: inline-flex; flex: 0 0 auto; gap: 3px; align-items: center; }
+    .think-dots span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: .45; }
+    .think-block[data-state="running"] .think-dots span { opacity: 1; animation: kb-bounce 1.2s infinite; }
+    .think-block[data-state="running"] .think-dots span:nth-child(2) { animation-delay: .15s; }
+    .think-block[data-state="running"] .think-dots span:nth-child(3) { animation-delay: .3s; }
+    /* \u8FDB\u884C\u4E2D\uFF1A\u6807\u7B7E\u8D70\u4E00\u904D\u626B\u5149\uFF0C\u957F\u601D\u7EF4\u94FE\u91CC\u6BD4\u4E09\u4E2A\u70B9\u66F4\u5BB9\u6613\u88AB\u6CE8\u610F\u5230\u3002
+       \u26A0 \u5FC5\u987B\u7528 @supports \u5305\u4F4F\uFF1Abackground-clip:text \u4E0D\u751F\u6548\u65F6 -webkit-text-fill-color:transparent
+       \u4F1A\u628A**\u6587\u5B57\u6574\u4E2A\u53D8\u6CA1**\uFF08\u53EA\u5269\u4E00\u6761\u770B\u4E0D\u89C1\u7684\u6E10\u53D8\uFF09\uFF0C\u8FD9\u662F\u5B81\u53EF\u4E0D\u52A8\u753B\u4E5F\u4E0D\u80FD\u5192\u7684\u9669\u3002 */
+    @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+      .think-block[data-state="running"] .think-label {
+        background: linear-gradient(90deg, currentColor 0%, #4a90d9 45%, currentColor 90%);
+        background-size: 220% 100%;
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: kb-shimmer 1.6s linear infinite;
+      }
+    }
+    @keyframes kb-shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
+    .think-body { display: none; padding: 0 10px 8px; font-size: 12px; line-height: 1.6; color: #6b7c8f; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
+    .panel.dark .think-body { color: #9aa0a8; }
+    .think-block[data-open="true"] .think-body { display: block; }
     .p-body h1, .p-body h2, .p-body h3, .p-body h4 { margin: 14px 0 8px; line-height: 1.4; font-weight: 700; }
     .p-body h1 { font-size: 17px; } .p-body h2 { font-size: 15.5px; } .p-body h3 { font-size: 14.5px; } .p-body h4 { font-size: 13.5px; }
     .msg.ai > :first-child { margin-top: 2px; }
@@ -4222,6 +4256,10 @@
   var pendingNarration = "";
   var lastNarration = "";
   var typingEl = null;
+  var pendingReasoning = "";
+  var thinkBlockEl = null;
+  var thinkBodyEl = null;
+  var thinkExpandedManual = null;
   var activeRunId = null;
   var planBar = null;
   var lastPlan = [];
@@ -4632,6 +4670,18 @@
     pendingAiMsg = aiMsg;
     pendingContentEl = contentEl;
     flowEl = flow;
+    if (pendingReasoning) {
+      thinkBlockEl = null;
+      thinkBodyEl = null;
+      const block = ensureThinkBlock();
+      if (block) {
+        block.dataset.state = "done";
+        const label = block.querySelector(".think-label");
+        if (label) label.textContent = "\u5DF2\u601D\u8003\uFF08" + pendingReasoning.length + " \u5B57\uFF09";
+        block.dataset.open = pendingStarted ? "false" : "true";
+        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
+      }
+    }
     typingEl = pendingNarration ? null : contentEl;
     pendingStarted = pendingStarted || Boolean(pendingNarration || pendingAcc);
     pendingAiMsg._raw = pendingAcc;
@@ -5469,8 +5519,62 @@
       flowEl.appendChild(el);
       return el;
     }
+    function ensureThinkBlock2() {
+      if (thinkBlockEl && thinkBlockEl.isConnected) return thinkBlockEl;
+      if (!flowEl) return null;
+      const block = document.createElement("div");
+      block.className = "think-block";
+      block.dataset.state = "running";
+      block.dataset.open = "true";
+      const head2 = document.createElement("button");
+      head2.type = "button";
+      head2.className = "think-head";
+      head2.innerHTML = '<span class="think-dots"><span></span><span></span><span></span></span><span class="think-label">\u601D\u8003\u4E2D\u2026</span><span class="think-caret" aria-hidden="true">\u25BE</span>';
+      head2.addEventListener("click", () => {
+        const opening = block.dataset.open !== "true";
+        thinkExpandedManual = opening;
+        block.dataset.open = opening ? "true" : "false";
+      });
+      const body = document.createElement("div");
+      body.className = "think-body";
+      block.appendChild(head2);
+      block.appendChild(body);
+      flowEl.insertBefore(block, flowEl.firstChild);
+      thinkBlockEl = block;
+      thinkBodyEl = body;
+      return block;
+    }
+    function pushReasoning(text) {
+      const piece = String(text || "");
+      if (!piece) return;
+      pendingReasoning += piece;
+      const block = ensureThinkBlock2();
+      if (!block) return;
+      if (thinkExpandedManual === null) block.dataset.open = "true";
+      streamRender.schedule("reason", () => {
+        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
+      });
+    }
+    function finishReasoning() {
+      if (!thinkBlockEl || !thinkBlockEl.isConnected) return;
+      if (thinkBlockEl.dataset.state === "done") return;
+      thinkBlockEl.dataset.state = "done";
+      const label = thinkBlockEl.querySelector(".think-label");
+      if (label) label.textContent = "\u5DF2\u601D\u8003\uFF08" + pendingReasoning.length + " \u5B57\uFF09";
+      if (thinkExpandedManual === null) thinkBlockEl.dataset.open = "false";
+      streamRender.schedule("reason", () => {
+        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
+      });
+    }
+    function resetReasoning() {
+      pendingReasoning = "";
+      thinkBlockEl = null;
+      thinkBodyEl = null;
+      thinkExpandedManual = null;
+    }
     function appendStep(step) {
       removeTypingEl();
+      finishReasoning();
       if (pendingNarration) {
         lastNarration = pendingNarration;
         pendingParts.push({ type: "narration", text: pendingNarration });
@@ -5606,6 +5710,7 @@
       pendingAiMsg = aiMsg;
       pendingContentEl = contentEl;
       typingEl = contentEl;
+      resetReasoning();
       pendingStarted = false;
       streaming = true;
       startProgress();
@@ -5769,8 +5874,12 @@
             fitPanelHeight();
             if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
           }
+        } else if (resp.type === "reasoning") {
+          removeTypingEl();
+          pushReasoning(resp.text);
         } else if (resp.type === "chunk") {
           removeTypingEl();
+          finishReasoning();
           pendingAcc += resp.text;
           pendingNarration += resp.text;
           pendingStarted = true;
@@ -5788,6 +5897,7 @@
           });
         } else if (resp.type === "end") {
           removeTypingEl();
+          finishReasoning();
           streamRender.flush();
           lastResponse = pendingNarration || lastNarration || "";
           const textParts = pendingParts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
