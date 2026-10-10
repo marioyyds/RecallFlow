@@ -11,67 +11,28 @@
 //   ① 任务最终完成（按钮被点击）—— 若重连不发生，端口一断这条永远不成立；
 //   ② 后台**跑了不止一次** —— 区分"重连接着跑"与"第一次自己就跑完了"。
 //      少了这条，测试会在"根本没断成功"的情况下假通过（这正是前几轮发生的事）。
-import { test, expect, chromium } from '@playwright/test';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { startServers, stopServers } from './fixtures/server.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const EXT_PATH = path.resolve(__dirname, '..', '..');
+import { test, expect } from '@playwright/test';
+import { launchExtension, closeExtension, configureSettings, openFixturePage, openPanel, PANEL } from './helpers.mjs';
 
 let context;
 
 test.beforeAll(async () => {
-  await startServers();
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-first-run'],
-  });
-  let [sw] = context.serviceWorkers();
-  if (!sw) sw = await context.waitForEvent('serviceworker');
+  context = await launchExtension();
 });
 
 test.afterAll(async () => {
-  await context?.close();
-  stopServers();
+  await closeExtension(context);
 });
 
-async function configure(settings) {
-  const sw = context.serviceWorkers()[0];
-  await sw.evaluate(async (s) => {
-    await chrome.storage.local.set({ aiSettings: s });
-  }, settings);
-}
-
-function baseSettings(overrides) {
-  return Object.assign(
-    {
-      apiKey: 'test-key',
-      baseUrl: 'http://127.0.0.1:7804',
-      model: 'mock',
-      ragEnabled: false,
-      pageContext: true,
-      toolApproval: true,
-      toolApprovalPolicy: { read: true, edit: true, commands: true, browser: true, mcp: true },
-      cdpEnabled: false,
-      quickPrompts: [],
-      agentBudget: {},
-    },
-    overrides || {}
-  );
-}
-
 test('golden: 端口断开后自动重连并接着跑完', async () => {
-  await configure(baseSettings());
+  await configureSettings(context);
   const sw = context.serviceWorkers()[0];
   const logs = [];
   sw.on('console', (m) => logs.push(m.text()));
 
-  const page = await context.newPage();
-  await page.goto('http://127.0.0.1:7802/');
-
-  await page.locator('#__kb-ai-host .fab').click();
-  await page.locator('#__kb-ai-host .cmd-input').fill('点击提交按钮');
+  const page = await openFixturePage(context);
+  await openPanel(page);
+  await page.locator(PANEL + ' .cmd-input').fill('点击提交按钮');
 
   // 注册跨世界事件回执（面板在隔离世界，page.evaluate 看不到它的全局对象）
   await page.evaluate(() => {
@@ -79,7 +40,7 @@ test('golden: 端口断开后自动重连并接着跑完', async () => {
     window.addEventListener('__RF_E2E__dropped', () => { window.__rfE2EDropped = true; });
   });
 
-  await page.locator('#__kb-ai-host .cmd-send').click();
+  await page.locator(PANEL + ' .cmd-send').click();
 
   // 等后台真的开始跑（用它自己的日志，而不是猜 DOM）
   await expect.poll(() => logs.some((t) => t.includes('agent run start')), { timeout: 20_000 }).toBe(true);

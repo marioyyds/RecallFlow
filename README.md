@@ -195,7 +195,7 @@ flowchart TD
 - **上下文与用量**：过大的工具结果自动截断并暂存全文（`expand_result` 按需分段读取），较早结果滚动折叠，用量实时计入。
 - **可观测性**：逐轮记录缓存命中率与耗时分段（网络 / 预填充 / 生成 / 工具执行），并保留含步骤、工具、耗时与错误码的运行轨迹。
 - **可靠性**：会话恢复、卡死检测、动作前后快照校验，SPA 异步渲染的变化同样可捕获。
-- **测试与门禁**：**1140** 项单元测试（80 个文件）与 8 个真实浏览器 E2E 场景。
+- **测试与门禁**：**1146** 项单元测试（81 个文件）与 8 个真实浏览器 E2E 场景。
   - `npm test`（= `node scripts/run-all-checks.mjs`）：**单元测试** + 三道**独立脚本门禁**（对 const 赋值 / 请求前缀稳定性 / **变异测试** —— 后者验证其它断言是否真有牙齿）+ 刷新测试数快照。
   - `npm run test:e2e`（= `node scripts/run-e2e.mjs`）：真实 Chromium + 加载扩展 + 模拟 LLM，覆盖 role+name 定位点击、跨域 iframe 路由、`type_text` 的 value 语义、**CDP 坐标点击（可信输入）**、**审批拒绝后副作用为零**（含阳性对照）、**思考记录的穿插顺序与自动收起**、**端口断开后自动重连并接着跑完**。需要显示环境 —— headless 下 MV3 扩展的 service worker 不会注册。
   - `npm run build:content`：把 `entries/content.js` 打成自包含的 `content.js`（含自包含性检查，不合格会以退出码 2 拒绝）。
@@ -213,6 +213,7 @@ flowchart TD
 | 新增/重构工具时必须遵守的规范 | [docs/tool-design.md](docs/tool-design.md) |
 | 内置工具从 55 往下合并的方案与成本 | [docs/tool-merge-plan.md](docs/tool-merge-plan.md) |
 | 桥接为什么按会话分桶 | [docs/bridge-session-isolation-plan.md](docs/bridge-session-isolation-plan.md) |
+| **真浏览器 E2E 怎么写**（原理 / 操作手册 / 五个坑 / 验不了什么） | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（目录速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 
 ## 项目结构
 
