@@ -107,7 +107,11 @@ export const PLAYBOOKS = Object.freeze({
       url: '/debug',
       instruction: '这个页面点「计算总价」没反应，帮我看一下为什么。',
       pageChecks: [
-        { expr: 'window.__clicks === 1', label: '点击真的复现了一次' },
+        // ⚠ 是 **>= 1** 而不是 === 1：那是**路径断言**。
+        // 实测（真模型 eval）：模型在第 3 步点了一次复现，第 16 步又点了一次，
+        // 于是计数是 2 而"复现过、且没渲染出结果"这个**结果**完全成立 ——
+        // `=== 1` 会把"它多点了一次"误判成"能力不行"。同一类错误在拖拽那一轮已犯过一次。
+        { expr: 'window.__clicks >= 1', label: '点击真的复现了（至少一次）' },
         { expr: 'window.__totalRendered === false', label: '结果确实没有渲染出来（症状成立）' },
         { expr: "document.querySelector('#total').textContent === ''", label: '结果区确实是空的' },
       ],
@@ -244,7 +248,8 @@ export const PLAYBOOKS = Object.freeze({
       instruction: '点开这个页面里的「查看详情」，内容会在新标签页里打开，帮我把详情里的要点告诉我。',
       pageChecks: [
         // 入口页确实点了（否则后面都没意义）
-        { expr: 'window.__portalClicks === 1', label: '入口页的链接被点了一次' },
+        // 同上：点一次就够，多点一次不改变"详情页在新标签页里打开过"这个结果
+        { expr: 'window.__portalClicks >= 1', label: '入口页的链接被点过（至少一次）' },
         // 同源 localStorage 作为跨标签页通道：入口页加载时会清掉这个标记，
         // 所以此刻它存在 ⇔ **详情页在本次运行中真的打开过**。
         { expr: "localStorage.getItem('rf-detail') === 'opened'", label: '详情页真的在新标签页里打开过' },
@@ -268,7 +273,9 @@ export const PLAYBOOKS = Object.freeze({
       instruction: '这个列表分了好几页，帮我翻页找到标题是「导出报表时金额列错位」的那条工单，把它的编号告诉我。',
       pageChecks: [
         { expr: 'window.__page === 3', label: '翻到了第 3 页' },
-        { expr: 'window.__nextClicks === 2', label: '恰好点了两次「下一页」（没多翻）' },
+        // 至少点过两次下一页 = 翻页确实发生过；"没多翻"是**效率**而非结果要求，
+        // 用 === 2 会把"翻过头又翻回来"误判成失败（最终停在第 3 页才是结果判据）
+        { expr: 'window.__nextClicks >= 2', label: '翻页确实发生过（至少两次下一页）' },
         { expr: 'window.__rendering === false', label: '翻页渲染已结束（不是停在加载中）' },
       ],
       // 目标条目必须真的进到模型手里 —— 这是"跨页找到"的唯一凭据
@@ -287,7 +294,7 @@ export const PLAYBOOKS = Object.freeze({
       url: '/shadow',
       instruction: '页面里有一个自定义组件（搜索框在它里面），帮我用它搜「咖啡」，然后告诉我结果。',
       pageChecks: [
-        { expr: 'window.__compSubmits === 1', label: '组件内的按钮被点了一次' },
+        { expr: 'window.__compSubmits >= 1', label: '组件内的按钮被点过（至少一次）' },
         { expr: "window.__compQuery === '咖啡'", label: '组件内的输入框被填对' },
         { expr: "window.__compResult.indexOf('组件内结果') === 0", label: '组件内渲染出结果' },
       ],
@@ -363,6 +370,9 @@ export const PLAYBOOKS = Object.freeze({
       instruction: '帮我用「咖啡」和「仅标题」查一次，然后把这个操作存成宏「咖啡查询」，再回放一次确认。',
       pageChecks: [
         // ★ 判据是**计数**：回放若只是报告成功、没真重放动作，这里会停在 1
+        // ⚠ 这一条**故意保留精确相等**（见 tests/skill-playbook-contract.test.mjs 的允许清单）：
+        // 若放宽成 >= 2，就无法区分"回放真的生效了"与"模型手动做了两次、根本没回放" ——
+        // 而"回放生效"正是本场景要证的东西。也就是说这里的次数**本身就是结果判据**。
         { expr: 'window.__runs === 2', label: '页面被执行了两次（手动一次 + 回放一次）' },
         { expr: "window.__last && window.__last.kw === '咖啡'", label: '回放时关键词被重新填入' },
         { expr: "window.__last && window.__last.scope === 'title'", label: '回放时范围被重新选中' },
@@ -391,7 +401,7 @@ export const PLAYBOOKS = Object.freeze({
       pageChecks: [
         // change 事件真的触发了（不是只把文件塞进去）
         { expr: "window.__fileName === 'sample-upload.txt'", label: '页面收到了 change 事件且文件名正确' },
-        { expr: 'window.__submits === 1', label: '提交了一次' },
+        { expr: 'window.__submits >= 1', label: '提交过（至少一次）' },
         {
           expr: "document.querySelector('#status').textContent === '已提交：sample-upload.txt'",
           label: '页面回执带文件名（说明确实按选中的文件提交了）',

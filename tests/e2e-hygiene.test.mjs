@@ -34,6 +34,51 @@ const stripComments = (s) =>
     .map((l) => l.replace(/\/\/.*$/, ''))
     .join('\n');
 
+// 「动作计数 + 精确相等」的识别式。**放在模块作用域**：
+// 下面那条"有牙齿"的测试也要用它 —— 先前定义在测试函数内部，
+// 结果牙齿测试直接 `ReferenceError: COUNTER is not defined`
+// （门禁本身坏了却看不出来，正是"门禁必须有牙齿测试"的理由）。
+const COUNTER =
+  /window\.__(clicks|submits|nextClicks|portalClicks|compSubmits|runs|dragEnds)\b[^;]*\.(toBe|toEqual)\((\d+)\)/g;
+
+test('E2E 里不许对「动作计数」写精确相等（那是路径断言，不是结果判据）', () => {
+  // 这个坑本会话犯了两次（拖拽 `__dragEnds === 1`、排查 `__clicks === 1`），
+  // 两次都是"结果完全达成，只因模型多做/少做了一次动作就被判失败"。
+  // 规则：动作计数只允许 `=== 0`（跑之前的基线）或 `>= N`；
+  // 想写精确相等的，必须能说清"这个次数本身就是结果"（见下面的允许清单）。
+  const ALLOWED = {
+    // 宏：放宽成 >= 2 就无法区分"回放生效"与"手动做了两次、根本没回放"
+    'golden.spec.mjs:__runs':
+      '次数本身就是结果：区分"回放真的生效"与"手动做了两次却没回放"',
+  };
+  const offenders = [];
+  for (const f of specFiles) {
+    const src = stripComments(read(path.join(E2E_DIR, f)));
+    for (const m of src.matchAll(COUNTER)) {
+      const n = Number(m[3]);
+      if (n === 0) continue; // 跑之前的基线，必须精确为 0
+      if (ALLOWED[f + ':' + '__' + m[1]]) continue;
+      offenders.push(f + ': __' + m[1] + ' ' + m[2] + '(' + n + ')');
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    '这些断言对动作计数用了精确相等 —— 判据要盯**结果**：改成 >= N（确实发生过）或 toBeGreaterThan(0)。' +
+      '若这个次数本身就是结果，请加进本测试的 ALLOWED 并写明理由：\n  ' +
+      offenders.join('\n  ')
+  );
+});
+
+test('这条门禁本身有牙齿：精确相等要被认出，基线 0 与 >= 不该被误伤', () => {
+  const hit = (s) => [...s.matchAll(COUNTER)].filter((m) => Number(m[3]) !== 0).length;
+  assert.equal(hit('expect(await page.evaluate(() => window.__clicks)).toBe(1);'), 1, '精确相等应被认出');
+  assert.equal(hit('await expect.poll(() => page.evaluate(() => window.__submits)).toBe(2);'), 1, '轮询里的也算');
+  assert.equal(hit('expect(await page.evaluate(() => window.__clicks)).toBe(0);'), 0, '基线 0 合法');
+  assert.equal(hit('await expect.poll(() => page.evaluate(() => window.__clicks)).toBeGreaterThan(0);'), 0, '>= 合法');
+  assert.equal(hit('expect(await page.evaluate(() => window.__page)).toBe(3);'), 0, '页码是状态量，不受限');
+});
+
 test('E2E 经验文档存在，且两处互相指路', () => {
   assert.ok(fs.existsSync(README), '缺少 ' + README);
   assert.ok(fs.existsSync(GUIDE), '缺少 ' + GUIDE);

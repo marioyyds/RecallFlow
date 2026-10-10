@@ -126,6 +126,58 @@ test('E2E 里用的指令必须与剧本声明的指令**逐字一致**（否则
   );
 });
 
+// 「动作计数」的精确相等 = 路径断言。
+//
+// 这个坑本会话犯了**两次**：拖拽那轮把 `__dragEnds === 1` 误当结果判据（模型改了路线就被判失败），
+// 排查那轮又是 `__clicks === 1`（真模型点了两次复现，结果完全成立却被判失败）。
+// 所以把规则显式化：**动作计数器不许写精确相等**，除非能说清"这个次数本身就是结果"。
+const EXACT_COUNT_ALLOWED = {
+  'macro-save-replay: window.__runs === 2':
+    '次数本身就是结果：放宽成 >= 2 就无法区分"回放生效"与"手动做了两次、根本没回放"',
+};
+// 只盯"动作计数"这一类的变量名；`__page`/`__renderedCount` 这类**状态**量不受限。
+const ACTION_COUNTER = /__(clicks|submits|nextClicks|portalClicks|compSubmits|runs|dragEnds)\b[^,)]*===\s*\d/;
+
+test('剧本不许对「动作计数」写精确相等（那是路径断言，会把"路线不同"误判成"能力不行"）', () => {
+  const offenders = [];
+  for (const [id, pb] of Object.entries(PLAYBOOKS)) {
+    for (const c of (pb.eval && pb.eval.pageChecks) || []) {
+      if (!ACTION_COUNTER.test(String(c.expr))) continue;
+      const key = id + ': ' + c.expr;
+      if (EXACT_COUNT_ALLOWED[key]) continue;
+      offenders.push(key);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    '这些判据对动作计数用了精确相等 —— 判据要盯**结果**（状态是否达成），' +
+      '路径只要求"确实发生过"。若这个次数本身就是结果，请加进 EXACT_COUNT_ALLOWED 并写明理由：\n  ' +
+      offenders.join('\n  ')
+  );
+});
+
+test('这条门禁本身有牙齿：动作计数的精确相等必须被认出，状态量则不受影响', () => {
+  const bad = { expr: 'window.__clicks === 1' };
+  assert.ok(ACTION_COUNTER.test(bad.expr), '动作计数的精确相等应被认出');
+  assert.ok(ACTION_COUNTER.test('window.__dragEnds === 1'), '拖拽计数同理');
+  assert.ok(ACTION_COUNTER.test('window.__compSubmits === 1'), '组件内提交计数同理');
+  // 状态量不该被误伤
+  assert.ok(!ACTION_COUNTER.test('window.__page === 3'), '页码是状态，不是动作计数');
+  assert.ok(!ACTION_COUNTER.test('window.__renderedCount === 5'), '渲染条数是状态');
+  // 放宽后的写法不该被认作违规
+  assert.ok(!ACTION_COUNTER.test('window.__clicks >= 1'), '>= 不是精确相等');
+});
+
+test('EXACT_COUNT_ALLOWED 里的每一条都必须真的出现在剧本里（防止清单腐化成死配置）', () => {
+  const exprs = new Set();
+  for (const [id, pb] of Object.entries(PLAYBOOKS)) {
+    for (const c of (pb.eval && pb.eval.pageChecks) || []) exprs.add(id + ': ' + c.expr);
+  }
+  const dead = Object.keys(EXACT_COUNT_ALLOWED).filter((k) => !exprs.has(k));
+  assert.deepEqual(dead, [], '允许清单里有已经不存在（或已改写）的条目，请删掉：' + dead.join(', '));
+});
+
 test('这条契约门禁本身有牙齿：缺一个工具必须被判定为不合格', () => {
   // 用内联样例验证判定逻辑，避免"永远通过"。
   const declared = ['get_page_snapshot', 'type_text', 'click_element'];
