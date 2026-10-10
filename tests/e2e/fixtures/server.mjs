@@ -525,6 +525,79 @@ function detailPage() {
 </body></html>`;
 }
 
+// 分页列表页：目标条目**只在第 3 页**，且翻页是**异步渲染**的。
+//
+// 两个难点叠在一起，这才是真实站点最常见的形态：
+//   · **跨页**：目标不在当前页 —— 不翻页就永远找不到；而"没找到"与"不存在"是两件事；
+//   · **异步**：点「下一页」后列表**先清空**、300ms 后才填入。
+//     所以"点完立刻读"会读到**空列表** —— 而空列表很容易被误读成"这一页没有内容"，
+//     进而得出"整站没有这条"的错误结论。
+//
+// 页面把这两个状态都记下来（`__page` / `__rendering`），让"翻到第几页"与
+// "是否仍在渲染中"都可断言。
+function pagedPage() {
+  const pages = [
+    ['TK-0001', '登录页按钮无响应'],
+    ['TK-0002', '搜索框自动补全不显示'],
+    ['TK-0003', '图片懒加载失败'],
+    ['TK-0004', '表单提交后未清空'],
+    ['TK-0005', '移动端菜单无法收起'],
+    ['TK-0006', '分页控件样式错位'],
+    ['TK-0007', '日期选择器时区偏差'],
+    ['TK-0008', '导出按钮重复触发'],
+    ['TK-0009', '表格横向滚动条消失'],
+    ['TK-0010', '筛选条件刷新后丢失'],
+    ['TK-0011', '弹窗在 Safari 下不居中'],
+    ['TK-0012', '上传进度条卡在 99%'],
+    ['TK-0013', '导出报表时金额列错位'],
+    ['TK-0014', '多选后批量操作无反馈'],
+    ['TK-0015', '页面滚动位置未恢复'],
+  ];
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具工单分页</title></head>
+<body>
+  <h1>工单列表</h1>
+  <div id="list" role="list"></div>
+  <div id="pageinfo" role="status">第 1 / 3 页</div>
+  <button id="next" type="button" role="button" aria-label="下一页">下一页</button>
+  <script>
+    var ALL = ${JSON.stringify(pages)};
+    var PER = 5;
+    window.__page = 1;
+    window.__rendering = false;
+    window.__nextClicks = 0;
+
+    function render() {
+      window.__rendering = true;
+      var box = document.getElementById('list');
+      // **先清空**：这正是"点完立刻读会读到空列表"的来源，与真实 SPA 一致
+      box.innerHTML = '';
+      document.getElementById('pageinfo').textContent = '第 ' + window.__page + ' / 3 页';
+      setTimeout(function () {
+        var start = (window.__page - 1) * PER;
+        ALL.slice(start, start + PER).forEach(function (it) {
+          var el = document.createElement('div');
+          el.className = 'item';
+          el.setAttribute('role', 'listitem');
+          el.setAttribute('data-id', it[0]);
+          el.textContent = it[0] + ' ' + it[1];
+          box.appendChild(el);
+        });
+        window.__rendering = false;
+      }, 300);
+    }
+
+    document.getElementById('next').addEventListener('click', function () {
+      if (window.__page >= 3) return;
+      window.__nextClicks += 1;
+      window.__page += 1;
+      render();
+    });
+
+    render();
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1028,6 +1101,27 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：分页 + 异步加载（playbook id = 'paginate-async'）。
+    //
+    // 每一步"翻页之后"都**先等目标内容出现再读**，而不是点完立刻读 ——
+    // 因为页面是"先清空、300ms 后才填"：立刻读会拿到空列表，
+    // 而空列表极容易被误读成"这一页没有内容"，进而得出"整站没有这条"的错误结论。
+    if (userText.includes(PLAYBOOKS['paginate-async'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '#list' }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '下一页' }); return; }
+      // 等第 2 页内容真的渲染出来
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#list', state: 'text_contains', text: 'TK-0006' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#list' }); return; }
+      if (done === 5) { toolStep(res, 'click_element', { role: 'button', name: '下一页' }); return; }
+      // 等第 3 页的目标条目出现
+      if (done === 6) { toolStep(res, 'wait_for_element', { selector: '#list', state: 'text_contains', text: 'TK-0013' }); return; }
+      if (done === 7) { toolStep(res, 'inspect_element', { op: 'text', selector: '#list' }); return; }
+      finalText(res, '翻到第 3 页找到了：工单 TK-0013「导出报表时金额列错位」。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1059,7 +1153,8 @@ const main = http.createServer((req, res) => {
                     : req.url && req.url.startsWith('/framed') ? framedPage()
                       : req.url && req.url.startsWith('/portal') ? portalPage()
                         : req.url && req.url.startsWith('/detail') ? detailPage()
-                          : mainPage()
+                          : req.url && req.url.startsWith('/paged') ? pagedPage()
+                            : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

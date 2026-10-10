@@ -254,6 +254,27 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['TK-8848', '待处理', '已自动绑定'],
     },
   },
+
+  'paginate-async': {
+    id: 'paginate-async',
+    title: '复杂场景：分页 + 异步渲染 —— 目标只在第 3 页，且翻页先清空再填充',
+    trigger: '翻页',
+    // 每步翻页之后都**先 wait_for_element 再读**：
+    // 页面是"先清空、300ms 后才填"，立刻读会拿到空列表。
+    tools: ['get_page_snapshot', 'inspect_element', 'click_element', 'wait_for_element'],
+    success: '翻到第 3 页、等到目标条目真的渲染出来、并把它的编号交到模型手上',
+    eval: {
+      url: '/paged',
+      instruction: '这个列表分了好几页，帮我翻页找到标题是「导出报表时金额列错位」的那条工单，把它的编号告诉我。',
+      pageChecks: [
+        { expr: 'window.__page === 3', label: '翻到了第 3 页' },
+        { expr: 'window.__nextClicks === 2', label: '恰好点了两次「下一页」（没多翻）' },
+        { expr: 'window.__rendering === false', label: '翻页渲染已结束（不是停在加载中）' },
+      ],
+      // 目标条目必须真的进到模型手里 —— 这是"跨页找到"的唯一凭据
+      mustSeeInToolResults: ['TK-0013', '导出报表时金额列错位'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

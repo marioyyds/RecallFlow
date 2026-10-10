@@ -306,7 +306,11 @@ test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构�
   // 夹具的请求记录是**整个 Playwright 运行共享**的，所以每条读它的用例都要先清空 ——
   // 否则会读到别的用例留下的工具结果，而那种断言会"永远为真"，比直接失败更糟。
   resetLlmRequests();
-  await sendInstruction(page, '站内搜一下咖啡，把前三条的标题和价格给我');
+  // ⚠ 这里的指令必须与剧本（playbooks.mjs 的 eval.instruction）**逐字一致**：
+  // 本条的 E2E 指令原先写成「站内搜一下咖啡，把前三条的标题和价格给我」，
+  // 而剧本里是另一句 —— 于是**两层跑的根本不是同一个请求**，
+  // 而"脚本下能过、真模型下不能过"就无法归因。已由契约门禁钉住（两处必须一致）。
+  await sendInstruction(page, '在这个页面的站内搜索里搜「咖啡」，然后把前三条结果的标题和价格告诉我。');
 
   // ① 页面真的到了目标状态
   await expect.poll(() => page.inputValue('#site-search'), { timeout: 30_000 }).toBe('咖啡');
@@ -696,6 +700,52 @@ test('golden: 新标签页 —— 自动接管，且后续读取落在新页上'
   // ④ 点击结果里必须写明"检测到新标签页并已自动绑定"：
   //    那是模型据以判断"换页了"的**唯一信号**。缺了它，模型会以为自己还在原页。
   expect(seen).toContain('已自动绑定');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
+//
+// 两个难点叠在一起，这是真实站点最常见的形态：
+//   ① **跨页**：目标条目只在第 3 页 —— 不翻页永远找不到，而"没找到"与"不存在"是两件事；
+//   ② **异步**：点「下一页」后列表**先清空**、300ms 后才填入 ——
+//      "点完立刻读"会读到**空列表**，而空列表极容易被误读成"这一页没有内容"，
+//      进而得出"整站没有这条"的错误结论。
+//
+// 这条用例因此先验证**难点确实存在**（目标不在第 1 页；且清空期间读确实是空的），
+// 再验证能力（翻到第 3 页、等到内容、把编号交回模型）。
+test('golden: 分页 —— 目标只在第 3 页，且翻页异步（先清空再填充）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/paged');
+
+  // 基线：目标确实不在第 1 页（否则这个场景不成立）
+  await expect.poll(() => page.locator('#list .item').count(), { timeout: 20_000 }).toBe(5);
+  expect(await page.textContent('#list')).not.toContain('TK-0013');
+  expect(await page.evaluate(() => window.__page)).toBe(1);
+
+  // 基线②：**异步窗口确实存在** —— 点完立刻看，列表是空的。
+  // 这条把"为什么必须等"变成可验证的事实，而不是注释里的说法。
+  await page.locator('#next').click();
+  expect(await page.locator('#list .item').count(), '点完立刻读应当是空的（异步窗口存在）').toBe(0);
+  expect(await page.evaluate(() => window.__rendering)).toBe(true);
+  // 等它自己渲染完，再继续（否则下面的用例会从"渲染中"的状态起步）
+  await expect.poll(() => page.locator('#list .item').count(), { timeout: 20_000 }).toBe(5);
+  // 复位到第 1 页，让 agent 从头开始（直接重新加载最干净）
+  await page.reload();
+  await expect.poll(() => page.locator('#list .item').count(), { timeout: 20_000 }).toBe(5);
+
+  resetLlmRequests();
+  await sendInstruction(page, '这个列表分了好几页，帮我翻页找到标题是「导出报表时金额列错位」的那条工单，把它的编号告诉我。');
+
+  // ① 翻到第 3 页，且没有多翻
+  await expect.poll(() => page.evaluate(() => window.__page), { timeout: 40_000 }).toBe(3);
+  expect(await page.evaluate(() => window.__nextClicks)).toBe(2);
+  // 渲染已结束（不是停在"加载中"就宣布完成）
+  await expect.poll(() => page.evaluate(() => window.__rendering), { timeout: 20_000 }).toBe(false);
+
+  // ② 目标条目必须真的进到模型手里 —— "跨页找到"的唯一凭据
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('TK-0013');
+  expect(toolResultsText()).toContain('导出报表时金额列错位');
 
   await page.close();
 });

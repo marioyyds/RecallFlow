@@ -87,6 +87,34 @@ test('技能与剧本的关联方式被固定下来（改了这里就要同步�
   }
 });
 
+test('每个能力剧本的**自身指令必须含自己的触发词**（否则剧本永远不会被选中）', () => {
+  // 实测踩到：`paginate-async` 的触发词是「翻页」，而它自己的 eval 指令写的是
+  // 「分了好几页…帮我翻到…」—— **不含「翻页」**。于是夹具按触发词分派时选不中它，
+  // 跑的是兜底剧本，表现成"agent 什么都没做、页码停在 1"，而错误信息完全指向别处。
+  // 这条断言把"剧本自己都调不起来"变成静态红灯。
+  const bad = Object.values(PLAYBOOKS).filter((p) => p.eval && !String(p.eval.instruction).includes(p.trigger));
+  assert.deepEqual(
+    bad.map((p) => p.id + '（触发词「' + p.trigger + '」不在指令里）'),
+    []
+  );
+});
+
+test('E2E 里用的指令必须与剧本声明的指令**逐字一致**（否则触发词分派会对不上）', () => {
+  // 指令存在两处（剧本的 eval.instruction 与 golden.spec.mjs 的 sendInstruction 字面量），
+  // 它们一旦漂移，就会出现"E2E 跑的是一套、eval 跑的是另一套"这种最难查的不一致。
+  // 这里要求 spec 里**原样出现**剧本声明的指令。
+  const spec = fs.readFileSync('tests/e2e/golden.spec.mjs', 'utf8');
+  const missing = Object.values(PLAYBOOKS)
+    .filter((p) => p.eval && p.eval.instruction)
+    .filter((p) => !spec.includes(p.eval.instruction))
+    .map((p) => p.id);
+  assert.deepEqual(
+    missing,
+    [],
+    '这些剧本的指令没有原样出现在 golden.spec.mjs 里（两处漂移会让 E2E 与 eval 跑的不是同一件事）：' + missing.join(', ')
+  );
+});
+
 test('这条契约门禁本身有牙齿：缺一个工具必须被判定为不合格', () => {
   // 用内联样例验证判定逻辑，避免"永远通过"。
   const declared = ['get_page_snapshot', 'type_text', 'click_element'];
