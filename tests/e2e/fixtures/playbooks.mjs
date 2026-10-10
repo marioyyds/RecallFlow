@@ -546,6 +546,33 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已提交：浙江 / 杭州'],
     },
   },
+
+  'read-select-options': {
+    id: 'read-select-options',
+    title: '复杂场景：读下拉框选项再选 —— "选最便宜的那个"（文字里才有价格）',
+    trigger: '最便宜',
+    // 难点：这是一个**原生 `<select>`**，闭合状态下 `<option>` 没有布局盒子，
+    // 正文抽取按"不可见"跳过 —— 所以 `get_page_snapshot` 的正文里**看不到选项文案**，
+    // 而价格只写在选项文案里。任务只说了"最便宜"，不把选项列出来就无从比较。
+    // `get_attribute` 也帮不上：它读的是**属性**，读不了 `outerHTML`。
+    tools: ['get_page_snapshot', 'inspect_element', 'select_option', 'click_element'],
+    success: '先读出选项清单、比较后选中真正最便宜的那个（经济配送 ¥5），而不是猜一个',
+    eval: {
+      url: '/shipping',
+      instruction: '帮我选最便宜的配送方式，然后确认。',
+      pageChecks: [
+        // ★ 选中的必须是**真正最便宜**的那一项，不是第一项、也不是默认项
+        { expr: "window.__picked === 'eco'", label: '选中的是最便宜的经济配送（不是猜的）' },
+        { expr: 'window.__submits > 0', label: '确认过一次' },
+        {
+          expr: "document.querySelector('#status').textContent.indexOf('经济配送') >= 0",
+          label: '页面回执里是经济配送',
+        },
+      ],
+      // 选项清单必须真的到过模型手里（那句话只可能来自 op:"options" 的返回）
+      mustSeeInToolResults: ['下拉框选项', '经济配送 · ¥5 · 7 天'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

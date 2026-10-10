@@ -1106,6 +1106,43 @@ function cascadePage() {
 </body></html>`;
 }
 
+// 配送方式页：**必须比较选项**才能选对（"选最便宜的那个"）。
+//
+// 难点在于：这是一个**原生 `<select>`**，闭合状态下它的 `<option>` 文案
+// **不在页面正文里**（没有布局盒子，正文抽取按"不可见"跳过）——
+// 所以 `get_page_snapshot` 的 text 里只有「配送方式」这个 label，**看不到 ¥8 / ¥22 / ¥5**。
+// 而任务只说了"最便宜"，没有点明是哪一个 —— 不把选项列出来就无从比较。
+//
+// 价格刻意只写在 option 文案里（真实站点也常这样），并让"最便宜"**不是**默认项、
+// 也不是第一个：猜 value / 猜顺序都会错。
+function shippingPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具配送方式</title></head>
+<body>
+  <h1>选择配送方式</h1>
+  <label for="ship">配送方式</label>
+  <select id="ship" role="combobox" aria-label="配送方式">
+    <option value="">请选择</option>
+    <option value="std">标准配送 · ¥8 · 3-5 天</option>
+    <option value="fast">次日达 · ¥22 · 1 天</option>
+    <option value="eco">经济配送 · ¥5 · 7 天</option>
+  </select>
+  <button id="ok" type="button" role="button" aria-label="确认配送方式">确认配送方式</button>
+  <div id="status" role="status">未确认</div>
+  <script>
+    window.__picked = null;
+    window.__submits = 0;
+    var statusEl = document.getElementById('status');
+    document.getElementById('ok').addEventListener('click', function () {
+      window.__submits += 1;
+      var sel = document.getElementById('ship');
+      window.__picked = sel.value;
+      var opt = sel.options[sel.selectedIndex];
+      statusEl.textContent = sel.value ? ('已确认：' + (opt ? opt.textContent : '')) : '请先选择配送方式';
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1869,6 +1906,21 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：读下拉框选项再选（playbook id = 'read-select-options'）。
+    //
+    // 顺序即要点：**先把选项列出来**（`inspect_element({op:"options"})`），
+    // 比较价格后再按 value 选中真正最便宜的那个。
+    // 在此之前这一步只能借道 run_javascript（高危审批），实测过。
+    if (userText.includes(PLAYBOOKS['read-select-options'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'options', selector: '#ship' }); return; }
+      if (done === 2) { toolStep(res, 'select_option', { selector: '#ship', value: 'eco' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '确认配送方式' }); return; }
+      finalText(res, '已比较三个配送方式（¥8 / ¥22 / ¥5），选中最便宜的经济配送 ¥5 并确认。', 70);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1913,7 +1965,8 @@ const main = http.createServer((req, res) => {
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
-                                                : mainPage()
+                                                : req.url && req.url.startsWith('/shipping') ? shippingPage()
+                                                  : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

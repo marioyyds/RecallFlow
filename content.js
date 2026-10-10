@@ -71,6 +71,16 @@
     "position",
     "z-index"
   ]);
+  function formatSelectOptions(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    return items.map((it, i) => {
+      const parts = ["[" + (i + 1) + "]", 'value="' + String(it.value == null ? "" : it.value) + '"'];
+      parts.push('\u6587\u5B57="' + String(it.label == null ? "" : it.label) + '"');
+      if (it.selected) parts.push("\uFF08\u5F53\u524D\u9009\u4E2D\uFF09");
+      if (it.disabled) parts.push("\uFF08\u7981\u7528\uFF09");
+      return parts.join(" ");
+    }).join("\n");
+  }
   function formatStylesSummary(items, total) {
     const list = Array.isArray(items) ? items : [];
     const n = typeof total === "number" && total > list.length ? total : list.length;
@@ -1777,6 +1787,39 @@
       })()
     };
   }
+  function cmdReadOptions(params) {
+    const els = findElementsFor(params);
+    if (!els.length) return { ok: false, error: targetMissError(params) };
+    const el = els[0];
+    const tag = (el.tagName || "").toUpperCase();
+    if (tag !== "SELECT") {
+      return {
+        ok: false,
+        error: "\u76EE\u6807\u5143\u7D20\u4E0D\u662F <select>\uFF08\u5B9E\u9645\u662F " + (tag || "\u672A\u77E5") + describeTargetState(el) + '\uFF09\u3002read_options \u53EA\u80FD\u8BFB\u4E0B\u62C9\u6846\uFF1B\u8981\u8BFB\u522B\u7684\u5143\u7D20\u7684\u6587\u5B57\u8BF7\u7528 op:"text"\u3002'
+      };
+    }
+    const MAX_OPTIONS = 60;
+    const all = Array.prototype.slice.call(el.options || []);
+    const listed = all.slice(0, MAX_OPTIONS);
+    const items = listed.map((o, i) => ({
+      index: i,
+      value: o.value,
+      label: String(o.textContent == null ? "" : o.textContent).replace(/\s+/g, " ").trim(),
+      selected: !!o.selected,
+      disabled: !!o.disabled
+    }));
+    const multiple = !!el.multiple;
+    const optionsText = formatSelectOptions(items);
+    return {
+      ok: true,
+      count: all.length,
+      truncated: all.length > listed.length,
+      multiple,
+      selectedIndex: el.selectedIndex,
+      items,
+      result: "\u4E0B\u62C9\u6846\u9009\u9879\uFF08\u5171 " + all.length + " \u9879" + (multiple ? "\uFF0C\u591A\u9009" : "") + (all.length > listed.length ? "\uFF0C\u53EA\u5217\u51FA\u524D " + listed.length + " \u9879" : "") + "\uFF09\uFF1A\n" + (optionsText || "\uFF08\u6CA1\u6709\u9009\u9879\uFF09") + "\n\uFF08\u9009\u4E2D\u8BF7\u7528 select_option\uFF1A\u6309 value \u6216 label \u90FD\u884C\uFF09"
+    };
+  }
   function cmdReadStyles(params) {
     const els = findElementsFor(params);
     if (!els.length) return { ok: false, error: targetMissError(params) };
@@ -2346,6 +2389,8 @@
         return cmdInspectElement(params);
       case "read_styles":
         return cmdReadStyles(params);
+      case "read_options":
+        return cmdReadOptions(params);
       case "extract_table":
         return cmdExtractTable(params);
       default:

@@ -15,19 +15,22 @@ import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
-test('inspect_element 的 op 枚举覆盖三个原工具，外加后来补的 styles', () => {
+test('inspect_element 的 op 枚举覆盖三个原工具，外加后来补的 styles 与 options', () => {
   const op = byName.inspect_element.inputSchema.properties.op;
   // 前三项对应 C-4 合并的三个原工具（get_element_text / inspect_element / extract_table）。
-  // 第四项 `styles` 不是合并来的 —— 是后来做「UI 美化」时**补**的只读一档，
-  // 理由见 tests/read-styles.test.mjs 与 commands.js 的 cmdReadStyles。
-  assert.deepEqual(op.enum, ['inspect', 'text', 'table', 'styles']);
+  // 后两项都不是合并来的 —— 是做能力剧本时**补**的只读档：
+  //   · `styles`：做「UI 美化」时发现"改完样式无法自证"（理由见 tests/read-styles.test.mjs）；
+  //   · `options`：做「按属性挑选项」时发现**没有只读办法看下拉框有哪些选项** ——
+  //     真模型探针实测只能借道 run_javascript（高危审批）。
+  //     理由见 tests/read-options.test.mjs 与 commands.js 的 cmdReadOptions。
+  assert.deepEqual(op.enum, ['inspect', 'text', 'table', 'styles', 'options']);
   assert.deepEqual(byName.inspect_element.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
 test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"页面命令无响应"）', async () => {
   // 这些命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
   const cli = fs.readFileSync(new URL('../lib/page/commands.js', import.meta.url), 'utf8');
-  for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles']) {
+  for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles', 'read_options']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
@@ -39,6 +42,7 @@ test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"
     inspect: 'inspect_element',
     table: 'extract_table',
     styles: 'read_styles',
+    options: 'read_options',
   });
 });
 

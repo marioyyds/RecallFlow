@@ -157,7 +157,10 @@ test('ANNOTATE_OPS / INSPECT_OPS 的映射与内容脚本命令名逐一对齐',
   // styles 不是 C-4 合并来的，而是后来**补**的一档（做「UI 美化」时发现改完样式无法自证：
   // annotate 只回一句摘要，而唯一的取证路径 run_javascript 是 alwaysRequireApproval
   // 且会被页面 CSP 拦住）。它复用只读的 readElementState，工具数不变。详见 read-styles.test.mjs。
-  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table', styles: 'read_styles' });
+  // options 同理**补**的一档：闭合的 `<select>` 里 option 没有布局盒子、正文抽取会跳过，
+  // 而 get_attribute 只读属性读不了 outerHTML —— 于是"这个下拉框有哪些选项"
+  // 此前没有只读办法（真模型探针实测只能借道 run_javascript）。详见 read-options.test.mjs。
+  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table', styles: 'read_styles', options: 'read_options' });
 });
 
 test('annotate：未知 op 时报错并列出全部合法取值', async () => {

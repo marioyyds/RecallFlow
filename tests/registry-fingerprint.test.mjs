@@ -117,7 +117,21 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //
   //                       ⚠ 两处说明都**刻意压到与原串等长**：它是每轮下发的工具定义，
   //                       膨胀会被 tests/registry.test.mjs 的体积预算拦下（本次初稿超了 90 字符，已收紧）。
-  const EXPECTED = '7d87402108e3a570';
+  //   281f58be3495237a —— **有意改动**：给 `inspect_element` 补 `op:"options"`（读 `<select>` 的选项清单）。
+  //                       **工具数不变（仍 44）**，与 `op:"styles"` 同属"给已有只读工具补一档"。
+  //
+  //                       起因（真模型探针实测，不是推测）：任务「选最便宜的那个配送方式」下，
+  //                       模型**只能先写一段 JS**：
+  //                         run_javascript({ code:"Array.from(document.querySelector('#ship').options)…" })
+  //                       因为闭合的 `<select>` 里 `<option>` **没有布局盒子**，正文抽取按"不可见"跳过 ——
+  //                       `get_page_snapshot` 的正文里看不到选项文案（价格常常只写在选项里）；
+  //                       而 `get_attribute` 只读**属性**，读不了 `outerHTML`。
+  //                       代价：一次 `alwaysRequireApproval` 的高危审批（CSP 严的页面还会直接失败）。
+  //
+  //                       与前两次同一条判据：**只读的事就该由只读工具做**，不该借道高危工具。
+  //                       ⚠ 本次**没有**上调体积预算：先压缩了 `op` 那段说明把字符数压回预算内
+  //                       （该常量上方写着"应当先精简描述，而不是继续调高预算"）。
+  const EXPECTED = '281f58be3495237a';
   assert.equal(
     fp,
     EXPECTED,

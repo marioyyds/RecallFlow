@@ -1177,6 +1177,53 @@ test('golden: 级联下拉 —— 子选项异步填充，等不到就选不了�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**读下拉框选项再选**（playbook 'read-select-options'）。
+//
+// 难点是"**价格藏在选项里，而选项不在正文里**"：这是一个原生 `<select>`，
+// 闭合状态下 `<option>` 没有布局盒子，正文抽取按"不可见"跳过 ——
+// 所以 `get_page_snapshot` 的正文里只有「配送方式」这个 label，**看不到 ¥8 / ¥22 / ¥5**。
+// 而任务只说了"最便宜"，不把选项列出来就无从比较。
+// `get_attribute` 也帮不上：它读的是**属性**，读不了 `outerHTML`。
+//
+// 这条用例是**按实测缺口补出来的**：真模型探针显示，在此之前模型只能先写一段
+// `run_javascript` 去 `Array.from(s.options).map(...)` —— 白花一次高危审批。
+// 现在 `inspect_element({op:"options"})` 是**只读**的一等公民。
+//
+// 基线证明难点成立：正文里确实读不到价格，且"最便宜"既不是第一项也不是默认项。
+test('golden: 下拉选项 —— 先读出选项再比较，选中真正最便宜的那个', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/shipping');
+
+  // 基线①：选项**没有布局盒子** —— 这正是扩展侧正文抽取把它当"不可见"跳过的原因。
+  // ⚠ 别用 `textContent` 或 `innerText` 来断言"正文里看不到价格"：
+  //   · `textContent` 连隐藏节点一起取（必然包含选项）；
+  //   · `innerText` 在 Chromium 上对 `<select>` 也会把**所有** option 文字带上（已知怪癖）。
+  // 所以这条基线盯**机制**：闭合的 select 里 option 的盒子为零 → 正文抽取跳过它。
+  const optBox = await page.locator('#ship option[value="eco"]').boundingBox();
+  expect(optBox === null || !optBox.width || !optBox.height, '选项竟然有布局盒子，本场景的难点不成立').toBe(true);
+  // 基线②：默认没有选中任何有效项；且"最便宜"不是第一项
+  expect(await page.inputValue('#ship')).toBe('');
+  const values = await page.locator('#ship option').evaluateAll((els) => els.map((e) => e.value));
+  expect(values[1], '第一项不该就是最便宜的（否则不用比较也能蒙对）').not.toBe('eco');
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我选最便宜的配送方式，然后确认。');
+
+  // ① 选中的是**真正最便宜**的那个
+  await expect.poll(() => page.evaluate(() => window.__picked), { timeout: 40_000 }).toBe('eco');
+  await expect(page.locator('#status')).toHaveText(/经济配送/);
+  expect(await page.evaluate(() => window.__submits)).toBeGreaterThan(0);
+
+  // ② 模型视角：**选项清单本身**必须回到它手里（那是它据以比较的唯一依据）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('下拉框选项');
+  const seen = toolResultsText();
+  expect(seen, '三个选项的文案都要给到模型，否则它无从比较').toContain('经济配送 · ¥5 · 7 天');
+  expect(seen).toContain('标准配送 · ¥8 · 3-5 天');
+  expect(seen).toContain('次日达 · ¥22 · 1 天');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：
