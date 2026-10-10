@@ -430,6 +430,11 @@ export const PLAYBOOKS = Object.freeze({
       // ⚠ 这一类的状态**不在页面上**（知识库是扩展侧存储），所以没有页面判据 ——
       // 权威的保真检查在 E2E 里直接读 chrome.storage 的 `knowledgeBase`。
       // 这里不塞凑数的页面断言：宁可显式留空，也不假装页面能证明什么。
+      //
+      // `outcome` 就是给这件事的**机器可读声明**：空 pageChecks 必须配一个理由，
+      // 否则门禁（tests/capability-inventory.test.mjs）会拦下来 ——
+      // 免得以后某个剧本**悄悄**少了页面断言，看起来还像验过了。
+      outcome: 'storage',
       pageChecks: [],
       // KB-1/KB-2/KB-3 这几个编号**只可能来自模型自己写的备注**：
       // 页面里没有它们（见夹具 notesPage 的注释），而 `add_entry` 的结果**只回显标题**。
@@ -455,7 +460,9 @@ export const PLAYBOOKS = Object.freeze({
       instruction:
         '把这一页的三个要点存进知识库（标题用「检索性能优化」，每条加上 KB-1 / KB-2 / KB-3 的编号），' +
         '然后回答我：知识库里有没有讲「页面打开很慢」的记录？找到的话把它读出来核对。',
-      // 状态在存储里、不在页面上（见上面的说明），所以不塞页面断言
+      // 状态在存储里、不在页面上（见上面的说明），所以不塞页面断言。
+      // `outcome` 是这件事的**机器可读声明**：空 pageChecks 必须给出理由（见本文件里那个剧本的注释）
+      outcome: 'storage',
       pageChecks: [],
       // 只认 KB-*：页面里没有这几个编号（见夹具 notesPage 注释），
       // 而 `add_entry` 的结果**只回显标题、不回显备注** ——
