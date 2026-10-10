@@ -326,6 +326,28 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['拖拽到'],
     },
   },
+
+  'canvas-coordinate-click': {
+    id: 'canvas-coordinate-click',
+    title: '复杂场景：canvas 上的按钮 —— DOM 路线是死路，只能按坐标点击',
+    trigger: '画布',
+    // 必须走"AX 拿坐标 → click_at"：DOM 里那层可访问性元素是 pointer-events:none，
+    // click_element 只能退化成程序化 click，而它不会冒泡到 canvas。
+    tools: ['get_page_snapshot', 'get_ax_snapshot', 'click_at', 'inspect_element'],
+    success: '画布收到真实鼠标点击且命中的是「保存」（DOM 路线点不动，只能按坐标点）',
+    eval: {
+      url: '/canvas',
+      cdp: true, // click_at 与 get_ax_snapshot 都需要 CDP
+      instruction: '页面上的工具条是画在画布上的，帮我点一下「保存」。',
+      pageChecks: [
+        { expr: 'window.__clicks >= 1', label: '画布收到了点击' },
+        { expr: "window.__hit === '保存'", label: '命中的是「保存」而不是别的按钮' },
+        { expr: "document.querySelector('#status').textContent === '已点击：保存'", label: '页面上读到"已点击：保存"' },
+      ],
+      // 坐标必须真的到模型手里（它是"DOM 看不到、只能按坐标点"的唯一依据）
+      mustSeeInToolResults: ['可访问性树', '保存'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

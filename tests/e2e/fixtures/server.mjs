@@ -743,6 +743,73 @@ function dragPage() {
 </body></html>`;
 }
 
+// 画布工具条：按钮**只以像素形式存在**，DOM 里没有可点中的元素。
+//
+// 难点是**DOM 路线是死路**：
+//   · 三个按钮画在 canvas 上，`get_page_snapshot` 里没有它们；
+//   · 页面为了可访问性放了一层同名同位的覆盖元素（`role=button` + `aria-label`），
+//     但那层是 `pointer-events:none` —— 命中测试会**穿过它**落到 canvas 上，
+//     所以"被遮挡"判定为真，`click_element` 只能退化成**程序化 click**；
+//     而程序化 click 派发在覆盖元素自身、**不会冒泡到 canvas**（两者是兄弟节点），
+//     于是什么都没发生，工具只会回报"已派发，但页面快照暂未观察到变化"。
+//   · 唯一可行的路：`get_ax_snapshot` 拿到按坐标，再用 `click_at` 派发**真实鼠标点击**。
+//
+// 覆盖层放在**已定位的 wrapper 里**（与 canvas 同坐标系）—— 上一轮踩过
+// "绝对定位元素挂错父节点导致坐标错位"的坑。
+function canvasPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具画布工具条</title></head>
+<body>
+  <h1>画布工具条</h1>
+  <div id="wrap" style="position:relative;display:inline-block">
+    <canvas id="cv" width="420" height="64" role="img" aria-label="工具条画布"></canvas>
+    <div id="ax"></div>
+  </div>
+  <div id="status" role="status">未点击</div>
+  <script>
+    window.__clicks = 0;
+    window.__hit = null;
+    var ITEMS = [
+      { name: '新建', x: 10, w: 120 },
+      { name: '保存', x: 150, w: 120 },
+      { name: '删除', x: 290, w: 120 }
+    ];
+    var cv = document.getElementById('cv');
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#eef2ff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.font = '16px system-ui';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#1e293b';
+    ctx.strokeStyle = '#94a3b8';
+    ITEMS.forEach(function (it) {
+      ctx.strokeRect(it.x, 8, it.w, 48);
+      ctx.fillText(it.name, it.x + 12, 32);
+    });
+
+    // 可访问性层：与画布按钮同位同尺寸，pointer-events:none 让命中测试穿透到 canvas
+    var ax = document.getElementById('ax');
+    ITEMS.forEach(function (it) {
+      var d = document.createElement('div');
+      d.setAttribute('role', 'button');
+      d.setAttribute('aria-label', it.name);
+      d.style.cssText =
+        'position:absolute;left:' + it.x + 'px;top:8px;width:' + it.w + 'px;height:48px;pointer-events:none;';
+      ax.appendChild(d);
+    });
+
+    cv.addEventListener('click', function (e) {
+      var r = cv.getBoundingClientRect();
+      var x = e.clientX - r.left;
+      var it = null;
+      ITEMS.forEach(function (c) { if (x >= c.x && x <= c.x + c.w) it = c; });
+      window.__clicks += 1;
+      window.__hit = it ? it.name : null;
+      document.getElementById('status').textContent = it ? ('已点击：' + it.name) : '未命中按钮';
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -807,6 +874,17 @@ function toolCallDelta(name, args) {
       },
     }],
   };
+}
+
+/** 从 get_ax_snapshot 的结果文本里解析某个节点的视口坐标（格式：[n] role「名称」 坐标(x,y)）。 */
+function extractAxCoords(toolResults, name) {
+  for (const m of toolResults) {
+    const content = typeof m.content === 'string' ? m.content : '';
+    const re = new RegExp('\\[\\d+\\] [a-z]+「' + name + '」 坐标\\((\\d+),(\\d+)\\)');
+    const hit = content.match(re);
+    if (hit) return { x: Number(hit[1]), y: Number(hit[2]) };
+  }
+  return null;
 }
 
 // 从工具结果里解析跨域 iframe 元素的 ref（f<frameId>:rf-N）——模拟真实模型「读快照后据此点击」。
@@ -1298,6 +1376,25 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：canvas + 坐标点击（playbook id = 'canvas-coordinate-click'）。
+    //
+    // DOM 路线是死路（按钮只画在 canvas 上，可访问性层是 pointer-events:none），
+    // 所以必须走"AX 拿坐标 → click_at 派发真实鼠标点击"这条路。
+    if (userText.includes(PLAYBOOKS['canvas-coordinate-click'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'get_ax_snapshot', { limit: 60 }); return; }
+      const at = extractAxCoords(toolResults, '保存');
+      if (!at) {
+        finalText(res, '可访问性树里没有找到「保存」的坐标，无法按坐标点击。', 30);
+        return;
+      }
+      if (done === 2) { toolStep(res, 'click_at', { x: at.x, y: at.y }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已在画布工具条上点击「保存」（按可访问性树给出的坐标 (' + at.x + ',' + at.y + ') 派发真实鼠标点击）。', 70);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1332,7 +1429,8 @@ const main = http.createServer((req, res) => {
                           : req.url && req.url.startsWith('/paged') ? pagedPage()
                             : req.url && req.url.startsWith('/shadow') ? shadowPage()
                               : req.url && req.url.startsWith('/drag') ? dragPage()
-                                : mainPage()
+                                : req.url && req.url.startsWith('/canvas') ? canvasPage()
+                                  : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

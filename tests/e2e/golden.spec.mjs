@@ -803,6 +803,49 @@ test('golden: 拖拽 —— CDP 可信拖拽把滑块拖到刻度，且值真的
   await page.close();
 });
 
+// 能力验收（复杂场景）：**canvas 上的按钮 → 按坐标点击**（playbook 'canvas-coordinate-click'）。
+//
+// 难点是 **DOM 路线是死路**：按钮只画在 canvas 上；
+// 页面为可访问性放的那层同名同位元素是 `pointer-events:none`，
+// 所以命中测试穿过它落到 canvas 上，`click_element` 只会退化成程序化 click，
+// 而程序化 click 派发在覆盖元素自身、**不会冒泡到 canvas**（两者是兄弟节点）。
+//
+// 这条用例因此**先把"死路"证明出来**（对覆盖元素做程序化点击，canvas 收不到），
+// 再验证真正可行的路（`get_ax_snapshot` 拿坐标 → `click_at` 派发真实鼠标点击）。
+test('golden: canvas —— DOM 路线点不动，按可访问性树坐标点击才命中', async () => {
+  // click_at 与 get_ax_snapshot 都走 CDP
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/canvas');
+
+  // 基线①：可访问性层确实存在（role=button + 名称），但它是 pointer-events:none
+  await expect(page.locator('#ax div[role="button"][aria-label="保存"]')).toHaveCount(1);
+  expect(
+    await page.locator('#ax div[aria-label="保存"]').evaluate((el) => getComputedStyle(el).pointerEvents)
+  ).toBe('none');
+
+  // 基线②：**证明 DOM 路线是死路** —— 对覆盖元素做程序化点击，canvas 收不到任何东西。
+  // 这条不是走过场：它就是"为什么必须按坐标点"的证据。
+  await page.locator('#ax div[aria-label="保存"]').evaluate((el) => el.click());
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.__clicks), 'DOM 路线竟然生效了，本场景的难点不成立').toBe(0);
+  expect(await page.evaluate(() => window.__hit)).toBe(null);
+
+  resetLlmRequests();
+  await sendInstruction(page, '页面上的工具条是画在画布上的，帮我点一下「保存」。');
+
+  // ① 画布真的收到了点击，且命中的是「保存」
+  await expect.poll(() => page.evaluate(() => window.__clicks), { timeout: 40_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__hit)).toBe('保存');
+  // 页面自己的状态也同步了（不是只有 window 变量变了）
+  await expect(page.locator('#status')).toHaveText('已点击：保存');
+
+  // ② 坐标必须真的到模型手里 —— 它是"DOM 看不到、只能按坐标点"的唯一依据
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('可访问性树');
+  expect(toolResultsText()).toContain('保存');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：
