@@ -81,7 +81,19 @@ function printTrace(title) {
     }
   }
   console.log('\n===== ' + title + ' =====');
-  console.log('LLM 请求次数：' + reqs.length + '；模型发起的工具调用（去重）' + calls.length + ' 次');
+  // 把**完成校验器**的调用单独数出来（它和 Agent 走同一个 callDeepSeek，靠系统提示词区分）。
+  // 为什么值得打印：校验器的成本策略（`shouldVerifyCompletion`）决定"什么时候多花一次调用"，
+  // 而"它到底占多少"此前只能靠猜 —— 实测两个剧本分别是 1/6 与 2/18（约 11%~17%），
+  // 早先"失败恢复那一轮成本主要来自校验器"的说法**与数据不符**，已更正。
+  // 打出来之后，将来它一旦失控会立刻看得见。
+  const verifierCalls = reqs.filter((r) => {
+    const sys = String(((r.messages || []).find((m) => m.role === 'system') || {}).content || '');
+    return sys.includes('任务校验器');
+  }).length;
+  console.log(
+    'LLM 请求次数：' + reqs.length + '（其中完成校验器 ' + verifierCalls + ' 次）' +
+      '；模型发起的工具调用（去重）' + calls.length + ' 次'
+  );
   calls.forEach((c, i) => console.log('  ' + (i + 1) + '. ' + c));
   return calls;
 }
