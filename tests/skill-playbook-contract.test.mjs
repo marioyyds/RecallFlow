@@ -136,13 +136,18 @@ const EXACT_COUNT_ALLOWED = {
     '次数本身就是结果：放宽成 >= 2 就无法区分"回放生效"与"手动做了两次、根本没回放"',
 };
 // 只盯"动作计数"这一类的变量名；`__page`/`__renderedCount` 这类**状态**量不受限。
-const ACTION_COUNTER = /__(clicks|submits|nextClicks|portalClicks|compSubmits|runs|dragEnds)\b[^,)]*===\s*\d/;
+const ACTION_COUNTER = /__(clicks|submits|nextClicks|portalClicks|compSubmits|runs|dragEnds)\b[^,)]*===\s*(\d+)/;
 
 test('剧本不许对「动作计数」写精确相等（那是路径断言，会把"路线不同"误判成"能力不行"）', () => {
   const offenders = [];
   for (const [id, pb] of Object.entries(PLAYBOOKS)) {
     for (const c of (pb.eval && pb.eval.pageChecks) || []) {
-      if (!ACTION_COUNTER.test(String(c.expr))) continue;
+      const m = ACTION_COUNTER.exec(String(c.expr));
+      if (!m) continue;
+      // ⚠ `=== 0` 是**允许**的，而且是**有意义的**：它断言的是"这件事**没有**发生过"
+      //（如"来源页没有被误提交"）。这与"恰好发生 N 次"完全不同 —— 后者才是路径约束。
+      // 本门禁起初漏了这个豁免，结果把一条合法的"必须为 0"判成了违规。
+      if (Number(m[2]) === 0) continue;
       const key = id + ': ' + c.expr;
       if (EXACT_COUNT_ALLOWED[key]) continue;
       offenders.push(key);
@@ -152,9 +157,22 @@ test('剧本不许对「动作计数」写精确相等（那是路径断言，�
     offenders,
     [],
     '这些判据对动作计数用了精确相等 —— 判据要盯**结果**（状态是否达成），' +
-      '路径只要求"确实发生过"。若这个次数本身就是结果，请加进 EXACT_COUNT_ALLOWED 并写明理由：\n  ' +
+      '路径只要求"确实发生过"（`>= N`），或者"根本没发生"（`=== 0`）。' +
+      '若这个次数本身就是结果，请加进 EXACT_COUNT_ALLOWED 并写明理由：\n  ' +
       offenders.join('\n  ')
   );
+});
+
+test('这条门禁本身有牙齿：`=== N（N≥1）` 要被认出，`=== 0` 与 `>= N` 不该被误伤', () => {
+  const hit = (expr) => {
+    const m = ACTION_COUNTER.exec(expr);
+    return m && Number(m[2]) !== 0 ? 1 : 0;
+  };
+  assert.equal(hit('window.__clicks === 1'), 1, '恰好一次是路径断言');
+  assert.equal(hit('window.__runs === 2'), 1, '恰好两次同理');
+  assert.equal(hit('window.__submits === 0'), 0, '「没有发生过」是合法且有意义的结果判据');
+  assert.equal(hit('window.__clicks >= 1'), 0, '>= 不是精确相等');
+  assert.equal(hit('window.__page === 3'), 0, '页码是状态量，不受限');
 });
 
 test('这条门禁本身有牙齿：动作计数的精确相等必须被认出，状态量则不受影响', () => {
@@ -212,17 +230,29 @@ test('夹具分派：一条指令命中多个触发词时，必须先检查**更
 
 test('这条契约门禁本身有牙齿：缺一个工具必须被判定为不合格', () => {
   // 用内联样例验证判定逻辑，避免"永远通过"。
+  //
+  // ⚠ 期望值**不要写死具体工具名**：剧本加一个工具（本轮就加了 `wait_for_element`）时，
+  // 写死的期望会变成**假失败** —— 门禁本身"坏了"却看起来像是覆盖关系坏了。
+  // 改成验证**判定逻辑的性质**：缺的能被发现、补齐后不再缺、齐全时不报缺。
   const declared = ['get_page_snapshot', 'type_text', 'click_element'];
   const needed = playbookTools('site-search');
   const missing = needed.filter((t) => !declared.includes(t));
-  assert.deepEqual(missing, ['inspect_element'], '缺 inspect_element 时应被发现，实际：' + JSON.stringify(missing));
+  assert.ok(missing.length > 0, '这个样例必须真的缺东西，否则测不出"能发现缺失"');
+  assert.ok(missing.includes('inspect_element'), '缺 inspect_element 时应被发现，实际：' + JSON.stringify(missing));
+
+  // 补齐之后不该再报缺（证明判定真的在看覆盖关系）
+  const completed = declared.concat(missing);
+  assert.deepEqual(needed.filter((t) => !completed.includes(t)), [], '补齐后不该再有缺失');
+
+  // 反向：声明本来就齐全时，一条都不该报
+  assert.deepEqual(needed.filter((t) => !needed.includes(t)), [], '声明齐全时不应报缺');
 });
 
 test('技能文件里写的技法必须与剧本一致（防止技能教一套、E2E 验另一套）', () => {
   // 站内检索技能的内容里，四条步骤应对应剧本的四个工具。
   const skill = skillWithPlaybook('site-search');
   const content = String(skill.content || '');
-  for (const t of ['get_page_snapshot', 'type_text', 'click_element', 'inspect_element']) {
+  for (const t of ['get_page_snapshot', 'type_text', 'click_element', 'wait_for_element', 'inspect_element']) {
     assert.ok(content.includes(t), '技能内容里应出现 `' + t + '`（与剧本步骤对应）');
   }
   // 本轮实测出来的三个坑必须写在技能里，否则下一个模型还会踩。
