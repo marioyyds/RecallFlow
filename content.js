@@ -1919,15 +1919,41 @@
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
+  function deepestElementAt(x, y) {
+    let el = document.elementFromPoint(x, y);
+    let guard = 0;
+    while (el && el.shadowRoot && guard < 10) {
+      let inner = null;
+      try {
+        inner = el.shadowRoot.elementFromPoint(x, y);
+      } catch (e) {
+        inner = null;
+      }
+      if (!inner || inner === el) break;
+      el = inner;
+      guard += 1;
+    }
+    return el;
+  }
+  function isSelfOrShadowDescendant(node, el) {
+    let n = node;
+    let guard = 0;
+    while (n && guard < 50) {
+      if (n === el) return true;
+      n = n.parentNode && n.parentNode.nodeType === 11 ? n.parentNode.host : n.parentNode;
+      guard += 1;
+    }
+    return false;
+  }
   function isElementCovered(el) {
     if (!el || !el.isConnected) return false;
     const rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height) return false;
     const x = rect.left + Math.min(rect.width / 2, 8);
     const y = rect.top + Math.min(rect.height / 2, 8);
-    const top = document.elementFromPoint(x, y);
+    const top = deepestElementAt(x, y);
     if (!top) return false;
-    return top !== el && !el.contains(top);
+    return !isSelfOrShadowDescendant(top, el);
   }
   function isActionable(el) {
     if (!el || !el.isConnected) return false;
