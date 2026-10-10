@@ -309,6 +309,74 @@ function blockedPage() {
 </body></html>`;
 }
 
+// 恢复页：一个**第一次提交必然失败**的页面，用来做"失败恢复自适应"。
+//
+// 难点是**自适应**，而不是"再点一次"：
+//   · 页面用的是真实站点常见的**渐进式校验** —— 邀请码输入框**首次提交后才出现**，
+//     并且报错里带上演示邀请码。任何人都无法事先知道要填它，
+//     所以无论脚本还是真模型**都必须走一遍"失败 → 读原因 → 补上 → 重试"**；
+//   · 这正好把"盲目重试"和"读懂原因再修"区分开：前者永远停在同一条错误上。
+//
+// 记录 `__submits`（提交次数）与 `__rejected`（是否出现过业务拒绝），
+// 让"确实经历了恢复"与"一次就过（不可能）"可被区分。
+function recoverPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具恢复页</title></head>
+<body>
+  <h1>购买</h1>
+  <label for="product">商品</label>
+  <select id="product" role="combobox" aria-label="商品">
+    <option value="">请选择商品</option>
+    <option value="coffee-a">哥伦比亚 慧兰</option>
+    <option value="coffee-b">埃塞俄比亚 耶加雪菲</option>
+  </select>
+  <label for="qty">数量</label>
+  <input id="qty" role="textbox" aria-label="数量">
+  <label for="addr">收货地址</label>
+  <input id="addr" role="textbox" aria-label="收货地址">
+  <!-- 邀请码一行**初始隐藏**：首次提交被拒后才出现 -->
+  <div id="inviteWrap" style="display:none">
+    <label for="invite">邀请码</label>
+    <input id="invite" role="textbox" aria-label="邀请码">
+  </div>
+  <button id="submit" type="button" role="button" aria-label="提交订单">提交订单</button>
+  <div id="msg" role="status"></div>
+  <script>
+    window.__submits = 0;
+    window.__rejected = false;
+    window.__order = null;
+    document.getElementById('submit').addEventListener('click', function () {
+      window.__submits += 1;
+      var o = {
+        product: document.getElementById('product').value,
+        qty: document.getElementById('qty').value,
+        addr: document.getElementById('addr').value,
+        invite: document.getElementById('invite').value,
+      };
+      var msg = document.getElementById('msg');
+      if (!o.product || !o.qty || !o.addr) {
+        window.__rejected = true;
+        msg.textContent = '请补全信息（商品 / 数量 / 收货地址都必填）';
+        return;
+      }
+      if (!o.invite) {
+        // 渐进式校验：需求在**尝试之后**才揭示，并给出可用的值。
+        window.__rejected = true;
+        document.getElementById('inviteWrap').style.display = 'block';
+        msg.textContent = '本商品需要邀请码才能下单（演示邀请码：RF2026）';
+        return;
+      }
+      if (o.invite !== 'RF2026') {
+        window.__rejected = true;
+        msg.textContent = '邀请码不正确，请核对后重试';
+        return;
+      }
+      window.__order = o;
+      msg.textContent = '下单成功：' + o.product + ' × ' + o.qty + '，寄往 ' + o.addr;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -730,6 +798,29 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：失败恢复自适应（playbook id = 'recover-from-rejection'）。
+    //
+    // 必须在**首次提交被拒之后**才去拿邀请码：那个输入框首次提交前根本不存在。
+    // 这条剧本的形状就是"失败 → 读原因 → 补上 → 重试"，而不是"再点一次"。
+    if (userText.includes(PLAYBOOKS['recover-from-rejection'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'select_option', { selector: '#product', label: '哥伦比亚 慧兰' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { selector: '#qty', value: '1', clearFirst: true }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { selector: '#addr', value: '上海市浦东新区 1 号', clearFirst: true }); return; }
+      // 第一次提交：必然被拒（邀请码还没填）—— 这正是要验的那一步
+      if (done === 4) { toolStep(res, 'click_element', { selector: '#submit' }); return; }
+      // 读页面反馈，看清"还差什么"
+      if (done === 5) { toolStep(res, 'inspect_element', { op: 'text', selector: '#msg' }); return; }
+      // 补上从错误信息里学到的邀请码（输入框此时才出现）
+      if (done === 6) { toolStep(res, 'type_text', { selector: '#invite', value: 'RF2026', clearFirst: true }); return; }
+      // 重试
+      if (done === 7) { toolStep(res, 'click_element', { selector: '#submit' }); return; }
+      if (done === 8) { toolStep(res, 'inspect_element', { op: 'text', selector: '#msg' }); return; }
+      finalText(res, '第一次提交被拒，页面提示需要邀请码（演示码 RF2026）；补填后重试成功，已下单：哥伦比亚 慧兰 × 1。', 120);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -756,7 +847,8 @@ const main = http.createServer((req, res) => {
           : req.url && req.url.startsWith('/article') ? articlePage()
             : req.url && req.url.startsWith('/debug') ? debugPage()
               : req.url && req.url.startsWith('/blocked') ? blockedPage()
-                : mainPage()
+                : req.url && req.url.startsWith('/recover') ? recoverPage()
+                  : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

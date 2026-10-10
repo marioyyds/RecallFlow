@@ -515,3 +515,50 @@ test('golden: 遮挡 —— 必须先处理干扰，且事件顺序可证', asyn
 
   await page.close();
 });
+
+// 能力验收（复杂场景）：**失败恢复自适应**（playbook 'recover-from-rejection'）。
+//
+// 这是最有"agent 味"的一类复杂度：**第一次提交必然失败**。
+// 页面用真实站点常见的**渐进式校验** —— 邀请码输入框首次提交后才出现，
+// 报错里才给出演示邀请码。所以无论脚本还是真模型都**无法事先知道要填什么**，
+// 必须走一遍"失败 → 读原因 → 补上 → 重试"。
+//
+// 这条用例刻意把"盲目重试"排除在外：
+//   ① 断言 `__rejected === true` —— 确实经历过拒绝（恢复的前提）；
+//   ② 断言提交次数**恰好 2** —— 一次是必然失败，一次是修好之后成功；
+//      若是 3 次以上，说明它在没读懂原因的情况下反复撞同一堵墙。
+test('golden: 失败恢复 —— 被拒后读懂原因、补齐、重试成功（不是盲目重试）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/recover');
+
+  // 基线：邀请码输入框**还不存在**（这正是"无法事先知道"的体现）
+  // 用 Playwright locator 而不是在 evaluate 里做原生 DOM 查询：
+  // 本目录禁止 spec 里出现原生查询（面板在 shadow DOM 里，写错会静默失准），
+  // 而 locator 是这条规则的正当替代。
+  await expect(page.locator('#inviteWrap')).toBeHidden();
+  expect(await page.evaluate(() => window.__submits)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我购买这个页面上的商品：商品选「哥伦比亚 慧兰」，数量 1，收货地址填「上海市浦东新区 1 号」。');
+
+  // ① 走完了整条恢复链：被拒 → 补上 → 成功
+  await expect.poll(() => page.evaluate(() => window.__order), { timeout: 40_000 }).not.toBeNull();
+  const order = await page.evaluate(() => window.__order);
+  expect(order).toEqual({
+    product: 'coffee-a',
+    qty: '1',
+    addr: '上海市浦东新区 1 号',
+    invite: 'RF2026', // ← 这个值只能从"被拒的报错"里学到
+  });
+  expect(await page.evaluate(() => window.__rejected)).toBe(true);
+  // ② **不是盲目重试**：恰好两次提交（一次必然失败 + 一次修好后成功）
+  expect(await page.evaluate(() => window.__submits)).toBe(2);
+  expect(await page.textContent('#msg')).toContain('下单成功');
+
+  // ③ 被拒原因确实进了模型的上下文 —— 否则它无从知道要补什么
+  const seen = toolResultsText();
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('RF2026');
+  expect(seen).toContain('邀请码');
+
+  await page.close();
+});

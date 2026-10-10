@@ -21,6 +21,19 @@ const RUNNER = 'scripts/run-e2e.mjs';
 const read = (p) => fs.readFileSync(p, 'utf8');
 const specFiles = fs.readdirSync(E2E_DIR).filter((f) => f.endsWith('.spec.mjs')).sort();
 
+/** 剥掉注释再做源码级判定。
+ *
+ *  为什么必须有它（实测踩过**两次**）：门禁扫的是整份文件，
+ *  于是"在注释里说明为什么要避免某个写法"反而会被自己举的例子判为违规 ——
+ *  一次是描述 `role=` 拼接的畸形写法，一次是说明"别用原生 DOM 查询"。
+ *  门禁要管的是**代码**，注释里的反面教材不算。 */
+const stripComments = (s) =>
+  String(s)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((l) => l.replace(/\/\/.*$/, ''))
+    .join('\n');
+
 test('E2E 经验文档存在，且两处互相指路', () => {
   assert.ok(fs.existsSync(README), '缺少 ' + README);
   assert.ok(fs.existsSync(GUIDE), '缺少 ' + GUIDE);
@@ -58,18 +71,30 @@ test('两个 spec 都通过 helpers 启动，且没有把样板复制回来', ()
 
 test('spec 里不得用 document.querySelector 查面板（穿透不了 shadow DOM）', () => {
   // 面板在 shadow root 里：page.evaluate 里的原生查询拿到 null / 空数组，
-  // 症状看起来像"面板里没有这个元素"，实际是查错了树。必须走 helpers。
+  // 症状看起来像"面板里没有这个元素"，实际是查错了树。必须走 helpers（或 Playwright locator）。
   const offenders = [];
   for (const f of specFiles) {
-    const src = read(path.join(E2E_DIR, f));
+    const src = stripComments(read(path.join(E2E_DIR, f)));
     if (/document\.querySelector/.test(src)) offenders.push(f);
   }
   assert.deepEqual(
     offenders,
     [],
-    '这些 spec 直接用了 document.querySelector，应改用 helpers 的 flowOrder / panelText / panelStyle：\n  ' +
+    '这些 spec 直接用了原生 DOM 查询，应改用 helpers 的 flowOrder / panelText / panelStyle / isCovered，或 Playwright locator：\n  ' +
       offenders.join('\n  ')
   );
+});
+
+test('门禁要忽略注释：在注释里说明"别用某个写法"不该被自己举的例子判违规', () => {
+  // 实测踩过两次（`role=` 拼接的畸形写法、以及本条的原生查询），都是注释里的反面教材触发。
+  const withComment = 'const a = 1; // 不要写 document.querySelector，会穿透不了 shadow DOM\n';
+  assert.match(stripComments(withComment), /const a = 1;/);
+  assert.ok(!/document\.querySelector/.test(stripComments(withComment)), '注释里的写法不该被检出');
+  // 真代码仍必须被检出
+  const realCode = 'await page.evaluate(() => document.querySelector(".x"));\n';
+  assert.match(stripComments(realCode), /document\.querySelector/, '真实代码必须仍被检出');
+  const block = '/* document.querySelector 也别用 */\nconst b = 2;\n';
+  assert.ok(!/document\.querySelector/.test(stripComments(block)), '块注释里的写法也不该被检出');
 });
 
 test('helpers.mjs 里没有死代码：每个导出都被至少一处引用', () => {

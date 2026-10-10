@@ -140,6 +140,34 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['哥伦比亚 慧兰', '云南 小粒咖啡'],
     },
   },
+
+  'recover-from-rejection': {
+    id: 'recover-from-rejection',
+    title: '复杂场景：第一次提交必然被拒 —— 读懂原因、补上、再试',
+    trigger: '购买',
+    // 顺序即能力，而且**必须包含"读失败原因"那一步**：
+    // 先按已知信息做完 → 提交 → 读被拒原因 → 补上从错误里学到的值 → 重试。
+    // 少了"读原因"这一步，就退化成"盲目重试"——而盲目重试永远停在同一条错误上。
+    tools: ['get_page_snapshot', 'select_option', 'type_text', 'click_element', 'inspect_element'],
+    success: '经历一次业务拒绝后补齐信息、重试成功，且页面收到的订单数据完整正确',
+    eval: {
+      url: '/recover',
+      instruction: '帮我购买这个页面上的商品：商品选「哥伦比亚 慧兰」，数量 1，收货地址填「上海市浦东新区 1 号」。',
+      pageChecks: [
+        // 这页用的是**渐进式校验**：邀请码输入框首次提交后才出现、报错里才给出演示码，
+        // 所以任何 agent 都必然经历一次拒绝 —— 于是这些判据对脚本与真模型同样成立。
+        { expr: 'window.__rejected === true', label: '确实经历过一次业务拒绝（恢复的前提）' },
+        { expr: 'window.__submits >= 2', label: '至少提交了两次（不是一次就过）' },
+        { expr: "window.__order && window.__order.product === 'coffee-a'", label: '商品选对了' },
+        { expr: "window.__order && window.__order.qty === '1'", label: '数量对' },
+        { expr: "window.__order && window.__order.addr === '上海市浦东新区 1 号'", label: '地址对' },
+        { expr: "window.__order && window.__order.invite === 'RF2026'", label: '邀请码是从错误信息里学到的那个' },
+        { expr: "document.querySelector('#msg').textContent.indexOf('下单成功') === 0", label: '最终下单成功' },
+      ],
+      // 关键：**被拒原因**必须进到模型手里，否则它无从知道要补什么。
+      mustSeeInToolResults: ['邀请码', 'RF2026'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
