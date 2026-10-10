@@ -9,6 +9,7 @@
 // 而本文件其余场景需要流正常结束；混在一起会让"第一次调用"的归属取决于执行顺序、
 // 测试时好时坏。那条在 tests/e2e/resume.spec.mjs。
 import { test, expect } from '@playwright/test';
+import { lastToolResultsText } from './fixtures/server.mjs';
 import {
   launchExtension,
   closeExtension,
@@ -281,6 +282,48 @@ test('golden: 拾取元素后对话里看得到它，且刷新后仍在', async 
   const restoredTurn = page.locator(PANEL + ' .user-turn', { hasText: '这是什么元素' });
   await expect(restoredTurn.locator('.user-picks')).toHaveCount(1, { timeout: 15_000 });
   await expect(restoredTurn.locator('.user-picks')).toContainText('提交');
+
+  await page.close();
+});
+
+// 能力验收：**站内检索**（playbook 'site-search'）。
+//
+// 这条是"能力类"的第一条，形状与别的场景不同，两个要点：
+//
+// ① 它跨 4 轮，逐步做「看页面 → 填搜索框 → 点搜索 → 结构化读结果」。
+//    而夹具页的结果是**点击之后异步渲染**的 —— 所以这条同时验了
+//    「工具会等页面静定」这个能力：若不等，第 4 轮读到的就是空列表。
+//
+// ② 断言分两处，缺一不可：
+//    · **页面状态** —— 搜索框真被填了、结果真渲染了、真点了搜索按钮；
+//    · **模型收到了什么** —— 从夹具记录的请求里读工具结果。
+//      这一条才是关键：E2E 的模拟模型是**脚本**，所以"最终答复里写了什么"证明不了任何事
+//      （那句话是脚本写的）。能证明的是**工具结果里到底有没有把数据交到模型手上**。
+test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构化交给模型', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/search');
+  await sendInstruction(page, '站内搜一下咖啡，把前三条的标题和价格给我');
+
+  // ① 页面真的到了目标状态
+  await expect.poll(() => page.inputValue('#site-search'), { timeout: 30_000 }).toBe('咖啡');
+  await expect.poll(() => page.evaluate(() => window.__searched), { timeout: 30_000 }).toBeGreaterThan(0);
+  // 结果列表是异步渲染的：这里等的就是"工具真的等到了它"
+  await expect.poll(() => page.evaluate(() => window.__renderedCount), { timeout: 30_000 }).toBe(5);
+
+  // ② 模型实际收到的工具结果里，必须能看到**真实条目**的标题与价格。
+  // 读夹具记录的请求，而不是读界面或最终答复 —— 后者都是脚本写的，证明不了能力。
+  await expect
+    .poll(() => lastToolResultsText(), { timeout: 30_000 })
+    .toContain('哥伦比亚 慧兰 水洗');
+  const seen = lastToolResultsText();
+  expect(seen).toContain('￥88');
+  expect(seen).toContain('埃塞俄比亚 耶加雪菲');
+  expect(seen).toContain('￥108');
+  expect(seen).toContain('云南 小粒咖啡');
+  expect(seen).toContain('￥68');
+
+  // 广告条目也一并被取回（是"检索"和"去广告"两种判断，不该在检索阶段就被悄悄丢掉）
+  expect(seen).toContain('【广告】');
 
   await page.close();
 });

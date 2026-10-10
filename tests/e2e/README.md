@@ -101,3 +101,17 @@ expect(await flowOrder(page)).not.toEqual(['think', 'think', 'content']); // 反
 
 触发词是**选择剧本**的开关，不只是输入一句话。详细步骤见
 [完整指南的「怎么新增一条场景」](../../docs/e2e-testing-guide.md#怎么新增一条场景)。
+
+## 第三层：真模型 eval 不在这里
+
+本目录是**第一层（能力验收）**与**第二层（技能契约）**的所在：脚本替模型做决定，回答「这套能力成不成立」。
+
+它**回答不了**「技能文案对真模型有没有用」——因为决定是脚本做的。那在隔壁：
+
+```text
+tests/e2e-eval/               真模型 eval（模型自己决定用哪些工具）
+scripts/eval-real-model.mjs   入口（前置检查 + 设置代理环境变量）
+```
+
+那一层**不进 CI**：花钱、结果非确定。完整设计（三层分工、剧本格式、断言该写在哪、真模型 eval 的纪律）见
+[docs/e2e-testing-guide.md](../../docs/e2e-testing-guide.md) 第九节。
