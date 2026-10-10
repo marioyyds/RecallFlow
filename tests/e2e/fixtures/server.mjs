@@ -598,6 +598,59 @@ function pagedPage() {
 </body></html>`;
 }
 
+// Shadow DOM 页：搜索组件藏在自定义组件的 **shadow root** 里（两层深）。
+//
+// 难点是**朴素查询根本看不到它**：
+//   · `document.querySelector('#q')` 返回 **null** —— 元素在 shadow root 里，
+//     光看 DOM 树"顶层什么都没有"，很容易得出"页面上没有这个搜索框"的错误结论；
+//   · 而且这里还套了**两层**：`rf-search` 的 shadow 里又有一个 `rf-inner`，
+//     它的内容在第二层 shadow 里（用来探"穿透深度"的边界）。
+//
+// 组件内部的 JS 仍跑在页面主世界，所以把状态写到 `window` 上，
+// 于是 main frame 的 `page.evaluate` 也能读到（shadow DOM 只隔离 DOM，不隔离全局）。
+function shadowPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具组件页</title></head>
+<body>
+  <h1>组件页</h1>
+  <p>下面的搜索框在一个自定义组件的 shadow DOM 里。</p>
+  <rf-search id="comp"></rf-search>
+  <script>
+    window.__compSubmits = 0;
+    window.__compQuery = '';
+    window.__compResult = '';
+    window.__deepSeen = '';
+
+    class RfInner extends HTMLElement {
+      connectedCallback() {
+        const r = this.attachShadow({ mode: 'open' });
+        r.innerHTML = '<div id="deep" role="note">深层组件就绪</div>';
+        window.__deepSeen = r.getElementById('deep').textContent;
+      }
+    }
+    customElements.define('rf-inner', RfInner);
+
+    class RfSearch extends HTMLElement {
+      connectedCallback() {
+        const r = this.attachShadow({ mode: 'open' });
+        r.innerHTML =
+          '<label for="q">组件内关键词</label>' +
+          '<input id="q" role="textbox" aria-label="组件内关键词">' +
+          '<button id="go" type="button" role="button" aria-label="组件内搜索">搜索</button>' +
+          '<div id="res" role="status"></div>' +
+          '<rf-inner></rf-inner>';
+        r.getElementById('go').addEventListener('click', () => {
+          window.__compSubmits += 1;
+          window.__compQuery = r.getElementById('q').value;
+          window.__compResult = '组件内结果：命中「' + window.__compQuery + '」3 条';
+          r.getElementById('res').textContent = window.__compResult;
+        });
+      }
+    }
+    customElements.define('rf-search', RfSearch);
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1122,6 +1175,23 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：Shadow DOM 穿透（playbook id = 'pierce-shadow-dom'）。
+    //
+    // 元素都在自定义组件的 shadow root 里，朴素 `document.querySelector` 看不到它们。
+    // 这里同时探**两层**：`#res` 在第一层 shadow，`#deep` 在第二层。
+    if (userText.includes(PLAYBOOKS['pierce-shadow-dom'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '组件内关键词', value: '咖啡' }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '组件内搜索' }); return; }
+      // 第一层 shadow 里的结果区
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#res' }); return; }
+      // 第二层 shadow（shadow 里套 shadow）—— 探穿透深度
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#deep' }); return; }
+      finalText(res, '已在组件的 shadow DOM 内完成搜索：命中「咖啡」3 条；并确认两层 shadow 里的内容都可读到。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1154,7 +1224,8 @@ const main = http.createServer((req, res) => {
                       : req.url && req.url.startsWith('/portal') ? portalPage()
                         : req.url && req.url.startsWith('/detail') ? detailPage()
                           : req.url && req.url.startsWith('/paged') ? pagedPage()
-                            : mainPage()
+                            : req.url && req.url.startsWith('/shadow') ? shadowPage()
+                              : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

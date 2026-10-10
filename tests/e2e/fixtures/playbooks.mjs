@@ -275,6 +275,26 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['TK-0013', '导出报表时金额列错位'],
     },
   },
+
+  'pierce-shadow-dom': {
+    id: 'pierce-shadow-dom',
+    title: '复杂场景：Shadow DOM 穿透 —— 元素在自定义组件的 shadow root 里（两层）',
+    trigger: '自定义组件',
+    // 定位与读取都必须穿透 shadow root；`#res` 在第一层，`#deep` 在**第二层**。
+    tools: ['get_page_snapshot', 'type_text', 'click_element', 'inspect_element'],
+    success: '在 shadow root 内填词、点击、读到结果，且**两层** shadow 里的内容都能读到',
+    eval: {
+      url: '/shadow',
+      instruction: '页面里有一个自定义组件（搜索框在它里面），帮我用它搜「咖啡」，然后告诉我结果。',
+      pageChecks: [
+        { expr: 'window.__compSubmits === 1', label: '组件内的按钮被点了一次' },
+        { expr: "window.__compQuery === '咖啡'", label: '组件内的输入框被填对' },
+        { expr: "window.__compResult.indexOf('组件内结果') === 0", label: '组件内渲染出结果' },
+      ],
+      // 第一层 shadow 的结果 + **第二层** shadow 的内容都必须进到模型手里
+      mustSeeInToolResults: ['组件内结果', '咖啡', '深层组件就绪'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

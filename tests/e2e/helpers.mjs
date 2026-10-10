@@ -102,6 +102,24 @@ export async function clickApproval(page, kind) {
 }
 
 /**
+ * 用**不穿透 shadow DOM 的原生查询**看能不能找到目标。
+ *
+ * 为什么需要它：本目录有一条硬规则 —— spec 里不得写原生 DOM 查询
+ * （面板在 shadow root 里，写错了会静默返回 null）。但 shadow 类场景恰恰要**证明
+ * "朴素查询找不到"** —— 那正是这一类的难点所在。把这条收进 helper，
+ * 既保住规则，又让"难点确实存在"变成可断言的事实。
+ *
+ * 用法上的对比才有意义：本 helper 返回 false（朴素查不到）**同时**
+ * `page.locator('#q')` 能命中（Playwright 的 CSS 选择器默认穿透 shadow DOM）——
+ * 两句合起来才证明"元素在 shadow 里，且确实存在"。
+ *
+ * @returns {Promise<boolean>} true=朴素查询能找到（说明不在 shadow 里）
+ */
+export async function lightDomHas(page, selector) {
+  return await page.evaluate((sel) => document.querySelector(sel) !== null, selector);
+}
+
+/**
  * 页面上某个元素是否**被别的东西盖住**（遮挡类场景专用）。
  *
  * 为什么必须走 helper，而不是在 spec 里写 document.querySelector：

@@ -19,6 +19,7 @@ import {
   sendInstruction,
   clickApproval,
   isCovered,
+  lightDomHas,
   flowOrder,
   panelStyle,
   panelText,
@@ -700,6 +701,47 @@ test('golden: 新标签页 —— 自动接管，且后续读取落在新页上'
   // ④ 点击结果里必须写明"检测到新标签页并已自动绑定"：
   //    那是模型据以判断"换页了"的**唯一信号**。缺了它，模型会以为自己还在原页。
   expect(seen).toContain('已自动绑定');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**Shadow DOM 穿透**（playbook 'pierce-shadow-dom'）。
+//
+// 难点是**朴素查询根本看不到元素**：搜索框在自定义组件的 shadow root 里，
+// `document.querySelector('#q')` 返回 null —— 光看顶层 DOM 树"什么都没有"，
+// 很容易得出"页面上没有这个搜索框"的错误结论。而且这里套了**两层** shadow，
+// 用来探穿透深度的边界。
+//
+// 这条用例的基线断言刻意成对出现，合起来才构成证据：
+//   ① `lightDomHas` 为 false —— 朴素查询**确实**看不到（难点成立）；
+//   ② Playwright locator 能命中 —— 元素**确实存在**（不是真的没有）。
+// 只有①会变成"页面没这个元素"，只有②会变成"随手就能找到"。
+test('golden: Shadow DOM —— 两层 shadow 内的元素都能定位、操作与读取', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/shadow');
+
+  // 基线：难点确实存在（见上方说明）
+  expect(await lightDomHas(page, '#q'), '朴素查询竟能看到 #q，本场景的难点不成立').toBe(false);
+  expect(await lightDomHas(page, '#deep'), '朴素查询竟能看到 #deep，本场景的难点不成立').toBe(false);
+  // 而它们确实存在：Playwright 的 CSS 选择器默认穿透 shadow DOM
+  await expect(page.locator('#q')).toHaveCount(1);
+  await expect(page.locator('#deep')).toHaveText('深层组件就绪');
+  expect(await page.evaluate(() => window.__compSubmits)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(page, '页面里有一个自定义组件（搜索框在它里面），帮我用它搜「咖啡」，然后告诉我结果。');
+
+  // ① 组件内真的被操作了（状态写在 window 上：shadow DOM 只隔离 DOM，不隔离全局）
+  await expect.poll(() => page.evaluate(() => window.__compSubmits), { timeout: 40_000 }).toBe(1);
+  expect(await page.evaluate(() => window.__compQuery)).toBe('咖啡');
+  await expect.poll(() => page.evaluate(() => window.__compResult), { timeout: 20_000 }).toContain('组件内结果');
+
+  // ② 两层 shadow 里的内容都必须进到模型手里
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('组件内结果');
+  const seen = toolResultsText();
+  expect(seen).toContain('咖啡');
+  // 第二层 shadow（shadow 里套 shadow）的内容 —— 探穿透深度
+  expect(seen, '第二层 shadow 的内容没有读到（穿透深度不足）').toContain('深层组件就绪');
 
   await page.close();
 });
