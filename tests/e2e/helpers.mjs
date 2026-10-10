@@ -54,6 +54,23 @@ export async function readKnowledgeBase(context) {
   });
 }
 
+/**
+ * 清空扩展侧的知识库存储。
+ *
+ * ⚠ **知识库测试必须先用它**：`chrome.storage.local` 在同一个浏览器上下文里
+ * **跨用例共享**，所以"基线应该是空的"这种断言会变成**顺序相关**的 ——
+ * 单独跑通过、跟别的知识库用例一起跑就失败。实测踩过一次：
+ * 新用例单跑 2.9 秒通过，全量跑 121 毫秒就挂在基线断言上。
+ * 用这个 helper 把前提重置掉，用例之间才是真正独立的。
+ */
+export async function resetKnowledgeBase(context) {
+  const [sw] = context.serviceWorkers();
+  if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
+  await sw.evaluate(async () => {
+    await chrome.storage.local.remove('knowledgeBase');
+  });
+}
+
 const MAIN_URL = 'http://127.0.0.1:7802';
 const LLM_PORT = 7804;
 

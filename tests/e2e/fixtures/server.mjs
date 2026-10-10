@@ -1548,6 +1548,42 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：知识库检索的召回边界（playbook id = 'knowledge-search-fallback'）。
+    //
+    // ⚠ 这一块必须排在「知识库往返」那一块**之前**：本剧本的指令里同时含
+    // 「知识库」与「打开很慢」两个触发词，而分派是 `includes` 顺序匹配 ——
+    // 排在后面就会被 knowledge-save-retrieve 抢走（静默跑错剧本）。
+    // 门禁 tests/skill-playbook-contract.test.mjs 会盯着"更长/更具体的触发词先检查"。
+    if (userText.includes(PLAYBOOKS['knowledge-search-fallback'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) {
+        toolStep(res, 'add_entry', {
+          type: 'note',
+          title: '检索性能优化',
+          note: 'KB-1 把首屏索引预热挪到扩展启动时；KB-2 检索超时从 800ms 收到 300ms；KB-3 结果缓存按 query 归一化后命中',
+        });
+        return;
+      }
+      // 用「页面打开很慢」检索 —— 与笔记在字符层面毫无交集，必然落空
+      if (done === 2) { toolStep(res, 'knowledge_read', { op: 'search', query: '页面打开很慢' }); return; }
+      // 回退：先列出本站已存条目
+      if (done === 3) { toolStep(res, 'knowledge_read', { op: 'list' }); return; }
+      const id = extractSavedId(toolResults);
+      if (done === 4) {
+        if (!id) { finalText(res, '拿不到条目 id，无法直接读出该条。', 30); return; }
+        toolStep(res, 'knowledge_read', { op: 'get', id });
+        return;
+      }
+      finalText(
+        res,
+        '检索「页面打开很慢」没有命中（词面确实对不上），但知识库里确实有这条记录，已按 id 读出来核对：' +
+          'KB-1 首屏索引预热、KB-2 检索超时 300ms、KB-3 结果缓存命中。',
+        90
+      );
+      return;
+    }
+
     // 剧本：知识库往返（playbook id = 'knowledge-save-retrieve'）。
     //
     // 走的是**稳的那条路**：三个要点放进**一条**的备注里（不带 url，于是拿到生成 id），

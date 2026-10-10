@@ -435,6 +435,35 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已保存条目', 'KB-1', 'KB-2', 'KB-3'],
     },
   },
+
+  'knowledge-search-fallback': {
+    id: 'knowledge-search-fallback',
+    title: '复杂场景：知识库检索的召回边界 —— 查不到 ≠ 没有，必须换路子确认',
+    trigger: '打开很慢',
+    // 难点是**词汇不匹配**：`tokenizeQuery` 是纯字符匹配，
+    // 「页面打开很慢」与笔记里的「预热 / 超时 / 缓存」在字符层面毫无交集 ——
+    // 检索必然返回「未检索到相关知识库条目」。
+    // 这是**固有限制**（测试 tests/rag-recall.test.mjs 把它钉住了），修不好，
+    // 所以能力在于**回退**：换个说法、或改用 list / get 直接确认。
+    // 判据是"最后确实把那条记录读出来了"，而不是"检索命中了"。
+    tools: ['get_page_snapshot', 'add_entry', 'knowledge_read'],
+    success: '检索没命中时没有下"知识库里没有"的结论，而是换路子把那条记录读出来并核对',
+    eval: {
+      url: '/notes',
+      instruction:
+        '把这一页的三个要点存进知识库（标题用「检索性能优化」，每条加上 KB-1 / KB-2 / KB-3 的编号），' +
+        '然后回答我：知识库里有没有讲「页面打开很慢」的记录？找到的话把它读出来核对。',
+      // 状态在存储里、不在页面上（见上面的说明），所以不塞页面断言
+      pageChecks: [],
+      // 只认 KB-*：页面里没有这几个编号（见夹具 notesPage 注释），
+      // 而 `add_entry` 的结果**只回显标题、不回显备注** ——
+      // 所以它们出现在工具结果里 ⇒ 一定发生过一次**读取**（get 或 search 命中）。
+      // ⚠ 这里**不**断言「未检索到相关知识库条目」：那是**路径**。
+      // 模型若换个更准的说法就命中了，反而更好 —— 用路径判据会把"做得更好"判成失败。
+      // （"检索确实会漏"这件事由脚本化 E2E 断言，因为那条查询是脚本自己选的。）
+      mustSeeInToolResults: ['KB-1', 'KB-2', 'KB-3'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

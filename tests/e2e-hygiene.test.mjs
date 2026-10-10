@@ -79,6 +79,24 @@ test('这条门禁本身有牙齿：精确相等要被认出，基线 0 与 >= �
   assert.equal(hit('expect(await page.evaluate(() => window.__page)).toBe(3);'), 0, '页码是状态量，不受限');
 });
 
+test('用到 readKnowledgeBase 的 spec 必须先 resetKnowledgeBase（存储跨用例共享，否则顺序相关）', () => {
+  // 实测踩过：新用例**单跑 2.9 秒通过**，全量跑 **121 毫秒**就挂在
+  // "基线应该是空的"断言上 —— 因为前一个知识库用例已经往 chrome.storage 里写过东西。
+  // 这种失败最难查（"单独跑没问题"），所以用门禁把它挡在前面。
+  const offenders = [];
+  for (const f of specFiles) {
+    const src = stripComments(read(path.join(E2E_DIR, f)));
+    const reads = (src.match(/readKnowledgeBase\(/g) || []).length;
+    if (!reads) continue;
+    if (!/resetKnowledgeBase\(/.test(src)) offenders.push(f);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    '这些 spec 读了知识库存储却没先重置前提（chrome.storage 在同一上下文里跨用例共享）：' + offenders.join(', ')
+  );
+});
+
 test('E2E 经验文档存在，且两处互相指路', () => {
   assert.ok(fs.existsSync(README), '缺少 ' + README);
   assert.ok(fs.existsSync(GUIDE), '缺少 ' + GUIDE);

@@ -178,6 +178,38 @@ test('EXACT_COUNT_ALLOWED 里的每一条都必须真的出现在剧本里（防
   assert.deepEqual(dead, [], '允许清单里有已经不存在（或已改写）的条目，请删掉：' + dead.join(', '));
 });
 
+test('夹具分派：一条指令命中多个触发词时，必须先检查**更长**的那个（否则静默跑错剧本）', () => {
+  // 分派是 `userText.includes(trigger)` 的**顺序**匹配。于是当某条指令同时含两个触发词时，
+  // 谁在前谁赢 —— 而"谁在前"是源码里的书写顺序，与触发词长短无关，出了问题完全看不出来。
+  // 本会话实例：新剧本的指令里既有「知识库」（旧剧本的触发词）又有「打开很慢」（自己的），
+  // 若把新块写在旧块后面，就会静默跑成旧剧本。
+  const src = fs.readFileSync('tests/e2e/fixtures/server.mjs', 'utf8');
+  const order = new Map();
+  for (const m of src.matchAll(/userText\.includes\(PLAYBOOKS\['([a-z0-9-]+)'\]\.trigger\)/g)) {
+    if (!order.has(m[1])) order.set(m[1], m.index);
+  }
+  // ① 每个剧本都要有分派块（新剧本忘了接线 = 那条 E2E 永远跑不到）
+  const unwired = Object.keys(PLAYBOOKS).filter((id) => !order.has(id));
+  assert.deepEqual(unwired, [], '这些剧本没有在 server.mjs 里接线分派：' + unwired.join(', '));
+
+  // ② 指令命中多个触发词时，更长（更具体）的必须先检查
+  const problems = [];
+  for (const [id, pb] of Object.entries(PLAYBOOKS)) {
+    const ins = pb.eval && pb.eval.instruction;
+    if (!ins) continue;
+    const hits = Object.values(PLAYBOOKS).filter((p) => ins.includes(p.trigger));
+    if (hits.length <= 1) continue;
+    const longest = hits.slice().sort((a, b) => b.trigger.length - a.trigger.length)[0];
+    const firstChecked = hits.slice().sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity))[0];
+    if (firstChecked.id !== longest.id) {
+      problems.push(
+        id + ' 的指令同时命中 [' + hits.map((h) => h.trigger).join('、') + ']，但分派先检查「' + firstChecked.trigger + '」（更具体的是「' + longest.trigger + '」）'
+      );
+    }
+  }
+  assert.deepEqual(problems, [], '分派顺序会让这些指令跑错剧本：\n  ' + problems.join('\n  '));
+});
+
 test('这条契约门禁本身有牙齿：缺一个工具必须被判定为不合格', () => {
   // 用内联样例验证判定逻辑，避免"永远通过"。
   const declared = ['get_page_snapshot', 'type_text', 'click_element'];

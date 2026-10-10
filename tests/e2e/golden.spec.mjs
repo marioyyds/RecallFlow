@@ -23,6 +23,7 @@ import {
   lightDomHas,
   resolveInstruction,
   readKnowledgeBase,
+  resetKnowledgeBase,
   flowOrder,
   panelStyle,
   panelText,
@@ -956,7 +957,9 @@ test('golden: 知识库 —— 三个要点存进去后都还在，且被读回�
   await configureSettings(context);
   const page = await openFixturePage(context, '/notes');
 
-  // 基线：知识库还是空的
+  // 知识库存储在同一个浏览器上下文里**跨用例共享** —— 必须先重置，
+  // 否则"基线是空的"会变成顺序相关（实测：单跑通过、全量跑挂在基线断言上）
+  await resetKnowledgeBase(context);
   expect(Object.keys(await readKnowledgeBase(context))).toEqual([]);
 
   resetLlmRequests();
@@ -983,6 +986,51 @@ test('golden: 知识库 —— 三个要点存进去后都还在，且被读回�
   expect(seen).toContain('已保存条目');
   expect(seen).toContain('KB-1');
   expect(seen).toContain('KB-2');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**知识库检索的召回边界**（playbook 'knowledge-search-fallback'）。
+//
+// 难点是**词汇不匹配**：`tokenizeQuery` 是纯字符匹配，
+// 「页面打开很慢」与笔记里的「预热 / 超时 / 缓存」在字符层面**毫无交集** ——
+// 检索必然返回「未检索到相关知识库条目」。这是**固有限制**（`tests/rag-recall.test.mjs`
+// 把它钉住了：纯词法检索跨不过同义词），修不好；所以能力在于**回退**——
+// 换个说法、或改用 list / get 直接确认，而不是对用户说"知识库里没有"。
+//
+// 判据分两层：
+//   ① **难点成立**：「未检索到」这句确实出现过。这条**只在这里**断言 ——
+//      查询是脚本自己选的，所以它不是"路径断言"；
+//      真模型 eval 那边**故意不**断言它（模型换个更准的说法命中反而更好）。
+//   ② **能力**：最后仍然把那条记录读了出来（KB-* 只可能来自知识库读取）。
+test('golden: 知识库检索 —— 词面查不到时不能下"没有"的结论（回退后读出来）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/notes');
+
+  await resetKnowledgeBase(context);
+  expect(Object.keys(await readKnowledgeBase(context))).toEqual([]);
+
+  resetLlmRequests();
+  await sendInstruction(page, resolveInstruction('knowledge-search-fallback'));
+
+  // ① 难点成立：那条查询确实检索不到
+  await expect
+    .poll(() => toolResultsText(), { timeout: 40_000 })
+    .toContain('未检索到相关知识库条目');
+
+  // ② 能力：没有就此收手，最终把记录读了出来
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('KB-3');
+  const seen = toolResultsText();
+  expect(seen).toContain('KB-1');
+  expect(seen).toContain('KB-2');
+
+  // ③ 存储层（权威事实）：那条记录确实在知识库里
+  const book = await readKnowledgeBase(context);
+  const all = Object.values(book)
+    .map((it) => String(it.note || ''))
+    .join('\n');
+  expect(all).toContain('KB-1');
+  expect(all).toContain('KB-3');
 
   await page.close();
 });
