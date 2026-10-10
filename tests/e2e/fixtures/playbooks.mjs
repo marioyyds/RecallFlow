@@ -402,6 +402,29 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已向文件输入框设置', 'sample-upload.txt'],
     },
   },
+
+  'knowledge-save-retrieve': {
+    id: 'knowledge-save-retrieve',
+    title: '复杂场景：知识库往返 —— 存进去要能原样取回来（同一个 url 会互相覆盖）',
+    trigger: '知识库',
+    // 难点不在页面，而在**往返保真**：`add_entry` 传了 url 就用 url 当 id，
+    // 于是"三条都带同一个网址"会静默只剩最后一条。稳的路是放进一条的备注，
+    // 或三条都不带 url；无论哪条，**读回那一步都不能省**。
+    tools: ['get_page_snapshot', 'add_entry', 'knowledge_read'],
+    success: '三个要点（KB-1/KB-2/KB-3）都留在知识库里，且被读回、回到模型上下文',
+    eval: {
+      url: '/notes',
+      instruction: '把这一页的三个要点存进知识库（标题用「检索性能优化」），每条加上 KB-1 / KB-2 / KB-3 的编号，然后从知识库读回来确认三条都在。',
+      // ⚠ 这一类的状态**不在页面上**（知识库是扩展侧存储），所以没有页面判据 ——
+      // 权威的保真检查在 E2E 里直接读 chrome.storage 的 `knowledgeBase`。
+      // 这里不塞凑数的页面断言：宁可显式留空，也不假装页面能证明什么。
+      pageChecks: [],
+      // KB-1/KB-2/KB-3 这几个编号**只可能来自模型自己写的备注**：
+      // 页面里没有它们（见夹具 notesPage 的注释），而 `add_entry` 的结果**只回显标题**。
+      // 所以它们出现在工具结果里 ⇒ 一定发生过一次**读回**。
+      mustSeeInToolResults: ['已保存条目', 'KB-1', 'KB-2', 'KB-3'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

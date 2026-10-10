@@ -10,6 +10,7 @@
 // 测试时好时坏。那条在 tests/e2e/resume.spec.mjs。
 import { test, expect } from '@playwright/test';
 import { toolResultsText, resetLlmRequests } from './fixtures/server.mjs';
+import { PLAYBOOKS } from './fixtures/playbooks.mjs';
 import {
   launchExtension,
   closeExtension,
@@ -21,6 +22,7 @@ import {
   isCovered,
   lightDomHas,
   resolveInstruction,
+  readKnowledgeBase,
   flowOrder,
   panelStyle,
   panelText,
@@ -931,6 +933,56 @@ test('golden: 上传 —— 文件真的被设置且派发了 change 事件（�
   const seen = toolResultsText();
   expect(seen).toContain('已向文件输入框设置');
   expect(seen).toContain('sample-upload.txt');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**知识库往返**（playbook 'knowledge-save-retrieve'）。
+//
+// 这一类的难点**不在页面上**（知识库是扩展侧存储，页面只是"要记什么"的来源），
+// 而在**往返保真**。坑在 `add_entry` 这一行：
+//
+//     const id = args.url || 'kb:' + Date.now() + ...
+//
+// **传了 url 就用 url 当 id**（注释写着"同一 URL 视为同一条，天然去重"）——
+// 于是"三个要点分三条存、都带上这一页的网址"会**静默只剩最后一条**，
+// 而每一步都返回 ok。所以权威判据只能是**直接读存储**：
+// 只有证明"三个编号都还在"，才算没踩这个坑。
+//
+// 另一条判据是**读回**：KB-1/KB-2/KB-3 是模型按指令自己加的编号，
+// 页面里没有（见夹具 notesPage 注释），而 `add_entry` 的结果**只回显标题**——
+// 所以这些编号出现在工具结果里 ⇒ 一定发生过一次读回。
+test('golden: 知识库 —— 三个要点存进去后都还在，且被读回模型上下文', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/notes');
+
+  // 基线：知识库还是空的
+  expect(Object.keys(await readKnowledgeBase(context))).toEqual([]);
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['knowledge-save-retrieve'].eval.instruction);
+
+  // ① 权威事实：三个编号都留在存储里（踩了 url 覆盖的坑就只剩一个）
+  await expect
+    .poll(async () => {
+      const book = await readKnowledgeBase(context);
+      const all = Object.values(book).map((it) => String(it.note || '')).join('\n');
+      return ['KB-1', 'KB-2', 'KB-3'].filter((k) => all.includes(k)).length;
+    }, { timeout: 40_000 })
+    .toBe(3);
+
+  // 条目本身也要对：标题、类型
+  const book = await readKnowledgeBase(context);
+  const items = Object.values(book);
+  expect(items.length, '应至少有一条条目').toBeGreaterThan(0);
+  expect(items.some((it) => it.title === '检索性能优化' && it.type === 'note')).toBe(true);
+
+  // ② 模型视角：写入结果 + **读回的内容**（编号只可能来自读回）都要到它手里
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('KB-3');
+  const seen = toolResultsText();
+  expect(seen).toContain('已保存条目');
+  expect(seen).toContain('KB-1');
+  expect(seen).toContain('KB-2');
 
   await page.close();
 });

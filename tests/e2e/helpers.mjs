@@ -35,6 +35,25 @@ export function resolveInstruction(id) {
   return String(pb.eval.instruction).replace(/\{\{UPLOAD_FILE\}\}/g, SAMPLE_UPLOAD);
 }
 
+/**
+ * 读扩展侧的**知识库存储**（`knowledgeBase`）。
+ *
+ * 为什么必须有这个 helper：知识库场景的权威事实在**存储**里，不在页面上 ——
+ * `add_entry` 传了 url 就用 url 当 id（同一 URL 视为同一条），
+ * 所以"分三条存、都带同一个网址"会**静默只剩最后一条**，每一步还都返回 ok。
+ * 只有直接读存储才能证明"三条都在"。
+ *
+ * ⚠ 读的是 service worker 的上下文，不是页面 —— 页面里没有 `chrome.storage`。
+ */
+export async function readKnowledgeBase(context) {
+  const [sw] = context.serviceWorkers();
+  if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
+  return await sw.evaluate(async () => {
+    const d = await chrome.storage.local.get('knowledgeBase');
+    return (d && d.knowledgeBase) || {};
+  });
+}
+
 const MAIN_URL = 'http://127.0.0.1:7802';
 const LLM_PORT = 7804;
 

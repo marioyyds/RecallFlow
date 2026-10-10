@@ -894,6 +894,33 @@ function uploadPage() {
 </body></html>`;
 }
 
+// 纪要页：知识库场景的**素材来源**。
+//
+// ⚠ 这一类的难点**不在页面上**（知识库是扩展侧的存储，页面只是"要记什么"的来源），
+// 而在**往返保真**：存进去的东西能不能原样取回来。真正的坑在 `add_entry` 这一行：
+//
+//     const id = args.url || 'kb:' + Date.now() + ...
+//
+// **传了 url 就用 url 当 id**（代码注释写着"同一 URL 视为同一条，天然去重"）。
+// 于是"把三个要点分三条存、都带上这一页的网址"会**静默只剩最后一条** ——
+// 前两条被覆盖掉了，而且每一步都返回 ok。这正是本场景要钉住的东西：
+// 要么放进**一条**的备注里，要么三条都**不带 url**（各得一个生成 id）。
+//
+// 页面本身刻意**不含** KB-1/KB-2/KB-3 这几个编号（编号由模型按指令自己加），
+// 而 `add_entry` 的结果**只回显标题、不回显备注** ——
+// 于是"KB-1 出现在工具结果里"就**只能**来自一次读回，不可能来自页面或写入回显。
+function notesPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具纪要</title></head>
+<body>
+  <h1>检索性能优化 · 纪要</h1>
+  <ul>
+    <li>把首屏索引预热挪到扩展启动时</li>
+    <li>检索超时从 800ms 收到 300ms</li>
+    <li>结果缓存按 query 归一化后命中</li>
+  </ul>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -967,6 +994,16 @@ function extractAxCoords(toolResults, name) {
     const re = new RegExp('\\[\\d+\\] [a-z]+「' + name + '」 坐标\\((\\d+),(\\d+)\\)');
     const hit = content.match(re);
     if (hit) return { x: Number(hit[1]), y: Number(hit[2]) };
+  }
+  return null;
+}
+
+/** 从 add_entry 的结果里解析条目 id（格式：已保存条目：标题「…」(id: xxx)。）。 */
+function extractSavedId(toolResults) {
+  for (const m of toolResults) {
+    const content = typeof m.content === 'string' ? m.content : '';
+    const hit = content.match(/\(id: ([^)]+)\)/);
+    if (hit) return hit[1];
   }
   return null;
 }
@@ -1511,6 +1548,44 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：知识库往返（playbook id = 'knowledge-save-retrieve'）。
+    //
+    // 走的是**稳的那条路**：三个要点放进**一条**的备注里（不带 url，于是拿到生成 id），
+    // 再用 `knowledge_read(op:'get')` 按 id 读回来核对 —— 读回那一步不能省，
+    // 因为"写入返回 ok"并不证明"取回来是对的"。
+    if (userText.includes(PLAYBOOKS['knowledge-save-retrieve'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) {
+        // 稳的那条路：三个要点放进**一条**的备注（不带 url，于是拿到生成 id）。
+        // 反例（实测过，见 E2E 注释）：三条各自带同一个 url → 存储里只剩最后一条。
+        toolStep(res, 'add_entry', {
+          type: 'note',
+          title: '检索性能优化',
+          note: 'KB-1 把首屏索引预热挪到扩展启动时；KB-2 检索超时从 800ms 收到 300ms；KB-3 结果缓存按 query 归一化后命中',
+        });
+        return;
+      }
+      const id = extractSavedId(toolResults);
+      if (done === 2) {
+        if (!id) { finalText(res, 'add_entry 没有返回条目 id，无法按 id 读回。', 30); return; }
+        toolStep(res, 'knowledge_read', { op: 'get', id });
+        return;
+      }
+      finalText(res, '已把三个要点存成知识库条目「检索性能优化」（一条，备注里带 KB-1/KB-2/KB-3），并已读回核对。', 80);
+      return;
+    }
+    if (userText.includes('__INJECT_NEVER__')) {
+      const id = extractSavedId(toolResults);
+      if (done === 2) {
+        if (!id) { finalText(res, 'add_entry 没有返回条目 id，无法按 id 读回。', 30); return; }
+        toolStep(res, 'knowledge_read', { op: 'get', id });
+        return;
+      }
+      finalText(res, '已把三个要点存成知识库条目「检索性能优化」（一条，备注里带 KB-1/KB-2/KB-3），并已读回核对。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1548,7 +1623,8 @@ const main = http.createServer((req, res) => {
                                 : req.url && req.url.startsWith('/canvas') ? canvasPage()
                                   : req.url && req.url.startsWith('/macro') ? macroPage()
                                     : req.url && req.url.startsWith('/upload') ? uploadPage()
-                                      : mainPage()
+                                      : req.url && req.url.startsWith('/notes') ? notesPage()
+                                        : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

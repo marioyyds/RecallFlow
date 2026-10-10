@@ -102,25 +102,26 @@ test('每个能力剧本的**自身指令必须含自己的触发词**（否则�
 test('E2E 里用的指令必须与剧本声明的指令**逐字一致**（否则触发词分派会对不上）', () => {
   // 指令存在两处（剧本的 eval.instruction 与 golden.spec.mjs 的 sendInstruction 字面量），
   // 它们一旦漂移，就会出现"E2E 跑的是一套、eval 跑的是另一套"这种最难查的不一致。
-  // 这里要求 spec 里**原样出现**剧本声明的指令。
-  //
-  // 例外：含**运行时占位符**（`{{...}}`）的指令无法写字面量（如上传文件的本地绝对路径，
-  // 每台机器不同、也不该进仓库），这类要求 spec 经 `resolveInstruction('<id>')` 引用 ——
-  // **仍是一处来源**，只是从"字面量一致"升级为"经同一个解析入口"。
+  // 这里要求 spec 里的指令**来自剧本**，三种形态任一即可：
+  //   1. 原样字面量；
+  //   2. `resolveInstruction('<id>')` —— 含运行时占位符（如上传文件的本地绝对路径）时**必须**用它；
+  //   3. `PLAYBOOKS['<id>'].eval.instruction` —— 直接引用，漂移在结构上不可能。
+  // 三种都保证"E2E 与 eval 跑的是同一条指令"，比只认字面量更强。
   const spec = fs.readFileSync('tests/e2e/golden.spec.mjs', 'utf8');
-  const hasPlaceholder = (s) => /\{\{[A-Z_]+\}\}/.test(String(s));
+  const refs = (id, instruction) => [
+    instruction,
+    "resolveInstruction('" + id + "')",
+    "PLAYBOOKS['" + id + "'].eval.instruction",
+  ];
   const missing = Object.values(PLAYBOOKS)
     .filter((p) => p.eval && p.eval.instruction)
-    .filter((p) =>
-      hasPlaceholder(p.eval.instruction)
-        ? !spec.includes("resolveInstruction('" + p.id + "')")
-        : !spec.includes(p.eval.instruction)
-    )
+    .filter((p) => !refs(p.id, p.eval.instruction).some((s) => spec.includes(s)))
     .map((p) => p.id);
   assert.deepEqual(
     missing,
     [],
-    '这些剧本的指令既没有原样出现在 golden.spec.mjs 里，也没有经 resolveInstruction 引用（两处漂移会让 E2E 与 eval 跑的不是同一件事）：' +
+    '这些剧本的指令在 golden.spec.mjs 里找不到出处（字面量 / resolveInstruction / PLAYBOOKS 引用都没有）——' +
+      '两处漂移会让 E2E 与 eval 跑的不是同一件事：' +
       missing.join(', ')
   );
 });
