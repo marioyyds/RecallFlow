@@ -432,6 +432,61 @@ function tablePage() {
 </body></html>`;
 }
 
+// 跨域 iframe 内的**完整操作**页（挂在框架站 7803）。
+//
+// 与既有的极简 framePage（一个按钮）不同，这里是一次完整操作：
+// 填文本 + 选下拉 + 提交 + 结果渲染，**全部发生在跨域框架内部**。
+//
+// 难点是**边界**：外层页面对这个 iframe 的 DOM 一无所知（不同源），
+// 所以既不能从外层读到它，也不能把结果写回外层 ——
+// 唯一可行的跨域通信是 `postMessage`。结果因此用 postMessage 报给外层，
+// 外层记进 `window.__frameReport`，这样"框架里到底做成了什么"在外层也可断言。
+function embedPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具内嵌检索</title></head>
+<body>
+  <h1>内嵌检索</h1>
+  <label for="fq">关键词</label>
+  <input id="fq" role="textbox" aria-label="内嵌关键词">
+  <label for="fp">范围</label>
+  <select id="fp" role="combobox" aria-label="内嵌范围">
+    <option value="">全部</option>
+    <option value="title">仅标题</option>
+  </select>
+  <button id="fgo" type="button" role="button" aria-label="内嵌搜索">搜索</button>
+  <div id="fres" role="status"></div>
+  <script>
+    window.__frameSubmits = 0;
+    window.__frameState = null;
+    document.getElementById('fgo').addEventListener('click', function () {
+      window.__frameSubmits += 1;
+      var q = document.getElementById('fq').value;
+      var scope = document.getElementById('fp').value;
+      window.__frameState = { q: q, scope: scope };
+      var text = '内嵌结果：' + (scope || '全部') + ' 命中「' + q + '」2 条';
+      document.getElementById('fres').textContent = text;
+      // 跨域下唯一能通知外层的通道
+      try { parent.postMessage({ type: 'frame-result', q: q, scope: scope, text: text }, '*'); } catch (e) {}
+    });
+  </script>
+</body></html>`;
+}
+
+// 外层页：正文里嵌一个**跨域** iframe（不同端口 = 不同源）。
+function framedPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具外层页</title></head>
+<body>
+  <h1>外层页面</h1>
+  <p>下面的检索在一个跨域 iframe 里。</p>
+  <iframe id="embed" src="http://127.0.0.1:${FRAME_PORT}/embed" width="640" height="320"></iframe>
+  <script>
+    window.__frameReport = null;
+    window.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'frame-result') window.__frameReport = e.data;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -889,6 +944,37 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：跨域 iframe 内的完整操作（playbook id = 'operate-in-cross-origin-iframe'）。
+    //
+    // 三次操作全部发生在**跨域框架内部**，所以都走 `f<frameId>:rf-N` 复合 ref
+    // （先 includeFrames 读合并快照，再按 ref 路由过去）—— 这是真实模型唯一可用的路径，
+    // 因为不同源，外层读不到里面的 DOM。
+    // 最后一步用**显式 frameId** 读回框架内的结果区，验证"读"也能跨域。
+    if (userText.includes(PLAYBOOKS['operate-in-cross-origin-iframe'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { includeFrames: true, maxElements: 60, maxText: 600 }); return; }
+      const kwRef = extractFrameRef(toolResults, '内嵌关键词');
+      const scopeRef = extractFrameRef(toolResults, '内嵌范围');
+      const goRef = extractFrameRef(toolResults, '内嵌搜索');
+      if (!kwRef || !scopeRef || !goRef) {
+        // 读不到框架内元素时**如实说明**，而不是继续猜 —— 脚本化剧本里"沉默地继续"
+        // 会让后面的断言失败指向错误的地方。
+        finalText(res, '未能在合并快照里找到跨域框架内的元素（' + [kwRef, scopeRef, goRef].join('/') + '）。', 30);
+        return;
+      }
+      if (done === 1) { toolStep(res, 'type_text', { ref: kwRef, value: '咖啡' }); return; }
+      if (done === 2) { toolStep(res, 'select_option', { ref: scopeRef, label: '仅标题' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { ref: goRef }); return; }
+      if (done === 4) {
+        // frameId 从复合 ref（f<frameId>:rf-N）里取出来 —— 证明"读"也能跨域。
+        const frameId = Number(String(goRef).replace(/^f(\d+):.*$/, '$1'));
+        toolStep(res, 'inspect_element', { op: 'text', frameId: frameId, selector: '#fres' });
+        return;
+      }
+      finalText(res, '已在跨域 iframe 内完成检索：关键词「咖啡」，范围「仅标题」，结果为 2 条。', 70);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -917,12 +1003,13 @@ const main = http.createServer((req, res) => {
               : req.url && req.url.startsWith('/blocked') ? blockedPage()
                 : req.url && req.url.startsWith('/recover') ? recoverPage()
                   : req.url && req.url.startsWith('/table') ? tablePage()
-                    : mainPage()
+                    : req.url && req.url.startsWith('/framed') ? framedPage()
+                      : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(framePage());
+  res.end(req.url && req.url.startsWith('/embed') ? embedPage() : framePage());
 });
 
 export function startServers() {

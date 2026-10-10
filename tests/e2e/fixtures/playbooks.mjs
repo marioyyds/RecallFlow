@@ -202,6 +202,34 @@ export const PLAYBOOKS = Object.freeze({
       ],
     },
   },
+
+  'operate-in-cross-origin-iframe': {
+    id: 'operate-in-cross-origin-iframe',
+    title: '复杂场景：跨域 iframe 内的完整操作（填 + 选 + 提交 + 读回）',
+    trigger: '跨域',
+    // 全部动作都发生在**不同源**的框架里，所以要靠复合 ref（f<frameId>:rf-N）路由过去；
+    // 读回则用显式 frameId。这条剧本同时验证"写"和"读"都能跨域。
+    tools: ['get_page_snapshot', 'type_text', 'select_option', 'click_element', 'inspect_element'],
+    success: '框架内被填入关键词、选定范围、提交一次，且结果渲染在框架内并被读回',
+    eval: {
+      url: '/framed',
+      instruction: '这个页面下半部分的检索在一个跨域 iframe 里，帮我在里面搜「咖啡」、范围选「仅标题」，然后把结果告诉我。',
+      pageChecks: [
+        // 外层与框架**不同源**，外层读不到 iframe 的 DOM ——
+        // 所以只能靠框架自己 `postMessage` 报上来的内容做判据（外层记进 __frameReport）。
+        // 这既符合跨域的现实，也让判据落在外层可断言的位置。
+        { expr: 'window.__frameReport !== null', label: '框架把结果报给了外层（说明框架内 JS 真的跑了）' },
+        { expr: "window.__frameReport && window.__frameReport.q === '咖啡'", label: '框架内关键词填对了' },
+        { expr: "window.__frameReport && window.__frameReport.scope === 'title'", label: '框架内范围选对了' },
+        {
+          expr: "window.__frameReport && window.__frameReport.text.indexOf('内嵌结果') === 0",
+          label: '框架内渲染出结果',
+        },
+      ],
+      // 结果文本必须回到模型手里 —— 这是"读回"那一半的判据
+      mustSeeInToolResults: ['内嵌结果', '仅标题'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

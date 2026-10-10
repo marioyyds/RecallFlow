@@ -609,3 +609,53 @@ test('golden: 表格 —— rowspan/colspan 被正确展开，且数据真的到
 
   await page.close();
 });
+
+// 能力验收（复杂场景）：**跨域 iframe 内的完整操作**（playbook 'operate-in-cross-origin-iframe'）。
+//
+// 难点是**边界**：框架与顶层**不同源**，所以
+//   · 顶层 DOM 里根本不存在框架内的节点 —— 用 selector 硬找只会得到"未找到元素"，
+//     而那不是"元素不存在"，是**找错了框架**；
+//   · 框架的结果也无法直接读到，只能靠 `postMessage` 报给外层。
+//
+// 这条用例因此有三层断言：
+//   ① 外层视角：框架 postMessage 上来的内容是"框架内 JS 真的跑了"的证据；
+//   ② **框架视角**（Playwright 可跨源取 frame 句柄）：直接核对框架内部状态，
+//      避免"外层收到了消息"被误当作"操作真的发生在框架里"；
+//   ③ 模型视角：结果文本必须回到模型手里（"读回"那一半）。
+test('golden: 跨域 iframe —— 填/选/提交发生在框架内，且结果被读回', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/framed');
+
+  // 基线：确实有一个**跨域**框架，且它还没被操作过
+  const embedFrame = page.frames().find((f) => f.url().includes(':7803/embed'));
+  expect(embedFrame, '未找到跨域内嵌框架，场景不成立').toBeTruthy();
+  expect(new URL(embedFrame.url()).origin).not.toBe(new URL(page.url()).origin);
+  expect(await embedFrame.evaluate(() => window.__frameSubmits)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(page, '这个页面下半部分的检索在一个跨域 iframe 里，帮我在里面搜「咖啡」、范围选「仅标题」，然后把结果告诉我。');
+
+  // ① 外层视角：框架主动报上来的结果
+  await expect.poll(() => page.evaluate(() => window.__frameReport), { timeout: 40_000 }).not.toBeNull();
+
+  // ② 框架视角：直接读框架内部状态（跨源也能取到 frame 句柄）
+  await expect.poll(() => embedFrame.evaluate(() => window.__frameSubmits), { timeout: 20_000 }).toBe(1);
+  expect(await embedFrame.evaluate(() => window.__frameState)).toEqual({ q: '咖啡', scope: 'title' });
+  expect(await embedFrame.evaluate(() => document.getElementById('fres').textContent)).toContain('内嵌结果');
+  // 外层**读不到**框架的 DOM —— 这正是"必须走复合 ref"的原因，顺手把这条现实钉住
+  expect(await page.evaluate(() => {
+    try {
+      return document.getElementById('embed').contentDocument === null;
+    } catch (e) {
+      return true; // 某些情况下访问直接抛异常，同样是"读不到"
+    }
+  })).toBe(true);
+
+  // ③ 模型视角：框架内的结果文本必须回到模型手里
+  const seen = toolResultsText();
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('内嵌结果');
+  expect(seen).toContain('仅标题');
+  expect(seen).toContain('咖啡');
+
+  await page.close();
+});
