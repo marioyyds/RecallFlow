@@ -79,13 +79,29 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   bd379daf4693655a —— **有意改动**：C-4 合并第 1 档（视觉标注四件套）。
   //                       highlight_text + outline_element + set_element_style + clear_page_overlays
   //                       → annotate({op})，47 → 44。
+  //   d138640ba617ecfe —— **有意改动**：给 inspect_element 补 `op:"styles"`（读**计算后的**样式）。
+  //                       **工具数不变（仍 44）** —— 这是给已有只读工具补一档，不是新增工具。
+  //
+  //                       起因：做「UI 美化」能力时发现**改完样式无法自证**。
+  //                       `annotate({op:"style"})` 只回一句「已修改 N 个元素」，那证明的是
+  //                       "调用发出去了"，不是"样式真的生效了"（可能被 !important 覆盖、
+  //                       或因取值非法被忽略）。而在此之前面板侧唯一的取证路径是
+  //                       `run_javascript` 读 getComputedStyle，它有**两个硬伤**（都实测到）：
+  //                         ① 元数据是 `alwaysRequireApproval` → 任何审批策略都拦不住地打断用户；
+  //                         ② 它经 eval 执行，**被页面 CSP 拦住会直接失败**（要另开 CDP 才能落到主世界）。
+  //                       而"读一下算出来的样式"是彻头彻尾的**只读**操作 —— 它本该和
+  //                       inspect/text/table 一起待在只读工具里，而不是借道一个高危工具。
+  //
+  //                       实现直接复用 `readElementState`（原本只给 MCP 侧 verify_change 用），
+  //                       所以没有引入新的取值逻辑。副作用：`browser_task` 的 prompt 预算需相应上调，
+  //                       见 tests/registry.test.mjs 的 SCHEMA_BYTES_BUDGET 说明。
   //                       四者风险完全相同（page + 逐次审批），且原本就共用同一条执行路径
   //                       （executePageTool → 内容脚本 highlight / outline / set_style / clear_highlights），
   //                       因此这是**纯粹的收敛**，不存在"取最高"或"路径不同"的歧义。
   //                       副作用：四个 schema 的描述合成一个，`browser_task` 的 prompt 预算
   //                       由 33400 上调到 35600（第三次出现"工具数下降但字符数上升"，
   //                       说明写在 tests/registry.test.mjs 的 SCHEMA_BYTES_BUDGET 上方）。
-  const EXPECTED = 'bd379daf4693655a';
+  const EXPECTED = 'd138640ba617ecfe';
   assert.equal(
     fp,
     EXPECTED,

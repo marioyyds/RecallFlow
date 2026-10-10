@@ -154,7 +154,10 @@ test('handlePageCommandTool：不属于本族返回 null', async () => {
 
 test('ANNOTATE_OPS / INSPECT_OPS 的映射与内容脚本命令名逐一对齐', () => {
   assert.deepEqual(ANNOTATE_OPS, { highlight: 'highlight', outline: 'outline', style: 'set_style', clear: 'clear_highlights' });
-  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table' });
+  // styles 不是 C-4 合并来的，而是后来**补**的一档（做「UI 美化」时发现改完样式无法自证：
+  // annotate 只回一句摘要，而唯一的取证路径 run_javascript 是 alwaysRequireApproval
+  // 且会被页面 CSP 拦住）。它复用只读的 readElementState，工具数不变。详见 read-styles.test.mjs。
+  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table', styles: 'read_styles' });
 });
 
 test('annotate：未知 op 时报错并列出全部合法取值', async () => {

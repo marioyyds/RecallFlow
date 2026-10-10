@@ -57,6 +57,32 @@
     const title = list.map((p) => p.locator).filter(Boolean).join(" / ");
     return '<span class="user-picks"' + (title ? ' title="' + esc(title) + '"' : "") + ">\u27E1 " + esc(formatPickedSummary(list)) + "</span>";
   }
+  var DEFAULT_STYLE_PROPS = Object.freeze([
+    "font-size",
+    "line-height",
+    "color",
+    "background-color",
+    "width",
+    "height",
+    "display",
+    "visibility",
+    "opacity",
+    "overflow-x",
+    "position",
+    "z-index"
+  ]);
+  function formatStylesSummary(items, total) {
+    const list = Array.isArray(items) ? items : [];
+    const n = typeof total === "number" && total > list.length ? total : list.length;
+    const head = "\u8BA1\u7B97\u6837\u5F0F\uFF08\u547D\u4E2D " + n + " \u4E2A" + (n > list.length ? "\uFF0C\u5217\u51FA\u524D " + list.length + " \u4E2A" : "") + "\uFF09\uFF1A";
+    if (!list.length) return head + "\uFF08\u65E0\uFF09";
+    const lines = list.map((it) => {
+      const s = it && it.styles || {};
+      const pairs = Object.keys(s).map((k) => k + "=" + s[k]).join("  ");
+      return "  " + (it && (it.selector || it.tag) || "?") + (it && it.visible === false ? "\uFF08\u4E0D\u53EF\u89C1\uFF09" : "") + "\uFF1A" + (pairs || "\uFF08\u65E0\uFF09");
+    });
+    return head + "\n" + lines.join("\n");
+  }
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
@@ -1707,6 +1733,22 @@
       })
     };
   }
+  function cmdReadStyles(params) {
+    const els = findElementsFor(params);
+    if (!els.length) return { ok: false, error: targetMissError(params) };
+    const wanted = Array.isArray(params.props) && params.props.length ? params.props.map((p) => String(p === void 0 || p === null ? "" : p).trim()).filter(Boolean).slice(0, 12) : DEFAULT_STYLE_PROPS.slice();
+    const MAX_LISTED = 8;
+    const listed = els.slice(0, MAX_LISTED);
+    const items = listed.map((el) => readElementState(el, wanted));
+    return {
+      ok: true,
+      count: els.length,
+      truncated: els.length > listed.length,
+      props: wanted,
+      items,
+      result: formatStylesSummary(items, els.length)
+    };
+  }
   function cmdExtractTable(params) {
     const p = params || {};
     let table = null;
@@ -2224,6 +2266,8 @@
         return cmdGetText(params);
       case "inspect_element":
         return cmdInspectElement(params);
+      case "read_styles":
+        return cmdReadStyles(params);
       case "extract_table":
         return cmdExtractTable(params);
       default:

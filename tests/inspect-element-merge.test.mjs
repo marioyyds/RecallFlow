@@ -15,23 +15,31 @@ import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
-test('inspect_element 的 op 枚举与三个原工具一一对应', () => {
+test('inspect_element 的 op 枚举覆盖三个原工具，外加后来补的 styles', () => {
   const op = byName.inspect_element.inputSchema.properties.op;
-  assert.deepEqual(op.enum, ['inspect', 'text', 'table']);
+  // 前三项对应 C-4 合并的三个原工具（get_element_text / inspect_element / extract_table）。
+  // 第四项 `styles` 不是合并来的 —— 是后来做「UI 美化」时**补**的只读一档，
+  // 理由见 tests/read-styles.test.mjs 与 commands.js 的 cmdReadStyles。
+  assert.deepEqual(op.enum, ['inspect', 'text', 'table', 'styles']);
   assert.deepEqual(byName.inspect_element.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
 test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"页面命令无响应"）', async () => {
-  // 这三个命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
+  // 这些命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
   const cli = fs.readFileSync(new URL('../lib/page/commands.js', import.meta.url), 'utf8');
-  for (const cmd of ['get_text', 'inspect_element', 'extract_table']) {
+  for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
   // C-1 拆分把 INSPECT_OPS 搬进 ./page-command-tools.js 时，
   // 基于切片的老写法会静默切到空串（然后断言失败但原因指向错误的地方）。
   const { INSPECT_OPS } = await import('../lib/assistant/page-command-tools.js');
-  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table' });
+  assert.deepEqual(INSPECT_OPS, {
+    text: 'get_text',
+    inspect: 'inspect_element',
+    table: 'extract_table',
+    styles: 'read_styles',
+  });
 });
 
 test('被合并的两个工具名不得再出现在注册表里（否则模型会看到已失效的签名）', () => {
