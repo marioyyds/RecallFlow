@@ -218,10 +218,14 @@ const llm = http.createServer((req, res) => {
     // 这里让模拟模型先吐思维链、再吐正文，用来验证面板真的渲染出可折叠的思考记录、
     // 并且在正文开始时自动收起。
     if (userText.includes('思考')) {
+      // 刻意发**两段**思维链，中间夹着正文 —— 用来验证"穿插"而不是"聚成一个总块"：
+      // 期望的面板结构是 思考块 → 正文 → 思考块 → 正文。
       sse(res, [
         reasoningDelta('先确认页面结构，'),
         reasoningDelta('再决定点击哪个按钮。'),
         textDelta('我想好了：结论如下。'),
+        reasoningDelta('再复核一下边界情况。'),
+        textDelta('补充一句。'),
         { choices: [{ delta: {}, finish_reason: 'stop' }] },
         { usage: { total_tokens: 42 } },
       ]);

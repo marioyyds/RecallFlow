@@ -3908,7 +3908,11 @@
       }
     }
     @keyframes kb-shimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
-    .think-body { display: none; padding: 0 10px 8px; font-size: 12px; line-height: 1.6; color: #6b7c8f; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
+    /* \u26A0 \u523B\u610F**\u4E0D\u8BBE** max-height / overflow\uFF1A
+       \u601D\u8003\u8BB0\u5F55\u662F\u5BF9\u8BDD\u6D41\u91CC\u7684\u4E00\u6BB5\uFF0C\u5E94\u8BE5\u8DDF\u7740\u5BF9\u8BDD\u4E00\u8D77\u957F\u3001\u4E00\u8D77\u6EDA \u2014\u2014 \u7531\u9762\u677F\u81EA\u8EAB\u7684\u6EDA\u52A8\u6761\u8D1F\u8D23\u3002
+       \u7ED9\u5B83\u52A0\u5185\u5C42\u6EDA\u52A8\u6761\u4F1A\u6709\u4E24\u4E2A\u95EE\u9898\uFF1A\u2460 \u6EDA\u8F6E\u505C\u5728\u5185\u5C42\u65F6\u6EDA\u4E0D\u52A8\u5916\u5C42\uFF0C\u64CD\u4F5C\u5F88\u522B\u626D\uFF1B
+       \u2461 \u601D\u8003\u4E0E\u5B83\u524D\u540E\u7684\u53D9\u8FF0/\u5DE5\u5177\u6B65\u9AA4\u4E0D\u5728\u540C\u4E00\u4E2A\u6EDA\u52A8\u5750\u6807\u91CC\uFF0C\u770B\u4E0D\u51FA\u5BF9\u5E94\u5173\u7CFB\u3002 */
+    .think-body { display: none; padding: 0 10px 8px; font-size: 12px; line-height: 1.6; color: #6b7c8f; white-space: pre-wrap; word-break: break-word; }
     .panel.dark .think-body { color: #9aa0a8; }
     .think-block[data-open="true"] .think-body { display: block; }
     .p-body h1, .p-body h2, .p-body h3, .p-body h4 { margin: 14px 0 8px; line-height: 1.4; font-weight: 700; }
@@ -4256,9 +4260,8 @@
   var pendingNarration = "";
   var lastNarration = "";
   var typingEl = null;
-  var pendingReasoning = "";
-  var thinkBlockEl = null;
-  var thinkBodyEl = null;
+  var thinkSeg = null;
+  var thinkSegSeq = 0;
   var thinkExpandedManual = null;
   var activeRunId = null;
   var planBar = null;
@@ -4628,6 +4631,39 @@
       fitPanelHeight();
     }
   }
+  function refreshThinkHead(seg) {
+    if (!seg || !seg.block) return;
+    const label = seg.block.querySelector(".think-label");
+    if (!label) return;
+    const text = seg.done ? "\u5DF2\u601D\u8003\uFF08" + seg.text.length + " \u5B57\uFF09" : "\u601D\u8003\u4E2D\u2026";
+    if (label.textContent !== text) label.textContent = text;
+  }
+  function mountThinkSegment(seg) {
+    if (!flowEl) return null;
+    const block = document.createElement("div");
+    block.className = "think-block";
+    block.dataset.state = seg.done ? "done" : "running";
+    block.dataset.open = seg.done ? "false" : "true";
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "think-head";
+    head.innerHTML = '<span class="think-dots"><span></span><span></span><span></span></span><span class="think-label"></span><span class="think-caret" aria-hidden="true">\u25BE</span>';
+    head.addEventListener("click", () => {
+      const opening = block.dataset.open !== "true";
+      block.dataset.open = opening ? "true" : "false";
+      if (seg === thinkSeg) thinkExpandedManual = opening;
+    });
+    const body = document.createElement("div");
+    body.className = "think-body";
+    body.textContent = seg.text;
+    block.appendChild(head);
+    block.appendChild(body);
+    seg.block = block;
+    seg.body = body;
+    refreshThinkHead(seg);
+    flowEl.appendChild(block);
+    return block;
+  }
   function restoreStreamingUI() {
     if (!panelBody || !streaming) return;
     if (pendingContentEl && pendingContentEl.isConnected) return;
@@ -4637,7 +4673,9 @@
     flow.className = "agent-flow";
     aiMsg.appendChild(flow);
     for (const p of pendingParts) {
-      if (p.type === "narration" && p.text) {
+      if (p.type === "thinking" && p.text) {
+        mountThinkSegment({ text: p.text, done: true, block: null, body: null });
+      } else if (p.type === "narration" && p.text) {
         const d = document.createElement("div");
         d.className = "agent-content";
         d.innerHTML = renderAnswer(p.text, currentCitations, false);
@@ -4670,17 +4708,10 @@
     pendingAiMsg = aiMsg;
     pendingContentEl = contentEl;
     flowEl = flow;
-    if (pendingReasoning) {
-      thinkBlockEl = null;
-      thinkBodyEl = null;
-      const block = ensureThinkBlock();
-      if (block) {
-        block.dataset.state = "done";
-        const label = block.querySelector(".think-label");
-        if (label) label.textContent = "\u5DF2\u601D\u8003\uFF08" + pendingReasoning.length + " \u5B57\uFF09";
-        block.dataset.open = pendingStarted ? "false" : "true";
-        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
-      }
+    if (thinkSeg && thinkSeg.text) {
+      thinkSeg.block = null;
+      thinkSeg.body = null;
+      mountThinkSegment(thinkSeg);
     }
     typingEl = pendingNarration ? null : contentEl;
     pendingStarted = pendingStarted || Boolean(pendingNarration || pendingAcc);
@@ -5519,57 +5550,40 @@
       flowEl.appendChild(el);
       return el;
     }
-    function ensureThinkBlock2() {
-      if (thinkBlockEl && thinkBlockEl.isConnected) return thinkBlockEl;
-      if (!flowEl) return null;
-      const block = document.createElement("div");
-      block.className = "think-block";
-      block.dataset.state = "running";
-      block.dataset.open = "true";
-      const head2 = document.createElement("button");
-      head2.type = "button";
-      head2.className = "think-head";
-      head2.innerHTML = '<span class="think-dots"><span></span><span></span><span></span></span><span class="think-label">\u601D\u8003\u4E2D\u2026</span><span class="think-caret" aria-hidden="true">\u25BE</span>';
-      head2.addEventListener("click", () => {
-        const opening = block.dataset.open !== "true";
-        thinkExpandedManual = opening;
-        block.dataset.open = opening ? "true" : "false";
-      });
-      const body = document.createElement("div");
-      body.className = "think-body";
-      block.appendChild(head2);
-      block.appendChild(body);
-      flowEl.insertBefore(block, flowEl.firstChild);
-      thinkBlockEl = block;
-      thinkBodyEl = body;
-      return block;
-    }
     function pushReasoning(text) {
       const piece = String(text || "");
       if (!piece) return;
-      pendingReasoning += piece;
-      const block = ensureThinkBlock2();
-      if (!block) return;
-      if (thinkExpandedManual === null) block.dataset.open = "true";
-      streamRender.schedule("reason", () => {
-        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
+      if (!thinkSeg || thinkSeg.done) {
+        thinkSeg = { id: ++thinkSegSeq, text: "", done: false, block: null, body: null };
+        thinkExpandedManual = null;
+        mountThinkSegment(thinkSeg);
+      }
+      const seg = thinkSeg;
+      seg.text += piece;
+      if (seg.block && thinkExpandedManual === null) seg.block.dataset.open = "true";
+      streamRender.schedule("reason-" + seg.id, () => {
+        if (seg.body) seg.body.textContent = seg.text;
+        refreshThinkHead(seg);
       });
     }
     function finishReasoning() {
-      if (!thinkBlockEl || !thinkBlockEl.isConnected) return;
-      if (thinkBlockEl.dataset.state === "done") return;
-      thinkBlockEl.dataset.state = "done";
-      const label = thinkBlockEl.querySelector(".think-label");
-      if (label) label.textContent = "\u5DF2\u601D\u8003\uFF08" + pendingReasoning.length + " \u5B57\uFF09";
-      if (thinkExpandedManual === null) thinkBlockEl.dataset.open = "false";
-      streamRender.schedule("reason", () => {
-        if (thinkBodyEl) thinkBodyEl.textContent = pendingReasoning;
+      const seg = thinkSeg;
+      if (!seg || seg.done) return;
+      seg.done = true;
+      if (seg.block) {
+        seg.block.dataset.state = "done";
+        if (thinkExpandedManual === null) seg.block.dataset.open = "false";
+      }
+      refreshThinkHead(seg);
+      streamRender.schedule("reason-" + seg.id, () => {
+        if (seg.body) seg.body.textContent = seg.text;
+        refreshThinkHead(seg);
       });
+      pendingParts.push({ type: "thinking", text: seg.text });
+      thinkSeg = null;
     }
     function resetReasoning() {
-      pendingReasoning = "";
-      thinkBlockEl = null;
-      thinkBodyEl = null;
+      thinkSeg = null;
       thinkExpandedManual = null;
     }
     function appendStep(step) {

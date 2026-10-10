@@ -56,10 +56,34 @@ test('agent.js：assistantMessage **不带**思维链（写回会破坏前缀缓
 
 // ---------------------------------------------------------------- 面板侧
 
-test('chat.js：受理 reasoning 事件并写进思考记录块', () => {
+test('chat.js：受理 reasoning 事件并写进思考记录', () => {
   assert.match(chatSrc, /resp\.type === 'reasoning'/, '端口消息处理里必须认这个事件类型');
   assert.match(chatSrc, /function pushReasoning\(/, '应有 pushReasoning');
   assert.match(chatSrc, /pushReasoning\(resp\.text\)/, '应把事件文本交给 pushReasoning');
+});
+
+test('chat.js：**每段思考单独一块并追加**（穿插在对话里，不是聚成一个总块）', () => {
+  // 用户明确要求：思考不要单独一个滚动区/总块，而应穿插在对话流中。
+  // 实现要点有两处，缺一不可：
+  //   ① 挂载时 appendChild 到末尾（不是 insertBefore 到最前）；
+  //   ② 定稿后把「进行中的段」指针置 null，下一段才会另起一块。
+  assert.ok(!/insertBefore\(block/.test(chatSrc), '不得把思考块插到对话最前面');
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
+  const mountBody = mount.slice(0, mount.indexOf('\n}'));
+  assert.match(mountBody, /flowEl\.appendChild\(block\)/, '应追加到 flow 末尾（穿插）');
+  const finish = chatSrc.slice(chatSrc.indexOf('function finishReasoning('));
+  const finishBody = finish.slice(0, finish.indexOf('\n  }'));
+  assert.match(finishBody, /thinkSeg = null;/, '定稿后必须断掉进行中的段指针 —— 否则下一段会写回同一块');
+});
+
+test('chat.js：定稿的思考记录进 pendingParts（面板重建时按原位置还原）', () => {
+  const finish = chatSrc.slice(chatSrc.indexOf('function finishReasoning('));
+  const finishBody = finish.slice(0, finish.indexOf('\n  }'));
+  assert.match(finishBody, /pendingParts\.push\(\{\s*type:\s*'thinking'/, '定稿时应记入 flow 记录');
+  // 恢复路径要认得这个类型，否则重开面板后思考全挤到最前（或直接消失）
+  const restore = chatSrc.slice(chatSrc.indexOf('function restoreStreamingUI('));
+  const restoreBody = restore.slice(0, 3600);
+  assert.match(restoreBody, /p\.type === 'thinking'/, '重建循环应处理 thinking 部件');
 });
 
 test('chat.js：正文/结束/进入工具步骤时都要给思考记录定稿', () => {
@@ -90,9 +114,9 @@ test('chat.js：新一轮开始时清掉上一轮的思考记录指针', () => {
 test('chat.js：面板重开时思维链要恢复（否则记录凭空消失）', () => {
   const at = chatSrc.indexOf('function restoreStreamingUI');
   assert.ok(at >= 0);
-  const body = chatSrc.slice(at, at + 4000);
-  assert.match(body, /pendingReasoning/, '恢复路径应使用已累积的思维链');
-  assert.match(body, /ensureThinkBlock\(\)/, '恢复路径应重建思考记录块');
+  const body = chatSrc.slice(at, at + 3600);
+  assert.match(body, /thinkSeg/, '恢复路径应处理"进行中的那一段"');
+  assert.match(body, /mountThinkSegment\(/, '恢复路径应重建思考记录块');
 });
 
 test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（不会写回请求）', () => {
@@ -108,6 +132,15 @@ test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（
 });
 
 // ---------------------------------------------------------------- 样式
+
+test('CSS：思考记录**不得**有内层滚动条（否则与面板滚动打架）', () => {
+  // 用户明确要求：思考不是单独一个滚动区。内层滚动会让滚轮停在里面、外层滚不动，
+  // 而且思考与它前后的步骤不在同一个滚动坐标里，看不出对应关系。
+  const body = cssSrc.match(/\.think-body\s*\{([^}]*)\}/);
+  assert.ok(body, '应有 .think-body 样式');
+  assert.ok(!/max-height/.test(body[1]), '.think-body 不得设 max-height（会造出内层滚动区）：' + body[1]);
+  assert.ok(!/overflow(-y)?\s*:\s*(auto|scroll)/.test(body[1]), '.think-body 不得设内层滚动：' + body[1]);
+});
 
 test('CSS：思考记录的样式真的随 PANEL_CSS 一起走', () => {
   assert.match(cssSrc, /\.think-block\s*\{/, '缺少 .think-block 样式');

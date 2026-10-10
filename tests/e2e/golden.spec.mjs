@@ -203,8 +203,8 @@ test('golden: CDP 坐标点击真的落到页面上（可信输入）', async ()
 // 为什么必须有这一条：`reasoning_content` 是推理模型独有的字段，而本仓库此前**完全没有读它** ——
 // 也就是说「模型在思考时界面一片空白」这件事既没有实现、也没有任何测试能发现。
 // 单测能证明 agent 发了事件、面板认了事件类型，但证明不了**面板上真的出现了一块记录**：
-// DOM 结构、CSS 类名、折叠状态、自动收起时机，任何一环错都只有真浏览器能看出来。
-test('golden: 思考记录渲染出来、可展开、并在正文开始时自动收起', async () => {
+// DOM 结构、CSS 类名、折叠状态、穿插顺序，任何一环错都只有真浏览器能看出来。
+test('golden: 思考记录按顺序穿插在对话中、可展开、无内层滚动条', async () => {
   await configure(baseSettings());
   const page = await context.newPage();
   await page.goto('http://127.0.0.1:7802/');
@@ -213,28 +213,69 @@ test('golden: 思考记录渲染出来、可展开、并在正文开始时自动
   await page.locator('#__kb-ai-host .cmd-input').fill('说说你的思考');
   await page.locator('#__kb-ai-host .cmd-send').click();
 
-  const block = page.locator('#__kb-ai-host .think-block');
-  await expect(block).toHaveCount(1, { timeout: 30_000 });
+  // 模拟模型发了**两段**思维链（中间夹着正文）→ 应该是**两块**，而不是一个总块。
+  const blocks = page.locator('#__kb-ai-host .think-block');
+  await expect(blocks).toHaveCount(2, { timeout: 30_000 });
 
-  // 思维链文本真的进了记录（模拟模型分两片发，拼起来应是完整句子）
-  const body = page.locator('#__kb-ai-host .think-block .think-body');
-  await expect(body).toContainText('先确认页面结构', { timeout: 30_000 });
-  await expect(body).toContainText('再决定点击哪个按钮', { timeout: 30_000 });
+  // 两段内容各自在自己的块里（不是都堆进同一块）
+  await expect(blocks.nth(0).locator('.think-body')).toContainText('先确认页面结构', { timeout: 30_000 });
+  await expect(blocks.nth(1).locator('.think-body')).toContainText('再复核一下边界情况', { timeout: 30_000 });
+  await expect(blocks.nth(0).locator('.think-body')).not.toContainText('再复核一下边界情况');
 
-  // 正文应当**不在**思考记录里（混在一起就再也分不出哪段是思考、哪段是回答）
-  await expect(body).not.toContainText('我想好了：结论如下');
+  // 正文**不在**思考记录里（混在一起就再也分不出哪段是思考、哪段是回答）
+  await expect(blocks.nth(0).locator('.think-body')).not.toContainText('我想好了：结论如下');
 
-  // 回答已经开始 → 记录自动收起（data-open="false"），但仍留在面板里作为记录
-  await expect(block).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
-  await expect(block).toHaveAttribute('data-open', 'false', { timeout: 30_000 });
-  // 收起时正文区不可见（display:none 由 CSS 负责，这里断言计算样式真的生效）
-  await expect(body).toBeHidden();
+  // 核心断言：思考块**穿插**在对话里，而不是都堆到最上面。
+  //
+  // ⚠ 面板在 **shadow DOM** 里：Playwright 的 locator 会穿透，但 page.evaluate 里的
+  // document.querySelector **不会** —— 必须自己拿 shadowRoot，否则永远查到 null
+  // （实测症状：收到空数组，看起来像"没有子元素"，其实是查错了树）。
+  const order = await page.evaluate(() => {
+    const host = document.querySelector('#__kb-ai-host');
+    const root = host && host.shadowRoot ? host.shadowRoot : document;
+    const flow = root.querySelector('.agent-flow');
+    if (!flow) return [];
+    return [...flow.children]
+      .map((el) => (el.classList.contains('think-block') ? 'think' : el.classList.contains('agent-content') ? 'content' : 'other'))
+      .filter((k) => k !== 'other');
+  });
+  //
+  // 这里期望 'think, content, think' —— 第二块思考排在正文**之后**。
+  // 为什么没有第二个 content：本场景两段思维链之间**没有工具步骤**，
+  // 而正文元素只在 pendingContentEl 为空时新建（工具步骤会把它清空）。
+  // 真实 run 里两段思考之间几乎总有工具调用，那时就是完整的 think/content/tool/think/content。
+  // 关键是这个顺序已经能区分对错：**旧写法（都插到最前）会得到 think, think, content**。
+  expect(order).toEqual(['think', 'content', 'think']);
+  expect(order).not.toEqual(['think', 'think', 'content']);
 
-  // 用户手动点开后应能读到完整思维链 —— 这就是「可以显示思考记录」
-  await page.locator('#__kb-ai-host .think-block .think-head').click();
-  await expect(block).toHaveAttribute('data-open', 'true');
-  await expect(body).toBeVisible();
-  await expect(body).toContainText('先确认页面结构，再决定点击哪个按钮。');
+  // 定稿后自动收起，但仍留在面板里作为记录
+  await expect(blocks.nth(0)).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'false', { timeout: 30_000 });
+  await expect(blocks.nth(0).locator('.think-body')).toBeHidden();
+
+  // **没有内层滚动条**：思考应该跟着对话一起滚，而不是自己一个小滚动区。
+  // （CSS 里写死 max-height 不会报错，只有真浏览器能算出来。）
+  const overflow = await page.evaluate(() => {
+    const host = document.querySelector('#__kb-ai-host');
+    const root = host && host.shadowRoot ? host.shadowRoot : document;
+    const b = root.querySelector('.think-block .think-body');
+    if (!b) return null;
+    const cs = getComputedStyle(b);
+    return { y: cs.overflowY, maxH: cs.maxHeight };
+  });
+  expect(overflow).not.toBeNull();
+  expect(overflow.y).not.toBe('auto');
+  expect(overflow.y).not.toBe('scroll');
+  expect(overflow.maxH).toBe('none');
+
+  // 用户手动点开后应能读到完整思维链 —— 这就是「可以折叠和展开」
+  await blocks.nth(0).locator('.think-head').click();
+  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'true');
+  await expect(blocks.nth(0).locator('.think-body')).toBeVisible();
+  await expect(blocks.nth(0).locator('.think-body')).toContainText('先确认页面结构，再决定点击哪个按钮。');
+
+  // 两块的折叠互不影响（历史段各自独立开合）
+  await expect(blocks.nth(1)).toHaveAttribute('data-open', 'false');
 
   await page.close();
 });
