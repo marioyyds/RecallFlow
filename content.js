@@ -83,6 +83,21 @@
     });
     return head + "\n" + lines.join("\n");
   }
+  function formatInspectMatches(matches) {
+    const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+    if (!list.length) return "";
+    return list.map((m) => {
+      const bits = [m.selector || m.tag || "?"];
+      bits.push(m.visible === false ? "\u4E0D\u53EF\u89C1" : "\u53EF\u89C1");
+      if (m.size && (m.size.w || m.size.h)) bits.push(m.size.w + "\xD7" + m.size.h);
+      if (typeof m.textLength === "number") bits.push("\u6587\u672C " + m.textLength + " \u5B57");
+      if (m.shadowDepth) bits.push("shadow \u6DF1\u5EA6 " + m.shadowDepth);
+      if (m.containsMainContent) bits.push("\u7591\u4F3C\u542B\u6B63\u6587");
+      let s = "  - " + bits.join("\uFF5C");
+      if (m.path) s += "\n    \u7956\u5148\u94FE\uFF1A" + m.path;
+      return s;
+    }).join("\n");
+  }
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
@@ -1730,7 +1745,12 @@
         truncated,
         touchesMain,
         main
-      })
+      }) + // 逐元素明细必须并进 result —— 页面命令走到模型的那条路只取 result 字符串，
+      // 只放在 matches 字段里等于丢掉（见 formatInspectMatches 的注释）。
+      (() => {
+        const detail = formatInspectMatches(matches);
+        return detail ? "\n\u5217\u51FA\uFF1A\n" + detail : "";
+      })()
     };
   }
   function cmdReadStyles(params) {
@@ -1798,6 +1818,7 @@
       }))
     );
     const grid = expandTableGrid(raw, { maxRows: p.maxRows, maxCols: p.maxCols, fillMerged: p.fillMerged !== false });
+    const markdown = formatTableText(grid, { maxRows: 40 });
     return {
       ok: true,
       selector: elementSelector(table),
@@ -1808,8 +1829,15 @@
       widths: grid.widths,
       rowCount: grid.rows.length,
       mergedCells: grid.mergedCells,
-      markdown: formatTableText(grid, { maxRows: 40 }),
-      result: "\u8868\u683C\u300C" + elementSelector(table) + "\u300D\uFF1A" + grid.rows.length + " \u884C \xD7 " + grid.widths + " \u5217" + (grid.mergedCells ? "\uFF08\u542B " + grid.mergedCells + " \u4E2A\u5408\u5E76\u5355\u5143\u683C\uFF0C\u5DF2\u5C55\u5F00\u5BF9\u9F50\uFF09" : "") + (grid.headers.length ? "\uFF0C\u8868\u5934\uFF1A" + grid.headers.join(" / ") : "\uFF0C\u65E0\u8868\u5934") + (total > 1 ? "\u3002\u9875\u9762\u4E0A\u5171 " + total + " \u4E2A\u8868\u683C\u3002" : "")
+      markdown,
+      result: "\u8868\u683C\u300C" + elementSelector(table) + "\u300D\uFF1A" + grid.rows.length + " \u884C \xD7 " + grid.widths + " \u5217" + (grid.mergedCells ? "\uFF08\u542B " + grid.mergedCells + " \u4E2A\u5408\u5E76\u5355\u5143\u683C\uFF0C\u5DF2\u5C55\u5F00\u5BF9\u9F50\uFF09" : "") + (grid.headers.length ? "\uFF0C\u8868\u5934\uFF1A" + grid.headers.join(" / ") : "\uFF0C\u65E0\u8868\u5934") + (total > 1 ? "\u3002\u9875\u9762\u4E0A\u5171 " + total + " \u4E2A\u8868\u683C\u3002" : "") + // ⚠ 表格**数据本身**必须并进 result。
+      // 原先只把它放在 markdown / rows 字段里，而页面命令走到模型的那条路
+      // （executePageTool）只取 result 字符串 —— 于是模型只收到
+      // 「4 行 × 4 列（含 4 个合并单元格，已展开对齐）」这一句摘要，
+      // 而 expandTableGrid + formatTableText 辛苦还原出来的对齐数据**被整份丢掉**。
+      // 这个工具存在的全部理由就是"把合并单元格还原成对齐网格再给模型"，
+      // 丢掉数据等于它只剩一句自我介绍。
+      "\n" + markdown
     };
   }
   async function cmdClick(params) {
