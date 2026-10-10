@@ -24,6 +24,7 @@ import {
   resolveInstruction,
   readKnowledgeBase,
   resetKnowledgeBase,
+  waitForPage,
   flowOrder,
   panelStyle,
   panelText,
@@ -1031,6 +1032,46 @@ test('golden: 知识库检索 —— 词面查不到时不能下"没有"的结�
     .join('\n');
   expect(all).toContain('KB-1');
   expect(all).toContain('KB-3');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**跨标签页搬运**（playbook 'cross-tab-handoff'）。
+//
+// 难点是**"现在在哪个标签页"是隐式的**。A 页（来源页）故意放了**诱饵**：
+// 一个可访问名为「备注」的输入框 + 一个「保存备注」按钮。
+// 读完成验证码若**没有真正切到新标签页**就往输入框打字，字会落进诱饵、
+// A 页还会被提交 —— 而**每一步都返回成功**，只有页面状态能拆穿。
+//
+// 所以这条用例是**两头断言**：B 页必须收到并提交，A 页必须**纹丝不动**。
+test('golden: 跨标签页 —— 验证码填进新开的页并提交，来源页纹丝不动', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/handoff');
+
+  // 基线：来源页还没被提交、诱饵输入框还没被填
+  expect(await page.evaluate(() => window.__submits)).toBe(0);
+  expect(await page.evaluate(() => window.__noteValue)).toBe(null);
+  expect(await page.textContent('#code')).toBe('RF-7391');
+
+  resetLlmRequests();
+  await sendInstruction(
+    page,
+    '这一页有个取件验证码，帮我点「打开填写页」，在新打开的页面里填上这个验证码并提交，然后把回执告诉我。'
+  );
+
+  // ① 目标页：验证码真的填进去了、真的提交了
+  const form = await waitForPage(context, '/handoff-form');
+  await expect.poll(() => form.evaluate(() => window.__submittedCode), { timeout: 40_000 }).toBe('RF-7391');
+  expect(await form.evaluate(() => window.__submits)).toBeGreaterThan(0);
+  await expect(form.locator('#status')).toHaveText('已提交验证码：RF-7391');
+
+  // ② **来源页纹丝不动** —— 这一半才是"没写错标签页"的证据
+  expect(await page.evaluate(() => window.__submits), '来源页被误提交了：说明操作落错了标签页').toBe(0);
+  expect(await page.evaluate(() => window.__noteValue), '验证码被填进了来源页的诱饵输入框').toBe(null);
+  await expect(page.locator('#status')).toHaveText('本页未提交');
+
+  // ③ 模型视角：目标页的回执必须回到它手里（那句话只可能来自目标页）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已提交验证码：RF-7391');
 
   await page.close();
 });

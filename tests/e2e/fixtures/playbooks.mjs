@@ -21,8 +21,10 @@ export const PLAYBOOKS = Object.freeze({
     id: 'site-search',
     title: '站内检索：把结果条目结构化取回',
     trigger: '站内搜',
-    // 顺序即剧本步骤：看页面 → 填搜索框 → 点搜索 → 结构化读取结果
-    tools: ['get_page_snapshot', 'type_text', 'click_element', 'inspect_element'],
+    // 顺序即剧本步骤：看页面 → 填搜索框 → 点搜索 → **等结果渲染** → 结构化读取结果
+    // `wait_for_element` 不能省：夹具的结果是异步渲染的（真实站点也是），
+    // 点完立刻读会读到**空列表**（实测这条漏了它 → 5 次里失败 1 次的间歇性用例）
+    tools: ['get_page_snapshot', 'type_text', 'click_element', 'wait_for_element', 'inspect_element'],
     success: '搜索框被填入查询词、结果列表已渲染、且工具结果里能看到真实条目的标题与价格',
     // ---- 第三层（真模型 eval）用的声明 ----
     //
@@ -462,6 +464,31 @@ export const PLAYBOOKS = Object.freeze({
       // 模型若换个更准的说法就命中了，反而更好 —— 用路径判据会把"做得更好"判成失败。
       // （"检索确实会漏"这件事由脚本化 E2E 断言，因为那条查询是脚本自己选的。）
       mustSeeInToolResults: ['KB-1', 'KB-2', 'KB-3'],
+    },
+  },
+
+  'cross-tab-handoff': {
+    id: 'cross-tab-handoff',
+    title: '复杂场景：跨标签页搬运 —— 在 A 页读到的东西填进新开的 B 页',
+    trigger: '验证码',
+    // 难点是**"现在在哪个标签页"是隐式的**：A 页故意放了一个诱饵输入框（备注）
+    // 和一个诱饵按钮（保存备注）。读完成验证码若没真正切到新标签页就往输入框打字，
+    // 字会落进诱饵、A 页还会被提交 —— 而**每一步都返回成功**，只有页面状态能拆穿。
+    tools: ['get_page_snapshot', 'click_element', 'type_text', 'inspect_element'],
+    success: '验证码落在新标签页的填写页并提交成功，且来源页的诱饵输入框没被动过、来源页没被提交',
+    eval: {
+      url: '/handoff',
+      instruction: '这一页有个取件验证码，帮我点「打开填写页」，在新打开的页面里填上这个验证码并提交，然后把回执告诉我。',
+      // 判据落在**来源页**：它必须**没有**被动过。
+      // （目标页的状态在另一个标签页上，page.evaluate 看不到 —— 那一侧靠下面的载荷判据。）
+      pageChecks: [
+        { expr: 'window.__submits === 0', label: '来源页没有被误提交（说明没写错标签页）' },
+        { expr: 'window.__noteValue === null', label: '来源页的诱饵输入框没被填过' },
+      ],
+      // 「已提交验证码：RF-7391」这句话**只可能**来自目标页的回执读取：
+      // 来源页没有这句文案，而它带着验证码 —— 所以这条同时证明了
+      // "验证码真的到了 B 页" 与 "B 页真的提交了"。
+      mustSeeInToolResults: ['已提交验证码：RF-7391'],
     },
   },
 });

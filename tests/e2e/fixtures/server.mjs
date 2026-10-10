@@ -921,6 +921,61 @@ function notesPage() {
 </body></html>`;
 }
 
+// 取件凭证页（**A 页 / 来源页**）：多标签页编排场景的起点。
+//
+// 难点是**"现在到底在哪个标签页"这件事是隐式的**。页面上故意放了一个
+// **诱饵输入框**（`#note`，可访问名「备注」）—— 它是个看起来也很合理的目标。
+// 如果 agent 读完成验证码后**没有真正切到新标签页**就往输入框里打字，
+// 字会落进这个诱饵、本页的「保存备注」还可能被点，而 B 页什么也没收到：
+// **每一步都返回成功**，只有页面状态能拆穿。
+// 所以 E2E 除了断言 B 页收到验证码，还要断言 **A 页的诱饵没被动过、本页没提交**。
+function handoffPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具取件凭证</title></head>
+<body>
+  <h1>取件凭证</h1>
+  <p>验证码：<code id="code">RF-7391</code></p>
+  <label for="note">备注</label>
+  <input id="note" role="textbox" aria-label="备注">
+  <button id="save" type="button" role="button" aria-label="保存备注">保存备注</button>
+  <p><a id="go" href="/handoff-form" target="_blank" role="link" aria-label="打开填写页">打开填写页</a></p>
+  <div id="status" role="status">本页未提交</div>
+  <script>
+    window.__submits = 0;
+    window.__noteValue = null;
+    document.getElementById('note').addEventListener('input', function (e) {
+      window.__noteValue = e.target.value;
+    });
+    document.getElementById('save').addEventListener('click', function () {
+      window.__submits += 1;
+      document.getElementById('status').textContent = '本页已保存备注：' + (window.__noteValue || '（空）');
+    });
+  </script>
+</body></html>`;
+}
+
+// 填写页（**B 页 / 目标页**）：在新标签页里打开，验证码要填到这里。
+function handoffFormPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具填写验证码</title></head>
+<body>
+  <h1>填写验证码</h1>
+  <label for="code">验证码</label>
+  <input id="code" role="textbox" aria-label="验证码">
+  <button id="ok" type="button" role="button" aria-label="提交验证码">提交验证码</button>
+  <div id="status" role="status">等待填写</div>
+  <script>
+    window.__submits = 0;
+    window.__submittedCode = null;
+    document.getElementById('ok').addEventListener('click', function () {
+      window.__submits += 1;
+      window.__submittedCode = document.getElementById('code').value;
+      document.getElementById('status').textContent = window.__submittedCode
+        ? ('已提交验证码：' + window.__submittedCode)
+        : '请先填写验证码';
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1259,7 +1314,18 @@ const llm = http.createServer((req, res) => {
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
       if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '站内搜索', value: '咖啡' }); return; }
       if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '搜索' }); return; }
-      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      // ⚠ **必须先等结果渲染出来再读** —— 这一条原先漏了，于是成了 5 次里失败 1 次的**间歇性**用例。
+      //
+      // 夹具的搜索页是**刻意异步**的（`box.innerHTML = ''` 之后 `setTimeout(..., 120)` 才填充），
+      // 因为真实站点的结果是请求回来才有的。剧本点完「搜索」立刻 `inspect_element`，
+      // 就有一段时间窗读到**空列表** —— 而后面那条 `expect.poll(__renderedCount === 5)`
+      // 是在**已经取完工具结果之后**才轮询的，它看到的是 5，于是失败信息只显示
+      // "工具结果里没有【广告】"，完全指不到"读早了"。
+      //
+      // 这正是分页剧本里写明的那条纪律（"翻页后先 wait_for_element 再读"），检索这边当时没照做。
+      // 全部 5 条是在**同一个同步循环**里 append 的，所以"等到任意一条出现"就等于"5 条都到齐了"。
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#results .result', state: 'visible' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
       finalText(
         res,
         '已取回结果：哥伦比亚 慧兰 水洗 ￥88；埃塞俄比亚 耶加雪菲 ￥108；云南 小粒咖啡 ￥68。',
@@ -1622,6 +1688,21 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：跨标签页搬运（playbook id = 'cross-tab-handoff'）。
+    //
+    // 在 A 页读到验证码 → 点链接（会新开 B 页并**自动绑定**）→ 把验证码填进 B 页并提交。
+    // 关键顺序：**必须在点开新页之前把验证码读到手** —— 切过去之后 A 页的正文就不在眼前了。
+    if (userText.includes(PLAYBOOKS['cross-tab-handoff'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'link', name: '打开填写页' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { role: 'textbox', name: '验证码', value: 'RF-7391' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '提交验证码' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已把 A 页的取件验证码 RF-7391 填进新标签页的填写页并提交，回执为「已提交验证码：RF-7391」。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1660,7 +1741,11 @@ const main = http.createServer((req, res) => {
                                   : req.url && req.url.startsWith('/macro') ? macroPage()
                                     : req.url && req.url.startsWith('/upload') ? uploadPage()
                                       : req.url && req.url.startsWith('/notes') ? notesPage()
-                                        : mainPage()
+                                        // ⚠ `/handoff-form` 必须排在 `/handoff` **前面**：
+                                        // `startsWith('/handoff')` 会把 /handoff-form 也吃掉。
+                                        : req.url && req.url.startsWith('/handoff-form') ? handoffFormPage()
+                                          : req.url && req.url.startsWith('/handoff') ? handoffPage()
+                                            : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

@@ -71,6 +71,27 @@ export async function resetKnowledgeBase(context) {
   });
 }
 
+/**
+ * 等一个 URL 含某片段的**新标签页**出现，并返回它。
+ *
+ * 为什么收进来：多标签页场景里"新页什么时候开出来"是**竞态** ——
+ * 点击之后立刻 `context.pages()` 往往还看不到它，于是断言跑在一个不存在的页上。
+ * 而 `page.waitForEvent('popup')` 也不稳（由扩展经 chrome.tabs 打开的页不一定是 popup）。
+ * 稳妥做法是**轮询 context.pages()**。
+ */
+export async function waitForPage(context, urlPart, timeoutMs = 20_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const hit = context.pages().find((p) => p.url().includes(urlPart) && !p.isClosed());
+    if (hit) return hit;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(
+    '等不到 URL 含「' + urlPart + '」的标签页；当前已打开：' +
+      context.pages().map((p) => p.url()).join(' | ')
+  );
+}
+
 const MAIN_URL = 'http://127.0.0.1:7802';
 const LLM_PORT = 7804;
 
