@@ -266,6 +266,42 @@ test('entries/content.js 用静态 import（否则打不出自包含产物）', 
 
 // ---------------- 文档数字必须与实测一致（否则手写数字必然腐烂） ----------------
 
+test('README 的表格每行列数必须一致（替换「行首前缀」会留下旧尾巴，把行撑成多一列）', () => {
+  // 实测踩到：同步脚本里用「整行前缀」做替换（`s.split('| 页面世界执行 |').join(新行)`），
+  // 而前缀只到第二个竖线 —— 于是新行插进去了，**旧行的后半截还留在后面**，
+  // 那一行变成 3 列（表头是 2 列）。Markdown 不会报错，只是渲染出来多一格，
+  // 而且信息重复。这类"看着没事"的文档损坏值得一条门禁。
+  const lines = readFileSync('README.md', 'utf8').split('\n');
+  const problems = [];
+  let header = null;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!/^\|/.test(l)) {
+      header = null; // 离开表格
+      continue;
+    }
+    const cols = l.split('|').length - 2; // 首尾各一个空段
+    if (!header) {
+      header = cols;
+      continue;
+    }
+    if (/^\|\s*-{2,}/.test(l)) continue; // 分隔行
+    if (cols !== header) {
+      problems.push('第 ' + (i + 1) + ' 行：' + cols + ' 列（表头 ' + header + ' 列）');
+    }
+  }
+  assert.deepEqual(problems, [], 'README 表格列数不一致（多半是替换前缀时留下了旧尾巴）：\n  ' + problems.join('\n  '));
+});
+
+test('这条表格门禁本身有牙齿：多一列的行必须被认出，正常表格不受影响', () => {
+  const cols = (l) => l.split('|').length - 2;
+  assert.equal(cols('| A | B |'), 2);
+  assert.equal(cols('| A | B | 旧尾巴 |'), 3, '多出来的尾巴必须体现在列数上');
+  // 前缀替换的典型后果：新行 + 旧行剩余部分拼在一起
+  const merged = ('| 页面世界执行 |' + ' 新说明 |' + ' 旧说明 |').replace(/^\| 页面世界执行 \|/, '| 页面世界执行 |');
+  assert.equal(cols(merged), 3, '前缀替换后应能看出列数变多');
+});
+
 test('README 声称的测试数必须等于已提交的快照', () => {
   // 驱动这条的原因：同一个数字曾在三份文档里以 562 / 382 / 526 三个互相矛盾的值出现，
   // 且三个都不对。手写数字必然腐烂，因此把它变成会失败的断言。

@@ -2,6 +2,16 @@
 // - 主站（7802）：包含按钮/输入框 + 一个跨域 iframe。
 // - 框架站（7803）：跨域 iframe 内容。
 // - 模拟 LLM（7804）：OpenAI 兼容，按脚本返回 tool_calls / 文本，供 Agent 端到端测试。
+//
+// ===================================================================================
+// ⚠⚠ 本文件里的每个 `xxxPage()` 都返回**模板字符串**。在这个文件里写注释时：
+//
+//        不要在注释里使用反引号（`）
+//
+//     一个反引号就会**提前结束模板字符串**，文件直接语法错误。
+//     本会话为此踩了**四次**，每次都只是白跑一轮 `node --check`。
+//     需要引用代码/名字时用「」或直接写，别用反引号。
+// ===================================================================================
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1181,6 +1191,63 @@ function cspPage() {
 </body></html>`;
 }
 
+// 草稿页：验**撤销**这条声称的能力（README：「撤销可回退输入 / 勾选 / 选择 / 样式 / 滚动」）。
+//
+// 页面本身很简单，难点在**撤销栈的边界**：工具的描述写明了
+// 「仅输入 / 勾选 / 选择 / 改样式 / 滚动可撤销；**点击与导航不可撤销**」——
+// 于是"做了三件可撤销的事 + 点了一次保存，然后撤销上一步"时，
+// 撤销弹出的是**选择**那一格（最后一次可撤销动作），
+// **保存那一下不会被撤回**（`__saves` 保持 1）。
+//
+// 所以判据必须同时看两件事：**该回退的回退了**（优先级回到未设置）、
+// **不该回退的还在**（标题与发布保持、保存次数仍是 1）。
+// 只断言"回退了一部分"或"点了撤销"都证明不了这条边界。
+function undoPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具草稿</title></head>
+<body>
+  <h1>草稿</h1>
+  <label for="title">标题</label>
+  <input id="title" role="textbox" aria-label="标题">
+  <label for="publish">发布</label>
+  <input id="publish" type="checkbox" role="checkbox" aria-label="发布">
+  <label for="level">优先级</label>
+  <select id="level" role="combobox" aria-label="优先级">
+    <option value="">未设置</option>
+    <option value="high">高</option>
+    <option value="low">低</option>
+  </select>
+  <button id="save" type="button" role="button" aria-label="保存草稿">保存草稿</button>
+  <div id="status" role="status">未改动</div>
+  <script>
+    window.__saves = 0;
+    window.__state = { title: '', publish: false, level: '' };
+    var statusEl = document.getElementById('status');
+    function sync() {
+      window.__state = {
+        title: document.getElementById('title').value,
+        publish: document.getElementById('publish').checked,
+        level: document.getElementById('level').value,
+      };
+      statusEl.textContent =
+        '标题=' + (window.__state.title || '空') +
+        '／发布=' + (window.__state.publish ? '是' : '否') +
+        '／优先级=' + (window.__state.level || '未设置') +
+        '／保存次数=' + window.__saves;
+    }
+    ['input', 'change'].forEach(function (ev) {
+      document.getElementById('title').addEventListener(ev, sync);
+      document.getElementById('publish').addEventListener(ev, sync);
+      document.getElementById('level').addEventListener(ev, sync);
+    });
+    document.getElementById('save').addEventListener('click', function () {
+      window.__saves += 1;
+      sync();
+    });
+    sync();
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1982,6 +2049,24 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：撤销（playbook id = 'undo-last-action'）。
+    //
+    // 刻意做三件**可撤销**的事 + 一次**不可撤销**的点击，再撤销上一步 ——
+    // 验的正是"撤销只弹最后一次可撤销动作"这条边界。
+    if (userText.includes(PLAYBOOKS['undo-last-action'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '标题', value: '周报' }); return; }
+      if (done === 2) { toolStep(res, 'check_box', { role: 'checkbox', name: '发布', checked: true }); return; }
+      if (done === 3) { toolStep(res, 'select_option', { selector: '#level', label: '高' }); return; }
+      // 点击**不进撤销栈**（工具描述写明了）—— 这一下应当保留
+      if (done === 4) { toolStep(res, 'click_element', { role: 'button', name: '保存草稿' }); return; }
+      if (done === 5) { toolStep(res, 'undo_last_action', {}); return; }
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已撤销上一步（回退的是优先级选择）；标题「周报」与发布勾选保留，点击保存不在撤销范围内、保存次数仍为 1。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2035,7 +2120,8 @@ const main = http.createServer((req, res) => {
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()
-                                                    : mainPage()
+                                                    : req.url && req.url.startsWith('/undo') ? undoPage()
+                                                      : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

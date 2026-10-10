@@ -43,6 +43,16 @@ const stripComments = (s) =>
 const COUNTER =
   /window\.__(clicks|submits|nextClicks|portalClicks|compSubmits|runs|dragEnds)\b[^;]*\.(toBe|toEqual)\((\d+)\)/g;
 
+test('夹具服务必须能被 import（语法错误别等到跑 E2E 才发现）', async () => {
+  // 为什么值得单独一条：夹具页都是**模板字符串**，注释里一个反引号就会提前结束它们、
+  // 让整个文件语法错误。而读文件的门禁（本文件其它几条）只把它当**文本**，看不出语法问题；
+  // 唯一的拦截是"跑一次 E2E"，那要一分钟。这条把失败提前到 `npm test` 里（毫秒级）。
+  const mod = await import('./e2e/fixtures/server.mjs');
+  for (const fn of ['startServers', 'stopServers', 'getLlmRequests', 'toolResultsText', 'instructionOf']) {
+    assert.equal(typeof mod[fn], 'function', '夹具服务应导出 ' + fn);
+  }
+});
+
 test('E2E 里不许对「动作计数」写精确相等（那是路径断言，不是结果判据）', () => {
   // 这个坑本会话犯了两次（拖拽 `__dragEnds === 1`、排查 `__clicks === 1`），
   // 两次都是"结果完全达成，只因模型多做/少做了一次动作就被判失败"。

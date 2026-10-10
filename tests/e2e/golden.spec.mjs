@@ -1287,6 +1287,57 @@ test('golden: CSP 页面 —— 沙箱被 CSP 拒后自动改用页面主世界�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**撤销**（playbook 'undo-last-action'）。
+//
+// 覆盖 README 声称的「撤销可回退输入 / 勾选 / 选择 / 样式 / 滚动」。
+// 难点不在"能不能撤销"，而在**撤销栈的边界** —— 工具描述写明了
+// 「仅输入 / 勾选 / 选择 / 改样式 / 滚动可撤销；**点击与导航不可撤销**」。
+//
+// 所以这条用例刻意做三件可撤销的事 + 一次不可撤销的点击，再撤销上一步：
+// 被回退的应当是**选择**那一格（最后一次可撤销动作），而**保存那一下不该被撤回**。
+//
+// 判据因此必须**两头都看**：只断言"回退了一部分"或"点了撤销"都证明不了这条边界 ——
+// 前者看不出回退错了对象，后者根本不知道撤销了什么。
+//
+// ⚠ 这里断言的是**脚本自己那条确定顺序**（选优先级是最后一次可逆动作）。
+// 真模型 eval 那边**不能**这么写：模型可以换顺序（实测它就先选了优先级、后填标题，
+// 于是撤销撤的是标题 —— 完全正确）。那边用的是**顺序无关**的不变量"恰好一处被回退"。
+// 两层判据不同是**有意的**：脚本路径由我们控制，可以更锋利；模型路径不行。
+test('golden: 撤销 —— 只回退最后一次可撤销动作，点击不在撤销范围内', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/undo');
+
+  // 基线：三项都是初始值，且还没保存过
+  expect(await page.evaluate(() => window.__state)).toEqual({ title: '', publish: false, level: '' });
+  expect(await page.evaluate(() => window.__saves)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(
+    page,
+    '帮我改一下这个草稿：标题填「周报」，勾上发布，优先级选「高」，然后点一下「保存草稿」。做完这些之后撤销上一步，并告诉我这三项目前各是什么。'
+  );
+
+  // ⚠ 这里**必须 poll 整个组合状态**，不能只 poll 其中一项。
+  // 起初写的是 `poll(() => __state.level).toBe('')` —— 而「优先级=未设置」**正是基线的初值**，
+  // 于是这个 poll 立刻就满足了（等于没等），紧接着的断言读到的还是"什么都还没发生"的页面
+  // （实测报 `title` 为 `''`，看起来像"标题被连带回退了"，其实是**读早了**）。
+  // 组合状态 `{周报, true, ''}` 只在目标达成后才成立，所以它才真的在等。
+  await expect
+    .poll(() => page.evaluate(() => window.__state), { timeout: 40_000 })
+    .toEqual({ title: '周报', publish: true, level: '' });
+  // 「点击不可撤销」：保存这一下保留（这是本场景最锋利的一条）
+  await expect.poll(() => page.evaluate(() => window.__saves), { timeout: 20_000 }).toBe(1);
+
+  // ④ 页面回执与模型视角：撤销的回执 + 随后读回的状态都要到模型手里
+  await expect(page.locator('#status')).toHaveText(/优先级=未设置/);
+  await expect(page.locator('#status')).toHaveText(/保存次数=1/);
+  const seen = toolResultsText();
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已撤销上一步操作');
+  expect(seen).toContain('优先级=未设置');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

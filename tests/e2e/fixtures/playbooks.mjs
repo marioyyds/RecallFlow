@@ -603,6 +603,41 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['108'],
     },
   },
+
+  'undo-last-action': {
+    id: 'undo-last-action',
+    title: '复杂场景：撤销 —— 只回退最后一次可撤销动作（点击不算）',
+    trigger: '撤销',
+    // 难点是**撤销栈的边界**：工具写明「仅输入/勾选/选择/改样式/滚动可撤销；点击与导航不可撤销」。
+    // 于是"改三项 + 点保存 + 撤销上一步"里，被回退的是**选择**那一格，
+    // 而**保存那一下不会被撤回**。判据必须同时看两边：该回退的回退了、不该回退的还在。
+    tools: ['get_page_snapshot', 'type_text', 'check_box', 'select_option', 'click_element', 'undo_last_action', 'inspect_element'],
+    success: '撤销只回退了最后一次可撤销动作（优先级），标题/发布/保存次数都不受影响',
+    eval: {
+      url: '/undo',
+      instruction:
+        '帮我改一下这个草稿：标题填「周报」，勾上发布，优先级选「高」，然后点一下「保存草稿」。做完这些之后撤销上一步，并告诉我这三项目前各是什么。',
+      pageChecks: [
+        // ⚠ 判据必须**顺序无关**：用户给的顺序是"标题→发布→优先级→保存"，
+        // 但模型完全可以换个顺序做（实测它就**先选了优先级、后填标题**）。
+        // 于是"撤销上一步"撤掉的是**它自己最后做的那一步**，而不是我以为的那一步。
+        // 最初我把检查写成"优先级被回退、标题保留"——那是在验**路径**，
+        // 把一次完全正确的撤销判成了失败（这是本会话第三次栽在路径断言上）。
+        //
+        // 正确的不变量：三处改动里**恰好一处**被回退（其余保留）——
+        // 三次改动都是可撤销的，撤一格就只该少一格。
+        {
+          expr:
+            "['title','publish','level'].map(function(k){return {title:'周报',publish:true,level:'high'}[k]===window.__state[k];}).filter(Boolean).length === 2",
+          label: '三处改动里恰好一处被回退（撤销只弹一格）',
+        },
+        // ★ 最锋利的一条，且与顺序无关：**点击不进撤销栈**
+        { expr: 'window.__saves === 1', label: '**点击保存不可撤销** —— 保存次数仍是 1' },
+      ],
+      // 撤销的回执、以及读回的状态里"保存次数仍为 1"，都要到模型手里
+      mustSeeInToolResults: ['已撤销上一步操作', '保存次数=1'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
