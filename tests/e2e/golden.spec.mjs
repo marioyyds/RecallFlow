@@ -373,3 +373,71 @@ test('golden: 点单 —— 四种控件各走对工具，且业务校验真的�
 
   await page.close();
 });
+
+// 能力验收：**UI 美化 / 可读性**（playbook 'readability-fix'）。
+//
+// 这一条的核心不是"改没改样式"，而是**美化与搞坏的分界**：
+// 把正文 display:none 掉，对比度与溢出两项立刻"达标"；删掉两段，溢出也没了。
+// 所以断言必须成对出现：
+//   ① 指标达标（字号 / 行高 / 对比度 / 无横向溢出）；
+//   ② **内容没少、仍可见** —— 只有①会被"隐藏内容"骗过。
+//
+// 另外，对比度用**有效背景色**（向上找第一个不透明背景）计算：
+// 元素自身的 background-color 默认是 transparent，直接用会当成黑色，
+// 于是深色文字被算成接近 1:1 —— 改好了却判成没改好。
+test('golden: UI 美化 —— 可读性指标达标，且不是靠隐藏/删内容换来的', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/article');
+
+  // 改之前的基线：确认这个页面**确实难读**，否则这条用例没有意义
+  const before = await page.evaluate(() => window.__readability());
+  expect(before.fontSize).toBeLessThan(16);
+  expect(before.contrast).toBeLessThan(4.5);
+  expect(before.hOverflow).toBeGreaterThan(2);
+  expect(before.textLength).toBeGreaterThan(100);
+
+  resetLlmRequests();
+  await sendInstruction(page, '这个页面读起来太费劲了，帮我做一下可读性美化：正文字号设成 17px、行高不小于 1.6、正文与背景的对比度至少 4.5，并且不要横向溢出。');
+  // 刻意**不点审批**：剧本用的是只读的 `inspect_element({op:'styles'})`。
+  // 这条用例同时钉住"取证不该借道 run_javascript"—— 那玩意 alwaysRequireApproval，
+  // 一旦有人把它换回去，这里就会因为等不到审批而超时。
+
+  // ① 等**全部**指标同时达标，再读细节。
+  //
+  // ⚠ 这里有个容易写错的地方（本轮实测踩到）：只 poll 其中一项（比如字号）会在**中间步骤**
+  // 就满足 —— 而"容器宽度"是剧本的**后一步**才改的。于是 poll 一通过就立刻读 hOverflow，
+  // 读到的是"宽度还没改"的旧值，用例偶发失败。
+  // 正确做法：poll 的谓词必须是**全部条件**，细节断言放到 poll 之后再重新读一次。
+  await expect
+    .poll(
+      async () => {
+        const r = await page.evaluate(() => window.__readability());
+        return (
+          r.fontSize === 17 &&
+          r.lineHeightRatio >= 1.6 &&
+          r.contrast >= 4.5 &&
+          r.hOverflow <= 2 &&
+          r.visible &&
+          r.textLength === before.textLength
+        );
+      },
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  const after = await page.evaluate(() => window.__readability());
+  expect(after.fontSize).toBe(17);
+  expect(after.lineHeightRatio).toBeGreaterThanOrEqual(1.6);
+  expect(after.contrast).toBeGreaterThanOrEqual(4.5);
+  expect(after.hOverflow).toBeLessThanOrEqual(2);
+
+  // ② **没有靠作弊达标**：内容仍然可见，且字数一个没少
+  expect(after.visible).toBe(true);
+  expect(after.textLength).toBe(before.textLength);
+
+  // ③ 模型必须**读回**改动后的计算值，而不是只凭"调用成功"就宣布改好了 ——
+  // 否则那正是"看起来完成了"的假象。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('17px');
+
+  await page.close();
+});

@@ -67,8 +67,34 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['下单成功', '埃塞俄比亚 耶加雪菲'],
     },
   },
-});
 
+  'readability-fix': {
+    id: 'readability-fix',
+    title: 'UI 美化 / 可读性：把难读的正文调成易读，且不靠删内容达成',
+    trigger: '美化',
+    // 只用一个工具（annotate 的 op:style），但**两次调用改两个不同目标**：
+    // 正文排版（body）与容器宽度（.wrap，修横向溢出）。
+    // 最后一步用 `inspect_element({op:"styles"})` 读回**计算后的**值来取证 ——
+    // 这是本轮做美化能力时补出来的一档（原先只能借道 run_javascript，
+    // 而它 alwaysRequireApproval 且会被页面 CSP 拦住）。
+    tools: ['get_page_snapshot', 'annotate', 'inspect_element'],
+    success: '字号 17px、行高比 ≥1.6、对比度 ≥4.5、无横向溢出，且**正文字数没变少、内容仍可见**',
+    eval: {
+      url: '/article',
+      instruction:
+        '这个页面读起来太费劲了，帮我做一下可读性美化：正文字号设成 17px、行高不小于 1.6、正文与背景的对比度至少 4.5，并且不要横向溢出。',
+      pageChecks: [
+        { expr: 'window.__readability().visible', label: '正文仍然可见（没有靠隐藏内容达标）' },
+        { expr: 'window.__readability().textLength === window.__textBefore', label: '正文字数没变少（没有靠删内容达标）' },
+        { expr: 'window.__readability().fontSize === 17', label: '字号已设为 17px' },
+        { expr: 'window.__readability().lineHeightRatio >= 1.6', label: '行高比 ≥ 1.6' },
+        { expr: 'window.__readability().contrast >= 4.5', label: '对比度 ≥ 4.5' },
+        { expr: 'window.__readability().hOverflow <= 2', label: '没有横向溢出' },
+      ],
+      mustSeeInToolResults: ['17px'],
+    },
+  },
+});
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
   const pb = PLAYBOOKS[id];

@@ -158,6 +158,73 @@ function checkoutPage() {
 </body></html>`;
 }
 
+// 文章页：一个**刻意难读**的页面，用来做"可读性美化"。
+//
+// 难点不在"改一个属性"，而在**美化与搞坏的分界**：
+//   · 字号 11px、行高 1（挤成一团）、正文 #c9c9c9 on #fff（对比度约 1.6，远低于 4.5）；
+//   · 容器宽 1500px → **横向溢出**（在窄窗口里必须左右拖才能读）；
+//   · 于是"把它变得好读"可以用很多手法，其中有些是**作弊**：
+//     把正文 display:none 掉、或删掉几段 —— 那样对比度/溢出全都"达标"了，但内容没了。
+//
+// 所以页面自带一个测量器 `window.__readability()`，并记下**改动前的正文字数**：
+// 断言里必须同时检查"指标达标"与"内容没少" —— 后者才是美化与搞坏的分界。
+function articlePage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具文章页</title>
+<style>
+  /* 全部刻意做差：小字号、行高 1、低对比、超宽容器 */
+  body { margin: 0; font-family: system-ui; font-size: 11px; line-height: 1; color: #c9c9c9; background: #ffffff; }
+  h1 { font-size: 12px; margin: 0; }
+  p { margin: 0; }
+  .wrap { width: 1500px; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="article">
+    <h1>为什么行高与对比度比字体更影响可读性</h1>
+    <p>正文的易读性主要由三件事决定：字号、行高、以及前景与背景的对比度。三者之中，行高的影响往往被低估——行与行贴得太近时，眼睛在换行时容易串行，阅读速度会明显下降。</p>
+    <p>对比度同样关键。浅灰文字放在白底上看似“高级”，但对比度低于 4.5:1 时，在户外或低亮度屏幕上几乎无法辨认。可访问性指南把 4.5:1 作为正文的最低要求，并非苛刻，而是来自大量实测。</p>
+    <p>最后是宽度。一行文字过长会让视线难以准确定位到下一行的开头，于是读者反复回扫。把正文容器限制在 60 到 80 个字符宽，通常能显著改善长文的阅读体验。</p>
+  </div>
+  <script>
+    function lum(c) {
+      var m = String(c).match(/\\d+(\\.\\d+)?/g) || [0, 0, 0];
+      var f = function (v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * f(+m[0]) + 0.7152 * f(+m[1]) + 0.0722 * f(+m[2]);
+    }
+    // 有效背景色：**必须向上找**，因为元素自身的 background-color 默认是 transparent。
+    // 直接用元素的 backgroundColor 会解析成 rgba(0,0,0,0) → 当成黑色 →
+    // 与深色文字算出的对比度接近 1:1，于是"改好了"被误判为没改好（实测踩过）。
+    function effBg(el) {
+      var n = el;
+      while (n && n.nodeType === 1) {
+        var c = getComputedStyle(n).backgroundColor;
+        if (c && c !== 'transparent' && !/rgba\\(0,\\s*0,\\s*0,\\s*0\\)/.test(c)) return c;
+        n = n.parentElement;
+      }
+      return 'rgb(255,255,255)';
+    }
+    window.__readability = function () {
+      var el = document.querySelector('.wrap');
+      var cs = getComputedStyle(el);
+      var fs = parseFloat(cs.fontSize) || 0;
+      var lh = cs.lineHeight === 'normal' ? 1.2 : (parseFloat(cs.lineHeight) || 0) / (fs || 1);
+      var a = lum(cs.color), b = lum(effBg(el));
+      var hi = Math.max(a, b), lo = Math.min(a, b);
+      return {
+        fontSize: fs,
+        lineHeightRatio: Math.round(lh * 100) / 100,
+        contrast: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100,
+        hOverflow: document.documentElement.scrollWidth - window.innerWidth,
+        textLength: (el.innerText || '').replace(/\\s+/g, '').length,
+        visible: cs.display !== 'none' && cs.visibility !== 'hidden' && el.offsetHeight > 0,
+      };
+    };
+    // 改动前的正文字数：用来断言"美化没有靠删内容达成"
+    window.__textBefore = window.__readability().textLength;
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -481,6 +548,47 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：UI 美化 / 可读性（playbook id = 'readability-fix'）。
+    //
+    // 难点是**美化与搞坏的分界**：把正文隐藏掉也能让"对比度达标"，删几段也能让"不溢出"。
+    // 所以剧本必须**真的改样式**（两次 annotate，分别改排版与容器宽度），
+    // 并且**读回计算后的值**才算验证过。
+    //
+    // ⚠ 最后一步用 run_javascript 读 getComputedStyle，是因为面板 agent 目前**没有**
+    //   专门的"读计算样式"入口（`verify_change` 只对 MCP 侧开放，`inspect_element` 的
+    //   op 只有 inspect/text/table，`annotate` 只回一句摘要）。这是本轮发现的能力缺口。
+    if (userText.includes(PLAYBOOKS['readability-fix'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) {
+        toolStep(res, 'annotate', {
+          op: 'style',
+          selector: 'body',
+          styles: { fontSize: '17px', lineHeight: '1.7', color: '#1a1a1a', background: '#ffffff' },
+        });
+        return;
+      }
+      if (done === 2) {
+        // 修横向溢出：把固定 1500px 宽改成自适应 + 上限，这才是"可读"的宽度
+        toolStep(res, 'annotate', { op: 'style', selector: '.wrap', styles: { width: 'auto', maxWidth: '760px' } });
+        return;
+      }
+      if (done === 3) {
+        // 读回**计算后的**样式来取证。
+        // 这里刻意用 `inspect_element({op:"styles"})` 而不是 run_javascript：
+        // 后者是 alwaysRequireApproval（每次打断用户）且会因页面 CSP 直接失败 ——
+        // 本轮做美化能力时正是踩到这一点，才补出了 styles 这一档（见 commands.js 的 cmdReadStyles）。
+        toolStep(res, 'inspect_element', {
+          op: 'styles',
+          selector: '.wrap',
+          props: ['font-size', 'line-height', 'color', 'max-width', 'overflow-x'],
+        });
+        return;
+      }
+      finalText(res, '已把正文调成 17px / 行高 1.7 / 深色文字，并把容器宽度限制到 760px，横向溢出已消除。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -504,7 +612,8 @@ const main = http.createServer((req, res) => {
     req.url && req.url.startsWith('/coord') ? coordPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
-          : mainPage()
+          : req.url && req.url.startsWith('/article') ? articlePage()
+            : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {
