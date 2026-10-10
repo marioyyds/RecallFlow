@@ -1,5 +1,5 @@
 // 设置页（API Key/模型/RAG/工具审批/快捷语句/MCP）
-import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings } from './lib/shared/settings.js';
+import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecutionApproval } from './lib/shared/settings.js';
 import { esc } from './lib/shared/utils.js';
 import { getUserscriptSettings, saveUserscriptSettings } from './lib/userscript/settings.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
@@ -22,7 +22,9 @@ async function load() {
   const policy = Object.assign({ read: true, edit: false, commands: false, browser: false, mcp: false }, s.toolApprovalPolicy || {});
   ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!policy[k]; });
   $('approval-notify').checked = s.toolApprovalNotify !== false;
-  $('runjs-approval').value = s.runJavascriptApproval || 'session';
+  $('code-exec-approval').value = resolveCodeExecutionApproval(s);
+  // 桥接 token：回填真实值，便于用户与 server 端环境变量核对/修改。
+  $('bridge-token').value = s.bridgeToken || '';
   syncApprovalPreset();
   const budget = s.agentBudget || {};
   // 工具调用次数与推理轮数上限已移除（对齐 DSH：不限制做了多少件事），
@@ -106,7 +108,8 @@ $('save-btn').addEventListener('click', async () => {
     toolApproval: $('tool-approval').checked,
     toolApprovalPolicy: Object.fromEntries(['read', 'edit', 'commands', 'browser', 'mcp'].map((k) => [k, $('approval-' + k).checked])),
     toolApprovalNotify: $('approval-notify').checked,
-    runJavascriptApproval: $('runjs-approval').value || 'session',
+    codeExecutionApproval: $('code-exec-approval').value || 'session',
+    bridgeToken: $('bridge-token').value.trim(),
     quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
     mcpServers: collectMcp(),
     agentBudget: {

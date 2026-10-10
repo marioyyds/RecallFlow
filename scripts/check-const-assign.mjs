@@ -21,15 +21,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOTS = ['lib', 'integrations/opencode/recallflow-mcp'];
-const SKIP = /node_modules|[\\/]test[\\/]|\.min\.js$/;
+// 扫描范围：**仓库根目录**，而不是只有 lib/。
+//
+// 原先 ROOTS = ['lib', 'integrations/opencode/recallflow-mcp'] 且只收 `.js`，
+// 于是 background.js / content.js / popup.js / userscripts.js / skills-page.js
+// 以及**所有 `.mjs`**（含 scripts/ 与 tests/）都在盲区之外。
+// 这个检查当初是为了抓 agent.js 里那个 `const deterministicFails` 被 `+= 1` 的崩溃
+// —— 它恰好位于 lib/ 内，所以能工作，但那是**运气而非设计**：
+// 同一类错误写在这几个根文件里就永远不会被发现。
+const ROOTS = ['.'];
+// 跳过依赖、忽略目录与**构建产物**；同时纳入 .mjs（本仓库的测试与门禁脚本都是 .mjs）。
+//
+// `content.js` 是 `scripts/build-content.mjs` 生成的打包产物（源码在 entries/content.js），
+// 必须排除：① 检查产物等于检查生成器，源码才是改动的对象；
+// ② 产物里字符串/正则的长行会被本检查器的保守剥离策略误判 ——
+//    实测扫出 3721 处假阳性，把真正的信号淹没了。
+const SKIP = /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|\.min\.js$/;
+// 生成物（源码在 entries/ 下）；按相对路径精确排除，避免误伤未来同名源码。
+const GENERATED = new Set(['content.js']);
+const EXTENSIONS = ['.js', '.mjs'];
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (SKIP.test(p)) continue;
     if (e.isDirectory()) walk(p, out);
-    else if (e.name.endsWith('.js')) out.push(p);
+    else if (EXTENSIONS.some((ext) => e.name.endsWith(ext))) out.push(p);
   }
   return out;
 }
@@ -119,12 +136,16 @@ export function stripStringsAndComments(src) {
 
 export function findConstAssignments(roots = ROOTS) {
   const findings = [];
+  const files = [];
   let scanned = 0;
 
   for (const root of roots) {
     if (!fs.existsSync(root)) continue;
     for (const file of walk(root)) {
+      const relForSkip = path.relative(process.cwd(), file).split(path.sep).join('/');
+      if (GENERATED.has(relForSkip)) continue;
       scanned++;
+      files.push(path.relative(process.cwd(), file).split(path.sep).join('/'));
       const lines = stripStringsAndComments(fs.readFileSync(file, 'utf8'));
       const decls = new Map();
       const note = (name, kind, lineNo) => {
@@ -141,6 +162,24 @@ export function findConstAssignments(roots = ROOTS) {
         // 声明：允许有/无初始化，允许 of/in
         for (const m of code.matchAll(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[=;,)\]}])/g)) note(m[2], m[1], i + 1);
         for (const m of code.matchAll(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s+(?:of|in)\b/g)) note(m[2], m[1], i + 1);
+        // 解构声明：`let [sw] = ...` / `const { a, b } = ...` / `const [a, b] = ...`。
+        // 为什么必须单独处理：上面的正则要求标识符后紧跟 `=` 或 `,` 等，
+        // 而解构声明是 `名 空格 [/{`。漏掉它会有两个后果：
+        //   ① 该名字的 const/let 声明未被登记 → 对它的赋值被漏报（假阴性）；
+        //   ② 若同一文件另有 `const 同名`（不同作用域），会把别处的赋值算到它头上（假阳性）。
+        // 实测：tests/e2e/golden.spec.mjs 的 `let [sw]` 与另一个作用域的 `const sw`
+        // 合并成「const 被赋值」，即是第 ② 类。
+        for (const m of code.matchAll(/\b(const|let|var)\s*([[{]([^\]}]*)[\]}])/g)) {
+          for (const raw of m[3].split(',')) {
+            // 取 `a` / `a: b` / `a = 1` / `...rest` 中的绑定名
+            const nm = raw
+              .trim()
+              .replace(/^\.\.\./, '')
+              .replace(/\s*[:=][\s\S]*$/, '')
+              .replace(/[^\w$]/g, '');
+            if (nm) note(nm, m[1], i + 1);
+          }
+        }
         for (const m of code.matchAll(/\b(function|class)\s+([A-Za-z_$][\w$]*)/g)) note(m[2], 'let', i + 1);
         for (const m of code.matchAll(/\(([^()]*)\)\s*(?:=>|\{)/g)) {
           for (const raw of m[1].split(',')) {
@@ -163,7 +202,7 @@ export function findConstAssignments(roots = ROOTS) {
       }
     }
   }
-  return { findings, scanned };
+  return { findings, scanned, files };
 }
 
 // CLI：仅在直接执行时输出报告并设定退出码（被测试 import 时不产生副作用）

@@ -99,13 +99,27 @@
         <input id="tool-approval" type="checkbox" hidden checked>
       </div>
       <label class="field">
-        <span class="field-label">run_javascript 审批</span>
-        <select id="runjs-approval" class="us-select">
+        <span class="field-label">代码执行审批</span>
+        <select id="code-exec-approval" class="us-select">
           <option value="each">每次都要确认</option>
           <option value="session">本任务内允许一次（推荐）</option>
           <option value="auto">自动批准（不再询问）</option>
         </select>
-        <span class="hint">run_javascript 是高风险的页面 JS 逃生舱（受限沙箱）。设为「本任务内允许一次」可避免同一次任务里反复弹窗。</span>
+        <span class="hint">
+          约束<b>所有执行任意/第三方代码</b>的工具：run_javascript（页面 JS 逃生舱）、
+          run_userscript / install_userscript（用户脚本，会从远程自动更新）。
+          注意它们共用这一个开关 —— 设为「自动批准」等于同时放开这三者。
+        </span>
+      </label>
+      <label class="field">
+        <span class="field-label">桥接 Token（本机 MCP 集成）</span>
+        <input id="bridge-token" type="password" autocomplete="off" placeholder="留空则不连接本机 MCP server">
+        <span class="hint">
+          与启动 recallflow-mcp 时的环境变量 <code>RECALLFLOW_BRIDGE_TOKEN</code> 必须完全一致。
+          留空 = 不连接（扩展其余功能不受影响）。<b>不再有内置默认值</b>：此前那个公开常量
+          会让任何本机进程都能冒充本扩展并伪造证据。
+          生成示例：<code>node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"</code>
+        </span>
       </label>
       <label class="field">
         <span class="field-label">翻译目标语言</span>

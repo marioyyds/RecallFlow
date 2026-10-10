@@ -114,8 +114,9 @@ test('高危工具绝不并行（alwaysRequireApproval）', () => {
 });
 
 test('会切换标签页 / 改变当前页面的工具绝不并行', () => {
-  // 它们会改 ctx.tabId / ctx.pageUrl，同批其它调用读到的是「哪个页面」就不确定了
-  const forbidden = ['open_tab', 'switch_tab', 'click_element', 'scroll_page', 'run_javascript', 'click_at', 'run_macro'];
+  // 它们会改 ctx.tabId / ctx.pageUrl，同批其它调用读到的是「哪个页面」就不确定了。
+  // `macro` 在前：macro(op="run") 会回放开页/切换等步骤（即原 run_macro），因此同样不得并行。
+  const forbidden = ['open_tab', 'switch_tab', 'click_element', 'scroll_page', 'run_javascript', 'click_at', 'macro'];
   for (const name of forbidden) {
     assert.notEqual(TOOL_METADATA[name].parallelSafe, true, name + ' 会改变页面状态，不得标记 parallelSafe');
   }
@@ -143,7 +144,7 @@ test('截图不并行（重且会向 UI 推图，同批没有收益）', () => {
 
 test('真实白名单下：三个只读调用能成组', () => {
   const groups = planParallelGroups(
-    [call('get_page_snapshot'), call('read_current_page'), call('get_element_text')],
+    [call('get_page_snapshot'), call('read_current_page'), call('inspect_element')],
     { isParallelSafe: (n) => TOOL_METADATA[n].parallelSafe === true }
   );
   assert.deepEqual(groups, [[0, 1, 2]]);

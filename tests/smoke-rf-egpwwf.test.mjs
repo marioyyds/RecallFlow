@@ -109,20 +109,22 @@ test('接线：page-text.js 不得再用原生 closest 做排除', () => {
 
 // ---------------------------------------------------------------- ③ 宏名不再有歧义
 
-test('接线：list_macros 必须显式标出 name（原写法名字与描述共用 `：`，边界歧义）', () => {
-  const src = fs.readFileSync('lib/assistant/tools.js', 'utf8');
-  assert.ok(/name="' \+ m\.name \+ '"/.test(src), 'list_macros 应把 name 用引号显式标出');
+test('接线：宏列表必须显式标出 name（原写法名字与描述共用 `：`，边界歧义）', () => {
+  // C-4 第 5 档合并后，实现从 tools.js 移到 lib/assistant/macros.js —— 断言跟着实现走，
+  // 而不是跟着文件名走（否则一次纯搬运就会让这条门禁失效）。
+  const src = fs.readFileSync('lib/assistant/macros.js', 'utf8');
+  assert.ok(/name="' \+ m\.name \+ '"/.test(src), '宏列表应把 name 用引号显式标出');
   assert.ok(
     !/\+ m\.name \+ \(m\.description \? '：'/.test(src),
     '旧的「名字：描述」拼法应已消失 —— 实测它让 agent 连试两次才猜对名字'
   );
 });
 
-test('接线：run_macro 找不到时必须列出可用宏名，而不是让调用方自己去看', () => {
-  const src = fs.readFileSync('lib/assistant/tools.js', 'utf8');
+test('接线：宏找不到时必须列出可用宏名，而不是让调用方自己去看', () => {
+  const src = fs.readFileSync('lib/assistant/macros.js', 'utf8');
   assert.ok(/本站可用的宏名如下，请照抄 name 的值/.test(src), '报错要直接给出候选');
   assert.ok(
-    !/未找到宏「' \+ name \+ '」（可用 list_macros 查看）/.test(src),
-    '旧的「可用 list_macros 查看」应已消失'
+    !/（可用 list_macros 查看）/.test(src),
+    '旧的「可用 list_macros 查看」应已消失（那等于把活推回给刚试错过的调用方）'
   );
 });

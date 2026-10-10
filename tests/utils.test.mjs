@@ -368,7 +368,7 @@ test('formatHighlightResult: 超上限时必须写明还剩多少条**未处理*
   assert.match(s, /未处理/);
   assert.match(s, /共收到 25 条/);
   assert.match(s, /5 条/, '必须给出未处理的条数：' + s);
-  assert.match(s, /再调用一次 highlight_text/);
+  assert.match(s, /再调用一次 annotate\(\{op:"highlight"/);
   // 关键：这句话绝不能被读成「25 条全做完了」
   assert.ok(!/^已高亮 25/.test(s));
 });

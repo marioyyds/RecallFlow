@@ -14,7 +14,8 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -35,10 +36,30 @@ const EXT_TIMEOUT_MS = Number(process.env.RECALLFLOW_EXT_TIMEOUT_MS) || 60000;
 const POLL_HOLD_MS = 25000;
 // 本地桥接鉴权：仅接受来自扩展的请求。扩展 fetch 带 host_permissions 不受 CORS 限制，
 // 而网页脚本既无法绕过 Host 校验（防 DNS rebinding），也无法携带自定义头（无 CORS 预检放行），
-// 因此「Host 白名单 + 共享 token 头」即可把网页挡在门外。token 可用环境变量覆盖。
-const BRIDGE_TOKEN = process.env.RECALLFLOW_BRIDGE_TOKEN || 'recallflow-local-bridge-v1';
+// 因此「Host 白名单 + 共享 token 头」即可把网页挡在门外。
+//
+// **不再有公开的默认 token。** 原先这里的回退值是 'recallflow-local-bridge-v1'，
+// 它与扩展侧写死成同一个常量、并且被 README 印了出来 —— 等于把一个"共享密钥"提交进了仓库。
+// 任何本机进程（或读到该文档的人）都能拿它冒充扩展，进而**伪造任意"证据"快照**，
+// 而证据链（时间戳 + 哈希归档）正是本项目的对外承诺。
+// 现在必须显式提供 token；缺失则快速失败，并给出可直接照做的生成命令。
+const BRIDGE_TOKEN = String(process.env.RECALLFLOW_BRIDGE_TOKEN || '');
+if (!BRIDGE_TOKEN) {
+  process.stderr.write(
+    '[recallflow-mcp] 缺少桥接鉴权 token，已拒绝启动。\n' +
+      '  桥接端口用于「扩展 ↔ MCP server」通信，必须共享一个只有你知道的密钥；\n' +
+      '  此前存在一个写死在仓库里的默认值，任何人都能用它冒充扩展并伪造证据，因此已移除。\n\n' +
+      '  生成并设置（PowerShell）：\n' +
+      "    $t = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })\n" +
+      '    $env:RECALLFLOW_BRIDGE_TOKEN = $t\n' +
+      '    # 把同一个 $t 填进扩展：设置页 → 桥接 Token（选项页可保存）\n\n' +
+      '  bash/zsh：\n' +
+      '    export RECALLFLOW_BRIDGE_TOKEN=$(openssl rand -hex 24)\n'
+  );
+  process.exit(1);
+}
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + PORT, 'localhost:' + PORT, '[::1]:' + PORT]);
-// 无需鉴权的探活路径（只读、无副作用）。
+// 无需鉴权的探活路径（只读、无副作用）。刻意不含任何秘密或页面内容。
 const OPEN_PATHS = new Set(['/health']);
 // MCP over Streamable HTTP 的端点路径。它与扩展桥接**共用同一端口**，
 // 因此多个 opencode 实例可以连同一个常驻进程（各自独立会话），无需各自拉起 MCP server。
@@ -60,22 +81,67 @@ function bearerToken(req) {
   return m ? m[1].trim() : '';
 }
 
+// 常量时间字符串比较。长度本身会泄露，因此长度不同直接判否（这是公认可接受的取舍），
+// 长度相同时用 timingSafeEqual 逐字节比较，避免按字节提前返回的时序侧信道。
+export function timingSafeEqualStr(a, b) {
+  const x = Buffer.from(String(a === undefined || a === null ? '' : a), 'utf8');
+  const y = Buffer.from(String(b === undefined || b === null ? '' : b), 'utf8');
+  if (x.length === 0 || x.length !== y.length) return false;
+  try {
+    return timingSafeEqual(x, y);
+  } catch (e) {
+    return false;
+  }
+}
+
 // ---------------- 与扩展的通道（WS + HTTP 长轮询） ----------------
 let extSocket = null;
 // 桥接端口绑定失败的原因（非空表示本进程永远收不到扩展连接）。
 // 多实例场景（多个 opencode 各自拉起一个 MCP server）下只有第一个能占用端口，
 // 其余进程必须快速失败，否则每次调用都要白等 60 秒超时且看不出原因。
 let bridgeBindError = '';
-const pending = new Map(); // id -> { resolve, reject, timer }
-const queue = []; // 等待扩展处理的请求
-const pollWaiters = []; // 挂起的长轮询响应
-let seq = 0;
 
-function nextId() {
-  return ++seq;
+// 请求/响应按**会话分桶**。
+//
+// 为什么必须分桶：原先 queue / pending / seq 都是全局单份，而 /poll 会把**整个队列**
+// 交给第一个等待者（`queue.splice(0, queue.length)`）、/result 接受任意 id。
+// 于是两个 MCP 客户端并发调用时，A 可能收到 B 的页面正文 —— 对前端调试来说，
+// 这等于把 file:line 归因挂到错误的页面上，比报错更糟（错误结果看起来是对的）。
+// MCP 侧的 mcpSessions 只隔离了 MCP 自身状态，没有隔离这条浏览器通道。
+//
+// 设计取舍：扩展是长轮询的**发起方**，服务端无法凭连接区分会话，
+// 因此让 job 携带 session 标记、扩展原样回带（见 relay.js），/poll 也支持按会话取活。
+// stdio 模式没有 HTTP 会话概念，统一落到 DEFAULT_SESSION。
+const DEFAULT_SESSION = 'stdio';
+const sessionBuckets = new Map(); // sessionId -> { queue, pending, seq }
+// 每个挂起的长轮询记录它愿意服务的会话集合（null = 不限，兼容旧扩展）。
+const pollWaiters = []; // { resolve: (jobs) => void, sessions: Set|null }
+
+function bucketOf(sessionId) {
+  const id = String(sessionId || DEFAULT_SESSION);
+  let b = sessionBuckets.get(id);
+  if (!b) {
+    b = { queue: [], pending: new Map(), seq: 0 };
+    sessionBuckets.set(id, b);
+  }
+  return b;
 }
 
-// 由 MCP 工具调用：把请求排入队列，等扩展取走并回结果。
+// 当前正在为哪个 MCP 会话服务。
+// 用 AsyncLocalStorage 而不是给 callExtension 加参数：它被 10 处调用，
+// 逐个传参会漏传（漏传就静默退回默认桶，等于没修）；异步上下文自动覆盖整条调用链。
+const sessionContext = new AsyncLocalStorage();
+
+function currentSession() {
+  const store = sessionContext.getStore();
+  if (!store) return DEFAULT_SESSION;
+  // 两种形态：已建立会话的请求直接存字符串；建立会话的那一次请求存一个带 id getter 的
+  // 包装对象（因为真实 sessionId 在该请求内部才由 SDK 生成）。
+  const id = typeof store === 'string' ? store : store.id;
+  return id ? String(id) : DEFAULT_SESSION;
+}
+
+// 由 MCP 工具调用：把请求排入**本会话的**队列，等扩展取走并回结果。
 function callExtension(method, params) {
   return new Promise((resolve, reject) => {
     // 本进程没能占用桥接端口 → 永远收不到扩展连接，立即给出可操作的原因，
@@ -84,41 +150,76 @@ function callExtension(method, params) {
       reject(new Error(bridgeBindError));
       return;
     }
-    const id = nextId();
+    const session = currentSession();
+    const bucket = bucketOf(session);
+    const id = ++bucket.seq;
     const timer = setTimeout(() => {
-      pending.delete(id);
-      const i = queue.findIndex((q) => q.id === id);
-      if (i >= 0) queue.splice(i, 1);
+      bucket.pending.delete(id);
+      const i = bucket.queue.findIndex((q) => q.id === id);
+      if (i >= 0) bucket.queue.splice(i, 1);
       reject(new Error('等待扩展响应超时（' + EXT_TIMEOUT_MS + 'ms）'));
     }, EXT_TIMEOUT_MS);
-    pending.set(id, { resolve, reject, timer });
-    const job = { id, method, params };
+    bucket.pending.set(id, { resolve, reject, timer });
+    // session 是回程路由标记：扩展不解释它，只原样回带（见 relay.js 的 result 回传）。
+    const job = { id, method, params, session };
     if (extSocket && extSocket.readyState === 1) {
       try {
         extSocket.send(JSON.stringify(job));
       } catch (e) {
-        queue.push(job);
+        bucket.queue.push(job);
       }
     } else {
-      queue.push(job);
+      bucket.queue.push(job);
     }
     flushPollWaiters();
   });
 }
 
-function resolvePending(id, payload) {
-  const p = pending.get(id);
-  if (!p) return;
-  pending.delete(id);
-  clearTimeout(p.timer);
-  if (payload && payload.error) p.reject(new Error(payload.error));
-  else p.resolve(payload ? payload.result : undefined);
+/**
+ * 处理扩展回传的结果。
+ *
+ * @param {number} id 请求 id
+ * @param {object} payload 结果体
+ * @param {string} [session] 扩展回带的会话标记；缺失时在全部桶里查找（兼容旧扩展）
+ * @returns {boolean} 是否找到了对应的挂起请求
+ */
+function resolvePending(id, payload, session) {
+  const tryBuckets = session && sessionBuckets.has(String(session))
+    ? [sessionBuckets.get(String(session))]
+    : [...sessionBuckets.values()];
+  for (const b of tryBuckets) {
+    const p = b.pending.get(id);
+    if (!p) continue;
+    b.pending.delete(id);
+    clearTimeout(p.timer);
+    if (payload && payload.error) p.reject(new Error(payload.error));
+    else p.resolve(payload ? payload.result : undefined);
+    return true;
+  }
+  return false;
+}
+
+// 取出某个等待者应当收到的 job（只从它愿意服务的会话里取）。
+function takeJobsFor(sessions) {
+  const out = [];
+  for (const [sid, b] of sessionBuckets) {
+    if (sessions && !sessions.has(sid)) continue;
+    if (!b.queue.length) continue;
+    out.push(...b.queue.splice(0, b.queue.length));
+  }
+  return out;
 }
 
 function flushPollWaiters() {
-  while (pollWaiters.length && queue.length) {
-    const waiter = pollWaiters.shift();
-    waiter(queue.splice(0, queue.length));
+  for (let i = 0; i < pollWaiters.length; ) {
+    const waiter = pollWaiters[i];
+    const jobs = takeJobsFor(waiter.sessions);
+    if (!jobs.length) {
+      i++;
+      continue;
+    }
+    pollWaiters.splice(i, 1);
+    waiter.resolve(jobs);
   }
 }
 
@@ -133,11 +234,11 @@ const httpServer = http.createServer((req, res) => {
   }
   const url = new URL(req.url, 'http://127.0.0.1');
   if (!OPEN_PATHS.has(url.pathname)) {
-    // 接受自定义头或标准 Bearer 头。要求「自定义头」本身就是一道防线：
-    // 网页脚本无法在无 CORS 预检（我们从不放行预检）的情况下携带自定义头，
-    // 因此恶意页面即使能 POST 到本机端口，也拿不到鉴权。
-    const token = bearerToken(req) || req.headers['x-recallflow-token'] || url.searchParams.get('token') || '';
-    if (token !== BRIDGE_TOKEN) {
+    // 只接受请求头里的 token（自定义头或标准 Bearer）。**不再接受 ?token=**：
+    // 查询串会进入访问日志、错误上报与浏览器历史，等于把共享密钥四处散播；
+    // 而这里的调用方是扩展，它本来就能带自定义头，没有理由再留一条更弱的通路。
+    const token = bearerToken(req) || req.headers['x-recallflow-token'] || '';
+    if (!timingSafeEqualStr(token, BRIDGE_TOKEN)) {
       res.writeHead(401, { 'Content-Type': 'text/plain' });
       res.end('unauthorized');
       return;
@@ -155,26 +256,51 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && url.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, ws: Boolean(extSocket), queued: queue.length }));
+    // 把每个会话的待办数一并暴露：串台类问题排查时，「谁还有多少活没被取走」是关键信息。
+    const perSession = {};
+    let queuedTotal = 0;
+    for (const [sid, b] of sessionBuckets) {
+      if (!b.queue.length) continue;
+      perSession[sid] = b.queue.length;
+      queuedTotal += b.queue.length;
+    }
+    res.end(
+      JSON.stringify({
+        ok: true,
+        ws: Boolean(extSocket),
+        queued: queuedTotal,
+        sessions: sessionBuckets.size,
+        bySession: perSession,
+      })
+    );
     return;
   }
   if (req.method === 'GET' && url.pathname === '/poll') {
-    if (queue.length) {
+    // 扩展可声明「我愿意服务哪些会话」（逗号分隔）。不传 = 不限，保持对旧扩展的兼容。
+    const sessionsParam = String(url.searchParams.get('sessions') || '').trim();
+    const sessions = sessionsParam
+      ? new Set(sessionsParam.split(',').map((s) => s.trim()).filter(Boolean))
+      : null;
+    const immediate = takeJobsFor(sessions);
+    if (immediate.length) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests: queue.splice(0, queue.length) }));
+      res.end(JSON.stringify({ requests: immediate }));
       return;
     }
+    const waiter = {
+      resolve: (requests) => {
+        clearTimeout(timer);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ requests }));
+      },
+      sessions,
+    };
     const timer = setTimeout(() => {
       const i = pollWaiters.indexOf(waiter);
       if (i >= 0) pollWaiters.splice(i, 1);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ requests: [] }));
     }, POLL_HOLD_MS);
-    const waiter = (requests) => {
-      clearTimeout(timer);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ requests }));
-    };
     pollWaiters.push(waiter);
     return;
   }
@@ -187,7 +313,13 @@ const httpServer = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const msg = JSON.parse(body || '{}');
-        resolvePending(msg.id, msg);
+        // msg.session 由扩展回带（它不解释这个值）。缺失时回退到全桶查找，兼容旧扩展。
+        const matched = resolvePending(msg.id, msg, msg.session);
+        if (!matched) {
+          // 以前这里会把结果交给任何持有该 id 的等待者。现在找不到就丢弃并记日志：
+          // 一个来路不明的结果绝不能悄悄 resolve 掉另一个会话的请求。
+          log('丢弃无法归属的扩展结果：id=' + msg.id + ' session=' + (msg.session || '(none)'));
+        }
       } catch (e) {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
@@ -201,11 +333,20 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: httpServer });
 wss.on('connection', (socket, req) => {
   // WebSocket 不受 CORS 约束，网页也能直连本机端口，故同样校验 Host + token。
+  //
+  // 已知不足：浏览器 WebSocket API **无法设置请求头**，因此 token 只能走查询串
+  // （会进入记录 URL 的地方：访问日志、错误上报、浏览器历史）。这是本文件里
+  // 唯一残留的「token 出现在 URL」的位置。
+  // 曾尝试改成「先连上、服务端发 nonce、客户端用 hello 回 token」的握手，
+  // 但该实现出现无法解释的行为（服务端记录 connected 后立即 close、而客户端直到
+  // 自己的超时才观测到关闭），在无法稳定解释前不采用 —— 见本轮变更说明。
+  // 缓解措施：Host 白名单仍生效；token 必须由用户显式配置且不再有仓库内默认值，
+  // 因此「猜一个公开常量」这条路已被切断。
   let ok = false;
   try {
     const host = (req && req.headers && req.headers.host) || '';
     const token = new URL(req.url, 'http://127.0.0.1').searchParams.get('token') || '';
-    ok = ALLOWED_HOSTS.has(host) && token === BRIDGE_TOKEN;
+    ok = ALLOWED_HOSTS.has(host) && timingSafeEqualStr(token, BRIDGE_TOKEN);
   } catch (e) {
     ok = false;
   }
@@ -223,7 +364,11 @@ wss.on('connection', (socket, req) => {
     } catch (e) {
       return;
     }
-    if (msg && msg.id !== undefined) resolvePending(msg.id, msg);
+    if (!msg || msg.id === undefined) return;
+    // msg.session 由扩展回带以完成回程路由；缺失则回退全桶查找（兼容旧扩展）。
+    if (!resolvePending(msg.id, msg, msg.session)) {
+      log('丢弃无法归属的扩展结果(ws)：id=' + msg.id + ' session=' + (msg.session || '(none)'));
+    }
   });
   socket.on('close', () => {
     if (extSocket === socket) extSocket = null;
@@ -268,7 +413,9 @@ async function handleMcpHttp(req, res) {
         res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: '未知会话：' + sid } }));
         return;
       }
-      await existing.handleRequest(req, res);
+      // 把「当前是哪个 MCP 会话」注入异步上下文：本次请求内所有 callExtension
+      // 都会落到该会话自己的桶里，从而不会与其它客户端串台（见 sessionBuckets 的说明）。
+      await sessionContext.run(String(sid), () => existing.handleRequest(req, res));
       return;
     }
     // 无会话 ID 的 GET（SSE 长连接）我们不支持：工具都是请求/响应，用 JSON 响应即可。
@@ -278,11 +425,16 @@ async function handleMcpHttp(req, res) {
       return;
     }
     // 新会话：独立的 transport + server 实例，避免多客户端共享状态。
+    // 会话 id 由 SDK 在本请求内生成（onsessioninitialized），而 AsyncLocalStorage 的值
+    // 必须在 run() 时就确定 —— 因此先用一个临时 id 包住本次请求，
+    // 初始化回调触发时再指向真实 id。这样「建立会话的那一次请求」也不会落错桶。
+    let sessionIdForRequest = 'pending:' + randomUUID();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
       onsessioninitialized: (id) => {
         mcpSessions.set(id, transport);
+        sessionIdForRequest = String(id);
         log('MCP 会话已建立：' + id + '（当前 ' + mcpSessions.size + ' 个）');
       },
     });
@@ -295,7 +447,9 @@ async function handleMcpHttp(req, res) {
     };
     transport.onerror = (e) => log('MCP 传输错误：' + (e && e.message));
     await createMcpServer().connect(transport);
-    await transport.handleRequest(req, res);
+    // 用 getStore 的包装器读取「当前」值：run 期间 sessionIdForRequest 可能已被
+    // onsessioninitialized 改写，而 callExtension 是在那之后才被调用的。
+    await sessionContext.run({ get id() { return sessionIdForRequest; } }, () => transport.handleRequest(req, res));
   } catch (e) {
     log('MCP HTTP 处理失败：' + (e && e.message));
     if (!res.headersSent) {
@@ -314,7 +468,18 @@ async function browserRead(args) {
     waitFor: args && args.waitFor,
     maxChars: args && args.maxChars,
   });
-  const rec = archive({ url: (r && r.url) || url, title: r && r.title, text: r && r.text, quotes: r && r.quotes });
+  // 归档的是本次实际拿到的正文，snapshotHash 忠实于这一份内容。
+  // 截断信息通过返回值告诉调用方（archive 只接受 url/title/text/quotes，
+  // 不塞它不认的字段 —— 那会变成"写了但没人读"的静默无效代码）。
+  const gotText = String((r && r.text) || '');
+  const fullChars = Number((r && r.fullChars) || 0);
+  const isTruncated = Boolean(r && r.truncated);
+  const rec = archive({
+    url: (r && r.url) || url,
+    title: r && r.title,
+    text: gotText,
+    quotes: r && r.quotes,
+  });
   return {
     ok: true,
     url: rec.url,
@@ -323,6 +488,13 @@ async function browserRead(args) {
     snapshotHash: rec.snapshotHash,
     text: rec.text,
     quotes: rec.quotes,
+    // 让调用方明确知道「这是片段还是全文」，以及等待是否超时。
+    ...(isTruncated
+      ? { truncated: true, fullChars, hint: '正文已按 maxChars 截断；需要全文请提高 maxChars。' }
+      : {}),
+    ...(r && r.waitError
+      ? { waitError: r.waitError, waitHint: 'waitFor 选择器未在超时前出现，正文可能尚未渲染完成。' }
+      : {}),
   };
 }
 
@@ -389,7 +561,12 @@ async function evidenceGet(args) {
 }
 
 async function readConsole(args) {
-  const r = await callExtension('read_console', {
+  // C-4 合并：扩展侧的 read_console / read_network 已收敛为一个按 kind 分派的工具，
+  // 桥接方法名与扩展工具名必须一致，因此这里改为传 kind。
+  // MCP 对外的工具名仍保留 read_console / read_network —— 它们是本服务器的对外契约，
+  // 与扩展的重构解耦（外部客户端不需要跟着改）。
+  const r = await callExtension('read_diagnostics', {
+    kind: 'console',
     level: args && args.level,
     limit: args && args.limit,
   });
@@ -398,7 +575,8 @@ async function readConsole(args) {
 }
 
 async function readNetwork(args) {
-  const r = await callExtension('read_network', {
+  const r = await callExtension('read_diagnostics', {
+    kind: 'network',
     filter: args && args.filter,
     limit: args && args.limit,
   });
@@ -618,6 +796,44 @@ const TOOLS = [
     },
   },
   {
+    name: 'page_action',
+    description:
+      '在浏览器**当前活动标签页**上执行一次页面动作，用于「调试必须触发交互」的场景：点击、输入、按键、滚动、等待元素出现。' +
+      '这是唯一会改变页面的工具 —— 只读能力请优先用 browser_read / page_health / read_console。\n' +
+      '允许的工具（白名单）：click_element、type_text、press_key、wait_for_element、scroll_page、select_option、check_box、get_page_snapshot、get_ax_snapshot、list_frames。\n' +
+      '**不开放**：run_javascript（任意代码执行）、用户脚本、文件上传、本地知识库写入 —— 这些只能在浏览器面板里由用户当次批准。\n' +
+      '返回值包含 verification / hadEffect，用于判断这一步是否真的产生了页面变化（不要只看 ok:true 就认为生效）。\n' +
+      '典型闭环：get_page_snapshot 取 ref → page_action(click_element) → verify_change 断言结果。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tool: {
+          type: 'string',
+          description: '要执行的工具名（必须在允许清单内）。',
+          enum: [
+            'click_element',
+            'type_text',
+            'press_key',
+            'wait_for_element',
+            'scroll_page',
+            'select_option',
+            'check_box',
+            'get_page_snapshot',
+            'get_ax_snapshot',
+            'list_frames',
+          ],
+        },
+        args: {
+          type: 'object',
+          description:
+            '传给该工具的参数对象。定位优先用快照里的 ref；也可用 selector / text / role+name / testid。' +
+            'type_text 的输入内容放在 args.value（args.text 是"按文本定位"，不是输入内容）。',
+        },
+      },
+      required: ['tool'],
+    },
+  },
+  {
     name: 'evidence_get',
     description:
       '按 snapshotHash 或 URL 取回已归档的证据快照，用于复核某条引用。网页即使已变更/404，归档内容仍可取回。',
@@ -773,6 +989,35 @@ const TOOLS = [
   },
 ];
 
+// page_action：把一次页面动作（点击/输入/按键…）转给扩展执行。
+// 允许的工具白名单**在扩展侧**强制（lib/shared/bridge-write-policy.js）——
+// 只在 MCP schema 里做 enum 限制是不够的：schema 是给模型的提示，不是安全边界。
+async function pageAction(args) {
+  const tool = String((args && args.tool) || '').trim();
+  if (!tool) return { ok: false, error: 'page_action 需要 tool（要执行的工具名）。' };
+  const actionArgs = (args && args.args) || {};
+  const r = await callExtension('page_action', { tool, args: actionArgs });
+  if (!r || r.ok === false) {
+    return {
+      ok: false,
+      tool,
+      error: (r && r.error) || '页面动作失败',
+      code: (r && r.code) || '',
+    };
+  }
+  return {
+    ok: true,
+    tool: r.tool || tool,
+    result: r.result || '',
+    // 把观测到的验证字段带出去：外部 agent 判断「这一步真的生效了吗」靠的就是它。
+    verification: r.verification || null,
+    hadEffect: Boolean(r.hadEffect),
+    tabId: r.tabId,
+    pageUrl: r.pageUrl,
+    hint: r.hadEffect ? '' : '本次未观测到页面变化（可能是动作未生效，也可能该交互本就不改变 DOM）。请用 get_page_snapshot 复核实际状态，不要假定成功。',
+  };
+}
+
 // recallflow_session：读取用户在浏览器面板里交接出来的会话。
 // 用户点一下面板上的标识芯片，就能复制一段带着 RF-XXXXXX 的指令贴给 AI；
 // 这个工具就是把那份「自包含交接包」取回来（对话 + 页面 + 拾取元素 + 控制台错误快照）。
@@ -830,6 +1075,7 @@ function createMcpServer() {
       else if (name === 'get_picked_element') result = await getPickedElement();
       else if (name === 'dev_session_get') result = readDevSession();
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
+      else if (name === 'page_action') result = await pageAction(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {

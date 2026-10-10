@@ -4,7 +4,13 @@
 //   - 本地工具（evidence_get）能正常往返，证明协议处理本身没问题
 const PORT = 7802;
 const URL_ = 'http://127.0.0.1:' + PORT + '/mcp';
-const TOKEN = 'recallflow-local-bridge-v1';
+// token 从环境变量读取：桥接不再有写死的默认值（它会允许任何本机进程冒充扩展）。
+// 运行前需与被测 server 共用同一个 RECALLFLOW_BRIDGE_TOKEN。
+const TOKEN = String(process.env.RECALLFLOW_BRIDGE_TOKEN || '');
+if (!TOKEN) {
+  console.error('缺少 RECALLFLOW_BRIDGE_TOKEN：请先设置环境变量，并与被测 server 使用同一个值。');
+  process.exit(2);
+}
 const HEADERS = {
   'Content-Type': 'application/json',
   Accept: 'application/json, text/event-stream',

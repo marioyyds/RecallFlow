@@ -14,7 +14,7 @@ import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
 import { HIGHLIGHT_MAX_TEXTS } from '../lib/shared/constants.js';
 
 const skill = SKILL_REGISTRY.find((s) => s.name === 'highlight-key-points');
-const schema = TOOL_SCHEMAS.find((t) => t.function && t.function.name === 'highlight_text');
+const schema = TOOL_SCHEMAS.find((t) => t.function && t.function.name === 'annotate');
 
 test('技能存在且是「划重点」', () => {
   assert.ok(skill, '找不到 highlight-key-points 技能');
@@ -45,10 +45,11 @@ test('说明凑不满档位时应少划，而不是拆句凑数', () => {
 test('技能不再把单次上限写死成具体数字（避免第三处真值来源）', () => {
   // 具体数字应从工具 schema 读到；技能里再写一份就会与常量/实现三方漂移
   assert.ok(!/单次最多 \d+ 条/.test(skill.content), '技能里不应硬编码单次条数上限');
-  assert.match(skill.content, /highlight_text 工具定义/, '应把读者引向工具定义');
+  assert.match(skill.content, /annotate 工具定义/, '应把读者引向工具定义');
 });
 
 test('工具 schema 的 maxItems 与实现用的常量一致', () => {
+  // C-4 第 1 档合并后，三件套与视觉标注合并为 annotate，texts 参数在 op=highlight 上。
   const maxItems = schema.function.parameters.properties.texts.maxItems;
   assert.equal(
     maxItems,
@@ -60,7 +61,7 @@ test('工具 schema 的 maxItems 与实现用的常量一致', () => {
 test('工具描述把上限告诉模型（不能只在实现里当暗礁）', () => {
   assert.ok(
     schema.function.description.includes(String(HIGHLIGHT_MAX_TEXTS)),
-    'highlight_text 的描述里应写明单次上限'
+    'annotate 的描述里应写明单次上限'
   );
   assert.match(schema.function.parameters.properties.texts.description, /超出会被截断并告知/);
 });
@@ -71,7 +72,7 @@ test('上限是正整数', () => {
 
 test('保留既有约定：必须用原文片段、批量一次调用、先清浮层', () => {
   assert.match(skill.content, /必须使用页面中的原文片段/);
-  assert.match(skill.content, /一次 highlight_text 调用/);
-  assert.match(skill.content, /clear_page_overlays/);
+  assert.match(skill.content, /一次 annotate\(\{op:"highlight"\}\) 调用/);
+  assert.match(skill.content, /op:"clear"/);
   assert.match(skill.content, /complete_task/);
 });

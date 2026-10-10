@@ -1,0 +1,32 @@
+name: checks
+
+# 为什么要有 CI：本仓库最强的几道闸（变异测试、前缀稳定性、const 赋值、
+# 桥接契约、注册表一致性）此前全部是**可选且手动**的 —— 没有 .github/，
+# `npm test` 也不包含它们中的三道。门禁不被强制运行就等于不存在：
+# 实测 mutation-check 已因 CRLF 与重构失配而静默失效，却无人发现。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # MCP 子包有独立依赖（@modelcontextprotocol/sdk、ws）。
+      # 根目录刻意不参与 lockfile/依赖安装（扩展本体零依赖）。
+      - name: 安装 MCP 子包依赖
+        working-directory: integrations/opencode/recallflow-mcp
+        run: npm ci || npm install
+      # 一条命令跑「单测 + 三道静态门禁」。用 node 直接调用，
+      # 不依赖 npm 的脚本执行策略（Windows 上 npm.ps1 常被执行策略拦住）。
+      - name: 单元测试 + 静态门禁
+        run: node scripts/run-all-checks.mjs
+      # 桥接层端到端验证：起真实 server 进程 + 真实 WS 客户端。
+      # 这一段「改一次就要重载扩展 + 重启 server」，此前完全没有回归测试。
+      - name: 桥接 WS 鉴权端到端验证
+        run: node scripts/verify-bridge-ws-handshake.mjs

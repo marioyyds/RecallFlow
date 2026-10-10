@@ -67,17 +67,22 @@ test('脏异常：null / undefined / 字符串都不产出 "undefined"', () => {
 // ---------------------------------------------------------------- 接线
 
 test('接线：超时不得进入 ctx.failedUrls（那是「请勿重试」的永久名单）', () => {
-  const src = fs.readFileSync('lib/assistant/tools.js', 'utf8');
+  // C-1 拆分后，fetch_webpage 的实现搬到了 lib/assistant/fetch-tools.js ——
+  // 断言跟着**实现**走，而不是跟着文件名走（否则一次纯搬运就会让这条门禁失效）。
+  const src = fs.readFileSync('lib/assistant/fetch-tools.js', 'utf8');
   assert.ok(
-    /if \(!isAbortLikeError\(e\)\) ctx\.failedUrls\.push\(norm\);/.test(src),
+    /if \(!deps\.isAbortLikeError\(e\)\) ctx\.failedUrls\.push\(norm\);/.test(src),
     '抓取失败的分支必须把「中止类」排除在永久拉黑之外'
   );
   assert.ok(!/catch \(e\) \{\s*\n\s*ctx\.failedUrls\.push\(norm\);/.test(src), '旧的「一律拉黑」写法应已消失');
 });
 
 test('接线：fetch_webpage 与 SkillHub 都必须区分超时', () => {
+  // 抓取这一半在 fetch-tools.js；SkillHub 那一半仍在 tools.js（属于另一族）。
+  const fetchSrc = fs.readFileSync('lib/assistant/fetch-tools.js', 'utf8');
+  assert.ok(/deps\.describeFetchError\(e, u, 15000\)/.test(fetchSrc), '抓取失败要走 describeFetchError');
+
   const src = fs.readFileSync('lib/assistant/tools.js', 'utf8');
-  assert.ok(/describeFetchError\(e, u, 15000\)/.test(src), '抓取失败要走 describeFetchError');
   assert.ok(/SkillHub 请求超时（15 秒内没有响应）/.test(src), 'SkillHub 的检索超时要与「安装失败」分开说');
   assert.ok(
     !/安装失败：' \+ \(e && e\.message/.test(src.split('isAbortLikeError(e)')[2] || ''),

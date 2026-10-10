@@ -140,10 +140,32 @@ Output: the merged session object.
 - **Permissions**: `browser_read` / `browser_search_read` touch the user's browser → gate
   behind opencode's `permission` (`"webfetch": "ask"` or a dedicated tool rule). `kb_*` and
   `evidence_get` are read-only.
+- **Write channel (`page_action`)**: this is the **only** tool that mutates the page
+  (click / type / press / scroll / wait / select / check / snapshot reads). It exists because
+  the debugging loop breaks without it: no interaction means no request, so a bug cannot be
+  reproduced and a fix cannot be triggered.
+  **The allowlist is enforced on the extension side** (`lib/shared/bridge-write-policy.js`),
+  not only in the MCP schema — a schema `enum` is a hint to the model, not a security boundary.
+  Deliberately **not** exposed over the bridge: `run_javascript` (arbitrary code execution),
+  user scripts, file upload, and local knowledge-base writes. Those require per-call approval
+  in the browser panel, because the bridge is a **separate entry point** that does not pass
+  through the agent loop's approval flow.
+  `page_action` therefore returns `verification` / `hadEffect`; a caller must not treat
+  `ok: true` alone as proof the action took effect.
 - **Untrusted input**: everything returned from the web is data, not instructions. RecallFlow
   sanitises fetched text (strips fake system/instruction markers) before returning it.
 - **No fabrication**: citations must reference a `snapshotHash` that exists in the evidence
   store; `evidence_get` is the check.
+
+## Session isolation
+
+Multiple MCP clients may share one resident server (HTTP mode, independent `mcp-session-id`).
+Bridge requests/responses are **bucketed per session**: each job carries a `session` tag that
+the extension echoes back verbatim, and `/result` routes strictly by that tag (unattributable
+results are dropped and logged rather than handed to whichever waiter holds the id).
+Without this, a concurrent client could receive another client's page text — which for
+debugging is worse than an error, because a wrong result still looks plausible.
+See `docs/bridge-session-isolation-plan.md` and `recallflow-mcp/test/session-isolation.test.mjs`.
 
 ## Wiring it into opencode
 

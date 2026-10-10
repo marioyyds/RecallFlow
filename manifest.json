@@ -40,10 +40,6 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["lib/**/*.js"],
-      "matches": ["http://*/*", "https://*/*"]
-    },
-    {
       "resources": ["docs/assets/recallflow-mark.svg"],
       "matches": ["http://*/*", "https://*/*"]
     }

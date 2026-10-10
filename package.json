@@ -5,13 +5,17 @@
   "type": "module",
   "description": "RecallFlow browser extension (MV3).",
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",
-    "test:e2e": "playwright test -c tests/e2e/playwright.config.mjs",
-    "check:prefix": "node scripts/check-prefix-stability.mjs",
+    "test:unit": "node --test \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",
     "check:const": "node scripts/check-const-assign.mjs",
+    "check:prefix": "node scripts/check-prefix-stability.mjs",
+    "check:mutation": "node scripts/mutation-check.mjs",
+    "build:content": "node scripts/build-content.mjs",
+    "test": "node scripts/run-all-checks.mjs",
+    "test:e2e": "node scripts/run-e2e.mjs",
     "render:icons": "node scripts/render-icons.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.47.0"
+    "@playwright/test": "^1.47.0",
+    "esbuild": "^0.28.2"
   }
 }

@@ -2,7 +2,12 @@
 // 即图片真的以 MCP image 内容块返回，并且落盘归档。
 // 这样无需重载用户的扩展、也无需重启用户的 7801 实例。
 const BASE = 'http://127.0.0.1:7802';
-const TOKEN = 'recallflow-local-bridge-v1';
+// token 从环境变量读取（见 verify-mcp-shot.mjs 的说明）。
+const TOKEN = String(process.env.RECALLFLOW_BRIDGE_TOKEN || '');
+if (!TOKEN) {
+  console.error('缺少 RECALLFLOW_BRIDGE_TOKEN：请先设置环境变量，并与被测 server 使用同一个值。');
+  process.exit(2);
+}
 const AUTH = { 'X-RecallFlow-Token': TOKEN };
 
 // 1x1 的合法 JPEG（足够验证透传与归档；服务端不做图像校验）

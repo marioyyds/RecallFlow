@@ -8,6 +8,7 @@ import { startMcpRelay } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
+import { loadAgentSession } from './lib/assistant/session-store.js';
 import {
   listScripts,
   installFromUrl,
@@ -303,6 +304,32 @@ chrome.runtime.onConnect.addListener((port) => {
       if (payload && payload.type === 'tool-approval') return;
       // 心跳：保持 service worker 存活（长任务期间），不触发新请求。
       if (payload && payload.type === 'keepalive') return;
+      // E2E 专用：从**后台侧**断开当前端口，用于验证面板的断线重连。
+      // 为什么必须从后台侧断：实测面板自己调用 port.disconnect() 并不会触发
+      // 它自己的 onDisconnect（本端主动断开不走该事件），因此那是**测不到**的路径。
+      // 而后台侧断开正是真实场景（MV3 worker 被回收）。
+      if (payload && payload.type === 'e2e-drop-port') {
+        // 先让本轮 abort 落盘（模拟 worker 被回收），再断开端口。
+        try { controller.abort(); } catch (e) {}
+        setTimeout(() => {
+          try { port.disconnect(); } catch (e) {}
+        }, 120);
+        return;
+      }
+      // 断线重连的就绪探针：面板在重连前用它确认「中断的会话已落盘」。
+      // 为什么必须有：面板的 onDisconnect 与后台 persist({phase:'interrupted'}) 是并发的。
+      // 若重连早于落盘，runAgentStream 的 canResume 为 false，会把重连当成**一次新任务**
+      // 从头开始 —— 用户会看到重复执行，且历史里同一条指令出现两次。
+      if (payload && payload.type === 'session-ready') {
+        let ready = false;
+        try {
+          ready = Boolean(await loadAgentSession(String(payload.runId || '')));
+        } catch (e) {
+          ready = false;
+        }
+        try { port.postMessage({ type: 'session-ready', ready }); } catch (e) {}
+        return;
+      }
       const settings = await getAISettings();
       if (!settings.apiKey) {
         port.postMessage({ type: 'error', needSetup: true, error: '尚未配置 API Key，请点击插件图标 → 设置页填写。' });

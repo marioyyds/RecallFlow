@@ -1,0 +1,31 @@
+# 依赖目录（任意层级）
+node_modules/
+
+# 日志与本地验证产物
+*.log
+scripts/out/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+# 根目录的 test-results/ 是 Playwright 的默认输出目录（与上面 e2e 那份同源）。
+# E2E 每次运行都会生成 .last-run.json —— 属本地验证产物，不应入库。
+test-results/
+playwright-report/
+
+# 操作系统 / 编辑器杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# 说明：**刻意不忽略 package-lock.json。**
+# 此前仓库只有 integrations/opencode/recallflow-mcp/package-lock.json，
+# 根目录没有 lockfile，依赖解析不可复现（见 docs/agent-engineering-review.md 的发布工程部分）。
+# lockfile 应当被提交，而不是被忽略。
+
+# 说明：**content.js 是构建产物，但必须提交。**
+# 它由 `node scripts/build-content.mjs` 从 entries/content.js 打包而来（自包含，manifest 直接加载），
+# 而浏览器加载扩展时不会执行构建 —— 不提交它，扩展就无法加载。
+# 修改内容脚本请改 entries/content.js，然后重新构建（不要手工编辑 content.js）。
+# 对应的门禁：tests/silent-failure-regressions.test.mjs 会核对产物确实自包含且已调用入口。

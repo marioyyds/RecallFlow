@@ -34,6 +34,7 @@ HTTP 模式下只常驻**一个** server，N 个客户端各持一条独立会�
 | `read_network(filter?, limit?)` | 读取活动标签页最近的 fetch/XHR（状态码、耗时、发起位置） |
 | `page_health(cursor?, since?, levels?, limit?)` | **增量**体检：自上次检查以来新增的错误/警告/失败请求，按「级别+文案+首个项目内帧」去重计数 |
 | `verify_change(targets?)` | **闭环验证**：一次性核对目标元素的渲染态断言 + 是否引入新错误 |
+| `page_action(tool, args)` | **唯一会改变页面的工具**：在活动标签页上执行一次动作（点击 / 输入 / 按键 / 滚动 / 等待元素 / 下拉 / 勾选 / 取快照 / AX 树 / 列框架）。没有它，外部 agent 既复现不了 bug（无交互即无请求）也验证不了修复（触发不了动作）。返回 `verification` / `hadEffect` 供判断是否真的生效。**白名单外的能力一律拒绝**：`run_javascript`、用户脚本、文件上传、本地知识库写入只能在浏览器面板里由用户当次批准。 |
 | `get_element_source(ref?\|selector?\|text?)` | 元素 → 框架源码位置（React/Vue/Svelte 开发构建），返回 `{file,line,column,framework,component}` |
 | `get_picked_element()` | 用户在页面上拾取的元素（选择器 + 语义定位 + 源码位置） |
 | `dev_session_get()` | 读取共享开发会话：`projectRoot / devUrl / changedFiles / targets` |
@@ -80,7 +81,7 @@ node index.js --http
       "type": "remote",
       "url": "http://127.0.0.1:7801/mcp",
       "enabled": true,
-      "headers": { "X-RecallFlow-Token": "recallflow-local-bridge-v1" },
+      "headers": { "X-RecallFlow-Token": "<你的 RECALLFLOW_BRIDGE_TOKEN>" },
       "oauth": false,
       "timeout": 90000
     }
@@ -109,7 +110,7 @@ node index.js --http
       "type": "remote",
       "url": "http://127.0.0.1:7801/mcp",
       "enabled": true,
-      "headers": { "X-RecallFlow-Token": "recallflow-local-bridge-v1" },
+      "headers": { "X-RecallFlow-Token": "<你的 RECALLFLOW_BRIDGE_TOKEN>" },
       "oauth": false,
       "timeout": 90000
     }
@@ -214,7 +215,7 @@ lsof -ti:7801 | xargs kill
 | `RECALLFLOW_MCP_HTTP` | 未设置 | 设为 `1` 启用 Streamable HTTP 模式（等价于 `--http`） |
 | `RECALLFLOW_MCP_TRANSPORT` | 未设置 | 设为 `http` 同样启用 HTTP 模式 |
 | `RECALLFLOW_MCP_PORT` | `7801` | 扩展连接的桥接端口，也是 HTTP MCP 端点的端口 |
-| `RECALLFLOW_BRIDGE_TOKEN` | `recallflow-local-bridge-v1` | 共享 token。**HTTP 模式建议改成随机长字符串** |
+| `RECALLFLOW_BRIDGE_TOKEN` | **无默认值（必填）** | 与扩展共享的密钥。**必须显式设置**，否则 server 拒绝启动：此前存在一个写死的默认值并被本文档公开，任何本机进程都能用它冒充扩展、伪造证据快照。生成方式见下方「生成桥接 Token」 |
 | `RECALLFLOW_EXT_TIMEOUT_MS` | `60000` | 等待扩展响应超时（应小于 opencode 的 `timeout`） |
 | `RECALLFLOW_EVIDENCE_DIR` | `~/.recallflow-evidence` | 证据归档目录（`dev-session.json` 也在此） |
 
@@ -244,7 +245,7 @@ curl http://127.0.0.1:7801/health
 curl -s -X POST http://127.0.0.1:7801/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -H 'X-RecallFlow-Token: recallflow-local-bridge-v1' \
+  -H "X-RecallFlow-Token: $RECALLFLOW_BRIDGE_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 ```
 

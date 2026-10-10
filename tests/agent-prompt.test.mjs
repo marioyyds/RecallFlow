@@ -94,7 +94,8 @@ test('toolNeedsApproval: external 落到 mcp 类别', () => {
 
 test('toolNeedsApproval: 只读工具直接放行，不看分类策略', () => {
   // requiresApproval 未置位 → 开头即返回 false，与 read/commands 等策略无关
-  assert.equal(toolNeedsApproval('search_knowledge_base', { toolApprovalPolicy: { read: false, commands: false } }), false);
+  // knowledge_read 是 C-4 合并后的只读入口（原 search_knowledge_base），同样应直接放行。
+  assert.equal(toolNeedsApproval('knowledge_read', { toolApprovalPolicy: { read: false, commands: false } }), false);
   assert.equal(toolNeedsApproval('web_search', { toolApprovalPolicy: { browser: false } }), false);
   assert.equal(toolNeedsApproval('get_page_snapshot', { toolApprovalPolicy: {} }), false);
 });

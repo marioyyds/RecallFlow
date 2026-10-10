@@ -127,9 +127,15 @@ sequenceDiagram
 其它客户端拿到一段无法执行的文本。指令的触发点是 **`RF-XXXXXX` 这个标识本身**，
 并附了退路：接收方若没有该能力，会请你改用面板的「导出记录」粘贴原文。
 
-## 与 opencode / DSH 集成
+## 与 MCP 客户端（opencode 等）集成
 
-`webfetch` 无法读取的 SPA、登录态或内网页面，交由 RecallFlow 以真实浏览器会话读取，并返回带时间戳与哈希的证据。共 **12 个工具**：
+> **关于集成方向**：本仓库里曾同时存在三种互相矛盾的说法（"opencode 链路已删除只留 DSH"、
+> README 的"与两者集成"、以及代码里实际仍在运行的 opencode MCP server）。
+> **唯一事实来源是 [docs/integration-status.md](docs/integration-status.md)** —— 它以代码与测试为准，
+> 并明确区分了「已实现并验证」与「仅存在于文档、本仓库无法保证」的部分。
+> 简言之：**可用的是 MCP 这条路径**（stdio 或 HTTP），它刚补齐了写通道与会话隔离。
+
+`webfetch` 无法读取的 SPA、登录态或内网页面，交由 RecallFlow 以真实浏览器会话读取，并返回带时间戳与哈希的证据。共 **13 个工具**（12 个只读 + 1 个受白名单约束的写通道）：
 
 ```mermaid
 %%{init: {"flowchart":{"curve":"basis","nodeSpacing":34,"rankSpacing":60,"padding":10},"themeVariables":{"fontSize":"14px"}}}%%
@@ -152,9 +158,16 @@ flowchart LR
 | 分类 | 工具 |
 | --- | --- |
 | 会话与证据 | `browser_read`、`page_screenshot`、`evidence_get`、`recallflow_session` |
-| 运行时诊断 | `read_console`、`read_network`、`page_health`、`verify_change` |
+| 运行时诊断 | `read_diagnostics`（console / network / downloads）、`page_health`、`verify_change` |
 | 页面与源码 | `get_element_source`、`get_picked_element` |
 | 开发上下文 | `dev_session_get`、`dev_session_set` |
+| **页面操作（唯一写通道）** | `page_action` —— 执行点击 / 输入 / 按键 / 滚动 / 等待 / 下拉 / 勾选 / 取快照 |
+
+> `page_action` 让外部 agent **能碰页面**：没有它，调试闭环断在"无法触发交互"上——
+> 复现不了 bug（无交互即无请求），也验证不了修复。它只开放白名单内的调试必需操作；
+> **任意代码执行、用户脚本、文件上传、本地数据写入一律拒绝**，这些只能在浏览器面板里
+> 由用户当次批准（桥接层是独立入口，不经过 agent 循环的审批，因此必须有自己的许可清单：
+> `lib/shared/bridge-write-policy.js`）。
 
 随附 `recallflow-evidence` 技能约束证据纪律（有据才断、网页内容不可信、不编造来源）。安装与配置见 [recallflow-mcp/README.md](integrations/opencode/recallflow-mcp/README.md)。
 
@@ -182,7 +195,24 @@ flowchart TD
 - **上下文与用量**：过大的工具结果自动截断并暂存全文（`expand_result` 按需分段读取），较早结果滚动折叠，用量实时计入。
 - **可观测性**：逐轮记录缓存命中率与耗时分段（网络 / 预填充 / 生成 / 工具执行），并保留含步骤、工具、耗时与错误码的运行轨迹。
 - **可靠性**：会话恢复、卡死检测、动作前后快照校验，SPA 异步渲染的变化同样可捕获。
-- **测试与门禁**：562 项单元测试与 Playwright E2E；静态门禁覆盖「对 const 赋值」「请求前缀稳定性」等只能由运行时暴露的缺陷类别。
+- **测试与门禁**：**1117** 项单元测试（78 个文件）与 7 个真实浏览器 E2E 场景。
+  - `npm test`（= `node scripts/run-all-checks.mjs`）：**单元测试** + 三道**独立脚本门禁**（对 const 赋值 / 请求前缀稳定性 / **变异测试** —— 后者验证其它断言是否真有牙齿）+ 刷新测试数快照。
+  - `npm run test:e2e`（= `node scripts/run-e2e.mjs`）：真实 Chromium + 加载扩展 + 模拟 LLM，覆盖 role+name 定位点击、跨域 iframe 路由、`type_text` 的 value 语义、**CDP 坐标点击（可信输入）**、**审批拒绝后副作用为零**（含阳性对照）、**端口断开后自动重连并接着跑完**。需要显示环境 —— headless 下 MV3 扩展的 service worker 不会注册。
+  - `npm run build:content`：把 `entries/content.js` 打成自包含的 `content.js`（含自包含性检查，不合格会以退出码 2 拒绝）。
+  - 另有几道**以单测形式存在**的门禁：工具注册表指纹（搬运式重构的等价性证明）、文档与工作树不漂移、元素收集与正文抽取的名单分工、内容脚本产物自包含性。
+  - 桥接另有两个独立验证脚本：WS 鉴权（`scripts/verify-bridge-ws-handshake.mjs`）与跨会话响应隔离（`recallflow-mcp/test/session-isolation.test.mjs`）。
+  - **测试数字由 `node scripts/test-count.mjs` 生成，不要手写** —— 本仓库曾同时在三份文档里写着 562 / 382 / 526 三个互相矛盾且都不正确的数字。
+
+## 关键文档导航
+
+| 想了解 | 看这里 |
+| --- | --- |
+| 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
+| 最近一轮改了什么、验证方式、健康度 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
+| 集成路线到底实现了哪些（唯一事实来源） | [docs/integration-status.md](docs/integration-status.md) |
+| 新增/重构工具时必须遵守的规范 | [docs/tool-design.md](docs/tool-design.md) |
+| 内置工具从 55 往下合并的方案与成本 | [docs/tool-merge-plan.md](docs/tool-merge-plan.md) |
+| 桥接为什么按会话分桶 | [docs/bridge-session-isolation-plan.md](docs/bridge-session-isolation-plan.md) |
 
 ## 项目结构
 

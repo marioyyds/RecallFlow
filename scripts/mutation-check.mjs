@@ -12,7 +12,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const FILE = 'lib/page/debug-hook.js';
-const original = fs.readFileSync(FILE, 'utf8');
+// 统一行尾再做锚点匹配。
+// 为什么：本文件是 CRLF，而锚点里的 `\n` 永远匹配不到 `...;\r\n` —— 于是那条变异
+// 长期处于「锚点未找到」状态，静默失效（实测）。变异脚本本身失效比测试失效更隐蔽：
+// 它输出的是「脚本需随源码更新」，很容易被当成脚本事、而不是「这道闸根本没在工作」。
+const original = fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
 
 const MUTATIONS = [
   {
@@ -23,14 +27,17 @@ const MUTATIONS = [
   },
   {
     name: '去掉「跳过自身帧」（恢复 initiator 被自己帧挤占的缺陷）',
-    from: "      while (lines.length && lines[0].indexOf('lib/page/debug-hook.js') >= 0) lines.shift();\n",
+    // 锚点曾写死为 `lines[0].indexOf('lib/page/debug-hook.js') >= 0`，
+    // 但该实现后来改用 SELF 正则（覆盖 file:// 与不同打包路径下的扩展帧），
+    // 于是锚点失配、这条变异静默失效。锚点必须随源码更新 —— 失配时脚本会报错而非静默跳过。
+    from: '      while (lines.length && SELF.test(lines[0])) lines.shift();\n',
     to: '',
     expectFail: '捕获的 initiator 不含本文件自身的帧',
   },
   {
     name: '恢复往 XHR 实例挂 __rfNet（给页面对象留可见痕迹）',
-    from: '      try {\n        xhrState.set(this, { method: method, url: url, start: 0 });\n      } catch (e) {}',
-    to: '      try {\n        this.__rfNet = { method: method, url: url, start: 0 };\n      } catch (e) {}',
+    from: '        xhrState.set(this, { method: method, url: url, start: 0 });',
+    to: '        this.__rfNet = { method: method, url: url, start: 0 };',
     expectFail: 'XHR 钩子不往页面实例上挂任何属性',
   },
   {
@@ -85,7 +92,7 @@ for (const f of tmpFiles) {
   } catch (e) {}
 }
 console.log(
-  '\n  ' + (fs.readFileSync(FILE, 'utf8') === original ? '源文件未被改动 ✓' : '✗ 源文件被改动了！')
+  '\n  ' + (fs.readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n') === original ? '源文件未被改动 ✓' : '✗ 源文件被改动了！')
 );
 console.log(allGood ? '变异测试通过：每条断言都能抓住对应的行为退化' : '有变异未被抓住 —— 对应断言形同虚设');
 process.exit(allGood ? 0 : 1);

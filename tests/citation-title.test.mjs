@@ -49,8 +49,10 @@ test('URL 尾段回落的边界', () => {
 // ---------------------------------------------------------------- 接线
 
 test('接线：引用标题必须走 citationTitleFor，不得再回落到正文', () => {
-  const src = fs.readFileSync('lib/assistant/tools.js', 'utf8');
-  assert.ok(/title: citationTitleFor\(pageResponse\.title, urlForTitle\)/.test(src), '应统一走纯函数');
+  // C-1 拆分后，read_current_page 的实现搬到了 lib/assistant/page-read-tools.js。
+  // 断言跟着**实现**走，而不是跟着文件名走（否则一次纯搬运就会让这条门禁失效）。
+  const src = fs.readFileSync('lib/assistant/page-read-tools.js', 'utf8');
+  assert.ok(/title: deps\.citationTitleFor\(pageResponse\.title, urlForTitle\)/.test(src), '应统一走纯函数');
   assert.ok(
     !/title: \(pageResponse\.title \|\| c\.replace/.test(src),
     '旧的「标题回落到正文前 40 字」应已消失 —— 那正是参考来源不可读的原因'
