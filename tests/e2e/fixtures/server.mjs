@@ -651,6 +651,98 @@ function shadowPage() {
 </body></html>`;
 }
 
+// 拖拽页：一个**用鼠标事件实现**的自定义滑块（带刻度），用来验 CDP 可信拖拽。
+//
+// 为什么不用 HTML5 拖放（draggable + dragstart/dragover/drop）：
+// `drag_element` 经 CDP 派发的是**鼠标事件**（mousedown → mousemove → mouseup），
+// 而 HTML5 拖放只响应**拖放事件**，两者不通 —— 用 HTML5 DnD 做夹具会得到
+// "拖了但什么都没发生"，进而把结论引向"工具不支持拖拽"。
+// 真实站点里的滑块 / 自定义排序也大多是鼠标事件实现，所以这样更贴近实际。
+//
+// 刻度用**真元素**（`#mark-80`）而不是算坐标：`drag_element` 的终点只接受
+// ref / selector / text，所以"拖到某个刻度"必须有一个可定位的目标元素。
+function dragPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具音量页</title>
+<style>
+  #track { position: relative; width: 300px; height: 24px; background: #e5e7eb; margin: 24px 0; }
+  #knob { position: absolute; top: 0; width: 20px; height: 24px; background: #2563eb; cursor: grab; }
+  .mark { position: absolute; top: 28px; font-size: 12px; color: #6b7280; transform: translateX(-50%); }
+</style></head>
+<body>
+  <h1>音量设置</h1>
+  <div id="track" role="slider" aria-label="音量" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div id="knob" role="button" aria-label="音量滑块"></div>
+  </div>
+  <div id="val" role="status">当前音量：0</div>
+  <script>
+    var KNOB = 20;
+    window.__value = 0;
+    window.__dragEnds = 0;
+    window.__lastClientX = null;
+    window.__lastRatio = null;
+    var track = document.getElementById('track');
+    var knob = document.getElementById('knob');
+    var dragging = false;
+
+    function usable() { return Math.max(1, track.clientWidth - KNOB); }
+    function leftFor(v) { return (v / 100) * usable(); }
+
+    function paint() {
+      knob.style.left = leftFor(window.__value) + 'px';
+      document.getElementById('val').textContent = '当前音量：' + window.__value;
+      track.setAttribute('aria-valuenow', String(window.__value));
+    }
+
+    // 刻度：0 / 80 / 100，中心与滑块中心对齐。
+    // ⚠ 必须挂在 **track 内部**：绝对定位元素的定位原点是最近的「已定位祖先」，
+    // 没放进去时原点会变成初始包含块（视口），于是"用 track 的坐标算出来的 left"
+    // 落在别的地方 —— 实测这一处让拖拽终点偏到轨道右端、值变成 100 而不是 80。
+    // （本段在模板字符串里，注释中不能出现反引号。）
+    [0, 80, 100].forEach(function (v) {
+      var m = document.createElement('div');
+      m.className = 'mark';
+      m.id = 'mark-' + v;
+      m.setAttribute('data-v', String(v));
+      m.textContent = String(v);
+      m.style.left = (leftFor(v) + KNOB / 2) + 'px';
+      track.appendChild(m);
+    });
+
+    function setFromX(clientX) {
+      var r = track.getBoundingClientRect();
+      var raw = (clientX - r.left - KNOB / 2) / usable();
+      var ratio = Math.max(0, Math.min(1, raw));
+      // 记录**未裁剪**的原始比例与坐标：出问题时能一眼看出是"鼠标真的走过头了"
+      // 还是"夹具坐标算错了" —— 否则只能看到一个被 clamp 成 100 的结果，无从判断。
+      window.__lastClientX = Math.round(clientX);
+      window.__lastRatio = Math.round(raw * 1000) / 1000;
+      window.__value = Math.round(ratio * 100);
+      paint();
+    }
+
+    knob.addEventListener('mousedown', function (e) { dragging = true; e.preventDefault(); });
+    // ⚠ 必须**同时**检查左键仍按着（e.buttons 的最低位）。
+    // 只靠一个 dragging 布尔值会被**任何**进来的 mousemove 劫持 ——
+    // 实测：CDP 拖拽的 8 步移动结束后、mouseup 之前，混进了一条 x=1138
+    //（面板区域，buttons=0）的移动，ratio 被算成 4 → 裁剪成 100，
+    // 于是"拖到 80"变成"拖到最右端"，且**五次里才出现一次**（间歇性最难查的那种）。
+    // 真实站点的自定义拖拽也是这么写的：按住才跟随。
+    //（本段在模板字符串里，注释中不能出现反引号。）
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging || !(e.buttons & 1)) return;
+      setFromX(e.clientX);
+    });
+    document.addEventListener('mouseup', function () {
+      if (!dragging) return;
+      dragging = false;
+      window.__dragEnds += 1;
+      paint();
+    });
+    paint();
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1192,6 +1284,20 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：CDP 可信拖拽（playbook id = 'cdp-drag-slider'）。
+    //
+    // 注意 `drag_element` 的两端**只接受 ref / selector / text**（没有 role/name），
+    // 所以这里用 selector 定位起终点。
+    if (userText.includes(PLAYBOOKS['cdp-drag-slider'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'drag_element', { fromSelector: '#knob', toSelector: '#mark-80' }); return; }
+      // 读回结果值 —— 拖拽本身只说"已派发"，不等于"值真的变了"
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#val' }); return; }
+      finalText(res, '已把音量滑块从 0 拖到 80 刻度，当前值为 80。', 60);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1225,7 +1331,8 @@ const main = http.createServer((req, res) => {
                         : req.url && req.url.startsWith('/detail') ? detailPage()
                           : req.url && req.url.startsWith('/paged') ? pagedPage()
                             : req.url && req.url.startsWith('/shadow') ? shadowPage()
-                              : mainPage()
+                              : req.url && req.url.startsWith('/drag') ? dragPage()
+                                : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

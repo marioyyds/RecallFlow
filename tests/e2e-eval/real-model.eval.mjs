@@ -107,7 +107,10 @@ for (const pb of evalPlaybooks()) {
   const ev = pb.eval;
   test('eval(真模型): ' + pb.title, async () => {
     const model = process.env.RECALLFLOW_EVAL_MODEL || 'deepseek-chat';
-    await configureSettings(context, { model });
+    // 剧本可以声明**设置前提**（如 `cdp: true`：拖拽经 CDP 派发真实鼠标事件）。
+    // 不照做的话会得到与能力无关的失败（"拖拽需要 CDP 输入层"），
+    // 而那种失败最容易被误读成"模型不会拖拽"。
+    await configureSettings(context, Object.assign({ model }, ev.cdp ? { cdpEnabled: true } : {}));
     const page = await openFixturePage(context, ev.url);
     resetLlmRequests();
     await sendInstruction(page, ev.instruction);
@@ -124,11 +127,16 @@ for (const pb of evalPlaybooks()) {
           if ((await btn.count()) > 0 && (await btn.first().isVisible())) {
             approvals += 1;
             await btn.first().click({ timeout: 2000 });
+            // ⚠ 点完必须**等它消失**再继续数：审批条从点击到移除有一小段时间，
+            // 不等待就会在下一轮轮询里把**同一次审批**再数一遍。
+            // 实测这个重复计数把 22 次工具调用报成了"34 次审批"，
+            // 而"模型索要了几次高危工具"本身是有效观察 —— 数字必须可信。
+            await btn.first().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
           }
         } catch (e) {
           /* 按钮消失/被替换都是正常竞态，忽略 */
         }
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(300);
       }
     })();
 
@@ -143,7 +151,11 @@ for (const pb of evalPlaybooks()) {
 
     printTrace(pb.title);
     printToolResults();
-    console.log('自动批准的审批次数：' + approvals + (approvals ? '（模型索要了高危工具）' : ''));
+    // ⚠ 说清这个数字的口径：它是**审批按钮的点击次数**，不是"模型索要了几次审批"。
+    // 审批条上同时有「允许一次」与「本任务内允许」两个按钮，且排队时它会连续出现，
+    // 因此点击次数是**上界**、可能明显大于提示次数（实测：22 次工具调用报出过 34/35 次）。
+    // 早期报告里引用过这个数字，按上界理解；要精确统计应从面板的审批事件里数，那是另一件事。
+    console.log('审批按钮点击次数（上界，非精确提示次数）：' + approvals);
     expect(finished, '这一轮没有跑完（超时）。先看上面的工具轨迹：是卡在某个工具上，还是模型绕圈？').toBe(true);
 
     // ① 页面判据（与脚本化 E2E 同一套表达式）

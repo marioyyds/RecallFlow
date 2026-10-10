@@ -746,6 +746,63 @@ test('golden: Shadow DOM —— 两层 shadow 内的元素都能定位、操作�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**CDP 可信拖拽**（playbook 'cdp-drag-slider'）。
+//
+// 夹具刻意用**鼠标事件**实现滑块（mousedown → mousemove → mouseup），
+// 而不是 HTML5 拖放：`drag_element` 经 CDP 派发的是鼠标事件，
+// 而 HTML5 拖放只响应拖放事件，两者不通 —— 用 HTML5 DnD 做夹具会得到
+// "拖了但什么都没发生"，把结论引向"工具不支持拖拽"这个错误方向。
+//
+// 判据分两层：**拖拽确实完成了一次**（`__dragEnds`）+ **值真的变了且落在刻度附近**
+// （`__value` 容差 ±10）。只断言"调用了拖拽"是不够的 ——
+// 工具本身只能报"已派发"，派发不等于生效。
+test('golden: 拖拽 —— CDP 可信拖拽把滑块拖到刻度，且值真的变了', async () => {
+  // 拖拽走 CDP 输入层，必须显式开启（默认 false）
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/drag');
+
+  // 基线：还在 0，且没发生过拖拽
+  await expect.poll(() => page.evaluate(() => window.__value), { timeout: 20_000 }).toBe(0);
+  expect(await page.evaluate(() => window.__dragEnds)).toBe(0);
+  // 刻度是可定位的真元素（拖拽终点只接受 ref/selector/text）
+  await expect(page.locator('#mark-80')).toHaveCount(1);
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我把页面上的音量滑块拖拽到 80 那个刻度上，然后告诉我当前音量。');
+
+  // ① 确实完成了一次拖拽，且值落到 80 附近
+  await expect.poll(() => page.evaluate(() => window.__dragEnds), { timeout: 40_000 }).toBeGreaterThan(0);
+  // 诊断信息用 **locator** 取元素几何（本目录禁止 spec 里写原生查询；
+  // locator.boundingBox() 同样能拿到跨 shadow 的位置）——
+  // 失败时要能一眼看出"鼠标实际落在哪"，否则只看到一个被裁剪的 100，无从判断原因。
+  const win = await page.evaluate(() => ({
+    value: window.__value,
+    lastClientX: window.__lastClientX,
+    lastRatio: window.__lastRatio,
+  }));
+  const knobStyle = await page.locator('#knob').getAttribute('style');
+  const markBox = await page.locator('#mark-80').boundingBox();
+  const trackBox = await page.locator('#track').boundingBox();
+  const diag = Object.assign({}, win, {
+    knobStyle,
+    trackLeft: Math.round(trackBox.x),
+    mark80CenterX: Math.round(markBox.x + markBox.width / 2),
+  });
+  const value = diag.value;
+  expect(
+    Math.abs(value - 80),
+    '音量应落在 80 附近（±10），实际 ' + value + '；诊断=' + JSON.stringify(diag)
+  ).toBeLessThanOrEqual(10);
+  // 页面自己的读数也同步了（不是只有 window 变量变了）
+  expect(await page.textContent('#val')).toBe('当前音量：' + value);
+
+  // ② 模型收到了拖拽结果；且**读回的值**也进了它的上下文
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('拖拽到');
+  expect(toolResultsText()).toContain('当前音量：' + value);
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

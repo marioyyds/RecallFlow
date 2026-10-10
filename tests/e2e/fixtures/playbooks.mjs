@@ -295,6 +295,37 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['组件内结果', '咖啡', '深层组件就绪'],
     },
   },
+
+  'cdp-drag-slider': {
+    id: 'cdp-drag-slider',
+    title: '复杂场景：CDP 可信拖拽 —— 鼠标事件型滑块，拖到指定刻度并读回',
+    trigger: '拖拽',
+    // 拖拽两端只支持 ref/selector/text（没有 role/name），所以用 selector。
+    // 拖完必须**读回值**：拖拽工具只能说"已派发"，那不等于"值真的变了"。
+    tools: ['get_page_snapshot', 'drag_element', 'inspect_element'],
+    success: '滑块被拖到 80 刻度附近，且读回的值与之一致',
+    eval: {
+      url: '/drag',
+      // 这一条**有设置前提**：拖拽经 CDP 派发真实鼠标事件，必须先开 CDP。
+      // 声明在这里，E2E 与真模型 eval 都据此开；否则会得到
+      // "拖拽需要 CDP 输入层（请在设置中开启）"这种与能力无关的失败。
+      cdp: true,
+      instruction: '帮我把页面上的音量滑块拖拽到 80 那个刻度上，然后告诉我当前音量。',
+      pageChecks: [
+        // 拖拽只能"派发"，是否真的生效要看页面状态。
+        // ⚠ 断言 **>= 1** 而不是 === 1：那是**路径断言**，会预设"模型只拖一次"。
+        // 实测真模型先拖到 `#track`（容器中心 = 50%）没到位，改了几次路线才到 80 ——
+        // 结果是达成的，而 `=== 1` 把"路线与我预期不同"误判成"能力不行"。
+        // 判据要盯**结果**（值是否到位），路径只要求"确实发生过拖拽"。
+        { expr: 'window.__dragEnds >= 1', label: '至少完成了一次拖拽（mousedown→move→mouseup）' },
+        // 容差：拖拽落点与刻度中心可能差几像素，但必须确实靠近 80
+        { expr: 'Math.abs(window.__value - 80) <= 10', label: '音量落在 80 附近（±10）' },
+        { expr: "document.querySelector('#val').textContent.indexOf('当前音量：') === 0", label: '页面上读得到当前音量' },
+      ],
+      // 拖拽结果文本必须到模型手里（证明这个工具被真的调用了）
+      mustSeeInToolResults: ['拖拽到'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
