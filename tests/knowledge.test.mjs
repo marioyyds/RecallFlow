@@ -35,6 +35,26 @@ const BOOK = {
   'https://a.test/2': { id: 'https://a.test/2', title: '算法错题', type: 'wrong', note: '二分边界', tags: ['算法'], updatedAt: 5 },
 };
 
+test('list 与 search 必须给出 id —— 否则列出来也读不了那一条（get 要的是 id）', () => {
+  // 这个缺口是做「检索落空 → 改用 list 兜底」的场景时发现的：
+  // list 原先只给标题/类型/标签，而 get 要 id，两个 op **接不上** ——
+  // 模型列出一堆条目、看中了某条，却拿不到能传给 get 的 id（条目没有 url 时彻底没辙）。
+  // 与 macroList 的 name 一样：**要被原样照抄的值必须有无歧义的边界**。
+  const deps = mkDeps(BOOK);
+  const list = knowledgeRead(deps, { op: 'list' });
+  assert.match(list.result, /id="https:\/\/a\.test\/1"/, 'list 每行都要带 id="…"');
+  assert.match(list.result, /id="https:\/\/a\.test\/2"/);
+
+  const search = knowledgeRead(deps, { op: 'search', query: '跨域' });
+  assert.match(search.result, /id="https:\/\/a\.test\/1"/, 'search 结果同样要带 id');
+
+  // 关键：从 list 里抠出来的 id **确实能**喂给 get（两个 op 真的接上了）
+  const id = (list.result.match(/id="([^"]+)"/) || [])[1];
+  assert.ok(id, '能从 list 里解析出 id');
+  const got = knowledgeRead(deps, { op: 'get', id });
+  assert.match(got.result, /标题：/, 'get 用这个 id 读到了条目');
+});
+
 test('op 必填：缺失时报错并列出可用取值，且不读任何数据', () => {
   const deps = mkDeps(BOOK);
   const r = knowledgeRead(deps, {});
