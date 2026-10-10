@@ -59,3 +59,50 @@ test('解构声明被正确识别（否则会同时产生漏报与误报）', ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('正则字面量里出现 `名字=` 不能被当成对 const 的赋值（实测误报）', () => {
+  // 起因：写测试时 `const id = …` 加上断言里的正则 `/id="([^"]+)"/` ——
+  // 剥离器不识别正则字面量，于是 `id=` 被读成对 const id 的赋值。
+  // 文件头当时给的规避办法是"别把局部变量命名为正则里出现的短名字"（把约束推给使用者）。
+  const dir = mkdtempSync(join(tmpdir(), 'rf-const-re-'));
+  try {
+    // 反例①：声明在正则之前（赋值符在正则里）
+    writeFileSync(join(dir, 're-before.mjs'), 'const id = 1;\nconst RE = /id="([^"]+)"/;\nconsole.log(id, RE);\n');
+    // 反例②：正则前面是 return（关键字后可以跟正则）
+    writeFileSync(
+      join(dir, 're-after-return.mjs'),
+      'const id = 2;\nfunction f(s){ return /id=(\\d+)/.test(s); }\nconsole.log(id, f);\n'
+    );
+    // 反例③：正则前是等号（`const re = /x=1/`）
+    writeFileSync(join(dir, 're-after-eq.mjs'), 'const kv = 3;\nconst re2 = /kv=3/;\nconsole.log(kv, re2);\n');
+    const { findings } = findConstAssignments([dir]);
+    assert.deepEqual(
+      findings.map((f) => f.name),
+      [],
+      '正则字面量里的 `名字=` 不该被当成赋值，实际误报：' + JSON.stringify(findings.map((f) => f.name))
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('识别正则不能把除号误判成正则（否则会吃掉整行，造成假阴性）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rf-const-div-'));
+  try {
+    // 除号后面仍有真正的 const 赋值 —— 必须被抓到（若把 `/` 误判成正则，这一行会被整段吃掉）
+    writeFileSync(
+      join(dir, 'division.mjs'),
+      'const total = 10 / 2;\nconst n = 1;\nfunction g(){ n = total / 5; }\n'
+    );
+    // 真正的赋值（普通情形）也必须照旧抓到
+    writeFileSync(join(dir, 'plain.mjs'), 'const m = 0;\nm += 1;\n');
+    const { findings } = findConstAssignments([dir]);
+    assert.deepEqual(
+      findings.map((f) => f.name).sort(),
+      ['m', 'n'],
+      '除号不该吃掉后面的代码，实际：' + JSON.stringify(findings.map((f) => f.name))
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

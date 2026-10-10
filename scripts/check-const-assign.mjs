@@ -14,9 +14,16 @@
 //
 // 已知局限（宁可漏报不误报）：不做真正的词法作用域分析，因此同名跨作用域遮蔽时会漏报；
 // 模板字符串里的 ${} 插值按字符串处理，若插值内含赋值会漏报。
-// **正则字面量的内容会被当成代码**：本剥离器不识别 `/.../`，所以
-// `const ID_RE = /id=(res-\\d+)/` 里的 `id=` 会被读成对某个 `const id` 的赋值（实测误报）。
-// 规避办法是别把局部变量命名为正则里出现的短名字；彻底修需要加正则识别，尚未做。
+//
+// 正则字面量：**已识别**（2024 实测踩到才补的）。此前 `/id=(\d+)/` 里的 `id=`
+// 会被读成对某个 `const id` 的赋值 —— 写测试时"变量名叫 id、断言里又有 `id="`"
+// 就必然误报，而文件头当时给的规避办法是"别把局部变量命名为正则里出现的短名字"
+// （把约束推给使用者，且没人会记得）。
+// 现在按标准启发式判定 `/` 是正则还是除号（见 isRegexStart）：
+//   · 前一个有意义字符是 `( , = : [ ! & | ? { } ;` 之一，或行首；
+//   · 或前一个标识符是 return / typeof / case / in / of / instanceof / new / delete /
+//     void / do / else / yield / await 这类"后面可以跟正则"的关键字。
+// 识别不出来时**按除号处理**（保持保守：宁可漏报，也不把整行代码吃掉造成假阴性）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,11 +58,29 @@ function walk(dir, out = []) {
   return out;
 }
 
-/** 把字符串/模板/注释内容替换成等长空白（保持行列结构），返回按行数组。 */
+// `/` 前面出现这些字符时，它只能是**正则开始**（不可能是除号）
+const REGEX_PREV_CHARS = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '\n', '']);
+// 这些关键字后面可以跟正则字面量（`return /x/`、`typeof /x/`…）
+const REGEX_PREV_WORDS = new Set([
+  'return', 'typeof', 'case', 'in', 'of', 'instanceof', 'new', 'delete', 'void', 'do', 'else', 'yield', 'await',
+]);
+
+/**
+ * 判断代码模式下遇到的 `/` 是正则字面量的开始，还是除号。
+ * 识别不出来时返回 false（**保守**：按除号处理，宁可漏报也不吃掉真正的代码）。
+ */
+function isRegexStart(prevChar, prevWord) {
+  if (REGEX_PREV_CHARS.has(prevChar)) return true;
+  return REGEX_PREV_WORDS.has(prevWord);
+}
+
+/** 把字符串/模板/注释/正则内容替换成等长空白（保持行列结构），返回按行数组。 */
 export function stripStringsAndComments(src) {
   const out = [];
-  let mode = null; // null | "'" | '"' | '`' | '//' | '/*'
+  let mode = null; // null | "'" | '"' | '`' | '//' | '/*' | '/re/'
   let line = '';
+  let prevChar = ''; // 行内最近一个"有意义的"代码字符
+  let prevWord = ''; // 行内最近一个标识符
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
     const n = src[i + 1];
@@ -79,6 +104,45 @@ export function stripStringsAndComments(src) {
       if (c === '\n') {
         out.push(line);
         line = '';
+        continue;
+      }
+      line += ' ';
+      continue;
+    }
+    if (mode === '/re/') {
+      // 正则内部：逐字符吃空白，处理 \ 转义与 [...] 字符类（类里的 / 不结束正则）
+      if (c === '\n') {
+        // 正则字面量不能跨行 —— 说明前面判断错了，退回到"按代码处理"
+        mode = null;
+        out.push(line);
+        line = '';
+        continue;
+      }
+      if (c === '\\') {
+        line += '  ';
+        i++;
+        continue;
+      }
+      if (c === '[') {
+        // 字符类：一直吃到 ] 为止
+        line += ' ';
+        i++;
+        while (i < src.length && src[i] !== ']' && src[i] !== '\n') {
+          if (src[i] === '\\') {
+            line += '  ';
+            i += 2;
+            continue;
+          }
+          line += ' ';
+          i++;
+        }
+        if (i < src.length && src[i] === ']') line += ' ';
+        continue;
+      }
+      if (c === '/') {
+        mode = null;
+        line += c;
+        prevChar = c;
         continue;
       }
       line += ' ';
@@ -118,17 +182,32 @@ export function stripStringsAndComments(src) {
       i++;
       continue;
     }
+    if (c === '/' && isRegexStart(prevChar, prevWord)) {
+      mode = '/re/';
+      line += c;
+      prevChar = '';
+      prevWord = '';
+      continue;
+    }
     if (c === "'" || c === '"' || c === '`') {
       mode = c;
       line += c;
+      prevChar = '';
       continue;
     }
     if (c === '\n') {
       out.push(line);
       line = '';
+      prevChar = '\n';
+      prevWord = '';
       continue;
     }
     line += c;
+    if (!/\s/.test(c)) {
+      prevChar = c;
+      if (/[\w$]/.test(c)) prevWord = (/[\w$]+$/.exec(line) || [''])[0];
+      else prevWord = '';
+    }
   }
   out.push(line);
   return out;
