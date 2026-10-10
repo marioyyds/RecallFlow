@@ -5,7 +5,7 @@
 > 以及 **C-4 的 5 个可重构档**（内置工具 55 → 44）与**思考记录**（推理模型的思维链展示）。
 >
 > 每条都经过四层验证中的至少一层：
-> - `npm test` —— **1134 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
+> - `npm test` —— **1140 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
 > - `npm run test:e2e` —— 真实 Chromium，**8 个场景**（黄金任务 7 + 断线恢复 1，分两阶段）；
 > - `node scripts/verify-bridge-ws-handshake.mjs` —— 桥接 WS 鉴权（真实 server + 真实客户端）；
 > - `integrations/opencode/recallflow-mcp/test/session-isolation.test.mjs` —— 跨会话响应隔离。
@@ -73,12 +73,12 @@ E2E 断言两条：任务最终完成 + 后台**跑了不止一次**（区分"�
 | **C-1 拆分 god files** | **已完成** | `executeTool` 已从**巨型 switch 换成分派注册表**（`TOOL_HANDLERS` Map + **加载时查重**；函数体内**零工具逻辑**）。从 `tools.js` 抽出 4 个**纯函数**模块共 339 行：① `net-parse.js`（186）：搜索结果解析 / 正文抓取与解码 / 抓取失败说明 / 引用标题。② `page-action-verify.js`（67）：`verifyPageAction` 等 —— 决定 `changed/verified`，**卡死检测与完成校验全靠它们**。③ `target-frame.js`（46）：`parseRef` / `frameIdFromArgs` / `localTargetArgs` / `planFrameBatches` —— **跨域 iframe 能否成立的核心**。④ `tool-results.js`（40）：`toolError` / `summarizeCdpError` / `compactSnapshotSummary` —— 决定**模型看到什么**。<br>另有 3 个**由 C-4 合并产生的** handler 模块（`diagnostics.js` / `macros.js` / `knowledge.js`），以及 **13 个工具族模块**：`tab-tools.js`、`run-state-tools.js`、`permission-tools.js`、`screenshot-tool.js`、`page-input-tools.js`、`fetch-tools.js`、`cdp-input-tools.js`、`page-read-tools.js`、`userscript-tools.js`、`skill-tools.js`、`code-access-tools.js`、`page-command-tools.js`、`knowledge-store-tools.js` —— 闭包依赖全部改为显式注入，另配 **184 条**以前写不出来的单测（把 `chrome` / `cdp` / `fetch` / `ctx` 换成假的）。`tools.js` 2288 → **1066 行**（−53%）。<br>**等价性证明**：每一步都跑注册表指纹门禁（**13 次纯搬运期间指纹始终不变**：`bd379daf4693655a`；有意的契约变更分别记为新值并写明原因）+ 全量单测 + E2E 7/7。<br>**收尾时踩到并守住的两类真实错误**：① `saveScreenshot` 移进截图模块后签名多了 `chromeApi`，调用点一度漏传 → **静默不落盘**（截图显示成功但取不回图）；② 一次脚本化批量搬运**同时**引入 **漏 case**（`expand_result` / `get_run_trace` 没有分支）、**重复 case**、**漏 `return`**（`complete_task` 会掉进 `load_skill` 去装技能）。第 ② 类正是**最终改用注册表**的原因：这三类在注册表里没有写法。门禁断言「`registeredToolNames()` == `TOOL_REGISTRY`」、注册表内无重名、`executeTool` 内不得出现工具逻辑，且**这些断言自身有牙齿测试**（多一个 / 少一个 / 改名都必须被发现）。 |
 | **C-4 工具 55 → ~28** | **可重构档全部完成（55 → 44）** | ① 新增 `docs/tool-merge-plan.md` + `scripts/tool-merge-impact.mjs`（成本数据）+ `tests/tool-merge-plan.test.mjs`（把方案数字与"哪些档不可做"**钉住**）。② **实测修正文档手算错误**：`tool-design.md` §10 原写"目标落在 ~28"，逐档净减量加起来实际是 **55 → 33**；实施后**可达落点是 38**（含需取舍的第 8/9 档），**到 28 还需再砍 10 个能力** —— 合并路径本身已用尽。③ **已执行 5 个可重构档**：诊断（55→53）、宏（53→51）、知识库只读（51→49）、元素检查只读（49→47）、视觉标注（47→**44**）。④ **每档都按"同权限 + 同执行路径"分组，而不是按语义相似度**：宏（risk 取最高 + 按 op 保留写审批与**执行期回放白名单**，有真实提权先例）、知识库（只合读三件套，写/删保持独立，否则每次检索都要审批）、元素检查（只合共用同一条执行路径的三个，`get_attribute` 与 `get_element_source` 保持独立）、视觉标注（四者权限与路径完全一致，最纯粹的一次）。⑤ **判为不可做（各有断言守住）**：第 6 档（`toolNeedsApproval` 拿不到 args）、第 7 档（`get_ax_snapshot` 需 CDP 而 `list_frames` 刻意不需）。⑥ **需你决策**：第 8 档（指针族，会削弱最高频工具签名）、第 9 档（用户脚本，要砍能力面）。⑦ 副产物：修复两处参数描述串台、修掉 `get_entry` 缺 status 时输出 `undefined`、暴露**三次"工具数下降但 prompt 变大"**、沉淀出合并可行性**三条判据** |
 | **（本轮新发现）两处参数描述串台** | **已修复 + 加门禁** | `macro.name`（原 `save_macro.name`）与 `load_skill.name` 的描述被从 `click_element` 复制过来，写成「可访问名（按钮文字 / aria-label），配合 role」—— 但前者是**宏的名字**，后者是要加载的**技能名**，且这两个工具**都没有 `role` 参数**。描述是模型唯一的说明来源，写错会让它去构造不存在的参数含义。已按语义改写，并新增 2 条门禁（"声称配合 role 的工具必须真有 role 参数" + 钉住这两个已知用例），**并已注入错误验证它们确实会报错**（当时 3 条门禁同时红灯） |
-| **思考记录（思维链）** | **已实现 + 真浏览器验证** | 用户反馈「模型在思考时界面没有记录」。**根因不是缺个动画，而是思维链从来没被读过**：`streamAgentStep` 只处理 `delta.content` 与 `delta.tool_calls`，推理模型的 `delta.reasoning_content` 被**直接丢弃**（全仓库此前对它零引用）。现已：① 后台把它发成**独立的 `type:'reasoning'` 事件**（不混进正文，否则面板再也分不出哪段是思考、哪段是回答）；② 面板渲染成**可折叠的思考记录**，位置固定在回答上方，思考时展开、正文一开始**自动收起**，用户点开后仍能读全文；③ 进行中的动画（三点 + 标签扫光）只在 `data-state="running"` 时跑，静止的记录不再闪。**四条硬约束**：思维链**绝不写回 messages**（写回会改写请求前缀使缓存全失效，且该字段不可回传）——已由前缀稳定性门禁 + 单测双重守住；`.think-body` 初始 `display:none`；扫光用 `@supports` 包住（`background-clip:text` 不生效时 `-webkit-text-fill-color:transparent` 会让**文字整个消失**）；`content.js` 重新构建（产物入库，忘构建等于没上线）。**验证**：13 条接线门禁 + 5 条 streamAgentStep 单测 + **1 条真浏览器 E2E**（断言记录真的出现、含思维链、不含正文、自动收起、点击后可展开读到全文）—— 光有单测只能证明"接了线"，证明不了"面板上真的有这块记录"。⚠ **只有 `deepseek-reasoner` 会返回思维链**；默认的 `deepseek-chat` 下不会有记录（只有等待动画），已在设置页提示里写明 |
+| **思考记录（思维链）** | **已实现 + 真浏览器验证** | 用户反馈「模型在思考时界面没有记录」。**根因不是缺个动画，而是思维链从来没被读过**：`streamAgentStep` 只处理 `delta.content` 与 `delta.tool_calls`，推理模型的 `delta.reasoning_content` 被**直接丢弃**（全仓库此前对它零引用）。现已：① 后台把它发成**独立的 `type:'reasoning'` 事件**（不混进正文，否则面板再也分不出哪段是思考、哪段是回答）；② 面板渲染成**可折叠的思考记录**。**版式（按用户第二轮反馈修正）**：思考**不是**一个总块 + 内层滚动条，而是**每段思考单独一块、按发生顺序穿插在对话流里**（思考 → 叙述 → 工具 → 思考 → …），与对话共用同一个滚动条；进行中展开、正文一开始自动收起，点开后仍能读全文。**四条硬约束**：思维链**绝不写回 messages**（写回会改写请求前缀使缓存全失效，且该字段不可回传）——已由前缀稳定性门禁 + 单测双重守住；`.think-body` 不得有 `max-height`/内层滚动；扫光用 `@supports` 包住（`background-clip:text` 不生效时 `-webkit-text-fill-color:transparent` 会让**文字整个消失**）；`content.js` 重新构建（产物入库，忘构建等于没上线）。<br>**验证**：16 条接线门禁 + 3 条作用域门禁 + 5 条 streamAgentStep 单测 + **1 条真浏览器 E2E**（断言两块记录真的出现、含各自思维链、不含正文、**穿插顺序为 think→content→think 而非 think→think→content**、自动收起、点击后可展开、计算样式确认无内层滚动条）。<br>**E2E 抓到两个单测抓不到的缺陷**：① **渲染合并器的 key 冲突** —— `pushReasoning` 与 `finishReasoning` 共用 key `'reason'`，而合并器按 key 只保留最后一次回调，于是「下一段开始时的排入」**顶掉了上一段尚未执行的回调**，第一块记录永远是空的（块数却是对的 —— 所以只断言"有几块"根本发现不了）；改为按段号 `reason-<id>` 后修复。② 我自己把 `mountThinkSegment` 写在 `openPanel` 内部却在模块级调用 → **流式中重开面板必 `ReferenceError`**；已移到模块顶层，并新增 `tests/panel-scope.test.mjs` 静态门禁专门盯「模块级函数不得调用更深层的函数」，**已注入该缺陷验证它确实会报错**。<br>⚠ **只有 `deepseek-reasoner` 会返回思维链**；默认的 `deepseek-chat` 下不会有记录（只有等待动画），已在设置页提示里写明 |
 
 ## 六、如何验证本轮的每一条
 
 ```powershell
-npm test                            # 1134 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
+npm test                            # 1140 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
 npm run test:e2e                     # 真实 Chromium：黄金任务 6 + 断线恢复 1（两阶段）
 npm run build:content -- --check     # 内容脚本打包（自包含性不合格会以退出码 2 拒绝）
 node scripts/test-count.mjs          # 测试数（文档数字由它生成，不手写）
@@ -94,7 +94,7 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 
 | 指标 | 值 |
 | --- | --- |
-| 单元测试 | **1134 项 / 79 个文件**，全通过 |
+| 单元测试 | **1140 项 / 80 个文件**，全通过 |
 | 真实浏览器 E2E | **8 项**（黄金任务 6 + 断线恢复 1），全通过 |
 | 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试），全通过 |
 | 变异测试 | 5/5 条变异都被断言抓住（证明断言不是摆设） |
