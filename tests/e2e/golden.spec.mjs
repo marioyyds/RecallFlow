@@ -1076,6 +1076,53 @@ test('golden: 跨标签页 —— 验证码填进新开的页并提交，来源�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**虚拟列表**（playbook 'virtual-list-scroll'）。
+//
+// 难点是"**DOM 里没有 ≠ 页面上没有**"：列表共 100 条，而容器**只渲染当前窗口的 5 行**
+// （滚动时回收重建）。所以：
+//   · `get_page_snapshot` 里看不到目标行；
+//   · `document.querySelectorAll('.row').length` 只返回 **5** ——
+//     把它当成"这个列表只有 5 条"或"没有 VL-87 这一条"都是**错的**。
+//
+// 第二个难点是它在一个**内部可滚动容器**里：滚窗口（`scroll_by` 的 `window.scrollBy`）
+// 对它毫无作用，必须滚**容器自己**。本轮为此补上了
+// `scroll_page({ selector, y })`＝"把该元素自身滚动 y 像素"（原先没有任何一等公民的滚法，
+// 只能反复 scrollIntoView 可见行慢慢推，或 run_javascript 自己设 scrollTop）。
+//
+// 基线因此成对出现：**DOM 里只有 5 行**（朴素读法会得出错误结论）**且目标不在其中**。
+test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读法只有 5 行）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/vlist');
+
+  // 基线①：DOM 里**只有 5 行**，而列表其实有 100 条
+  await expect.poll(() => page.locator('#list .row').count(), { timeout: 20_000 }).toBe(5);
+  expect(await page.textContent('#list')).not.toContain('VL-87');
+  // 基线②：目标行**不在 DOM 里**（所以"找不到"不等于"没有"）
+  expect(await page.locator('#list [data-id="i87"]').count()).toBe(0);
+  expect(await page.evaluate(() => window.__renderedIds.includes('i87'))).toBe(false);
+  // 基线③：**滚动窗口对它没用** —— 这条正是"必须滚容器"的证据
+  await page.evaluate(() => window.scrollBy(0, 600));
+  await page.waitForTimeout(200);
+  expect(
+    await page.evaluate(() => window.__renderedIds.includes('i87')),
+    '滚窗口竟然让第 87 条出现了，本场景的难点不成立'
+  ).toBe(false);
+
+  resetLlmRequests();
+  await sendInstruction(page, '这个页面的列表很长，帮我找到第 87 条（标着 VL-87 的那条）并点开它。');
+
+  // ① 目标行真的被渲染出来过（说明滚对了容器）
+  await expect.poll(() => page.evaluate(() => window.__renderedIds.includes('i87')), { timeout: 40_000 }).toBe(true);
+  // ② 点开的正是第 87 条
+  await expect.poll(() => page.evaluate(() => window.__clicked), { timeout: 20_000 }).toBe('i87');
+  await expect(page.locator('#status')).toHaveText('已点开：87');
+
+  // ③ 模型视角：滚动的**实际位置**要回到它手里（它能据此判断"滚到哪了"）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('scrollTop=3480');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

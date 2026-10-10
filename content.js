@@ -1595,6 +1595,30 @@
     const beforeY = window.scrollY;
     const pushScrollUndo = () => pushUndo(() => window.scrollTo(beforeX, beforeY));
     if (params.ref || params.text || params.selector) {
+      const offY = Number(params.y) || 0;
+      const offX = Number(params.x) || 0;
+      if (offY || offX) {
+        const target = params.ref || params.selector ? findElementsFor(params)[0] : null;
+        const range = !target && params.text ? findRangeFor(params) : null;
+        const box = target || range && (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
+        if (!box) {
+          return { ok: false, error: targetMissError(params) + "\uFF08\u53EF\u5148 get_page_snapshot \u83B7\u53D6 ref\uFF0C\u6216\u6539\u7528 role/name \u5B9A\u4F4D\uFF09" };
+        }
+        const prevTop = box.scrollTop;
+        const prevLeft = box.scrollLeft;
+        box.scrollTop = prevTop + offY;
+        box.scrollLeft = prevLeft + offX;
+        pushUndo(() => {
+          box.scrollTop = prevTop;
+          box.scrollLeft = prevLeft;
+        });
+        const moved = Math.round(box.scrollTop) !== Math.round(prevTop) || Math.round(box.scrollLeft) !== Math.round(prevLeft);
+        return {
+          ok: true,
+          selector: elementSelector(box),
+          result: "\u5DF2\u6EDA\u52A8\u5BB9\u5668\uFF08\u504F\u79FB y=" + offY + " x=" + offX + "\uFF09\u2192 scrollTop=" + Math.round(box.scrollTop) + " scrollLeft=" + Math.round(box.scrollLeft) + (moved ? "" : "\uFF08\u4F4D\u7F6E\u6CA1\u53D8\uFF1A\u8BE5\u5143\u7D20\u53EF\u80FD\u672C\u6765\u5C31\u4E0D\u53EF\u6EDA\u52A8\uFF0C\u6216\u5DF2\u7ECF\u5230\u8FB9\u754C\uFF09")
+        };
+      }
       if (params.text) {
         const range = findRangeFor(params);
         if (range) {

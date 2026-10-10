@@ -976,6 +976,67 @@ function handoffFormPage() {
 </body></html>`;
 }
 
+// 虚拟列表面板：**DOM 里只有可见的几行**，其余是假的。
+//
+// 难点是"**DOM 里没有 ≠ 页面上没有**"：
+//   · 列表共 100 条，容器只渲染**当前窗口的 5 条**（滚动时回收重建）；
+//   · 所以 `get_page_snapshot` 里看不到目标行，`document.querySelectorAll('.row').length` 只返回 5 ——
+//     把它当成"这个列表只有 5 条"或"没有 VL-87 这一条"都是**错的**。
+//   · 而且目标在一个**内部可滚动容器**里：窗口滚动(`window.scrollBy`)对它毫无作用，
+//     必须滚**容器自己**（`scroll_page({ selector: '#list', y: … })`）。
+//
+// `#pad` 撑出总高度（100×40px），行绝对定位在 `#list` 里（`#list` 是定位祖先），
+// 于是行号与 scrollTop 成正比：start = floor(scrollTop / 40)。
+function virtualListPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具虚拟列表</title>
+<style>
+  #list { position: relative; height: 200px; overflow-y: auto; border: 1px solid #cbd5e1; }
+  .row { position: absolute; left: 0; right: 0; height: 40px; line-height: 40px; padding-left: 8px; }
+  .row:hover { background: #f1f5f9; }
+</style></head>
+<body>
+  <h1>虚拟列表</h1>
+  <div id="list" role="list" aria-label="条目列表"><div id="pad"></div><div id="win"></div></div>
+  <div id="status" role="status">未点开</div>
+  <script>
+    var TOTAL = 100, ROW = 40, VISIBLE = 5;
+    window.__clicked = null;
+    window.__renderedIds = [];
+    window.__windowStart = 0;
+    var list = document.getElementById('list');
+    var pad = document.getElementById('pad');
+    var win = document.getElementById('win');
+    pad.style.height = (TOTAL * ROW) + 'px';
+    function render() {
+      var start = Math.floor(list.scrollTop / ROW);
+      if (start > TOTAL - VISIBLE) start = Math.max(0, TOTAL - VISIBLE);
+      window.__windowStart = start;
+      win.innerHTML = '';
+      var ids = [];
+      for (var i = start; i < start + VISIBLE && i < TOTAL; i++) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.setAttribute('role', 'listitem');
+        row.setAttribute('data-id', 'i' + i);
+        row.style.top = (i * ROW) + 'px';
+        row.textContent = '条目 ' + i + (i === 87 ? ' · VL-87 目标条目' : '');
+        (function (idx) {
+          row.addEventListener('click', function () {
+            window.__clicked = 'i' + idx;
+            document.getElementById('status').textContent = '已点开：' + idx;
+          });
+        })(i);
+        win.appendChild(row);
+        ids.push('i' + i);
+      }
+      window.__renderedIds = ids;
+    }
+    list.addEventListener('scroll', render);
+    render();
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1703,6 +1764,23 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：虚拟列表（playbook id = 'virtual-list-scroll'）。
+    //
+    // 目标行**一开始不在 DOM 里**（只有 5 行被渲染），所以必须先滚**容器自己**再读。
+    // 100 条 × 40px，第 87 条 ⇒ scrollTop = 87 × 40 = 3480。
+    if (userText.includes(PLAYBOOKS['virtual-list-scroll'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      // 滚**容器**（不是窗口）—— 这正是本轮补上的那个能力
+      if (done === 1) { toolStep(res, 'scroll_page', { selector: '#list', y: 3480 }); return; }
+      // 滚动后必须**重新读**才知道窗口换成了哪几行
+      if (done === 2) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { text: 'VL-87' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已滚到第 87 条并点开它（目标条目 VL-87，页面回执「已点开：87」）。', 70);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1745,7 +1823,8 @@ const main = http.createServer((req, res) => {
                                         // `startsWith('/handoff')` 会把 /handoff-form 也吃掉。
                                         : req.url && req.url.startsWith('/handoff-form') ? handoffFormPage()
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
-                                            : mainPage()
+                                            : req.url && req.url.startsWith('/vlist') ? virtualListPage()
+                                              : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

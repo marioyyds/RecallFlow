@@ -101,7 +101,23 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       副作用：四个 schema 的描述合成一个，`browser_task` 的 prompt 预算
   //                       由 33400 上调到 35600（第三次出现"工具数下降但字符数上升"，
   //                       说明写在 tests/registry.test.mjs 的 SCHEMA_BYTES_BUDGET 上方）。
-  const EXPECTED = 'd138640ba617ecfe';
+  //   7d87402108e3a570 —— **有意改动**：修掉「滚动内部可滚动容器」的能力缺口。
+  //                       **工具数不变（仍 44）**，只改 `scroll_page` 的 `y`/`x` 两处参数说明。
+  //
+  //                       起因：做「虚拟列表」能力时发现**没有任何一等公民的滚法能滚内部容器**。
+  //                       原先：有目标 → `scrollIntoView`（对已在视口里的容器是空操作，`y` 被忽略）；
+  //                       无目标 → `window.scrollBy`（**只动窗口**）。虚拟列表、带 overflow 的面板
+  //                       全是内部容器，于是只能反复把可见行 scrollIntoView 慢慢推，
+  //                       或 run_javascript 自己设 scrollTop（一次高危审批，还丢掉滚动结果回报）。
+  //
+  //                       现在 `scroll_page({ selector, y })` = "把该元素自身滚动 y 像素"，
+  //                       并在结果里回报**实际落点**（scrollTop=… / 位置没变时说明原因）。
+  //                       旧说明「有 ref/selector/text/top/left 时忽略」与实现相反、也正是否认了这个能力，
+  //                       一并改成"与 ref/selector/text 同用时滚该元素自身，否则滚窗口"。
+  //
+  //                       ⚠ 两处说明都**刻意压到与原串等长**：它是每轮下发的工具定义，
+  //                       膨胀会被 tests/registry.test.mjs 的体积预算拦下（本次初稿超了 90 字符，已收紧）。
+  const EXPECTED = '7d87402108e3a570';
   assert.equal(
     fp,
     EXPECTED,

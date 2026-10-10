@@ -491,6 +491,32 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已提交验证码：RF-7391'],
     },
   },
+
+  'virtual-list-scroll': {
+    id: 'virtual-list-scroll',
+    title: '复杂场景：虚拟列表 —— DOM 里没有 ≠ 页面上没有，必须滚容器再读',
+    trigger: 'VL-87',
+    // 三个难点叠在一起：
+    //   ① **DOM 里只有可见的 5 行**（共 100 条）—— 看不到目标不等于没有；
+    //   ② 目标在**内部可滚动容器**里 —— 滚窗口（scroll_by）对它毫无作用，必须滚容器自己；
+    //   ③ 滚完**必须重新读**才知道窗口换成了哪几行（行是回收重建的，旧 ref 全部失效）。
+    tools: ['get_page_snapshot', 'scroll_page', 'click_element', 'inspect_element'],
+    success: '滚动容器后目标行进入窗口并被点开（页面回执「已点开：87」）',
+    eval: {
+      url: '/vlist',
+      instruction: '这个页面的列表很长，帮我找到第 87 条（标着 VL-87 的那条）并点开它。',
+      pageChecks: [
+        // ★ 目标行**真的进过窗口**：证明是"滚过去"而不是碰巧
+        { expr: "window.__renderedIds.indexOf('i87') >= 0", label: '第 87 条真的被渲染出来过' },
+        // 点开的是**第 87 条**，不是别的行
+        { expr: "window.__clicked === 'i87'", label: '点开的正是第 87 条' },
+        { expr: "document.querySelector('#status').textContent === '已点开：87'", label: '页面回执「已点开：87」' },
+      ],
+      // 窗口滚动位置必须真的变了 —— 说明滚的是**容器**
+      // （窗口滚不动这个列表，所以这一条能区分"滚了容器"与"滚了窗口"）
+      mustSeeInToolResults: ['scrollTop=3480'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
