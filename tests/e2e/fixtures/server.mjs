@@ -487,6 +487,44 @@ function framedPage() {
 </body></html>`;
 }
 
+// 入口页：点了链接会**在新标签页**打开详情（用来验"新标签页接管"）。
+//
+// 难点是**换页之后还得继续干活**：
+//   · 内容不在当前页 —— 点击之后，"当前页面"换成了另一个标签页；
+//   · 若工具不接管新标签页，后续读取会**回到原页**上去找，得到"没有这个元素"，
+//     而那个结论是错的（页面换了，不是元素不存在）；
+//   · 跨标签页没法直接断言，所以这里借**同源 localStorage** 做一个跨标签页通道：
+//     入口页加载时先清掉标记，详情页写入标记 —— 于是"详情页真的打开过"在入口页可查。
+//     （两个页同源才有这个便利；跨域时只能靠 postMessage，见 /framed 那组。）
+function portalPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具工单列表</title></head>
+<body>
+  <h1>工单列表</h1>
+  <p>共 3 条工单，最新的那条需要查看详情。</p>
+  <a id="open" href="/detail" target="_blank" role="link" aria-label="查看详情">查看详情</a>
+  <script>
+    // 清掉上一次运行留下的标记，避免"上一轮打开过"被当成这一轮的成绩
+    try { localStorage.removeItem('rf-detail'); } catch (e) {}
+    window.__portalClicks = 0;
+    document.getElementById('open').addEventListener('click', function () { window.__portalClicks += 1; });
+  </script>
+</body></html>`;
+}
+
+// 新标签页里的详情页。
+function detailPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具工单详情</title></head>
+<body>
+  <h1>工单详情</h1>
+  <div id="detail-body" role="region" aria-label="详情正文">工单号 TK-8848；状态：待处理；负责人：张三；问题：导出报表时金额列错位。</div>
+  <script>
+    window.__detailOpened = true;
+    // 同源跨标签页通道：入口页据此可判定"详情页真的打开过"
+    try { localStorage.setItem('rf-detail', 'opened'); } catch (e) {}
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -975,6 +1013,21 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：新标签页接管（playbook id = 'new-tab-takeover'）。
+    //
+    // 点击后"当前页面"换成新标签页，后续读取必须落在**新页**上。
+    // 这里刻意不做任何显式切页动作（不调 switch_tab）：
+    // 点击工具在检测到新标签页时会自动绑定（结果文本里会写明），
+    // 这条剧本验的就是"绑定之后，后面几步是不是真的在新页上执行"。
+    if (userText.includes(PLAYBOOKS['new-tab-takeover'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'link', name: '查看详情' }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#detail-body' }); return; }
+      finalText(res, '已在新标签页里读到工单详情：TK-8848，状态待处理，负责人张三，问题是导出报表时金额列错位。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1004,7 +1057,9 @@ const main = http.createServer((req, res) => {
                 : req.url && req.url.startsWith('/recover') ? recoverPage()
                   : req.url && req.url.startsWith('/table') ? tablePage()
                     : req.url && req.url.startsWith('/framed') ? framedPage()
-                      : mainPage()
+                      : req.url && req.url.startsWith('/portal') ? portalPage()
+                        : req.url && req.url.startsWith('/detail') ? detailPage()
+                          : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

@@ -230,6 +230,30 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['内嵌结果', '仅标题'],
     },
   },
+
+  'new-tab-takeover': {
+    id: 'new-tab-takeover',
+    title: '复杂场景：点击后开新标签页 —— 接管之后继续干活',
+    trigger: '新标签页',
+    // 刻意**不含**任何显式切页工具：点击工具检测到新标签页会自动绑定，
+    // 这条剧本验的是"绑定之后后面几步真的落在新页上"。
+    tools: ['get_page_snapshot', 'click_element', 'inspect_element'],
+    success: '新标签页被打开、被自动接管，详情内容在**新页**上读到并交到模型手里',
+    eval: {
+      url: '/portal',
+      instruction: '点开这个页面里的「查看详情」，内容会在新标签页里打开，帮我把详情里的要点告诉我。',
+      pageChecks: [
+        // 入口页确实点了（否则后面都没意义）
+        { expr: 'window.__portalClicks === 1', label: '入口页的链接被点了一次' },
+        // 同源 localStorage 作为跨标签页通道：入口页加载时会清掉这个标记，
+        // 所以此刻它存在 ⇔ **详情页在本次运行中真的打开过**。
+        { expr: "localStorage.getItem('rf-detail') === 'opened'", label: '详情页真的在新标签页里打开过' },
+      ],
+      // ① 详情内容必须回到模型手里（证明"读"发生在新页上，而不是回原页找）
+      // ② 点击结果里应写明"检测到新标签页并已自动绑定" —— 这是模型据以判断"换页了"的唯一信号
+      mustSeeInToolResults: ['TK-8848', '待处理', '已自动绑定'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

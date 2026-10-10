@@ -659,3 +659,43 @@ test('golden: 跨域 iframe —— 填/选/提交发生在框架内，且结果�
 
   await page.close();
 });
+
+// 能力验收（复杂场景）：**新标签页接管**（playbook 'new-tab-takeover'）。
+//
+// 难点是**换页之后还得继续干活**：点击后"当前页面"变成了另一个标签页。
+// 若工具不接管新标签页，后续读取会**回到原页**上去找，得到"没有这个元素" ——
+// 而那个结论是错的：页面换了，不是元素不存在。
+//
+// 这条用例刻意**不做任何显式切页**（不调 switch_tab），验的就是
+// "点击检测到新标签页 → 自动绑定 → 后面几步真的落在新页上"。
+test('golden: 新标签页 —— 自动接管，且后续读取落在新页上', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/portal');
+
+  // 基线：入口页还没被点，详情页也还没打开过
+  expect(await page.evaluate(() => window.__portalClicks)).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('rf-detail'))).toBe(null);
+  const pagesBefore = context.pages().length;
+
+  resetLlmRequests();
+  await sendInstruction(page, '点开这个页面里的「查看详情」，内容会在新标签页里打开，帮我把详情里的要点告诉我。');
+
+  // ① 真的开了一个新标签页，且它就是详情页
+  await expect.poll(() => context.pages().length, { timeout: 40_000 }).toBeGreaterThan(pagesBefore);
+  const detail = context.pages().find((p) => p.url().includes('/detail'));
+  expect(detail, '没有找到详情页标签页').toBeTruthy();
+  await expect.poll(() => detail.evaluate(() => window.__detailOpened), { timeout: 20_000 }).toBe(true);
+
+  // ② 入口页视角：同源标记说明"详情页本次真的打开过"（与 eval 的同一条判据）
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('rf-detail')), { timeout: 20_000 }).toBe('opened');
+
+  // ③ 模型视角：详情内容必须回到模型手里 —— 证明"读"发生在新页上
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('TK-8848');
+  const seen = toolResultsText();
+  expect(seen).toContain('待处理');
+  // ④ 点击结果里必须写明"检测到新标签页并已自动绑定"：
+  //    那是模型据以判断"换页了"的**唯一信号**。缺了它，模型会以为自己还在原页。
+  expect(seen).toContain('已自动绑定');
+
+  await page.close();
+});
