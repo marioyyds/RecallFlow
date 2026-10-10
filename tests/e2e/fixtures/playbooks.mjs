@@ -638,6 +638,40 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已撤销上一步操作', '保存次数=1'],
     },
   },
+
+  'form-validation': {
+    id: 'form-validation',
+    title: '复杂场景：HTML5 原生校验静默拦住提交（页面上什么都不说）',
+    trigger: '报名表',
+    // 难点是"**页面上什么都没说**"：字段不合法时浏览器拦住 submit，
+    // 只在**它自己的原生气泡**里提示（工具读不到），DOM 里既没有错误文案、状态也不变。
+    // 于是"点了提交没反应"看起来像"按钮坏了"，而真相是两个字段没通过约束：
+    // 姓名少于 minlength=2（tooShort）、邮箱格式不对（typeMismatch）。
+    // 判据要同时证明两件事：**页面上确实没有提示**（难点成立）、以及修好之后真的提交成功。
+    tools: ['get_page_snapshot', 'type_text', 'check_box', 'click_element', 'inspect_element'],
+    success: '先发现"提交被校验静默拦住"并读出是哪两个字段、什么原因，改好后再提交成功',
+    eval: {
+      url: '/validate',
+      instruction:
+        '帮我把这个报名表填好并提交：姓名「李」，手机号 13800138000，邮箱 lilei#example.com，勾选同意条款。' +
+        '如果有填得不对的地方，你看着改成能通过的，然后提交。',
+      pageChecks: [
+        // 「确实提交成功过」而不是「恰好一次」：多点一次不该判失败（判据盯结果，不盯路径）
+        { expr: 'window.__submits >= 1', label: '最终真的提交成功了' },
+        { expr: "document.getElementById('f').checkValidity() === true", label: '表单最终完全合法' },
+        { expr: "document.getElementById('name').value.length >= 2", label: '姓名被补到满足 minlength' },
+        { expr: "document.getElementById('email').value.indexOf('@') > 0", label: '邮箱被改成合法格式' },
+      ],
+      // ⚠ 只断言**那段报告本身出现过**（`表单未通过校验` 这句只可能来自新加的合法性读取）。
+      //
+      // 原先要求 `patternMismatch` 与 `typeMismatch` **两个都出现** —— 那又是**路径断言**：
+      // 实测模型可能**先改好了邮箱**再看，于是那一轮只剩姓名是无效的、`typeMismatch` 根本不会出现。
+      // 这已经是本会话第四次栽在同一件事上（计数、顺序、先后…形态各异，本质都是"我预设了做法"）。
+      // 「报告出现过」才是与做法无关的证据；**具体是哪两个字段**由脚本化 E2E 断言
+      //（那条路径的顺序由我们控制，可以更锋利）。
+      mustSeeInToolResults: ['表单未通过校验'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

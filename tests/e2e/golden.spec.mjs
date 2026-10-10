@@ -1338,6 +1338,61 @@ test('golden: 撤销 —— 只回退最后一次可撤销动作，点击不在�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**HTML5 原生校验静默拦住提交**（playbook 'form-validation'）。
+//
+// 难点是"**页面上什么都没说**"：字段不合法时浏览器拦住 `submit`，
+// 只在**它自己的原生气泡**里提示（工具读不到），DOM 里既没有错误文案、`#status` 也不变。
+// 于是"点了提交没反应"看起来像"按钮坏了"，而真相是字段没通过约束。
+//
+// 基线把这一点证明出来：**直接照用户给的问题值填好、点提交，什么都不发生、
+// 页面上也没有任何"哪里不对"的文字**。修好之前模型为此要换 8 次调用四处找原因
+// （实测探针：还借道 run_javascript 自己扫 DOM —— 一次高危审批）。
+// 现在 `inspect_element({op:"inspect"})` 直接把不合格的字段与**与语言无关的约束名**列出来。
+//
+// ⚠ 夹具设计上的一个真坑：姓名用 `pattern=".{2,}"` 而不是 `minlength="2"` ——
+// 按规范 `tooShort` 需要用户输入产生的"脏值标记"，而工具是**程序化**写值的，
+// 实测 `minlength` 对 agent 写入**根本不生效**（`validity.valid` 仍是 true）。
+// 也就是说：拿 `minlength` 做约束的页面**拦不住 agent**，拿它做夹具则**什么都没验**。
+test('golden: 表单校验 —— 提交被静默拦住，读出原因改好后才能提交', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/validate');
+
+  // 基线：按用户给的问题值填好 → 点提交 → **什么都不发生**，且页面上没有提示
+  await page.fill('#name', '李');
+  await page.fill('#phone', '13800138000');
+  await page.fill('#email', 'lilei#example.com');
+  await page.check('#agree');
+  await page.click('#ok');
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__submits), '这次提交竟然成功了，本场景的难点不成立').toBe(0);
+  expect(await page.evaluate(() => document.getElementById('f').checkValidity())).toBe(false);
+  await expect(page.locator('#status')).toHaveText('未提交');
+  // 页面上**没有任何**"哪里不对"的可见文字 —— 这正是难点
+  const bodyText = await page.locator('body').innerText();
+  expect(bodyText, '页面上竟然写了错误提示，那本场景就不算"静默"').not.toMatch(/至少|格式|不正确|必填|无效/);
+
+  // 还原到未填状态，让脚本从零开始
+  await page.reload();
+
+  resetLlmRequests();
+  // 指令取自剧本（单一来源）—— 跨行拼接的字面量无法通过"逐字一致"门禁
+  await sendInstruction(page, PLAYBOOKS['form-validation'].eval.instruction);
+
+  // ① 最终真的提交成功了
+  await expect.poll(() => page.evaluate(() => window.__submits), { timeout: 40_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.getElementById('f').checkValidity())).toBe(true);
+  await expect(page.locator('#status')).toHaveText(/^已提交：/);
+
+  // ② 模型视角：两个字段的**约束名**必须回到它手里（那是它据以修的依据，且与语言无关）
+  const seen = toolResultsText();
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('patternMismatch');
+  expect(seen).toContain('typeMismatch');
+  // 还要明确告诉它"提交会被拦住、页面上不会有提示"——否则它仍会把"没反应"当成故障
+  expect(seen).toContain('表单未通过校验');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

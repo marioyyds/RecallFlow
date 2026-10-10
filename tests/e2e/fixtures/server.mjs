@@ -1248,6 +1248,48 @@ function undoPage() {
 </body></html>`;
 }
 
+// 报名表页：**HTML5 原生校验**静默拦住提交。
+//
+// 难点是"**页面上什么都没说**"：表单填得不对时，浏览器拦住 submit，
+// 只在**它自己的原生气泡**里提示（工具读不到），DOM 里既没有错误文案、`#status` 也不变。
+// 于是"点了提交没反应"看起来像"按钮坏了"，而真相是字段没通过约束。
+//
+// ⚠⚠ 夹具设计上的一个真坑（实测出来的，值得记住）：
+//   **`minlength` 对"程序化填值"不生效** —— 按规范 `tooShort` 需要用户输入产生的
+//   "脏值标记"，而工具是用 `setNativeValue` + 派发 input 事件写值的，**不会**让它变脏。
+//   实测：姓名填「李」+ `minlength="2"` → `validity.valid` 仍是 **true**，
+//   也就是说这个约束**根本拦不住 agent**，拿它做夹具等于什么都没验。
+//   改用 `pattern` 就正常生效（`patternMismatch`）—— 与 `required` 空值、`type=email` 一样，
+//   它们不依赖脏值标记。所以本页的"至少 2 个字"用 `pattern=".{2,}"` 表达。
+function validatePage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具报名表</title></head>
+<body>
+  <h1>报名表</h1>
+  <form id="f">
+    <label for="name">姓名</label>
+    <input id="name" required pattern=".{2,}" aria-label="姓名">
+    <label for="phone">手机号</label>
+    <input id="phone" required pattern="1[3-9][0-9]{9}" aria-label="手机号">
+    <label for="email">邮箱</label>
+    <input id="email" type="email" required aria-label="邮箱">
+    <label for="agree">同意条款</label>
+    <input id="agree" type="checkbox" required aria-label="同意条款">
+    <button id="ok" type="submit" role="button" aria-label="提交报名">提交报名</button>
+  </form>
+  <div id="status" role="status">未提交</div>
+  <script>
+    window.__submits = 0;
+    var statusEl = document.getElementById('status');
+    document.getElementById('f').addEventListener('submit', function (e) {
+      e.preventDefault();
+      window.__submits += 1;
+      statusEl.textContent = '已提交：' + document.getElementById('name').value +
+        '／' + document.getElementById('email').value;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -2067,6 +2109,30 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：HTML5 原生校验静默拦住提交（playbook id = 'form-validation'）。
+    //
+    // 节奏：按用户给的（有问题的）值填 → 点提交（**被浏览器静默拦住**）→
+    // 用 inspect 读出哪两个字段不合法 → 改好 → 再提交成功。
+    if (userText.includes(PLAYBOOKS['form-validation'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '姓名', value: '李' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { role: 'textbox', name: '手机号', value: '13800138000' }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { role: 'textbox', name: '邮箱', value: 'lilei#example.com' }); return; }
+      if (done === 4) { toolStep(res, 'check_box', { role: 'checkbox', name: '同意条款', checked: true }); return; }
+      // 第一次提交：会被原生校验拦住（页面上不会有任何提示）
+      if (done === 5) { toolStep(res, 'click_element', { role: 'button', name: '提交报名' }); return; }
+      // 读**表单**：不合格的字段与原因就在这一步的返回里
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'inspect', selector: '#f' }); return; }
+      // 按读到的原因改好
+      if (done === 7) { toolStep(res, 'type_text', { role: 'textbox', name: '姓名', value: '李雷', clearFirst: true }); return; }
+      if (done === 8) { toolStep(res, 'type_text', { role: 'textbox', name: '邮箱', value: 'lilei@example.com', clearFirst: true }); return; }
+      if (done === 9) { toolStep(res, 'click_element', { role: 'button', name: '提交报名' }); return; }
+      if (done === 10) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '第一次提交被 HTML5 原生校验静默拦住了（姓名少于 2 字、邮箱格式不对），补齐这两处后提交成功。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2121,7 +2187,8 @@ const main = http.createServer((req, res) => {
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()
                                                     : req.url && req.url.startsWith('/undo') ? undoPage()
-                                                      : mainPage()
+                                                      : req.url && req.url.startsWith('/validate') ? validatePage()
+                                                        : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

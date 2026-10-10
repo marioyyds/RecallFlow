@@ -81,6 +81,13 @@
       return parts.join(" ");
     }).join("\n");
   }
+  function formatInvalidControls(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    const lines = items.map(
+      (it, i) => "[" + (i + 1) + "] " + it.selector + (it.name ? "\uFF08" + it.name + "\uFF09" : "") + " \u539F\u56E0\uFF1A" + ((it.reasons || []).join("+") || "\u672A\u77E5") + (it.message ? " \u2014\u2014 " + it.message : "")
+    );
+    return "\n\u26A0 \u8868\u5355\u672A\u901A\u8FC7\u6821\u9A8C\uFF08" + items.length + " \u4E2A\u5B57\u6BB5\uFF09\u2014\u2014 **\u63D0\u4EA4\u4F1A\u88AB\u6D4F\u89C8\u5668\u62E6\u4F4F\u3001\u9875\u9762\u4E0A\u4E0D\u4F1A\u6709\u4EFB\u4F55\u63D0\u793A**\uFF1A\n" + lines.join("\n");
+  }
   function formatStylesSummary(items, total) {
     const list = Array.isArray(items) ? items : [];
     const n = typeof total === "number" && total > list.length ? total : list.length;
@@ -1730,6 +1737,56 @@
     cmdStyleReverters.push(revert);
     return { ok: true, result: summary, changed: true, alreadySatisfied: false };
   }
+  function collectInvalidControls(root) {
+    const out = [];
+    const seenSel = /* @__PURE__ */ new Set();
+    const roots = [];
+    const push = (el) => {
+      if (el && roots.indexOf(el) === -1) roots.push(el);
+    };
+    push(root);
+    try {
+      if (root && root.closest) push(root.closest("form"));
+    } catch (e) {
+    }
+    for (const scope of roots) {
+      let nodes = [];
+      try {
+        nodes = Array.prototype.slice.call(scope.querySelectorAll("input, select, textarea"));
+      } catch (e) {
+        nodes = [];
+      }
+      if (scope && /^(INPUT|SELECT|TEXTAREA)$/.test(String(scope.tagName || ""))) nodes.unshift(scope);
+      for (const el of nodes) {
+        const v = el.validity;
+        if (!v || v.valid !== false) continue;
+        const sel = elementSelector(el);
+        if (seenSel.has(sel)) continue;
+        seenSel.add(sel);
+        const reasons = [
+          "valueMissing",
+          "typeMismatch",
+          "patternMismatch",
+          "tooLong",
+          "tooShort",
+          "rangeUnderflow",
+          "rangeOverflow",
+          "stepMismatch",
+          "badInput",
+          "customError"
+        ].filter((k) => v[k] === true);
+        out.push({
+          selector: sel,
+          name: String(el.getAttribute("aria-label") || el.name || el.id || "").slice(0, 60),
+          reasons,
+          message: String(el.validationMessage || "").slice(0, 160),
+          value: typeof el.value === "string" ? el.value.slice(0, 80) : ""
+        });
+        if (out.length >= 12) return out;
+      }
+    }
+    return out;
+  }
   function cmdInspectElement(params) {
     const all = findElementsFor(params);
     if (!all.length) return { ok: false, error: targetMissError(params) };
@@ -1761,6 +1818,7 @@
     });
     const visibleCount = matches.filter((m) => m.visible).length;
     const hidden = matches.length - visibleCount;
+    const invalid = collectInvalidControls(listed[0]);
     const touchesMain = matches.some((m) => m.containsMainContent);
     return {
       ok: true,
@@ -1772,6 +1830,7 @@
       visibleCount,
       mainContent: main ? { selector: main.selector, textLength: main.textLength } : null,
       matches,
+      invalidControls: invalid.length ? invalid : void 0,
       result: formatInspectSummary({
         total: all.length,
         listed: matches.length,
@@ -1784,7 +1843,8 @@
       (() => {
         const detail = formatInspectMatches(matches);
         return detail ? "\n\u5217\u51FA\uFF1A\n" + detail : "";
-      })()
+      })() + // 同一约定：合法性也要并进 result（模型只读得到这一段文本）
+      formatInvalidControls(invalid)
     };
   }
   function cmdReadOptions(params) {
