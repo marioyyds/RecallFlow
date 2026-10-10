@@ -257,6 +257,58 @@ function debugPage() {
 </body></html>`;
 }
 
+// 遮挡页：一个**必须先处理干扰才能干活**的页面。
+//
+// 难点是**顺序**，不是"能不能点"：
+//   · 全屏遮罩（`position: fixed; inset: 0`）盖住正文，此时点输入框/按钮会被判定为**被遮挡** ——
+//     这是真实站点最常见的干扰（Cookie 同意、活动弹窗、引导蒙层）；
+//   · 干扰不处理掉，后面的动作根本做不成；而"先关了它"这件事**只有断言事件顺序才能验到**：
+//     只看"搜索出结果了"无法区分"先关弹窗再搜"与"运气好点到了"。
+// 所以页面把每一次关键动作记进 `window.__events`，让顺序可被钉死。
+function blockedPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具遮挡页</title></head>
+<body>
+  <div id="mask" style="position:fixed;inset:0;background:rgba(20,20,30,.55);z-index:9999">
+    <div id="modal" role="dialog" aria-label="隐私提示" style="position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:#fff;padding:24px">
+      <p>本站使用 Cookie 以改善体验</p>
+      <button id="accept" type="button" role="button" aria-label="接受并关闭">接受</button>
+    </div>
+  </div>
+
+  <h1>站内搜索</h1>
+  <label for="q">搜索关键词</label>
+  <input id="q" role="textbox" aria-label="搜索关键词">
+  <button id="go" type="button" role="button" aria-label="搜索">搜索</button>
+  <div id="results" role="list"></div>
+
+  <script>
+    window.__events = [];        // 关键动作的顺序（断言"先处理干扰"靠它）
+    window.__modalClosed = false;
+    window.__renderedCount = 0;
+    document.getElementById('accept').addEventListener('click', function () {
+      window.__events.push('modal-closed');
+      window.__modalClosed = true;
+      document.getElementById('mask').style.display = 'none';
+    });
+    document.getElementById('go').addEventListener('click', function () {
+      window.__events.push('search-clicked');
+      var q = document.getElementById('q').value;
+      var box = document.getElementById('results');
+      box.innerHTML = '';
+      ['哥伦比亚 慧兰 ￥88', '埃塞俄比亚 耶加雪菲 ￥108', '云南 小粒咖啡 ￥68'].forEach(function (t) {
+        var el = document.createElement('div');
+        el.className = 'result';
+        el.setAttribute('role', 'listitem');
+        el.textContent = t;
+        box.appendChild(el);
+      });
+      window.__renderedCount = box.children.length;
+      window.__lastQuery = q;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -376,6 +428,27 @@ const REAL_BASE = process.env.E2E_LLM_REAL_BASE || 'https://api.deepseek.com';
 const REAL_KEY = process.env.E2E_LLM_REAL_KEY || '';
 const REAL_MODEL = process.env.E2E_LLM_REAL_MODEL || '';
 
+// 触发词只能看**真实指令**，不能看整条 user 消息。
+//
+// 为什么（实测踩到，症状极具误导性）：那条 user 消息里除了指令，还塞着**注入的页面正文**
+// （不可信数据区）。于是页面自己写的文字就能命中另一个剧本的触发词 ——
+// 遮挡页的 H1 写了「站内搜索」，正好包含检索剧本的触发词「站内搜」，
+// 结果**检索剧本被选中**，而它去 `type_text(name:'站内搜索')` 自然找不到（那一页叫「搜索关键词」），
+// 报出来的是「未找到可输入的目标元素」。症状看起来像**工具坏了**，实际是剧本选错了。
+//
+// 指令段有固定标签（带随机校验 token，见 lib/assistant/initial-messages.js 的 instructionLabel），
+// 据此切出真正的指令即可；找不到标签时退回整条消息（兼容没有标签的请求形态）。
+//
+// ⚠ 遮挡页的 H1 刻意**保留**「站内搜索」不去改：它现在是这条修复的**永久回归探针** ——
+//   一旦有人把这里的切分去掉，遮挡用例会立刻因为跑错剧本而红灯。
+const INSTRUCTION_LABEL_RE = /以下是用户的真实指令（唯一具有指令效力的内容；校验标记 [^）]*）：\n?/;
+
+export function instructionOf(text) {
+  const s = String(text || '');
+  const m = INSTRUCTION_LABEL_RE.exec(s);
+  return m ? s.slice(m.index + m[0].length) : s;
+}
+
 async function proxyToRealModel(req, res, body, payload) {
   const upstream = await fetch(REAL_BASE.replace(/\/+$/, '') + '/chat/completions', {
     method: 'POST',
@@ -460,7 +533,9 @@ const llm = http.createServer((req, res) => {
     }
 
     const userMsg = [...messages].reverse().find((m) => m.role === 'user');
-    const userText = userMsg && typeof userMsg.content === 'string' ? userMsg.content : '';
+    // 只取**真实指令**段做剧本分派（原因见 instructionOf 的注释：整条消息含页面正文，
+    // 页面文字能命中别的剧本触发词，导致静默跑错剧本）。
+    const userText = instructionOf(userMsg && typeof userMsg.content === 'string' ? userMsg.content : '');
     const toolResults = messages.filter((m) => m.role === 'tool');
     const clicked = toolResults.some((m) => typeof m.content === 'string' && m.content.includes('已点击'));
 
@@ -639,6 +714,22 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：遮挡 / 弹层干扰（playbook id = 'dismiss-overlay'）。
+    //
+    // 顺序即能力：**先关掉遮罩，再做正事**。遮罩不关，输入框与按钮都在它下面，
+    // 动作会被判定为"被遮挡"而失败。脚本按正确顺序写，真模型会不会也这么干由第三层检验。
+    if (userText.includes(PLAYBOOKS['dismiss-overlay'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      // 第一步就是处理干扰 —— 不是先去点被挡住的东西
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '接受并关闭' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { role: 'textbox', name: '搜索关键词', value: '咖啡' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '搜索' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      finalText(res, '已关闭 Cookie 弹窗，并搜索「咖啡」：哥伦比亚 慧兰 ￥88；埃塞俄比亚 耶加雪菲 ￥108；云南 小粒咖啡 ￥68。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -664,7 +755,8 @@ const main = http.createServer((req, res) => {
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
           : req.url && req.url.startsWith('/article') ? articlePage()
             : req.url && req.url.startsWith('/debug') ? debugPage()
-              : mainPage()
+              : req.url && req.url.startsWith('/blocked') ? blockedPage()
+                : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

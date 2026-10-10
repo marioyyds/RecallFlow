@@ -101,6 +101,31 @@ export async function clickApproval(page, kind) {
   await btn.click();
 }
 
+/**
+ * 页面上某个元素是否**被别的东西盖住**（遮挡类场景专用）。
+ *
+ * 为什么必须走 helper，而不是在 spec 里写 document.querySelector：
+ * 本目录有一条硬规则 —— **spec 里不得出现 `document.querySelector`**
+ * （面板在 shadow DOM 里，原生查询穿透不了，写错了会静默返回 null）。
+ * 为了保住这条简单规则，所有页面侧的原生查询都收进这里。
+ *
+ * 判据：取元素中心点上的最上层节点，既不是它自己、也不是它的子节点 → 被遮挡。
+ * 用中心点而不是左上角，是因为元素左上角常有自己的边框/内边距，
+ * 而遮挡物往往从边缘开始覆盖，取中心更能反映"用户点得到吗"。
+ * 元素不存在时返回 null（与"没被遮挡"区分开）。
+ */
+export async function isCovered(page, selector) {
+  return await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const x = r.left + Math.min(r.width / 2, 6);
+    const y = r.top + r.height / 2;
+    const top = document.elementFromPoint(x, y);
+    return !(top === el || el.contains(top));
+  }, selector);
+}
+
 // ---------------------------------------------------------------- 穿透 shadow DOM 的查询
 //
 // ⚠ 这是本目录最容易踩的一个坑：

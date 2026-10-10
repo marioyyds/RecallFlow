@@ -18,6 +18,7 @@ import {
   openPanel,
   sendInstruction,
   clickApproval,
+  isCovered,
   flowOrder,
   panelStyle,
   panelText,
@@ -471,6 +472,46 @@ test('golden: 排查 —— 先复现再读诊断，且读到的是浏览器生�
   const seen = toolResultsText();
   expect(seen).toMatch(/Cannot read properties of undefined|undefined/);
   expect(seen).toContain('total');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**被弹窗遮挡** —— 先处理干扰，再干活（playbook 'dismiss-overlay'）。
+//
+// 这一类的难点是**顺序**，不是"能不能点"：
+// 全屏遮罩盖住正文时，输入框与按钮都在它下面，动作会被判定为**被遮挡**而失败 ——
+// 所以"先关掉它"不是多此一举，而是前提。
+//
+// 而"先关了它"这件事**只有断言事件顺序才能验到**：
+// 只看"搜索出结果了"无法区分"先关弹窗再搜"与"不知怎么点到了"。
+// 这是本场景存在的理由，也是它比前几类更"复杂"的地方 —— 复杂在步骤依赖，不在页面花哨。
+test('golden: 遮挡 —— 必须先处理干扰，且事件顺序可证', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/blocked');
+
+  // 基线：遮罩在，干扰确实存在
+  expect(await page.evaluate(() => window.__modalClosed)).toBe(false);
+  expect(await page.evaluate(() => window.__events.length)).toBe(0);
+  // 且它真的**盖住**了目标（elementFromPoint 命中的是遮罩而不是输入框）
+  const covered = await isCovered(page, '#q');
+  expect(covered, '基线不成立：输入框没有被遮挡，这个场景就失去意义').toBe(true);
+
+  resetLlmRequests();
+  await sendInstruction(page, '这个页面被弹窗挡住了，先关掉它，然后帮我搜「咖啡」并把结果告诉我。');
+
+  // ① 干扰被处理 + 正事做成
+  await expect.poll(() => page.evaluate(() => window.__modalClosed), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__renderedCount), { timeout: 30_000 }).toBe(3);
+  expect(await page.inputValue('#q')).toBe('咖啡');
+
+  // ② **顺序**：第一个动作必须是关弹窗，搜索必须在它之后
+  const events = await page.evaluate(() => window.__events.slice());
+  expect(events[0]).toBe('modal-closed');
+  expect(events.indexOf('search-clicked')).toBeGreaterThan(0);
+
+  // ③ 模型确实拿到了结果数据
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('哥伦比亚 慧兰');
+  expect(toolResultsText()).toContain('云南 小粒咖啡');
 
   await page.close();
 });

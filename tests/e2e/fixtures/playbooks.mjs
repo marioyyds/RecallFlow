@@ -116,6 +116,30 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['TypeError', 'total'],
     },
   },
+
+  'dismiss-overlay': {
+    id: 'dismiss-overlay',
+    title: '复杂场景：被弹窗遮挡 —— 先处理干扰，再干活',
+    trigger: '弹窗',
+    // 顺序即能力：先关遮罩，再输入、再点搜索。
+    // 遮罩没关时点输入框/按钮会被判定为"被遮挡"，所以这不是"多此一举"，是前提。
+    tools: ['get_page_snapshot', 'click_element', 'type_text', 'inspect_element'],
+    success: '遮罩被关掉、搜索真的执行、结果渲染出来，且**事件顺序是"先关弹窗再搜索"**',
+    eval: {
+      url: '/blocked',
+      instruction: '这个页面被弹窗挡住了，先关掉它，然后帮我搜「咖啡」并把结果告诉我。',
+      pageChecks: [
+        { expr: 'window.__modalClosed === true', label: '遮罩被关掉了' },
+        // ↓ 这条才是本场景的核心：**顺序**。只断言"搜索出结果了"无法区分
+        //   "先关弹窗再搜" 与 "不知怎么点到了"。
+        { expr: "window.__events[0] === 'modal-closed'", label: '第一个动作就是关弹窗（顺序正确）' },
+        { expr: "window.__events.indexOf('search-clicked') > 0", label: '搜索发生在关弹窗之后' },
+        { expr: "document.querySelector('#q').value === '咖啡'", label: '关键词填对了' },
+        { expr: 'window.__renderedCount === 3', label: '结果渲染出来了' },
+      ],
+      mustSeeInToolResults: ['哥伦比亚 慧兰', '云南 小粒咖啡'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
