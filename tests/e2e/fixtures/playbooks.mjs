@@ -517,6 +517,35 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['scrollTop=3480'],
     },
   },
+
+  'cascade-select': {
+    id: 'cascade-select',
+    title: '复杂场景：级联下拉框 —— 子选项异步填充，选完父项不能立刻选子项',
+    trigger: '配送范围',
+    // 三层难点：
+    //   ① 城市框初始 disabled、只有一句「请先选省份」——不先选省份就选不了城市；
+    //   ② 选了省份后城市选项要 3 秒后才填进来 ——"选完立刻选"会得到
+    //     「未找到匹配的 option」，而那句话极易被读成"页面上没有这个城市"。
+    //     ⚠ 延迟必须**大于真模型一轮工具往返**（约 1 秒）：起初写 300ms 时，
+    //     真模型选了省份**立刻**选城市也照样成功 —— 场景在真模型下什么都没验到。
+    //   ③ 填充期间城市框**仍是 disabled** —— 所以光等"选项出现"不够，还要等到可用。
+    tools: ['get_page_snapshot', 'select_option', 'wait_for_element', 'click_element', 'inspect_element'],
+    success: '省份与城市都选对并提交成功，且是在等待子选项填充之后完成的',
+    eval: {
+      url: '/cascade',
+      instruction: '帮我把这一页的配送范围选成浙江 / 杭州，然后提交。',
+      pageChecks: [
+        { expr: "window.__picked && window.__picked.prov === 'zj'", label: '省份选对了（浙江）' },
+        { expr: "window.__picked && window.__picked.city === 'hz'", label: '城市选对了（杭州）' },
+        {
+          expr: "document.querySelector('#status').textContent === '已提交：浙江 / 杭州'",
+          label: '页面回执「已提交：浙江 / 杭州」',
+        },
+      ],
+      // 回执里同时出现省份与城市 ⇒ 两个下拉框都真的被选中过（不是只点了提交）
+      mustSeeInToolResults: ['已提交：浙江 / 杭州'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

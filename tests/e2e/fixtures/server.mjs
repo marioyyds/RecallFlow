@@ -1037,6 +1037,75 @@ function virtualListPage() {
 </body></html>`;
 }
 
+// 级联下拉框页：选了省份，城市才**异步**填进去。
+//
+// 三层难点叠在一起（真实表单里很常见）：
+//   ① 城市框初始是 **disabled**、并且只有一句「请先选省份」—— 不先选省份根本选不了城市；
+//   ② 选了省份之后，城市选项要**几秒后**才填进来（真实站点是请求回来才有）——
+//      "选完立刻选城市"会得到「未找到匹配的 option」，而那句话极易被读成"页面上没有这个城市"；
+//   ③ 填充期间城市框**还是 disabled** —— 所以光等"选项出现"不够，还要等到**可用**。
+//
+// ⚠ 延迟刻意取 **3000ms**，必须**大于真模型一轮工具往返**（实测约 1 秒）。
+// 起初写的是 300ms，结果真模型"选完省份立刻选城市"**照样成功** ——
+// 那 300ms 被它自己的往返延迟吃掉了，也就是说**这个场景在真模型下什么都没验到**
+// （脚本化 E2E 仍会过，因为它显式等了；只有真模型 eval 才能暴露这一点）。
+//
+// 另外：option 在闭合的 select 里**没有布局盒子**，所以等它出现要用
+// state:"attached"（挂在 DOM 上），用 visible 会一直等不到 —— 这点写进了技能。
+function cascadePage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具配送范围</title></head>
+<body>
+  <h1>配送范围</h1>
+  <label for="prov">省份</label>
+  <select id="prov" role="combobox" aria-label="省份">
+    <option value="">请选择</option>
+    <option value="zj">浙江</option>
+    <option value="js">江苏</option>
+  </select>
+  <label for="city">城市</label>
+  <select id="city" role="combobox" aria-label="城市" disabled>
+    <option value="">请先选省份</option>
+  </select>
+  <button id="ok" type="button" role="button" aria-label="提交配送范围">提交配送范围</button>
+  <div id="status" role="status">未提交</div>
+  <script>
+    var CITIES = { zj: [['hz', '杭州'], ['nb', '宁波']], js: [['nj', '南京'], ['sz', '苏州']] };
+    window.__submits = 0;
+    window.__picked = null;
+    var prov = document.getElementById('prov');
+    var city = document.getElementById('city');
+    // ⚠ 变量名**不能叫 status**：window.status 是浏览器的**遗产属性**（状态栏文本），
+    // var status = … 在经典脚本里**不会遮蔽它** —— 赋值走的是它自带的 setter，
+    // 读回来是一个**字符串**（不是元素），于是 status.textContent = '…' 变成
+    // "给字符串设属性"：**宽松模式下静默无效、不抛异常**。
+    // 实测代价：提交处理看起来完全没生效（回执一直是「未提交」），而 __submits / __picked 都正常。
+    //（本段在模板字符串里，注释中不能出现反引号。）
+    var statusEl = document.getElementById('status');
+    function labelOf(sel) {
+      var o = sel.options[sel.selectedIndex];
+      return o ? o.textContent : '';
+    }
+    prov.addEventListener('change', function () {
+      city.disabled = true;
+      city.innerHTML = '<option value="">加载中…</option>';
+      setTimeout(function () {
+        var list = CITIES[prov.value] || [];
+        city.innerHTML = '<option value="">请选择</option>' +
+          list.map(function (p) { return '<option value="' + p[0] + '">' + p[1] + '</option>'; }).join('');
+        city.disabled = false;
+      }, 3000);
+    });
+    document.getElementById('ok').addEventListener('click', function () {
+      window.__submits += 1;
+      window.__picked = { prov: prov.value, city: city.value };
+      statusEl.textContent = city.value
+        ? ('已提交：' + labelOf(prov) + ' / ' + labelOf(city))
+        : '请先选择城市';
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1781,6 +1850,25 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：级联下拉框（playbook id = 'cascade-select'）。
+    //
+    // 关键节奏：选省份 → **等城市选项挂上 DOM**（`attached`，不能用 `visible`：
+    // `<option>` 在闭合的 select 里没有布局盒子）→ 选城市 → 提交。
+    if (userText.includes(PLAYBOOKS['cascade-select'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'select_option', { selector: '#prov', label: '浙江' }); return; }
+      if (done === 2) {
+        toolStep(res, 'wait_for_element', { selector: '#city option[value="hz"]', state: 'attached' });
+        return;
+      }
+      if (done === 3) { toolStep(res, 'select_option', { selector: '#city', label: '杭州' }); return; }
+      if (done === 4) { toolStep(res, 'click_element', { role: 'button', name: '提交配送范围' }); return; }
+      if (done === 5) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已把配送范围选成浙江 / 杭州并提交，页面回执「已提交：浙江 / 杭州」。', 70);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1824,7 +1912,8 @@ const main = http.createServer((req, res) => {
                                         : req.url && req.url.startsWith('/handoff-form') ? handoffFormPage()
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
-                                              : mainPage()
+                                              : req.url && req.url.startsWith('/cascade') ? cascadePage()
+                                                : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

@@ -1123,6 +1123,60 @@ test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读
   await page.close();
 });
 
+// 能力验收（复杂场景）：**级联下拉框**（playbook 'cascade-select'）。
+//
+// 三层难点叠在一起（真实表单里很常见），基线把三层都证明出来：
+//   ① 城市框初始 **disabled**、只有一句「请先选省份」——不先选省份根本选不了城市；
+//   ② 选了省份之后城市选项要 **3 秒后**才填进来 ——"选完立刻选"会得到
+//      「未找到匹配的 option」，而那句话极易被读成"页面上没有这个城市"。
+//      ⚠ 延迟必须**大于真模型一轮工具往返**（实测约 1 秒）：起初写 300ms，
+//      真模型"选完立刻选城市"照样成功 —— 也就是说**这个场景在真模型下什么都没验到**。
+//      脚本化 E2E 显式等了，所以它一直过；**只有真模型 eval 才能暴露这一点**。
+//   ③ 填充期间城市框**仍然是 disabled** —— 所以光等"选项出现"不够，还要等到**可用**。
+//
+// 基线③是这条用例最关键的一条：它模拟了"选完立刻选城市"这条捷径，证明它**必然失败**。
+test('golden: 级联下拉 —— 子选项异步填充，等不到就选不了（捷径必然失败）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/cascade');
+
+  // 基线①：城市框是禁用的，且只有一句占位
+  expect(await page.locator('#city').isDisabled()).toBe(true);
+  await expect(page.locator('#city option')).toHaveCount(1);
+  expect(await page.textContent('#city')).not.toContain('杭州');
+
+  // 基线②：**选完立刻**去选城市 —— 必须失败（这就是"不能立刻选"的证据）。
+  // 直接走页面自身的逻辑，模拟"不等就选"：此时 hz 这个 option 还不存在。
+  await page.selectOption('#prov', 'zj');
+  expect(
+    await page.locator('#city option[value="hz"]').count(),
+    '选完省份后城市选项立刻就出现了，本场景的难点不成立'
+  ).toBe(0);
+  // 而且此刻城市框**仍是禁用的**（基线③）——等"选项出现"不够，得等它可用
+  expect(await page.locator('#city').isDisabled()).toBe(true);
+
+  // 等它真的填充完（这一条由脚本自己完成；用例只负责还原起点）
+  await expect.poll(() => page.locator('#city option[value="hz"]').count(), { timeout: 10_000 }).toBe(1);
+  // 还原起点：清掉这一次手动选择的痕迹，让脚本从"未选择"开始
+  await page.selectOption('#prov', '');
+  await page.reload();
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我把这一页的配送范围选成浙江 / 杭州，然后提交。');
+
+  // ① 两个下拉框都真的选对了
+  await expect.poll(() => page.evaluate(() => window.__picked), { timeout: 40_000 }).toEqual({
+    prov: 'zj',
+    city: 'hz',
+  });
+  await expect(page.locator('#status')).toHaveText('已提交：浙江 / 杭州');
+  expect(await page.evaluate(() => window.__submits)).toBeGreaterThan(0);
+
+  // ② 模型视角：回执里同时有省份与城市（说明两个框都选中过，不是只点了提交）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已提交：浙江 / 杭州');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

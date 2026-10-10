@@ -98,6 +98,44 @@ test('用到 readKnowledgeBase 的 spec 必须先 resetKnowledgeBase（存储跨
   );
 });
 
+test('夹具页不得用 var 声明与 window 遗产属性同名的变量（静默失效，不报错）', () => {
+  // 实测踩到：夹具页写了 `var status = document.getElementById('status')`，然后
+  // `status.textContent = '…'` —— **完全没生效，也不抛异常**。
+  // 因为 `window.status` 是浏览器的**遗产属性**（状态栏文本）：顶层 `var` 走的是全局对象，
+  // **不会遮蔽**它，赋值进它自带的 setter，读回来是个**字符串**；
+  // 给字符串设属性在宽松模式下静默失败。
+  // 症状极具误导性：`__submits` / `__picked` 都正常，只有"页面回执"永远不变。
+  //
+  // 只有 `var` 有这个问题：顶层 `const`/`let` 建的是词法绑定，会正常遮蔽。
+  const LEGACY = [
+    'status', 'name', 'length', 'top', 'self', 'window', 'frames', 'parent',
+    'location', 'closed', 'origin', 'event', 'document', 'history', 'screen', 'navigator',
+  ];
+  const offenders = [];
+  const fixture = stripComments(read(path.join(E2E_DIR, 'fixtures/server.mjs')));
+  const re = new RegExp('\\bvar\\s+(' + LEGACY.join('|') + ')\\s*=', 'g');
+  for (const m of fixture.matchAll(re)) {
+    const line = fixture.slice(0, m.index).split('\n').length;
+    offenders.push('fixtures/server.mjs 第 ' + line + ' 行左右：var ' + m[1]);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    '这些 var 会撞上 window 的遗产属性（赋值静默失效）：改用 const/let 或改名\n  ' + offenders.join('\n  ')
+  );
+});
+
+test('这条遗产属性门禁本身有牙齿：var 要被认出，const/let 与普通名字不该被误伤', () => {
+  const LEGACY = ['status', 'name', 'location', 'document'];
+  const hit = (s) => [...s.matchAll(new RegExp('\\bvar\\s+(' + LEGACY.join('|') + ')\\s*=', 'g'))].length;
+  assert.equal(hit('var status = document.getElementById("status");'), 1, 'var status 应被认出');
+  assert.equal(hit('var name = 1;'), 1, 'var name 同理');
+  assert.equal(hit('var statusEl = document.getElementById("status");'), 0, '换个名字就安全');
+  assert.equal(hit('const status = document.getElementById("status");'), 0, '顶层 const 会遮蔽，不受限');
+  assert.equal(hit('let status = 1;'), 0, 'let 同理');
+  assert.equal(hit('var count = 1;'), 0, '不在遗产名单里的名字不受限');
+});
+
 test('E2E 经验文档存在，且两处互相指路', () => {
   assert.ok(fs.existsSync(README), '缺少 ' + README);
   assert.ok(fs.existsSync(GUIDE), '缺少 ' + GUIDE);
