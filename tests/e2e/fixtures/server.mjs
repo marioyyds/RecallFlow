@@ -225,6 +225,38 @@ function articlePage() {
 </body></html>`;
 }
 
+// 排查页：一个**症状可见、原因只在运行时**的页面，用来做"debug"。
+//
+// 难点（也是这一类能力与"改样式"的根本差别）：
+//   · **症状与原因不在同一处**：用户看到的是"点了按钮没反应"，
+//     真正的原因是一条只在点击后出现的未捕获 TypeError；
+//   · **必须先在页面上复现**才能拿到运行期事实 —— 光看 DOM 快照看不出任何异常；
+//   · 报错信息是**浏览器生成的**（不是页面写的），所以断言要对着真实文案，
+//     不能自己编一句"出错了"来自我满足。
+// 页面记下 __clicks / __totalRendered，让"确实复现了、且确实没渲染出结果"可被断言。
+function debugPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具排查页</title></head>
+<body>
+  <h1>订单合计</h1>
+  <p>点击下面的按钮计算合计。</p>
+  <button id="apply" type="button" role="button" aria-label="计算总价">计算总价</button>
+  <div id="total" role="status"></div>
+  <script>
+    window.__clicks = 0;
+    window.__totalRendered = false;
+    document.getElementById('apply').addEventListener('click', function () {
+      window.__clicks += 1;
+      // 真实的 bug 形态：数据结构里没有 cart，却直接当下标用。
+      // 于是抛未捕获 TypeError，后面的赋值永远执行不到 ——
+      // 用户看到的就是"点了没反应"。
+      var state = { items: [{ price: 10 }] };
+      document.getElementById('total').textContent = '合计：' + state.cart.total;
+      window.__totalRendered = true;
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -589,6 +621,24 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：排查（playbook id = 'debug-console-error'）。
+    //
+    // 这一类与其余三类的根本差别：**症状与原因不在同一处**。
+    // 用户看到的是"点了没反应"，原因是一条只在点击后出现的未捕获 TypeError ——
+    // 所以必须先复现、再读运行期事实，光看快照什么也看不出来。
+    if (userText.includes(PLAYBOOKS['debug-console-error'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      // 复现：不点一下，错误根本不会产生
+      if (done === 1) { toolStep(res, 'click_element', { selector: '#apply' }); return; }
+      // 读运行期事实（复盘后才会有的那条 TypeError）
+      if (done === 2) { toolStep(res, 'read_diagnostics', { kind: 'console', level: 'error' }); return; }
+      // 确认症状：结果区确实是空的
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#total' }); return; }
+      finalText(res, '复现了：点击「计算总价」后抛出未捕获 TypeError（读取 undefined 的 total），因此结果区始终为空。代码里把 state.cart 当对象用，但该数据结构只有 items，没有 cart。', 110);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -613,7 +663,8 @@ const main = http.createServer((req, res) => {
       : req.url && req.url.startsWith('/search') ? searchPage()
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
           : req.url && req.url.startsWith('/article') ? articlePage()
-            : mainPage()
+            : req.url && req.url.startsWith('/debug') ? debugPage()
+              : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

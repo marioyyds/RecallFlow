@@ -441,3 +441,36 @@ test('golden: UI 美化 —— 可读性指标达标，且不是靠隐藏/删内
 
   await page.close();
 });
+
+// 能力验收：**排查 / debug**（playbook 'debug-console-error'）。
+//
+// 这一类与前几类的根本差别：**症状与原因不在同一处**。
+// 用户看到的是"点了没反应"，真正的原因是一条**只在点击后出现**的未捕获 TypeError。
+// 所以这条用例钉住的是"能力顺序"：
+//   ① 必须先复现（不点，错误根本不存在，读到的是一条空诊断）；
+//   ② 再读运行期事实；
+//   ③ 而且读到的必须是**浏览器生成的**报错文案 —— 不能是模型自己编一句"好像出错了"。
+// 第 ③ 条是这条用例的价值所在：模型"猜对了原因"与"真的看到了证据"是两回事。
+test('golden: 排查 —— 先复现再读诊断，且读到的是浏览器生成的真实报错', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/debug');
+
+  // 复现之前：页面上没有任何可见异常（这正是"光看快照查不出来"的原因）
+  expect(await page.evaluate(() => window.__clicks)).toBe(0);
+  resetLlmRequests();
+  await sendInstruction(page, '这个页面点「计算总价」没反应，帮我看一下为什么。');
+
+  // ① 真的复现了：点了一次，且结果确实没渲染出来（症状成立）
+  await expect.poll(() => page.evaluate(() => window.__clicks), { timeout: 30_000 }).toBe(1);
+  expect(await page.evaluate(() => window.__totalRendered)).toBe(false);
+  expect(await page.textContent('#total')).toBe('');
+
+  // ② **运行期事实**必须进到模型手里：浏览器生成的报错文案是"证据"，
+  //    而不是"看起来完成了"式的自我描述。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('TypeError');
+  const seen = toolResultsText();
+  expect(seen).toMatch(/Cannot read properties of undefined|undefined/);
+  expect(seen).toContain('total');
+
+  await page.close();
+});

@@ -94,6 +94,28 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['17px'],
     },
   },
+
+  'debug-console-error': {
+    id: 'debug-console-error',
+    title: '排查：点了没反应 —— 复现后读运行期事实，定位未捕获异常',
+    trigger: '没反应',
+    // 顺序即能力：**先复现，再读诊断**。
+    // 反过来的话读到的是一条空诊断，然后很容易得出"页面没问题"的错误结论。
+    tools: ['get_page_snapshot', 'click_element', 'read_diagnostics', 'inspect_element'],
+    success: '点击真的发生了（复现）、控制台错误被读到、结果区确认为空',
+    eval: {
+      url: '/debug',
+      instruction: '这个页面点「计算总价」没反应，帮我看一下为什么。',
+      pageChecks: [
+        { expr: 'window.__clicks === 1', label: '点击真的复现了一次' },
+        { expr: 'window.__totalRendered === false', label: '结果确实没有渲染出来（症状成立）' },
+        { expr: "document.querySelector('#total').textContent === ''", label: '结果区确实是空的' },
+      ],
+      // 关键判据：**浏览器生成的**报错文案必须出现在模型收到的工具结果里。
+      // 这条不能放宽成"模型说了句出错了"——那是它自己编的，不是运行期事实。
+      mustSeeInToolResults: ['TypeError', 'total'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
