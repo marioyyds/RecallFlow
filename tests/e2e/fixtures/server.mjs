@@ -102,11 +102,80 @@ function searchPage() {
 </body></html>`;
 }
 
+// 下单页：一个有代表性的"多步表单"页面。
+//
+// 为什么不能用检索页那种单个输入框凑：点单真正的难点是**步骤之间有依赖、且有业务校验**：
+//   ① 控件类型多（select / 文本 / checkbox / 按钮），四种走**不同的工具与定位方式**；
+//   ② **勾选「我已确认」是承重的** —— 不勾就提交，页面只回「请补全信息」，不会下单。
+//      于是 check_box 一坏，这条用例必红（这正是它比"填个框"值钱的地方）；
+//   ③ 下单结果**异步出现**，且只有真正成功才渲染摘要。
+// 页面显式写了 role / aria-label：语义定位需要它（与检索页同一个前提）。
+function checkoutPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具下单页</title></head>
+<body>
+  <h1>下单</h1>
+  <label for="product">商品</label>
+  <select id="product" role="combobox" aria-label="商品">
+    <option value="">请选择商品</option>
+    <option value="coffee-a">哥伦比亚 慧兰</option>
+    <option value="coffee-b">埃塞俄比亚 耶加雪菲</option>
+  </select>
+
+  <label for="qty">数量</label>
+  <input id="qty" role="textbox" aria-label="数量" value="1">
+
+  <label for="addr">收货地址</label>
+  <input id="addr" role="textbox" aria-label="收货地址">
+
+  <label for="agree"><input type="checkbox" id="agree" role="checkbox" aria-label="我已确认订单信息"> 我已确认订单信息</label>
+
+  <button id="submit" type="button" role="button" aria-label="提交订单">提交订单</button>
+  <div id="done" role="status"></div>
+  <script>
+    window.__submits = 0;    // 提交了几次（业务校验失败也会 +1）
+    window.__order = null;   // 真正下单时页面收到的数据
+    document.getElementById('submit').addEventListener('click', function () {
+      window.__submits += 1;
+      var o = {
+        product: document.getElementById('product').value,
+        qty: document.getElementById('qty').value,
+        addr: document.getElementById('addr').value,
+        agree: document.getElementById('agree').checked,
+      };
+      if (!o.product || !o.addr || !o.agree) {
+        // 刻意**不**调用任何工具、也不下单：真实站点的表单校验就是这样，
+        // 模型必须能从页面反馈里看出"还差什么"。
+        document.getElementById('done').textContent = '请补全信息（商品 / 收货地址 / 确认勾选都必填）';
+        return;
+      }
+      window.__order = o;
+      setTimeout(function () {
+        document.getElementById('done').textContent =
+          '下单成功：' + o.product + ' × ' + o.qty + '，寄往 ' + o.addr;
+      }, 120);
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
 <script>window.__frameClicked = false; document.getElementById('fb').addEventListener('click', () => { window.__frameClicked = true; });</script>
 </body></html>`;
+}
+
+/** 回一个"调用某个工具"的步骤（脚本化剧本的基本单位）。 */
+function toolStep(res, name, args) {
+  sse(res, [toolCallDelta(name, args), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
+}
+/** 回一段最终文本（本步之后这一轮就结束了）。 */
+function finalText(res, text, tokens) {
+  sse(res, [
+    textDelta(text),
+    { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    { usage: { total_tokens: tokens || 40 } },
+  ]);
 }
 
 function sse(res, chunks) {
@@ -183,12 +252,15 @@ export function getLlmRequests() {
 export function resetLlmRequests() {
   llmRequests.length = 0;
 }
-/** 把最近一次请求里所有 tool 消息的文本拼起来 —— 断言"模型看到了什么"用这个。 */
-export function lastToolResultsText() {
-  const last = llmRequests[llmRequests.length - 1];
-  if (!last) return '';
-  return (last.messages || [])
-    .filter((m) => m.role === 'tool')
+/** 把**当前记录周期内**所有请求里的 tool 消息文本拼起来 —— 断言"模型看到过什么"用这个。
+ *
+ *  为什么不是"只看最后一次请求"（曾经的写法）：一轮跑完后通常还有一次校验/收尾请求，
+ *  它**没有** tool 消息 —— 于是"只看最后一次"会读到空串，断言随执行时序时好时坏。
+ *  实测踩过一次：同一条用例第一次过、第二次挂在 `Received string: ""`。
+ *  跨用例隔离靠调用方在每个用例开始前 `resetLlmRequests()`。 */
+export function toolResultsText() {
+  return llmRequests
+    .flatMap((r) => (r.messages || []).filter((m) => m.role === 'tool'))
     .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')))
     .join('\n');
 }
@@ -377,18 +449,35 @@ const llm = http.createServer((req, res) => {
     // 用的工具与 fixtures/playbooks.mjs 的 'site-search' 声明一致 —— 由契约门禁保证不漂移。
     if (userText.includes(PLAYBOOKS['site-search'].trigger)) {
       const done = toolResults.length;
-      const next = (name, args) => {
-        sse(res, [toolCallDelta(name, args), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
-      };
-      if (done === 0) { next('get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
-      if (done === 1) { next('type_text', { role: 'textbox', name: '站内搜索', value: '咖啡' }); return; }
-      if (done === 2) { next('click_element', { role: 'button', name: '搜索' }); return; }
-      if (done === 3) { next('inspect_element', { op: 'text', selector: '#results' }); return; }
-      sse(res, [
-        textDelta('已取回结果：哥伦比亚 慧兰 水洗 ￥88；埃塞俄比亚 耶加雪菲 ￥108；云南 小粒咖啡 ￥68。'),
-        { choices: [{ delta: {}, finish_reason: 'stop' }] },
-        { usage: { total_tokens: 60 } },
-      ]);
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '站内搜索', value: '咖啡' }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '搜索' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      finalText(
+        res,
+        '已取回结果：哥伦比亚 慧兰 水洗 ￥88；埃塞俄比亚 耶加雪菲 ￥108；云南 小粒咖啡 ￥68。',
+        60
+      );
+      return;
+    }
+
+    // 剧本：点单 / 多步表单（playbook id = 'checkout-form'，6 轮）。
+    //
+    // 与检索剧本的区别在于**步骤之间有依赖，而且有业务校验**：
+    // 商品+数量+地址+勾选缺一样，页面就只回「请补全信息」、根本不下单。
+    // 所以最后两轮（提交流程 + 读结果）才是真正的判据 —— 只看"点过提交"是假证据。
+    if (userText.includes(PLAYBOOKS['checkout-form'].trigger)) {
+      const done = toolResults.length;
+      // 工具集与 fixtures/playbooks.mjs 的 'checkout-form' 对齐（契约门禁保证不漂移）。
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'select_option', { selector: '#product', label: '埃塞俄比亚 耶加雪菲' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { role: 'textbox', name: '数量', value: '2', clearFirst: true }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { role: 'textbox', name: '收货地址', value: '上海市浦东新区 1 号', clearFirst: true }); return; }
+      // 承重的一步：不勾选，页面就只回「请补全信息」，不会下单。
+      if (done === 4) { toolStep(res, 'check_box', { role: 'checkbox', name: '我已确认订单信息', checked: true }); return; }
+      if (done === 5) { toolStep(res, 'click_element', { role: 'button', name: '提交订单' }); return; }
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'text', selector: '#done' }); return; }
+      finalText(res, '已下单：埃塞俄比亚 耶加雪菲 × 2，寄往上海市浦东新区 1 号。', 70);
       return;
     }
 
@@ -414,7 +503,8 @@ const main = http.createServer((req, res) => {
   res.end(
     req.url && req.url.startsWith('/coord') ? coordPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
-        : mainPage()
+        : req.url && req.url.startsWith('/checkout') ? checkoutPage()
+          : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

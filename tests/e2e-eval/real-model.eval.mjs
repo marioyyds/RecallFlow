@@ -24,7 +24,7 @@ import {
   PANEL,
 } from '../e2e/helpers.mjs';
 import { evalPlaybooks } from '../e2e/fixtures/playbooks.mjs';
-import { getLlmRequests, lastToolResultsText } from '../e2e/fixtures/server.mjs';
+import { getLlmRequests, toolResultsText } from '../e2e/fixtures/server.mjs';
 
 let context;
 
@@ -97,7 +97,7 @@ for (const pb of evalPlaybooks()) {
     }
 
     // ② "数据有没有交到模型手上"（与脚本化 E2E 同一条判据）
-    const seen = lastToolResultsText();
+    const seen = toolResultsText();
     const missed = ev.mustSeeInToolResults.filter((s) => !seen.includes(s));
 
     const failed = results.filter((r) => !r.ok);

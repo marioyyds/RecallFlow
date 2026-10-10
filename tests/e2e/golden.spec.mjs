@@ -9,7 +9,7 @@
 // 而本文件其余场景需要流正常结束；混在一起会让"第一次调用"的归属取决于执行顺序、
 // 测试时好时坏。那条在 tests/e2e/resume.spec.mjs。
 import { test, expect } from '@playwright/test';
-import { lastToolResultsText } from './fixtures/server.mjs';
+import { toolResultsText, resetLlmRequests } from './fixtures/server.mjs';
 import {
   launchExtension,
   closeExtension,
@@ -302,6 +302,9 @@ test('golden: 拾取元素后对话里看得到它，且刷新后仍在', async 
 test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构化交给模型', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context, '/search');
+  // 夹具的请求记录是**整个 Playwright 运行共享**的，所以每条读它的用例都要先清空 ——
+  // 否则会读到别的用例留下的工具结果，而那种断言会"永远为真"，比直接失败更糟。
+  resetLlmRequests();
   await sendInstruction(page, '站内搜一下咖啡，把前三条的标题和价格给我');
 
   // ① 页面真的到了目标状态
@@ -313,9 +316,9 @@ test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构�
   // ② 模型实际收到的工具结果里，必须能看到**真实条目**的标题与价格。
   // 读夹具记录的请求，而不是读界面或最终答复 —— 后者都是脚本写的，证明不了能力。
   await expect
-    .poll(() => lastToolResultsText(), { timeout: 30_000 })
+    .poll(() => toolResultsText(), { timeout: 30_000 })
     .toContain('哥伦比亚 慧兰 水洗');
-  const seen = lastToolResultsText();
+  const seen = toolResultsText();
   expect(seen).toContain('￥88');
   expect(seen).toContain('埃塞俄比亚 耶加雪菲');
   expect(seen).toContain('￥108');
@@ -324,6 +327,49 @@ test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构�
 
   // 广告条目也一并被取回（是"检索"和"去广告"两种判断，不该在检索阶段就被悄悄丢掉）
   expect(seen).toContain('【广告】');
+
+  await page.close();
+});
+
+// 能力验收：**点单 / 多步表单**（playbook 'checkout-form'）。
+//
+// 与检索那条的差别在于**步骤之间有依赖，而且有业务校验**：商品/数量/地址/勾选缺一样，
+// 页面就只回「请补全信息」、根本不下单。所以：
+//
+// ① 断言不能停在"点过提交" —— 那证明不了下单成功。要看**页面真正收到的订单数据**
+//    （`window.__order`），它是"业务上真的成交了"的唯一凭据；
+// ② 页面刻意让**确认勾选成为承重件**：不勾就下不了单。于是 `check_box` 一坏这条必红 ——
+//    它同时也在验证本轮修的那个定位缺陷（`check_box` 的 schema 声明了 role/name，
+//    而它同样走 `firstTarget`，修复前按 role+name 定位是找不到的）。
+test('golden: 点单 —— 四种控件各走对工具，且业务校验真的通过了', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/checkout');
+  resetLlmRequests();
+  await sendInstruction(page, '帮我在这家店下单：商品选「埃塞俄比亚 耶加雪菲」，数量 2，收货地址填「上海市浦东新区 1 号」，勾选确认后提交订单。');
+
+  // ① 页面真正收到的订单数据 —— 业务成交的凭据
+  await expect.poll(() => page.evaluate(() => window.__order), { timeout: 30_000 }).not.toBeNull();
+  const order = await page.evaluate(() => window.__order);
+  expect(order).toEqual({
+    product: 'coffee-b',
+    qty: '2',
+    addr: '上海市浦东新区 1 号',
+    agree: true, // ← 承重件：不勾选这里会是 false，且 __order 为 null
+  });
+  // 结果摘要是**异步渲染**的（页面在点击后 120ms 才写入）：必须 poll。
+  // 直接读会时好时坏 —— 实测第一次过、第二次拿到空串（`window.__order` 是同步设的，
+  // 所以"订单数据对了"并不代表"摘要已经画出来了"，这两件事的时机不同）。
+  await expect.poll(() => page.textContent('#done'), { timeout: 15_000 }).toContain('下单成功');
+  // 提交次数应恰好是 1：说明**填齐了才提交**，没有先失败再重试
+  // （重试本身不算错，但"一次就过"才是这套能力应有的样子；若这里变成 2，先看工具轨迹）
+  expect(await page.evaluate(() => window.__submits)).toBe(1);
+
+  // ② 模型实际收到的工具结果里，必须有下单成功的摘要 ——
+  // 否则模型只能靠"点击成功"猜，那正是"看起来完成了"的假象。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('下单成功');
+  const seen = toolResultsText();
+  expect(seen).toContain('埃塞俄比亚 耶加雪菲');
+  expect(seen).toContain('上海市浦东新区 1 号');
 
   await page.close();
 });

@@ -43,6 +43,30 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['哥伦比亚 慧兰 水洗', '￥88', '埃塞俄比亚 耶加雪菲', '云南 小粒咖啡'],
     },
   },
+
+  'checkout-form': {
+    id: 'checkout-form',
+    title: '点单 / 多步表单：选商品 → 填数量与地址 → 勾选确认 → 提交',
+    trigger: '下单',
+    // 四种控件走四类工具：select_option（下拉）/ type_text（文本框）/ check_box（勾选）/ click_element（提交）。
+    // 注意 check_box 是**承重件**：页面不勾选就只回「请补全信息」，所以它一坏这条用例必红。
+    tools: ['get_page_snapshot', 'select_option', 'type_text', 'check_box', 'click_element', 'inspect_element'],
+    success: '页面收到的订单数据与指令一致（商品/数量/地址/已勾选），且渲染出「下单成功」摘要',
+    eval: {
+      url: '/checkout',
+      instruction:
+        '帮我在这家店下单：商品选「埃塞俄比亚 耶加雪菲」，数量 2，收货地址填「上海市浦东新区 1 号」，勾选确认后提交订单。',
+      pageChecks: [
+        { expr: "window.__order && window.__order.product === 'coffee-b'", label: '下单商品是耶加雪菲' },
+        { expr: "window.__order && window.__order.qty === '2'", label: '数量是 2' },
+        { expr: "window.__order && window.__order.addr === '上海市浦东新区 1 号'", label: '收货地址正确' },
+        { expr: 'window.__order && window.__order.agree === true', label: '确认勾选已生效（承重件）' },
+        { expr: "document.querySelector('#done').textContent.indexOf('下单成功') === 0", label: '渲染出下单成功摘要' },
+        { expr: 'window.__submits >= 1', label: '提交按钮被点过' },
+      ],
+      mustSeeInToolResults: ['下单成功', '埃塞俄比亚 耶加雪菲'],
+    },
+  },
 });
 
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
