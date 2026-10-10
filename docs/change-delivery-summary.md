@@ -6,7 +6,7 @@
 >
 > 每条都经过四层验证中的至少一层：
 > - `npm test` —— **1140 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
-> - `npm run test:e2e` —— 真实 Chromium，**10 个场景**（黄金任务 7 + 断线恢复 1，分两阶段）；
+> - `npm run test:e2e` —— 真实 Chromium，**11 个场景**（黄金任务 7 + 断线恢复 1，分两阶段）；
 > - `node scripts/verify-bridge-ws-handshake.mjs` —— 桥接 WS 鉴权（真实 server + 真实客户端）；
 > - `integrations/opencode/recallflow-mcp/test/session-isolation.test.mjs` —— 跨会话响应隔离。
 >

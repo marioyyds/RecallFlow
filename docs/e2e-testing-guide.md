@@ -389,22 +389,28 @@ await page.evaluate(() => {
 RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/eval-real-model.mjs
 ```
 
-### 9.7 本仓库的第一条实例（可照抄的形状）
+### 9.7 本仓库的两条实例（可照抄的形状）
 
-`site-search`（站内检索）是本设计的第一个完整实例，路径：
+`site-search`（站内检索）与 `checkout-form`（点单 / 多步表单）是这套设计的两个完整实例。
+每新增一类能力，就是沿着同一条路径加一组文件：
 
+```text
+tests/e2e/fixtures/playbooks.mjs          剧本：trigger / tools（契约锚点）/ success / eval 判据
+tests/e2e/fixtures/server.mjs             代表页面 + 脚本化剧本 + 请求记录
+tests/e2e/golden.spec.mjs                 端到端用例（页面状态 + 模型收到了什么）
+lib/assistant/skill-defs.js               技能（x.playbook 指向剧本、x.tools 覆盖剧本工具）
+tests/skill-playbook-contract.test.mjs   ②契约门禁（自动覆盖新剧本，无需改测试）
+tests/e2e-eval/real-model.eval.mjs        ③真模型 eval（自动覆盖带 eval 声明的剧本）
 ```
-tests/e2e/fixtures/playbooks.mjs          剧本与工具集（契约锚点、eval 判据）
-tests/e2e/fixtures/server.mjs             /search 代表页面 + 4 轮剧本 + 请求记录
-tests/e2e/golden.spec.mjs                 「站内检索」端到端用例（页面状态 + 模型收到什么）
-lib/assistant/skill-defs.js               search-within-site 技能（x.playbook 指向剧本）
-tests/skill-playbook-contract.test.mjs    ②契约门禁
-tests/e2e-eval/real-model.eval.mjs        ③真模型 eval
-scripts/eval-real-model.mjs               ③入口（前置检查）
-```
 
-**做新能力类就照这个形状复制**，一次只做一类 —— 每类的代表页面都要单独设计，一起上会变成几份半成品。
+两类各自的「难点」必须在代表页面里体现出来，否则用例只是走过场：
 
+| 能力类 | 真正的难点（代表页面必须造出来） |
+| --- | --- |
+| 站内检索 | 结果**点击后异步渲染**（工具必须等静定）＋ **混入广告**（检索与去广告是两种判断） |
+| 点单 / 表单 | **步骤有依赖**（缺项就不成交）＋ **勾选是承重件**（不勾条件根本不提交）＋ 四种控件走四类工具 |
+
+**一次只做一类**，每类的代表页面都要单独设计；一起上会变成几份半成品。
 ### 9.8 ⚠ 本轮真实收获：`firstTarget` 丢定位符
 
 做站内检索时，剧本第 2 轮 `type_text({role:'textbox', name:'站内搜索'})` 返回
