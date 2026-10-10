@@ -29,13 +29,16 @@ import { formatInspectMatches } from '../lib/shared/utils.js';
 const cmdSrc = fs.readFileSync('lib/page/commands.js', 'utf8');
 const toolsSrc = fs.readFileSync('lib/assistant/tools.js', 'utf8');
 
-/** 取一个顶层函数的源码体（到下一个顶层 function 为止）。 */
+/** 取一个顶层函数的源码体（到下一个顶层 function 为止）。
+ *  ⚠ 必须容忍 `export ` 前缀：`recordTraceStep` 是 `export function`，
+ *  只匹配 `^function` 会切到**空串**，于是断言在一个空字符串上做 —— 症状是"断言失败"
+ *  而看不出是"根本没取到函数体"。（本文件实测踩过一次。） */
 function fnBody(src, name) {
-  const re = new RegExp('^(?:async\\s+)?function\\s+' + name + '\\s*\\(', 'm');
+  const re = new RegExp('^(?:export\\s+)?(?:async\\s+)?function\\s+' + name + '\\s*\\(', 'm');
   const m = re.exec(src);
   if (!m) return '';
   const rest = src.slice(m.index + m[0].length);
-  const next = /^(?:async\s+)?function\s+\w+\s*\(/m.exec(rest);
+  const next = /^(?:export\s+)?(?:async\s+)?function\s+\w+\s*\(/m.exec(rest);
   return next ? rest.slice(0, next.index) : rest;
 }
 
@@ -117,4 +120,32 @@ test('这条门禁本身有牙齿：只给摘要、把载荷留在旁路字段�
   // inspect 那一侧同理：必须出现 formatInspectMatches 调用
   assert.ok(!/formatInspectMatches\(/.test(bad), '旧形态不含该调用');
   assert.ok(/formatInspectMatches\(/.test('result: summary + formatInspectMatches(matches)'), '新形态含该调用');
+});
+
+// ---------------------------------------------------------------- 同一族缺陷的第二个实例
+
+test('executePageTool 必须转发 selector —— 它是宏记录的定位依据', () => {
+  // `recordTraceStep` 在没有 `res.selector` 时**整步都不记录**，
+  // 而 `executePageTool` 是"重建对象"，原先把内容脚本返回的 `selector` 丢掉了。
+  // 后果：`click_element` **永远进不了宏** —— 宏回放只能重放输入/选择、不能重放点击，
+  // 而点击恰恰是宏最主要的动作。
+  // 实测：宏里只有 2 步（type_text + select_option），回放后页面执行计数停在 1，什么都没发生。
+  // 更迷惑的是：`type_text` / `select_option` 走各自的 handler（透传内容脚本结果），**不受影响** ——
+  // "同一类操作里一半好一半坏"最难从现象反推。
+  const body = fnBody(toolsSrc, 'executePageTool');
+  const hit = [...body.matchAll(/selector:\s*\(res && res\.selector\)/g)].length;
+  assert.ok(hit >= 2, '新标签页分支与主返回都要转发 selector，实际 ' + hit + ' 处');
+});
+
+test('把「下游需要什么」与「上游给了什么」对起来（这条故事的推广）', () => {
+  // 只要下游读的字段上游没给，能力就会**静默少一半**：
+  // 上一节是"载荷没并进 result"（模型看不到数据），这一节是"selector 没转发"（宏记不住点击）。
+  // 两者形状相同，所以这条断言把两端的依赖关系显式钉住。
+  const recorder = fnBody(toolsSrc, 'recordTraceStep');
+  assert.match(recorder, /res\.selector/, 'recordTraceStep 依赖 res.selector');
+  assert.match(fnBody(toolsSrc, 'executePageTool'), /res\.selector/, '因此 executePageTool 必须转发它');
+  assert.ok(
+    /if \(!selector\) return;/.test(recorder),
+    'recordTraceStep 在缺 selector 时是**整步不记录**（不是报错）—— 所以缺字段是静默的'
+  );
 });
