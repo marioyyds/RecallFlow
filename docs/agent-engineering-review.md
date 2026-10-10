@@ -4,6 +4,20 @@
 >
 > 阅读方式：先看[结论摘要](#结论摘要)与[验证状态](#验证状态我证明了什么没证明什么)，再看[遗留债务与优先级](#遗留债务与优先级)。
 
+> ## ⚠️ 这是一份**历史快照**，其中的数字已过时
+>
+> 本文保留原貌以记录当时的结论与教训（尤其是「我犯的错」一节，那些教训与数字无关，仍然有效）。
+> 但下面这些**数字**不要引用：
+>
+> | 本文写的 | 当前实测 |
+> | --- | --- |
+> | 「382 项用例通过」「23 个测试文件」 | **908** 项 / **66** 个文件 —— 用 `node scripts/test-count.mjs` 取 |
+> | 「内置工具 55 个」（另见 `docs/tool-design.md`） | 现为 **44**（C-4 已合并诊断、宏、知识库只读、元素检查只读、视觉标注五档；`tests/registry.test.mjs` 钉住，方案见 `docs/tool-merge-plan.md`）。而 §P0 说的"这是最大的结构性债务"仍然成立 |
+> | 「没有 CI、门禁靠手动」 | 已有 `scripts/run-all-checks.mjs` 统一入口与 `.github/workflows/checks.yml` |
+>
+> **教训（这也是本文自己记下的第 6 类错）**：手写数字必然腐烂。同一个测试数曾同时以
+> 562 / 382 / 526 三个互相矛盾的值出现在三份文档里，而三个都不对。数字应生成，不应手抄。
+
 ---
 
 ## 结论摘要
@@ -103,7 +117,7 @@ const safe = sanitizeHref(url);           // url 来自 data-cite-url（页面/�
 
 | 模块 | 行数 | 职责 |
 |---|---:|---|
-| `lib/assistant/tool-schemas.js` | 915 | 55 个工具的 Schema（唯一来源） |
+| `lib/assistant/tool-schemas.js` | 913 | 44 个工具的 Schema（唯一来源） |
 | `lib/page/markdown.js` | 462 | 模型输出 → HTML 渲染 + 引用 + `sanitizeHref` |
 | `lib/page/panel-css.js` | 364 | 面板样式（纯字符串） |
 | `lib/shared/table.js` | 125 | `rowspan/colspan` 网格展开算法 |

@@ -105,12 +105,13 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 | `network` | 网络请求 | `browser` | 需审批，可按类别自动批准 |
 | `write` / `destructive` | 写/删本地数据 | `edit` | 需审批，可按类别自动批准 |
 | `external` | MCP / 外部服务 | `mcp` | 需审批，可按类别自动批准 |
-| `high` | 任意代码执行等高危 | —（改走 `runJavascriptApproval`） | 默认需确认一次后本任务内放行；可配为每次确认或自动批准 |
+| `high` | 任意代码执行等高危 | —（改走 `codeExecutionApproval`） | 默认需确认一次后本任务内放行；可配为每次确认或自动批准 |
 
-- `alwaysRequireApproval: true` 用于 `high` 风险工具（如 `run_javascript`）：它**不参与** `toolApprovalPolicy` 的分类自动批准，而由独立的 `runJavascriptApproval` 控制：
+- `alwaysRequireApproval: true` 用于 `high` 风险工具（`run_javascript`、`run_userscript`、`install_userscript`）：它**不参与** `toolApprovalPolicy` 的分类自动批准，也不受站点信任影响，而由独立的 `codeExecutionApproval` 控制：
   - `'each'`：每次调用都确认；
   - `'session'`（默认）：确认一次后，本任务内后续调用直接放行；
   - `'auto'`：完全不弹审批。
+  - 旧键名 `runJavascriptApproval` 仍可读（`resolveCodeExecutionApproval` 会回退），但不再写入。**泛化键名的理由**：该开关约束的是「执行任意/第三方代码」这一**类**工具，而非只有 JavaScript；沿用旧名会让用户以为只放开了 JavaScript，却连带放开了会从远程自动更新的用户脚本。
 - `toolApprovalPolicy` 默认值里的 `read: true` 实际不生效（只读工具在 `toolNeedsApproval` 开头就返回了），保留它只是为了 UI 勾选项的完整性。
 - `readOnly: true` 的工具不受失败摘除影响（交给 stuck detector 判定）。
 
@@ -146,7 +147,16 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 待办：
 
 - [ ] 视觉标注类（`highlight_text` / `outline_element` / `set_element_style` / `clear_page_overlays`）存在功能重叠，可评估合并为统一「标注」语义。
-- [ ] **内置工具已达 50 个，是 §10 目标（≤25）的两倍**，`BROWSER` 意图单轮即暴露约 40 个签名。工具过密会抬高误选率并浪费提示 token，应优先合并重叠工具，而不是继续新增。
+- [ ] **内置工具现为 44 个（原 55），仍是 §10 目标（≤25）的 1.8 倍** —— 属待偿还的结构性债务。工具过密会抬高误选率并浪费提示 token，应优先合并重叠工具，而不是继续新增。
+  - **已执行的 5 步（2026-02）**：① 诊断三件套 → `read_diagnostics({kind})`（55→53）；② 宏三件套 → `macro({op})`（53→51）；③ 知识库只读三件套 → `knowledge_read({op})`（51→49）；④ 元素检查只读三件套 → `inspect_element({op})`（49→47）；⑤ 视觉标注四件套 → `annotate({op})`（47→**44**）。
+  - **分组判据（多次实测得到的）**：按**执行路径与权限类别**分组，而**不是**按语义相似度。原方案里"知识库 5→2"与"元素检查 5→1"都因为把不同权限/不同路径的工具硬合到一起而被收窄；第 6、7 档则因为**前置条件根本不同**（审批函数拿不到 args / CDP 依赖差异）而判定不可做。净减量与传统分组一致，但不产生权限污染、不把两条链路塞进一个入口。
+  - **注意（反直觉，已出现三次）**：合并让**工具数下降、但 schema 字符数上升**（诊断档 32791>32500；宏档 chat_task 8400→9700；视觉标注档 browser_task 33400→35600）。**"工具数下降"≠"prompt 变小"**。若后续还要合并，应当先**精简描述**，而不是继续调高预算。
+  - **完整方案与成本数据**：`docs/tool-merge-plan.md`（含每档净减量、权限该继承谁、跨越性约束核对、以及"这条路到不了 28"的实测结论），复核命令 `node scripts/tool-merge-impact.mjs`。
+  - **可落地的合并路径**（按收益排序）：元素检查 5→1（`get_element_text` + `get_attribute` + `get_element_source` + `inspect_element` + `extract_table` → `inspect_element({fields})`）、视觉标注 4→1（`annotate(op)`）、知识库 5→2、宏 3→1、用户脚本 4→1、技能 2→1、`read_console` + `read_network` + `list_downloads` → `read_diagnostics(kind)`、`list_frames` + `get_ax_snapshot` → 1、指针族 4→1（`click_element`/`click_at`/`hover_element`/`drag_element` → `pointer(op)`）。
+  - **实测修正（2026-02 校对）**：上面这条路径把工具数**从 55 降到 33，只省下 22 个** —— 达不到这里原先写的"目标落在 ~28"。原因不是分析错，而是那句话是**手算的**；改动它们之前没人把每一档的净减量加起来核过。（诊断档已于本轮执行，故从 55 起算的 33 现对应 53 起算的 31。）
+    复核方式：`node scripts/tool-merge-impact.mjs`（分组从 `TOOL_REGISTRY` 派生，名字不存在就直接报错退出，避免统计出一份"漂亮但描述的不是这个系统"的报告）。
+    因此现实的取舍是：**要落到 28 还需再砍 5 个；要落到 §10 的 ≤25 还需再砍 8 个。**
+  - 注意：那些额外削减**必然是砍能力**（例如不再内置用户脚本管理、或把诊断三件套并入更少的入口），而不是纯重构。这是产品取舍 —— 本文只能给出成本，不能替代决策。
 - [ ] 知识库检索目前是「字段加权词法匹配 + 中文 bigram 切分」（`lib/shared/rag.js`），**不含向量嵌入**：语义近义查询（问「跨域」而条目只写「CORS」）会漏召回。
 - [ ] 写操作批量参数（如 `set_element_style` 批量元素）尚未推广。
 - [ ] 表单值选择类（`select_option`）按设计以 `ref / selector + value / label / index` 定位，`text` 暂不追加（与 `label` 语义重叠），需在 §5 补充例外说明。
