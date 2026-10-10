@@ -14,6 +14,7 @@ import {
   closeExtension,
   configureSettings,
   openFixturePage,
+  openPanel,
   sendInstruction,
   clickApproval,
   flowOrder,
@@ -210,6 +211,76 @@ test('golden: 思考记录按顺序穿插在对话中、可展开、无内层滚
 
   // 两块的折叠互不影响（历史段各自独立开合）
   await expect(blocks.nth(1)).toHaveAttribute('data-open', 'false');
+
+  await page.close();
+});
+
+// 拾取页面元素后，它必须**留在对话里**（显示 + 持久化）。
+//
+// 起因：用户反馈「选中页面元素时，对话中不显示所选元素的信息」。
+// 查下来不是渲染坏了，而是这条信息从来没进过对话：待发送条有它、给模型的元数据也有它，
+// 但用户气泡只渲染 instruction，conversation 里也只存 content，发送后 pickedElements 直接清空。
+//
+// 为什么必须端到端：这条链路跨了 内容脚本(拾取) → 后台(转发) → 面板(入库) →
+// `chrome.storage.session`(持久化) → 刷新后重放 —— 任何一环断了都不会报错，
+// 症状只是"看不见"。而且 `serializeConversation` 是**白名单**式拷贝，
+// 漏一个字段的表现恰好是"当时看得见、刷新后没了"，只有真刷新一次才能证伪。
+test('golden: 拾取元素后对话里看得到它，且刷新后仍在', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await openPanel(page);
+
+  // 进入拾取模式，然后点页面上的「提交」按钮
+  await page.locator(PANEL + ' .cmd-pick').click();
+  await page.locator('#submit').click({ force: true });
+  // ⚠ 点击只是**加入选区**，拾取要靠 Esc/Enter **结束并提交**（按钮 tooltip 里也写着「Esc 完成」）。
+  // 漏掉这一步的表现是"没有任何 chip 出现"，很容易误判成拾取坏了。
+  await page.keyboard.press('Escape');
+
+  // 待发送条出现 chip（拾取真的发生了）
+  await expect(page.locator(PANEL + ' .pick-chip')).toHaveCount(1, { timeout: 15_000 });
+  expect(await panelText(page, '.pick-chip-text')).toContain('提交');
+  // 拾取是"选中"，不该触发页面动作本身（拾取在 capture 阶段 stopPropagation）
+  expect(await page.evaluate(() => window.__clicked)).toBe(false);
+
+  // 发送后才进入对话
+  await page.locator(PANEL + ' .cmd-input').fill('这是什么元素');
+  await page.locator(PANEL + ' .cmd-send').click();
+
+  // ① 刚发出去：**我这条**消息的气泡里能看到这次拾取。
+  // 断言限定在含本条指令的那个 turn：其它测试/其它轮次的气泡不该影响这条判断。
+  const myTurn = page.locator(PANEL + ' .user-turn', { hasText: '这是什么元素' });
+  await expect(myTurn.locator('.user-picks')).toHaveCount(1, { timeout: 15_000 });
+  await expect(myTurn.locator('.user-picks')).toContainText('提交');
+  await expect(myTurn.locator('.user-picks')).toContainText('button');
+
+  // ② **确定性地**等后台真的把它写进了 chrome.storage.session。
+  //
+  // 刻意不等"答案文本出现"再刷新：那条路依赖模型回复的时序，脆弱且不是我要验的东西。
+  // 真正要验的是**持久化白名单里有没有 pickedElements** —— 直接读存储最准，
+  // 而且它能顺带证明"这条消息确实带着拾取被存下来了"，而不是只看界面。
+  const sw = context.serviceWorkers()[0];
+  const storedPicks = () =>
+    sw.evaluate(async () => {
+      const all = await chrome.storage.session.get(null);
+      const key = Object.keys(all).find((k) => k.startsWith('recallflow.conv.'));
+      if (!key) return null;
+      const conv = (all[key] && all[key].conversation) || [];
+      const mine = conv.find((m) => m.role === 'user' && String(m.content || '').includes('这是什么元素'));
+      return mine && Array.isArray(mine.pickedElements) ? mine.pickedElements : null;
+    });
+  await expect.poll(storedPicks, { timeout: 30_000 }).not.toBeNull();
+  const persisted = await storedPicks();
+  expect(persisted.length).toBeGreaterThan(0);
+  expect(persisted[0].label).toBe('提交');
+  expect(persisted[0].tag).toBe('button');
+
+  // ③ 刷新后仍在：这一条才真正验证了整条"入库 → 恢复 → 重放"链路
+  await page.reload();
+  await openPanel(page);
+  const restoredTurn = page.locator(PANEL + ' .user-turn', { hasText: '这是什么元素' });
+  await expect(restoredTurn.locator('.user-picks')).toHaveCount(1, { timeout: 15_000 });
+  await expect(restoredTurn.locator('.user-picks')).toContainText('提交');
 
   await page.close();
 });

@@ -25,6 +25,41 @@
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
   }
+  function formatElementLocator(locator, selector, tag) {
+    const l = locator || {};
+    if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
+    if (l.name) return 'name="' + l.name + '"';
+    if (l.testid) return "testid=" + l.testid;
+    return String(selector || tag || "");
+  }
+  function summarizePickedForMessage(picked) {
+    if (!Array.isArray(picked)) return [];
+    return picked.filter((p) => p && typeof p === "object").slice(0, 8).map((p) => {
+      const src = p.source || {};
+      return {
+        tag: String(p.tag || "").slice(0, 40),
+        label: String(p.label || "").slice(0, 60),
+        loc: src.file ? String(src.file).slice(0, 200) + (src.line ? ":" + src.line : "") : "",
+        locator: formatElementLocator(p.locator, p.selector, p.tag).slice(0, 200)
+      };
+    });
+  }
+  function formatPickedSummary(picks) {
+    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
+    if (!list.length) return "";
+    return list.map(
+      (p, i) => (list.length > 1 ? i + 1 + ". " : "") + (p.tag || "\u5143\u7D20") + (p.label ? "\u300C" + p.label + "\u300D" : "") + (p.loc ? " \u2192 " + p.loc : "")
+    ).join("\uFF1B");
+  }
+  function pickedSummaryHtml(picks) {
+    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
+    if (!list.length) return "";
+    const title = list.map((p) => p.locator).filter(Boolean).join(" / ");
+    return '<span class="user-picks"' + (title ? ' title="' + esc(title) + '"' : "") + ">\u27E1 " + esc(formatPickedSummary(list)) + "</span>";
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
   function formatInspectSummary(input) {
     const o = input || {};
     const total = Math.max(0, Math.floor(Number(o.total) || 0));
@@ -1322,8 +1357,8 @@
   function findElementsByTestId(testid) {
     const q = String(testid || "");
     if (!q) return [];
-    const esc = cssEscapeLocal(q);
-    const sel = ["data-testid", "data-test-id", "data-test", "data-cy", "data-name"].map((a) => "[" + a + '="' + esc + '"]').join(",");
+    const esc2 = cssEscapeLocal(q);
+    const sel = ["data-testid", "data-test-id", "data-test", "data-cy", "data-name"].map((a) => "[" + a + '="' + esc2 + '"]').join(",");
     try {
       return queryAllInFrames(document, sel);
     } catch (e) {
@@ -3410,13 +3445,13 @@
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
   function highlightCode(code) {
-    const esc = hlEscape(code);
+    const esc2 = hlEscape(code);
     const tokens = [];
     const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|\b(\d+\.\d+|\d+\.?)\b|([A-Za-z_$][\w$]*)/g;
     let last = 0;
     let m;
-    while (m = re.exec(esc)) {
-      if (m.index > last) tokens.push(esc.slice(last, m.index));
+    while (m = re.exec(esc2)) {
+      if (m.index > last) tokens.push(esc2.slice(last, m.index));
       if (m[1]) tokens.push('<span class="tk-comment">' + m[1] + "</span>");
       else if (m[2]) tokens.push('<span class="tk-string">' + m[2] + "</span>");
       else if (m[3]) tokens.push('<span class="tk-number">' + m[3] + "</span>");
@@ -3425,14 +3460,14 @@
         if (HL_KEYWORDS.has(w)) tokens.push('<span class="tk-keyword">' + w + "</span>");
         else if (HL_TYPES.has(w)) tokens.push('<span class="tk-type">' + w + "</span>");
         else {
-          const after = esc.slice(m.index + w.length, m.index + w.length + 1);
+          const after = esc2.slice(m.index + w.length, m.index + w.length + 1);
           if (after === "(") tokens.push('<span class="tk-fn">' + w + "</span>");
           else tokens.push(w);
         }
       }
       last = m.index + m[0].length;
     }
-    if (last < esc.length) tokens.push(esc.slice(last));
+    if (last < esc2.length) tokens.push(esc2.slice(last));
     return tokens.join("");
   }
   function sanitizeHref(raw) {
@@ -3870,6 +3905,10 @@
       box-shadow: 0 2px 8px rgba(74,144,217,.22);
     }
     .msg.ai { background: transparent; padding: 0 2px; margin-right: 6px; }
+    /* \u7528\u6237\u6C14\u6CE1\u91CC\u300C\u8FD9\u6761\u6D88\u606F\u5E26\u4E0A\u4E86\u54EA\u4E9B\u62FE\u53D6\u5143\u7D20\u300D\u90A3\u4E00\u884C\u3002
+       \u5B83\u5FC5\u987B**\u7559\u5728\u6C14\u6CE1\u5185**\uFF1A\u90A3\u662F\u8FD9\u6761\u6D88\u606F\u7684\u4E0A\u4E0B\u6587\uFF0C\u4E0D\u662F\u63D0\u793A\u6761 \u2014\u2014
+       \u653E\u5230\u6C14\u6CE1\u5916\u5C31\u53C8\u4F1A\u53D8\u6210"\u53D1\u9001\u540E\u6D88\u5931\u7684\u4E34\u65F6\u72B6\u6001"\u3002 */
+    .user-picks { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.82); word-break: break-all; }
     .msg.ai .typing { color: #999; }
     .panel.dark .msg.ai .typing { color: #9aa0a8; }
     .typing { display: inline-flex; gap: 4px; align-items: center; }
@@ -4780,7 +4819,7 @@
     panelBody.className = "p-body";
     panelBody.innerHTML = conversation.map((m, index) => {
       if (m.role === "user") {
-        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + "</div>" + userActionsHtml(index) + "</div>";
+        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + userActionsHtml(index) + "</div>";
       }
       const parts = Array.isArray(m.parts) ? m.parts : [];
       const flowHtml = parts.map((p) => {
@@ -4875,6 +4914,7 @@
       const copy = { role: m.role };
       if (typeof m.content === "string") copy.content = m.content.slice(0, 4e3);
       if (typeof m.toolSummary === "string" && m.toolSummary) copy.toolSummary = m.toolSummary.slice(0, 600);
+      if (Array.isArray(m.pickedElements) && m.pickedElements.length) copy.pickedElements = m.pickedElements.slice(0, 8);
       if (Array.isArray(m.parts)) copy.parts = m.parts.slice(-30);
       if (Array.isArray(m.citations)) {
         copy.citations = m.citations.slice(0, 20).map((c) => ({
@@ -5306,13 +5346,7 @@
     cmdWrap.appendChild(pickBtn);
     cmdWrap.appendChild(sendBtn);
     cmdArea.appendChild(cmdWrap);
-    const locatorText = (p) => {
-      const l = p && p.locator || {};
-      if (l.role || l.name) return "role=" + (l.role || "") + (l.name ? (l.role ? " " : "") + 'name="' + l.name + '"' : "");
-      if (l.testid) return "testid=" + l.testid;
-      if (p && p.selector) return p.selector;
-      return p && p.tag || "";
-    };
+    const locatorText = (p) => formatElementLocator(p && p.locator, p && p.selector, p && p.tag);
     const renderPick = () => {
       pickBar.innerHTML = "";
       if (!pickedElements.length) {
@@ -5700,10 +5734,16 @@
         }
       };
       lastResponse = "";
-      conversation.push({ role: "user", content: instruction });
+      const pickedForMessage = summarizePickedForMessage(pickedElements);
+      conversation.push(
+        Object.assign(
+          { role: "user", content: instruction },
+          pickedForMessage.length ? { pickedElements: pickedForMessage } : {}
+        )
+      );
       const userMsg = document.createElement("div");
       userMsg.className = "user-turn";
-      userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + "</div>" + userActionsHtml(conversation.length - 1);
+      userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
       const aiMsg = document.createElement("div");
       aiMsg.className = "msg ai";
       flowEl = document.createElement("div");

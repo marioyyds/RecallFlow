@@ -232,6 +232,14 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 场景 G：拾取元素后的追问。
+    // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
+    // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
+    if (userText.includes('这是什么元素')) {
+      sse(res, [textDelta('这是页面上的提交按钮。'), { choices: [{ delta: {}, finish_reason: 'stop' }] }, { usage: { total_tokens: 20 } }]);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
