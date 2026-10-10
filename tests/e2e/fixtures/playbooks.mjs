@@ -372,6 +372,36 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已保存宏', '（3 步）', '已回放宏'],
     },
   },
+
+  'upload-file': {
+    id: 'upload-file',
+    title: '复杂场景：文件上传 —— 工具如实说"没观察到变化"，所以要读回',
+    trigger: '上传文件',
+    // `upload_file` 返回 hadEffect:false（设置文件不产生可观察的页面变化），
+    // 所以这四步里**读回那一步不能省**：上传工具返回 ok ≠ 文件真的进去了。
+    tools: ['get_page_snapshot', 'upload_file', 'click_element', 'inspect_element'],
+    success: '文件真的被设置到 file input 上并派发了 change 事件，提交后页面回执带文件名',
+    eval: {
+      url: '/upload',
+      cdp: true, // upload_file 走 CDP 的 DOM.setFileInputFiles
+      // {{UPLOAD_FILE}} 是**运行时占位符**：本地绝对路径每台机器不同、也不该写进仓库。
+      // 由 tests/e2e/helpers.mjs 的 resolveInstruction 解析，E2E 与真模型 eval 共用同一入口，
+      // 于是两边跑的仍是**同一条指令**。
+      instruction: '帮我上传文件 {{UPLOAD_FILE}} 到这个页面，然后提交。',
+      pageChecks: [
+        // change 事件真的触发了（不是只把文件塞进去）
+        { expr: "window.__fileName === 'sample-upload.txt'", label: '页面收到了 change 事件且文件名正确' },
+        { expr: 'window.__submits === 1', label: '提交了一次' },
+        {
+          expr: "document.querySelector('#status').textContent === '已提交：sample-upload.txt'",
+          label: '页面回执带文件名（说明确实按选中的文件提交了）',
+        },
+      ],
+      // ① 上传结果文本（含路径）必须到模型手里
+      // ② 读回的结果也要在 —— 那是"文件真的进去了"的唯一凭据
+      mustSeeInToolResults: ['已向文件输入框设置', 'sample-upload.txt'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

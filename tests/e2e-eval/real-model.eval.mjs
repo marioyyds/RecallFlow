@@ -21,6 +21,7 @@ import {
   configureSettings,
   openFixturePage,
   sendInstruction,
+  resolveInstruction,
   PANEL,
 } from '../e2e/helpers.mjs';
 import { evalPlaybooks } from '../e2e/fixtures/playbooks.mjs';
@@ -113,7 +114,10 @@ for (const pb of evalPlaybooks()) {
     await configureSettings(context, Object.assign({ model }, ev.cdp ? { cdpEnabled: true } : {}));
     const page = await openFixturePage(context, ev.url);
     resetLlmRequests();
-    await sendInstruction(page, ev.instruction);
+    // 指令统一经 resolveInstruction 解析：含运行时占位符的剧本（如上传文件的本地绝对路径）
+    // 才拿得到真实值；不含占位符的原样返回。E2E 走同一个入口，
+    // 于是两层跑的**始终是同一条指令**。
+    await sendInstruction(page, resolveInstruction(pb.id));
 
     // 真模型可能选到 alwaysRequireApproval 的工具（run_javascript / run_userscript /
     // install_userscript）—— 那三个**任何审批策略都不放行**，必须点掉，否则整轮卡死到超时。

@@ -103,15 +103,25 @@ test('E2E 里用的指令必须与剧本声明的指令**逐字一致**（否则
   // 指令存在两处（剧本的 eval.instruction 与 golden.spec.mjs 的 sendInstruction 字面量），
   // 它们一旦漂移，就会出现"E2E 跑的是一套、eval 跑的是另一套"这种最难查的不一致。
   // 这里要求 spec 里**原样出现**剧本声明的指令。
+  //
+  // 例外：含**运行时占位符**（`{{...}}`）的指令无法写字面量（如上传文件的本地绝对路径，
+  // 每台机器不同、也不该进仓库），这类要求 spec 经 `resolveInstruction('<id>')` 引用 ——
+  // **仍是一处来源**，只是从"字面量一致"升级为"经同一个解析入口"。
   const spec = fs.readFileSync('tests/e2e/golden.spec.mjs', 'utf8');
+  const hasPlaceholder = (s) => /\{\{[A-Z_]+\}\}/.test(String(s));
   const missing = Object.values(PLAYBOOKS)
     .filter((p) => p.eval && p.eval.instruction)
-    .filter((p) => !spec.includes(p.eval.instruction))
+    .filter((p) =>
+      hasPlaceholder(p.eval.instruction)
+        ? !spec.includes("resolveInstruction('" + p.id + "')")
+        : !spec.includes(p.eval.instruction)
+    )
     .map((p) => p.id);
   assert.deepEqual(
     missing,
     [],
-    '这些剧本的指令没有原样出现在 golden.spec.mjs 里（两处漂移会让 E2E 与 eval 跑的不是同一件事）：' + missing.join(', ')
+    '这些剧本的指令既没有原样出现在 golden.spec.mjs 里，也没有经 resolveInstruction 引用（两处漂移会让 E2E 与 eval 跑的不是同一件事）：' +
+      missing.join(', ')
   );
 });
 

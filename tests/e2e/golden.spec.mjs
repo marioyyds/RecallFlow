@@ -20,6 +20,7 @@ import {
   clickApproval,
   isCovered,
   lightDomHas,
+  resolveInstruction,
   flowOrder,
   panelStyle,
   panelText,
@@ -880,6 +881,56 @@ test('golden: 宏 —— 保存后回放真的在页面上重放了动作（计�
   expect(seen, '宏里应恰好记录白名单内的 3 步（快照与 macro 自身不应进宏）').toContain('（3 步）');
   // 回放的分步日志也要在（证明每一步都执行了，而不是只报了个总数）
   expect(seen).toContain('[3/3] click_element');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**文件上传**（playbook 'upload-file'）。
+//
+// 难点是**工具如实说"没观察到变化"**：`upload_file` 返回 `hadEffect:false` +
+// 「已向文件输入框设置文件（未做页面变化观测）」——
+// 因为设置文件本身不产生可观察的页面变化。所以「调用返回 ok」不等于「文件真的进去了」，
+// **必须读回**才算验证过。这条用例把两件事分开断言：
+//   ① `input.files[0].name` —— 权威事实（文件真的被设置了）；
+//   ② `window.__fileName` —— 只在 change 事件触发时才更新（CDP 设置文件**派发了事件**）。
+// 两者一起才能区分"文件没设置"与"设置了但没触发事件"。
+//
+// 指令里的 `{{UPLOAD_FILE}}` 由 resolveInstruction 解析成本地绝对路径：
+// 每台机器不同、也不该写进仓库，而剧本与 E2E/eval 必须用**同一条指令**。
+test('golden: 上传 —— 文件真的被设置且派发了 change 事件（工具只说"未观测"）', async () => {
+  // upload_file 走 CDP 的 DOM.setFileInputFiles
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/upload');
+
+  // 基线：还没选文件
+  expect(await page.evaluate(() => window.__fileName)).toBe(null);
+  await expect(page.locator('#status')).toHaveText('尚未选择文件');
+  expect(await page.locator('#file').evaluate((el) => el.files.length)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(page, resolveInstruction('upload-file'));
+
+  // ① 权威事实：文件真的被设置到 input 上（与事件无关）
+  await expect.poll(() => page.locator('#file').evaluate((el) => el.files[0] && el.files[0].name), {
+    timeout: 40_000,
+  }).toBe('sample-upload.txt');
+  // ② change 事件确实触发了（页面的 __fileName 只在 change 里更新）
+  await expect.poll(() => page.evaluate(() => window.__fileName), { timeout: 20_000 }).toBe('sample-upload.txt');
+
+  // ③ 提交后页面回执带文件名
+  await expect.poll(() => page.evaluate(() => window.__submits), { timeout: 20_000 }).toBe(1);
+  await expect(page.locator('#status')).toHaveText('已提交：sample-upload.txt');
+
+  // ④ 模型视角：上传结果文本（含路径）与**读回的结果**都要到它手里 ——
+  // 后者是"文件真的进去了"的唯一凭据（工具自己说 hadEffect:false）
+  //
+  // ⚠ 先 poll **最后**才会出现的那一条，再读一份新鲜的：
+  // 早先的写法是"先读一次 seen、再逐条断言"，而那时这一轮可能还没跑完 ——
+  // 断言跑在**过期的快照**上（同一类错误本会话已出现多次）。
+  await expect.poll(() => toolResultsText(), { timeout: 40_000 }).toContain('已提交：sample-upload.txt');
+  const seen = toolResultsText();
+  expect(seen).toContain('已向文件输入框设置');
+  expect(seen).toContain('sample-upload.txt');
 
   await page.close();
 });

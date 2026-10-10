@@ -8,10 +8,32 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { startServers, stopServers } from './fixtures/server.mjs';
+import { PLAYBOOKS } from './fixtures/playbooks.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 仓库根（`--load-extension` 要指向它）。仅本文件内部使用，不导出。
 const EXT_PATH = path.resolve(__dirname, '..', '..');
+
+// 上传夹具的**绝对路径**：`upload_file` 需要真实的本地路径（CDP 的 DOM.setFileInputFiles），
+// 而剧本指令是静态字符串 —— 见下面 resolveInstruction 的说明。
+const SAMPLE_UPLOAD = fileURLToPath(new URL('./fixtures/sample-upload.txt', import.meta.url));
+
+/**
+ * 解析剧本指令里的**运行时占位符**，返回可以直接发给面板的指令文本。
+ *
+ * 为什么需要它：剧本的指令是静态字符串，但有些场景需要**只有运行时才知道的值** ——
+ * 最典型的是上传文件的**本地绝对路径**（每台机器不同，且不该写进仓库）。
+ * 若让 E2E 与真模型 eval 各自拼接，就会出现"两边跑的不是同一条指令"，
+ * 而"脚本下能过、真模型下不能过"就无法归因。
+ *
+ * 所以：**占位符留在剧本里（单一来源）**，两边都经这里解析。
+ * 没有占位符的指令原样返回，因此所有场景都可以统一走这个入口。
+ */
+export function resolveInstruction(id) {
+  const pb = PLAYBOOKS[id];
+  if (!pb || !pb.eval || !pb.eval.instruction) throw new Error('未找到剧本指令：' + id);
+  return String(pb.eval.instruction).replace(/\{\{UPLOAD_FILE\}\}/g, SAMPLE_UPLOAD);
+}
 
 const MAIN_URL = 'http://127.0.0.1:7802';
 const LLM_PORT = 7804;

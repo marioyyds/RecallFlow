@@ -3,7 +3,14 @@
 // - 框架站（7803）：跨域 iframe 内容。
 // - 模拟 LLM（7804）：OpenAI 兼容，按脚本返回 tool_calls / 文本，供 Agent 端到端测试。
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PLAYBOOKS } from './playbooks.mjs';
+
+// 上传夹具的绝对路径：`upload_file` 要的是真实本地路径（CDP 的 DOM.setFileInputFiles）。
+// 剧本指令里用 {{UPLOAD_FILE}} 占位，由 tests/e2e/helpers.mjs 的 resolveInstruction 解析 ——
+// 这里给脚本化剧本用同一份。
+const SAMPLE_UPLOAD = fileURLToPath(new URL('./sample-upload.txt', import.meta.url));
 
 const MAIN_PORT = 7802;
 const FRAME_PORT = 7803;
@@ -850,6 +857,43 @@ function macroPage() {
 </body></html>`;
 }
 
+// 上传页：一个真实的 file input，用来验 CDP 的 DOM.setFileInputFiles。
+//
+// 难点是**工具有意不谎报成功**：`upload_file` 返回 `hadEffect:false` +
+// 验证说明「已向文件输入框设置文件（未做页面变化观测）」——
+// 因为设置文件本身不产生可观察的页面变化。所以"调用返回 ok"不等于"文件真的进去了"，
+// 必须**读回**（页面状态或 input.files）才算验证过。
+//
+// 页面把「change 事件是否真的触发」与「文件名」都记下来：
+//   · `window.__fileName` 只在 change 触发时更新 —— 能证明 CDP 设置文件**派发了事件**；
+//   · `input.files[0].name` 是权威事实，与事件无关。
+// 两者一起断言，才能区分"文件没设置"与"设置了但没触发事件"。
+function uploadPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具资料上传</title></head>
+<body>
+  <h1>资料上传</h1>
+  <label for="file">选择文件</label>
+  <input id="file" type="file" role="button" aria-label="选择文件">
+  <button id="send" type="button" role="button" aria-label="提交资料">提交资料</button>
+  <div id="status" role="status">尚未选择文件</div>
+  <script>
+    window.__fileName = null;
+    window.__submits = 0;
+    document.getElementById('file').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0];
+      window.__fileName = f ? f.name : null;
+      document.getElementById('status').textContent = f ? ('已选择：' + f.name) : '尚未选择文件';
+    });
+    document.getElementById('send').addEventListener('click', function () {
+      window.__submits += 1;
+      document.getElementById('status').textContent = window.__fileName
+        ? ('已提交：' + window.__fileName)
+        : '请先选择文件';
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1453,6 +1497,20 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：文件上传（playbook id = 'upload-file'）。
+    //
+    // 关键点：`upload_file` **有意报告 hadEffect:false**（设置文件不产生可观察的页面变化），
+    // 所以剧本不能停在"上传工具返回 ok"，必须**读回**页面状态才算完成。
+    if (userText.includes(PLAYBOOKS['upload-file'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'upload_file', { selector: '#file', files: [SAMPLE_UPLOAD] }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '提交资料' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已把 sample-upload.txt 设置到文件输入框并提交，页面回执「已提交：sample-upload.txt」。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1489,7 +1547,8 @@ const main = http.createServer((req, res) => {
                               : req.url && req.url.startsWith('/drag') ? dragPage()
                                 : req.url && req.url.startsWith('/canvas') ? canvasPage()
                                   : req.url && req.url.startsWith('/macro') ? macroPage()
-                                    : mainPage()
+                                    : req.url && req.url.startsWith('/upload') ? uploadPage()
+                                      : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

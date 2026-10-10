@@ -1,0 +1,2 @@
+RecallFlow 上传夹具：这个文件的内容不重要，重要的是它有一个**真实的绝对路径**，
+让 `upload_file`（经 CDP 的 DOM.setFileInputFiles）有东西可设。
