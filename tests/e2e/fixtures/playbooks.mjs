@@ -573,6 +573,36 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['下拉框选项', '经济配送 · ¥5 · 7 天'],
     },
   },
+
+  'csp-page-world-js': {
+    id: 'csp-page-world-js',
+    title: '复杂场景：严格 CSP 页面读页面 JS 状态（沙箱被拒 → 自动改用页面主世界）',
+    trigger: '核对总价',
+    // 两个难点叠在一起，正好覆盖 README 声称的那条能力（"经 CDP 在页面主世界执行，不受页面 CSP 限制"）：
+    //   ① 页面 CSP 不放行 `unsafe-eval` → run_javascript 的默认沙箱（`new Function`）被拒；
+    //   ② 就算没有 CSP，沙箱跑在**隔离世界**里也看不到页面的 JS 变量（DOM 共享、页面全局不共享）。
+    // 真实总价 108 只在 JS 状态里（DOM 上是陈旧值 88，且整页文本里没有 "108"），
+    // 所以"工具结果里出现 108"只可能来自**页面主世界**。
+    tools: ['get_page_snapshot', 'run_javascript', 'inspect_element'],
+    success: '读到页面 JS 状态里的真实总价 108，并用页面自身的 reportTotals() 记下核对结果',
+    eval: {
+      url: '/csp',
+      cdp: true, // 自动改用页面主世界走 CDP；关掉 CDP 时这一步**做不到**（实测过）
+      instruction:
+        '帮我核对总价：页面显示的是 ¥88，请从页面 JS 状态里读出真实的 total，然后用页面的 reportTotals() 把核对结果记下来。',
+      pageChecks: [
+        // ★ 页面自己的函数真的被调用了（说明代码确实在**页面主世界**跑过）
+        { expr: 'window.__checked === 108', label: '页面函数 reportTotals() 被调用且读到真实 total' },
+        {
+          expr: "document.querySelector('#status').textContent === '已核对：108'",
+          label: '页面回执「已核对：108」',
+        },
+      ],
+      // 108 只存在于页面 JS 状态里（整页正文没有这三个字符）——
+      // 它出现在工具结果里，就证明**页面主世界**真的读到了页面变量。
+      mustSeeInToolResults: ['108'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

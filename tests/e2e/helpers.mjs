@@ -181,6 +181,40 @@ export async function clickApproval(page, kind) {
 }
 
 /**
+ * 在后台**反复**点掉审批条，直到调用返回的 stop()。返回 `stop`。
+ *
+ * 为什么需要它（实测踩到）：`run_javascript` 这类 `alwaysRequireApproval` 的工具
+ * **在脚本化剧本里同样会弹审批**。用例若不点，整个 run 会**卡在审批上** ——
+ * 现象是工具结果里只有第一条快照、后面什么都没有，看起来像"脚本没生效/工具没执行"，
+ * 其实是没人批准（本会话在 CSP 用例上就是这样卡了 40 秒才看懂）。
+ *
+ * 与 `clickApproval` 的分工：那个是"等一次审批出现再点"（用于审批相关用例本身），
+ * 这个是"整段跑期间持续兜住审批"（用于只关心页面状态、不关心审批的用例）。
+ */
+export function autoApprove(page) {
+  let running = true;
+  const loop = (async () => {
+    while (running) {
+      try {
+        const btn = page.locator(PANEL + ' .tool-approve');
+        if ((await btn.count()) > 0 && (await btn.first().isVisible())) {
+          await btn.first().click({ timeout: 2000 });
+          // 点完等它消失再继续，避免把同一次审批重复计数（同 eval 那边的处理）
+          await btn.first().waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+        }
+      } catch (e) {
+        /* 按钮消失/被替换都是正常竞态 */
+      }
+      await page.waitForTimeout(250);
+    }
+  })();
+  return async () => {
+    running = false;
+    await loop.catch(() => {});
+  };
+}
+
+/**
  * 用**不穿透 shadow DOM 的原生查询**看能不能找到目标。
  *
  * 为什么需要它：本目录有一条硬规则 —— spec 里不得写原生 DOM 查询

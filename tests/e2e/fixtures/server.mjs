@@ -1143,6 +1143,44 @@ function shippingPage() {
 </body></html>`;
 }
 
+// CSP 页：**严格禁止 eval**（`script-src 'self' 'unsafe-inline'`，没有 `unsafe-eval`），
+// 且真实数据只在**页面的 JS 状态**里 —— 两个难点叠在一起，正好覆盖 README 声称的那条能力：
+// "需要时经 CDP 在页面主世界执行，**不受页面 CSP 限制**"。
+//
+//   ① `run_javascript` 的默认沙箱用 `new Function` 实现，而**内容脚本里的 eval 类构造
+//      同样受页面 CSP 约束** —— 所以在这页上沙箱执行会被拒，必须自动改用页面主世界（CDP）；
+//   ② 就算没有 CSP，沙箱跑在**隔离世界**里，也**看不到页面的 JS 变量**（`window.__orderState`）——
+//      DOM 是共享的，页面全局不是。
+//
+// 页面上的 ¥88 是**陈旧值**，真实总价 108 只存在于 JS 状态里（DOM 里没有 "108" 这三个字符），
+// 所以"工具结果里出现 108"就只可能来自**页面主世界读到 JS 状态**。
+function cspPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具订单核对</title></head>
+<body>
+  <h1>订单核对</h1>
+  <p>页面显示的总价：¥<span id="shown">88</span></p>
+  <p>（页面脚本渲染的这个数字看起来没跟上真实订单状态）</p>
+  <div id="status" role="status">未核对</div>
+  <script>
+    // 页面**自己的脚本**试一次 new Function，把结果记下来 —— 这是"页面确实禁止 eval"的可断言证据。
+    // ⚠ 不要在用例里用 page.evaluate 去试：它走 CDP Runtime.evaluate，**不受页面 CSP 约束**，
+    // 于是永远得到 "eval-ok"（本会话先踩过这个，误判成"夹具的 CSP 没生效"）。
+    // 这段内联脚本本身是允许的（CSP 里有 'unsafe-inline'），但 new Function 需要 'unsafe-eval'。
+    //（本段在模板字符串里，注释中不能出现反引号 —— 这条规则本会话已踩过四次。）
+    window.__evalAllowed = (function () {
+      try { new Function('return 1')(); return true; } catch (e) { return false; }
+    })();
+    // 页面 JS 状态里的**真实**总价。DOM 上是陈旧值 88 —— 这类"显示与状态不一致"很常见。
+    window.__orderState = { items: [['咖啡豆', 68], ['滤纸', 40]], total: 108 };
+    window.__checked = null;
+    window.reportTotals = function () {
+      window.__checked = window.__orderState.total;
+      document.getElementById('status').textContent = '已核对：' + window.__checked;
+    };
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -1921,6 +1959,29 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：严格 CSP 页面上读页面 JS 状态（playbook id = 'csp-page-world-js'）。
+    //
+    // 关键：**不带 `engine`** —— 走默认沙箱，让页面 CSP 把它拒掉，
+    // 再让工具**自动改用页面主世界**（这正是要验的那条能力）。
+    // 带上 `engine:"page"` 反而绕过了它。
+    if (userText.includes(PLAYBOOKS['csp-page-world-js'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      // 默认沙箱（`new Function`）→ 被页面 CSP 拒 → 工具自动改用页面主世界重试
+      if (done === 1) {
+        toolStep(res, 'run_javascript', { code: 'return (window.__orderState || {}).total;' });
+        return;
+      }
+      // 调页面自己的函数（同样必须跑在页面主世界）
+      if (done === 2) {
+        toolStep(res, 'run_javascript', { code: 'window.reportTotals(); return window.__checked;' });
+        return;
+      }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已从页面 JS 状态读到真实总价 108（页面显示的 ¥88 是陈旧值），并调用页面自身的 reportTotals() 记下核对结果。', 80);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -1939,7 +2000,14 @@ const llm = http.createServer((req, res) => {
 });
 
 const main = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  const url = String(req.url || '');
+  // ⚠ CSP 夹具需要**不同的响应头**：`script-src 'self' 'unsafe-inline'` 放行页面自己的内联脚本
+  // （否则连夹具页的脚本都跑不起来，难点就不是"eval 被拒"了），但**不放行 `unsafe-eval`** ——
+  // 这正是 run_javascript 默认沙箱（`new Function`）会撞上的东西。其余夹具页仍用宽松的头。
+  const cspHeaders = url.startsWith('/csp')
+    ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline'; object-src 'none'" }
+    : {};
+  res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8' }, cspHeaders));
   res.end(
     req.url && req.url.startsWith('/coord') ? coordPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
@@ -1966,7 +2034,8 @@ const main = http.createServer((req, res) => {
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
-                                                  : mainPage()
+                                                  : req.url && req.url.startsWith('/csp') ? cspPage()
+                                                    : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

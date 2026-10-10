@@ -25,6 +25,7 @@ import {
   readKnowledgeBase,
   resetKnowledgeBase,
   waitForPage,
+  autoApprove,
   flowOrder,
   panelStyle,
   panelText,
@@ -1220,6 +1221,68 @@ test('golden: 下拉选项 —— 先读出选项再比较，选中真正最便�
   expect(seen, '三个选项的文案都要给到模型，否则它无从比较').toContain('经济配送 · ¥5 · 7 天');
   expect(seen).toContain('标准配送 · ¥8 · 3-5 天');
   expect(seen).toContain('次日达 · ¥22 · 1 天');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**严格 CSP 页面读页面 JS 状态**（playbook 'csp-page-world-js'）。
+//
+// 覆盖 README 声称的那条能力："需要时经 CDP 在页面主世界执行，**不受页面 CSP 限制**"。
+// 两个难点叠在一起：
+//   ① 页面 CSP 不放行 `unsafe-eval` → `run_javascript` 的默认沙箱（`new Function`）被拒；
+//   ② 就算没有 CSP，沙箱跑在**隔离世界**里也看不到页面的 JS 变量（DOM 共享、页面全局不共享）。
+//
+// 这条用例的判据分三层，缺一不可：
+//   ① **沙箱确实被 CSP 拒了、并自动改用了页面主世界** —— 回执里必须有那句提示。
+//      这是"自动兜底"这条能力本身的证据；只断言结果的话，带 `engine:"page"` 也能过，就等于没验。
+//   ② 页面自己的函数真的被调用（`__checked === 108`）—— 说明代码跑在**页面主世界**。
+//   ③ 108 到达模型（它只存在于 JS 状态里，整页正文没有这三个字符）。
+//
+// 基线证明难点成立：DOM 上是陈旧值 ¥88，且正文里找不到 108。
+test('golden: CSP 页面 —— 沙箱被 CSP 拒后自动改用页面主世界，才读到页面 JS 状态', async () => {
+  // 自动兜底走 CDP；关掉 CDP 时这一步做不到（已实测：模型换了 7 次调用也拿不到 108）
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/csp');
+
+  // 基线①：页面**确实**禁止 eval（不放行 unsafe-eval），难点成立。
+  // 判据取自**页面自己的脚本**（它试过 `new Function` 并把结果记在 `window.__evalAllowed`）——
+  // ⚠ 不能用 `page.evaluate` 去试：那走 CDP `Runtime.evaluate`，**不受页面 CSP 约束**，
+  // 永远得到 "ok"，于是会误判成"夹具的 CSP 没生效"（本会话先踩过这个坑）。
+  expect(
+    await page.evaluate(() => window.__evalAllowed),
+    '页面竟然允许 eval，本场景的难点不成立'
+  ).toBe(false);
+  // 基线②：DOM 上是陈旧值 88，且正文里没有真实值 108（脚本正文不算正文）
+  expect(await page.textContent('#shown')).toBe('88');
+  const visible = await page.locator('body').innerText();
+  expect(visible).toContain('¥88');
+  expect(visible, '正文里竟然有 108，那这条用例就证明不了"读到了 JS 状态"').not.toContain('108');
+  expect(await page.evaluate(() => window.__checked)).toBe(null);
+
+  resetLlmRequests();
+  // `run_javascript` 是 alwaysRequireApproval：脚本化剧本也会弹审批，
+  // 不点掉的话整个 run 会**卡在审批上**（现象：工具结果里只有第一条快照，像"脚本没生效"）
+  const stopApprove = autoApprove(page);
+  try {
+    await sendInstruction(
+      page,
+      '帮我核对总价：页面显示的是 ¥88，请从页面 JS 状态里读出真实的 total，然后用页面的 reportTotals() 把核对结果记下来。'
+    );
+
+    // ① 沙箱被 CSP 拒 + **自动改用页面主世界**（脚本化路径刻意不带 engine，走的就是这条兜底）
+    await expect
+      .poll(() => toolResultsText(), { timeout: 40_000 })
+      .toContain('已自动改用页面主世界执行');
+
+    // ② 页面自己的函数真的被调用了（跑在页面主世界才可能）
+    await expect.poll(() => page.evaluate(() => window.__checked), { timeout: 20_000 }).toBe(108);
+    await expect(page.locator('#status')).toHaveText('已核对：108');
+
+    // ③ 真实总价到达模型
+    expect(toolResultsText()).toContain('108');
+  } finally {
+    await stopApprove();
+  }
 
   await page.close();
 });

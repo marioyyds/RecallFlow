@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PLAYBOOKS } from './e2e/fixtures/playbooks.mjs';
 
 const E2E_DIR = 'tests/e2e';
 const GUIDE = 'docs/e2e-testing-guide.md';
@@ -134,6 +135,37 @@ test('这条遗产属性门禁本身有牙齿：var 要被认出，const/let 与
   assert.equal(hit('const status = document.getElementById("status");'), 0, '顶层 const 会遮蔽，不受限');
   assert.equal(hit('let status = 1;'), 0, 'let 同理');
   assert.equal(hit('var count = 1;'), 0, '不在遗产名单里的名字不受限');
+});
+
+test('用到 alwaysRequireApproval 工具的剧本，其 E2E 必须自动批审批（否则 run 卡在审批上）', () => {
+  // 实测踩到：CSP 用例的脚本化路径用了 `run_javascript`（alwaysRequireApproval），
+  // 而用例没有点审批 —— 整个 run **卡在审批上**，现象是"工具结果里只有第一条快照、
+  // 后面什么都没有"，看起来像"脚本没生效/工具没执行"，实际是没人批准（排查花了 40 秒）。
+  // 所以：凡是剧本工具里含这类工具的，spec 里就必须出现 autoApprove。
+  const meta = read('lib/assistant/tool-metadata.js');
+  const needApproval = new Set();
+  for (const m of meta.matchAll(/^\s{2}([a-z_]+):\s*\{([^}]*)\}/gm)) {
+    if (/alwaysRequireApproval:\s*true/.test(m[2])) needApproval.add(m[1]);
+  }
+  assert.ok(needApproval.size > 0, '应当能从元数据里认出 alwaysRequireApproval 的工具（否则这条门禁是空的）');
+
+  const specs = Object.values(PLAYBOOKS).filter((p) =>
+    (p.tools || []).some((t) => needApproval.has(t))
+  );
+  if (!specs.length) return; // 没有这类剧本时不必要求
+
+  const src = stripComments(read(path.join(E2E_DIR, 'golden.spec.mjs')));
+  const uses = (src.match(/autoApprove\(/g) || []).length;
+  assert.ok(
+    uses >= specs.length,
+    '这些剧本要用 alwaysRequireApproval 工具 [' +
+      specs.map((p) => p.id).join(', ') +
+      ']，spec 里 autoApprove 的出现次数应 ≥ ' +
+      specs.length +
+      '，实际 ' +
+      uses +
+      ' —— 漏了它 run 会卡在审批提示上（现象极易被误读成"工具没执行"）'
+  );
 });
 
 test('E2E 经验文档存在，且两处互相指路', () => {
