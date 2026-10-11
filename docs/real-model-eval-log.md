@@ -902,3 +902,186 @@ TIMELINE: 5ms stop=1/vis=true … 24215ms stop=1/vis=true req=9 → 26230ms stop
 - `tests/` / `lib/` / `scripts/` / 夹具 / 技能文案**一行未改**（`git status` 里除本文件外，
   与开跑前一致：5 个根目录 `temp-*` + `docs/` 下一批未跟踪 md）。
 - **没有** `git add` / `commit` / `push`。改动留在工作区待复核。
+
+---
+
+# 第六轮：打开视觉开关后的测量 —— **真模型那一半没能跑**（HEAD `da5f5ea` + 工作区未提交改动）
+
+> ⚠ **先读这一句**：本轮**没有**产出任何真模型通过率。原因是**环境里没有可用的 API key**
+> （`E2E_LLM_REAL_KEY` / `RECALLFLOW_EVAL_API_KEY` 都未设置，`env` 里也不存在任何疑似凭据，
+> 工作区文件里也没有 `sk-` 形态的 key）。所以本轮记录的是：
+> ① 一个**静态发现**（本来就值得单独记下来）；② 已写好、**待跑**的最小探针；
+> ③ 明确列出"因此**没有**被验证的部分"。**不要把本节读成"测量已完成"** ✗
+>
+> 触发本轮的改动：`lib/shared/utils.js` 的 `VISION_ENABLED` 由 `false` 改成 `true`
+> （即 `docs/remaining-work.md` 二-① 的第 6 步）。这**改了模型可见内容** ⇒ 按纪律必须测量 ——
+> 本轮只能完成"其中不依赖密钥的那一半"。
+
+## 一、静态发现：**没有任何 eval 场景会调用 `take_screenshot`**
+
+这条不需要密钥，也不依赖本轮改动，是可以现在就把结论钉住的：
+
+```powershell
+# ① 30 条剧本里，take_screenshot 的出现次数
+Select-String -Path tests\e2e\fixtures\playbooks.mjs -Pattern "take_screenshot" -Encoding UTF8 | Measure-Object
+#   ⇒ Count = 0
+# ② eval harness 两个入口
+Select-String -Path tests\e2e-eval\real-model.eval.mjs,scripts\eval-real-model.mjs -Pattern "take_screenshot" -Encoding UTF8 | Measure-Object
+#   ⇒ Count = 0
+# ③ 全仓库唯一会真截图的地方（对照用）
+Get-ChildItem -Recurse -File -Include *.mjs -Path tests | Select-String -Pattern "take_screenshot" -Encoding UTF8 |
+  Group-Object Path | Select-Object Name,Count
+#   ⇒ tests\e2e\fixtures\server.mjs (4) / tests\e2e\vision-switch.spec.mjs (5)
+#      + 若干纯单测（夹具里自己定义假 schema 的那些）
+```
+
+**这意味着**：视觉能力打开后，**在真模型下无法被评估** ——
+唯一会走截图链路的路径是 `tests/e2e/vision-switch.spec.mjs`，而它用的是
+**脚本化夹具 + 模拟 LLM**（`tests/e2e/fixtures/server.mjs` 按 `E2E_LLM_VISION_SHOT` 决定要不要发截图）。
+它证明的是**传输管道**（图有没有作为"追加的 user 消息"进请求、形态对不对），
+**不是**"模型看见图之后判断更准了"。这两件事差别很大，不要混为一谈 ✗
+
+⇒ 现状可以一句话概括：**"开关打开了，但它的用处没有任何一条真模型场景在验"**。
+
+**最小可行方案（本轮刻意不新造场景，只把做法记下来）**：
+挑一条**现有**剧本（如 `readability-fix`，它本来就要改样式 + 读回计算值），
+在它的 `eval.instruction` 末尾加一句"顺便截一张图，并说出你在图里看到的一个具体细节"，
+然后跑 `E2E_LLM_VISION_SHOT=1` 那一臂即可 —— 不需要新夹具页、不需要新技能、
+也不需要进 `PLAYBOOKS`（否则会牵动能力清单与五件套门禁）。
+⚠ 但它一旦进了指令，就**改动了模型可见内容** ⇒ 按纪律要重新测量该条场景 ✗（这是它的代价，不是它的优点）。
+
+## 二、真 API 探针：**已写好、语法与截图步骤都验过、但缺密钥未跑**
+
+探针脚本（临时文件，**只在 `%TEMP%`**，脚本里**不含任何密钥**，只读环境变量）：
+
+```
+%TEMP%\rf-vision-probe.mjs
+```
+
+它做三件事：
+1. 用真 Chromium（仓库已装的 Playwright）把一张**内容可核对**的页面截成
+   **1280×720 JPEG q40**（与本仓库默认截图口径一致）；
+2. 同一段文本发两次（纯文本基线 / 带一张图），读 `usage.prompt_tokens` 差值 = **每图 token**；
+3. 让模型**描述图里的内容**（图里写着 `RECALLFLOW 7391`、一个绿色圆、一个橙色方块、
+   一句中文说明），把回答**原文**打出来 —— 这才是"模型真的看得见"的证据。
+
+跑法（密钥**只走环境变量**）：
+
+```powershell
+cd <仓库根>                                # 脚本从 cwd 解析仓库的 node_modules
+$env:E2E_LLM_REAL_KEY = '<你的 key>'       # 不要写进任何文件
+node "$env:TEMP\rf-vision-probe.mjs"
+```
+
+**本轮实际跑出来的部分（不需要密钥的那一步，就是第 ① 步）**：
+
+```
+截图：C:\Users\mario\AppData\Local\Temp\rf-vision-probe.jpg
+体积：20.1 KB（JPEG q40，1280×720）
+base64 字符数：27432
+（随后以退出码 2 明确报"缺少密钥"）
+```
+
+⇒ 截图步骤可用、体积与口径符合预期（20.1KB ≪ `maxBase64Chars` 2e6，
+即单图 27,432 字符，距上限有两个数量级）✓
+⇒ 而 ②③ 两步（token 增量、模型描述原文）**没有读数** —— 本轮**给不出**每图 token 增量，
+**不要**拿历史轮次的 578 当成"打开开关后的新读数"（那是同一口径下的历史实测，不是本轮读数）✗
+
+## 三、"打开后没退化"的对照：**只跑了脚本化 E2E，没有跑真模型场景**
+
+能给的（脚本化、确定性的）：
+
+| 项 | 结果 |
+| --- | --- |
+| `node scripts/run-all-checks.mjs` | 视觉相关 **47 条**用例全绿（`history-array-content` 8 / `vision-switch` 9 / `vision-messages` 13 / `vision-wiring` 4 / `vision-text-conditional` 13）。⚠ 同一命令里另有 **3 条既有失败**，与视觉开关无关（能力清单被他人未提交改动改乱 1 条 + 技能清单生成器被 CRLF 打挂 2 条，证据见 `docs/remaining-work.md`）|
+| `node scripts/run-e2e.mjs`（全量三阶段） | 退出码 **0**：黄金任务 **39 passed** / 断线恢复 **1 passed** / 视觉两臂 **2 passed + 1 skipped**（skip 的是关闭臂，按常量自动跳过）|
+| 视觉**开启臂**真的跑了吗 | 跑了：`ok 2 … 开启臂（VISION_ENABLED=true）：图像必须以「截图结果之后追加的 user 消息」出现`。它断言图出现在 `take_screenshot` 结果**之后追加的 user 消息**里、`tool` 消息仍是**纯字符串**、`image_url` 是 `data:image/…` 形态 ✓ |
+
+**不能给的**（就是本轮缺的那一半）：**真模型场景的通过率**。按本轮任务口径本应"跑 1–2 条现有场景各 1–2 次
+作为打开后没退化的对照"，但这需要真实 key（`E2E_LLM_REAL=1` 走 `proxyToRealModel`）
+⇒ **通过率：无法给出**（不是 0，也不是通过）✗
+
+## 四、发现 17 【新】开启侧文案承诺了一件接线**没有做**的事：按张数封顶
+
+这条**不需要密钥**，是"人读开启侧文案 + 脚本核对"时抓到的（也正是本轮任务要求做的那一步）：
+
+- 开启侧三条文案原来都写着「只送**预算内**的最近几张，超出的会省略并说明」；
+- 但 `lib/assistant/agent.js` 的接线是**每张截图各调用一次** `visionMessagesFor([res.screenshot])`
+  —— 数组里永远只有 1 张 ⇒ `DEFAULT_VISION_BUDGET.maxImages`（2）**永远不是约束**：
+
+```
+一次传 5 张 ⇒ 选中 2 张，说明="（为控制体积，另有 3 张截图**未送入模型**…）"
+复刻 agent.js 的调用形状（5 次各传 1 张）⇒ 进上下文的图 = 5 张，省略说明出现 0 次
+DEFAULT_VISION_BUDGET.maxImages = 2
+⇒ 结论：**按张数封顶在真实接线里不生效** ✗
+```
+
+- **顺带发现更糟的一处**：全部被跳过时（单张超过 `maxBase64Chars`）`buildScreenshotMessage([])`
+  返回 `null` ⇒ 连"未送入模型"那句说明也一起被丢掉 = **静默丢图** ✗
+  （本仓库最忌讳的形态；开启侧文案里"会省略并说明"这句因此在**两种**情形下都是假的）
+
+**本轮怎么处理的**（都属于"改了模型可见内容"⇒ 同样需要测量，而环境无密钥 ⇒ **未测量**）：
+
+| # | 处理 | 位置 |
+| --- | --- | --- |
+| ① | 三条开启侧文案改成**如实说法**：「本次任务里截的每张都会送；单张过大的会省略并说明」 | `lib/shared/utils.js` 的 `VISION_ENABLED_*_COPY` |
+| ② | 加门禁：**不许**再出现 `预算内` / `超出的会省略`（防止有人改回这个假承诺） | `tests/vision-text-conditional.test.mjs` ⑥ |
+| ③ | 修掉静默丢图：全被跳过时仍产出**一条纯文本说明消息** | `lib/assistant/vision.js` 的 `visionMessagesFor` |
+| ④ | 补测试：全被跳过 ⇒ 1 条纯文本说明、**不含** `image_url`；并另有一条用例把"当前形状下 5 张全进上下文、0 次说明"钉住（谁真去接了任务级上限，它会红） | `tests/vision-messages.test.mjs` |
+
+⚠ **没有做**（列入 `docs/remaining-work.md` 的待决项）：把上限做成**任务级**（在 `agent.js` 累计已送张数）。
+那是行为改动，且天然会碰"请求前缀稳定性"门禁（只能追加说明，不能回头改写已发出的消息）。
+
+## 五、未解决 / 不确定 / 我做不到的事
+
+1. **真模型端到端未做**：无密钥 ⇒ 探针 ②③ 与真模型场景对照**都没跑**。要在有密钥的机器上补，
+   命令见上面第二节（探针）与 `docs/next-steps-handoff.md`（30 条全量扫描的口径）。
+2. **"视觉有用吗"无法回答**：没有任何 eval 场景会截图（第一节）⇒ 即使有密钥，现有场景也**不会**
+   触发视觉路径。必须先按第一节的最小方案给某条场景加一句截图指令。
+3. **每图 token 的"打开后新读数"没有**：本轮只有脚本化 E2E，读不到 `usage.prompt_tokens`。
+   计划用的预算上限（`maxImages: 2` / `maxBase64Chars: 2e6`）是**基于历史实测 578 token/图 + 本轮
+   实测 20.1KB 单图体积**推出来的**有依据的保留值**，不是新测出来的 ✗（依据写在
+   `lib/assistant/vision.js` 的 `DEFAULT_VISION_BUDGET` 注释与 `docs/remaining-work.md` 的「预算复核」）。
+4. **`ctx.visionBudget` 不可配置**：全仓库只有一处**读**、零处**写** ⇒ 生产恒用默认预算。
+   本轮**如实标注**（代码注释 + 一条门禁），**没有**给它接上设置项 —— 要接就得同时加"设置真的生效"的门禁。
+5. **3 条既有失败本轮没修**：它们与本轮无关（根因与证据见 `docs/remaining-work.md`），
+   按"不顺手重构无关代码"的纪律留成独立一轮。
+
+## 六、改动
+
+- 本轮**除了** `docs/real-model-eval-log.md`（本节，纯追加；历史五节**逐字未动**）以外，
+  还改了视觉开关那一轮涉及的文件（`lib/shared/utils.js`、`lib/assistant/context.js`、
+  `lib/assistant/vision.js`、`lib/assistant/agent.js`、`tests/vision-*.test.mjs`、
+  `tests/history-array-content.test.mjs`、`tests/utils.test.mjs`、`tests/registry-fingerprint.test.mjs`、
+  `tests/vision-wiring.test.mjs`、`tests/e2e/vision-switch.spec.mjs`、
+  `tests/e2e/fixtures/server.mjs`、`scripts/run-e2e.mjs`、`tests/.test-count.json` 与几份 docs 的数字）。
+- **没有**碰 `temp-*`、没有碰 `docs/` 下未跟踪的 md、没有碰 `docs/capability-inventory.md` 里
+  他人那处未提交改动、没有 switch/merge `wip/video-eval-fixes`。
+- 探针与审计脚本**全部在 `%TEMP%`**，**用完即删**（`rf-vision-audit.mjs`（两臂渲染比对）/
+  `rf-off-arm-identity.mjs`（关闭臂逐字节证明）/ `rf-surface-diff.mjs` / `rf-inventory-diff.mjs` /
+  `rf-skills-gate-cause.mjs` / `rf-fingerprint-proof.mjs` 已删），仓库里**没有**新增临时文件 ✓
+- **唯一保留**的临时文件是 `%TEMP%\rf-vision-probe.mjs` 与它生成的 `rf-vision-probe.jpg` ——
+  因为第二节的探针**还没跑**，删了就没法复核；密钥补上后跑完即可一并删掉 ✓
+  （若希望长期保留，正确的位置是 `scripts/`，那需要单独一轮决定 + 门禁，本**没有**擅自加文件 ✗）
+- **没有** `git add` / `commit` / `push`。改动留在工作区待复核。
+
+## 补测（复核者本人补跑）：**模型真的看得见图** —— 带阴性对照
+
+上一节说"真模型那一半被密钥卡住"（派单时漏给密钥）⇒ 复核时补跑。**结论：视觉前提成立，而且不是编的** ✓
+
+图里写着 `RECALLFLOW 7391`，并有"左边绿色圆形、右边橙色方块"。
+
+| 请求 | 模型回答（原文，截断）| usage |
+| --- | --- | --- |
+| **带图**，`max_tokens=400` | `RECALLFLOW 7391` + 「左边是绿色圆形，右边是橙色矩形（图内文字写作"橙色方块"…）」| `prompt_tokens=649`（`reasoning_tokens=368`）|
+| **纯文本对照**（同问题、无图）| 「**看不到**」| `prompt_tokens=71` |
+| 带图，`max_tokens=4` | `content=""`（`finish_reason=length`）| `reasoning_tokens=4` |
+
+- **关键对照**：同一句话，**有图能逐字读对、无图直接答"看不到"** ⇒ 排除"模型在编" ✓✓
+- **token 增量 = 649 − 71 = 578** ⇒ 与历史实测（578 / 588）一致 ⇒ `TOKENS_PER_IMAGE = 600`（上界）站得住 ✓
+- ⚠ **新事实：实际模型 `deepseek-flash` 是推理模型**（响应带 `reasoning_content`、
+  `completion_tokens_details.reasoning_tokens`）。**这解释了那次空回答**：`max_tokens=4` 时 4 个 token
+  全被思考吃掉，正文一个字都不剩 ⇒ **任何把 `max_tokens` 设得很小的调用都可能拿到空正文** ✗。
+  好消息：本仓库 `agent.js` 已在累计 `reasoning_content`（思维链展示），且**请求里没有设 `max_tokens`**
+  （走 API 默认）⇒ 生产路径不受这个坑影响 ✓；但**将来若要设 `max_tokens`，必须记住它是推理模型**。
+  另注：`prompt_tokens_details.cached_tokens=512` ⇒ 该网关**有提示缓存** ✓（与仓库关于缓存命中的记录一致）。
