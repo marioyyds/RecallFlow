@@ -759,7 +759,7 @@ export const PLAYBOOKS = Object.freeze({
     //   ② 日历**异步渲染**：点开之后要等一拍才有格子，立刻点会落空；
     //   ③ 目标日期在**下个月**：只看当前月就下结论必然错；
     //   ④ 有**已订满的禁用日**（含紧邻目标的 14 号）：必须真的读日历，不能按顺序猜。
-    tools: ['get_page_snapshot', 'click_element', 'inspect_element', 'wait_for_element'],
+    tools: ['get_page_snapshot', 'click_element', 'inspect_element', 'wait_for_element', 'scroll_page'],
     success: '翻到下个月、在日历里点中 15 日，输入框值变为 2026/03/15',
     eval: {
       url: '/datepicker',
@@ -770,9 +770,10 @@ export const PLAYBOOKS = Object.freeze({
         // 目标在下个月 ⇒ 没翻月是不可能点到的（这条保证"跨月"真的发生了）
         { expr: "document.getElementById('status').textContent.includes('2026/03/15')", label: '页面状态确认了所选日期' },
       ],
-      // ⚠ 试过更强的「已订满」，但它**始终不出现** ✗ 已排除：夹具 role 不在采集器名单
-      //（已改 button）、采集器过滤 disabled（实现里没有）、异步渲染时序（已加 wait_for_element）。
-      // **原因未定** —— 不写没验证的结论。这里用只来自日历、且确实出现的标签。
+      // ⚠ 「已订满」一直拿不到，而且**推翻了我上一轮的根因链**（"视口距离排序 + 体积裁剪"）：
+      //   本轮先 scroll_page 把目标格子滚进视口再读，**仍然不出现** ✗
+      //   ⇒ 那条链不是（或不只是）原因。不写第二个没验证的结论。
+      //   下轮候选（待验证）：长工具结果在上下文里被折叠成"头 + 尾"，日历标签在中段 ⇒ 丢失。
       mustSeeInToolResults: ['3月15日'],
     },
   },

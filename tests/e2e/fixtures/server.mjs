@@ -2482,9 +2482,16 @@ const llm = http.createServer((req, res) => {
         toolStep(res, 'wait_for_element', { selector: 'button[data-date="2026-03-15"]', state: 'visible', timeoutMs: 4000 });
         return;
       }
-      if (done === 6) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
-      if (done === 7) { toolStep(res, 'click_element', { role: 'button', name: '3月15日' }); return; }
-      if (done === 8) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
+      if (done === 6) {
+        // ★ 对上一轮根因链的**预测检验**：快照的 elements 按"离视口中心远近"排序、
+        //   再过体积预算裁剪 —— 日历格子原本在视口外 ⇒ 排在最后 ⇒ 被裁掉，
+        //   所以「已订满」进不了上下文。若链条成立，先把它滚进视口，它就该出现。
+        toolStep(res, 'scroll_page', { selector: 'button[data-date="2026-03-15"]' });
+        return;
+      }
+      if (done === 7) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
+      if (done === 8) { toolStep(res, 'click_element', { role: 'button', name: '3月15日' }); return; }
+      if (done === 9) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
       finalText(res, '已选择入住日期 2026/03/15（自定义日历：输入框是只读的，只能点日历；15 号在 3 月，需要先翻到下个月）。', 90);
       return;
     }
