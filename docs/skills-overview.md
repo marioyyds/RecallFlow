@@ -8,10 +8,10 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **38** |
-| 有剧本归属（真浏览器验收覆盖） | **29** |
+| 技能总数 | **39** |
+| 有剧本归属（真浏览器验收覆盖） | **30** |
 | **孤儿技能**（无验收覆盖） | **9** |
-| 能力剧本总数 | **29** |
+| 能力剧本总数 | **30** |
 
 ## 有剧本归属的技能（每一项都有夹具页 + E2E 判据）
 
@@ -45,6 +45,7 @@
 | `search-within-site` | 站内检索（搜索 + 结构化取回结果） | browser | `site-search` |
 | `undo-last-action` | 撤销上一步（只回退最后一次可撤销动作） | browser-automation | `undo-last-action` |
 | `upload-file` | 文件上传（工具只说"未观测"，必须读回） | browser-automation | `upload-file` |
+| `video-playback-verify` | 视频播放器状态（「看起来在播」不等于真的在播） | browser-automation | `video-playback-verify` |
 | `virtual-list-scroll` | 虚拟列表 / 长列表（DOM 里没有 ≠ 页面上没有） | browser-automation | `virtual-list-scroll` |
 
 ## 重复的通用纪律（抽「底座」的依据，数出来的不是感觉）
@@ -55,12 +56,12 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 35 |
-| `get_page_snapshot` | 33 |
-| `inspect_element` | 30 |
-| `click_element` | 26 |
+| `complete_task` | 36 |
+| `get_page_snapshot` | 34 |
+| `inspect_element` | 31 |
+| `click_element` | 27 |
 | `type_text` | 10 |
-| `wait_for_element` | 9 |
+| `wait_for_element` | 10 |
 | `select_option` | 8 |
 | `read_current_page` | 4 |
 | `scroll_page` | 4 |
@@ -76,12 +77,12 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 35 |
-| `get_page_snapshot` | 33 |
-| `inspect_element` | 30 |
-| `click_element` | 26 |
+| `complete_task` | 36 |
+| `get_page_snapshot` | 34 |
+| `inspect_element` | 31 |
+| `click_element` | 27 |
 | `type_text` | 10 |
-| `wait_for_element` | 9 |
+| `wait_for_element` | 10 |
 | `select_option` | 8 |
 | `read_current_page` | 4 |
 | `scroll_page` | 4 |
