@@ -8,10 +8,10 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **37** |
-| 有剧本归属（真浏览器验收覆盖） | **28** |
+| 技能总数 | **38** |
+| 有剧本归属（真浏览器验收覆盖） | **29** |
 | **孤儿技能**（无验收覆盖） | **9** |
-| 能力剧本总数 | **28** |
+| 能力剧本总数 | **29** |
 
 ## 有剧本归属的技能（每一项都有夹具页 + E2E 判据）
 
@@ -33,6 +33,7 @@
 | `knowledge-save-retrieve` | 知识库：存进去要能原样取回来（同一个网址会互相覆盖） | knowledge | `knowledge-save-retrieve` |
 | `knowledge-search-fallback` | 知识库检索查不到时（查不到 ≠ 没有） | knowledge | `knowledge-search-fallback` |
 | `macro-save-replay` | 宏：把已验证的多步操作存下来，之后零 token 回放 | browser-automation | `macro-save-replay` |
+| `multi-candidate-convergence` | 多候选收敛（多家里挑一家：逐条核对约束 + 关键属性要重读） | browser-automation | `multi-candidate-convergence` |
 | `new-tab-takeover` | 新标签页接管（点击后换页继续干活） | browser | `new-tab-takeover` |
 | `operate-in-cross-origin-iframe` | 跨域 iframe 内操作（先读合并快照，再按复合 ref 路由） | browser | `operate-in-cross-origin-iframe` |
 | `paginate-async` | 分页 + 异步加载（跨页找到目标，并等它真的渲染出来） | browser | `paginate-async` |
@@ -54,13 +55,13 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 34 |
-| `get_page_snapshot` | 32 |
-| `inspect_element` | 29 |
-| `click_element` | 25 |
+| `complete_task` | 35 |
+| `get_page_snapshot` | 33 |
+| `inspect_element` | 30 |
+| `click_element` | 26 |
 | `type_text` | 10 |
+| `wait_for_element` | 9 |
 | `select_option` | 8 |
-| `wait_for_element` | 8 |
 | `read_current_page` | 4 |
 | `scroll_page` | 4 |
 | `add_entry` | 3 |
@@ -75,13 +76,13 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 34 |
-| `get_page_snapshot` | 32 |
-| `inspect_element` | 29 |
-| `click_element` | 25 |
+| `complete_task` | 35 |
+| `get_page_snapshot` | 33 |
+| `inspect_element` | 30 |
+| `click_element` | 26 |
 | `type_text` | 10 |
+| `wait_for_element` | 9 |
 | `select_option` | 8 |
-| `wait_for_element` | 8 |
 | `read_current_page` | 4 |
 | `scroll_page` | 4 |
 | `add_entry` | 3 |

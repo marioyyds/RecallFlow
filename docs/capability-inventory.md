@@ -26,6 +26,7 @@
 | `knowledge-save-retrieve` | 知识库 | `/notes` ✓ | 3 | `knowledge-save-retrieve` | ✓ | 0 | 4 | storage |
 | `knowledge-search-fallback` | 打开很慢 | `/notes` ✓ | 3 | `knowledge-search-fallback` | ✓ | 0 | 3 | storage |
 | `macro-save-replay` | 存成宏 | `/macro` ✓ | 6 | `macro-save-replay` | ✓ | 3 | 3 | page |
+| `multi-candidate-convergence` | 比价 | `/pick` ✓ | 4 | `multi-candidate-convergence` | ✓ | 7 | 2 | page |
 | `new-tab-takeover` | 新标签页 | `/portal` ✓ | 3 | `new-tab-takeover` | ✓ | 2 | 3 | page |
 | `operate-in-cross-origin-iframe` | 跨域 | `/framed` ✓ | 5 | `operate-in-cross-origin-iframe` | ✓ | 4 | 2 | page |
 | `paginate-async` | 翻页 | `/paged` ✓ | 4 | `paginate-async` | ✓ | 3 | 2 | page |
@@ -39,4 +40,4 @@
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 3 | 1 | page |
 
-**合计**：28 个剧本；页面判据 85 条、回执判据 58 条；夹具路由已接线 28/28；E2E 已引用 28/28；有内置技能 28/28。
+**合计**：29 个剧本；页面判据 92 条、回执判据 60 条；夹具路由已接线 29/29；E2E 已引用 29/29；有内置技能 29/29。

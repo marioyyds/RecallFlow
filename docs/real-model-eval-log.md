@@ -111,6 +111,11 @@ cmd /c npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep "<场�
   （P1 三次都打印了"共 0 条"）。后果：将来失败时手上有完整**工具轨迹**，
   但"页面回执里到底写了什么 / 模型最后怎么答复"可能是空的。
   建议改成用已按 `tool_call_id` 去重的 `toolResultsText()`，并补打印最后一条无 `tool_calls` 的 assistant 消息。
+- **`llmRequests` 记的是「请求体」**（不是事件流）⇒ 刚产生的工具结果要等**下一次请求**才会进记录：
+  任何"读回执"的断言都必须 `expect.poll`，**同步读取会漏掉最后一条**。该数组另有 **40 条上限**
+  （超出丢**最旧的**）⇒ 长会话里早期工具结果会消失（这也会削弱"第一次读到了什么"这类判据）。
+  ⚠ `toolResultsText()` 与 `toolMessagesInOrder()` **不是两种口径**：后者只多做一层按 `tool_call_id`
+  去重，是前者的**子集**（前者不去重）。本轮曾把"同步读漏了最后一条"误记成"两个口径不一致"，已改正 ✗。
 
 ### 4 三条场景的 eval 判据只有"半条"
 
