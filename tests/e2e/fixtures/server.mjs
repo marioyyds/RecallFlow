@@ -1290,6 +1290,116 @@ function validatePage() {
 </body></html>`;
 }
 
+// 番剧付费墙页：验「**能打开 ≠ 能看**」这一类。
+//
+// 难点刻意做成"**不试就看不出来**"（忠实还原用户那次会话）：
+//   · 页面打开完全正常、标题正确、选集列表也在 —— 于是很容易得出"已打开最新一集 → 完成"✗
+//   · 但第195话是**会员试看**：`duration` 只有 180 秒（正片约 1140 秒），
+//     而且**播放之后**才出现那句"会员专享内容，试看中" ✗
+//   · 真要回答用户的问题（没会员怎么办），还必须找出**免费能看的最后一集是第180话** ——
+//     这在当前这一集页面上**看不出来**，得去选集列表里读状态。
+//
+// 判据因此落在两处：页面真的换到了免费那一集并播到片尾（页面状态），
+// 以及"最后一集免费的是 180"这个结论真的到了模型手里（回执）。
+function paywallPage() {
+  const eps = [];
+  for (let n = 178; n <= 195; n++) {
+    // 178–180 免费/限免，181 起会员专享（与用户会话里的真实边界一致）
+    const status = n <= 179 ? 'free' : n <= 180 ? 'limited' : 'vip';
+    eps.push(
+      '<li class="ep" data-ep="' + n + '" data-status="' + status + '" role="listitem">' +
+        '<button class="ep-btn" role="button" aria-label="第' + n + '话">第' + n + '话' +
+        (status === 'vip' ? '<span class="badge vip">会员</span>' : '<span class="badge">限免</span>') +
+        '</button></li>'
+    );
+  }
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具番剧 · 凡人修仙传</title></head>
+<body>
+  <h1>凡人修仙传</h1>
+  <div id="player-box">
+    <div id="player-title">第195话 慕兰之战19</div>
+    <div id="player-time">00:00 / 03:00</div>
+    <div id="player-note"></div>
+    <button id="play" type="button" role="button" aria-label="播放">播放</button>
+    <button id="seek-end" type="button" role="button" aria-label="跳到片尾">跳到片尾</button>
+  </div>
+  <h2>选集</h2>
+  <ul id="episodes">${eps.join('')}</ul>
+  <div id="status" role="status">就绪</div>
+  <script>
+    // 权威数据：正片 1140 秒；仅第 1–180 话可完整观看，181 起为会员试看（180 秒）
+    window.__lastFreeEp = 180;
+    window.__previewSeconds = 180;
+    window.__fullSeconds = 1140;
+    window.__currentEp = 195;
+    window.__playStarts = 0;
+    window.__reachedEnd = false;
+    window.__player = { ep: 195, duration: 180, currentTime: 0, isPreview: true, playing: false };
+    var statusEl = document.getElementById('status');
+    var timeEl = document.getElementById('player-time');
+    var noteEl = document.getElementById('player-note');
+    var titleEl = document.getElementById('player-title');
+    function fmt(s) {
+      var m = Math.floor(s / 60), x = Math.floor(s % 60);
+      return (m < 10 ? '0' : '') + m + ':' + (x < 10 ? '0' : '') + x;
+    }
+    function epStatus(n) {
+      var li = document.querySelector('li.ep[data-ep="' + n + '"]');
+      return li ? li.getAttribute('data-status') : '';
+    }
+    function render() {
+      var p = window.__player;
+      timeEl.textContent = fmt(p.currentTime) + ' / ' + fmt(p.duration);
+      titleEl.textContent = '第' + p.ep + '话';
+    }
+    /** 切到某一集：免费集给完整时长，会员集只给试看时长。 */
+    function selectEp(n) {
+      var st = epStatus(n);
+      var preview = st === 'vip';
+      window.__currentEp = n;
+      window.__player = {
+        ep: n,
+        duration: preview ? window.__previewSeconds : window.__fullSeconds,
+        currentTime: 0,
+        isPreview: preview,
+        playing: false,
+      };
+      window.__reachedEnd = false;
+      noteEl.textContent = '';
+      statusEl.textContent = '已切换：第' + n + '话（' + (preview ? '会员' : '免费') + '）';
+      render();
+    }
+    document.getElementById('play').addEventListener('click', function () {
+      window.__playStarts += 1;
+      window.__player.playing = true;
+      // ⚠ 试看提示**只在播放之后**出现 —— 这正是"不试就看不出来"的那一步。
+      if (window.__player.isPreview) {
+        noteEl.textContent = '本片是大会员专享内容，试看中（' + fmt(window.__player.duration) + '）';
+      }
+      statusEl.textContent = '播放中：第' + window.__player.ep + '话';
+      render();
+    });
+    document.getElementById('seek-end').addEventListener('click', function () {
+      var p = window.__player;
+      if (!p.playing) { statusEl.textContent = '请先播放'; return; }
+      p.currentTime = p.duration;
+      window.__reachedEnd = true;
+      statusEl.textContent = p.isPreview
+        ? '试看结束：第' + p.ep + '话（仅 ' + fmt(p.duration) + '）'
+        : '已看完整集：第' + p.ep + '话（' + fmt(p.duration) + '）';
+      render();
+    });
+    document.getElementById('episodes').addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.ep-btn') : null;
+      if (!btn) return;
+      var li = btn.closest('li.ep');
+      if (li) selectEp(Number(li.getAttribute('data-ep')));
+    });
+    render();
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -2133,6 +2243,37 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：付费墙 / 试看边界（playbook id = 'paywall-preview-limit'）。
+    //
+    // 节奏刻意模仿真实过程：先"打开最新一集"（看起来就成了）→ 播放 → **只在这时**
+    // 才发现是会员试看（`duration` 180 vs 正片 1140）→ 去选集列表找免费能看的最后一集
+    // → 切过去并**播到片尾证明真能看**。
+    if (userText.includes(PLAYBOOKS['paywall-preview-limit'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 600 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '播放' }); return; }
+      // 播放之后页面才给出试看提示；读回播放器状态坐实"不能看完整"
+      if (done === 2) {
+        toolStep(res, 'run_javascript', {
+          code: 'const p = window.__player; return { ep: p.ep, duration: p.duration, isPreview: p.isPreview, note: (document.getElementById("player-note")||{}).textContent };',
+        });
+        return;
+      }
+      // 去选集列表里读每一集的状态，找出**免费能看的最后一集**
+      if (done === 3) {
+        toolStep(res, 'run_javascript', {
+          code: 'const all = [...document.querySelectorAll("li.ep")].map(li => ({ ep: Number(li.dataset.ep), status: li.dataset.status })); return { lastFree: Math.max(...all.filter(x => x.status !== "vip").map(x => x.ep)), total: all.length };',
+        });
+        return;
+      }
+      if (done === 4) { toolStep(res, 'click_element', { role: 'button', name: '第180话' }); return; }
+      if (done === 5) { toolStep(res, 'click_element', { role: 'button', name: '播放' }); return; }
+      if (done === 6) { toolStep(res, 'click_element', { role: 'button', name: '跳到片尾' }); return; }
+      if (done === 7) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '最新一集是第195话《慕兰之战19》，但它是大会员专享、只能试看 3 分钟（正片约 19 分钟）。没会员能完整观看的最后一集是第180话，我已切过去并播到片尾确认可完整观看。', 100);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2188,7 +2329,8 @@ const main = http.createServer((req, res) => {
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()
                                                     : req.url && req.url.startsWith('/undo') ? undoPage()
                                                       : req.url && req.url.startsWith('/validate') ? validatePage()
-                                                        : mainPage()
+                                                        : req.url && req.url.startsWith('/paywall') ? paywallPage()
+                                                          : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

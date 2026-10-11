@@ -1449,6 +1449,57 @@ test('golden: 表单校验 —— 提交被静默拦住，读出原因改好后�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**付费墙 / 试看边界**（playbook 'paywall-preview-limit'）。
+//
+// 忠实还原一次真实会话：「《凡人修仙传》更新到最新一集了，我想看，但我没会员」。
+// 三个叠在一起的难点：
+//   ① 页面打开完全正常 → 很容易得出"已打开最新一集 → 完成"✗；
+//   ② 试看提示**只在播放之后**出现（所以"页面上没看到限制"不等于没有限制）；
+//   ③ 用户真正要的"免费能看的最后一集是哪一集"，在**当前这一集页面上看不出来**。
+//
+// 判据两层：
+//   · 页面状态 —— 最终停在**免费**那一集、不是试看、**播到了片尾**（证明"能看"不是靠文案）；
+//   · 模型收到了什么 —— 「最后一集免费的是第 180 话」这个结论真的进了上下文。
+test('golden: 付费墙 —— 「能打开」不等于「能看」，要找到免费能看的最后一集', async () => {
+  // 读播放器状态要走页面主世界执行 → **必须开 CDP**（沙箱在 MV3 下任何页面都跑不起来）
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/paywall');
+
+  // 基线：难点必须真实 —— 播放**之前**页面上没有任何"试看"提示，
+  // 只有播放器时长（180 秒）与选集状态能说明问题
+  expect(await page.evaluate(() => window.__player.isPreview)).toBe(true);
+  expect(await page.evaluate(() => window.__player.duration)).toBe(180);
+  await expect(page.locator('#player-note')).toHaveText('');
+  expect(await page.evaluate(() => window.__playStarts)).toBe(0);
+  expect(await page.evaluate(() => window.__reachedEnd)).toBe(false);
+
+  resetLlmRequests();
+  // 该剧本用 run_javascript（alwaysRequireApproval）：不点审批，run 会卡在审批提示上
+  const stopApprovePaywall = autoApprove(page);
+  try {
+    await sendInstruction(
+      page,
+      '《凡人修仙传》更新到最新一集了，我想看，但我没会员。你看一下能不能看，不能的话告诉我实际情况。'
+    );
+
+    // ① 最终落在**免费**那一集，且不是试看
+    await expect.poll(() => page.evaluate(() => window.__currentEp), { timeout: 40_000 }).toBeLessThanOrEqual(180);
+    expect(await page.evaluate(() => window.__player.isPreview)).toBe(false);
+    // ② 真的播到片尾（而不是"点了播放就算"）
+    await expect.poll(() => page.evaluate(() => window.__reachedEnd), { timeout: 20_000 }).toBe(true);
+    expect(await page.evaluate(() => window.__player.duration)).toBe(1140);
+    await expect(page.locator('#status')).toHaveText(/已看完整集/);
+    // ③ 结论到达模型：免费能看的最后一集是第 180 话；且它读到了**只在播放后出现**的试看提示
+    const seen = toolResultsText();
+    await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('试看');
+    expect(seen).toContain('180');
+  } finally {
+    await stopApprovePaywall();
+  }
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

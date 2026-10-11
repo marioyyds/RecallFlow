@@ -502,7 +502,8 @@ tests/e2e-eval/real-model.eval.mjs        ③真模型 eval（自动覆盖带 ev
 2. **改完样式无法自证**：`annotate({op:"style"})` 只回一句「已修改 N 个元素」，
    而当时唯一的取证路径 `run_javascript` 有两个硬伤 ——
    元数据是 `alwaysRequireApproval`（**任何策略都拦不住地打断用户**），
-   且它经 eval 执行、**被页面 CSP 拦住会直接失败**。
+   且它经 eval 执行，而 **MV3 扩展自身的 CSP 不允许 eval**（与页面无关），
+   所以**没有 CDP 就直接失败**。
    已补只读的 `inspect_element({op:"styles"})`（复用原本只给 MCP 侧 `verify_change` 用的
    `readElementState`，**工具数不变**）。
 

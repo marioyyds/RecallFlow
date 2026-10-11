@@ -26,6 +26,7 @@
 | `new-tab-takeover` | 新标签页 | `/portal` ✓ | 3 | `new-tab-takeover` | ✓ | 2 | 3 | page |
 | `operate-in-cross-origin-iframe` | 跨域 | `/framed` ✓ | 5 | `operate-in-cross-origin-iframe` | ✓ | 4 | 2 | page |
 | `paginate-async` | 翻页 | `/paged` ✓ | 4 | `paginate-async` | ✓ | 3 | 2 | page |
+| `paywall-preview-limit` | 没会员 | `/paywall` ✓ | 4 | `paywall-boundary` | ✓ | 4 | 2 | page |
 | `pierce-shadow-dom` | 自定义组件 | `/shadow` ✓ | 4 | `pierce-shadow-dom` | ✓ | 3 | 3 | page |
 | `read-select-options` | 最便宜 | `/shipping` ✓ | 4 | `read-select-options` | ✓ | 3 | 2 | page |
 | `readability-fix` | 美化 | `/article` ✓ | 3 | `readability-fix` | ✓ | 6 | 1 | page |
@@ -35,4 +36,4 @@
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 3 | 1 | page |
 
-**合计**：24 个剧本；页面判据 74 条、回执判据 51 条；夹具路由已接线 24/24；E2E 已引用 24/24；有内置技能 24/24。
+**合计**：25 个剧本；页面判据 78 条、回执判据 53 条；夹具路由已接线 25/25；E2E 已引用 25/25；有内置技能 25/25。

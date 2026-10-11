@@ -685,6 +685,46 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['表单未通过校验'],
     },
   },
+
+  'paywall-preview-limit': {
+    id: 'paywall-preview-limit',
+    title: '复杂场景：付费墙 / 试看边界 —— 「能打开 ≠ 能看」',
+    trigger: '没会员',
+    // 三个叠在一起的难点（忠实还原用户那次"我要看最新一集但我没会员"的会话）：
+    //   ① 页面打开完全正常 → 很容易得出"已打开最新一集 → 完成"✗；
+    //   ② 只有**播放之后**才出现试看提示，而"正片 19 分钟 vs 试看 3 分钟"是唯一线索；
+    //   ③ 用户真正要的答案是"**免费能看的最后一集是哪一集**"，
+    //      而这一集页面上看不出来，必须去选集列表里读每集状态。
+    tools: ['get_page_snapshot', 'click_element', 'run_javascript', 'inspect_element'],
+    success: '识破第195话只是试看，找到免费可完整观看的最后一集（第180话），切过去并播到片尾证明真能看',
+    eval: {
+      url: '/paywall',
+      // 读播放器状态必须走 `run_javascript({engine:"page"})`，而**页面主世界执行需要 CDP**。
+      // 顺带纠正一个长期说法：默认的"受限沙箱"其实**任何页面都跑不起来** ——
+      // 沙箱用 `new Function`，而 MV3 扩展自身的 CSP 不允许 eval（与页面无关，
+      // 实测在完全没有 CSP 的夹具页上同样被拒）。所以这条 `cdp: true` 不是"为了稳妥"，是**必需**。
+      cdp: true,
+      instruction:
+        '《凡人修仙传》更新到最新一集了，我想看，但我没会员。你看一下能不能看，不能的话告诉我实际情况。',
+      pageChecks: [
+        // ★ 结局必须落在**能完整观看**的那一集上（而不是"打开了最新一集"就算完）
+        { expr: 'window.__currentEp <= window.__lastFreeEp', label: '最终停在免费可看的一集上（不是停在会员集）' },
+        { expr: 'window.__player.isPreview === false', label: '当前这集不是试看' },
+        // ★ 真的播到片尾：证明"能看"不是靠页面文案，而是靠实际播放
+        { expr: 'window.__reachedEnd === true', label: '播到了片尾（而不是只点了播放）' },
+        { expr: 'window.__player.duration === window.__fullSeconds', label: '走的是完整时长（1140 秒），不是试看的 180 秒' },
+      ],
+      // ⚠ 判据必须与**实现无关**：第一版我写的是 `['lastFree', '180']` ——
+      // 而 `lastFree` 是**我自己脚本里起的键名** ✗ 真模型自己写 JS、键名当然不同，
+      // 于是四条页面判据全过、却被这条判据判失败（这是同一类错误的第七次）。
+      //
+      // 改成两条都来自**页面本身的文本/数据**：
+      //   · `试看` —— 夹具那句"本片是大会员专享内容，试看中"**只在播放之后**出现，
+      //     所以它进了工具结果 ⇒ 模型真的播了并读到了试看提示（= 识破了"能打开≠能看"）；
+      //   · `180` —— 免费能看的最后一集，是用户真正要的答案。
+      mustSeeInToolResults: ['试看', '180'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

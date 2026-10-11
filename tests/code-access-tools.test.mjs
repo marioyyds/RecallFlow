@@ -77,7 +77,7 @@ test('run_javascript：engine=page 时直接走页面主世界（跳过沙箱）
   }
 });
 
-test('**关键**：沙箱被 CSP 阻止时自动改用页面主世界重试（模型不必多花一轮）', async () => {
+test('**关键**：沙箱 eval 被拒时自动改用页面主世界重试（模型不必多花一轮）', async () => {
   const deps = mkDeps({
     contentResult: { ok: false, error: 'Refused to evaluate: Content Security Policy' },
     pageWorldResult: { ok: true, result: '主世界拿到了数据' },
@@ -85,31 +85,36 @@ test('**关键**：沙箱被 CSP 阻止时自动改用页面主世界重试（�
   const r = await runJavascript(deps, { code: 'return document.title' });
   assert.equal(r.ok, true);
   assert.ok(deps.calls.some((c) => c.op === 'pageWorld'), '应自动重试主世界');
-  assert.match(r.result, /沙箱被页面 CSP 阻止，已自动改用页面主世界执行/);
+  // 文案要归因正确：拦住 eval 的是**扩展自身的 MV3 CSP**，不是页面
+  assert.match(r.result, /MV3 扩展自身的 CSP 不允许/);
+  assert.match(r.result, /已自动改用页面主世界执行/);
   assert.match(r.result, /主世界拿到了数据/);
 });
 
-test('**关键**：CSP 阻止但 CDP 不可用时，说明原因并指向设置（不静默失败）', async () => {
+test('**关键**：eval 被拒但 CDP 不可用时，说明原因并指向设置（不静默失败）', async () => {
   const deps = mkDeps({
     contentResult: { ok: false, error: 'Content Security Policy blocks unsafe-eval' },
     cdpAllowed: () => false,
   });
   const r = await runJavascript(deps, { code: 'x' });
   assert.equal(r.ok, false);
-  assert.match(r.result, /沙箱执行被页面 CSP 阻止/);
+  assert.match(r.result, /需要页面主世界执行（CDP）/);
+  assert.match(r.result, /MV3 扩展自身的 CSP 不允许 eval/);
+  assert.match(r.result, /与页面无关/, '必须点明这不是页面造成的 —— 否则会被引向"换个页面"');
   assert.match(r.result, /设置中开启/);
-  assert.match(r.result, /原始错误/, '要带出原始错误，便于判断是否真被 CSP 拒');
+  assert.match(r.result, /原始错误/, '要带出原始错误');
   assert.ok(!deps.calls.some((c) => c.op === 'pageWorld'), 'CDP 不可用时不该去试主世界');
 });
 
-test('CSP 阻止且主世界也失败时，如实说明两次都失败', async () => {
+test('eval 被拒且主世界也失败时，如实说明两次都失败', async () => {
   const deps = mkDeps({
     contentResult: { ok: false, error: 'unsafe-eval blocked' },
     pageWorldResult: { ok: false, result: '主世界也报错' },
   });
   const r = await runJavascript(deps, { code: 'x' });
   assert.equal(r.ok, false);
-  assert.match(r.result, /沙箱被页面 CSP 阻止；改用页面主世界同样失败：主世界也报错/);
+  assert.match(r.result, /MV3 扩展自身的 CSP 不允许，与页面无关/);
+  assert.match(r.result, /改用页面主世界同样失败：主世界也报错/);
 });
 
 test('非 CSP 类失败**不得**触发主世界重试（避免无谓地提权执行）', async () => {
