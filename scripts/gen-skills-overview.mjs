@@ -87,6 +87,25 @@ export function buildSkillsOverview() {
     .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool));
   const duplicated = ranking.filter((r) => r.count >= 3);
 
+  // 文案体量（近似）：把该技能 `content:` 之后的**字符串字面量**长度累加。
+  //
+  // 为什么要量：目标 ⑤ 要求"薄技能充实或合并"，而没有数字就只能凭印象挑 ✗
+  // 近似口径写在文档里（只数单引号/双引号字面量，不含模板拼接与转义展开），避免读者误当成精确值。
+  for (const s of skills) {
+    const b = blocks.find((x) => x.name === s.name);
+    const at = b ? b.body.indexOf('content:') : -1;
+    if (at < 0) { s.contentChars = 0; continue; }
+    const tail = b.body.slice(at);
+    let sum = 0;
+    for (const m of tail.matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"/g)) {
+      sum += (m[1] !== undefined ? m[1] : m[2] || '').length;
+    }
+    s.contentChars = sum;
+  }
+  const thin = skills
+    .filter((s) => s.contentChars > 0 && s.contentChars < 400)
+    .sort((a, b) => a.contentChars - b.contentChars);
+
   const lines = [];
   lines.push('# 技能清单（自动生成，勿手改）');
   lines.push('');
@@ -130,6 +149,19 @@ export function buildSkillsOverview() {
   for (const r of ranking) lines.push('| `' + r.tool + '` | ' + r.count + ' |');
   lines.push('');
   lines.push('</details>');
+  lines.push('');
+  lines.push('## 薄技能（文案偏短，可能讲不清"怎么做"）');
+  lines.push('');
+  lines.push('口径：`content` 里**字符串字面量**的字符数累加（近似值，不含转义展开），');
+  lines.push('这里列出 **< 400 字符**的。目标 ⑤ 要求"薄技能充实或合并" —— 没有数字就只能凭印象挑 ✗');
+  lines.push('');
+  if (!thin.length) {
+    lines.push('（当前没有 < 400 字符的技能）');
+  } else {
+    lines.push('| 技能 | 文案字符数 | 展示名 |');
+    lines.push('| --- | --- | --- |');
+    for (const s of thin) lines.push('| `' + s.name + '` | ' + s.contentChars + ' | ' + (s.displayName || '—') + ' |');
+  }
   lines.push('');
   lines.push('## ⚠ 孤儿技能（**没有**真浏览器验收 —— 文案写了，但没人验过）');
   lines.push('');
