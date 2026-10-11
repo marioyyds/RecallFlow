@@ -24,6 +24,7 @@ import {
   resolveInstruction,
   readKnowledgeBase,
   resetKnowledgeBase,
+  readAiSettings,
   waitForPage,
   autoApprove,
   flowOrder,
@@ -116,6 +117,61 @@ test('golden: 阳性对照 —— 批准后同样的写操作确实发生', asyn
   await clickApproval(page, 'approve');
 
   await expect.poll(() => page.evaluate(() => window.__clicked), { timeout: 20_000 }).toBe(true);
+
+  await page.close();
+});
+
+// 运行**中途**打开「自动批准」——本轮剩下的调用应当立刻不再弹确认。
+//
+// 消费的是真实用法：面板上的「自动驾驶（全部自动批准）」就在输入框上方，用户随时会去打开它。
+// 而 `settings` 是每次运行开始时读的一份**快照**（background.js 在 runAgentStream 之前
+// `getAISettings()` 一次），运行期间从不重读 —— 于是"打开了也没用"：
+// 本轮剩下的每个写操作仍会一个个弹确认，只有**下一次**运行才生效。
+//
+// 判据刻意用「我撒手不管」来证明：打开自动批准、批准那个**已在等待**的确认框之后，
+// 此后**一次都不再点**。若本轮仍读旧快照，run 会卡在下一个确认框上，最终状态永远到不了。
+//
+// 时序上刻意**先打开开关、再批准**：脚本化的下一步很快就到，
+// 若反过来（先批准再点开关）就会和"下一次决策"抢时间，变成偶发失败。
+test('golden: 运行中途打开自动批准 —— 本轮剩下的调用不再弹确认', async () => {
+  await configureSettings(context, {
+    toolApprovalPolicy: { read: true, edit: false, commands: false, browser: false, mcp: false },
+  });
+  const page = await openFixturePage(context, '/validate');
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['form-validation'].eval.instruction);
+
+  // ① 开始时没开自动批准：第一个写操作**已经在等确认**（先不批）
+  const approveBtn = page.locator(PANEL + ' .tool-approve');
+  await approveBtn.waitFor({ state: 'visible', timeout: 30_000 });
+
+  // ② 就在这时候打开「自动驾驶（全部自动批准）」
+  await page.locator(PANEL + ' .approval-settings-toggle').click();
+  await page.locator(PANEL + ' [data-autopilot]').check();
+
+  // 确认它**真的落盘了** —— 否则这条用例分不清"开关没保存"与"保存了但本轮没生效"
+  await expect
+    .poll(
+      async () => {
+        const s = await readAiSettings(context);
+        const p = (s && s.toolApprovalPolicy) || {};
+        return ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => p[k] === true);
+      },
+      { timeout: 15_000 }
+    )
+    .toBe(true);
+
+  // ③ 关掉设置浮层（真实用法也是这样），再批准那个已在等待的确认框
+  //    ⚠ 这一步不能省：浮层打开时 `approval-open` + `fitPanelHeight()` 会让
+  //    对话区里的确认条**不再可见**（Playwright 判定为不可点击），
+  //    于是用例会卡在"等一个其实还在、但点不到的按钮"上（首跑就栽在这里）。
+  await page.locator(PANEL + ' .approval-settings-toggle').click();
+  await clickApproval(page, 'approve');
+
+  // 本轮剩下的写操作都应当直接放行 —— 放行不了就会卡在下一个确认框上，这里永远等不到
+  await expect.poll(() => page.evaluate(() => window.__submits), { timeout: 60_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.getElementById('f').checkValidity())).toBe(true);
 
   await page.close();
 });

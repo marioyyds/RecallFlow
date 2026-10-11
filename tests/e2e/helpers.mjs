@@ -36,6 +36,25 @@ export function resolveInstruction(id) {
 }
 
 /**
+ * 读扩展侧的 **AI 设置**（`aiSettings`）。
+ *
+ * 为什么需要：审批类设置的权威事实在**扩展存储**里 —— 面板上的开关会写存储，
+ * 而运行中的 Agent 该不该弹确认，取决于**它决策那一刻**读到的值。
+ * 于是"用户在运行中途打开了自动批准"这件事，只能靠直接读存储来确认**开关真的落盘了**，
+ * 否则测试无法区分两种失败：「开关没保存」与「保存了但本轮没生效」。
+ *
+ * ⚠ 读的是 service worker 的上下文，不是页面 —— 页面里没有 `chrome.storage`。
+ */
+export async function readAiSettings(context) {
+  const [sw] = context.serviceWorkers();
+  if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
+  return await sw.evaluate(async () => {
+    const d = await chrome.storage.local.get('aiSettings');
+    return (d && d.aiSettings) || {};
+  });
+}
+
+/**
  * 读扩展侧的**知识库存储**（`knowledgeBase`）。
  *
  * 为什么必须有这个 helper：知识库场景的权威事实在**存储**里，不在页面上 ——

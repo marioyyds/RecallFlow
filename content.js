@@ -3237,6 +3237,13 @@
     const v = s.codeExecutionApproval !== void 0 && s.codeExecutionApproval !== null && s.codeExecutionApproval !== "" ? s.codeExecutionApproval : s.runJavascriptApproval;
     return v === "each" || v === "auto" || v === "session" ? v : "session";
   }
+  async function updateAISettings(patch) {
+    const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
+    const saved = d[AI_SETTINGS_KEY] || {};
+    const next = Object.assign({}, saved, patch || {});
+    await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
+    return Object.assign({}, AI_SETTINGS_DEFAULTS, next);
+  }
   async function getAISettings() {
     const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
     const saved = d[AI_SETTINGS_KEY] || {};
@@ -5513,7 +5520,7 @@
         x2.addEventListener("change", async () => {
           const policy = Object.fromEntries([...approvalSettings.querySelectorAll("[data-policy]")].map((y2) => [y2.dataset.policy, y2.checked]));
           try {
-            await chrome.storage.local.set({ aiSettings: { ...s, toolApprovalPolicy: policy } });
+            await updateAISettings({ toolApprovalPolicy: policy });
           } catch (e) {
             warnExtDead();
           }
@@ -5525,7 +5532,7 @@
       runjsEl.value = resolveCodeExecutionApproval(s);
       runjsEl.addEventListener("change", async () => {
         try {
-          await chrome.storage.local.set({ aiSettings: { ...s, codeExecutionApproval: runjsEl.value } });
+          await updateAISettings({ codeExecutionApproval: runjsEl.value });
         } catch (e) {
           warnExtDead();
         }
