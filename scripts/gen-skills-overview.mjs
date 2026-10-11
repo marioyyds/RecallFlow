@@ -18,17 +18,59 @@ import { PLAYBOOKS } from '../tests/e2e/fixtures/playbooks.mjs';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
-/** 孤儿技能的原因表（从 skill-defs.js 里读，避免复制粘贴导致两边漂移）。 */
-const ORPHAN_REASONS = (() => {
-  const src = read('lib/assistant/skill-defs.js');
-  const at = src.indexOf('export const ORPHAN_SKILL_REASONS');
-  if (at < 0) return {};
-  const end = src.indexOf('});', at);
-  const body = src.slice(at, end);
-  const out = {};
-  for (const m of body.matchAll(/'([a-z0-9-]+)':\s*\n?\s*'([\s\S]*?)',\n/g)) {
-    out[m[1]] = m[2].replace(/\s+/g, ' ').trim();
+/**
+ * 解析 `ORPHAN_SKILL_REASONS` 的条目（从 skill-defs.js 里读，避免复制粘贴导致两边漂移）。
+ *
+ * ⚠ 这里**必须**把"多行字符串拼接"拼起来：理由是中文长句，源码里普遍写成
+ *   `'第一段' +` / `'第二段'` 这种跨行拼接。原来的正则只认 `'...',\n` 的单行形态，
+ *   遇到拼接就把 `' + '` 当内容留在正文里 —— 门禁（比对生成物）发现不了这种
+ *   "解析出来的文本本身就是垃圾"，但**读者**会看到 `' + '` 这种源码碎片 ✗
+ * 所以：从每个 `key:` 开始，把紧随其后的所有单引号字面量依次拼接，遇到下一个 key 或表尾即停。
+ */
+export function parseOrphanReasonEntries(src) {
+  const text = String(src || '');
+  const at = text.indexOf('export const ORPHAN_SKILL_REASONS');
+  if (at < 0) return [];
+  const end = text.indexOf('});', at);
+  const body = text.slice(at, end < 0 ? undefined : end);
+  const entries = [];
+  for (const hit of body.matchAll(/'([a-z0-9-]+)':/g)) {
+    const literals = [];
+    let i = hit.index + hit[0].length;
+    for (;;) {
+      while (i < body.length && /[\s+]/.test(body[i])) i++; // 跨行 + 号
+      if (body[i] !== "'") break;
+      i++;
+      let buf = '';
+      while (i < body.length) {
+        const ch = body[i];
+        if (ch === '\\') {
+          buf += body[i + 1] === undefined ? '' : body[i + 1];
+          i += 2;
+          continue;
+        }
+        if (ch === "'") {
+          i++;
+          break;
+        }
+        buf += ch;
+        i++;
+      }
+      literals.push(buf);
+      // 字面量之后若紧接着下一个 key，说明本条目结束
+      let j = i;
+      while (j < body.length && /[\s+]/.test(body[j])) j++;
+      if (/^'[a-z0-9-]+':/.test(body.slice(j))) break;
+    }
+    entries.push({ name: hit[1], reason: literals.join('').replace(/\s+/g, ' ').trim() });
   }
+  return entries;
+}
+
+/** 孤儿技能的原因表（key → 已拼好的理由文本）。 */
+const ORPHAN_REASONS = (() => {
+  const out = {};
+  for (const e of parseOrphanReasonEntries(read('lib/assistant/skill-defs.js'))) out[e.name] = e.reason;
   return out;
 })();
 
@@ -122,6 +164,35 @@ export function buildSkillsOverview() {
   lines.push('| **孤儿技能**（无验收覆盖） | **' + orphans.length + '** |');
   lines.push('| 能力剧本总数 | **' + playbookIds.length + '** |');
   lines.push('');
+  // ---- 固定说明段（不是数出来的，是**实测事实** + 结构性事实；数字全部来自
+  //      docs/real-model-eval-log.md，不许在这里编新数字）----
+  lines.push('## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）');
+  lines.push('');
+  lines.push('这一节是**手工维护的固定说明**（不是从源码数出来的），因为它讲的是运行时的真实行为，');
+  lines.push('而清单只能数出"有哪些技能、对应哪条剧本"。');
+  lines.push('');
+  lines.push('1. **生产只给模型一行 `name：description`。** `buildSkillCatalog()`（`lib/assistant/skills.js`）');
+  lines.push('   把每个技能渲染成 `- name：用途`，随 system prompt 一起发出；**正文不预先注入**。');
+  lines.push('   模型判断当前任务适合某个技能时，才调用常驻工具 `load_skill(name)` 取回正文（`lib/assistant/skill-tools.js`）。');
+  lines.push('2. **运行时不做关键词匹配。** 曾经有一条"按 `x.keywords` 正则命中就注入正文"的路');
+  lines.push('   （`skills.js` 的 `detectSkill()`），它**在生产代码里没有任何调用方**，已于目标 ⑤ 删除。');
+  lines.push('   `x.keywords` / `x.intents` 仍保留，但只用于 **SkillHub 格式往返**（`skill-md.js`）与技能编辑页展示');
+  lines.push('   （`skills-page.js`）—— 与"选哪个技能"无关。');
+  lines.push('3. **因此"技能 ↔ 场景"在运行时比清单上松得多**（真模型实测，`docs/real-model-eval-log.md` 的');
+  lines.push('   「技能 ↔ 场景在运行时比清单上松得多」一节）；其中最要紧的两条：');
+  lines.push('   · **有 10 条场景一个技能都没加载，照样通过** —— 清单上的"有内置技能"是**资产层面**的对应，');
+  lines.push('     不等于"运行时模型会用它"✗；');
+  lines.push('   · 少数场景加载的是**不是自己那条**技能（如 `form-validation` 那次加载了 `checkout-form`），');
+  lines.push('     也照样通过；');
+  lines.push('   · **孤儿 ≠ 没被用**：`clip-to-knowledge` 没有自己的剧本，却被「知识库往返」与');
+  lines.push('     「知识库检索回退」两条剧本**实际加载过**。');
+  lines.push('4. **所以"孤儿技能"说的是验收覆盖，不是使用价值**：它意味着"没有夹具页 + 真浏览器判据"，');
+  lines.push('   意味着**改它的文案没法用现有 eval 测量**（这正是孤儿的代价）。');
+  lines.push('5. **文案的可执行性有一条静态门禁**（`tests/skill-content-structure.test.mjs`）：');
+  lines.push('   每个技能的正文要么有**连续编号、从 1 开始**的步骤清单，要么**显式声明**"本技能无步骤：<原因>"。');
+  lines.push('   依据是本仓库最贵的一课：**散文式的关键步骤会被模型跳过**（`readability-fix` 最早漏掉"改行宽"）。');
+  lines.push('   ⚠ 这道门禁**只**保证"结构上做得出来"，**不**保证"模型真的照做" —— 后者只有真模型 eval 能回答。');
+  lines.push('');
   lines.push('## 有剧本归属的技能（每一项都有夹具页 + E2E 判据）');
   lines.push('');
   lines.push('| 技能 | 展示名 | 分类 | 对应剧本 |');
@@ -167,6 +238,12 @@ export function buildSkillsOverview() {
   lines.push('');
   lines.push('这些技能只在"模型读到文案"这一层有效，**没有**夹具页与 E2E 判据。');
   lines.push('要么给它们补一个能力剧本，要么在技能定义里写一行 `// 无剧本：<原因>` 显式声明。');
+  lines.push('');
+  lines.push('⚠ **孤儿 ≠ 没被用**（真模型实测）：`clip-to-knowledge` 就在这里，却被「知识库往返」与');
+  lines.push('「知识库检索回退」两条剧本实际加载过。孤儿状态说明的是**没有自己的验收覆盖**，');
+  lines.push('也就是**改它的文案没法用现有 eval 测量** —— 不是"这个技能没人会用"。');
+  lines.push('每条理由都由 `tests/skill-content-structure.test.mjs` 门禁核对：**必须是够用的理由**，');
+  lines.push('写"待补""暂无"这类空话会被判红。');
   lines.push('');
   if (!orphans.length) {
     lines.push('（当前没有孤儿技能）');

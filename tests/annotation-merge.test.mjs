@@ -87,6 +87,13 @@ test('划重点技能的工具清单必须是 annotate（否则技能会引导�
   assert.match(block, /'annotate'/, '划重点技能应声明 annotate');
   assert.ok(!/'highlight_text'/.test(block), '不得再声明 highlight_text');
   // 去广告技能同理（原 set_element_style + clear_page_overlays → annotate）
-  const ads = src.slice(src.indexOf("name: 'remove-ads'"));
-  assert.match(ads.slice(0, 900), /'annotate'/, '去广告技能应声明 annotate');
+  //
+  // ⚠ 这里原来写的是 `ads.slice(0, 900)` —— **硬编码字符数**。技能正文一旦被充实
+  // （目标 ⑤ 给 remove-ads 补了编号步骤清单），`x.tools` 就被推到 900 字之后，
+  // 断言变成"看前 900 字里有没有 annotate"，于是**充实文案反而把门禁弄红** ✗
+  // 而红的信息是"去广告技能应声明 annotate"，指不到真正的原因（截断）。
+  // 改成与上面同款：按**技能块边界**切（到下一个技能为止），与正文长短无关。
+  const ads = src.slice(src.indexOf("name: 'remove-ads'"), src.indexOf("name: 'userscript-task'"));
+  assert.ok(ads.length > 0, '切不出 remove-ads 技能块（技能名被改过？）');
+  assert.match(ads, /'annotate'/, '去广告技能应声明 annotate');
 });

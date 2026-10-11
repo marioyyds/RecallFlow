@@ -5,8 +5,10 @@
 //    - fetch_webpage 路径：charset 恒定退化为 utf-8 → GBK/GB2312 页面乱码（静默、只影响非 UTF-8 页面）。
 //    - searchWeb 路径：对 TextDecoder 实例调用 .decode() → TypeError → 被 catch 吞掉 → 引擎被跳过
 //      → web_search 返回空数组且不报错。
-// 2) 技能触发条件缺失：detectSkill 把「关键词数组为空」当通配符，
+// 2) 技能触发条件缺失：关键词匹配把「关键词数组为空」当通配符，
 //    于是缺少 x 块的内置技能会在**每一个非对话任务**上被注入正文。
+//    ⚠ 那条匹配分支（`skills.js` 的 `detectSkill`）后来被证明**在生产里没有调用方**，
+//    已于目标 ⑤ 一并删除 ⇒ 这里只留**定义层**审计（技能必须写全 x 块）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -23,21 +25,11 @@ import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.js';
 import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.js';
-import { detectSkill } from '../lib/assistant/skills.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
 import { toRuntimeSkill } from '../lib/assistant/skill-md.js';
 
 // 宏存储键（与 lib/assistant/macro-store.js 的 KEY 一致）
 const MACRO_KEY = 'recallflow.macros.v1';
-
-// detectSkill → getMergedSkills → chrome.storage.local。
-// 不安装桩时 getMergedSkills 会 catch 掉异常并返回**空列表**，
-// 于是「不得触发」那几条断言会因为「根本没有技能」而假通过 —— 必须显式安装。
-if (!globalThis.chrome) {
-  globalThis.chrome = {
-    storage: { local: { async get() { return {}; }, async set() {} } },
-  };
-}
 
 // ---------------- decodeBuffer ----------------
 
@@ -665,40 +657,49 @@ test('中断路径必须把部分产出补回历史（接线断言）', () => {
   assert.match(src, /messages\.push\(partial\.assistantMessage\)/, '中断分支必须把它补回历史');
 });
 
-// ---------------- 技能通配注入 ----------------
-test('技能通配语义：关键词确有不命中时**不得**触发（这是本轮修复的目标）', async () => {
-  const hits = await detectSkill('把页面背景改成深色', 'browser_task');
-  const names = hits.map((s) => s.name);
-  // summarize 原先无关键词 → 命中一切；补上触发条件后不应再被「改样式」类指令触发。
-  assert.equal(names.includes('summarize'), false, 'summarize 不应被改样式指令触发：' + names.join(','));
-});
+// ---------------- 技能触发条件（定义层） ----------------
+//
+// ⚠ 本轮删掉了原来那三条调用 `detectSkill()` 的用例（`skills.js` 的 `detectSkill` 已删除：
+// 它在生产代码里**没有调用方**，详见该文件里的长注释与 docs/real-model-eval-log.md 的发现 1）。
+// 删 3 条、改造 1 条 ⇒ 总数减少，由 `node scripts/test-count.mjs --write` 重新产出快照。
+//
+// 留下的是**定义层**审计：当初的缺陷（"没有 x 块的技能会被当成通配符"）发生在已被删除的匹配分支里，
+// 但"技能定义必须写出触发条件"这件事本身仍然要有东西盯着 —— 否则删掉一个字段不会被任何人发现，
+// 而 SkillHub 格式往返（skill-md.js）与技能编辑页都依赖它。
 
-test('技能触发语义：关键词命中时必须触发（修完不能把技能改死）', async () => {
-  const hits = await detectSkill('帮我总结一下这篇文章', 'browser_task');
-  assert.ok(hits.some((s) => s.name === 'summarize'), '「总结」应触发 summarize');
-});
-
-test('技能触发语义：humanizer 由润色类关键词触发', async () => {
-  const hits = await detectSkill('帮我把这段文字润色一下，去掉 AI 味', 'chat_task');
-  assert.ok(hits.some((s) => s.name === 'humanizer'));
-});
-
-test('运行时技能结构：关键词字符串确实被编译为正则', () => {
+test('运行时技能结构：关键词字符串确实被编译为正则（SkillHub 格式往返要用）', () => {
   const rt = toRuntimeSkill({ name: 'x', x: { keywords: ['总结|概括'] } }, true);
   assert.equal(rt.match.keywords.length, 1);
   assert.ok(rt.match.keywords[0] instanceof RegExp);
   assert.deepEqual(rt.match.keywordStrings, ['总结|概括']);
 });
 
-test('内置技能审计：非对话意图下不得再有「无触发条件」的通配技能', () => {
+test('内置技能审计（定义层）：非对话意图下不得再有「无触发条件」的通配技能', () => {
+  // ⚠ 这条断言现在审计的是**定义**，不是运行时行为 —— 运行时不做关键词匹配
+  // （`x.keywords` 只用于 SkillHub 往返与技能页展示）。保留它的理由：
+  // 当初的修复就是"给缺 x 的技能补上触发条件"，把这条固化成回归，免得下一个新增技能又漏写。
+  //
   // agent-browser 是已知的例外：它的描述是「需要与网站交互时使用」，
   // 与 RecallFlow 的核心能力完全重合，给它加任何关键词都等于换个方式继续通配。
-  // 这需要产品取舍，因此以白名单显式记录，而不是默默放过：
-  // 若将来有人新增了一个忘记写 x 的技能，这条断言会失败。
+  // 这需要产品取舍，因此以白名单显式记录，而不是默默放过。
   const KNOWN_WILDCARD = new Set(['agent-browser']);
   const unexpected = SKILL_REGISTRY
     .filter((s) => !(s.x && Array.isArray(s.x.keywords) && s.x.keywords.length))
     .map((s) => s.name)
     .filter((n) => !KNOWN_WILDCARD.has(n));
-  assert.deepEqual(unexpected, [], '这些内置技能缺少 x.keywords，会在每个非对话任务上被注入：' + unexpected.join(','));
+  assert.deepEqual(unexpected, [], '这些内置技能缺少 x.keywords：' + unexpected.join(','));
+});
+
+test('技能触发的"死路"不许再被接回来（含它的门禁也不许复活）', () => {
+  // 这条与 skill-common-discipline.test.mjs 同型：钉住一个**反直觉的删除决定**。
+  // 有人若"顺手"把关键词匹配加回运行时（无论是恢复 detectSkill，还是换个名字重写一遍），
+  // 那都是模型可见内容的改动 ⇒ 必须先按 docs/regression-red-flag.md 测量，而不是直接合。
+  const src = readFileSync(new URL('../lib/assistant/skills.js', import.meta.url), 'utf8');
+  const live = src.split('\n').filter((l) => !l.trim().startsWith('//'));
+  assert.ok(
+    !live.some((l) => /export\s+(async\s+)?function\s+detectSkill/.test(l)),
+    'detectSkill 被加回来了 —— 它当初在生产里没有调用方；要接回运行时请先测量并写进 docs/real-model-eval-log.md'
+  );
+  // 而且必须留下"为什么删"的可读说明（否则下一个人只会看到"少了个函数"）。
+  assert.match(src, /生产代码里从头到尾没有调用方|运行时不做关键词匹配/, 'skills.js 里要写明删除原因');
 });
