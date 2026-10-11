@@ -55,11 +55,12 @@ const chunkDelay = process.env.E2E_LLM_CHUNK_DELAY_MS || '0';
 // 混在一个进程里，"第一次调用"的归属会取决于执行顺序，测试就时好时坏（实测踩过）。
 const baseEnv = Object.assign({}, process.env, { E2E_LLM_CHUNK_DELAY_MS: chunkDelay });
 // 视觉（多模态）两臂：**都跑**，不是靠某个环境变量二选一 ——
-//   · 关闭臂（`E2E_LLM_VISION_SHOT` 不设）：截图链路真的走一遍 `take_screenshot`，
-//     断言"请求里没有任何图像内容"（今天的行为）；
-//   · 开启臂（`=1`）：让夹具真的调 `take_screenshot`，断言图像以"追加的 user 消息"出现。
-// ⚠ 开启臂在 `VISION_ENABLED = false` 时**必然失败**，所以 spec 会按常量实际值 skip 它 ——
-//   跳过方式见 tests/e2e/vision-switch.spec.mjs 的说明（开关一打开，同一份门禁自动变成开启臂）。
+//   · 不发起截图（`E2E_LLM_VISION_SHOT` 不设）：断言"请求里没有任何图像内容"；
+//   · 发起截图（`=1`，本阶段）：让夹具真的调 `take_screenshot`，断言图像以"追加的 user 消息"出现。
+// ⚠ 第 6 步已把 `VISION_ENABLED` 打开：
+//   · 开启臂（`=1` 那一臂）现在**真的会产出图**，必须绿 —— 这是本轮的关键验收；
+//   · "关闭臂"那条按常量实际值 skip（真实扩展读的就是这个常量）⇒ 关闭侧的传输行为
+//     改由 tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住，不是没人管。
 const phases = [
   { name: '黄金任务', spec: 'golden.spec.mjs', hold: '', visionShot: '' },
   { name: '断线恢复', spec: 'resume.spec.mjs', hold: '1', visionShot: '' },

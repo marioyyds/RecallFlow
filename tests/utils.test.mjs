@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -164,15 +164,26 @@ test('screenshotAttempts: 越界/脏 quality 被夹紧', () => {
   assert.equal(screenshotAttempts('jpeg', 'abc')[0].quality, 72);
 });
 
-test('formatScreenshotSummary: 必须以「看不到图像」明确警示模型', () => {
-  const s = formatScreenshotSummary({ width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 });
+test('formatScreenshotSummary: **两臂**各自明确警示/如实地说明视觉能力（按开关取值选臂）', () => {
+  const meta = { width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 };
+  const s = formatScreenshotSummary(meta);
   assert.ok(s.includes('1280×720'), s);
   assert.ok(s.includes('JPEG'), s);
   assert.ok(s.includes('q72'), s);
   assert.ok(s.includes('142KB'), s);
-  // 这两点最关键：防止模型凭「已截图」编造页面外观描述
-  assert.ok(s.includes('看不到图像'), s);
-  assert.ok(s.includes('get_page_snapshot'), s);
+
+  // 关闭臂：必须明确"你看不到图像"（防止模型凭「已截图」编造页面外观描述）
+  const off = formatScreenshotSummary(meta, false);
+  assert.ok(off.includes('看不到图像'), off);
+  // 开启臂：**不得**再说看不到（与事实相反 ✗），必须如实说图会进上下文
+  const on = formatScreenshotSummary(meta, true);
+  assert.ok(!on.includes('看不到图像'), on);
+  assert.ok(on.includes('送进你的上下文'), on);
+  assert.notEqual(off, on, '两臂必须不同（否则 override 是摆设）');
+  // 默认（生产不传 override）走的是开关的**实际取值**那一臂
+  assert.equal(s, VISION_ENABLED ? on : off, '默认必须按开关实际值选臂');
+  // 两臂共用的指导：仍然指向可判断的文本证据
+  for (const arm of [off, on]) assert.ok(arm.includes('get_page_snapshot'), arm);
 });
 
 test('formatScreenshotSummary: 标注与降质提示', () => {

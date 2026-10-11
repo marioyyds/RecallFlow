@@ -1,27 +1,28 @@
-// 视觉开关的**文案条件化**验收（docs/remaining-work.md「二、① 多模态」第 5 步）。
+// 视觉开关的**文案条件化**验收（docs/remaining-work.md「二、① 多模态」第 5、6 步）。
 //
 // ## 这组断言在证什么
 //
-// 第 5 步只做一件事：把既有的那句"你看不到图像"**原样包起来**
-//（`VISION_ENABLED ? '' : 原文`）。因此 `VISION_ENABLED = false` 时，产出必须与改动前
-// **逐字节相同** ⇒ 属于**纯重构**，按 docs/regression-red-flag.md 的纪律**不需要**跑真模型 eval ✓
+// 做法是把既有的那句"你看不到图像"**原样包起来**（`VISION_ENABLED ? 启用分支 : 原文`）。
+// 因此**关闭臂**的产出必须与改动前**逐字节相同** ⇒ 关闭侧属于**纯重构**，
+// 按 docs/regression-red-flag.md 的纪律不需要测量 ✓（开启侧是模型可见内容的变化 ⇒ 必须测量）
 //
 // 反过来说：一旦有人顺手改了措辞（哪怕只少一个换行），这里就必须红 ——
-// 因为那时它已经不再是纯重构，而是"改了模型能看到的内容"，得补对照测量 ✗
 // 所以下面把**改动前的原文**直接当基准写进用例（取自 git HEAD，逐字节核对过）。
+//
+// ## 关闭臂怎么拿到（第 6 步之后：常量已经是 true）
+//
+// 直接 import 只能看到**开启侧**（模块级 const 固定了）⇒ 关闭臂必须靠 data: URL
+// **把源码里的开关真的改成 false 再载入**（`loadWithVision(false, file)`），不落盘 ✓
+// 两臂因此都被钉住：关闭臂钉"逐字节原文"，开启臂钉"不再有反话、且如实" ✓
 //
 // ## 为什么还要"源码级门禁"
 //
 // 行为断言管不住"只改一处、漏改另一处"：漏掉的那处在开关打开后会说反话
-//（"你看不到图" + 一张真图就在上下文里）✗ 所以三处都必须**引用**开关，不许各自硬编码。
-//
-// ## 已知遗留（第 7 步已修掉，这里改为**两臂都钉住**）
-//
-// 第 5 步只条件化了一个从句，于是开启侧会拼出坏话 ✗（第 7 步审校实测复现，见用例 ⑥ / ⑦）：
-//   · `formatScreenshotSummary`：`…不进入你的上下文：` + `''` + `，不要据它描述页面外观。`
-//     ⇒ 坏标点 `：，` **且与事实相反**（开启后图确实进了上下文）；
-//   · `take_screenshot` 说明：`图片**只展示给用户与留档**` ⊕ `同时也会送进你的上下文…` ⇒ 自相矛盾。
-// 现在的做法是**整句二选一**（`lib/shared/utils.js` 里的 `VISION_ENABLED_*_COPY`）✓
+//（"你看不到图" + 一张真图就在上下文里）✗ 所以四处都必须**引用**开关，不许各自硬编码。
+// ⚠ 第 6 步正是靠这条扫描 + 两臂渲染比对找出**第四处**的：
+//   `context.js` 的 `flattenHistoryContent`（历史回放占位说明）——
+//   它属于"开关翻转**不会**改到、但打开后会变成假话"的那一类，
+//   只有把两臂**渲染出来逐条比对**才看得见（见本轮报告里的审计脚本输出）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -39,11 +40,18 @@ import {
 } from '../lib/shared/utils.js';
 import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
+import { flattenHistoryContent } from '../lib/assistant/context.js';
 
 const read = (p) => fs.readFileSync(p, 'utf8');
 const screenshotDesc = () => TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
 const readabilityFix = () => SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content;
+const descOf = (mod) => mod.TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
+const skillOf = (mod) => mod.SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content;
 const META = { width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 };
+const HISTORY_WITH_IMAGE = [
+  { type: 'text', text: '这个按钮在哪？' },
+  { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+];
 
 // ---------------- 改动前的原文（git HEAD，逐字节） ----------------
 // ① take_screenshot 的工具说明（整条，188 字符）
@@ -58,26 +66,43 @@ const BASELINE_SCREENSHOT_SUMMARY =
 // ④ visionLimitationNote 的默认整句（这一处在改动前就已经是条件化的，见用例 ④）
 const BASELINE_NOTE_SENTENCE =
   '注意：当前**看不到图像**（截图只给用户看，不会进入你的输入），请依据 DOM / 可访问性树等文本信息判断。';
+// ⑤ 历史回放占位说明的**关闭侧原文**（第 6 步新增的第 4 处接线点；关闭时逐字节保留）
+const BASELINE_HISTORY_NOTE = '（该消息含 1 张图片；当前**未把图片传给模型**，仅保留此文字说明。）';
 
-test('前提：开关当前是**关闭**的（下面所有"逐字节相同"的断言都以此为前提）', () => {
-  assert.equal(VISION_ENABLED, false, '打开它属于第 6 步：必须同时做完传输/文案/预算/门禁并跑 eval');
+test('前提：开关是布尔的**打开**态（第 6 步已完成），且关闭臂仍可被载入', async () => {
+  assert.equal(typeof VISION_ENABLED, 'boolean');
+  assert.equal(VISION_ENABLED, true, '第 6 步已打开；若关回去，必须同步两臂文案门禁与文档');
+  // 关闭臂靠改写源码载入 —— 锚点失效会在这里就抛错（不静默）
+  const off = await loadWithVision(false, 'lib/shared/utils.js');
+  assert.equal(off.VISION_ENABLED, false, '关闭臂必须真的被改成 false 再载入');
+  const on = await loadWithVision(true, 'lib/shared/utils.js');
+  assert.equal(on.VISION_ENABLED, true);
 });
 
-test('① take_screenshot 工具说明：关闭时与改动前逐字节相同', () => {
-  assert.equal(screenshotDesc(), BASELINE_TOOL_DESC);
+test('① take_screenshot 工具说明：关闭臂与改动前逐字节相同（且两臂不同）', async () => {
+  const off = await loadWithVision(false, 'lib/assistant/tool-schemas.js');
+  assert.equal(descOf(off), BASELINE_TOOL_DESC);
+  const on = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
+  assert.notEqual(descOf(on), BASELINE_TOOL_DESC, '开启臂必须真的换了整句（否则开关没接上）');
+  // 生产（真 import）落在**开启**那一档 ⇒ 顺手确认它和开启臂一致
+  assert.equal(screenshotDesc(), descOf(on), '真模块必须等于开启臂');
 });
 
-test('② readability-fix 技能正文：关闭时与改动前逐字节相同（含段落空行）', () => {
-  const content = readabilityFix();
+test('② readability-fix 技能正文：关闭臂与改动前逐字节相同（含段落空行）', async () => {
+  const off = await loadWithVision(false, 'lib/assistant/skill-defs.js');
+  const content = skillOf(off);
   assert.ok(content.includes(BASELINE_SKILL_FRAGMENT), '技能正文里那一段必须仍是原文（含结尾的 \\n\\n）');
   assert.ok(
     !content.includes('已经改好。\n## 绝不允许'),
     '少一个换行也是"改了模型能看到的内容" ✗（本次改动中真实发生过一次）'
   );
+  const on = await loadWithVision(true, 'lib/assistant/skill-defs.js');
+  assert.ok(!skillOf(on).includes(BASELINE_SKILL_FRAGMENT), '开启臂必须整段替换掉');
 });
 
-test('③ formatScreenshotSummary：关闭时与改动前逐字节相同，且禁用语不重复拼接', () => {
-  const summary = formatScreenshotSummary(META);
+test('③ formatScreenshotSummary：关闭臂与改动前逐字节相同，且禁用语不重复拼接', async () => {
+  const off = await loadWithVision(false, 'lib/shared/utils.js');
+  const summary = off.formatScreenshotSummary(META);
   assert.equal(summary, BASELINE_SCREENSHOT_SUMMARY);
   assert.equal(
     (summary.match(/你看不到图像内容/g) || []).length,
@@ -85,7 +110,21 @@ test('③ formatScreenshotSummary：关闭时与改动前逐字节相同，且�
     '重复拼接会让模型连着读到两遍同一句 ✗（本次改动中真实发生过一次）'
   );
   // 另一条 meta 只钉住那句的关键标点（整条基准见 ③ 的 META）
-  assert.ok(formatScreenshotSummary(null).includes('：**你看不到图像内容**，不要据它描述页面外观。'));
+  assert.ok(off.formatScreenshotSummary(null).includes('：**你看不到图像内容**，不要据它描述页面外观。'));
+});
+
+test('⑧ 历史回放占位说明：**第四处**接线点 —— 关闭臂逐字节原文，开启臂如实且不笼统', () => {
+  // 关闭臂（显式 override）：与改动前逐字节相同
+  assert.equal(flattenHistoryContent(HISTORY_WITH_IMAGE, false), '这个按钮在哪？\n' + BASELINE_HISTORY_NOTE);
+  // 开启臂：不得再说"未把图片传给模型"（与事实相反 ✗），也不能笼统说"图片已传给模型"
+  const on = flattenHistoryContent(HISTORY_WITH_IMAGE, true);
+  assert.ok(!on.includes('未把图片传给模型'), '开启后不得再说图片没传给模型（与事实相反 ✗）');
+  assert.ok(!on.includes('图片已传给模型'), '也不能笼统说"图片已传给模型" —— 这些历史图恰恰没传');
+  assert.match(on, /不会重传/, '必须说清历史回放**不重传**');
+  assert.match(on, /只有\*\*本次新增\*\*的截图才会随请求送进你的上下文/, '必须说清哪一类图在上下文里');
+  // 生产（真 import，常量 = true）必须落在开启臂
+  assert.equal(flattenHistoryContent(HISTORY_WITH_IMAGE), on, '真模块（常量 true）必须等于开启臂');
+  assert.notEqual(flattenHistoryContent(HISTORY_WITH_IMAGE, false), on, '两臂必须不同');
 });
 
 test('④ visionLimitationNote 的默认整句：改动前**就已经**是条件化的 ⇒ 这里只钉现状', () => {
@@ -107,7 +146,7 @@ test('⑤ 不算一处：panel-css.js 里那句是样式表**注释**，不面�
 });
 
 // ---------------- 源码级门禁 ----------------
-// 三处接线点：必须在**自己那段代码里**引用开关 —— "import 了但没用"不算。
+// **四处**接线点：必须在**自己那段代码里**引用开关 —— "import 了但没用"不算。
 const SITES = [
   {
     name: 'take_screenshot 工具说明',
@@ -127,6 +166,14 @@ const SITES = [
     from: 'export function formatScreenshotSummary',
     to: '\n}',
   },
+  {
+    // ⚠ 第 4 处（第 6 步找出）：它**不**随开关翻转而改变输出（因为原先根本没读开关），
+    // 所以"两臂渲染比对"不会把它列为差异 —— 只有**逐条读模型可见文本**才发现它打开后会变成假话。
+    name: '历史回放占位说明（flattenHistoryContent）',
+    file: 'lib/assistant/context.js',
+    from: 'export function flattenHistoryContent',
+    to: '\n}',
+  },
 ];
 
 /** 取出一段代码（锚点找不到时返回 null，避免门禁静默退化成"永远通过"✗）。 */
@@ -143,7 +190,7 @@ function isSwitchDriven(region) {
   return /VISION_ENABLED|visionEnabled/.test(region);
 }
 
-test('源码级门禁：三处都必须引用 VISION_ENABLED，不许各自硬编码', () => {
+test('源码级门禁：**四处**都必须引用 VISION_ENABLED，不许各自硬编码', () => {
   for (const site of SITES) {
     const region = regionOf(read(site.file), site.from, site.to);
     assert.ok(region, '锚点失效（' + site.file + '）：请同步更新本用例的 from/to');
@@ -156,9 +203,11 @@ test('这条门禁**有牙齿**：硬编码同一句文案的假源码必须被�
     "name: 'take_screenshot', description: '图片**只展示给用户与留档**，不进入你的上下文 —— 当前模型是纯文本的，**你看不到图像内容**，不要据「已截图」描述页面外观。', parameters: {",
     '- 需要给用户可视证据时用 `take_screenshot`，但**你看不到图像内容**，\n  不要据"已截图"声称视觉上已经改好。\n\n## 绝不允许的',
     "export function formatScreenshotSummary(meta) { return '图片只展示给用户、不进入你的上下文：**你看不到图像内容**，不要据它描述页面外观。'; }",
+    // 第 4 处的硬编码版：就是它在 HEAD 里的样子（开关打开后会变成假话 ✗）
+    "export function flattenHistoryContent(content) { return text + '（该消息含 ' + images + ' 张图片；当前**未把图片传给模型**，仅保留此文字说明。）'; }",
   ];
   for (const src of guilty) {
-    assert.ok(src.includes('你看不到图像内容'), '夹具前提：它确实写着那句禁用文案');
+    assert.ok(/你看不到图像内容|未把图片传给模型/.test(src), '夹具前提：它确实写着那句禁用文案');
     assert.equal(isSwitchDriven(src), false, '硬编码版必须被判为不合格');
   }
   // 反向：真源码必须判合格（否则门禁恒假，等于没有）
@@ -194,17 +243,26 @@ function skillFragmentOf(content) {
 }
 
 /**
- * 把源码里的开关**真的改成 true** 再载入 —— 用来验证"开启后那句确实消失"。
+ * 把源码里的开关**真的改成 `enabled`** 再载入 —— 两臂都靠它拿到（第 6 步之后常量是 true）。
  *
- * 为什么要这么麻烦：`VISION_ENABLED` 是模块级 const，import 进来就固定了 ⇒ 直接 import
- * 只看得到关闭态，开启侧断言会退化成"其实还是关闭"而**静默通过** ✗
+ * 为什么要这么麻烦：`VISION_ENABLED` 是模块级 const，import 进来就固定了 ⇒
+ * 直接 import 只看得到**一档**（当初是关闭、现在是开启），另一臂的断言会退化成
+ * "其实还是这一档"而**静默通过** ✗
  * data: URL 让 Node 把改写后的源码当模块执行，且不落盘 ✓ 锚点失效时抛错，不静默。
+ *
+ * @param {boolean} enabled 想要的臂
+ * @param {string} file 要载入的模块（相对仓库根）
  */
-async function loadWithVisionOn(file) {
+async function loadWithVision(enabled, file) {
+  const anchor = /export const VISION_ENABLED = (?:true|false);/;
+  assert.match(read('lib/shared/utils.js'), anchor, '开关定义锚点失效（`export const VISION_ENABLED = <bool>;`）');
   const patched = read('lib/shared/utils.js')
-    .replace('export const VISION_ENABLED = false;', 'export const VISION_ENABLED = true;')
+    .replace(anchor, 'export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';')
     .replace("from './constants.js'", "from '" + ABS('lib/shared/constants.js') + "'");
-  assert.ok(patched.includes('export const VISION_ENABLED = true;'), '改写锚点失效（开关定义变了？）');
+  assert.ok(
+    patched.includes('export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';'),
+    '改写锚点失效（开关定义变了？）'
+  );
   const utilsUrl = 'data:text/javascript;base64,' + Buffer.from(patched, 'utf8').toString('base64');
   if (file === 'lib/shared/utils.js') return import(utilsUrl);
   const src = read(file);
@@ -213,13 +271,13 @@ async function loadWithVisionOn(file) {
   return import('data:text/javascript;base64,' + Buffer.from(rewritten, 'utf8').toString('base64'));
 }
 
-test('开关打开后：三处都不再说"看不到图像"，且技能段落的空行仍在', async () => {
-  const onUtils = await loadWithVisionOn('lib/shared/utils.js');
-  const onSchemas = await loadWithVisionOn('lib/assistant/tool-schemas.js');
-  const onSkills = await loadWithVisionOn('lib/assistant/skill-defs.js');
+test('开关打开后：四处都不再说"看不到图像"，且技能段落的空行仍在', async () => {
+  const onUtils = await loadWithVision(true, 'lib/shared/utils.js');
+  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
+  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.js');
 
-  const desc = onSchemas.TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
-  const skill = onSkills.SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content;
+  const desc = descOf(onSchemas);
+  const skill = skillOf(onSkills);
   const summary = onUtils.formatScreenshotSummary(META);
 
   assert.ok(!desc.includes('看不到图像'), '开启后工具说明不得再说"看不到图像"');
@@ -227,6 +285,11 @@ test('开关打开后：三处都不再说"看不到图像"，且技能段落的
   assert.ok(!skill.includes('看不到图像内容'), '开启后技能不得再说"看不到图像内容"');
   assert.ok(!summary.includes('看不到图像'), '开启后截图摘要不得再说"看不到图像"');
   assert.ok(!summary.includes('不进入你的上下文'), '开启后截图摘要不得再说"不进入你的上下文"（与事实相反 ✗）');
+  // 第 4 处：历史回放占位也要走开启档
+  const hist = flattenHistoryContent(HISTORY_WITH_IMAGE, true);
+  assert.ok(!hist.includes('未把图片传给模型'), '开启后历史占位不得再说"未把图片传给模型"');
+  assert.ok(!hist.includes(BASELINE_HISTORY_NOTE), '开启后旧的历史占位整句都该走了');
+  assert.ok(hist.includes('不会重传'), '开启后必须点明历史图不重传');
   // 关闭侧的原文在开启侧必须**不出现**（否则等于开关没接上）
   assert.ok(!desc.includes(BASELINE_TOOL_DESC), '开启后旧说明整条都该走了');
   assert.ok(!skill.includes(BASELINE_SKILL_FRAGMENT), '开启后旧技能文案整段都该走了');
@@ -240,7 +303,12 @@ test('⑥ 开启分支的文案常数：单一来源、如实、且不含任何"
   for (const sym of ['VISION_ENABLED_TOOL_COPY', 'VISION_ENABLED_SKILL_COPY', 'VISION_ENABLED_SUMMARY_COPY']) {
     assert.equal(utils.split('export const ' + sym).length - 1, 1, sym + ' 只能定义一次');
   }
-  // 三条都必须是**如实的**：说图会进上下文 + 只有预算内那几张 + 超出的会说明
+  // 三条都必须是**如实的**：说图会进上下文 + 说清"哪些会送、哪些会被省略并说明"
+  //
+  // ⚠ 第 6 步人读时发现原稿承诺了接线**没做**的事：「只送**预算内**的最近几张，超出的会省略并说明」——
+  //    而 `agent.js` 每张截图各调用一次 `visionMessagesFor([...])` ⇒ `maxImages: 2` 永远不是约束
+  //    （实测 5 次各传 1 张 ⇒ 5 张全进上下文、0 次省略说明）。所以文案改成了如实说法，
+  //    并用下面这条 `doesNotMatch` 让它**不能再被改回去** ✓
   for (const [name, s] of [
     ['tool', VISION_ENABLED_TOOL_COPY],
     ['skill', VISION_ENABLED_SKILL_COPY],
@@ -248,22 +316,26 @@ test('⑥ 开启分支的文案常数：单一来源、如实、且不含任何"
   ]) {
     assert.ok(s.length > 20, name + ' 启用分支太短，等于什么都没说');
     assert.match(s, /送进你的上下文/, name + ' 必须如实说明图会进上下文');
-    assert.match(s, /预算内/, name + ' 必须说明**只有**被送进去的那几张（受预算上限约束）');
-    assert.match(s, /省略并说明/, name + ' 必须说明超出的会被省略并说明');
+    assert.match(s, /都会送/, name + ' 必须如实说明"本次任务里截的每张都会送"');
+    assert.match(s, /单张过大的会省略并说明/, name + ' 必须如实说明"单张过大的会被省略并说明"');
     assert.doesNotMatch(s, /看不到图像|不进入你的上下文|纯文本/, name + ' 不得再出现"看不到"式反话');
     assert.doesNotMatch(s, /只展示给用户/, name + ' 不得再说"只展示给用户"（与"会进上下文"矛盾 ✗）');
+    // ⚠ 反话之二：**不许**承诺按张数封顶 —— 接线没做这件事（`maxImages` 在真实调用形状下不生效）
+    assert.doesNotMatch(s, /预算内/, name + ' 不得承诺"只送预算内的最近几张"（接线没有按张数封顶 ✗）');
+    assert.doesNotMatch(s, /超出的会省略/, name + ' 不得承诺"超出的会省略"（超出张数这件事根本不会被发现 ✗）');
   }
   // ③ 里那条与开关**无关**的 evidence 规则必须两档共用 —— 不能被条件化掉
-  const off = formatScreenshotSummary(META);
-  assert.ok(off.includes('**截图不能作为 complete_task 的 evidence**'), '关闭侧仍有 evidence 规则');
+  for (const arm of [formatScreenshotSummary(META, false), formatScreenshotSummary(META, true)]) {
+    assert.ok(arm.includes('**截图不能作为 complete_task 的 evidence**'), '两臂都必须保留 evidence 规则');
+  }
 });
 
 test('⑦ 开启分支的实际渲染：不复现第 7 步审校发现的那两类坏话（整句二选一）', async () => {
-  const onUtils = await loadWithVisionOn('lib/shared/utils.js');
-  const onSchemas = await loadWithVisionOn('lib/assistant/tool-schemas.js');
-  const onSkills = await loadWithVisionOn('lib/assistant/skill-defs.js');
-  const desc = onSchemas.TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
-  const skill = skillFragmentOf(onSkills.SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content);
+  const onUtils = await loadWithVision(true, 'lib/shared/utils.js');
+  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
+  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.js');
+  const desc = descOf(onSchemas);
+  const skill = skillFragmentOf(skillOf(onSkills));
   const summary = onUtils.formatScreenshotSummary(META);
   // ① 缺陷一：坏标点「：，」
   assert.ok(!summary.includes('：，'), '坏标点：冒号后直接跟逗号（第 5 步的拼接残留 ✗）');
@@ -276,4 +348,8 @@ test('⑦ 开启分支的实际渲染：不复现第 7 步审校发现的那两�
     assert.ok(s.includes('截图不能作为 complete_task 的 evidence') || s.includes('文本证据优先') || s.includes('需要可判断的文本证据'),
       name + ' 开启侧也必须保留"文本证据优先 / 截图不是 evidence"的指导');
   }
+  // ④ 第 4 处（历史回放占位）：开启侧同样不许出现"坏标点"式的拼接残留
+  const hist = flattenHistoryContent(HISTORY_WITH_IMAGE, true);
+  assert.ok(!hist.includes('）\n（'), '历史占位不许出现重复拼接的空括号段落');
+  assert.equal((hist.match(/该消息含 1 张图片/g) || []).length, 1, '这句话不许被拼两遍');
 });

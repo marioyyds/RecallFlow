@@ -1,19 +1,28 @@
-// **视觉（多模态）两臂对照门禁**（docs/remaining-work.md「二、① 多模态」第 7 步）。
+// **视觉（多模态）两臂对照门禁**（docs/remaining-work.md「二、① 多模态」第 6、7 步）。
 //
 // ## 它证什么
 //
 // 捕获 **Agent 真实发往 LLM 的请求体**（夹具的 `getLlmRequests()`），断言两件事：
-//   · **关闭臂（今天）**：所有捕获到的请求里**不得出现任何图像内容**（`content` 数组里的
-//     `image_url` 部件）—— 这就是"开关关闭 ⇒ 模型可见内容零变化"的对照组 ✓
-//   · **开启臂（未来）**：**必须**出现图像内容，且形态正确 —— 图片在
-//     `take_screenshot` 的 **tool 消息之后**、作为**追加的 `user` 消息**出现，
+//   · **关闭臂（`VISION_ENABLED=false`，第 6 步之前就是这一档）**：所有捕获到的请求里
+//     **不得出现任何图像内容**（`content` 数组里的 `image_url` 部件）——
+//     这就是"开关关闭 ⇒ 模型可见内容零变化"的对照组 ✓
+//   · **开启臂（`VISION_ENABLED=true`，第 6 步已打开 ⇒ 本臂现在真的在跑）**：**必须**出现图像内容，
+//     且形态正确 —— 图片在 `take_screenshot` 的 **tool 消息之后**、作为**追加的 `user` 消息**出现，
 //     而 `tool` 消息本身仍是纯文本 ✓
 //
 // ## 为什么断言臂由**常量的实际值**决定，而不是写死
 //
 // 若写死"今天没有图"，那么开关一打开这条门禁就会**红着**，而修它的最省事做法是删掉断言 ✗。
-// 现在两臂的断言都写在文件里，`VISION_ENABLED` 决定**跳过哪一臂** ⇒
+// 两臂的断言都写在文件里，`VISION_ENABLED` 决定**跳过哪一臂** ⇒
 // 开关一打开，同一份门禁自动变成开启臂，不会出现"开了但没人管" ✓
+// ⚠ 代价：开关打开后**关闭臂会被 skip** ⇒ 关闭侧的传输行为不再由 E2E 覆盖，
+//   改由 `tests/vision-messages.test.mjs` 的 `visionEnabled:false` override 钉住（两臂都还在）✓
+//
+// ## 为什么要 `E2E_LLM_VISION_SHOT=1`
+//
+// 这一臂还需要夹具**真的发起** `take_screenshot`（见 fixtures/server.mjs 的场景块）。
+// `scripts/run-e2e.mjs` 的第三阶段正是这么跑的 ⇒ 单独手跑本 spec 时必须自己带上这个变量，
+// 否则会看到"找不到「已截图」"这类失败（那是夹具没发截图，不是管道坏了）。
 //
 // ## 为什么它不是一个"能力剧本"（PLAYBOOKS）
 //
@@ -133,10 +142,10 @@ function shapeOfRequests(requests) {
   });
 }
 
-// ---------------- 关闭臂（今天）----------------
+// ---------------- 关闭臂（第 6 步之前的那一档；现在按常量实际值 skip）----------------
 
 test('关闭臂（VISION_ENABLED=false）：Agent 发往 LLM 的请求里不得出现任何图像内容', async () => {
-  test.skip(VISION_ENABLED !== false, '开关已打开 ⇒ 本臂不再适用（见开启臂那条）');
+  test.skip(VISION_ENABLED !== false, '开关已打开 ⇒ 本臂不再适用（见开启臂那条；关闭侧改由单测 override 钉住）');
 
   await configureSettings(context, { cdpEnabled: true });
   const page = await openFixturePage(context, '/article');
@@ -174,10 +183,10 @@ test('关闭臂（VISION_ENABLED=false）：Agent 发往 LLM 的请求里不得�
   await page.close();
 });
 
-// ---------------- 开启臂（未来）----------------
+// ---------------- 开启臂（第 6 步已打开 ⇒ 本臂真的在跑）----------------
 
 test('开启臂（VISION_ENABLED=true）：图像必须以「截图结果之后追加的 user 消息」出现', async () => {
-  test.skip(VISION_ENABLED !== true, '开关还是关的 ⇒ 本臂今天不可能成立（这正是要跳过的原因）');
+  test.skip(VISION_ENABLED !== true, '开关还是关的 ⇒ 本臂不可能成立（这正是要跳过的原因）');
 
   await configureSettings(context, { cdpEnabled: true });
   const page = await openFixturePage(context, '/article');

@@ -1,4 +1,4 @@
-// 视觉消息装配：**开关关闭时一律不产出** —— 这是"今天行为不变"的可验证依据。
+// 视觉消息装配：**两臂都由开关决定**（`VISION_ENABLED` 第 6 步已打开 ⇒ 默认臂现在会产出图）。
 //
 // 起因见 docs/remaining-work.md 的 ①：工具消息只能放文本 ✗ ⇒ 图必须走**追加的 user 消息** ✓
 // 且**实测**约 578 token/图（1280×720；随尺寸变化）⇒ 必须有预算，超出时**如实说明省了什么** ✓
@@ -21,10 +21,20 @@ const shot = (id, chars = 100) => ({
   dataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(chars),
 });
 
-test('**开关关闭时一律返回空数组**（今天的行为与引入之前完全一致）', () => {
-  assert.equal(VISION_ENABLED, false, '前置：开关当前是关的');
-  assert.deepEqual(visionMessagesFor([shot('s1')]), [], '关着就不许产出任何多模态消息');
+test('默认臂按开关**实际取值**选（不写死"关着"）：关闭为空数组，打开就必须产出', () => {
+  const dflt = visionMessagesFor([shot('s1')]);
+  if (VISION_ENABLED) {
+    assert.equal(dflt.length, 1, '开关打开时默认必须产出 1 条多模态消息');
+    assert.ok(
+      (dflt[0].content || []).some((p) => p && p.type === 'image_url'),
+      '打开时默认必须含 image_url'
+    );
+  } else {
+    assert.deepEqual(dflt, [], '关着就不许产出任何多模态消息');
+  }
+  // 两臂都由 override 表达（与常量当前值无关）
   assert.deepEqual(visionMessagesFor([shot('s1')], { visionEnabled: false }), []);
+  assert.equal(visionMessagesFor([shot('s1')], { visionEnabled: true }).length, 1);
 });
 
 test('开关打开时才产出，且是**追加的 user 消息**（不是 tool 消息）', () => {
@@ -63,6 +73,42 @@ test('预算：单张过大时跳过它，并计入"省了"的说明', () => {
   assert.deepEqual(picked.map((s) => s.id), ['fine']);
   assert.equal(skippedCount, 1);
   assert.match(note, /另有 1 张截图/);
+});
+
+test('**丢东西必须说明**：全都被跳过时仍要产出一条纯文本说明（不许静默丢图）', () => {
+  // 原先这条路会走 `buildScreenshotMessage([]) === null` ⇒ 连说明一起丢掉：
+  // 模型既拿不到图、也不知道"图被省略了"，只会以为截图没发生 ✗
+  const only = [{ id: 'huge', dataUrl: 'data:image/jpeg;base64,' + 'A'.repeat(50) }];
+  const msgs = visionMessagesFor(only, { visionEnabled: true, budget: { maxImages: 2, maxBase64Chars: 20 } });
+  assert.equal(msgs.length, 1, '全被跳过时也必须有一条消息（说明），不是 0 条');
+  assert.equal(msgs[0].role, 'user');
+  assert.ok(Array.isArray(msgs[0].content));
+  assert.equal(msgs[0].content.length, 1, '没有图可送 ⇒ 只能是纯文本，不许产出 image_url');
+  assert.equal(msgs[0].content[0].type, 'text');
+  assert.match(msgs[0].content[0].text, /没有送入你的上下文/);
+  assert.match(msgs[0].content[0].text, /另有 1 张截图/);
+  // 有图可送时，说明跟着图走（不额外多一条消息）
+  const ok = visionMessagesFor([shot('fine', 10)], { visionEnabled: true, budget: { maxImages: 2, maxBase64Chars: 20 } });
+  assert.equal(ok.length, 1);
+  assert.ok(ok[0].content.some((p) => p && p.type === 'image_url'));
+  // 关着的时候**一律**空数组（包括"全被跳过"这条路）
+  assert.deepEqual(visionMessagesFor(only, { visionEnabled: false, budget: { maxBase64Chars: 20 } }), []);
+});
+
+test('⚠ 如实记账：张数上限在**真实接线形状**下不生效（防止有人再写"只送预算内的最近几张"）', () => {
+  // agent.js 是每张截图各调用一次（数组里永远只有 1 张）⇒ maxImages 永远不是约束。
+  // 这条用例把这个事实钉住：一旦有人真去接了任务级上限，它会红，逼人同步开启侧文案 ✓
+  let images = 0;
+  let omissionNotes = 0;
+  for (let i = 1; i <= 5; i++) {
+    for (const m of visionMessagesFor([shot('s' + i, 1000)], { visionEnabled: true })) {
+      for (const p of m.content || []) if (p && p.type === 'image_url') images += 1;
+      const t = (m.content || []).find((p) => p && p.type === 'text');
+      if (t && /未送入模型/.test(String(t.text))) omissionNotes += 1;
+    }
+  }
+  assert.equal(images, 5, '当前形状下 5 张截图会全部进上下文（没有张数封顶）—— 若改成封顶，请同步文案');
+  assert.equal(omissionNotes, 0, '当前形状下不会产生"张数超出"的说明 —— 若改成封顶，请同步文案');
 });
 
 test('没有超出预算时不写说明（免得每次都塞一句废话）', () => {
@@ -105,11 +151,13 @@ test('默认预算有界（防止有人把它设成"不限张数"）', () => {
 // 要么靠 data: URL 重载（重）；override 参数就是为这件事存在的 ——
 // 它同时钉住"override 真的能覆盖常量"（否则这两条会**静默退化成**只测常量当前值 ✗）。
 test('纯单元门禁：两臂各断言一次（用 override，不改常量）', () => {
-  assert.equal(VISION_ENABLED, false, '前置：常量仍是关闭（下面两臂都靠 override）');
+  // ⚠ 这里**不再**断言"常量必须是关的"（第 6 步已打开）——
+  // 改断言的是"两臂都能被表达"，这样常量翻到哪一边这条门禁都有效 ✓
+  assert.equal(typeof VISION_ENABLED, 'boolean', '前置：常量是布尔（下面两臂都靠 override）');
 
   // 关闭臂：空数组 —— 且**不依赖常量当前值**（显式传 false）
   const off = visionMessagesFor([shot('s1'), shot('s2')], { visionEnabled: false });
-  assert.deepEqual(off, [], 'visionEnabled:false 必须返回 []（今天的行为）');
+  assert.deepEqual(off, [], 'visionEnabled:false 必须返回 []');
 
   // 开启臂：必须产出**含 image_url 的消息**
   const on = visionMessagesFor([shot('s1')], { visionEnabled: true });
@@ -122,8 +170,8 @@ test('纯单元门禁：两臂各断言一次（用 override，不改常量）',
 
   // 反向自检：override 不是"摆设" —— 两臂结果必须**不同**
   assert.notDeepEqual(off, on, '两臂结果相同 ⇒ override 没生效，这条门禁会恒真 ✗');
-  // 常量在整个用例里没被动过（否则上面的前置断言会红）
-  assert.equal(VISION_ENABLED, false, '后置：常量仍未被改');
+  // 默认入口（生产不传 override）必须等于**常量实际值**那一臂
+  assert.deepEqual(visionMessagesFor([shot('s1')]), VISION_ENABLED ? on : off, '默认按开关实际值选臂');
 });
 
 // ---------------- 与 E2E 门禁的**接线检查** ----------------

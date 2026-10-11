@@ -30,8 +30,10 @@ test('图片消息必须是**追加到 messages**（而不是塞进 tool 消息�
   assert.ok(!/content:\s*\[\s*\{\s*type: 'image_url'/.test(near), '不许把图片数组塞进 tool 消息 ✗');
 });
 
-test('接线必须受开关约束（今天关着 ⇒ 不可能产出图片）', () => {
-  // 装配函数本身在开关关闭时返回 []；这里再确认 agent 侧没有绕过它自己拼图片
+test('接线必须受开关约束（开关**打开**时才产出；关着时一律空数组）', () => {
+  // 装配函数本身在开关关闭时返回 []；这里再确认 agent 侧没有绕过它自己拼图片。
+  // ⚠ 第 6 步已把开关打开 ⇒ 现在这段**真的会产出图片消息**；"关着就不产出"由
+  //    tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住 ✓
   assert.ok(!/image_url/.test(AGENT), 'agent.js 里不该自己拼 image_url（必须走 vision.js）');
   const vision = fs.readFileSync('lib/assistant/vision.js', 'utf8');
   assert.match(vision, /if \(!enabled\) return \[\];/, 'vision.js 里开关关闭时一律返回空');

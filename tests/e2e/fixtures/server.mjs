@@ -2689,7 +2689,8 @@ export function toolCallCount(name) {
 // 否则"脚本下能过、真模型下不能过"就无法归因到底是能力问题还是文案问题。
 const REAL = /^(1|true|yes)$/i.test(String(process.env.E2E_LLM_REAL || ''));
 // 视觉截图场景用哪一臂：'1' 才真的调 `take_screenshot`（见下面那个场景块的说明）。
-// 默认关闭 ⇒ 默认跑的就是今天的行为（请求里不该有任何图像内容）。
+// 它只决定"要不要发起截图"，与 `VISION_ENABLED`（要不要把图送进上下文）是两件事 ——
+// 二者正是 vision-switch.spec.mjs 要对照的两个变量。默认不发截图。
 const VISION_SHOT_ARM = /^(1|true|yes)$/i.test(String(process.env.E2E_LLM_VISION_SHOT || ''));
 const REAL_BASE = process.env.E2E_LLM_REAL_BASE || 'https://api.deepseek.com';
 const REAL_KEY = process.env.E2E_LLM_REAL_KEY || '';
@@ -2977,11 +2978,14 @@ const llm = http.createServer((req, res) => {
     // 场景：视觉（多模态）截图链路 —— 对照门禁用（tests/e2e/vision-switch.spec.mjs）。
     //
     // 为什么要让**被叫到的那条 user 消息决定**脚本顺序（而不是分两个场景）：
-    //   · 开关关闭（今天）：`take_screenshot` 走 CDP 拿真图，但 `visionMessagesFor()`
-    //     返回空数组 ⇒ 请求里**不得**出现任何图像内容（对照臂）；
-    //   · 开关打开（未来）：同一条工具调用之后，agent.js 会**追加一条 user 消息**承载图片
-    //     ⇒ 请求里**必须**出现图像内容，且 `tool` 消息本身仍是纯文本（形态臂）。
+    //   · 本臂不发起截图（`E2E_LLM_VISION_SHOT` 未设）：请求里**不得**出现任何图像内容；
+    //   · 本臂发起截图（`=1`，run-e2e 的"视觉两臂"阶段就是这么跑的）：同一条工具调用之后，
+    //     agent.js 会**追加一条 user 消息**承载图片 ⇒ 请求里**必须**出现图像内容，
+    //     且 `tool` 消息本身仍是纯文本（形态臂）。
     // 两臂共用这一份脚本，靠环境变量选路 ⇒ 不会出现"脚本只覆盖了一臂"。
+    // ⚠ 第 6 步已把 `VISION_ENABLED` 打开 ⇒ 捕获到的请求里**现在会有图**；
+    //   spec 的"关闭臂"会被 skip（真实扩展读的就是那个常量），关闭侧的传输行为
+    //   由 tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住 ✓
     // 触发词用**字面量**而不是 PLAYBOOKS：见 vision-switch.spec.mjs 的说明
     // （不把它登记成"能力剧本"，它验的是传输管道，不是一条新能力）。
     if (userText.includes('来张截图')) {
