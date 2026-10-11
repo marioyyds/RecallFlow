@@ -140,11 +140,35 @@ npm run test:e2e         # 真实 Chromium，35 个场景（两阶段：黄金�
 
 | 指标 | 值 |
 | --- | --- |
-| 单元测试 | **1140 项 / 80 个文件** |
-| 真实浏览器 E2E | **9 项**（黄金任务 6 + 断线恢复 1） |
-| 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试 5/5） |
+| 单元测试 | **1319 项 / 100 个文件** |
+| 真实浏览器 E2E | **35 项**（黄金任务 34 + 断线恢复 1） |
+| 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试） |
 | 桥接鉴权 / 跨会话隔离 | 各自独立验证通过 |
 | 内置工具数 | **44** |
-| `tools.js` | **1066 行**（起始 2288） |
-| 内容脚本 | 自包含打包产物（18 模块 / 265KB）—— **改了 `lib/page/**` 或 `lib/shared/**` 必须重新构建** |
-| 注册表指纹 | `bd379daf4693655a`（变更历史与原因写在 `tests/registry-fingerprint.test.mjs`） |
+| `tools.js` | 见文件本身（**不要在这里写行数**：它已经漂移过一次） |
+| 内容脚本 | 自包含打包产物 —— **改了 `lib/page/**` 或 `lib/shared/**` 必须重新构建** |
+| 注册表指纹 | `fb63cc85d45590b1`（变更历史与原因写在 `tests/registry-fingerprint.test.mjs`） |
+
+## 待续：浏览器级 JS 对话框的场景（本轮**未收敛**，如实记录）
+
+**目标**：给 `handle_dialog` 做行为验收（它至今只有单测，没有真浏览器场景）。
+`/dialog` 夹具页**已写好并验证过自身行为**（`tests/e2e/fixtures/server.mjs` 的 `dialogPage()`，
+路由已接线），但**能力剧本与 E2E 没进仓库** —— 因为场景没能稳定跑通。
+
+**已经验到的**：
+- `prompt` 的 `promptText` 回填是**必需的**：只 `accept` 会原样接受默认值「未命名」；
+- 对话框的**检测**完全依赖 CDP 事件（`Page.javascriptDialogOpening`）⇒ **必须先 attach CDP**，
+  否则事件不会到达扩展（处理仍会成功，但**消息与默认值进不了上下文**）；
+- 因此脚本路径的第一步要用 **CDP 支撑的读取**（如 `get_ax_snapshot`），而不是内容脚本快照。
+
+**未解决**：同一轮里出现**第二个**对话框（`confirm`）时处理不成功（`__confirmResult` 恒为 null）。
+**已排除**：① 点击被同步对话框阻塞（改成 `setTimeout` 延迟弹框后**仍然失败**）；
+② 检测时机（已先 attach CDP）。
+**剩下的怀疑方向**：连续两次 `handle_dialog` 之间的事件/桶状态（`clearDialogs` 的时机）、
+或"看起来失败的点击"累积触发工具摘除（`click_element` 被移出工具集后，第二步点击根本没发生）。
+
+**复现入口**：夹具页在 `/dialog`；`handle_dialog` 的实现见
+`lib/assistant/target-manager.js`（`getPendingDialogs` / `handleDialog`）与
+`lib/assistant/permission-tools.js`。**注意**：调试时不要用 PowerShell 改写源文件
+（`Get-Content`/`Set-Content` 会破坏 UTF-8，本轮实测把 `golden.spec.mjs` 写坏过一次，
+已从 git 恢复）。
