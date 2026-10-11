@@ -14,10 +14,11 @@
 | --- | --- |
 | `golden.spec.mjs` | 黄金任务 7 条：role+name 点击 / 跨域 iframe / 审批拒绝 + 阳性对照 / `type_text` value / CDP 坐标点击 / **思考记录穿插顺序** |
 | `resume.spec.mjs` | 断线恢复 1 条。**独立文件**，因为它要求夹具把第一次 LLM 调用挂起 |
-| `helpers.mjs` | 两个 spec 共用的启动、设置、面板操作与 **shadow DOM 查询**工具 |
+| `vision-switch.spec.mjs` | 视觉（多模态）**两臂对照门禁**：断言"Agent 真发出去的请求体里有没有图像内容"。按 `VISION_ENABLED` 的**实际值**跳过不适用的那一臂 ⇒ 开关一打开自动变成开启臂 |
+| `helpers.mjs` | 三个 spec 共用的启动、设置、面板操作与 **shadow DOM 查询**工具 |
 | `fixtures/server.mjs` | 三个真 HTTP 服务：主站 7802 / 跨域框架站 7803 / **模拟 LLM 7804** |
 | `playwright.config.mjs` | Playwright 配置（`workers: 1`、`fullyParallel: false`） |
-| `../../scripts/run-e2e.mjs` | 入口脚本：三项前置检查 + **分两阶段**跑 |
+| `../../scripts/run-e2e.mjs` | 入口脚本：三项前置检查 + **分三阶段**跑 |
 
 ## 怎么跑
 
@@ -32,14 +33,18 @@ node scripts/run-e2e.mjs          # 等价于 npm run test:e2e
 3. **有真实显示**。`headless: false` 是技术约束不是偏好 —— 实测 headless 下 MV3 扩展的
    service worker 根本不注册，扩展起不来。Linux CI 上要 `xvfb-run -a node scripts/run-e2e.mjs`。
 
-分两阶段跑（各自设置环境变量 `E2E_LLM_HOLD_OPEN`）：
+分三阶段跑（各自设置环境变量 `E2E_LLM_HOLD_OPEN` / `E2E_LLM_VISION_SHOT`）：
 
 | 阶段 | spec | 夹具模式 |
 | --- | --- | --- |
 | 黄金任务 | `golden.spec.mjs` | 模拟 LLM 正常返回 |
 | 断线恢复 | `resume.spec.mjs` | 把**第一次**调用挂起，确定性造出"流进行中"的窗口 |
+| 视觉两臂 | `vision-switch.spec.mjs` | `E2E_LLM_VISION_SHOT=1` ⇒ 真的调 `take_screenshot`（走 CDP 拿真图） |
 
 **为什么必须分进程**：混在一起时"第一次调用"归谁取决于执行顺序，实测会时好时坏。
+
+⚠ 视觉那条**不能单跑 `--grep` 挑一臂**：夹具那一臂由 `E2E_LLM_VISION_SHOT` 在**进程**级决定，
+所以"关闭臂 + 真截图"必须用该环境变量跑（命令见 spec 顶部注释）。
 
 ## 五个真踩过的坑
 

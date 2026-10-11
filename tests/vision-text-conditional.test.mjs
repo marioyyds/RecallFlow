@@ -15,18 +15,28 @@
 // 行为断言管不住"只改一处、漏改另一处"：漏掉的那处在开关打开后会说反话
 //（"你看不到图" + 一张真图就在上下文里）✗ 所以三处都必须**引用**开关，不许各自硬编码。
 //
-// ## 已知遗留（留给第 6 步，本文件**刻意不钉**）
+// ## 已知遗留（第 7 步已修掉，这里改为**两臂都钉住**）
 //
-// 开关**打开**时，`formatScreenshotSummary` 会拼出「…不进入你的上下文：，不要据它描述页面外观。」
-// —— 冒号后直接跟逗号，读起来别扭。这属于"开启侧的新文案"，第 6 步打开开关时本来就要
-// 按 regression-red-flag 做对照测量，届时一并定稿；现在钉死反而会拦住那次改动。
+// 第 5 步只条件化了一个从句，于是开启侧会拼出坏话 ✗（第 7 步审校实测复现，见用例 ⑥ / ⑦）：
+//   · `formatScreenshotSummary`：`…不进入你的上下文：` + `''` + `，不要据它描述页面外观。`
+//     ⇒ 坏标点 `：，` **且与事实相反**（开启后图确实进了上下文）；
+//   · `take_screenshot` 说明：`图片**只展示给用户与留档**` ⊕ `同时也会送进你的上下文…` ⇒ 自相矛盾。
+// 现在的做法是**整句二选一**（`lib/shared/utils.js` 里的 `VISION_ENABLED_*_COPY`）✓
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { VISION_ENABLED, VISION_CLAUSE, visionLimitationNote, formatScreenshotSummary } from '../lib/shared/utils.js';
+import {
+  VISION_ENABLED,
+  VISION_CLAUSE,
+  visionLimitationNote,
+  formatScreenshotSummary,
+  VISION_ENABLED_TOOL_COPY,
+  VISION_ENABLED_SKILL_COPY,
+  VISION_ENABLED_SUMMARY_COPY,
+} from '../lib/shared/utils.js';
 import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
 
@@ -172,6 +182,17 @@ test('单一来源：禁用文案只在 utils.js 定义一份，工具 / 技能�
 });
 
 // ---------------- 开启侧：那句必须真的消失 ----------------
+/** 以**绝对路径** import（data: URL 模块里的相对 specifier 不解析 ⇒ 必须给 file:// 或 data: URL）。 */
+const ABS = (rel) => pathToFileURL(path.resolve(rel)).href;
+
+/** readability-fix 技能正文里那一段（含结尾空行 —— 那正是最容易丢的字节）。 */
+function skillFragmentOf(content) {
+  const a = content.indexOf('- 需要给用户可视证据时用');
+  const b = content.indexOf('## 绝不允许的', a);
+  if (a < 0 || b < 0) throw new Error('技能段落锚点失效');
+  return content.slice(a, b + '## 绝不允许的'.length);
+}
+
 /**
  * 把源码里的开关**真的改成 true** 再载入 —— 用来验证"开启后那句确实消失"。
  *
@@ -182,7 +203,7 @@ test('单一来源：禁用文案只在 utils.js 定义一份，工具 / 技能�
 async function loadWithVisionOn(file) {
   const patched = read('lib/shared/utils.js')
     .replace('export const VISION_ENABLED = false;', 'export const VISION_ENABLED = true;')
-    .replace("from './constants.js'", "from '" + pathToFileURL(path.resolve('lib/shared/constants.js')).href + "'");
+    .replace("from './constants.js'", "from '" + ABS('lib/shared/constants.js') + "'");
   assert.ok(patched.includes('export const VISION_ENABLED = true;'), '改写锚点失效（开关定义变了？）');
   const utilsUrl = 'data:text/javascript;base64,' + Buffer.from(patched, 'utf8').toString('base64');
   if (file === 'lib/shared/utils.js') return import(utilsUrl);
@@ -205,9 +226,54 @@ test('开关打开后：三处都不再说"看不到图像"，且技能段落的
   assert.ok(!desc.includes('当前模型是纯文本的'), '开启后不得再说"当前模型是纯文本的"');
   assert.ok(!skill.includes('看不到图像内容'), '开启后技能不得再说"看不到图像内容"');
   assert.ok(!summary.includes('看不到图像'), '开启后截图摘要不得再说"看不到图像"');
+  assert.ok(!summary.includes('不进入你的上下文'), '开启后截图摘要不得再说"不进入你的上下文"（与事实相反 ✗）');
   // 关闭侧的原文在开启侧必须**不出现**（否则等于开关没接上）
   assert.ok(!desc.includes(BASELINE_TOOL_DESC), '开启后旧说明整条都该走了');
   assert.ok(!skill.includes(BASELINE_SKILL_FRAGMENT), '开启后旧技能文案整段都该走了');
+  assert.ok(!summary.includes(BASELINE_SCREENSHOT_SUMMARY), '开启后旧摘要整条都该走了');
   // 空行是两档共用的排版，别只在一档里对
-  assert.ok(skill.includes('截图也会进入你的上下文。\n\n## 绝不允许的'), '开启侧也要保持段落空行');
+  assert.ok(skill.includes('的读数）。\n\n## 绝不允许的'), '开启侧也要保持段落空行');
+});
+
+test('⑥ 开启分支的文案常数：单一来源、如实、且不含任何"看不到"式反话', () => {
+  const utils = read('lib/shared/utils.js');
+  for (const sym of ['VISION_ENABLED_TOOL_COPY', 'VISION_ENABLED_SKILL_COPY', 'VISION_ENABLED_SUMMARY_COPY']) {
+    assert.equal(utils.split('export const ' + sym).length - 1, 1, sym + ' 只能定义一次');
+  }
+  // 三条都必须是**如实的**：说图会进上下文 + 只有预算内那几张 + 超出的会说明
+  for (const [name, s] of [
+    ['tool', VISION_ENABLED_TOOL_COPY],
+    ['skill', VISION_ENABLED_SKILL_COPY],
+    ['summary', VISION_ENABLED_SUMMARY_COPY],
+  ]) {
+    assert.ok(s.length > 20, name + ' 启用分支太短，等于什么都没说');
+    assert.match(s, /送进你的上下文/, name + ' 必须如实说明图会进上下文');
+    assert.match(s, /预算内/, name + ' 必须说明**只有**被送进去的那几张（受预算上限约束）');
+    assert.match(s, /省略并说明/, name + ' 必须说明超出的会被省略并说明');
+    assert.doesNotMatch(s, /看不到图像|不进入你的上下文|纯文本/, name + ' 不得再出现"看不到"式反话');
+    assert.doesNotMatch(s, /只展示给用户/, name + ' 不得再说"只展示给用户"（与"会进上下文"矛盾 ✗）');
+  }
+  // ③ 里那条与开关**无关**的 evidence 规则必须两档共用 —— 不能被条件化掉
+  const off = formatScreenshotSummary(META);
+  assert.ok(off.includes('**截图不能作为 complete_task 的 evidence**'), '关闭侧仍有 evidence 规则');
+});
+
+test('⑦ 开启分支的实际渲染：不复现第 7 步审校发现的那两类坏话（整句二选一）', async () => {
+  const onUtils = await loadWithVisionOn('lib/shared/utils.js');
+  const onSchemas = await loadWithVisionOn('lib/assistant/tool-schemas.js');
+  const onSkills = await loadWithVisionOn('lib/assistant/skill-defs.js');
+  const desc = onSchemas.TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
+  const skill = skillFragmentOf(onSkills.SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content);
+  const summary = onUtils.formatScreenshotSummary(META);
+  // ① 缺陷一：坏标点「：，」
+  assert.ok(!summary.includes('：，'), '坏标点：冒号后直接跟逗号（第 5 步的拼接残留 ✗）');
+  // ② 缺陷二：自相矛盾 —— 同一句里既"只展示给用户"又说"送进你的上下文"
+  for (const [name, s] of [['工具说明', desc], ['技能段', skill], ['截图摘要', summary]]) {
+    assert.ok(!(s.includes('只展示给用户') && s.includes('送进你的上下文')), name + ' 自相矛盾 ✗');
+  }
+  // ③ 与开关无关的两条：evidence 规则仍在；「文本证据优先」的指导仍在
+  for (const [name, s] of [['截图摘要', summary], ['工具说明', desc]]) {
+    assert.ok(s.includes('截图不能作为 complete_task 的 evidence') || s.includes('文本证据优先') || s.includes('需要可判断的文本证据'),
+      name + ' 开启侧也必须保留"文本证据优先 / 截图不是 evidence"的指导');
+  }
 });

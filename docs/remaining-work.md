@@ -28,18 +28,58 @@
 | 4 | **接线**：截图在 tool 消息之后作为**追加的 user 消息**进入上下文 | ✅ | `lib/assistant/agent.js`（`messages.push({role:'tool'…})` 之后）|
 
 对应门禁：`tests/history-array-content.test.mjs`(8)、`tests/vision-switch.test.mjs`(6)、
-`tests/vision-messages.test.mjs`(9)、`tests/vision-wiring.test.mjs`(4)
+`tests/vision-messages.test.mjs`(11)、`tests/vision-wiring.test.mjs`(4)、
+`tests/vision-text-conditional.test.mjs`(12)、`tests/e2e/vision-switch.spec.mjs`（真浏览器两臂）
 
-**还剩（按顺序做，第 5 步才需要跑 eval）**：
+**还剩（按顺序做，第 6 步才需要跑 eval）**：
 
-| # | 事项 | 注意 |
+| # | 事项 | 状态 / 注意 |
 | --- | --- | --- |
-| 5 | 三处"你看不到图像"文案改用条件化 | ⚠ 见下方**关键技巧**：做成"包裹现有文案"就是**纯重构**，今天输出逐字节不变 ⇒ **不需要测量** ✓ |
-| 6 | 打开开关（`VISION_ENABLED = true`）| **这一步才真正改变模型可见内容** ⇒ 到这一步才必须测量 ✓ |
-| 7 | 对照门禁：开关关闭时请求里**不得**出现任何 `image_url`；开启时**应当**出现 | 可在 E2E 里读 mock LLM 收到的请求断言（夹具已有 `getLlmRequests()`）|
-| 8 | 预算实测：确认 ~400 token/图、以及 `maxImages` 取几合适 | 打开后按真实会话量一量 |
+| 5 | 三处"你看不到图像"文案条件化 | ✅ 已完成（关闭侧与 HEAD 逐字节相同，脚本可证）|
+| 6 | 打开开关（`VISION_ENABLED = true`）| ⬜ **未做**。**这一步才真正改变模型可见内容** ⇒ 到这一步才必须测量 ✓ |
+| 7 | 对照门禁：关闭时请求里**不得**有 `image_url`；开启时**应当**有 | ✅ 已完成，见下 |
+| 8 | 预算实测：确认 token/图、以及 `maxImages`/`maxBytes` 取几合适 | 🟡 **部分完成**：token/图已实测（578）；张数/体积上限仍是**拍的**，需按真实会话量再定 |
 
-### 关键技巧：第 5 步怎么做到"零风险"
+### 第 7 步怎么做的（可复核）
+
+- **真截图**走通了：`tests/e2e/vision-switch.spec.mjs` 用真 Chromium + 真扩展 + `cdpEnabled: true`，
+  夹具脚本调 `take_screenshot`（CDP `Page.captureScreenshot`）拿到真 base64
+  （实测 1280×705 JPEG q40 ≈ 63KB），**不是**在 mock 层塞假图 ✓
+- **两臂都由开关的实际值决定**：`test.skip(VISION_ENABLED !== false / !== true)` ——
+  开关一打开，**同一份门禁自动变成开启臂**，不会出现"开了但没人管" ✓
+- **关门臂（今天）**：所有捕获请求里图像部件数 = 0，同时断言截图**文本**结果确实发出去过
+  （否则"没有图"可能只是"没截图"，证不出东西）✓
+- **开门臂（未来）**：图像必须出现在 `take_screenshot` 的 tool 消息**之后**、作为**追加的 user 消息**，
+  且 tool 消息本身仍是纯文本（`checkScreenshotImageShape` 逐条验形态）✓
+- **门禁有牙齿**（三条证据）：① spec 内的纯函数判定逻辑用构造的坏数据验了一遍（把图塞进 tool 消息、
+  少掉带图消息、role 不对、非 data: URL 全都要被判不合格）；② 故意往捕获请求里注入一个假图 ⇒
+  关门臂真的红了（错误信息里给出请求形态、不打印 base64）；③ 把开关**临时**改成 `true` 跑了一次，
+  开启臂真的**绿**了（证明这份门禁不是"永远跳过"）✓
+- **已知未覆盖**：开启臂只在**临时改常量**的那一次跑过；它平时的"跳过"是靠 `test.skip` +
+  常量判断，**没有**独立的 CI 强制（若有人删掉开启臂，只有 `tests/vision-messages.test.mjs`
+  的源码级接线门禁会红）⚠
+
+### 第 8 步实测（真实 API）
+
+方法：同一段文本发两次（`deepseek-flash`，`stream:false`，`max_tokens:4`），读 `usage.prompt_tokens` 差值。
+
+| 图宽（16:9，JPEG q40） | 体积 | 差值 prompt_tokens |
+| --- | --- | --- |
+| 320px | 1.4KB | 192 |
+| 640px | 3.2KB | 192 |
+| 960px | 6.4KB | 314 |
+| **1280px（本仓库默认视口）** | 11.5KB | **578**（连测 3 次都是 578，纯文本基线恒为 44） |
+
+⇒ 旧的 `TOKENS_PER_IMAGE = 400` 是**低估**（默认视口实测 578）⇒ 改成 **600**（保守上界）✓
+⚠ 张数（`maxImages: 2`）与单张体积（`maxBase64Chars: 2e6`）**仍是拍的**：
+它们要在第 6 步打开开关后按真实会话量定 —— 本轮**没有**做，不要当成已验过 ✗
+
+### 关键技巧：第 5 步怎么做到"零风险"（第 7 步已升级为**整句**二选一）
+
+⚠ 下面是第 5 步当时用的"只包一个从句"的做法。第 7 步审校发现**只条件化从句会拼出坏话**
+（`：，` 坏标点、"只展示给用户" ⊕ "送进你的上下文"自相矛盾）⇒ 现在三处都是**整句**二选一
+（`lib/shared/utils.js` 的 `VISION_ENABLED_TOOL_COPY` / `VISION_ENABLED_SKILL_COPY` /
+`VISION_ENABLED_SUMMARY_COPY`）。**关闭侧仍然是逐字节原文** ✓ 原理不变：
 
 不要**改写**那三处文案 ✗（措辞一变就是模型可见变化 ⇒ 立刻要测量）。
 而是**把现有文案原样包起来** ✓：

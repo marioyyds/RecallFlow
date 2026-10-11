@@ -37,7 +37,13 @@ test('开启时说明为空串（否则会出现"嘴上说看不到、上下文�
 
 test('单一来源：这两个符号只在一个文件里定义（别处硬编码"看不到图像"会被这条盯上）', () => {
   const utils = fs.readFileSync('lib/shared/utils.js', 'utf8');
-  assert.equal(utils.split('export const VISION_ENABLED').length - 1, 1, '开关只能定义一次');
+  // ⚠ 必须用**词边界**数，不能用 `split('export const VISION_ENABLED').length - 1`：
+  // 那会把 `VISION_ENABLED_TOOL_COPY` 这类**同前缀的文案常数**也数进去 ⇒ 假红 ✗（第 7 步踩到）
+  assert.equal(
+    (utils.match(/export const VISION_ENABLED\b/g) || []).length,
+    1,
+    '开关只能定义一次（注意别把 VISION_ENABLED_*_COPY 也算进来）'
+  );
   assert.equal(utils.split('export function visionLimitationNote').length - 1, 1, '说明函数只能定义一次');
 });
 

@@ -1703,6 +1703,9 @@ export function toolResultsText() {
 // 刻意与常规 E2E 用同一套夹具服务与同一套页面判据，**只换掉"谁在做决定"**：
 // 否则"脚本下能过、真模型下不能过"就无法归因到底是能力问题还是文案问题。
 const REAL = /^(1|true|yes)$/i.test(String(process.env.E2E_LLM_REAL || ''));
+// 视觉截图场景用哪一臂：'1' 才真的调 `take_screenshot`（见下面那个场景块的说明）。
+// 默认关闭 ⇒ 默认跑的就是今天的行为（请求里不该有任何图像内容）。
+const VISION_SHOT_ARM = /^(1|true|yes)$/i.test(String(process.env.E2E_LLM_VISION_SHOT || ''));
 const REAL_BASE = process.env.E2E_LLM_REAL_BASE || 'https://api.deepseek.com';
 const REAL_KEY = process.env.E2E_LLM_REAL_KEY || '';
 const REAL_MODEL = process.env.E2E_LLM_REAL_MODEL || '';
@@ -1983,6 +1986,35 @@ const llm = http.createServer((req, res) => {
         return;
       }
       finalText(res, '已把正文调成 17px / 行高 1.7 / 深色文字，并把容器宽度限制到 760px，横向溢出已消除。', 80);
+      return;
+    }
+
+    // 场景：视觉（多模态）截图链路 —— 对照门禁用（tests/e2e/vision-switch.spec.mjs）。
+    //
+    // 为什么要让**被叫到的那条 user 消息决定**脚本顺序（而不是分两个场景）：
+    //   · 开关关闭（今天）：`take_screenshot` 走 CDP 拿真图，但 `visionMessagesFor()`
+    //     返回空数组 ⇒ 请求里**不得**出现任何图像内容（对照臂）；
+    //   · 开关打开（未来）：同一条工具调用之后，agent.js 会**追加一条 user 消息**承载图片
+    //     ⇒ 请求里**必须**出现图像内容，且 `tool` 消息本身仍是纯文本（形态臂）。
+    // 两臂共用这一份脚本，靠环境变量选路 ⇒ 不会出现"脚本只覆盖了一臂"。
+    // 触发词用**字面量**而不是 PLAYBOOKS：见 vision-switch.spec.mjs 的说明
+    // （不把它登记成"能力剧本"，它验的是传输管道，不是一条新能力）。
+    if (userText.includes('来张截图')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      // 有截图臂才真的截图（没开这一臂时不再发起 take_screenshot）。
+      // spec 侧会按 `VISION_SHOT_ARM` 取**不同的锚点**证明脚本真的走过了（见 spec 的 ①）。
+      if (done === 1 && VISION_SHOT_ARM) {
+        // 真截图：走 CDP `Page.captureScreenshot`（e2e 已装扩展、cdpEnabled 由 spec 打开）。
+        toolStep(res, 'take_screenshot', { label: '视觉门禁', quality: 40 });
+        return;
+      }
+      if (done === 1 || done === 2) {
+        // 文本证据：用 `inspect_element({op:"styles"})`（只读、不需要审批）读回计算值。
+        toolStep(res, 'inspect_element', { op: 'styles', selector: '.wrap', props: ['font-size', 'max-width'] });
+        return;
+      }
+      finalText(res, '页面正文 11px、容器 1500px 宽，已按文本证据读出计算值。', 60);
       return;
     }
 
