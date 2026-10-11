@@ -16,7 +16,7 @@
 | `checkout-form` | 下单 | `/checkout` ✓ | 6 | `checkout-form` | ✓ | 6 | 2 | page |
 | `cross-tab-handoff` | 验证码 | `/handoff` ✓ | 4 | `cross-tab-handoff` | ✓ | 2 | 1 | page |
 | `csp-page-world-js` | 核对总价 | `/csp` ✓ | 3 | `page-world-js` | ✓ | 2 | 1 | page |
-| `date-picker-custom` | 入住 | `/datepicker` ✓ | 3 | `date-picker-custom` | ✓ | 3 | 1 | page |
+| `date-picker-custom` | 入住 | `/datepicker` ✓ | 4 | `date-picker-custom` | ✓ | 3 | 1 | page |
 | `debug-console-error` | 没反应 | `/debug` ✓ | 4 | `debug-console-error` | ✓ | 3 | 2 | page |
 | `dismiss-overlay` | 弹窗 | `/blocked` ✓ | 4 | `dismiss-overlay` | ✓ | 5 | 2 | page |
 | `download-verify` | 报表 | `/download` ✓ | 4 | `dialog-handling` | ✓ | 0 | 1 | payload |

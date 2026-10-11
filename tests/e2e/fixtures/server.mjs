@@ -1519,7 +1519,11 @@ function datePickerPage() {
         var k = y + '-' + pad(m) + '-' + pad(i);
         var b = document.createElement('button');
         b.type = 'button';
-        b.setAttribute('role', 'listitem');
+        // ⚠ 必须用**采集器认得的** role：'listitem' 不在
+        // page-text.js 的 INTERACTIVE_SELECTOR / INTERACTIVE_ROLES 里 ⇒
+        // 这个格子**根本不会进快照**（连带它的 aria-label（含「已订满」）也看不到）。
+        // 上一轮我把这个现象误读成"快照不列 disabled 元素"✗ —— 其实是夹具自己的 markup 问题。
+        b.setAttribute('role', 'button');
         b.setAttribute('aria-label', m + '月' + i + '日' + (FULL[k] ? '（已订满）' : ''));
         b.textContent = String(i);
         b.disabled = !!FULL[k];
@@ -2465,12 +2469,22 @@ const llm = http.createServer((req, res) => {
       const done = toolResults.length;
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
       if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '选择入住日期' }); return; }
-      // 异步渲染：先读一次，确认格子已经出来（也顺便看到"已订满"的信息）
-      if (done === 2) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
-      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '下个月' }); return; }
-      if (done === 4) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
-      if (done === 5) { toolStep(res, 'click_element', { role: 'listitem', name: '3月15日' }); return; }
-      if (done === 6) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
+      // ⚠ 日历是异步渲染的（200ms）。脚本化模式下没有"思考延迟"，
+      //   直接读快照会读到"加载中…"—— 上一轮「已订满」看不到就是这个原因 ✗
+      //   （我一度误读成"快照不列 disabled 元素"）。这里用 wait_for_element 钉住渲染。
+      if (done === 2) {
+        toolStep(res, 'wait_for_element', { selector: 'button[data-date="2026-02-28"]', state: 'visible', timeoutMs: 4000 });
+        return;
+      }
+      if (done === 3) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
+      if (done === 4) { toolStep(res, 'click_element', { role: 'button', name: '下个月' }); return; }
+      if (done === 5) {
+        toolStep(res, 'wait_for_element', { selector: 'button[data-date="2026-03-15"]', state: 'visible', timeoutMs: 4000 });
+        return;
+      }
+      if (done === 6) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
+      if (done === 7) { toolStep(res, 'click_element', { role: 'button', name: '3月15日' }); return; }
+      if (done === 8) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
       finalText(res, '已选择入住日期 2026/03/15（自定义日历：输入框是只读的，只能点日历；15 号在 3 月，需要先翻到下个月）。', 90);
       return;
     }
