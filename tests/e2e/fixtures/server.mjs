@@ -1400,6 +1400,59 @@ function paywallPage() {
 </body></html>`;
 }
 
+// 对话框页：验 **浏览器级 JS 对话框**（alert / confirm / prompt）。
+//
+// 难点是真实的：
+
+//   · `confirm` / `prompt` 会**阻塞页面 JS** —— 对话框没处理之前，页面就不动了；
+//   · 所以正确的下一步是 `handle_dialog`，而**不是**再点一次按钮（那只会叠加对话框）；
+//   · `prompt` 还需要**回填一个值**（`promptText`）—— 只 accept 会拿到默认值。
+//
+// 页面上记录两件事供断言：确认框的结果、以及 prompt 真正收到的文本。
+function dialogPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具对话框</title></head>
+<body>
+  <h1>备注管理</h1>
+  <div id="note">旧备注内容</div>
+  <button id="del" type="button" role="button" aria-label="删除备注">删除备注</button>
+  <button id="ren" type="button" role="button" aria-label="重命名备注">重命名备注</button>
+  <div id="status" role="status">就绪</div>
+  <script>
+    window.__confirmResult = null;
+    window.__promptValue = null;
+    window.__deleted = false;
+    window.__renamed = '';
+    var statusEl = document.getElementById('status');
+    document.getElementById('ren').addEventListener('click', function () {
+      // ⚠ 这里**同步**弹 prompt（而不是 setTimeout 延迟）：
+      // 实测延迟版反而让对话框处理不成功（原因未定，见剧本注释里的"已知缺口"），
+      // 而同步版是能跑通的路径。代价是"点击"这一步本身会被对话框卡住 ——
+      // 那**恰恰是真实体验**（点了之后页面就停住），也值得让用例覆盖到。
+      var v = window.prompt('请输入新的备注名', '未命名');
+      window.__promptValue = v;
+      if (v) {
+        window.__renamed = v;
+        document.getElementById('note').textContent = v;
+        statusEl.textContent = '已重命名：' + v;
+      } else {
+        statusEl.textContent = '已取消重命名';
+      }
+    });
+    document.getElementById('del').addEventListener('click', function () {
+      var ok = window.confirm('确定要删除这条备注吗？');
+      window.__confirmResult = ok;
+      if (ok) {
+        window.__deleted = true;
+        document.getElementById('note').textContent = '（已删除）';
+        statusEl.textContent = '已删除';
+      } else {
+        statusEl.textContent = '已取消删除';
+      }
+    });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -2274,6 +2327,11 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：浏览器级 JS 对话框（playbook id = 'dialog-handling'）。
+    //
+    // 节奏：先重命名（prompt 需要**回填值** → 走 handle_dialog({promptText})），
+    // 再删除（confirm 只需确定）。刻意都先点一次按钮**让对话框出现**，
+    // 再读快照看到"未处理对话框"的提示，然后处理它 —— 这正是真实使用路径。
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2330,7 +2388,8 @@ const main = http.createServer((req, res) => {
                                                     : req.url && req.url.startsWith('/undo') ? undoPage()
                                                       : req.url && req.url.startsWith('/validate') ? validatePage()
                                                         : req.url && req.url.startsWith('/paywall') ? paywallPage()
-                                                          : mainPage()
+                                                          : req.url && req.url.startsWith('/dialog') ? dialogPage()
+                                                            : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {
