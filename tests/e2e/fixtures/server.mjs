@@ -1286,6 +1286,21 @@ function feedPage() {
 //   事件序列每次都出现 play → playing → (waiting) → … → pause → ended
 //   （见 golden.spec.mjs 里这条用例的基线断言）。
 //
+// ⚠⚠ **时长（duration）必须等"完整解析"之后才是真的** —— 这是这条用例**唯一**的 flaky 来源，
+//    已经做成确定的（细节与实测数字见脚本里 `ensureFiniteDuration` 的注释）：
+//    MediaRecorder 录出来的 WebM，"时长"要等解复用器**读到文件尾**才知道。实测事件顺序是
+//    `durationchange:Infinity` → `loadedmetadata`（那一刻 duration 仍可能是 `Infinity`）
+//    → `durationchange:<真时长>`；文件没解析完时 Chromium 会把"已读到的部分"当整段，
+//    duration 于是落成 `0` / `0.001` / `0.086` / `0.32` 这种**极小值**
+//    （把同一段素材截到前 1024 字节实测 `0.086`、截到 4096 字节实测 `0.787`、截 512 字节实测 `0`）。
+//    blob URL 是本地瞬间可读的，所以**多数时候**解析会在 `loadedmetadata` 之前完成（直接就是真数字）
+//    —— 这就是"上一轮连跑 4 次全绿、本轮首次抓到 `0.001`"的成因。
+//    ⇒ 处理：`loadedmetadata` 之后若 `!isFinite(duration) || duration < 1`，就把 `currentTime`
+//      设成 `1e101` **逼 Chromium 完整解析**，等 `durationchange` 拿到真时长后再复位 `currentTime = 0`；
+//      **只有拿到有限真时长才设 `__ready = true`**（`__durFix.rounds` 记着这一手用了几次）。
+//      该页里**两处**读时长的地方（主播放器 + 「跳转到末尾」用的副本播放器）都走同一个入口，
+//      因为 `duration - 1` 在 duration 还是 Infinity 时是空操作 ⇒ 那条"中途缓冲"判据也会跟着 flaky。
+//
 // ⚠ body 收窄到 560px：CDP 的坐标类工具用元素**中心点**，面板贴右宽 640px，
 //   全宽元素的中心会落在面板底下（点击/悬停会打到面板上）。见 /feed 的说明。
 function videoPage() {
@@ -1330,6 +1345,10 @@ function videoPage() {
     //   中途缓冲（位置 > 0.5 秒）才说明"播着播着卡住了" —— 那只能由 seek 到**未缓冲区间**造出来。
     window.__midWaits = 0;
     window.__lastMidWaitAt = -1;
+    // ⑥ 「逼 Chromium 完整解析媒体」这一手的账本：rounds > 0 表示真的需要这一手
+    //    （loadedmetadata 那一刻 duration 还不是真数字）。用例里有一条断言把它钉住，
+    //    免得日后有人把这一手删掉却以为"反正一直都很绿"。
+    window.__durFix = { rounds: 0, recordDur: null, targetDur: null };
     window.__seeked = 0;
     window.__events = [];
     window.__lastWaitingAt = -1;
@@ -1348,6 +1367,91 @@ function videoPage() {
     //   —— 那一刻它还是 null，于是**事件序列永远写不进 DOM**（实测：面板里其它数字都有、
     //   只有它空白）。而"事件序列"恰恰是本场景判断"在播/卡住/播完"的关键证据。
     function evLogNow() { return document.getElementById('ev-log'); }
+
+    // ⑥ **时长必须是真的**（这一手是为了把"时好时坏"变成确定）：等 video 的 duration 落成
+    //    一个**有限且 > 0** 的真数字，再对外宣称"媒体准备好了"；否则**逼 Chromium 完整解析**。
+    //
+    // 为什么必须有这一手（实测，不是推测）：
+    //   · 媒体是页面内 MediaRecorder 现录的 WebM。它走 MediaRecorder 自己的写头路径，
+    //     时长是要**把整段文件解析完**才知道的（我的实测里录出来的文件其实**带** Duration
+    //     字段 0x4489，但 Chromium 的读法分两步，见下）。
+    //   · 实测事件顺序：durationchange:Infinity → loadedmetadata（duration 当时=Infinity）
+    //     →（解析到文件末尾）→ durationchange:<真时长>。也就是说
+    //     **loadedmetadata 触发那一刻 duration 可能是 Infinity**（"媒体还没解析完"的哨兵值）。
+    //     blob URL 因为是本地瞬间可读，多数时候解析会在 loadedmetadata 之前完成（那就直接是真数字），
+    //     —— 这正是这条用例"上一轮连跑 4 次全绿、本轮首次抓到"的**时好时坏**来源。
+    //   · 另一头：文件没解析完时 Chromium 会把"已读到的部分"当成整段，于是 duration 会落成
+    //     0 / 0.001 / 0.086 / 0.32 这种**极小值**。把文件截成前 1024 字节复现到 0.086，
+    //     截 4096 字节复现到 0.787，截 512 字节复现到 0 —— 与"本轮拿到 0.001"同一形态。
+    //     判据 dur0 > 1 要验的正是"这段 WebM 真的被解码了"，它被这种形态打红**不是判据的问题**。
+    //   · 标准解法（本函数）：loadedmetadata 之后若 !isFinite(duration) || duration < 1，
+    //     就把 currentTime 设成一个天文数字（1e101）—— Chromium 会**为了 seek 去完整解析媒体**，
+    //     解析完发出 durationchange，此时 duration 才是真的；拿到真时长后再把 currentTime 复位 0。
+    //     ⚠ 反过来也实测过（所以顺序不能变）：**先读到的 duration 不作数** —— 必须等
+    //     durationchange 之后再读。实测（直接读 vs 逼解析后读，同一段录出来的素材）：
+    //       · 完整文件：直接读 Infinity ／ 逼解析后 1.97 ← **这一手治的就是它**
+    //       · 截断文件：逼解析后 0 / 0.086 / 0.32 / 0.787（**文件真的不完整，救不回来**）
+    //     ⇒ 所以本函数只负责"把已经录完整的那段文件解析完"，**不会**、也不该把残缺文件变成合格素材：
+    //       残缺文件仍然会走超时分支，__ready 不会被设成 true，用例会**红在"媒体没准备好"**上
+    //       （而不是"红在一个骗人的数字"上）。判据一个字都没放宽。
+    function ensureFiniteDuration(el, cb) {
+      var done = false;
+      var rounds = 0;
+      var timer = null;
+      function finish(res) {
+        if (done) return;
+        done = true;
+        if (timer) clearTimeout(timer);
+        cb(res);
+      }
+      function ok() { return isFinite(el.duration) && el.duration > 0; }
+      function oneShot(evName, fn) { el.addEventListener(evName, fn, { once: true }); }
+      // 兜底：残余不确定性（例如某天 Chromium 改了行为、seek 不再触发完整解析）必须
+      // **如实失败**，不许把 __ready 设成 true 把用例拖绿 —— 所以这里有硬超时。
+      timer = setTimeout(function () {
+        finish({ dur: el.duration, forced: window.__durFix.rounds > 0, timedOut: true });
+      }, 15000);
+      function round() {
+        // ⚠ 这里**不靠 durationchange 当唯一判决**（实测的坑）：如果 duration 本来就已经是
+        //   有限值，seek 之后 Chromium **不会**再发一次 durationchange（它没"变过"）——
+        //   只等那个事件就会白白等到硬超时。所以用 seeked（seek 真做完的信号）+
+        //   兜底计时，两者谁先到都行，然后再读一次 duration 判真伪。
+        var settled = false;
+        var settle = function () {
+          if (settled) return;
+          settled = true;
+          if (rounds < 3 && !ok()) {
+            rounds += 1;
+            setTimeout(round, 50);
+            return;
+          }
+          // 拿到真时长后**复位到 0**：判据要求初始播放位置是 0，而且复位之后
+          // 后面那条"跳转到末尾"的 seek 才是从干净起点出发的。
+          el.currentTime = 0;
+          var done2 = function () { finish({ dur: el.duration, forced: true, timedOut: false }); };
+          oneShot('seeked', done2);
+          setTimeout(done2, 1500);
+        };
+        oneShot('seeked', settle);
+        setTimeout(settle, 1500);
+        // 逼解析：这个天文数字不需要是"合法时间"，Chromium 会把它夹到媒体末尾，
+        // 关键是这一步**迫使解复用器读到文件尾**，从而算出真时长。
+        el.currentTime = 1e101;
+        window.__durFix.rounds += 1;
+      }
+      function verify() {
+        if (ok()) { finish({ dur: el.duration, forced: window.__durFix.rounds > 0, timedOut: false }); return; }
+        // ⚠ readyState 还是 0（连元数据都没到）时 seek 是空操作，必须等 loadedmetadata，
+        //   否则会把"逼解析"浪费在一次无效 seek 上。
+        if (el.readyState >= 1) round();
+        else oneShot('loadedmetadata', function () { if (!done) verify(); });
+      }
+      oneShot('error', function () { finish({ dur: el.duration, forced: false, timedOut: false, error: true }); });
+      // ⚠ 不能只看 loadedmetadata：它在 duration 还是 Infinity 的时候就可能已经触发过了
+      //   （实测顺序见上）。所以**两条路都接上**：事件没来就等它，事件已经来过就直接校验。
+      oneShot('loadedmetadata', verify);
+      setTimeout(function () { if (!done) verify(); }, 0);
+    }
 
     // ① 首帧的自动播放**探针**：结果如实记账（成功 / 被拦的错误名 + 那一刻的真实 paused）。
     //    探针本身不改变页面语义 —— 紧接着页面自己 pause() 一次（探针的播放不算用户要播）。
@@ -1415,7 +1519,7 @@ function videoPage() {
         'probeError=' + (window.__probePlayError || 'none') +
         ' decoded=' + window.__decoded + ' waits=' + window.__waits + ' midWaits=' + window.__midWaits +
         ' t=' + t.toFixed(2) + ' dur=' + d.toFixed(2) + ' paused=' + v.paused +
-        ' ended=' + v.ended + ' statusbar=' + statusEl.textContent;
+        ' ended=' + v.ended + ' durFixRounds=' + window.__durFix.rounds + ' statusbar=' + statusEl.textContent;
     }
 
     // ⑤ 真证据：RVFC 帧计数（真解码过多少帧）+ currentTime 推进。
@@ -1478,7 +1582,16 @@ function videoPage() {
           update();
         });
       });
-      d2.addEventListener('loadedmetadata', function () {
+      // ⚠ 这里也必须**先等时长是真的**再 seek：副本读的是同一个 blob，loadedmetadata
+      //   那一刻它的 duration 同样可能是 Infinity（实测），于是 duration - 1 还是 Infinity、
+      //   seek 变成空操作 ⇒ waiting 不出现 ⇒ 用例的"中途缓冲"判据时好时坏地红。
+      //   这是**同一条 flaky 的另一处入口**，一并做确定（判据本身一个字没改）。
+      ensureFiniteDuration(d2, function (res2) {
+        if (!isFinite(res2.dur) || res2.dur <= 0) {
+          window.__probePlayError = res2.timedOut ? 'copy-duration-timeout' : 'copy-duration-unreadable';
+          update();
+          return;
+        }
         d2.play().then(function () {
           d2.currentTime = Math.max(0, d2.duration - 1);
         }).catch(function () {});
@@ -1543,8 +1656,39 @@ function videoPage() {
         //   这里只挂**录好的 blob URL**（文件型媒体）。素材本身仍然是真的：
         //   canvas 的动画帧被 MediaRecorder 编成真 WebM，再由 video 真解码播放。
         v.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
-        v.addEventListener('loadedmetadata', function () { window.__ready = true; update(); });
-        probeAutoplay();
+        // ① 挂上 src 之后**先等时长变成真的**（见 ensureFiniteDuration 的实测说明：必要时由它
+        //    把 currentTime 设成 1e101 逼 Chromium 完整解析，再复位 0），**然后**才宣称"准备好了"、
+        //    才做首帧自动播放探针。这样 __ready === true 就等于"媒体真被解码、时长是真的"，
+        //    用例读取到的 duration 不可能是 Infinity / 0 / 0.001 这类没解析完的中间值。
+        ensureFiniteDuration(v, function (res) {
+          try {
+          window.__durFix.recordDur = isFinite(res.dur) ? Number(res.dur) : String(res.dur);
+          window.__durFix.targetDur = 2;
+          if (!isFinite(res.dur) || res.dur <= 0) {
+            // 文件真的不完整（或 15 秒内没解析出来）：**不设 __ready**，让用例红在
+            // "媒体没有准备好"上，而不是拿一个骗人的数字继续往下跑。
+            window.__probePlayError = res.timedOut ? 'duration-timeout' : 'duration-unreadable';
+            update();
+            return;
+          }
+          // ⚠ 顺序是判据的一部分，不能随手改：**先把播放位置复位到 0，再宣告 ready 并做探针**。
+          //   实测踩到过：如果在"位置还没复位"时就把 __ready 设成 true，用例会在
+          //   initial.t === 0 那条基线上读到 0.0001 —— 探针那次 play() 已经推进了一点点。
+          //   复位是同步生效的 property：赋值后如果 seekable 非空，currentTime 立刻就是 0
+          //   （实测 12/12 次都是 0），所以这里读一次确认，没到 0 就等 seeked。
+          v.currentTime = 0;
+          var announce = function () {
+            window.__ready = true;
+            update();
+            probeAutoplay();
+          };
+          if (v.currentTime === 0) { announce(); return; }
+          var announced = false;
+          var announceOnce = function () { if (announced) return; announced = true; announce(); };
+          v.addEventListener('seeked', announceOnce, { once: true });
+          setTimeout(announceOnce, 1000);
+          } catch (e) { window.__probePlayError = 'ready-handler:' + (e && e.message ? e.message : String(e)); }
+        });
       };
       rec.start();
       setTimeout(function () { rec.stop(); }, 2000);
@@ -3537,7 +3681,20 @@ const llm = http.createServer((req, res) => {
       }
       if (done === 7) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
       if (done === 8) { toolStep(res, 'click_element', { role: 'button', name: '3月15日' }); return; }
-      if (done === 9) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
+      // 第 9 步：读回"值真的写进去了"。
+      //   ⚠ 这里原来是 `inspect_element({ op: 'value' })` —— **没有这个 op**
+      //     （`INSPECT_OPS` 只有 text / inspect / table / styles / options，见
+      //     lib/assistant/page-command-tools.js），所以它每一步都回 BAD_ARGS、
+      //     面板上是个红叉，而用例没断言这一步 ⇒ 长期静默失败（直到录 GIF 才看见）。
+      //     现在由 tests/e2e-scripted-steps.test.mjs 在**源码层**兜住这一类错误。
+      //   为什么读 `#status` 而不是读输入框：
+      //     · `op:'text'` 读的是 innerText/textContent，`<input>` 上恒为空 ✗；
+      //     · `get_attribute({attribute:'value'})` 读的是**属性**，而页面是
+      //       `inputEl.value = ...`（只改 property、不改 attribute）⇒ 会回
+      //       「属性不存在：value」，看着像失败、其实是个**换了个姿势的错读** ✗；
+      //     · 而 `#status` 的文案正是这次点击写下的「已选择入住日期：2026/03/15」，
+      //       是**同一段真实 DOM 状态**，也正是用例断言的那个节点 ✓
+      if (done === 9) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
       finalText(res, '已选择入住日期 2026/03/15（自定义日历：输入框是只读的，只能点日历；15 号在 3 月，需要先翻到下个月）。', 90);
       return;
     }
