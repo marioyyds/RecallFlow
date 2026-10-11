@@ -54,6 +54,23 @@ export function buildSkillsOverview() {
   const withPlaybook = skills.filter((s) => s.playbook && playbookIds.includes(s.playbook));
   const orphans = skills.filter((s) => !(s.playbook && playbookIds.includes(s.playbook)));
 
+  // 各技能声明的工具 → 统计"同一条纪律被重复写了多少次"。
+  //
+  // 为什么要量化：目标 ⑤ 要求抽「通用操作纪律」底座消除重复，而"重复"必须有**数字**才谈得上消除，
+  // 否则只会凭印象改 ✗ 这里直接从产物数出来（每个技能的 `tools: [...]`），
+  // 于是"要不要抽底座、抽哪几条"变成可复核的判断，而不是感觉。
+  const toolCounts = new Map();
+  for (const b of blocks) {
+    const mm = /tools:\s*\[([^\]]*)\]/.exec(b.body);
+    if (!mm) continue;
+    const names = (mm[1].match(/'([a-z0-9_]+)'/g) || []).map((x) => x.replace(/'/g, ''));
+    for (const n of new Set(names)) toolCounts.set(n, (toolCounts.get(n) || 0) + 1);
+  }
+  const ranking = Array.from(toolCounts.entries())
+    .map(([tool, count]) => ({ tool, count }))
+    .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool));
+  const duplicated = ranking.filter((r) => r.count >= 3);
+
   const lines = [];
   lines.push('# 技能清单（自动生成，勿手改）');
   lines.push('');
@@ -78,6 +95,26 @@ export function buildSkillsOverview() {
     lines.push('| `' + s.name + '` | ' + (s.displayName || '—') + ' | ' + (s.category || '—') + ' | `' + s.playbook + '` |');
   }
   lines.push('');
+  lines.push('## 重复的通用纪律（抽「底座」的依据，数出来的不是感觉）');
+  lines.push('');
+  lines.push('每个技能都要自带一遍"先快照、后操作、收尾 complete_task"这类纪律，');
+  lines.push('于是同一条纪律在多个技能里重复。下表统计**被至少 3 个技能声明**的工具 ——');
+  lines.push('数字越大，越说明它该被抽成公共底座（而不是在 36 份文案里各写一遍）。');
+  lines.push('');
+  lines.push('| 工具 | 声明它的技能数 |');
+  lines.push('| --- | --- |');
+  for (const r of duplicated) lines.push('| `' + r.tool + '` | ' + r.count + ' |');
+  lines.push('');
+  lines.push('（全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）');
+  lines.push('');
+  lines.push('<details><summary>全部工具的出现次数</summary>');
+  lines.push('');
+  lines.push('| 工具 | 技能数 |');
+  lines.push('| --- | --- |');
+  for (const r of ranking) lines.push('| `' + r.tool + '` | ' + r.count + ' |');
+  lines.push('');
+  lines.push('</details>');
+  lines.push('');
   lines.push('## ⚠ 孤儿技能（**没有**真浏览器验收 —— 文案写了，但没人验过）');
   lines.push('');
   lines.push('这些技能只在"模型读到文案"这一层有效，**没有**夹具页与 E2E 判据。');
@@ -93,7 +130,7 @@ export function buildSkillsOverview() {
     }
   }
   lines.push('');
-  return { skills, withPlaybook, orphans, playbookIds, text: lines.join('\n') + '\n' };
+  return { skills, withPlaybook, orphans, playbookIds, ranking, duplicated, text: lines.join('\n') + '\n' };
 }
 
 const OUT = 'docs/skills-overview.md';

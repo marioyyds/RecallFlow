@@ -45,6 +45,76 @@
 | `upload-file` | 文件上传（工具只说"未观测"，必须读回） | browser-automation | `upload-file` |
 | `virtual-list-scroll` | 虚拟列表 / 长列表（DOM 里没有 ≠ 页面上没有） | browser-automation | `virtual-list-scroll` |
 
+## 重复的通用纪律（抽「底座」的依据，数出来的不是感觉）
+
+每个技能都要自带一遍"先快照、后操作、收尾 complete_task"这类纪律，
+于是同一条纪律在多个技能里重复。下表统计**被至少 3 个技能声明**的工具 ——
+数字越大，越说明它该被抽成公共底座（而不是在 36 份文案里各写一遍）。
+
+| 工具 | 声明它的技能数 |
+| --- | --- |
+| `complete_task` | 33 |
+| `get_page_snapshot` | 31 |
+| `inspect_element` | 28 |
+| `click_element` | 24 |
+| `type_text` | 10 |
+| `select_option` | 8 |
+| `wait_for_element` | 7 |
+| `read_current_page` | 4 |
+| `add_entry` | 3 |
+| `annotate` | 3 |
+| `check_box` | 3 |
+| `get_ax_snapshot` | 3 |
+| `read_diagnostics` | 3 |
+| `scroll_page` | 3 |
+
+（全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）
+
+<details><summary>全部工具的出现次数</summary>
+
+| 工具 | 技能数 |
+| --- | --- |
+| `complete_task` | 33 |
+| `get_page_snapshot` | 31 |
+| `inspect_element` | 28 |
+| `click_element` | 24 |
+| `type_text` | 10 |
+| `select_option` | 8 |
+| `wait_for_element` | 7 |
+| `read_current_page` | 4 |
+| `add_entry` | 3 |
+| `annotate` | 3 |
+| `check_box` | 3 |
+| `get_ax_snapshot` | 3 |
+| `read_diagnostics` | 3 |
+| `scroll_page` | 3 |
+| `fetch_webpage` | 2 |
+| `knowledge_read` | 2 |
+| `run_javascript` | 2 |
+| `click_at` | 1 |
+| `drag_element` | 1 |
+| `get_attribute` | 1 |
+| `get_entry` | 1 |
+| `handle_dialog` | 1 |
+| `install_skill` | 1 |
+| `install_userscript` | 1 |
+| `list_frames` | 1 |
+| `list_tabs` | 1 |
+| `list_userscripts` | 1 |
+| `load_skill` | 1 |
+| `macro` | 1 |
+| `open_tab` | 1 |
+| `remove_entry` | 1 |
+| `run_userscript` | 1 |
+| `search_knowledge_base` | 1 |
+| `search_userscripts` | 1 |
+| `switch_tab` | 1 |
+| `take_screenshot` | 1 |
+| `undo_last_action` | 1 |
+| `upload_file` | 1 |
+
+</details>
+
 ## ⚠ 孤儿技能（**没有**真浏览器验收 —— 文案写了，但没人验过）
 
 这些技能只在"模型读到文案"这一层有效，**没有**夹具页与 E2E 判据。
