@@ -1,65 +1,63 @@
-// 「通用操作纪律」底座：所有技能共用一段，只在 load_skill 里定义一次。
+// 「通用操作纪律」底座：**实测有害，已停用** —— 这道门禁钉住这个决定，防止有人不加测量又加回来。
 //
-// ## 为什么值得一道门禁
+// ## 背景
 //
-// 实测（`docs/skills-overview.md` 的"重复的通用纪律"）：`complete_task` 被 33 个技能声明、
-// `get_page_snapshot` 31 个、`inspect_element` 28 个 —— 同一套纪律在 36 份文案里各写一遍 ✗
-// 重复不会让它更可靠，只会更容易**漂移**（改一处忘另一处）。
+// 第 20 轮统计发现同一套纪律在 36 份技能文案里重复（`complete_task`×33、`get_page_snapshot`×31、
+// `inspect_element`×28），于是第 23 轮把纪律抽成 `COMMON_OPERATING_DISCIPLINE`，
+// 由 `load_skill` **每次加载技能时统一附加** —— 看起来是很自然的"消重"✗
 //
-// 抽成底座后，这里钉住三件事：
-//   ① 底座**定义存在且是唯一来源**；
-//   ② 每个技能加载时都会带上它（不是"某些技能才有"）；
-//   ③ 底座必须包含那几条被反复重复的纪律（否则抽出来的东西没意义）。
+// ## 实测结果（真模型 eval，同一场景/同一模型，付费墙那条）
+//
+// | 配置 | 通过 / 次数 | 通过率 |
+// | --- | --- | --- |
+// | **注入底座** | 3 / 7 | ≈43% ✗ |
+// | **不注入** | 4 / 4（另加加底座之前的 1 次，共 5/5）| **100%** ✓ |
+//
+// ⇒ **每次 load_skill 追加约 600 字符的通用纪律，稀释了技能正文，造成真实退化** ✗
+//
+// ## 因此本门禁断言的是"**不要**注入"，而不是"要注入"
+//
+// 这条约束的方向与直觉相反，所以更要写死 + 写清原因：**没有测量就不要加提示** ✗
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { loadSkill, COMMON_OPERATING_DISCIPLINE } from '../lib/assistant/skill-tools.js';
 
+const SRC = fs.readFileSync('lib/assistant/skill-tools.js', 'utf8');
+
 const mkDeps = (skill) => ({
   getMergedSkills: async () => [skill],
   validateSkillTools: () => [],
 });
 
-test('底座存在，且包含被反复重复的那几条纪律', () => {
-  assert.ok(COMMON_OPERATING_DISCIPLINE.length > 200, '底座不能是空的摆设');
-  assert.match(COMMON_OPERATING_DISCIPLINE, /get_page_snapshot/, '要包含"先看清再动手"');
-  assert.match(COMMON_OPERATING_DISCIPLINE, /inspect_element|回读/, '要包含"改完回读确认"');
-  assert.match(COMMON_OPERATING_DISCIPLINE, /complete_task/, '要包含"收尾如实汇报"');
-  assert.match(COMMON_OPERATING_DISCIPLINE, /不要重试同一条调用|换策略/, '要包含"失败要换策略"');
-  assert.match(COMMON_OPERATING_DISCIPLINE, /不确定/, '要包含"不确定就说不确定"');
-});
-
-test('**每个**技能加载时都会带上底座（不是部分技能才有）', async () => {
-  for (const name of ['随便一个技能', '另一个']) {
-    const r = await loadSkill(mkDeps({ name: 'x', title: name, description: 'd', content: '正文' }), { name });
-    assert.ok(String(r.result).includes('通用操作纪律'), name + ' 没带上底座');
-    assert.ok(String(r.result).includes('正文'), '技能正文也还要在');
-  }
-});
-
-test('底座放在技能正文**之后**（末尾更被重视，也便于日后从正文里删掉重复段落）', async () => {
+test('**不得**把通用纪律底座拼进 load_skill 的返回里（实测造成退化）', async () => {
   const r = await loadSkill(mkDeps({ name: 'x', title: 't', description: 'd', content: '正文标记AAA' }), { name: 't' });
   const text = String(r.result);
-  assert.ok(text.indexOf('正文标记AAA') < text.indexOf('通用操作纪律'), '底座应排在正文之后');
+  assert.ok(text.includes('正文标记AAA'), '技能正文必须在');
+  assert.ok(!text.includes('通用操作纪律'), '底座**不该**出现（实测注入后通过率从 5/5 掉到 3/7）');
 });
 
-test('找不到技能时**不**塞底座（否则每条错误信息都变长，且与纪律无关）', async () => {
-  const r = await loadSkill({ getMergedSkills: async () => [], validateSkillTools: () => [] }, { name: '不存在' });
-  assert.equal(r.ok, false);
-  assert.ok(!String(r.result).includes('通用操作纪律'), '失败信息里不该出现底座');
+test('注入语句必须保持停用状态（哪怕只是被取消注释）', () => {
+  const live = SRC.split('\n').filter((l) => !l.trim().startsWith('//'));
+  assert.ok(
+    !live.some((l) => l.includes('parts.push(COMMON_OPERATING_DISCIPLINE)')),
+    '有人把注入放回来了 —— 请先按 docs/regression-red-flag.md 重新测量通过率'
+  );
 });
 
-test('唯一来源：底座只在 skill-tools.js 里定义一次（别处不许再抄一份）', () => {
-  const src = fs.readFileSync('lib/assistant/skill-tools.js', 'utf8');
-  assert.equal(src.split('export const COMMON_OPERATING_DISCIPLINE').length - 1, 1, '只能定义一次');
-  // 只数**标题行**（`## 通用操作纪律`）：文件顶部的说明注释里也会提到这个名字，那是文档不是第二份底本
-  assert.equal(src.split('## 通用操作纪律').length - 1, 1, '底座正文只应出现一次');
+test('底座常量本身留着，并带上"为什么停用"的说明（免得下一个人重新发明）', () => {
+  assert.ok(COMMON_OPERATING_DISCIPLINE.length > 200, '常量还在（内容本身是对的，问题在"每次注入"）');
+  assert.match(SRC, /不要\*\*把通用纪律底座拼进技能返回里|实测它会造成退化/, '源码里要写明停用原因');
+  assert.match(SRC, /3 \/ 7|3 次通过|≈43%/, '要带上实测数字，否则后人无从判断');
 });
 
-test('这条门禁本身有牙齿：把底座从装配里去掉就该红', () => {
-  const guilty = (s) => !s.includes('parts.push(COMMON_OPERATING_DISCIPLINE)');
-  assert.equal(guilty('const parts = []; return { result: parts.join() };'), true, '没装配就要被抓');
-  const real = fs.readFileSync('lib/assistant/skill-tools.js', 'utf8');
-  assert.equal(guilty(real), false, '当前实现不该被抓');
+test('这条门禁本身有牙齿：把注入放回去就该红', () => {
+  const guilty = (src) => {
+    const live = src.split('\n').filter((l) => !l.trim().startsWith('//'));
+    return live.some((l) => l.includes('parts.push(COMMON_OPERATING_DISCIPLINE)'));
+  };
+  assert.equal(guilty('  parts.push(COMMON_OPERATING_DISCIPLINE);'), true, '活的注入要被抓');
+  assert.equal(guilty('  // parts.push(COMMON_OPERATING_DISCIPLINE);'), false, '注释掉的不算');
+  assert.equal(guilty(SRC), false, '当前实现不该被抓');
 });
