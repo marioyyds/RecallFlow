@@ -386,9 +386,12 @@ test('previewArgsJson: 超长参数退化为字段名列表，仍然是合法 JS
   assert.equal(typeof parsed, 'object');
 });
 
-test('previewArgsJson: 数组超长时补「共 N 项」标记，而不是截掉', () => {
+test('previewArgsJson: 数组超长时补**可辨的**省略标记，而不是截掉', () => {
   const json = previewArgsJson({ texts: ['甲', '乙', '丙', '丁', '戊'] });
-  assert.ok(json.includes('共 5 项'), json);
+  // 形态必须是 `⟨…省略 N 项⟩`：旧写法 `…共 N 项` 与真实元素同形，
+  // 读者会把它当成一个真的值（本仓库真被这个误导过一次，见 tests/omit-mark.test.mjs）
+  assert.ok(json.includes('⟨…省略 5 项⟩'), json);
+  assert.ok(!json.includes('…共 5 项'), '不该再用与数据同形的旧标记');
   const parsed = JSON.parse(json);
   assert.equal(parsed.texts.length, 4, '前 3 项 + 1 个标记元素');
   assert.deepEqual(parsed.texts.slice(0, 3), ['甲', '乙', '丙']);

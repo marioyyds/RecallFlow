@@ -3370,13 +3370,18 @@
   function norm(text) {
     return String(text === void 0 || text === null ? "" : text).replace(/\s+/g, " ").trim();
   }
+  var OMIT_MARK_START = "\u27E8\u2026\u7701\u7565 ";
+  var OMIT_MARK_END = " \u9879\u27E9";
+  function formatOmittedItems(n) {
+    return OMIT_MARK_START + n + OMIT_MARK_END;
+  }
   function previewArgsJson(args, maxLen = 240) {
     const shorten = (v, depth) => {
       if (typeof v === "string") return v.length > 80 ? v.slice(0, 80) + "\u2026" : v;
       if (Array.isArray(v)) {
         const cap = 3;
         const head = v.slice(0, cap).map((x) => shorten(x, depth + 1));
-        if (v.length > cap) head.push("\u2026\u5171 " + v.length + " \u9879");
+        if (v.length > cap) head.push(formatOmittedItems(v.length));
         return head;
       }
       if (v && typeof v === "object") {

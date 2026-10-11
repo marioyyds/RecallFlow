@@ -314,10 +314,13 @@ test('多参数合计也受限（不会因为参数多就线性膨胀）', () =>
   assert.ok(text.length <= 2000, '实际 ' + text.length);
 });
 
-test('巨大数组：只展开前几项并标注总数', () => {
+test('巨大数组：只展开前几项并标注总数（标记必须是**可辨的**元信息形态）', () => {
   const big = Array.from({ length: 100000 }, (_, i) => i);
   const text = loggedText(big);
-  assert.ok(text.includes('共 100000 项'), text.slice(0, 200));
+  // 形态从 `…共 N 项` 改成 `⟨…省略 N 项⟩`：前者与真实元素同形，
+  // 读者会把它当成一个真的值（本仓库真被这个误导过一次，见 tests/omit-mark.test.mjs）
+  assert.ok(text.includes('⟨…省略 100000 项⟩'), text.slice(0, 200));
+  assert.ok(!text.includes('…共 100000 项'), '不该残留与数据同形的旧形态');
   assert.ok(text.length <= 2000);
 });
 
