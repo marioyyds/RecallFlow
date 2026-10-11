@@ -780,6 +780,54 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['3月15日'],
     },
   },
+  'infinite-scroll-hover-preview': {
+    id: 'infinite-scroll-hover-preview',
+    title: '复杂场景：无限滚动（页面级）+ hover 预览 —— 目标在第 4 批，预览只在可信 hover 后存在',
+    trigger: '信息流',
+    // 顺序即能力，而且**顺序本身**就是难点：
+    //   看一遍（目标不在，只有第 1 批）→ 那个"看起来能点"的加载按钮**推不动页面**
+    //   → 滚到底 → 等新批 → **再滚**（append 之后当前位置不再是底部了）→ ……
+    //   直到读到「已到底」才停 → hover 目标行 → 等预览填充 → 读回预览。
+    // ⚠ 三个与"时机/环境"有关的坑（都实测过）：
+    //   ① hover 用的是**调用那一刻的视口坐标** —— 目标不在视口里就先滚进视口
+    //      （滚完**先读一次页面**再 hover；刚滚过就 hover 会被浏览器按真实光标位置重算的
+    //      hover 状态挪走，实测滚动后约 60ms 补发一次重算）；
+    //   ② 行内 popover 只在你**还停在那一行上**时才有内容，而真实光标随时可能动
+    //      （实测：hover 后 41ms 就有一条真实 mousemove 落在侧边栏上，popover 当场被清空）
+    //      ⇒ 读的是页面留下的**耐久记录**（「最近一次查看」），hover 之后紧接着读；
+    //   ③ 预览是**异步取数**的：hover 完立刻读会读到空，先 `wait_for_element` 等它填充。
+    tools: ['get_page_snapshot', 'click_element', 'scroll_page', 'wait_for_element', 'hover_element', 'inspect_element'],
+    success:
+      '滚到第 4 批并读到第 5 批后的「已到底」（唯一停止信号）才停；把目标行滚进视口后用可信 hover 取出预览里的订单号，且滚动次数有上界',
+    eval: {
+      url: '/feed',
+      // hover_element 经 chrome.debugger 派发**可信**鼠标事件；合成事件拿不到预览
+      // （夹具检查 event.isTrusted：假事件只计数、不取内容）。
+      cdp: true,
+      instruction:
+        '这个反馈信息流一直在往下加载，帮我找到标题里带「结算页白屏」的那条反馈：把鼠标移到它上面，' +
+        '读出悬停预览里的订单号；同时告诉我这个信息流是不是已经到底了。',
+      pageChecks: [
+        // ★ 目标行的预览**真的出现过**：只可能来自"可信 hover 之后向服务端取到的那段文本"——
+        //   页面 HTML/JS 里根本没有订单号（结构性保证，不是靠 CSS 藏起来），
+        //   而合成事件连请求都不会发（夹具只认 isTrusted）。
+        {
+          expr: "String(window.__feed.revealedText['r38'] || '').indexOf('SO-8842') >= 0",
+          label: '目标行的悬停预览真的被可信 hover 揭示过',
+        },
+        // 页面自己记的可信事件计数：证明 hover 是**真事件**打进来的，不是页面自己造的
+        { expr: 'window.__feed.trustedEnters >= 1', label: '可信鼠标事件真的到达过页面（不是合成事件）' },
+        // ★ 停得对：读到「已到底」才停 —— 状态行只报"已加载 N 条"、不报总数，
+        //   所以"还有没有更多"只能靠这个信号（否则就是无限重滚）
+        { expr: 'window.__feed.exhausted === true', label: '信息流确实加载到「已到底」（唯一的停止信号）' },
+        // 目标在第 4 批 ⇒ 至少要加载到第 4 批（状态量，不是动作计数）
+        { expr: 'window.__feed.batches >= 4', label: '至少加载到第 4 批（目标所在的那一批）' },
+      ],
+      // 订单号只可能来自"hover 之后读回的那段预览"；
+      // 「已到底」是停止信号（读到它才停）；目标标题证明那条反馈真的进过模型手里。
+      mustSeeInToolResults: ['SO-8842', '已到底', '结算页白屏'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

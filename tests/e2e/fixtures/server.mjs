@@ -1047,6 +1047,261 @@ function virtualListPage() {
 </body></html>`;
 }
 
+// 反馈信息流页：**页面级无限滚动** + **hover 才出现的预览**（两个真难点叠在一页里）。
+//
+// A1 无限滚动（**页面级**，不是滚容器）：
+//   · 一次滚动只触发**一批**加载：滚到底（防抖之后）才加载，而加载是**异步**的（500ms）；
+//   · append 之后页面变高、当前位置**不再是底部**，而且不会再触发 scroll 事件
+//     ⇒ 必须"滚动 → 等新批 → 再滚"；
+//   · 目标在第 4 批（共 5 批）⇒ 不滚到位就永远看不到它，`get_page_snapshot` 里没有它；
+//   · 最后一批之后才出现「已到底」—— 这是**唯一的停止信号**（状态行只报"已加载 N 条"，
+//     不报总数 ⇒ "还有没有更多"只能靠它），读到它才该停；
+//   · 「加载更多」按钮是**迷惑项**：点它不加载任何东西（看起来能点的东西推不动页面）。
+//
+// A2 hover 预览：
+//   · 预览文本**不在页面里**（HTML/JS 里一个字都没有）：只在**可信** mouseenter 时向
+//     /feed-preview 取 ⇒ "不 hover 直接读"在结构上不可能（不是靠 CSS 藏起来）；
+//   · 合成事件过不去：夹具检查 event.isTrusted，假事件只计数、不取内容；
+//   · 鼠标一移开，**行内 popover 就清空**（`#pv-<id>` 只在还停在这一行时才有内容）。
+//
+// ⚠⚠ 为什么要同时留一条**耐久**的「最近一次查看」记录（`#peek`）：CDP 注入的 hover 随时会被
+//   **真实鼠标事件**重置 —— 实测（本机人的鼠标就在窗口里）：`hover_element` 把光标放到目标行的
+//   41ms 之后，一条真实的 `mousemove`（x=830，落在侧边栏上）就把 hover 状态挪走了，
+//   行内 popover 随即被清空 ⇒ 这时"读 popover"能不能成功**取决于运气**，用例必然时好时坏。
+//   真实站点也常这么做（详情/预览面板会留下"最近查看"）。于是：
+//     · popover = hover 期间才可见（基线断言"移开就消失"用它）；
+//     · `#peek` = 最近一次**可信 hover** 取到的预览（读它才是可靠的取证路径）。
+//   两者都**只在可信 hover 之后**才有内容 —— "不 hover 读不到"这条没有被削弱。
+//
+// 连**标题**都是按批从服务端取的（/feed-batch）：页面源码里既没有第 4 批的标题，
+// 也没有任何订单号 —— 所以"目标不在快照里"是真的不在**页面里**，不是抽取逻辑漏了它。
+//
+// 两个难点的状态都记在 window.__feed 上（供 E2E 读回）：
+// batches / exhausted / decoyClicks / trustedEnters / fakeEnters / leaves / revealedIds / revealedText。
+//
+// ⚠ 第一批刻意撑到**超过一屏**（每条约 81px × 10 条 + 头部 ≈ 1090px）：文档不比视口高时，
+//   滚到底根本不产生 scroll 事件，那这条场景会变成"怎么滚都不加载"。
+function feedPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具反馈信息流</title>
+<style>
+  /* ⚠ body 收窄到 560px 是**必须的**（不是排版偏好）：RecallFlow 面板默认贴在右边、
+     宽 640px，而 CDP 类的工具（hover_element / click_at / drag_element）用的是元素**中心点**
+     的视口坐标 —— 整行铺满宽度时中心点正好落在面板底下，鼠标会打到面板上而不是页面上，
+     mouseenter 根本不触发（实测：坐标 632,294 与 632,360 都撞在面板区域里）。
+     收窄之后行中心在 x≈280，明确在面板左侧。 */
+  body { max-width: 560px; }
+  .intro { padding: 18px 0; }
+  .peek { padding: 6px 0 10px; color: #334155; }
+  .item { border-bottom: 1px solid #e2e8f0; }
+  .row { position: relative; display: block; padding: 20px 12px; }
+  .meta { display: block; color: #64748b; font-size: 12px; }
+  /* 预览：默认 display:none（既看不见，也不进 innerText）；hover 才显示。
+     内容由 mouseenter 时向服务端取 —— 也就是说**不 hover 时它压根不存在**。 */
+  .preview { display: none; position: absolute; left: 12px; top: 50px; z-index: 5;
+             padding: 8px 12px; border-radius: 6px; background: #1e293b; color: #fff; font-size: 13px; }
+  .item:hover .preview { display: block; }
+</style></head>
+<body>
+  <h1>反馈信息流</h1>
+  <div class="intro">
+    <p>反馈按时间从新到旧排列，继续向下滚动会自动加载更早的反馈。</p>
+    <p>把鼠标移到某一条反馈上，可以看到它的订单预览。</p>
+  </div>
+  <div id="peek" class="peek" role="status">最近一次查看：—</div>
+  <div id="feed" role="feed"></div>
+  <div id="feed-status" role="status">正在加载…</div>
+  <div id="feed-end" role="status"></div>
+  <button id="more" type="button" role="button" aria-label="加载更多">加载更多</button>
+  <div id="more-note" role="status"></div>
+  <script>
+    var BATCH = 10, TOTAL_BATCHES = 5, LOAD_MS = 500, SETTLE_MS = 150, EDGE_PX = 8;
+    window.__feed = {
+      batches: 1, loading: false, exhausted: false, decoyClicks: 0, scrollEvents: 0,
+      trustedEnters: 0, fakeEnters: 0, leaves: 0, hoveredId: null,
+      revealedIds: [], revealedText: {}
+    };
+    var feedState = window.__feed;
+    var feedEl = document.getElementById('feed');
+    var statusEl = document.getElementById('feed-status');
+    var endEl = document.getElementById('feed-end');
+    var moreNoteEl = document.getElementById('more-note');
+    var peekEl = document.getElementById('peek');
+
+    function attachHover(row, id, pv) {
+      row.addEventListener('mouseenter', function (ev) {
+        // ★ 只认**可信**事件：dispatchEvent 造出来的鼠标事件 isTrusted=false ——
+        //   它既不会去取预览，也不会让内容出现（在夹具层面就过不去）。
+        if (!ev.isTrusted) { feedState.fakeEnters += 1; return; }
+        feedState.trustedEnters += 1;
+        feedState.hoveredId = id;
+        fetch('feed-preview?id=' + id).then(function (r) { return r.json(); }).then(function (data) {
+          var text = '订单号 ' + data.order + ' · ' + data.owner + ' · ' + data.state;
+          // 耐久记录：**无条件写下**（这就是"可信 hover 真的发生过"的可靠凭据，
+          // 也是读预览的可靠路径 —— 详见文件顶部关于真实鼠标事件的说明）
+          peekEl.textContent = '最近一次查看：' + text;
+          if (feedState.revealedIds.indexOf(id) < 0) feedState.revealedIds.push(id);
+          feedState.revealedText[id] = text;
+          // 行内 popover 只在这一行**还处于 hover** 时填：鼠标一移开它就没了
+          if (feedState.hoveredId === id) pv.textContent = text;
+        }).catch(function () {});
+      });
+      row.addEventListener('mouseleave', function (ev) {
+        if (!ev.isTrusted) return;
+        feedState.leaves += 1;
+        if (feedState.hoveredId === id) feedState.hoveredId = null;
+        // 移开就消失：只清 popover（那个「最近一次查看」记录留着）
+        pv.textContent = '';
+      });
+    }
+
+    function makeRow(it) {
+      var id = it.id;
+      var item = document.createElement('div');
+      item.className = 'item';
+      item.setAttribute('data-id', id);
+      var row = document.createElement('div');
+      row.className = 'row';
+      row.setAttribute('data-id', id);
+      // tabindex 让这一行进入快照的可交互元素列表（模型据此拿到 ref/selector 再 hover）
+      row.setAttribute('tabindex', '0');
+      row.textContent = it.title;
+      var meta = document.createElement('span');
+      meta.className = 'meta';
+      meta.textContent = '受理中 · 编号 ' + id.slice(1);
+      row.appendChild(meta);
+      var pv = document.createElement('div');
+      pv.className = 'preview';
+      pv.id = 'pv-' + id;
+      pv.setAttribute('role', 'tooltip');
+      row.appendChild(pv);
+      attachHover(row, id, pv);
+      item.appendChild(row);
+      return item;
+    }
+
+    // 按批取数：页面源码里**没有**任何标题（更别说订单号）—— 目标条目只有滚到第 4 批才存在。
+    function appendBatch(n) {
+      return fetch('feed-batch?n=' + n).then(function (r) { return r.json(); }).then(function (rows) {
+        var frag = document.createDocumentFragment();
+        rows.forEach(function (it) { frag.appendChild(makeRow(it)); });
+        feedEl.appendChild(frag);
+        feedState.batches = n;
+      });
+    }
+
+    function atBottom() {
+      return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - EDGE_PX;
+    }
+
+    function loadNext() {
+      if (feedState.loading || feedState.exhausted) return;
+      feedState.loading = true;
+      statusEl.textContent = '正在加载更早的反馈…';
+      // 真实站点这里是一次请求；把"加载窗口"固定成 500ms，让"滚动 → 等 → 再滚"可观测
+      setTimeout(function () {
+        appendBatch(feedState.batches + 1).then(function () {
+          feedState.loading = false;
+          statusEl.textContent = '已加载 ' + (BATCH * feedState.batches) + ' 条反馈';
+          if (feedState.batches >= TOTAL_BATCHES) {
+            feedState.exhausted = true;
+            endEl.textContent = '已到底 · 没有更多反馈了';
+          }
+        }).catch(function () {
+          feedState.loading = false;
+          statusEl.textContent = '加载失败，请稍后重试';
+        });
+      }, LOAD_MS);
+    }
+
+    var scrollTimer = null;
+    window.addEventListener('scroll', function () {
+      feedState.scrollEvents += 1;
+      // 防抖：**滚动停下来**并且停在底部，才加载下一批。
+      // 这一条同时保证了"一次滚动只加载一批"：append 之后页面变高、当前位置不再是底部，
+      // 而且不会再触发 scroll 事件 ⇒ 要加载下一批必须**再滚一次**。
+      if (scrollTimer) clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(function () {
+        scrollTimer = null;
+        if (atBottom()) loadNext();
+      }, SETTLE_MS);
+    });
+
+    document.getElementById('more').addEventListener('click', function () {
+      // ★ 迷惑项：这个按钮**什么都不加载**（看起来能点，推不动页面）
+      feedState.decoyClicks += 1;
+      moreNoteEl.textContent = '「加载更多」暂不可用：请在页面底部继续向下滚动，更早的反馈会自动加载。';
+    });
+
+    appendBatch(1).then(function () {
+      statusEl.textContent = '已加载 ' + (BATCH * feedState.batches) + ' 条反馈';
+    });
+  </script>
+</body></html>`;
+}
+
+// 信息流的数据：**标题与订单号都只在服务端**（夹具页的 HTML/JS 里一个字都没有）。
+//
+// 这是两个难点的**结构性**保证（不是"藏在 CSS 后面"，而是页面里根本没有这些文本）：
+//   · 标题按批从 /feed-batch 取 ⇒ 第 4 批的标题在滚动加载之前**不存在**于页面里；
+//   · 订单号只在 /feed-preview 里，而它只在**可信** mouseenter 时被请求一次 ⇒ 不 hover 读不到。
+// 目标条目是第 38 条（0 基下标）「结算页白屏，刷新后才恢复」，它的订单号是 SO-8842。
+// ⚠ 它刻意放在第 4 批**靠后**的位置：滚到底之后它就在视口里（视口高 720 时还有几百像素余量），
+//   于是脚本可以**直接 hover**，不必"滚到目标 → 立刻 hover" —— 后者会被 Chromium
+//   在滚动后按**真实光标位置**重算的 hover 状态立刻清掉（实测：滚动后约 60ms 补发一次重算，
+//   鼠标被"挪"回真实光标处，刚填好的预览随即被清空）。
+const FEED_ITEMS = [
+  ['登录后头像不显示', 'SO-4101', '张伟', '已复现'],
+  ['消息列表重复推送', 'SO-7788', '李娜', '受理中'],
+  ['表格导出少一列', 'SO-2299', '王强', '已修复'],
+  ['图片上传进度卡住', 'SO-6642', '陈静', '待确认'],
+  ['夜间模式颜色反差低', 'SO-3315', '刘洋', '受理中'],
+  ['搜索建议不刷新', 'SO-9027', '张伟', '已复现'],
+  ['分页跳转回到首页', 'SO-1184', '李娜', '待确认'],
+  ['通知红点无法清除', 'SO-5560', '王强', '已修复'],
+  ['时间显示时区不对', 'SO-8433', '陈静', '受理中'],
+  ['表单粘贴被截断', 'SO-2718', '刘洋', '已复现'],
+  ['弹窗按钮点不动', 'SO-6094', '张伟', '受理中'],
+  ['列表滚动位置丢失', 'SO-4477', '李娜', '已修复'],
+  ['附件下载失败', 'SO-9351', '王强', '待确认'],
+  ['头像裁剪偏移', 'SO-1266', '陈静', '受理中'],
+  ['快捷键在输入框里也生效', 'SO-7820', '刘洋', '已复现'],
+  ['收藏后列表不更新', 'SO-3589', '张伟', '待确认'],
+  ['草稿没有自动保存', 'SO-6103', '李娜', '已修复'],
+  ['标签拖动后顺序错乱', 'SO-2917', '王强', '受理中'],
+  ['分享链接过期太快', 'SO-8674', '陈静', '已复现'],
+  ['富文本粘贴样式丢失', 'SO-4058', '刘洋', '待确认'],
+  ['评论区折叠后无法展开', 'SO-7331', '张伟', '受理中'],
+  ['批量删除提示语歧义', 'SO-1592', '李娜', '已修复'],
+  ['移动端底部被键盘遮挡', 'SO-5806', '王强', '已复现'],
+  ['图表颜色区分度不足', 'SO-9243', '陈静', '待确认'],
+  ['重复登录不提示', 'SO-3170', '刘洋', '受理中'],
+  ['上传大文件没有进度', 'SO-6485', '张伟', '已修复'],
+  ['日期选择器跨月错位', 'SO-2038', '李娜', '待确认'],
+  ['导出的表格有乱码', 'SO-8562', '王强', '已复现'],
+  ['消息搜索不到历史记录', 'SO-4727', '陈静', '受理中'],
+  ['页面刷新后表单清空', 'SO-7419', '刘洋', '已修复'],
+  ['多选后批量操作无反馈', 'SO-1853', '张伟', '待确认'],
+  ['复制按钮在 Safari 无效', 'SO-5968', '李娜', '已复现'],
+  ['语音消息播放中断', 'SO-3702', '王强', '受理中'],
+  ['二维码扫描识别慢', 'SO-8146', '陈静', '待确认'],
+  ['地址簿选择后不生效', 'SO-7505', '刘洋', '已复现'],
+  ['优惠券叠加算错金额', 'SO-2471', '李娜', '受理中'],
+  ['订单状态不同步', 'SO-6993', '王强', '已修复'],
+  ['客服入口在深色模式看不见', 'SO-1348', '陈静', '待确认'],
+  ['结算页白屏，刷新后才恢复', 'SO-8842', '张伟', '已复现'],
+  ['支付结果页一直加载中', 'SO-3827', '张伟', '受理中'],
+  ['发票信息填写被清空', 'SO-9116', '李娜', '已修复'],
+  ['退款进度查不到', 'SO-5084', '王强', '待确认'],
+  ['物流轨迹缺少最新一条', 'SO-2273', '陈静', '已复现'],
+  ['收藏夹排序不稳定', 'SO-6701', '刘洋', '受理中'],
+  ['分享到微信打不开', 'SO-1495', '张伟', '已修复'],
+  ['消息提醒延迟几分钟', 'SO-8938', '李娜', '待确认'],
+  ['图片放大后无法关闭', 'SO-3416', '王强', '已复现'],
+  ['表格列宽拖动后复位', 'SO-7285', '陈静', '受理中'],
+  ['时间轴节点重叠', 'SO-1929', '刘洋', '已修复'],
+  ['底部导航遮挡内容', 'SO-5367', '张伟', '待确认'],
+];
+
 // 级联下拉框页：选了省份，城市才**异步**填进去。
 //
 // 三层难点叠在一起（真实表单里很常见）：
@@ -1693,6 +1948,48 @@ export function toolResultsText() {
     .flatMap((r) => (r.messages || []).filter((m) => m.role === 'tool'))
     .map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')))
     .join('\n');
+}
+
+/**
+ * 模型**实际收到**的工具结果，按 `tool_call_id` 去重后按到达顺序返回。
+ *
+ * 为什么必须去重：Agent 每次请求都把**完整历史**再发一遍，所以同一条工具结果会出现在
+ * 之后的每一个请求里。要看"第一次读到了什么"、或者要**数调用次数**，就必须按 id 去重 ——
+ * 否则同一次调用会被数成十几次（本仓库的轨迹打印踩过这个坑）。
+ */
+export function toolMessagesInOrder() {
+  const seen = new Set();
+  const out = [];
+  for (const r of llmRequests) {
+    for (const m of r.messages || []) {
+      if (!m || m.role !== 'tool') continue;
+      const key = m.tool_call_id || 'idx:' + out.length + ':' + String(m.content || '').slice(0, 60);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
+/**
+ * 模型**发起**的工具调用次数（按 `tool_calls[].id` 去重）。
+ *
+ * 用途：给"它到底滚了几次"这类**上界判据**提供可复核的数字 ——
+ * 无限滚动场景里"停不下来"是反复出现的失败形态，而每一次调用都记在请求里。
+ */
+export function toolCallCount(name) {
+  const ids = new Set();
+  for (const r of llmRequests) {
+    for (const m of r.messages || []) {
+      if (!m || m.role !== 'assistant' || !Array.isArray(m.tool_calls)) continue;
+      for (const tc of m.tool_calls) {
+        if (!tc || !tc.function || tc.function.name !== name) continue;
+        ids.add(tc.id || 'anon:' + ids.size);
+      }
+    }
+  }
+  return ids.size;
 }
 
 // ---- 真模型 eval 模式 ----
@@ -2531,6 +2828,80 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：无限滚动 + hover 预览（playbook id = 'infinite-scroll-hover-preview'）。
+    //
+    // 节奏即能力，而且**停止条件是状态驱动的**（与真模型该做的一样）：
+    //   看一遍（这时只有第 1 批，目标条目不在里面）→ 试一下那个"看起来能点"的加载按钮
+    //   （它会如实说此路不通）→ 循环「滚到底 → 等新批挂上 DOM → 再读一次页面」，
+    //   **直到读到「已到底」才停** → 把目标滚进视口 → 可信 hover → 等预览填充 → 读回 → 作答。
+    //
+    // ⚠ 循环自带**上界**（8 次）：夹具要是坏了（比如永远不显示「已到底」），
+    //   这里会如实报告并停下，而不是无限重滚 —— 于是失败信息指向夹具，而不是"模型不行"。
+    if (userText.includes(PLAYBOOKS['infinite-scroll-hover-preview'].trigger)) {
+      const done = toolResults.length;
+      const textOf = (m) => (typeof m.content === 'string' ? m.content : '');
+      const seen = toolResults.map(textOf).join('\n');
+      const last = done ? textOf(toolResults[done - 1]) : '';
+      // 第 1 步：先看一遍 —— 此时只有第 1 批，目标条目**不在**里面
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 3000 }); return; }
+      // 第 2 步：先试那个"看起来能点"的按钮 —— 它不加载任何东西
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '加载更多' }); return; }
+
+      // 第 3 步起：滚到底 → 等新批 → 再读一次，直到读到「已到底」
+      if (!/已到底/.test(seen)) {
+        const scrolls = (seen.match(/已滚动(?!到)/g) || []).length;
+        if (scrolls > 8) {
+          finalText(res, '滚到底很多次也没读到「已到底」，先停下如实报告：这个信息流没有可读的停止信号。', 40);
+          return;
+        }
+        if (/已滚动(?!到)/.test(last)) {
+          // 刚滚到底：**加载是异步的**，等新的一批真的挂上 DOM 再往下走
+          //（这正是"滚一次不够"的那一步；等错东西就会一直等到超时）
+          const snaps = toolResults.filter((m) => textOf(m).includes('已加载'));
+          const loaded = Number((/已加载 (\d+) 条反馈/.exec(snaps.length ? textOf(snaps[snaps.length - 1]) : '') || [])[1] || 0);
+          toolStep(res, 'wait_for_element', { selector: '#feed .item[data-id="r' + loaded + '"]', state: 'attached' });
+          return;
+        }
+        if (/已等到目标元素（attached）/.test(last)) {
+          // 新批到了：**读一次页面**才知道有没有「已到底」
+          toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 3000 });
+          return;
+        }
+        toolStep(res, 'scroll_page', { y: 4000 });
+        return;
+      }
+
+      // 第 4 步：**可信** hover（合成事件读不到：夹具只认 isTrusted 的事件）。
+      // ⚠ 这里刻意**不**先"滚到目标再 hover"：目标在第 4 批靠后处，滚到底之后它就在视口里，
+      //   而"刚滚过就 hover"会被浏览器按**真实光标位置**重算的 hover 状态立刻挪走
+      //   （实测：滚动后约 60ms 补发一次 hover 重算）。若确实需要滚进视口：用 behavior:"auto"
+      //   （立即完成），**滚完先读一次页面**再 hover。
+      // 第 5 步：等预览填充（内容是一次异步取数）→ **紧接着**读回。
+      //   读的是 `#peek`（页面留下的"最近一次查看"）而不是行内 popover —— 后者随时可能
+      //   被真实鼠标事件清掉（本机人的鼠标就在窗口里），而"读 popover"能不能成功全看运气。
+      // 第 6 步：读到就读回（`#peek` 的文本就是结果本身）。
+      const hovers = (seen.match(/已悬停到元素/g) || []).length;
+      const waited = toolResults.some((m) => textOf(m).includes('已等到目标元素（text_contains）'));
+      const readBack = toolResults.some((m) => textOf(m).trim().startsWith('最近一次查看：'));
+      if (hovers === 0) { toolStep(res, 'hover_element', { text: '结算页白屏' }); return; }
+      if (!waited) {
+        if (/等待元素超时/.test(seen)) {
+          // hover 被真实鼠标事件挪走了：**再 hover 一次**（最多两次），而不是谎报成功
+          if (hovers >= 2) {
+            finalText(res, '悬停两次都没读到预览文本（等元素超时），先如实报告：读不到订单号。', 40);
+            return;
+          }
+          toolStep(res, 'hover_element', { text: '结算页白屏' });
+          return;
+        }
+        toolStep(res, 'wait_for_element', { selector: '#peek', state: 'text_contains', text: '订单号', timeoutMs: 4000 });
+        return;
+      }
+      if (!readBack) { toolStep(res, 'inspect_element', { op: 'text', selector: '#peek' }); return; }
+      finalText(res, '信息流已经到底（共 50 条反馈）。「结算页白屏，刷新后才恢复」这条的悬停预览里是：订单号 SO-8842 · 张伟 · 已复现。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2557,6 +2928,28 @@ const main = http.createServer((req, res) => {
       'Content-Disposition': 'attachment; filename="report.csv"',
     });
     res.end('月份,金额\n2026-01,100\n2026-02,200\n');
+    return;
+  }
+  // 反馈的**按批数据**：只有 id 与标题（**没有订单号**）。
+  // 页面按批取它 ⇒ 页面上"还没加载到的那几批"连标题都不存在（不是"看不见"，是没有）。
+  if (url.startsWith('/feed-batch')) {
+    const m = /[?&]n=(\d+)/.exec(url);
+    const n = m ? Number(m[1]) : 0;
+    const rows = n >= 1
+      ? FEED_ITEMS.slice((n - 1) * 10, n * 10).map((item, i) => ({ id: 'r' + ((n - 1) * 10 + i), title: item[0] }))
+      : [];
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(rows));
+    return;
+  }
+  // 反馈预览的**服务端数据**：订单号只存在于这里（夹具页的 HTML/JS 里一个字都没有）。
+  // 页面只在**可信** mouseenter 时来取一次 —— 这就是"不 hover 读不到"的结构性保证，
+  // 也让"合成事件绕过"在夹具层面就过不去（假事件连请求都不会发）。
+  if (url.startsWith('/feed-preview')) {
+    const m = /[?&]id=r(\d+)/.exec(url);
+    const item = m ? FEED_ITEMS[Number(m[1])] : null;
+    res.writeHead(item ? 200 : 404, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(item ? { order: item[1], owner: item[2], state: item[3] } : { error: '没有这条反馈' }));
     return;
   }
   // ⚠ CSP 夹具需要**不同的响应头**：`script-src 'self' 'unsafe-inline'` 放行页面自己的内联脚本
@@ -2590,6 +2983,7 @@ const main = http.createServer((req, res) => {
                                         : req.url && req.url.startsWith('/handoff-form') ? handoffFormPage()
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
+                                              : req.url && req.url.startsWith('/feed') ? feedPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()

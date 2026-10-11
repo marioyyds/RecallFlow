@@ -9,7 +9,7 @@
 // 而本文件其余场景需要流正常结束；混在一起会让"第一次调用"的归属取决于执行顺序、
 // 测试时好时坏。那条在 tests/e2e/resume.spec.mjs。
 import { test, expect } from '@playwright/test';
-import { toolResultsText, resetLlmRequests } from './fixtures/server.mjs';
+import { toolResultsText, resetLlmRequests, toolCallCount, toolMessagesInOrder } from './fixtures/server.mjs';
 import { PLAYBOOKS } from './fixtures/playbooks.mjs';
 import {
   launchExtension,
@@ -386,15 +386,16 @@ test('golden: 站内检索 —— 填框/点击/等渲染，并把条目结构�
   await expect
     .poll(() => toolResultsText(), { timeout: 30_000 })
     .toContain('哥伦比亚 慧兰 水洗');
-  const seen = toolResultsText();
-  expect(seen).toContain('￥88');
-  expect(seen).toContain('埃塞俄比亚 耶加雪菲');
-  expect(seen).toContain('￥108');
-  expect(seen).toContain('云南 小粒咖啡');
-  expect(seen).toContain('￥68');
-
-  // 广告条目也一并被取回（是"检索"和"去广告"两种判断，不该在检索阶段就被悄悄丢掉）
-  expect(seen).toContain('【广告】');
+  // ⚠ 下面这几条**必须逐个轮询**，不能只读一次 `toolResultsText()` 就地断言。
+  //    原因（实测抓到的间歇性红灯）：上面的 poll 谓词（"标题出现过"）靠**点击结果里的
+  //    正文摘要**就能满足 —— 那时 `wait_for_element` / `inspect_element` 这两步**还没发生**，
+  //    而摘要被截断在 300 字，恰好停在「云南 小粒咖啡￥68」，广告条目压根不在里面。
+  //    于是紧随其后的即时断言会撞上这个窗口（跑两次里就有一次在这行红，1.2s 就跑到这里，
+  //    而 run 还在第 3 步）。判据**一个字都没改**，只是等它真的到达（与上面那条同样的口径）。
+  //    可复现的证据：给夹具的第 3 步注入 2s 延迟，这一行必红；改成轮询后同样注入也绿。
+  for (const needle of ['￥88', '埃塞俄比亚 耶加雪菲', '￥108', '云南 小粒咖啡', '￥68', '【广告】']) {
+    await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain(needle);
+  }
 
   await page.close();
 });
@@ -1634,6 +1635,138 @@ test('golden: 分页 —— 目标只在第 3 页，且翻页异步（先清空�
   // ② 目标条目必须真的进到模型手里 —— "跨页找到"的唯一凭据
   await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('TK-0013');
   expect(toolResultsText()).toContain('导出报表时金额列错位');
+
+  await page.close();
+});
+
+// 能力验收（复杂场景）：**无限滚动 + hover 预览**（playbook 'infinite-scroll-hover-preview'）。
+//
+// 两个难点都是**结构性**的（不是加装饰），基线逐条把它们变成可复现的事实：
+//   A1 页面级无限滚动：
+//     ① 目标在第 4 批 ⇒ **不滚动就读不到**：标题是按批从服务端取的，第 4 批在加载之前
+//        连标题都不在页面里（不是"看不见"，是没有）；快照里当然也没有；
+//     ② 一次滚动只加载一批：加载是异步的，而**追加之后当前位置不再是底部**、
+//        也不会再有 scroll 事件 ⇒ 必须"滚动 → 等新批 → 再滚"（基线证明"滚一次只多一批"）；
+//     ③ 唯一的停止信号是第 5 批之后的「已到底」（状态行只报"已加载 N 条"，不报总数）
+//        ⇒ "还有没有更多"只能靠它，读到它才该停；
+//     ④ 「加载更多」按钮是**迷惑项**：点它不加载任何东西（基线证明批数不变）。
+//   A2 hover 预览：
+//     ⑤ 预览文本**不在页面里**：只在可信 mouseenter 时向 /feed-preview 取 ——
+//        "不 hover 直接读"在结构上不可能（连 `page.content()` 里都搜不到那个订单号）；
+//     ⑥ **合成事件过不去**：dispatchEvent 造的事件 isTrusted=false，夹具只计数、不取内容；
+//     ⑦ **移开就消失**：真 hover 才有内容，鼠标一移开立刻清空。
+//
+// 双层判据（缺一层就是走过场）：
+//   · 页面状态：`window.__feed.revealedText['r38']`（页面自己记的"预览真的被填入过什么"）
+//     + trustedEnters / exhausted / batches；
+//   · 模型回执：toolResultsText() 里必须出现 SO-8842（预览）与「已到底」（停止信号）；
+//   · 阴性对照①（需要滚动）：**第一次**快照里既没有目标标题、也没有预览文本；
+//   · 阴性对照②（需要 hover）：不 hover 读不到 + 假事件读不到（见基线⑤⑥）。
+//
+// ⚠ 滚动次数既要有**下界**（目标在第 4 批，不滚到就永远看不到），也要有**上界** ——
+//   "滚个不停"是本仓库反复出现的失败形态，而停止条件是页面给的「已到底」。
+test('golden: 无限滚动 + hover 预览 —— 目标在第 4 批，预览只在可信 hover 后存在', async () => {
+  // hover_element 走 CDP 的**可信**鼠标事件；关掉 CDP 这条能力**做不到**（不是"更稳"）
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/feed');
+
+  // ---- 基线：两个难点真的存在（全部先于 agent 运行）----
+  //
+  // ⚠ 一条**环境事实**决定了下面这些基线怎么写：CDP 注入的 hover **随时可能被真实鼠标事件重置**
+  //  （本机人的鼠标就在窗口里。实测：`hover_element` 把光标放到目标行 41ms 之后，一条真实
+  //  `mousemove`（x=830，落在侧边栏上）就把 hover 状态挪走了，行内 popover 随即被清空）。
+  //  所以：
+  //    · "预览出现过"用**页面自己记下的文本**（`revealedText` / 耐久记录 `#peek`）判定，
+  //      而不是"当下读 popover 的 DOM"—— 后者的可见窗口可能只有几十毫秒；
+  //    · "假事件过不去"用**视口外**的行（r9）做对象：视口内的行随时可能被真实鼠标命中，
+  //      那会污染这条基线（不是被测行为造成的，却会让用例时好时坏）；
+  //    · 派发假事件用 `locator.evaluate` 直接 dispatch（不经过 Playwright 的 dispatchEvent ——
+  //      它可能把元素滚进视口，而滚动会顺带把真实光标位置重算进来）。
+  // ① 不滚动就只有第一批，目标**不在页面里**（不是"看不见"）
+  await expect.poll(() => page.locator('#feed .item').count(), { timeout: 20_000 }).toBe(10);
+  expect(await page.locator('#feed .item', { hasText: '结算页白屏' }).count()).toBe(0);
+  expect(await page.content(), '目标标题竟然一开始就在页面源码里：本场景的难点不成立').not.toContain('结算页白屏');
+  expect(await page.locator('body').innerText()).not.toContain('结算页白屏');
+  // ⑤ 预览文本**连页面源码里都没有**（订单号只在服务端，hover 时才取）
+  expect(await page.content(), '订单号竟然一开始就在页面源码里：hover 这个难点不成立').not.toContain('SO-8842');
+  expect(await page.textContent('#peek')).toContain('最近一次查看：—');
+  // ⑥ 合成事件过不去：假事件只被计数，既不发请求也不填内容
+  const fakeBefore = await page.evaluate(() => ({
+    fake: window.__feed.fakeEnters,
+    trusted: window.__feed.trustedEnters,
+  }));
+  await page.locator('.row[data-id="r9"]').evaluate((el) => {
+    el.dispatchEvent(new MouseEvent('mouseenter'));
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  });
+  expect(await page.evaluate(() => window.__feed.fakeEnters), '假事件没被认出来（isTrusted 判断失效？）').toBeGreaterThan(
+    fakeBefore.fake
+  );
+  expect(await page.evaluate(() => window.__feed.trustedEnters), '合成事件竟然被当成可信事件计了数').toBe(fakeBefore.trusted);
+  expect(
+    await page.evaluate(() => window.__feed.revealedText.r9 === undefined),
+    '合成事件竟然取到了预览：本场景的难点不成立'
+  ).toBe(true);
+  expect(await page.textContent('#pv-r9'), '合成事件竟然把预览填上了：本场景的难点不成立').toBe('');
+  expect(await page.textContent('#peek'), '合成事件竟然写进了「最近一次查看」').toContain('最近一次查看：—');
+  // ⑦ 真 hover 才有内容（用页面记下的文本判定，见上面的环境说明）；**移开就消失**（popover 被清空）
+  await page.locator('.row[data-id="r0"]').hover();
+  await expect.poll(() => page.evaluate(() => String(window.__feed.revealedText.r0 || '')), { timeout: 20_000 }).toContain(
+    '订单号'
+  );
+  await page.mouse.move(2, 2);
+  await expect.poll(() => page.textContent('#pv-r0'), { timeout: 10_000 }).toBe('');
+  // ② 一次滚动只加载一批；**追加之后不会自动接着加载**（否则"滚一次"就够了）
+  await page.evaluate(() => window.scrollTo(0, 999999));
+  await expect.poll(() => page.evaluate(() => window.__feed.batches), { timeout: 10_000 }).toBe(2);
+  await page.waitForTimeout(900);
+  expect(
+    await page.evaluate(() => window.__feed.batches),
+    '滚一次竟然加载了两批：追加之后自动接着加载了，"滚动 → 等 → 再滚"这个难点不成立'
+  ).toBe(2);
+  // ④ 「加载更多」按钮推不动页面（看起来能点的东西 ≠ 能推进的东西）
+  await page.locator('#more').click();
+  await page.waitForTimeout(400);
+  expect(
+    await page.evaluate(() => window.__feed.batches),
+    '点「加载更多」竟然加载了新的一批：迷惑项不成立（那剧本与技能里写的"正确的路"就是错的）'
+  ).toBe(2);
+  expect(await page.evaluate(() => window.__feed.decoyClicks)).toBeGreaterThan(0);
+
+  // 复位到干净起点，再让 agent 从头做（与分页/级联两条用例同样的处理）
+  await page.reload();
+  await expect.poll(() => page.locator('#feed .item').count(), { timeout: 20_000 }).toBe(10);
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['infinite-scroll-hover-preview'].eval.instruction);
+
+  // ① 页面状态：目标行的预览**真的**被可信 hover 揭示过（页面自己记下填进去的文本）
+  await expect.poll(
+    () => page.evaluate(() => String(window.__feed.revealedText['r38'] || '')),
+    { timeout: 60_000 }
+  ).toContain('订单号 SO-8842');
+  expect(await page.evaluate(() => window.__feed.trustedEnters)).toBeGreaterThan(0);
+  // ② 停得对：读到「已到底」才停 —— 它是**唯一**的停止信号
+  expect(await page.evaluate(() => window.__feed.exhausted), '没有加载到「已到底」：歇在中间了').toBe(true);
+  expect(await page.evaluate(() => window.__feed.batches)).toBe(5);
+  // ③ 滚动**次数**：下界 = 至少滚到第 4 批；上界 = 读到停止信号就该停（不是滚个不停）
+  const scrolls = toolCallCount('scroll_page');
+  expect(scrolls, '滚动次数少于 4 次却读到了第 4 批的目标 —— 这条用例没有真的验到"多批加载"').toBeGreaterThanOrEqual(4);
+  expect(scrolls, '滚动次数没有上界：应读到「已到底」就停（滚个不停是本仓库反复出现的失败形态）').toBeLessThanOrEqual(8);
+  // ④ 模型回执：预览文本与停止信号都必须到模型手里（脚本化 E2E 里"最终答复"证明不了任何事）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('SO-8842');
+  expect(toolResultsText()).toContain('订单号 SO-8842');
+  expect(toolResultsText(), '停止信号没进到模型手里 —— 那它凭什么停？').toContain('已到底');
+  expect(toolResultsText(), '目标条目文本没进到模型手里').toContain('结算页白屏');
+  // ⑤ 阴性对照（模型回执层）：**第一次**快照（滚到目标之前）里没有目标标题、也没有预览文本
+  const firstTool = toolMessagesInOrder()[0];
+  expect(firstTool, '一条工具结果都没记录到').toBeTruthy();
+  expect(String(firstTool.content), '第一次快照里就有目标标题：那这条用例不需要滚动').not.toContain('结算页白屏');
+  expect(String(firstTool.content), '第一次快照里就有预览文本：那这条用例不需要 hover').not.toContain('SO-8842');
+  // ⑥ 阴性对照（捷径）：整轮里没有任何**合成事件**带来的预览（假事件一路都被拒绝）
+  expect(
+    await page.evaluate(() => window.__feed.fakeEnters),
+    '有合成鼠标事件到达了页面 —— 说明有人用 dispatchEvent 之类的假事件绕过 hover'
+  ).toBe(0);
 
   await page.close();
 });
