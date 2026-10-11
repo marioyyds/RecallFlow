@@ -5,8 +5,8 @@
 > 以及 **C-4 的 5 个可重构档**（内置工具 55 → 44）与**思考记录**（推理模型的思维链展示）。
 >
 > 每条都经过四层验证中的至少一层：
-> - `npm test` —— **1140 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
-> - `npm run test:e2e` —— 真实 Chromium，**37 个场景**（黄金任务 7 + 断线恢复 1，分两阶段）；
+> - `npm test` —— **1385 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
+> - `npm run test:e2e` —— 真实 Chromium，**40 个用例**（黄金任务 36 + 断线恢复 1 + 视觉两臂对照门禁 3，分三阶段；开启臂今天按开关跳过）；
 > - `node scripts/verify-bridge-ws-handshake.mjs` —— 桥接 WS 鉴权（真实 server + 真实客户端）；
 > - `integrations/opencode/recallflow-mcp/test/session-isolation.test.mjs` —— 跨会话响应隔离。
 >
@@ -44,7 +44,7 @@
 
 **C-3 验证网**
 
-- 安装 Playwright + Chromium，新增 `scripts/run-e2e.mjs`（带前置检查与可执行的失败提示），**分两阶段**运行（黄金任务 / 断线恢复），因为两者需要的夹具模式不同。
+- 安装 Playwright + Chromium，新增 `scripts/run-e2e.mjs`（带前置检查与可执行的失败提示），**分两阶段**运行（黄金任务 / 断线恢复），因为两者需要的夹具模式不同。（后续已扩到**三阶段**，加了视觉两臂对照门禁 —— 见 `scripts/run-e2e.mjs` 与 `tests/e2e/README.md`。）
 - **E2E 从 2 个场景扩到 7 个稳定通过**：role+name 定位点击、跨域 iframe 路由、`type_text` 的 value 语义、**CDP 坐标点击（可信输入）**、**审批拒绝后副作用为零**、**阳性对照（批准后确实点击）**、**端口断开后自动重连并接着跑完**。
 - **顺带发现并修复一个 Critical 级长期缺陷**：`PAGE_TEXT_EXCLUDE`（含 `button,input,select,textarea,form`）被误用于**元素查找**，导致快照里**从来没有按钮或输入框**、`click_element({role:'button'})` 恒失败。新增 `ELEMENT_COLLECT_EXCLUDE` 区分两种语义，并加 2 条门禁钉死。
 - 修正我自己的一个判断：`headless:false` **不是**疏漏——实测 headless 下 MV3 的 service worker 根本不注册。
@@ -81,8 +81,8 @@ E2E 断言两条：任务最终完成 + 后台**跑了不止一次**（区分"�
 ## 六、如何验证本轮的每一条
 
 ```powershell
-npm test                            # 1140 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
-npm run test:e2e                     # 真实 Chromium：黄金任务 6 + 断线恢复 1（两阶段）
+npm test                            # 1385 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
+npm run test:e2e                     # 真实 Chromium：黄金任务 36 + 断线恢复 1 + 视觉两臂 3（三阶段）
 npm run build:content -- --check     # 内容脚本打包（自包含性不合格会以退出码 2 拒绝）
 node scripts/test-count.mjs          # 测试数（文档数字由它生成，不手写）
 node scripts/verify-bridge-ws-handshake.mjs   # 桥接 WS 鉴权（真实 server + 真实客户端）
@@ -97,8 +97,8 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 
 | 指标 | 值 |
 | --- | --- |
-| 单元测试 | **1140 项 / 80 个文件**，全通过 |
-| 真实浏览器 E2E | **9 项**（黄金任务 6 + 断线恢复 1），全通过 |
+| 单元测试 | **1385 项 / 110 个文件**，全通过 |
+| 真实浏览器 E2E | **40 个用例**（黄金任务 36 + 断线恢复 1 + 视觉两臂 3；其中视觉开启臂今天按开关跳过），全通过 |
 | 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试），全通过 |
 | 变异测试 | 5/5 条变异都被断言抓住（证明断言不是摆设） |
 | 集成方向 | 已收敛为唯一事实来源（`docs/integration-status.md`） |
