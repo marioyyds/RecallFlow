@@ -1085,3 +1085,69 @@ DEFAULT_VISION_BUDGET.maxImages = 2
   好消息：本仓库 `agent.js` 已在累计 `reasoning_content`（思维链展示），且**请求里没有设 `max_tokens`**
   （走 API 默认）⇒ 生产路径不受这个坑影响 ✓；但**将来若要设 `max_tokens`，必须记住它是推理模型**。
   另注：`prompt_tokens_details.cached_tokens=512` ⇒ 该网关**有提示缓存** ✓（与仓库关于缓存命中的记录一致）。
+
+---
+
+# 第七轮：目标 ⑤「技能归纳」的定向复测（HEAD `4545ffd` + 工作区未提交改动）
+
+> 本轮**刻意不跑 30 条全量**（约 13 分钟）：改动只落在**技能文案**上，
+> 按纪律要给"改了模型可见文本"的那几条做测量，而不是把所有剧本再扫一遍。
+> 所以只跑**被改动技能所对应的场景**各 2 次。
+
+## 一、跑了什么、结果
+
+| 场景（剧本 `title`）| 次数 | 结果 | 请求数 | 模型实际加载的技能 |
+| --- | --- | --- | --- | --- |
+| `复杂场景：知识库往返 —— 存进去要能原样取回来（同一个 url 会互相覆盖）` | 2 | **2/2 ok** | 3 / 4 | run1（无）；run2 `clip-to-knowledge`（**第一个调用**）|
+| `复杂场景：知识库检索的召回边界 —— 查不到 ≠ 没有，必须换路子确认` | 2 | **2/2 ok** | 7 / 8 | run1 `knowledge-save-retrieve` + `knowledge-search-fallback`；run2 `clip-to-knowledge` + `knowledge-save-retrieve` + `knowledge-search-fallback` |
+
+- 命令（逐条先 `--list --grep` 确认 `Total: 1`，再跑 2 次）：
+  `cmd /c npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep "知识库往返" --repeat-each=2 --max-failures=0`
+  （另一条把 grep 换成 `"召回边界"`）。两条都 **exit code 0**，总耗时 26.4s + 43.7s。
+- 页面判据段**全部为空**：这两条剧本的 `pageChecks` 本来就是空的（判据在"工具结果有没有交到模型手上"
+  与脚本化 E2E 层），所以这里打印为空是**预期**，不是漏跑（基线「发现 4」记过同一件事）。
+- **没有为了变绿重跑任何一次**；4 次是 4 个独立样本。
+
+## 二、能被这次测量支持的两条观察
+
+1. **改过的文案仍会被模型加载**：`clip-to-knowledge` 在 2 条场景的 4 个 run 里出现 **2 次**
+   （与历史基线一致：它一直是这两条场景里被加载的那一个，见基线「发现 2」）。
+   文案从 ~171 字涨到 ~940 字、并加了 6 步清单之后，**没有出现"模型不再加载它"**。
+2. **新写的步骤真的进了轨迹**（这正是加编号清单的目的）：
+   - 要"先查重"那一步：`knowledge-往返` 的 run2 第 2 个调用就是
+     `knowledge_read({"op":"search","query":"检索性能优化"})`，**在 `add_entry` 之前**；
+   - 要"读回验证"那一步：同 run 末尾用 `knowledge_read({op:"get", id})` **逐条读回**了三个 id；
+   - 同场景 run1 **没有**加载技能，轨迹里就只有 3 次 `add_entry` + 1 次 `search`，**没有逐条读回**。
+   ⇒ 同一场景两次采样的行为差异与"有没有加载该技能"一致，但不能据此断言因果（样本只有 1 对）。
+
+## 三、**无法用现有 eval 测量**的部分（如实说明）
+
+| 改动 | 为什么测不了 |
+| --- | --- |
+| `userscript-task`（充实成 6 步 + 3 条硬约束）| **没有对应剧本** ⇒ 没有夹具页与 eval 判据。这正是"孤儿技能"的代价（见 `docs/skill-design.md`）|
+| `remove-ads`（充实成 5 步 + 3 条硬约束）| 同上：孤儿技能，没有剧本 |
+| `humanizer` / `highlight-key-points`（各加一句"本技能无步骤：…"）| 同上：两条都是孤儿（`highlight-key-points` 只有工具级单测）|
+
+**最小可行方案**（本轮**没有**新造剧本，按任务口径留给接手者）：
+`remove-ads` 的判据最容易立 —— 夹具页放一个 `#ad-slot` 广告块 **与它同容器**的正文段落，
+断言"广告块不可见 **且** 正文仍可见"；`userscript-task` 需要先拆出最小形态（如"展开全文"），
+且它依赖 GreasyFork 这类外部站点，夹具页给不出可信等价物（理由已写进 `ORPHAN_SKILL_REASONS`）。
+
+## 四、`detectSkill()` 的删除**不需要**测量（说明理由）
+
+它**不改变任何模型可见内容**：模型看到的仍然是 `buildSkillCatalog()` 生成的一行
+`name：description`（`detectSkill` 从来没有被生产代码调用过 —— 它在生产里是一条死路）。
+所以"删掉它"属于**结构性删除**，不触发"改了提示就要测"的纪律。
+新增的那条门禁（`不许把关键词匹配接回运行时`）正是为了让将来真接回时**必须先测量**。
+
+## 五、改动
+
+- 本轮除本文件（纯追加，历史六节**逐字未动**）外，还改了：
+  `lib/assistant/skills.js`（删 `detectSkill` + 写明原因）、`lib/assistant/skill-defs.js`（3 个薄技能 + 2 句无步骤声明 + 理由表）、
+  `lib/assistant/tools.js`（`TOOL_RENAME_MAP` 补知识库旧名）、`scripts/gen-skills-overview.mjs`（固定说明段 + 修解析器）、
+  `tests/skill-content-structure.test.mjs`（新增门禁）、`tests/silent-failure-regressions.test.mjs`（删 3 条测死代码的用例、改造 1 条、新增 1 条）、
+  `tests/annotation-merge.test.mjs`（修硬编码 900 字截断）、`docs/skill-design.md`（新增）、
+  `docs/skills-overview.md`（重新生成）、`README.md` / `docs/change-delivery-summary.md` / `docs/next-steps-handoff.md`（数字与链接）、
+  `tests/.test-count.json`（1411 项 / 113 个文件）。
+- **没有** `git add` / `commit` / `push`；**没有**碰 `wip/video-eval-fixes`、根目录 `temp-*`、`docs/` 下未跟踪的 md。
+- 临时脚本与日志全部在 `%TEMP%`（`rf-*`），未进仓库。

@@ -107,7 +107,7 @@ flowchart TB
 | 能力剧本（与夹具页、技能一一对应） | **30** |
 | 真浏览器 E2E 场景 | **43**（黄金任务 39 + 断线恢复 1 + 视觉两臂对照门禁 3；开关已打开 ⇒ 现在跑的是**开启臂**，关闭臂按开关跳过）|
 | 页面状态判据 / 模型回执判据 | **101 / 64** 条 |
-| 单元测试与门禁 | **1404** 项单元测试（112 个文件） |
+| 单元测试与门禁 | **1411** 项单元测试（113 个文件） |
 
 ```bash
 npm test          # 单元测试 + 三道独立脚本门禁 + 刷新测试数快照
@@ -255,6 +255,8 @@ sequenceDiagram
 | 想了解 | 看这里 |
 | --- | --- |
 | **30 类能力各由什么保证**（夹具页 / 剧本 / E2E / 技能 / 判据） | [docs/capability-inventory.md](docs/capability-inventory.md)（自动生成） |
+| **技能清单**（39 个技能 / 剧本归属 / 孤儿 / 薄技能，自动生成） | [docs/skills-overview.md](docs/skills-overview.md) |
+| **运行时到底怎么选技能**（为什么删掉关键词匹配 / 实测：不加载技能也通过 / 孤儿 ≠ 没被用） | [docs/skill-design.md](docs/skill-design.md) |
 | **真浏览器 E2E 怎么写**（原理 / 操作手册 / 踩过的坑 / 验不了什么） | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
