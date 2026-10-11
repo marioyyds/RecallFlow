@@ -1474,6 +1474,95 @@ function downloadPage() {
 </body></html>`;
 }
 
+// 日期选择器页：验「**自定义控件，打字没用、必须点**」这一类。
+//
+// 四个真实难点：
+//   ① 输入框是 `readonly` —— 往里打字**静默无效**（工具可能还回"已输入"✗）；
+//   ② 日历是**异步渲染**的：点开之后要等一拍才有格子，立刻点会落空；
+//   ③ 目标日期在**下个月** —— 必须先点"下个月"，不能只看当前月就下结论；
+//   ④ 有**已订满的禁用日**（含紧邻目标的那天）—— 必须真的看日历，不能按顺序猜。
+function datePickerPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具预订</title></head>
+<body>
+  <h1>预订房间</h1>
+  <label for="checkin">入住日期</label>
+  <input id="checkin" readonly placeholder="请选择日期" aria-label="入住日期">
+  <button id="open" type="button" role="button" aria-label="选择入住日期">选择日期</button>
+  <div id="cal" hidden>
+    <div class="cal-head">
+      <button id="prev" type="button" role="button" aria-label="上个月">上个月</button>
+      <span id="cal-month" role="heading"></span>
+      <button id="next" type="button" role="button" aria-label="下个月">下个月</button>
+    </div>
+    <div id="cal-days" role="list"></div>
+  </div>
+  <div id="status" role="status">就绪</div>
+  <script>
+    window.__selected = '';
+    window.__typed = 0;
+    // 只有 2026-03-15 是我们要的日期；14 号已订满，用来验证"真看了日历"
+    var FULL = { '2026-03-10': 1, '2026-03-11': 1, '2026-03-14': 1 };
+    var month = { y: 2026, m: 2 }; // 先显示 2 月（目标在下个月）
+    var statusEl = document.getElementById('status');
+    var daysEl = document.getElementById('cal-days');
+    var monthEl = document.getElementById('cal-month');
+    var inputEl = document.getElementById('checkin');
+    var calEl = document.getElementById('cal');
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function key(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+    function render() {
+      var y = month.y, m = month.m;
+      monthEl.textContent = y + ' 年 ' + m + ' 月';
+      daysEl.innerHTML = '';
+      var last = new Date(y, m, 0).getDate();
+      for (var i = 1; i <= last; i++) {
+        var k = y + '-' + pad(m) + '-' + pad(i);
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('role', 'listitem');
+        b.setAttribute('aria-label', m + '月' + i + '日' + (FULL[k] ? '（已订满）' : ''));
+        b.textContent = String(i);
+        b.disabled = !!FULL[k];
+        b.setAttribute('data-date', k);
+        if (FULL[k]) { b.title = '已订满'; }
+        daysEl.appendChild(b);
+      }
+    }
+    document.getElementById('open').addEventListener('click', function () {
+      calEl.hidden = false;
+      // ① 异步渲染：点开之后要等一拍才有格子
+      daysEl.innerHTML = '<span id="loading">加载中…</span>';
+      statusEl.textContent = '日历已打开';
+      window.setTimeout(render, 200);
+    });
+    document.getElementById('next').addEventListener('click', function () {
+      month.m += 1;
+      if (month.m > 12) { month.m = 1; month.y += 1; }
+      daysEl.innerHTML = '<span id="loading">加载中…</span>';
+      window.setTimeout(render, 200);
+    });
+    document.getElementById('prev').addEventListener('click', function () {
+      month.m -= 1;
+      if (month.m < 1) { month.m = 12; month.y -= 1; }
+      daysEl.innerHTML = '<span id="loading">加载中…</span>';
+      window.setTimeout(render, 200);
+    });
+    daysEl.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('button[data-date]') : null;
+      if (!b) return;
+      var k = b.getAttribute('data-date');
+      if (b.disabled) { statusEl.textContent = '该日期已订满：' + k; return; }
+      window.__selected = k;
+      inputEl.value = k.replace(/-/g, '/');
+      calEl.hidden = true;
+      statusEl.textContent = '已选择入住日期：' + k.replace(/-/g, '/');
+    });
+    // ② readonly 输入框：程序化输入也会被忽略（这里如实计数，供断言"打字无效"）
+    inputEl.addEventListener('input', function () { window.__typed += 1; });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -2368,6 +2457,24 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：自定义日期选择器（playbook id = 'date-picker-custom'）。
+    //
+    // 节奏刻意踩到四个坑：打开日历后**不立刻点**（等异步渲染）→ 点"下个月"
+    // → 读一次日历（看到"已订满"的日期）→ 点目标日。
+    if (userText.includes(PLAYBOOKS['date-picker-custom'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '选择入住日期' }); return; }
+      // 异步渲染：先读一次，确认格子已经出来（也顺便看到"已订满"的信息）
+      if (done === 2) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { role: 'button', name: '下个月' }); return; }
+      if (done === 4) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
+      if (done === 5) { toolStep(res, 'click_element', { role: 'listitem', name: '3月15日' }); return; }
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'value', selector: '#checkin' }); return; }
+      finalText(res, '已选择入住日期 2026/03/15（自定义日历：输入框是只读的，只能点日历；15 号在 3 月，需要先翻到下个月）。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2435,7 +2542,8 @@ const main = http.createServer((req, res) => {
                                                         : req.url && req.url.startsWith('/paywall') ? paywallPage()
                                                           : req.url && req.url.startsWith('/dialog') ? dialogPage()
                                                             : req.url && req.url.startsWith('/download') ? downloadPage()
-                                                              : mainPage()
+                                                              : req.url && req.url.startsWith('/datepicker') ? datePickerPage()
+                                                                : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

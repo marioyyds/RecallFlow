@@ -16,6 +16,7 @@
 | `checkout-form` | 下单 | `/checkout` ✓ | 6 | `checkout-form` | ✓ | 6 | 2 | page |
 | `cross-tab-handoff` | 验证码 | `/handoff` ✓ | 4 | `cross-tab-handoff` | ✓ | 2 | 1 | page |
 | `csp-page-world-js` | 核对总价 | `/csp` ✓ | 3 | `page-world-js` | ✓ | 2 | 1 | page |
+| `date-picker-custom` | 入住 | `/datepicker` ✓ | 3 | `date-picker-custom` | ✓ | 3 | 1 | page |
 | `debug-console-error` | 没反应 | `/debug` ✓ | 4 | `debug-console-error` | ✓ | 3 | 2 | page |
 | `dismiss-overlay` | 弹窗 | `/blocked` ✓ | 4 | `dismiss-overlay` | ✓ | 5 | 2 | page |
 | `download-verify` | 报表 | `/download` ✓ | 4 | `dialog-handling` | ✓ | 0 | 1 | payload |
@@ -37,4 +38,4 @@
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 3 | 1 | page |
 
-**合计**：26 个剧本；页面判据 78 条、回执判据 54 条；夹具路由已接线 26/26；E2E 已引用 26/26；有内置技能 26/26。
+**合计**：27 个剧本；页面判据 81 条、回执判据 55 条；夹具路由已接线 27/27；E2E 已引用 27/27；有内置技能 27/27。

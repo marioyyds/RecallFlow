@@ -749,6 +749,34 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['report.csv'],
     },
   },
+
+  'date-picker-custom': {
+    id: 'date-picker-custom',
+    title: '复杂场景：自定义日期选择器（只读输入框 / 异步日历 / 跨月 / 禁用日）',
+    trigger: '入住',
+    // 四个真实难点：
+    //   ① 输入框 `readonly` —— 往里打字**静默无效**（"已输入"是假的）；
+    //   ② 日历**异步渲染**：点开之后要等一拍才有格子，立刻点会落空；
+    //   ③ 目标日期在**下个月**：只看当前月就下结论必然错；
+    //   ④ 有**已订满的禁用日**（含紧邻目标的 14 号）：必须真的读日历，不能按顺序猜。
+    tools: ['get_page_snapshot', 'click_element', 'inspect_element'],
+    success: '翻到下个月、在日历里点中 15 日，输入框值变为 2026/03/15',
+    eval: {
+      url: '/datepicker',
+      instruction: '帮我订 2026 年 3 月 15 日入住，选好日期就行。',
+      pageChecks: [
+        { expr: "window.__selected === '2026-03-15'", label: '选中的确实是 2026-03-15（不是别的日子）' },
+        { expr: "document.getElementById('checkin').value === '2026/03/15'", label: '输入框里的值也跟着变了' },
+        // 目标在下个月 ⇒ 没翻月是不可能点到的（这条保证"跨月"真的发生了）
+        { expr: "document.getElementById('status').textContent.includes('2026/03/15')", label: '页面状态确认了所选日期' },
+      ],
+      // ⚠ 原本想用「已订满」当回执判据（它只在日历格子、含紧邻目标的 14 号），
+      // 但实测**快照里没有它** —— 初步看快照不列 disabled 元素 ✗（已记进提交信息，本轮不改）。
+      // 改用同样只来自日历、且确实能出现的标签：「3月15日」是**下个月**的格子，
+      // 出现即说明翻月后重新读了日历并按标签定位到那天（而不是按序号碰运气）。
+      mustSeeInToolResults: ['3月15日'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {

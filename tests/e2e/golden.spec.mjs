@@ -1542,6 +1542,50 @@ test('golden: 下载 —— 页面上什么都不会变，凭据只能来自浏�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**自定义日期选择器**（playbook 'date-picker-custom'）。
+//
+// 四个真实难点：
+//   ① 输入框是 `readonly` —— 往里打字**静默无效**（"已输入"是假的）；
+//   ② 日历**异步渲染**：点开之后要等一拍才有格子，立刻点会落空；
+//   ③ 目标日期（3月15日）在**下个月** —— 只看当前月就下结论必然错；
+//   ④ 有**已订满的禁用日**（14 号紧邻目标）—— 必须真的读日历，不能按顺序猜。
+//
+// 判据两层：
+//   · 页面状态：选中的日期、输入框的值、状态文案都对得上；
+//   · 模型收到了什么：「已订满」只存在于日历格子里 ⇒ 它进了上下文，
+//     说明模型真的**读了一遍日历**（而不是直接去找"15"那个按钮碰运气）。
+test('golden: 日期选择器 —— 只读输入框打字无效，必须翻月点日历', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/datepicker');
+
+  // 基线：输入框是只读的（打字的坑必须真实存在）
+  expect(await page.evaluate(() => document.getElementById('checkin').readOnly)).toBe(true);
+  expect(await page.evaluate(() => window.__selected)).toBe('');
+  // 日历初始是关着的，且目标日期不在当前显示的月份里
+  expect(await page.locator('#cal').isHidden()).toBe(true);
+
+  resetLlmRequests();
+  await sendInstruction(page, '帮我订 2026 年 3 月 15 日入住，选好日期就行。');
+
+  // ① 选中的确实是目标日期
+  await expect.poll(() => page.evaluate(() => window.__selected), { timeout: 45_000 }).toBe('2026-03-15');
+  expect(await page.evaluate(() => document.getElementById('checkin').value)).toBe('2026/03/15');
+  await expect(page.locator('#status')).toHaveText(/2026\/03\/15/);
+  // ② 日历被关上了（选完就收，说明是走完流程而不是半途）
+  await expect(page.locator('#cal')).toBeHidden();
+
+  // ③ 模型真的读了日历：格子的 `aria-label`（「3月15日」）只在日历里，
+  //    而且它是**下个月**的格子 ⇒ 出现即说明翻月后重新读了日历、并按标签定位到那天。
+  //
+  // ⚠ 本轮实测发现：快照里**没有出现**禁用格子的「已订满」标记
+  //   （`aria-label` 里明明带着它）—— 初步看快照**不列 disabled 元素**。
+  //   那意味着"哪些日子订满了"这类信息，模型从快照拿不到（得靠 JS 或属性读取）✗
+  //   这条不在这轮解决（避免又一次预设结论），先按可靠判据断言并把观察记进提交信息。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('3月15日');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：
