@@ -3562,9 +3562,9 @@
   var MAX_CONSOLE = 30;
   var MAX_STACK_CHARS = 1500;
   var MAX_TEXT_CHARS = 300;
-  var MAX_TOOL_TRAIL = 24;
+  var MAX_TOOL_TRAIL = 60;
   var MAX_TRAIL_ARGS_CHARS = 200;
-  var MAX_TRAIL_RESULT_CHARS = 300;
+  var MAX_TRAIL_RESULT_CHARS = 600;
   function newHandoffId() {
     let out = "";
     const len = ID_ALPHABET.length;
@@ -3616,7 +3616,7 @@
       };
     });
   }
-  function deriveToolTrail(messages) {
+  function buildToolTrail(messages) {
     const list = Array.isArray(messages) ? messages : [];
     const out = [];
     for (const m of list) {
@@ -3642,7 +3642,41 @@
         });
       }
     }
-    return out.slice(-MAX_TOOL_TRAIL);
+    return out;
+  }
+  var MAX_TRAIL_FULL = 200;
+  var MAX_FULL_TRAIL_BYTES = 4e5;
+  function prepareHandoffTrail(rawTrail) {
+    const full = Array.isArray(rawTrail) ? rawTrail : [];
+    const fitted = fitFullTrailToBudget(full);
+    return {
+      items: fitted.items,
+      total: full.length,
+      omitted: fitted.omitted,
+      summary: fitted.items.slice(-MAX_TOOL_TRAIL)
+    };
+  }
+  function fitFullTrailToBudget(trail, maxBytes = MAX_FULL_TRAIL_BYTES) {
+    const src = Array.isArray(trail) ? trail : [];
+    let kept = src.slice(-MAX_TRAIL_FULL);
+    while (kept.length > 0 && handoffByteSize(kept) > maxBytes) {
+      kept = kept.slice(Math.ceil(kept.length / 2));
+    }
+    return { items: kept, omitted: src.length - kept.length };
+  }
+  function handoffByteSize(value) {
+    let s = "";
+    try {
+      s = JSON.stringify(value);
+    } catch (e) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+    if (s === void 0) return 0;
+    try {
+      return new TextEncoder().encode(s).length;
+    } catch (e) {
+      return s.length * 2;
+    }
   }
   function buildHandoffRecord(input = {}) {
     const id = normalizeHandoffId(input.id);
@@ -3651,7 +3685,9 @@
     const messages = trimMessages(input.messages);
     const consoleErrors = trimConsole(input.consoleEntries);
     const picked = trimPicked(input.pickedElements);
-    const toolTrail = Array.isArray(input.toolTrail) ? input.toolTrail.slice(-MAX_TOOL_TRAIL) : deriveToolTrail(input.messages);
+    const rawTrail = Array.isArray(input.toolTrail) ? input.toolTrail : buildToolTrail(input.messages);
+    const prepared = prepareHandoffTrail(rawTrail);
+    const toolTrail = prepared.summary;
     return {
       id,
       version: 1,
@@ -3664,6 +3700,13 @@
       messageCount: messages.length,
       messages,
       toolTrail,
+      // 三个数的语义要分清（接手方据此判断"我拿到的是不是完整的、缺的能不能取回"）：
+      //   trailTotal   会话真实步数
+      //   trailStored  可通过分段读取取回的步数
+      //   trailOmitted **真正取不回**的步数（超出全量预算）
+      trailTotal: prepared.total,
+      trailStored: prepared.items.length,
+      trailOmitted: prepared.omitted,
       pickedElements: picked,
       consoleErrors,
       note: clampText(input.note, 500)
@@ -4265,6 +4308,9 @@
     .p-foot button:hover { border-color: #4a90d9; color: #4a90d9; }
     .p-foot .spacer { flex: 1; }
     .p-foot .copy-btn { margin-left: auto; }
+    /* \u7B2C\u4E8C\u4E2A\u5BFC\u51FA\u6309\u94AE\uFF08\u5BFC\u51FA\u5B8C\u6574\uFF09\u7D27\u6328\u7740\u4E0A\u4E00\u4E2A\uFF1A\u4E24\u4E2A\u90FD\u5403 margin-left:auto \u7684\u8BDD\uFF0C
+       \u81EA\u52A8\u5916\u8FB9\u8DDD\u4F1A\u5728\u5B83\u4EEC\u4E4B\u95F4\u4E5F\u6491\u5F00\u4E00\u6BB5\uFF0C\u9875\u811A\u53D8\u6210\u300Cclear \u2026\u2026 \u5BFC\u51FA\u8BB0\u5F55 \u2026\u2026 \u5BFC\u51FA\u5B8C\u6574 \u505C\u6B62\u300D\u3002 */
+    .p-foot .copy-btn + .copy-btn { margin-left: 6px; }
     .p-foot .stop-btn { border-color: #e74c3c; color: #e74c3c; font-weight: 600; }
     .p-foot .stop-btn:hover { border-color: #e74c3c; color: #fff; background: #e74c3c; }
     .panel.dark .p-foot .stop-btn { border-color: #e74c3c; color: #e74c3c; }
@@ -5141,13 +5187,16 @@
     if (partial) list.push(partial);
     return list;
   }
-  function buildTranscriptMarkdown() {
+  function buildTranscriptMarkdown(mode) {
     return buildTranscript({
       title: document.title || "(\u65E0\u6807\u9898)",
       url: location.href,
       exportedAt: (/* @__PURE__ */ new Date()).toLocaleString(),
       handoffId: handoffId || "",
-      conversation: messagesForExport()
+      conversation: messagesForExport(),
+      // ⚠ `maxResultLen` 是本模块**唯一**的裁剪点（用户与助手正文原样输出），
+      // 所以给足上限就等于无损 —— 不要以为这里还有别的暗坑。
+      ...mode === "full" ? { maxResultLen: 1e9 } : {}
     });
   }
   function serializeConversation() {
@@ -5705,30 +5754,38 @@
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
     copyBtn.textContent = "\u5BFC\u51FA\u8BB0\u5F55";
-    copyBtn.title = "\u5BFC\u51FA\u4E3A\u7ED3\u6784\u5316 markdown\uFF08\u542B\u89D2\u8272\u5206\u9694\u4E0E\u5DE5\u5177\u660E\u7EC6\uFF09\uFF0C\u53EF\u76F4\u63A5\u4EA4\u7ED9 AI \u6216\u8D34\u8FDB\u5DE5\u5355";
-    copyBtn.addEventListener("click", () => {
+    copyBtn.title = "\u5BFC\u51FA\u4E3A\u7ED3\u6784\u5316 markdown\uFF08\u542B\u89D2\u8272\u5206\u9694\u4E0E\u5DE5\u5177\u660E\u7EC6\uFF09\uFF0C\u53EF\u76F4\u63A5\u4EA4\u7ED9 AI \u6216\u8D34\u8FDB\u5DE5\u5355\uFF1B\u5355\u6761\u5DE5\u5177\u7ED3\u679C\u6309 500 \u5B57\u622A\u65AD\u4EE5\u4FBF\u7C98\u8D34";
+    const copyFullBtn = document.createElement("button");
+    copyFullBtn.className = "copy-btn";
+    copyFullBtn.textContent = "\u5BFC\u51FA\u5B8C\u6574";
+    copyFullBtn.title = "\u540C\u4E0A\uFF0C\u4F46**\u4E0D\u622A\u65AD**\u5DE5\u5177\u7ED3\u679C \u2014\u2014 \u9002\u5408\u7559\u6863\u3001\u6392\u67E5\u3001\u6216\u8BA9\u63A5\u624B\u7684 AI \u770B\u5230\u524D\u4E00\u4E2A AI \u8BD5\u8FC7\u7684\u5168\u90E8\u6B65\u9AA4";
+    const exportTranscript = (btn, mode) => {
+      const label = btn.textContent;
+      const restore = () => setTimeout(() => btn.textContent = label, 1600);
       let text = "";
       try {
-        text = buildTranscriptMarkdown();
+        text = buildTranscriptMarkdown(mode);
       } catch (e) {
         text = "";
       }
       if (!text) {
-        copyBtn.textContent = "\u6682\u65E0\u53EF\u5BFC\u51FA\u7684\u5BF9\u8BDD";
-        setTimeout(() => copyBtn.textContent = "\u5BFC\u51FA\u8BB0\u5F55", 1600);
+        btn.textContent = "\u6682\u65E0\u53EF\u5BFC\u51FA\u7684\u5BF9\u8BDD";
+        restore();
         return;
       }
       navigator.clipboard.writeText(text).then(
         () => {
-          copyBtn.textContent = "\u5DF2\u590D\u5236 " + text.length + " \u5B57";
-          setTimeout(() => copyBtn.textContent = "\u5BFC\u51FA\u8BB0\u5F55", 1600);
+          btn.textContent = "\u5DF2\u590D\u5236 " + text.length + " \u5B57";
+          restore();
         },
         () => {
-          copyBtn.textContent = "\u590D\u5236\u5931\u8D25";
-          setTimeout(() => copyBtn.textContent = "\u5BFC\u51FA\u8BB0\u5F55", 1600);
+          btn.textContent = "\u590D\u5236\u5931\u8D25";
+          restore();
         }
       );
-    });
+    };
+    copyBtn.addEventListener("click", () => exportTranscript(copyBtn, "brief"));
+    copyFullBtn.addEventListener("click", () => exportTranscript(copyFullBtn, "full"));
     stopBtn = document.createElement("button");
     stopBtn.className = "stop-btn";
     stopBtn.textContent = "\u25A0 \u505C\u6B62";
@@ -5736,6 +5793,7 @@
     stopBtn.addEventListener("click", interrupt);
     foot.appendChild(clearBtn);
     foot.appendChild(copyBtn);
+    foot.appendChild(copyFullBtn);
     foot.appendChild(stopBtn);
     panel.appendChild(foot);
     const resizeHandle = document.createElement("div");

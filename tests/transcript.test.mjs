@@ -18,6 +18,58 @@ const pos = (haystack, needle) => {
   return i;
 };
 
+// ---------------------------------------------------------------- 导出两档（精简 / 完整）
+//
+// 起因（用户反馈）：复杂会话导出的记录里"读不到完整信息" —— 默认档把单条工具结果截到 500 字。
+// 但粘贴给另一个 AI 时截断是有意义的（上下文成本真实存在），所以做成**两档**而不是直接放开：
+//   brief（默认）→ 单条 500 字，适合粘贴
+//   full         → 不截断，适合留档 / 排查 / 让接手的 AI 看到前一个 AI 试过的全部步骤
+// `maxResultLen` 是本模块**唯一**的裁剪点（用户与助手正文原样输出），所以 full 是真无损。
+
+test('导出两档：brief 截断工具结果，full 不截断（同一段对话，长度必须不同）', () => {
+  const long = 'X'.repeat(3000);
+  const conv = [
+    { role: 'user', content: '跑一下' },
+    {
+      role: 'assistant',
+      parts: [
+        { type: 'tool-call', callId: 'a', name: 'run_javascript', args: {} },
+        { type: 'tool-result', callId: 'a', status: 'completed', result: long },
+      ],
+    },
+  ];
+  const brief = wrap(conv);
+  const full = wrap(conv, { maxResultLen: 1e9 });
+  assert.ok(brief.includes('已截断'), 'brief 档应当出现截断标记');
+  assert.ok(!full.includes('已截断'), 'full 档**不该**有截断标记：它就是为无损存在的');
+  assert.ok(brief.includes(long.slice(0, 400)), 'brief 保留开头');
+  assert.ok(!brief.includes(long), 'brief 不该包含全量');
+  assert.ok(full.includes(long), 'full 必须包含**完整**结果');
+  assert.ok(full.length > brief.length, 'full 一定更长（否则两档没区别，等于没做）');
+});
+
+test('导出两档：正文（用户与助手）在两档里都必须完整 —— 截断只能影响工具结果', () => {
+  // 这条是防"顺手也把正文截了"：正文是记录的核心，任何一档都不该动它。
+  const body = '要点'.repeat(2000);
+  const conv = [
+    { role: 'user', content: '问我' },
+    { role: 'assistant', content: body },
+  ];
+  for (const extra of [{}, { maxResultLen: 1e9 }]) {
+    const out = wrap(conv, extra);
+    assert.ok(out.includes(body), '正文必须原样出现（maxResultLen=' + (extra.maxResultLen || '默认') + '）');
+  }
+});
+
+test('这条门禁本身有牙齿：若两档用同一个上限，上面的"必须不同"会失败', () => {
+  const long = 'Y'.repeat(3000);
+  const conv = [
+    { role: 'assistant', parts: [{ type: 'tool-call', callId: 'a', name: 't', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: long }] },
+  ];
+  const same = wrap(conv); // 模拟"两档都走默认"
+  assert.equal(same.includes(long), false, '默认档不含全量 —— 若两档同参，full 也就拿不到全量（用例会红）');
+});
+
 // ---------------------------------------------------------------- ① 时序
 
 test('叙述与工具按原顺序交错输出（本模块存在的理由）', () => {

@@ -21,6 +21,57 @@ test('不存在「对 const 声明重新赋值」的代码（运行时必崩且�
   assert.deepEqual(findings, [], '发现对 const 的赋值，运行时必抛 Assignment to constant variable：\n  ' + detail);
 });
 
+test('创建出来的元素必须被挂载（"建了但忘了 append"是静默失效）', () => {
+  // 真实近失：本轮给面板加「导出完整」按钮时，先把 createElement 与事件都写好了，
+  // 却没写 `foot.appendChild(copyFullBtn)` —— 代码能跑、语法没错、按钮**永远不出现**，
+  // 而症状是"功能没做"，很容易被误判成"用户没找到按钮"。
+  // 判据：`const X = document.createElement(...)` 之后，X 必须出现在某个挂载调用里。
+  const files = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.(mjs|js)$/.test(e.name)) files.push(p);
+    }
+  };
+  if (existsSync('lib')) walk('lib');
+  const bad = [];
+  for (const f of files) {
+    const src = readFileSync(f, 'utf8');
+    // 逐个变量名收集：`const x = document.createElement(...)`
+    for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(/g)) {
+      const name = m[1];
+      // 挂载方式：appendChild / append / insertBefore / replaceChild / prepend / after / before
+      const mounted = new RegExp('\\b(appendChild|append|insertBefore|replaceChild|prepend|after|before)\\s*\\(\\s*' + name + '\\b');
+      // 也允许自己被返回或被别的容器收走（例如作为返回值、或赋给 innerHTML 之外的用法）
+      const escaped = new RegExp('\\breturn\\s+' + name + '\\b');
+      if (mounted.test(src) || escaped.test(src)) continue;
+      bad.push(f + '  变量 ' + name);
+    }
+  }
+  assert.ok(files.length > 20, '前置：应扫描到足够多的文件，实际 ' + files.length);
+  assert.deepEqual(bad, [], '这些元素创建后从未被挂载（静默失效）：\n  ' + bad.join('\n  '));
+});
+
+test('这条门禁本身有牙齿：建了不挂载会被抓，正常挂载不误报', () => {
+  const mounted = (src, name) =>
+    new RegExp('\\b(appendChild|append|insertBefore|replaceChild|prepend|after|before)\\s*\\(\\s*' + name + '\\b').test(src) ||
+    new RegExp('\\breturn\\s+' + name + '\\b').test(src);
+  const created = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(/g;
+  const names = (src) => [...src.matchAll(created)].map((m) => m[1]);
+  // 建了但没挂载 → 名字会出现在 names 里、mounted 为 false
+  const badSrc = "const b = document.createElement('button');\nb.addEventListener('click', go);";
+  assert.deepEqual(names(badSrc), ['b']);
+  assert.equal(mounted(badSrc, 'b'), false, '未挂载必须被判为未挂载');
+  // 正常挂载
+  const okSrc = "const b = document.createElement('button');\nfoot.appendChild(b);";
+  assert.equal(mounted(okSrc, 'b'), true);
+  // 作为返回值交给调用方挂载也算
+  assert.equal(mounted("const b = document.createElement('div');\nreturn b;", 'b'), true);
+  // 名字相似但不相同不能误判
+  assert.equal(mounted('parent.appendChild(bb);', 'b'), false, 'appendChild(bb) 不等于挂载 b');
+});
+
 test('注释不许把下一行代码吃掉（注释里出现"紧贴着声明关键字"的形态）', () => {
   // 真实踩到的坑：编辑时把 `// 注释……。` 与下一行 `function installStorage() {` **接在了一起**，
   // 于是那个函数整体变成**注释的一部分**，函数体成了顶层代码。
