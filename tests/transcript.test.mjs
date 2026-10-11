@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, stripTrailingSources, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
+import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, stripTrailingSources, serializeConversationMessages, MAX_PARTS, MAX_PART_RESULT_CHARS, MAX_MESSAGE_CONTENT_CHARS, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -68,6 +68,95 @@ test('这条门禁本身有牙齿：若两档用同一个上限，上面的"必�
   ];
   const same = wrap(conv); // 模拟"两档都走默认"
   assert.equal(same.includes(long), false, '默认档不含全量 —— 若两档同参，full 也就拿不到全量（用例会红）');
+});
+
+// ---------------------------------------------------------------- 对话持久化（刷新后还剩什么）
+//
+// 对话存进 chrome.storage.session（每标签页一个 key，**配额所有标签页共享**约 10MB）。
+// 上一版有两个毛病：只有"步数上限 30"、而**单步完全没有上限** ——
+// 一条 20KB 的快照乘 30 步就是 600KB。改成"步数留得多、单步有界"。
+
+test('持久化：步数留得多（200），单步各自有界（不再只限条数）', () => {
+  const big = 'R'.repeat(50000);
+  const parts = [];
+  for (let i = 0; i < 260; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 't', args: { pad: 'a'.repeat(3000) } });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: big });
+  }
+  const [rec] = serializeConversationMessages([{ role: 'assistant', content: 'x', parts }]);
+  assert.equal(rec.parts.length, MAX_PARTS, '保留步数应等于上限（原先只有 30）');
+  // 用 parts.length 而不是自己再算一遍（每轮推 2 个 part，手算最容易错 —— 本用例第一版就错在这）
+  assert.equal(rec.partsTotal, parts.length);
+  assert.equal(rec.partsOmitted, parts.length - MAX_PARTS, '丢了多少步必须写明');
+  // 单步有界：否则"步数变多"会把配额吃掉
+  for (const p of rec.parts) {
+    if (typeof p.result === 'string') assert.ok(p.result.length <= MAX_PART_RESULT_CHARS, '单步结果必须有界');
+    if (p.args && typeof p.args === 'object') {
+      assert.ok(JSON.stringify(p.args).length < 500, '单步参数必须有界');
+    }
+  }
+  // 总量必须远小于"步数 × 原始单步"，否则这次放宽等于没做配额约束
+  const bytes = JSON.stringify(rec).length;
+  assert.ok(bytes < 200 * 4000, '整轮持久化体积应有界，实际 ' + bytes);
+});
+
+test('实测场景：一次约 60 步的会话必须被**完整**持久化（原先 30 步上限要丢一半）', () => {
+  // 用户报的就是这个：一次"检索动画"的会话约 60 次工具调用，
+  // 刷新后只剩 30 步以内 —— 导出再"完整"也取不回被持久化层丢掉的部分。
+  const parts = [];
+  for (let i = 0; i < 60; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: { i } });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const [rec] = serializeConversationMessages([{ role: 'assistant', parts }]);
+  assert.equal(rec.partsOmitted, undefined, '60 轮会话不该丢任何一步');
+  assert.equal(rec.parts.length, parts.length, '一步不少');
+  assert.equal(rec.parts[0].name, 'tool0', '而且是从最早那步开始的（不是只剩尾巴）');
+});
+
+test('持久化：没超上限时不写"省略"字段（免得读者以为丢过东西）', () => {
+  const [rec] = serializeConversationMessages([
+    { role: 'assistant', parts: [{ type: 'tool-call', callId: 'a', name: 't', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: 'ok' }] },
+  ]);
+  assert.equal(rec.partsOmitted, undefined, '没丢就不能写 partsOmitted');
+  assert.equal(rec.partsTotal, undefined);
+  assert.equal(rec.contentTruncated, undefined);
+});
+
+test('持久化：正文上限放宽（4000 → 20000），超限时标明"已截断"', () => {
+  const long = 'A'.repeat(15000);
+  const [ok] = serializeConversationMessages([{ role: 'assistant', content: long }]);
+  assert.equal(ok.content.length, 15000, '原先 4000 字就被砍，现在应完整保留');
+  assert.equal(ok.contentTruncated, undefined);
+  const [cut] = serializeConversationMessages([{ role: 'assistant', content: 'B'.repeat(MAX_MESSAGE_CONTENT_CHARS + 10) }]);
+  assert.equal(cut.content.length, MAX_MESSAGE_CONTENT_CHARS);
+  assert.equal(cut.contentTruncated, true, '截断必须留下显式标记');
+});
+
+test('导出里必须**说明**少了多少步（否则记录看起来像"当时只做了这些"）', () => {
+  const conv = [
+    {
+      role: 'assistant',
+      partsTotal: 260,
+      partsOmitted: 60,
+      parts: [{ type: 'tool-call', callId: 'a', name: 't', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: 'ok' }],
+    },
+  ];
+  const out = wrap(conv);
+  assert.match(out, /更早的 \*\*60 步\*\*/, '要写出丢了多少步');
+  assert.match(out, /共 260 步/, '要写出该轮总步数');
+  assert.match(out, /无法恢复/, '要说明这是**不可恢复**的（不能让人以为还取得到）');
+  // 没丢的时候不该出现这段提示
+  const clean = wrap([{ role: 'assistant', parts: [{ type: 'tool-call', callId: 'a', name: 't', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: 'ok' }] }]);
+  assert.ok(!clean.includes('未保留'), '没丢就不该有这句');
+});
+
+test('导出里也要说明正文被截断（正文截断与工具截断是两件事）', () => {
+  const out = wrap([{ role: 'assistant', content: '答', contentTruncated: true }]);
+  assert.match(out, /正文超过存储上限/);
+  assert.match(out, /只存在于当次页面会话中/, '要指明可恢复性：原文已不可取回');
+  const clean = wrap([{ role: 'assistant', content: '答' }]);
+  assert.ok(!clean.includes('正文超过存储上限'));
 });
 
 // ---------------------------------------------------------------- ① 时序

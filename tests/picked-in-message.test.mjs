@@ -21,6 +21,7 @@ import {
 } from '../lib/shared/utils.js';
 
 const chatSrc = fs.readFileSync('lib/page/chat.js', 'utf8');
+const transcriptSrc = fs.readFileSync('lib/page/transcript.js', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
 
 const onePick = {
@@ -184,11 +185,12 @@ test('发送时把拾取信息写进那条 user 消息（否则对话里没有�
 });
 
 test('**持久化白名单**里必须有 pickedElements（漏了就"当时看得见、刷新后没了"）', () => {
-  // serializeConversation 是白名单式字段拷贝，新字段不加进去就存不下来 ——
-  // 而症状看起来像渲染问题，极易误判。
-  const at = chatSrc.indexOf('function serializeConversation()');
-  assert.ok(at > 0, '应能找到 serializeConversation');
-  const body = chatSrc.slice(at, at + 1200);
+  // 白名单式字段拷贝：新字段不加进去就存不下来 —— 而症状看起来像渲染问题，极易误判。
+  // ⚠ 白名单的实现在本轮从 chat.js **搬到了 transcript.js**（纯函数、可单测）。
+  // 门禁因此跟着搬：它盯的是**语义**（这个字段必须被拷贝），不是某个文件的位置。
+  const at = transcriptSrc.indexOf('export function serializeConversationMessages(');
+  assert.ok(at > 0, '应能找到 serializeConversationMessages');
+  const body = transcriptSrc.slice(at, at + 1600);
   assert.match(body, /copy\.pickedElements = m\.pickedElements\.slice\(0, 8\)/, '白名单里必须拷贝 pickedElements');
 });
 
@@ -198,7 +200,7 @@ test('模型上下文**不受影响**：给模型的那份仍由 agent.js 单独
   assert.match(agentSrc, /const pickedBlocks = picks\.map/, 'agent.js 仍应有自己那份元数据装配');
   assert.match(agentSrc, /buildInitialMessagesPure\(\{/, '仍应交给纯函数装配');
   // 会话里存的那份是**压缩后**的，不含 text/ancestors —— 两者形状不同正是刻意的
-  const at = chatSrc.indexOf('function serializeConversation()');
-  const body = chatSrc.slice(at, at + 1200);
+  const at = transcriptSrc.indexOf('export function serializeConversationMessages(');
+  const body = transcriptSrc.slice(at, at + 1600);
   assert.ok(!/ancestors/.test(body), '会话里不该存祖先链（那是给模型看的）');
 });

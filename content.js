@@ -3304,6 +3304,64 @@
     }
     return false;
   }
+  var MAX_PARTS = 200;
+  var MAX_PART_RESULT_CHARS = 2e3;
+  var MAX_PART_ARGS_CHARS = 400;
+  var MAX_PART_TEXT_CHARS = 2e3;
+  var MAX_MESSAGE_CONTENT_CHARS = 2e4;
+  function clipPart(p) {
+    const out = Object.assign({}, p);
+    if (typeof out.result === "string" && out.result.length > MAX_PART_RESULT_CHARS) {
+      out.result = out.result.slice(0, MAX_PART_RESULT_CHARS);
+      out.resultTruncated = true;
+    }
+    if (typeof out.text === "string" && out.text.length > MAX_PART_TEXT_CHARS) {
+      out.text = out.text.slice(0, MAX_PART_TEXT_CHARS);
+      out.textTruncated = true;
+    }
+    if (out.args && typeof out.args === "object") {
+      let s = "";
+      try {
+        s = JSON.stringify(out.args);
+      } catch (e) {
+        s = "";
+      }
+      if (s.length > MAX_PART_ARGS_CHARS) out.args = { "\u2026": "\u53C2\u6570\u8FC7\u957F\uFF08" + s.length + " \u5B57\u7B26\uFF09\uFF0C\u5DF2\u7701\u7565" };
+    }
+    return out;
+  }
+  function serializeConversationMessages(conversation2) {
+    return (Array.isArray(conversation2) ? conversation2 : []).slice(-20).map((m) => {
+      const copy = { role: m.role };
+      if (typeof m.content === "string") {
+        copy.content = m.content.slice(0, MAX_MESSAGE_CONTENT_CHARS);
+        if (m.content.length > MAX_MESSAGE_CONTENT_CHARS) copy.contentTruncated = true;
+      }
+      if (typeof m.toolSummary === "string" && m.toolSummary) copy.toolSummary = m.toolSummary.slice(0, 600);
+      if (Array.isArray(m.pickedElements) && m.pickedElements.length) copy.pickedElements = m.pickedElements.slice(0, 8);
+      if (Array.isArray(m.parts)) {
+        const all = m.parts;
+        const kept = all.slice(-MAX_PARTS);
+        copy.parts = kept.map(clipPart);
+        if (all.length > kept.length) {
+          copy.partsTotal = all.length;
+          copy.partsOmitted = all.length - kept.length;
+        }
+      }
+      if (Array.isArray(m.citations)) {
+        copy.citations = m.citations.slice(0, 20).map((c) => ({
+          index: c.index,
+          source: c.source,
+          id: c.id,
+          title: c.title,
+          url: c.url,
+          snippet: String(c.snippet || "").slice(0, 300)
+        }));
+      }
+      if (Array.isArray(m.plan)) copy.plan = m.plan;
+      return copy;
+    });
+  }
   function clipInline(text, max) {
     const t = norm(text);
     if (!t) return "";
@@ -3379,6 +3437,16 @@
       }
       out.push("## RecallFlow");
       out.push("");
+      if (Number(m.partsOmitted) > 0) {
+        out.push(
+          "> \u26A0 \u66F4\u65E9\u7684 **" + m.partsOmitted + " \u6B65**\uFF08\u8BE5\u8F6E\u5171 " + (Number(m.partsTotal) || "?") + " \u6B65\uFF09\u56E0**\u4F1A\u8BDD\u5B58\u50A8\u4E0A\u9650**\u672A\u4FDD\u7559\uFF0C\u5237\u65B0\u540E\u65E0\u6CD5\u6062\u590D \u2014\u2014 \u4E0B\u9762\u7684\u5DE5\u5177\u660E\u7EC6\u4E0D\u662F\u5B8C\u6574\u7684\u3002"
+        );
+        out.push("");
+      }
+      if (m.contentTruncated === true) {
+        out.push("> \u26A0 \u672C\u8F6E\u6B63\u6587\u8D85\u8FC7\u5B58\u50A8\u4E0A\u9650\uFF0C\u5DF2\u622A\u65AD\uFF1B\u5B8C\u6574\u539F\u6587\u53EA\u5B58\u5728\u4E8E\u5F53\u6B21\u9875\u9762\u4F1A\u8BDD\u4E2D\u3002");
+        out.push("");
+      }
       const parts = Array.isArray(m.parts) ? m.parts : [];
       const results = /* @__PURE__ */ new Map();
       const callIds = /* @__PURE__ */ new Set();
@@ -5200,25 +5268,7 @@
     });
   }
   function serializeConversation() {
-    return conversation.slice(-20).map((m) => {
-      const copy = { role: m.role };
-      if (typeof m.content === "string") copy.content = m.content.slice(0, 4e3);
-      if (typeof m.toolSummary === "string" && m.toolSummary) copy.toolSummary = m.toolSummary.slice(0, 600);
-      if (Array.isArray(m.pickedElements) && m.pickedElements.length) copy.pickedElements = m.pickedElements.slice(0, 8);
-      if (Array.isArray(m.parts)) copy.parts = m.parts.slice(-30);
-      if (Array.isArray(m.citations)) {
-        copy.citations = m.citations.slice(0, 20).map((c) => ({
-          index: c.index,
-          source: c.source,
-          id: c.id,
-          title: c.title,
-          url: c.url,
-          snippet: String(c.snippet || "").slice(0, 300)
-        }));
-      }
-      if (Array.isArray(m.plan)) copy.plan = m.plan;
-      return copy;
-    });
+    return serializeConversationMessages(conversation);
   }
   function saveConversation() {
     try {
