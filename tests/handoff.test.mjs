@@ -11,6 +11,8 @@ import {
   updateHandoffIndex,
   formatHandoffPrompt,
   deriveToolTrail,
+  buildToolTrail,
+  MAX_TOOL_TRAIL,
   handoffByteSize,
   fitRecordToBudget,
 } from '../lib/shared/handoff.js';
@@ -213,13 +215,75 @@ test('deriveToolTrail: 无结果的调用标记为 unknown（而不是假装成�
 
 test('deriveToolTrail: 丢 user、容错脏数据、只留最近 N 步', () => {
   const parts = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 140; i++) {
     parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
     parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
   }
-  const trail = deriveToolTrail([{ role: 'user', content: 'hi', parts }, null, { role: 'assistant' }, { role: 'assistant', parts }]);
-  assert.equal(trail.length, 24, '应只保留最近 24 步');
-  assert.equal(trail[trail.length - 1].name, 'tool39');
+  const messages = [{ role: 'user', content: 'hi', parts }, null, { role: 'assistant' }, { role: 'assistant', parts }];
+  const trail = deriveToolTrail(messages);
+  // 断言**上限本身**而不是字面量：写死 24 会在上限调整时变成一条与行为无关的红灯
+  assert.equal(trail.length, MAX_TOOL_TRAIL, '应只保留最近 ' + MAX_TOOL_TRAIL + ' 步');
+  assert.equal(trail[trail.length - 1].name, 'tool139', '保留的必须是**最近**的几步');
+  assert.equal(trail[0].name, 'tool' + (140 - MAX_TOOL_TRAIL));
+});
+
+test('buildToolTrail：返回全量且不截断（省略计数的依据）', () => {
+  const parts = [];
+  for (let i = 0; i < 140; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const all = buildToolTrail([{ role: 'assistant', parts }]);
+  assert.equal(all.length, 140, 'buildToolTrail 是"全量"那份，不能自己截断');
+});
+
+// 起因（用户反馈）：一次"检索动画"的会话有约 60 次工具调用，而记录只留最近 24 步、
+// 每步结果 300 字符 —— 接手方看不到前面的探索，也就判断不了"哪些路已经试过了"。
+// 上限已放宽；但**更根本**的是：**省略了却不说，接手方会以为记录是完整的**。
+test('省略了多少步必须显式记在记录里（省略而不说＝谎报完整）', () => {
+  const parts = [];
+  for (let i = 0; i < 140; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const rec = buildHandoffRecord({ id: 'RF-7K2M9X', messages: [{ role: 'assistant', parts }] });
+  assert.equal(rec.trailTotal, 140, '要记下轨迹**总数**');
+  assert.equal(rec.toolTrail.length, MAX_TOOL_TRAIL, '交付的轨迹受上限约束');
+  assert.equal(rec.trailOmitted, 140 - MAX_TOOL_TRAIL, '省略的步数必须写明');
+  // 没超上限时不能虚报省略
+  const small = buildHandoffRecord({
+    id: 'RF-7K2M9X',
+    messages: [{ role: 'assistant', parts: [{ type: 'tool-call', callId: 'a', name: 'x', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: 'ok' }] }],
+  });
+  assert.equal(small.trailOmitted, 0);
+  assert.equal(small.trailTotal, 1);
+});
+
+test('**降级**砍轨迹时也必须同步更新省略计数（否则接手方更严重地高估完整性）', () => {
+  // 造一条**确实超预算**的记录，逼 fitRecordToBudget 走到「工具轨迹只留 10 步」那一档
+  const parts = [];
+  for (let i = 0; i < 60; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: { pad: 'y'.repeat(200) } });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r'.repeat(600) });
+  }
+  const rec = buildHandoffRecord({ id: 'RF-7K2M9X', messages: [{ role: 'assistant', parts }] });
+  const before = rec.trailOmitted;
+  const out = fitRecordToBudget(rec, 6000);
+  assert.ok(out.truncated, '小预算下应当被降级（否则这条用例没验到东西）');
+  assert.ok(
+    out.record.trailOmitted >= before,
+    '降级后省略计数只能增加，不能变小：少报了就等于谎报完整'
+  );
+  if (out.record.toolTrail.length < rec.toolTrail.length) {
+    assert.equal(
+      out.record.trailOmitted,
+      before + (rec.toolTrail.length - out.record.toolTrail.length),
+      '降级砍掉的步数必须计进省略数'
+    );
+  }
+  // 牙齿：一个"降级但忘了更新计数"的实现必须被判不合格
+  const naive = Object.assign({}, rec, { toolTrail: rec.toolTrail.slice(-10) });
+  assert.notEqual(naive.trailOmitted, before + (rec.toolTrail.length - 10), '朴素写法不更新计数，应被这条断言识别');
 });
 
 test('buildHandoffRecord: 工具轨迹进入交接包（此前 parts 被 trimMessages 丢掉）', () => {

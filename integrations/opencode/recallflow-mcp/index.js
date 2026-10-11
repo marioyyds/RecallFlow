@@ -1047,7 +1047,13 @@ async function recallflowSession(args) {
     session: r.record,
     hint:
       '这是用户复制标识「那一刻」的快照。若对应标签页仍处于活动状态，可再调 page_health / read_console 获取实时状态；' +
-      '若快照里的 consoleErrors 已足够定位问题，直接据此分析即可。源码位置若为开发服务器 URL，需先 dev_session_set 写入 projectRoot 与 devUrl。',
+      '若快照里的 consoleErrors 已足够定位问题，直接据此分析即可。源码位置若为开发服务器 URL，需先 dev_session_set 写入 projectRoot 与 devUrl。' +
+      // 复杂会话（实测一次检索类任务可达 ~60 次工具调用）会因体积上限被裁，
+      // 所以**必须让接手方知道自己拿到的是不是完整的** —— 否则它会以为"前一个 AI 只做了这些"，
+      // 把已经试过的路再试一遍。
+      '⚠ `toolTrail` 受体积上限约束：`trailTotal` 是实际步数、`trailOmitted` 是被省略的步数。' +
+      '只要 `trailOmitted > 0`，就说明**更早的探索不在快照里**，不要把它当成完整历史；' +
+      '需要那部分时请让用户在面板上「导出记录」并把范围说明给你。',
   };
 }
 
