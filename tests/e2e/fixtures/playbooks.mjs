@@ -838,6 +838,48 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['SO-8842', '已到底', '结算页白屏'],
     },
   },
+  'video-playback-verify': {
+    id: 'video-playback-verify',
+    title: '复杂场景：视频播放器状态 —— 「看起来在播」不等于真的在播',
+    trigger: '视频在播',
+    // 顺序即能力，而且**顺序本身**就是难点：
+    //   看一遍（状态栏写着「播放中」，但详情还没打开、没有任何数值）
+    //   → **先拆穿假象**：那个装饰性播放键点了没用（点完真实状态一位不变）
+    //   → 真按「播放视频」，等**真解码**的证据（帧计数 > 0）
+    //   → 中途暂停（状态栏**不改口**，还是写着「播放中」）
+    //   → 「跳转到末尾」触发一次**真缓冲**（waiting）
+    //   → 播到结束（ended）→ 打开「播放详情」→ 读回**概率性数值**（位置 / 帧数 / 缓冲次数 / 事件序列）
+    tools: ['get_page_snapshot', 'click_element', 'inspect_element', 'wait_for_element'],
+    success:
+      '点过装饰性播放键并证明它推不动页面；真按播放后页面**真的解码过帧**（已解码帧数 > 0、播放位置推进过）；' +
+      '读到过真实事件序列（含 waiting 缓冲、pause 暂停、ended 播完）与缓冲次数；' +
+      '最终结论只用这些数值，不用页面上那句「播放中」',
+    eval: {
+      url: '/video',
+      instruction:
+        '帮我确认一下这个视频在播到底是真是假：页面上写着「播放中」，我不太信。' +
+        '先点一下那个播放键试试，再告诉我它**真的**播过吗、播放位置到哪了、中间有没有卡顿、最后是播完了还是停了。',
+      pageChecks: [
+        // ★ "真在播"的**真证据**：RVFC 帧计数 > 0（真解码过）+ currentTime 推进过。
+        //   `paused === false` 只作参考，**不作判据** —— 它可能只是"这一刻还在播"。
+        { expr: 'window.__decoded > 0', label: '视频真的解码过帧（RVFC 帧计数 > 0，不是"paused=false 就算在播"）' },
+        { expr: 'window.__seeked >= 1', label: '「跳转到末尾」真的做过（那是缓冲证据的来源）' },
+        // ★ 真缓冲：waiting 是**真的触发过**（副播放器 seek 到未缓冲区间），累计计数 >= 1
+        { expr: 'window.__waits >= 1', label: '真的出现过缓冲（waiting 累计次数 >= 1）' },
+        { expr: 'window.__pauses >= 1', label: '中途真的暂停过 —— 「在播 / 停了」必须分得开' },
+        {
+          expr: 'window.__events.indexOf("ended") >= 0',
+          label: '事件序列里出现过 ended（真的播完了，而不是"停住了"）',
+        },
+        // ★ 迷惑控件：点过，但**真实播放状态没被它推动**（它的次数只记在 decoy 计数上）
+        { expr: 'window.__decoyPresses >= 1', label: '那个装饰性播放键真的被点过' },
+        { expr: 'window.__realPlays >= 1', label: '真播放按钮也真的被按过（对比项：推得动 / 推不动）' },
+        // ★ 决定性状态只在点开详情之后才写进 DOM —— 初始没有任何进度数值
+        { expr: "document.getElementById('diag-body').innerHTML !== ''", label: '「播放详情」被打开过（决定性状态藏在它后面）' },
+      ],
+      mustSeeInToolResults: ['已解码帧数', '缓冲等待次数', '播放位置：', '事件序列：'],
+    },
+  },
   'multi-candidate-convergence': {
     id: 'multi-candidate-convergence',
     title: '复杂场景：多候选收敛 —— 6 家报价只差一点，决定性属性藏在详情里且会刷新',

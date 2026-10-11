@@ -505,3 +505,93 @@ injection-B playwright exit=1
   **本机真实鼠标**的 mousemove 重置，"读 popover 能不能成功取决于运气"。
 - ⚠ 上面的对照 worktree 已 `git worktree remove --force` 删除；**主工作区未被改动**
   （`git worktree list` 只剩主工作区）。
+
+---
+
+# 第四轮：修上面那条 flake + 加一道门禁 + 新增 `video-playback-verify`（HEAD `4e0618a` + 工作区未提交改动）
+
+本轮**没有跑真模型**（没有新 key，也不该为了"看起来做完"去花这笔钱）。
+下面记的是三件事：① 那条既有 flaky 的**复现尝试与结论**；② 新加的门禁；
+③ 新场景 `video-playback-verify`（**脚本化 E2E 通过，真模型未测**）。
+
+## 一、`infinite-scroll-hover-preview` 的 flaky：**没能复现，但机制被证实了**
+
+**复现尝试（如实报，全部贴数字）**：
+
+| 做法 | 结果 |
+| --- | --- |
+| 同一条用例 `--repeat-each=3` | **3 绿**（8.2s / 8.1s / 8.2s） |
+| `--repeat-each=10` | **10 绿**（8.1–8.3s） |
+| `--repeat-each=12`（带脚本节奏追踪） | **12 绿** |
+| 全量三阶段 `node scripts/run-e2e.mjs`（三次） | **39 + 1 + 2 全绿，exit 0** 三次 |
+
+⇒ **本轮 25 次单独连跑 + 3 次全量，一次都没红**。上一轮那条"2 红 1 绿"的对照实验**没有重现** ——
+这可能只是概率（上一轮 3 次里红 2 次，本轮 25 次里红 0 次，不像同一个概率），
+也可能与环境有关（本机当时鼠标正好压在窗口上）。**我不把它当作"已经修好了"。**
+
+**机制实验（这才是本轮的收获）**：写了一条临时 spec（用完已删），在整轮 agent 运行期间
+用 `page.mouse.move` **不停移动真实光标**扫过页面，连跑 3 次：
+
+```text
+RESULT hasSO=true trustedEnters=60 fakeEnters=0 peek="最近一次查看：订单号 SO-1348 · 陈静 · 待确认"
+RESULT hasSO=true trustedEnters=61 fakeEnters=0 peek="最近一次查看：订单号 SO-6993 · 王强 · 已修复"
+RESULT hasSO=true trustedEnters=65 fakeEnters=0 peek="最近一次查看：订单号 SO-6993 · 王强 · 已修复"
+```
+
+三件事被证成**事实**（不是推测）：
+1. 真实鼠标确实会不停触发**可信** `mouseenter`（trustedEnters 60+，fakeEnters 0）——
+   也就是说夹具里那 35 行全都被真实光标扫过；
+2. hover 会被真实鼠标"抢走"：脚本跑完时 `#peek` 里留着的是**别的行**的订单号（SO-1348 / SO-6993），
+   而**不是**目标 r38 的 SO-8842；
+3. 即便如此，`#peek` 里**曾经**出现过 SO-8842（因为脚本确实 hover 到过 r38），
+   所以这条实验**没有**变红 —— 它证明的是"**证据会长期停留在别的行上**"，
+   而不是"**读不到**"。
+
+⇒ 上一轮那句"读 popover 能不能成功取决于运气"**是真的**，但**红的充分条件本轮没找到**。
+我没有为了让它变绿去削弱任何断言，也没有声称已经修好。
+
+**这轮实际做的两件事（都是"更强"，不是"放宽"）**：
+
+1. **脚本侧的重试判据从"粘性"改成"逐条盯"**（`fixtures/server.mjs` 的 `infinite-scroll-hover-preview` 分块）。
+   修复前的写法是 `toolResults.some(...)` / `/等待元素超时/.test(seen)` —— **整轮历史里出现过就算数**，
+   于是一次历史超时会被**反复**当成"刚 hover 失败"，两次 hover 额度可能被**一次性烧掉**，
+   直接走到"读不到订单号"的放弃分支（失败形态与上一轮那 37.8s 超时红**完全一致**）。
+   现在：三个信号只看**最后一条**工具结果；成败以 `#peek` 里有没有 `SO-8842` 为准（不是"有没有订单号"）；
+   重试上限 4 次、到顶**如实报告**；重试路径**优先直接读 `#peek`**（少花一个往返，读得越早越好）。
+2. **加了一道门禁** `tests/hover-preview-script.test.mjs`（5 条，纯静态 + 牙齿测试）：
+   粘性判据、无上界、绕过 hover 三类写法必须被判不合格；真源码必须合格。
+
+⚠ **我没能证明**第 1 条就是那次红的原因 —— 它只是把一个**能导致完全相同失败形态**的写法消掉了。
+判断留在这里，不粉饰。
+
+## 二、新增门禁：`tests/page-read-signal.test.mjs`（8 条）
+
+钉住 `lib/page/commands.js` 的 `notifyElementsRead` 那个页面读信号：
+事件名**只出现一次**（连注释都不许再写一遍，为此把源码注释里的字面量改写成「这个读信号事件」）、
+`bubbles: false`、派发**包在 try 里**（且 dispatch 必须落在 try 块内）、
+`content.js` 产物里同样**恰好一次**（改了 `lib/page/**` 必须重建），
+外加**行为测试**（照 `tests/lookup-diagnostics.test.mjs` 的先例给最小 DOM 替身再 import 真模块）：
+真的派发一次且不冒泡；页面监听器抛异常时**读取仍然返回文本**。
+牙齿：构造假源码验证三类违规都会被判不合格。
+
+## 三、新场景 `video-playback-verify`（④-3 `<video>` 播放器状态）
+
+**只跑了脚本化 E2E**：单跑 `--repeat-each=2` 通过、连跑 4 次全绿（26.8–28.8s）。
+**真模型 eval 未跑**（没有 key）。⇒ 它能证明"这套能力成立"，**不能**证明技能文案对真模型有用。
+
+**媒体来源**：零二进制资产 —— 页面内 `canvas.captureStream()` + `MediaRecorder` 录 2 秒真 WebM
+（blob URL），交给 `<video>` 真解码播放；证据是 `requestVideoFrameCallback` 的帧计数真的涨到 50–60、
+`currentTime` 真的走到 1.94s、事件序列里有真 `seeking → waiting → seeked → playing → pause → ended`。
+
+**诚实交代（难点①的降级）**：**"自动播放被策略拦住"这一层在本 harness 里做不到** ——
+Playwright 给 Chromium 传 `--no-user-gesture-required` 且自身持有用户激活，
+实测 `--autoplay-policy=user-gesture-required` / `document-user-activation-required` 都被无视
+（`play()` 一律 resolve，`window.__probePaused === false`，用例里有一条断言把这个**环境事实**钉住）。
+**所以没有把"自动播放被拦"算作难点**（更不会拿它冒充难点）：初始"没在播"是页面自己 `pause()` 一次
+得到的确定性事实，"看起来在播"来自那条**永不刷新**的状态栏（中途暂停后它照旧写着「播放中」，用例断言了这一点）。
+
+**本轮抓到的第二个假绿（注入缺陷实测）**：判据原本写 `window.__waits > 0`（"出现过缓冲"）——
+而媒体**在加载那一刻**天然就会 `waiting` 一次，于是这条**恒真**。
+把页面里那段故意的「seek 到未缓冲区间」**去掉**，用例**照样绿**（注入缺陷 2 第一次实测：`exit=0`）。
+已改成 `window.__midWaits > 0`（**播放中途**位置 > 0.5 秒的 waiting，只可能由 seek 到未缓冲区间造出），
+再注入同一个缺陷就红了（`Expected: > 0, Received: 0`）。⇒ **判据是注入缺陷逼出来的，不是写出来的。**

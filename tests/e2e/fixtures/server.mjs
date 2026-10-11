@@ -1248,6 +1248,314 @@ function feedPage() {
 </body></html>`;
 }
 
+// 播放验收台：**视频播放器状态**（playbook id = 'video-playback-verify'）。
+//
+// 这一类要造的是"**看起来在播 ≠ 真的在播**"。难点逐条造在机制里（不是加装饰）：
+//
+// ① **"看起来在播"的状态栏**：`#statusbar` 在**加载那一刻**写着「播放中 · 进度 00:00」，
+//    而且**永远不刷新**（真实站点里这种烂状态栏很常见）。而页面用的是 `autoplay` +
+//    首帧 `play()` 探测：**探针结果（成功/被拦的名字）与真实 paused 都如实记在
+//    `window.__autoplayError` / `window.__autoplayPaused` 上**，并且**随后由页面自己
+//    `pause()` 一次**（探针的一次播放不能算"用户要播"）—— 于是初始一定是
+//    `paused === true`、`__decoded === 0`，而状态栏那句话是**假的**。
+//    ⚠ 诚实说明（不许假装）：本 harness 里**做不到**让自动播放被策略拦住 ——
+//      Playwright 给 Chromium 传 `--no-user-gesture-required`，且它自身持有用户激活
+//      （实测：`--autoplay-policy=user-gesture-required` /
+//      `document-user-activation-required` 都被无视，`play()` 一律 resolve）。
+//      所以自动播放这一层**不作为难点计数**：难点是"状态栏说的话与真实状态相反"，
+//      与自动播放是否被拦无关（见 golden.spec.mjs 里这条用例的注解）。
+// ② **必须区分「在播 / 卡住 / 播完」**：页面把 video 的事件序列原样记在 `#ev-log` 上，
+//    并且**专门触发一次真实的 `waiting`** —— 「跳转到末尾」用**副播放器**（同一个 blob）
+//    seek 到**未缓冲区间**，`waiting` 是真的触发（实测：2 秒素材、seek 到 duration-1，
+//    18/18 次都出现 `seeking → waiting → seeked → playing`）。`waiting` 一过就接着
+//    `playing` → `ended`：**只看某一瞬间的 paused 会得出"卡住了"或"播完了"这两种
+//    相反的错误结论**，要看事件序列与累计次数（`__waits`）。
+// ③ **迷惑控件**：`#fake-play`（装饰性播放键）与 `#fake-bar`（假进度条）**推不动页面** ——
+//    点它们只动一个纯 CSS 的假填充、`__decoyPresses` 加一，真播放器的
+//    `__decoded` / `__waits` / 事件序列一个都不变。
+// ④ **决定性状态藏在额外动作后**：真实数值只在点开「播放详情」之后才**被写进 DOM**
+//    （初始 `#diag-body` 是空的，而且 `<details>` 折叠时 `innerText` 只有 summary）——
+//    所以初始快照里没有任何进度数值。
+// ⑤ **"真在播"必须是真证据**：`requestVideoFrameCallback` 的**帧计数**（`__decoded`，
+//    注册必须早于挂 src）+ `currentTime` 的推进。`paused === false` 只作参考，不作判据。
+//
+// ⚠ 媒体来源：**零二进制资产**。仓库里没有视频素材，也不该塞一个大二进制进 git。
+//   本页在**页面内**用 `canvas.captureStream()` + `MediaRecorder` 录一段**真的 WebM**
+//   （2 秒，blob URL），再交给 `<video>` **真的解码播放** —— 不是假状态位。
+//   实测证据：`__decoded`（RVFC 帧计数）推进到几十上百，`currentTime` 推进，
+//   事件序列每次都出现 play → playing → (waiting) → … → pause → ended
+//   （见 golden.spec.mjs 里这条用例的基线断言）。
+//
+// ⚠ body 收窄到 560px：CDP 的坐标类工具用元素**中心点**，面板贴右宽 640px，
+//   全宽元素的中心会落在面板底下（点击/悬停会打到面板上）。见 /feed 的说明。
+function videoPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具播放验收台</title>
+<style>
+  body { max-width: 560px; }
+  video { display: block; width: 320px; background: #0f172a; }
+  #fake-bar { position: relative; width: 320px; height: 14px; margin: 6px 0 2px;
+              background: #e2e8f0; border: 1px solid #cbd5e1; cursor: pointer; }
+  #fake-fill { width: 0%; height: 100%; background: #94a3b8; }
+  button { display: inline-block; margin: 6px 8px 6px 0; padding: 6px 12px; }
+  .note { color: #334155; }
+  #ev-log { color: #0f172a; font-size: 13px; }
+</style></head>
+<body>
+  <h1>播放验收台</h1>
+  <p class="note">演示视频（页面自己录制并播放）。「播放详情」里的数字才是真实状态。</p>
+  <video id="v" muted autoplay playsinline width="320" height="180" poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180'%3E%3Crect width='320' height='180' fill='%23334155'/%3E%3C/svg%3E"></video>
+  <div id="fake-bar" role="progressbar" aria-label="播放进度条" aria-valuenow="0"><div id="fake-fill"></div></div>
+  <div id="bar-note" class="note">进度 00:00 / 00:00</div>
+  <div id="ctl">
+    <button id="fake-play" type="button">▶ 播放（演示）</button>
+    <button id="real-play" type="button">播放视频</button>
+    <button id="pause-mid" type="button">暂停视频</button>
+    <button id="seek-end" type="button">跳转到末尾</button>
+    <button id="open-diag" type="button">打开播放详情</button>
+  </div>
+  <div id="statusbar" role="status">播放中 · 进度 00:00</div>
+  <div id="diag-when" role="status">播放详情尚未打开（先点「打开播放详情」）</div>
+  <details id="diag"><summary>播放详情</summary><div id="diag-body"></div></details>
+  <div id="diag-flags" hidden></div>
+  <script>
+    window.__probePlayError = '';
+    window.__probePaused = null;
+    window.__realPlays = 0;
+    window.__pauses = 0;
+    window.__decoyPresses = 0;
+    window.__decoded = 0;
+    window.__waits = 0;
+    // ⚠ 单独记「**播放中途**出现的缓冲」：媒体在**加载那一刻**天然就会 waiting 一次
+    //   （位置 0.0），所以「缓冲次数 > 0」是**恒真**的、不能当判据（注入缺陷实测过：假绿）。
+    //   中途缓冲（位置 > 0.5 秒）才说明"播着播着卡住了" —— 那只能由 seek 到**未缓冲区间**造出来。
+    window.__midWaits = 0;
+    window.__lastMidWaitAt = -1;
+    window.__seeked = 0;
+    window.__events = [];
+    window.__lastWaitingAt = -1;
+    window.__ready = false;
+    var v = document.getElementById('v');
+    var statusEl = document.getElementById('statusbar');
+    var barNote = document.getElementById('bar-note');
+    var fakeFill = document.getElementById('fake-fill');
+    var evLogEl = document.getElementById('ev-log');
+    var diagBody = document.getElementById('diag-body');
+    var probed = false;
+    function pad2(n) { n = Math.floor(n); return (n < 10 ? '0' : '') + n; }
+    function clock(t) { return pad2(t / 60) + ':' + pad2(t % 60); }
+    // ⚠ 事件序列节点**必须每次现查**，不能像别的元素那样缓存引用：
+    //   它在「打开播放详情」时才被注入。第一版缓存了它的引用（getElementById 一次）
+    //   —— 那一刻它还是 null，于是**事件序列永远写不进 DOM**（实测：面板里其它数字都有、
+    //   只有它空白）。而"事件序列"恰恰是本场景判断"在播/卡住/播完"的关键证据。
+    function evLogNow() { return document.getElementById('ev-log'); }
+
+    // ① 首帧的自动播放**探针**：结果如实记账（成功 / 被拦的错误名 + 那一刻的真实 paused）。
+    //    探针本身不改变页面语义 —— 紧接着页面自己 pause() 一次（探针的播放不算用户要播）。
+    function probeAutoplay() {
+      if (probed) return;
+      probed = true;
+      var p = v.play();
+      var settle = function (err) {
+        if (err && err.name) window.__probePlayError = err.name;
+        window.__probePaused = v.paused;
+        v.pause();
+        update();
+      };
+      if (p && p.then) p.then(function () { settle(null); }, function (e) { settle(e); });
+      else settle(null);
+    }
+
+    // ② 事件序列：原样记下来。**三个状态（在播/卡住/播完）的区分只能靠它 + 累计次数**。
+    ['loadedmetadata', 'play', 'playing', 'waiting', 'seeked', 'pause', 'ended'].forEach(function (evName) {
+      v.addEventListener(evName, function () {
+        window.__events.push(evName + '@' + v.currentTime.toFixed(1));
+        if (evName === 'waiting') {
+          window.__waits += 1;
+          window.__lastWaitingAt = Number(v.currentTime.toFixed(1));
+          // 中途缓冲：位置已经走过一段（> 0.5 秒）才叫"卡住"，加载那一刻那次不算
+          if (v.currentTime > 0.5) {
+            window.__midWaits += 1;
+            window.__lastMidWaitAt = Number(v.currentTime.toFixed(1));
+          }
+        }
+        if (evName === 'seeked') { window.__seeked += 1; }
+        update();
+      });
+    });
+    function evText() { return window.__events.slice(-10).join(' → '); }
+    function diagOpened() { return document.getElementById('diag').open === true; }
+
+    // 真实数值全部落进 DOM（供 inspect_element 读回）。
+    function update() {
+      var t = v.currentTime || 0;
+      var d = v.duration || 0;
+      // ⚠ 这条状态栏**故意不刷新**：它在加载那一刻写着「播放中 · 进度 00:00」，
+      //   之后就不再变（有人中途暂停、播放已结束，它照旧说"播放中"）。
+      //   它是"看起来在播"这句话的来源，**不是判据** —— 判据看下面那些数字。
+      if (evLogNow()) evLogNow().textContent = '事件序列：' + (evText() || '—');
+      var stEl = document.getElementById('d-state');
+      if (stEl) {
+        var state = v.paused
+          ? (window.__decoded > 0 ? '已暂停（上次播放确实推进过；也可能已经播完）' : '未开始播放（尚未解码任何一帧）')
+          : (v.ended
+              ? '已播完'
+              : (window.__lastWaitingAt >= 0 && t - window.__lastWaitingAt < 0.5 ? '卡住（缓冲中）' : '正在播放'));
+        stEl.textContent = '状态：' + state;
+        document.getElementById('d-time').textContent = '播放位置：' + t.toFixed(2) + ' 秒';
+        document.getElementById('d-decoded').textContent = '已解码帧数：' + window.__decoded;
+        document.getElementById('d-waits').textContent = '缓冲等待次数：' + window.__waits + '（其中播放中途 ' + window.__midWaits + ' 次，最近一次在 ' + window.__lastMidWaitAt.toFixed(1) + ' 秒）';
+        document.getElementById('d-autoplay').textContent = '首次自动播放探测：' + (window.__probePlayError ? ('被拦（' + window.__probePlayError + '）') : '未被拦（play() 直接成功）');
+        document.getElementById('d-real').textContent = '真实播放按钮按下次数：' + window.__realPlays + '；暂停按钮按下次数：' + window.__pauses;
+        document.getElementById('d-decoy').textContent = '迷惑控件按下次数：' + window.__decoyPresses;
+      }
+      document.getElementById('diag-when').textContent = diagOpened()
+        ? (v.ended ? '播放详情已打开 · 播放已结束（ended）' : '播放详情已打开 · 尚未播完')
+        : '播放详情尚未打开（先点「打开播放详情」）';
+      document.getElementById('diag-flags').textContent =
+        'probeError=' + (window.__probePlayError || 'none') +
+        ' decoded=' + window.__decoded + ' waits=' + window.__waits + ' midWaits=' + window.__midWaits +
+        ' t=' + t.toFixed(2) + ' dur=' + d.toFixed(2) + ' paused=' + v.paused +
+        ' ended=' + v.ended + ' statusbar=' + statusEl.textContent;
+    }
+
+    // ⑤ 真证据：RVFC 帧计数（真解码过多少帧）+ currentTime 推进。
+    //    ⚠ 必须在**附上 src 之前**注册：实测（本机 Chromium）在 srcObject/src 已经挂上、
+    //      媒体正在播之后才注册 RVFC 的回调**一次都不会被调用**（第一次探针就是 0 帧，
+    //      改成先注册之后帧计数正常推进）。
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      var loop = function () { window.__decoded += 1; v.requestVideoFrameCallback(loop); };
+      v.requestVideoFrameCallback(loop);
+    }
+    setInterval(function () { if (!v.paused) update(); }, 200);
+
+    // ④ 决定性状态只在**点开之后**才写进 DOM（初始 #diag-body 是空的）。
+    //    ⚠ details 元素的 open 属性要**显式设**：只靠点 summary 在测试里不可靠，
+    //      而折叠时 details 的正文**不进 innerText**（实证：innerText 只有 "播放详情"）——
+    //      那"读详情"这条路会变成"读不到"，用例会误判成模型没做事。
+    document.getElementById('open-diag').addEventListener('click', function () {
+      document.getElementById('diag').open = true;
+      if (!diagBody.innerHTML) {
+        diagBody.innerHTML =
+          '<div id="d-state" role="status"></div>' +
+          '<div id="d-time"></div>' +
+          '<div id="d-decoded"></div>' +
+          '<div id="d-waits"></div>' +
+          '<div id="d-autoplay"></div>' +
+          '<div id="d-real"></div>' +
+          '<div id="d-decoy"></div>' +
+          '<div id="ev-log"></div>' +
+          '<p class="note">说明：页面那条状态栏**不会刷新**，本面板的数字才是真实状态。' +
+          '「事件序列」里的 waiting 是缓冲，playing 是恢复播放，ended 是播完。</p>';
+      }
+      update();
+    });
+
+    // ② 真实的 buffering：用**另一个 video 元素**（#diag-video）播同一段媒体，
+    //    并 seek 到**未缓冲区间** —— waiting 是真的触发（不是伪造事件）。
+    //    实测（Playwright 的 Chromium，2 秒素材）：seeking → waiting → seeked → playing → ended
+    //    每次都出现；主播放器（#v）自己则停在这一刻（它不 seek），于是事件序列里同时看得到
+    //    waiting 与它之后的状态。
+    document.getElementById('seek-end').addEventListener('click', function () {
+      var d2 = document.createElement('video');
+      d2.muted = true;
+      d2.setAttribute('playsinline', '');
+      d2.style.width = '120px';
+      d2.src = v.currentSrc || v.src;
+      document.getElementById('ctl').appendChild(d2);
+      ['play', 'playing', 'waiting', 'seeked'].forEach(function (t) {
+        d2.addEventListener(t, function () {
+          window.__events.push('副本:' + t + '@' + d2.currentTime.toFixed(1));
+          if (t === 'waiting') {
+            window.__waits += 1;
+            window.__lastWaitingAt = Number(d2.currentTime.toFixed(1));
+            // 副本播放器 seek 到**未缓冲区间**触发的那次 waiting 就是"中途缓冲"：
+            // 它一定发生在位置 > 0.5 秒处（我们 seek 到 duration-1）
+            if (d2.currentTime > 0.5) {
+              window.__midWaits += 1;
+              window.__lastMidWaitAt = Number(d2.currentTime.toFixed(1));
+            }
+          }
+          update();
+        });
+      });
+      d2.addEventListener('loadedmetadata', function () {
+        d2.play().then(function () {
+          d2.currentTime = Math.max(0, d2.duration - 1);
+        }).catch(function () {});
+      });
+      window.__seeked += 1;
+      update();
+    });
+
+    // ③ 迷惑控件：看着像能播、能拖，推不动页面（只动纯 CSS 的假填充与一个计数）
+    document.getElementById('fake-play').addEventListener('click', function () {
+      window.__decoyPresses += 1;
+      var n = 0;
+      var t2 = setInterval(function () {
+        n += 1;
+        fakeFill.style.width = Math.min(100, n * 10) + '%';
+        if (n >= 10) clearInterval(t2);
+      }, 120);
+      update();
+    });
+    document.getElementById('fake-bar').addEventListener('click', function () {
+      window.__decoyPresses += 1;
+      fakeFill.style.width = '35%';
+      update();
+    });
+
+    // 真实播放键：真按下去（这是**用户的手势**，播放从此才真的开始）
+    document.getElementById('real-play').addEventListener('click', function () {
+      window.__realPlays += 1;
+      var p = v.play();
+      if (p && p.catch) p.catch(function (e) { window.__probePlayError = (e && e.name) ? e.name : String(e); update(); });
+      update();
+    });
+
+    // 中途暂停：**状态栏不会跟着改**（它永远写着"播放中"）—— 这正是"看起来在播"的陷阱。
+    // 真实状态要看事件序列（pause 之后没有 playing）与"已解码帧数"。
+    document.getElementById('pause-mid').addEventListener('click', function () {
+      window.__pauses += 1;
+      v.pause();
+      update();
+    });
+
+    // ① 媒体准备：页面内录 2 秒真 WebM（零二进制资产），交给 video 播放
+    try {
+      var canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 180;
+      var g = canvas.getContext('2d');
+      var n2 = 0;
+      setInterval(function () {
+        n2 += 1;
+        g.fillStyle = 'hsl(' + ((n2 * 13) % 360) + ',70%,45%)';
+        g.fillRect(0, 0, 320, 180);
+        g.fillStyle = '#fff'; g.font = '28px sans-serif';
+        g.fillText('F' + n2, 14, 104);
+      }, 33);
+      var rec = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
+      var chunks = [];
+      rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = function () {
+        // ⚠⚠ **不要把 canvas 的 MediaStream 挂到这个 video 上**（第一版就是这么写的）：
+        //   video 元素挂 MediaStream（srcObject）属于"实时流"，**自动播放策略对它不生效** ——
+        //   于是"首帧探测"这条路会静默变成"自动播放成功"，与真实站点不同。
+        //   这里只挂**录好的 blob URL**（文件型媒体）。素材本身仍然是真的：
+        //   canvas 的动画帧被 MediaRecorder 编成真 WebM，再由 video 真解码播放。
+        v.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+        v.addEventListener('loadedmetadata', function () { window.__ready = true; update(); });
+        probeAutoplay();
+      };
+      rec.start();
+      setTimeout(function () { rec.stop(); }, 2000);
+    } catch (e) {
+      window.__probePlayError = 'record-failed:' + (e && e.message ? e.message : String(e));
+    }
+    update();
+  </script>
+</body></html>`;
+}
+
 // 比价下单页：**多候选收敛**（6 个候选 × 5 个可核对属性 + 详情里才有的决定属性 + 实时报价重读）。
 //
 // 这一类要造的是"**看起来都行**"的下一层：多个候选在**第一个属性**（标价，页面上最显眼）
@@ -3260,25 +3568,99 @@ const llm = http.createServer((req, res) => {
       //   读的是 `#peek`（页面留下的"最近一次查看"）而不是行内 popover —— 后者随时可能
       //   被真实鼠标事件清掉（本机人的鼠标就在窗口里），而"读 popover"能不能成功全看运气。
       // 第 6 步：读到就读回（`#peek` 的文本就是结果本身）。
+      //
+      // ⚠⚠ 这一段是本用例**唯一**与"人真的在动鼠标"相关的地方，因此判据必须**逐条盯最近一次**：
+      //   先前这里用的是"整轮里有没有出现过某文案"（`toolResults.some(...)` / `seen` 正则），
+      //   那是**粘性**的 —— 一旦印过一次就永远为真，会把后面的重试逻辑吃掉
+      //   （旧版甚至会把整轮里任何一次「等待元素超时」都当成"刚 hover 失败"，
+      //    于是**两次 hover 额度可能被历史一次性烧掉**，直接走到"读不到订单号"的放弃分支）。
+      //   现在三个信号全部只看**最后一条**工具结果，并且**按读回的订单号判断成败**。
       const hovers = (seen.match(/已悬停到元素/g) || []).length;
-      const waited = toolResults.some((m) => textOf(m).includes('已等到目标元素（text_contains）'));
-      const readBack = toolResults.some((m) => textOf(m).trim().startsWith('最近一次查看：'));
-      if (hovers === 0) { toolStep(res, 'hover_element', { text: '结算页白屏' }); return; }
-      if (!waited) {
-        if (/等待元素超时/.test(seen)) {
-          // hover 被真实鼠标事件挪走了：**再 hover 一次**（最多两次），而不是谎报成功
-          if (hovers >= 2) {
-            finalText(res, '悬停两次都没读到预览文本（等元素超时），先如实报告：读不到订单号。', 40);
-            return;
-          }
-          toolStep(res, 'hover_element', { text: '结算页白屏' });
-          return;
-        }
-        toolStep(res, 'wait_for_element', { selector: '#peek', state: 'text_contains', text: '订单号', timeoutMs: 4000 });
+      const lastTimedOut = /等待元素超时/.test(last);
+      const peekIsTarget = toolResults.some((m) => textOf(m).includes('SO-8842'));
+      const readBack = toolResults.some((m) => /最近一次查看：/.test(textOf(m)));
+      // 已经 hover 过、但 `#peek` 还是空的（或不是目标行）：如实重试，最多 4 次。
+      // ⚠ 上限保留：夹具坏了（永远读不到）就该**如实报告**并停下，而不是无限重 hover。
+      if (hovers >= 1 && !peekIsTarget && hovers < 4 && !lastTimedOut) {
+        // 上一次 hover 已经过去（`#peek` 该有了）：**先直接读一次**再决定要不要重 hover ——
+        // "等元素"会花掉一个往返，而真实鼠标随时可能把 hover 状态挪走，读得越早越好。
+        if (!readBack) { toolStep(res, 'inspect_element', { op: 'text', selector: '#peek' }); return; }
+      }
+      if (hovers >= 1 && !peekIsTarget && hovers < 4) {
+        toolStep(res, 'hover_element', { text: '结算页白屏' });
         return;
       }
+      if (hovers >= 4 && !peekIsTarget) {
+        finalText(res, '悬停 4 次都没读到目标预览（`#peek` 始终没有「SO-8842」），先如实报告：读不到订单号。', 40);
+        return;
+      }
+      if (hovers === 0) { toolStep(res, 'hover_element', { text: '结算页白屏' }); return; }
       if (!readBack) { toolStep(res, 'inspect_element', { op: 'text', selector: '#peek' }); return; }
       finalText(res, '信息流已经到底（共 50 条反馈）。「结算页白屏，刷新后才恢复」这条的悬停预览里是：订单号 SO-8842 · 张伟 · 已复现。', 90);
+      return;
+    }
+
+    // 剧本：视频播放器状态 —— 「看起来在播 ≠ 真的在播」（playbook id = 'video-playback-verify'）。
+    //
+    // 节奏即能力，而且**每一步都在拆穿一层假象**：
+    //   看一遍（状态栏写着「播放中」，但真实数值一个都没有）
+    //   → 点那个**装饰性播放键**（它不是进度条，推不动页面）
+    //   → 点假进度条（同样推不动）
+    //   → 真按「播放视频」→ 等**真解码**的证据（帧计数 > 0、位置推进）
+    //   → 中途暂停（状态栏**不改口**）
+    //   → 「跳转到末尾」触发一次**真缓冲**（waiting）
+    //   → 播到 ended → 打开「播放详情」→ 读回位置 / 帧数 / 缓冲次数 / 事件序列。
+    //
+    // ⚠ 节奏用**计数器**（done = 已收到几条工具结果）推，与文案、截断、编码无关 ——
+    //   这是本文件前几轮踩过坑之后定下来的写法（见多候选收敛那段的长注释）。
+    if (userText.includes(PLAYBOOKS['video-playback-verify'].trigger)) {
+      const done = toolResults.length;
+      const textOf = (m) => (typeof m.content === 'string' ? m.content : '');
+      // 第 0 步：先看一遍页面（此刻状态栏说「播放中」，但没有任何真实数值）
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 3000 }); return; }
+      // 第 1 步：先点那个"看起来能播"的装饰性播放键（它会如实说点过了）
+      if (done === 1) { toolStep(res, 'click_element', { selector: '#fake-play' }); return; }
+      // 第 2 步：假进度条同理（推不动页面）
+      if (done === 2) { toolStep(res, 'click_element', { selector: '#fake-bar' }); return; }
+      // 第 3 步：真按播放键
+      if (done === 3) { toolStep(res, 'click_element', { selector: '#real-play' }); return; }
+      // 第 4 步：等一拍（让"真的解码过帧"这件事在页面上留下痕迹）
+      if (done === 4) {
+        toolStep(res, 'wait_for_element', { selector: '#diag-flags', state: 'visible', timeoutMs: 5000 });
+        return;
+      }
+      if (done === 5) { toolStep(res, 'inspect_element', { op: 'text', selector: '#statusbar' }); return; }
+      // 第 6 步：读一下（此刻它应当还是写着「播放中」—— 但那句话不是证据）
+      if (done === 6) { toolStep(res, 'inspect_element', { op: 'text', selector: '#diag-when' }); return; }
+      // 第 7 步：中途暂停 —— 「在播 / 停了」必须分得开（状态栏不会改口）
+      if (done === 7) { toolStep(res, 'click_element', { selector: '#pause-mid' }); return; }
+      // 第 8 步：跳转到末尾 —— 触发**真缓冲**（waiting）
+      if (done === 8) { toolStep(res, 'click_element', { selector: '#seek-end' }); return; }
+      if (done === 9) { toolStep(res, 'inspect_element', { op: 'text', selector: '#diag-when' }); return; }
+      // 第 10 步：打开详情（决定性状态这时才进 DOM）
+      if (done === 10) { toolStep(res, 'click_element', { selector: '#open-diag' }); return; }
+      // 第 11 步：再真播一次，让它走到 ended（"播完"与"卡住"要能分开）
+      if (done === 11) { toolStep(res, 'click_element', { selector: '#real-play' }); return; }
+      // 第 12 步：等它**播到头**。等的是页面自己写的状态信号「播放已结束（ended）」——
+      //   用 `attached`/`visible` 会立刻满足（那是更弱的信号），必须等**文本**变成播完的样子。
+      //   ⚠ 这就是"在播 / 播完"必须分得开的那一步：少了它，脚本会读到"还在播"的中间态。
+      if (done === 12) {
+        toolStep(res, 'wait_for_element', {
+          selector: '#diag-when', state: 'text_contains', text: '播放已结束', timeoutMs: 8000,
+        });
+        return;
+      }
+      if (done === 13) { toolStep(res, 'inspect_element', { op: 'text', selector: '#bar-note' }); return; }
+      // 第 14 步：读回概率性数值（位置 / 帧数 / 缓冲次数 / 事件序列）
+      if (done === 14) { toolStep(res, 'inspect_element', { op: 'text', selector: '#diag-body' }); return; }
+      finalText(
+        res,
+        '结论：这个视频**现在没有在播**（页面那条「播放中」是假的 —— 它中途暂停过、最后也播完了，' +
+          '那句话一次都没改口）。实际发生过的是：真播放键按过、真的解码过帧（已解码帧数 > 0），' +
+          '播放位置推进过，中途出现过缓冲（缓冲等待次数 >= 1），中间暂停过一次，最后走到了 ended（播完）。' +
+          '那个装饰性播放键点过但推不动页面。',
+        90
+      );
       return;
     }
 
@@ -3510,6 +3892,7 @@ const main = http.createServer((req, res) => {
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/feed') ? feedPage()
+                                              : req.url && req.url.startsWith('/video') ? videoPage()
                                               : req.url && req.url.startsWith('/pick') ? pickPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()

@@ -128,7 +128,23 @@ export async function launchExtension() {
   await startServers();
   const context = await chromium.launchPersistentContext('', {
     headless: false,
-    args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-first-run'],
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-first-run',
+      // ⚠ 关于自动播放策略：**这条开关在本 harness 里其实不起作用**，留着只是为了让意图明确
+      //   （诚实记录，别把它当成"已经拦住自动播放"）。
+      //   实测（`/video` 夹具那条用例就是为它建的）：
+      //     · Playwright 自己会给 Chromium 传 `--no-user-gesture-required`，且它自身持有用户激活；
+      //     · 因此 `--autoplay-policy=user-gesture-required` /
+      //       `document-user-activation-required` **都被无视** —— `video.play()` 一律 resolve
+      //       （`window.__probePaused === false`），页面里"自动播放被拦"这个陷阱**造不出来**。
+      //   ⇒ 新场景 `video-playback-verify` **不把"自动播放被拦"算作难点**（也绝不拿它冒充难点），
+      //     它的"看起来在播"来自页面那条**永不刷新**的状态栏；用例里有一条断言把这个环境事实钉住
+      //     （一旦哪天 Playwright 不再送用户激活，那条断言会红，提醒重新评估难点说明）。
+      //   本仓库其它夹具页都没有 autoplay，因此这条 flag 只可能影响 /video。
+      '--autoplay-policy=user-gesture-required',
+    ],
   });
   // 必须等 service worker 起来再继续：不等的话后续配置写入会打到一个还没注册的后台。
   let [sw] = context.serviceWorkers();

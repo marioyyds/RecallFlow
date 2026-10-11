@@ -1778,6 +1778,211 @@ test('golden: 无限滚动 + hover 预览 —— 目标在第 4 批，预览只�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**视频播放器状态**（playbook 'video-playback-verify'）。
+//
+// 这一条要造的是"**看起来在播 ≠ 真的在播**"。页面上的每一层假象都有对应的结构性事实：
+//   ① 「看起来在播」：`#statusbar` 在加载那一刻写着「播放中 · 进度 00:00」，而且**永不刷新** ——
+//      实测：中途 `pause()` 之后它照旧写着「播放中」，而 `paused === true`。
+//      ⚠ 诚实说明：**自动播放被策略拦住这一层在本 harness 里做不到** ——
+//        Playwright 给 Chromium 传 `--no-user-gesture-required`，且它自身持有用户激活，
+//        `--autoplay-policy=user-gesture-required` / `document-user-activation-required`
+//        实测都被无视（`play()` 一律 resolve，`window.__probePaused === false`）。
+//        所以**不**把"自动播放被拦"算作难点（更不会拿它冒充难点）：
+//        初始"没在播"是由页面自己 `pause()` 一次得到的确定性事实，
+//        "看起来在播"来自那条不刷新的状态栏 —— 这两件事都真的存在，且可断言。
+//   ② 「在播 / 卡住 / 播完」必须分得开：事件序列里有真 `waiting`（副播放器 seek 到**未缓冲区间**
+//      触发的），随后还有 `ended`。只看某一瞬间的 `paused` 会得出"卡住了"或"播完了"两种相反结论。
+//   ③ 迷惑控件推不动页面：`#fake-play` / `#fake-bar` 只动一个纯 CSS 假填充 + 一个计数。
+//   ④ 决定性状态藏在额外动作后：真实数值只在点开「播放详情」之后才**写进 DOM**。
+//   ⑤ "真在播"必须是真证据：RVFC 帧计数（`__decoded`）+ `currentTime` 推进，
+//      而不是 `paused === false`。
+//
+// 双层判据（缺一层就是走过场）：
+//   · 页面状态：`__decoded > 0`、`__waits >= 1`、`__pauses >= 1`、事件序列含 `ended`、
+//     迷惑控件点过而真实状态没被它推动；
+//   · 模型回执：toolResultsText() 里必须出现**数值与状态文本**（已解码帧数 / 缓冲等待次数 /
+//     播放位置 / 事件序列）—— 最终答复是脚本写的，证明不了任何事；
+//   · 阴性对照①（模型回执层）：**第一次**工具结果里没有任何进度数值、
+//     也**没有**「正在播放」这种结论性文本（证明"必须做动作才拿得到"）；
+//   · 阴性对照②（页面层）：初始 `__decoded` 为 0、`paused === true`、`#diag-body` 为空；
+//   · 捷径必败：「只看 `paused`」「只信页面写的『播放中』」「点那个迷惑播放键」都过不了 ——
+//     见下面基线与"点过迷惑键后真实状态一位不变"的断言。
+test('golden: 视频播放器状态 —— 「看起来在播」不等于真的在播', async () => {
+  // 与其它场景同一套设置基线（apiKey/baseUrl 指向夹具的模拟 LLM）。
+  // ⚠ 少了这一句面板会显示「尚未配置 API Key」，run 根本不会发生 —— 实测踩过一次。
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/video');
+
+  // ---- 基线：每一层假象/难点都先于 agent 运行被变成可断言的事实 ----
+  // ① 媒体**真的**准备完成（页面内录的 2 秒 WebM 已挂上，duration 是真实数字）
+  await expect.poll(() => page.evaluate(() => window.__ready === true), { timeout: 40_000 }).toBe(true);
+  const dur0 = await page.evaluate(() => Number(document.getElementById('v').duration));
+  expect(dur0, '媒体没有真实时长：那段 WebM 没被真的解码').toBeGreaterThan(1);
+
+  // ② "看起来在播"这句话真的在页面上（而真实状态是 paused）
+  expect(await page.textContent('#statusbar'), '「看起来在播」这层假象不成立（状态栏没写「播放中」）').toContain(
+    '播放中'
+  );
+  const initial = await page.evaluate(() => ({
+    paused: document.getElementById('v').paused,
+    decoded: window.__decoded,
+    waits: window.__waits,
+    seeked: window.__seeked,
+    t: Number(document.getElementById('v').currentTime.toFixed(2)),
+    diagBody: document.getElementById('diag-body').innerHTML,
+  }));
+  expect(initial.paused, '初始竟然在播：这一条就变成"本来就在播"了，假象不成立').toBe(true);
+  // ⚠ **不能断言 `__decoded === 0`**：页面把"探针那一次 play()"如实算进去了，而 Chromium 会在
+  //    paused 之前先把首帧解出来（实测 `__decoded === 1`）。这里断言的是**真正要保证的性质**：
+  //   当前没有在播、播放位置没有推进、而且帧计数**停在原地**（不是"还在涨"）。
+  expect(initial.t, '初始播放位置不在 0：页面没暂停干净').toBe(0);
+  expect(initial.decoded, '初始帧计数大得不合理（不是"只解了首帧"）：页面没暂停干净').toBeLessThanOrEqual(3);
+  // ④ 决定性状态还没进 DOM
+  expect(initial.diagBody, '「播放详情」初始就有内容：那"藏在额外动作后面"这个难点不成立').toBe('');
+  // ⚠ 诚实记录（**不作为判据**）：本 harness 里自动播放**拦不住**（见文件上方说明）。
+  //    这条断言把这个环境事实钉下来，免得日后有人以为"自动播放被拦"是这里的难点。
+  expect(
+    await page.evaluate(() => window.__probePaused),
+    '自动播放竟然被拦住了？那说明 harness 变了（Playwright 不再送用户激活）——请重新评估本用例的难点说明'
+  ).toBe(false);
+
+  // ③ 迷惑控件推不动页面：点它只增加自己的计数，真实播放状态一位不变
+  await page.click('#fake-play');
+  await page.waitForTimeout(1300);
+  const afterDecoy = await page.evaluate(() => ({
+    decoy: window.__decoyPresses,
+    decoded: window.__decoded,
+    waits: window.__waits,
+    paused: document.getElementById('v').paused,
+    t: Number(document.getElementById('v').currentTime.toFixed(2)),
+    events: window.__events.length,
+  }));
+  expect(afterDecoy.decoy, '那个装饰性播放键连计数都没涨：它没被点过').toBeGreaterThan(0);
+  expect(afterDecoy.paused, '点迷惑播放键竟然让视频开始播了：迷惑项不成立').toBe(true);
+  expect(afterDecoy.t, '点迷惑播放键竟然推进了播放位置：迷惑项不成立').toBe(0);
+  // 帧计数**不许再涨**（涨了就说明真的解码在跑 —— 那这个"迷惑"就变成真控件了）
+  expect(afterDecoy.decoded, '点迷惑播放键之后帧计数还在涨：那不是装饰，是真的在播').toBeLessThanOrEqual(
+    initial.decoded
+  );
+
+  // ② 真 buffering 确实会发生（这是判据用的证据来源，先单独验证它稳定成立）
+  //    用**副播放器**（同一个 blob）seek 到未缓冲区间 —— waiting 是真的触发。
+  const waitProbe = await page.evaluate(async () => {
+    const d2 = document.createElement('video');
+    d2.muted = true;
+    d2.src = document.getElementById('v').currentSrc;
+    document.body.appendChild(d2);
+    const ev = [];
+    ['waiting', 'seeked', 'playing'].forEach((t) => d2.addEventListener(t, () => ev.push(t)));
+    await new Promise((r) => d2.addEventListener('loadedmetadata', r, { once: true }));
+    await d2.play();
+    d2.currentTime = Math.max(0, d2.duration - 1);
+    await new Promise((r) => setTimeout(r, 1500));
+    return { ev, dur: d2.duration, t: d2.currentTime };
+  });
+  expect(waitProbe.ev, 'seek 到未缓冲区间没有触发 waiting：缓冲这个难点不成立').toContain('waiting');
+
+  // 复位到干净起点（重新加载页面 = 重新录一段、重新计数）
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__ready === true), { timeout: 40_000 }).toBe(true);
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['video-playback-verify'].eval.instruction);
+
+  // ---- 页面状态（真实证据）----
+  // ⑤ "真在播"的真证据：RVFC 帧计数**真的涨起来**（不是"注册过回调就算数"）。
+  //    ⚠ 这一步必须等，不能只断言 `> 0`：页面自己那次探针已经解了首帧，
+  //      所以 ">0" 恒真（典型的假判据）。等到 ≥30 才说明**真的播过一段**。
+  await expect
+    .poll(() => page.evaluate(() => window.__decoded), { timeout: 60_000 })
+    .toBeGreaterThanOrEqual(30);
+  // ② 三个状态分得开：等页面自己写出「播放已结束（ended）」再读最终数值
+  await expect
+    .poll(() => page.textContent('#diag-when'), { timeout: 60_000 })
+    .toContain('播放已结束');
+  expect(
+    await page.evaluate(() => Number(document.getElementById('v').currentTime)),
+    '播放位置没有推进过 —— 帧计数涨了但时间没走，那不算真的播过'
+  ).toBeGreaterThan(1);
+  // ⚠ `__waits > 0` **不能**当判据：媒体在**加载那一刻**天然就会 waiting 一次（位置 0.0），
+  //   于是"缓冲次数 > 0"恒真 —— 实测：把页面里那段**故意的**「seek 到未缓冲区间」去掉，
+  //   用例照样绿（注入缺陷 2 抓到的假绿，已修）。
+  //   真正要保证的是「**播放中途**卡过一次」：位置 > 0.5 秒的 waiting，
+  //   只可能由"seek 到未缓冲区间"造出来。
+  expect(
+    await page.evaluate(() => window.__midWaits),
+    '播放中途一次缓冲都没有（只有加载那一刻的天然 waiting）：「卡住」这条难点没成立'
+  ).toBeGreaterThan(0);
+  expect(
+    await page.evaluate(() => window.__seeked),
+    '「跳转到末尾」根本没被按过：缓冲证据的来源不存在'
+  ).toBeGreaterThan(initial.seeked);
+  expect(await page.evaluate(() => window.__pauses), '没有中途暂停过：「在播 / 停了」分不开').toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__events.join(' → ')), '事件序列里没有 ended：没走到"播完"').toContain(
+    'ended'
+  );
+  // ③ 迷惑控件被点过，而它**没推动**真实播放状态（真实推动来自真播放键）
+  expect(await page.evaluate(() => window.__decoyPresses), '那个装饰性播放键从来没被点过').toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__realPlays), '真播放按钮从来没被按过').toBeGreaterThan(0);
+  // ④ 决定性状态已经进 DOM（点开过详情）
+  expect(
+    await page.evaluate(() => document.getElementById('diag-body').innerHTML !== ''),
+    '「播放详情」没被打开过：那决定性状态根本没进 DOM'
+  ).toBe(true);
+  // ① 那句「播放中」在暂停之后**没有改口** —— 这就是"看起来在播"这层假象的证据
+  expect(
+    await page.textContent('#statusbar'),
+    '状态栏改口了？那"看起来在播"这层假象就没造出来'
+  ).toContain('播放中');
+
+  // ---- 模型回执（模型**实际收到**了什么）----
+  const seen = toolResultsText();
+  for (const needle of ['已解码帧数', '缓冲等待次数', '播放位置：', '事件序列：']) {
+    expect(seen, '模型回执里没有「' + needle + '」—— 那它凭什么判断真的在播？').toContain(needle);
+  }
+  // "卡过一次"这个结论也必须有依据：回执里要能看到**播放中途**的缓冲次数
+  expect(seen, '回执里没有「播放中途 N 次」这种可判依据："有没有卡顿"就成了空口结论').toContain('播放中途');
+  // 数值必须是**真的**（不是页面或脚本编的）：回执里的帧数/位置/缓冲次数要与页面自记的事实一致。
+  // ⚠ 不能用"页面此刻的值"去精确比对：帧计数与播放位置是**活的**，读回那一刻之后还会继续涨
+  //   （实测：回执里是 59，断言时页面已经到 60 ⇒ 精确相等必然假失败）。
+  //   正确口径：把回执里的数字**解析出来**，要求它落在页面真实发生过的区间里。
+  const numIn = (label) => {
+    const m = new RegExp(label + '：(\\d+(?:\\.\\d+)?)').exec(seen);
+    return m ? Number(m[1]) : NaN;
+  };
+  const seenDecoded = numIn('已解码帧数');
+  const seenWaits = numIn('缓冲等待次数');
+  const seenPos = numIn('播放位置');
+  const live = await page.evaluate(() => ({
+    decoded: window.__decoded,
+    waits: window.__waits,
+    t: Number(document.getElementById('v').currentTime.toFixed(2)),
+    dur: Number(document.getElementById('v').duration.toFixed(2)),
+  }));
+  // 帧计数：回执里的值必须**真的解码过一段**（≥30 帧 ≈ 1 秒 30fps 素材），并且不超过页面此刻的总数
+  expect(Number.isFinite(seenDecoded), '回执里没解析出「已解码帧数」，实际文本：' + JSON.stringify(seen.slice(0, 200))).toBe(true);
+  expect(seenDecoded, '回执里的帧计数只有 ' + seenDecoded + '：那不足以说明"真的播过一段"').toBeGreaterThanOrEqual(30);
+  expect(seenDecoded, '回执里的帧计数比页面总帧数还大：这个数字是编的').toBeLessThanOrEqual(live.decoded);
+  // 缓冲次数：必须是真发生过的（>=1），且不超过页面记的总数
+  expect(Number.isFinite(seenWaits), '回执里没解析出「缓冲等待次数」').toBe(true);
+  expect(seenWaits, '回执里说缓冲 0 次：那"卡顿"这条结论没有依据').toBeGreaterThanOrEqual(1);
+  expect(seenWaits).toBeLessThanOrEqual(live.waits);
+  // 播放位置：回执里的位置必须落在 [0, duration] 且真的推进过（> 1 秒）
+  expect(Number.isFinite(seenPos), '回执里没解析出「播放位置」').toBe(true);
+  expect(seenPos, '回执里的播放位置没有推进过（' + seenPos + '）').toBeGreaterThan(1);
+  expect(seenPos).toBeLessThanOrEqual(live.dur + 0.01);
+
+  // ---- 阴性对照（模型回执层）：第一次工具结果里没有任何数值、也没有结论性文本 ----
+  const firstTool = toolMessagesInOrder()[0];
+  expect(firstTool, '一条工具结果都没记录到').toBeTruthy();
+  const first = String(firstTool.content);
+  for (const needle of ['已解码帧数', '缓冲等待次数', '播放位置：']) {
+    expect(first, '第一次快照里就有 ' + needle + '：那这条用例不需要打开详情').not.toContain(needle);
+  }
+  expect(first, '第一次快照里就写着「正在播放」：那是页面在骗人，判据不该信它').not.toContain('正在播放');
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**多候选收敛**（playbook 'multi-candidate-convergence'）。
 //
 // 这条路要造的是"**看起来都行**"的下一层：6 家供应商对同一支摄像头模组的报价，
