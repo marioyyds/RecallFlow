@@ -1500,6 +1500,48 @@ test('golden: 付费墙 —— 「能打开」不等于「能看」，要找到�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**下载文件**（playbook 'download-verify'）。
+//
+// 难点：点一下之后**页面什么都不变**（没有 DOM 变化、没有状态文案）——
+// 于是"点了链接"与"文件真的下载了"分家 ✗ 与付费墙同源（能点 ≠ 生效）。
+// 唯一可信来源是**浏览器自己报的下载事件**（CDP `Page.downloadWillBegin`
+// → `read_diagnostics({kind:"downloads"})`），它同样要求**点击之前已 attach CDP**。
+//
+// 判据两层：
+//   · 浏览器级结果（本场景没有"页面状态"可断言）：Playwright 的 download 事件确实发生、
+//     且文件名与夹具一致 —— 这是"真的下载了"的唯一硬证据；
+//   · 模型收到了什么：浏览器报的文件名 `report.csv` 必须进上下文。链接文字是"导出报表 CSV"，
+//     与真实文件名不同 ⇒ 它进了上下文就说明读的是**浏览器事件**，不是链接文字。
+test('golden: 下载 —— 页面上什么都不会变，凭据只能来自浏览器事件', async () => {
+  await configureSettings(context, { cdpEnabled: true }); // 下载事件靠 CDP 上报
+  const page = await openFixturePage(context, '/download');
+
+  // 基线：难点成立 —— 还没点击，页面也没有任何变化
+  expect(await page.evaluate(() => window.__clicked)).toBe(0);
+  await expect(page.locator('#status')).toHaveText('就绪');
+
+  // 浏览器级证据：等 Playwright 的 download 事件（真实下载）
+  const downloadPromise = page.waitForEvent('download', { timeout: 45_000 }).catch(() => null);
+
+  resetLlmRequests();
+  const stopApproveDownload = autoApprove(page);
+  try {
+    await sendInstruction(page, '帮我把这个月的报表导出来，导出后告诉我文件名是什么。');
+
+    const dl = await downloadPromise;
+    expect(dl, '浏览器真的发生了下载（否则本用例没验到东西）').not.toBeNull();
+    expect(dl.suggestedFilename()).toBe('report.csv');
+    expect(await page.evaluate(() => window.__clicked)).toBeGreaterThan(0);
+
+    // 模型收到了什么：真实文件名（与链接文字不同 ⇒ 只能来自浏览器事件）
+    await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('report.csv');
+  } finally {
+    await stopApproveDownload();
+  }
+
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**分页 + 异步渲染**（playbook 'paginate-async'）。
 //
 // 两个难点叠在一起，这是真实站点最常见的形态：

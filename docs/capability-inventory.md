@@ -18,6 +18,7 @@
 | `csp-page-world-js` | 核对总价 | `/csp` ✓ | 3 | `page-world-js` | ✓ | 2 | 1 | page |
 | `debug-console-error` | 没反应 | `/debug` ✓ | 4 | `debug-console-error` | ✓ | 3 | 2 | page |
 | `dismiss-overlay` | 弹窗 | `/blocked` ✓ | 4 | `dismiss-overlay` | ✓ | 5 | 2 | page |
+| `download-verify` | 报表 | `/download` ✓ | 4 | `dialog-handling` | ✓ | 0 | 1 | payload |
 | `extract-merged-table` | 表格 | `/table` ✓ | 2 | `extract-merged-table` | ✓ | 1 | 4 | page |
 | `form-validation` | 报名表 | `/validate` ✓ | 5 | `form-validation` | ✓ | 4 | 1 | page |
 | `knowledge-save-retrieve` | 知识库 | `/notes` ✓ | 3 | `knowledge-save-retrieve` | ✓ | 0 | 4 | storage |
@@ -36,4 +37,4 @@
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 3 | 1 | page |
 
-**合计**：25 个剧本；页面判据 78 条、回执判据 53 条；夹具路由已接线 25/25；E2E 已引用 25/25；有内置技能 25/25。
+**合计**：26 个剧本；页面判据 78 条、回执判据 54 条；夹具路由已接线 26/26；E2E 已引用 26/26；有内置技能 26/26。

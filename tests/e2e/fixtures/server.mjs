@@ -1453,6 +1453,27 @@ function dialogPage() {
 </body></html>`;
 }
 
+// 下载页：验「**下载是浏览器级事件，页面上不会发生任何变化**」这一类。
+//
+// 难点：点一下之后页面**什么都不变**（没有 DOM 变化、没有状态文案）——
+// 于是"点了链接"与"文件真的下载了"分家 ✗ 与付费墙那类同源（能点 ≠ 生效）。
+// 唯一可信来源是**浏览器自己报的下载事件**（CDP `Page.downloadWillBegin` →
+// `read_diagnostics({kind:"downloads"})`），而它同样要求**点击之前已 attach CDP**。
+function downloadPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具报表</title></head>
+<body>
+  <h1>月度报表</h1>
+  <p>把本月报表导出为 CSV。</p>
+  <a id="dl" href="/files/report.csv" role="link" aria-label="导出报表 CSV">导出报表 CSV</a>
+  <div id="status" role="status">就绪</div>
+  <script>
+    // 页面**不会**因为下载而变化 —— 这正是本场景要考的：别把"点了"当成"下载了"。
+    window.__clicked = 0;
+    document.getElementById('dl').addEventListener('click', function () { window.__clicked += 1; });
+  </script>
+</body></html>`;
+}
+
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
@@ -2332,6 +2353,21 @@ const llm = http.createServer((req, res) => {
     // 节奏：先重命名（prompt 需要**回填值** → 走 handle_dialog({promptText})），
     // 再删除（confirm 只需确定）。刻意都先点一次按钮**让对话框出现**，
     // 再读快照看到"未处理对话框"的提示，然后处理它 —— 这正是真实使用路径。
+    // 剧本：下载文件（playbook id = 'download-verify'）。
+    //
+    // ⚠ 第一步用 **CDP 支撑的**读取：下载事件（Page.downloadWillBegin）只有
+    // 在"点击之前就已 attach"时才会到达扩展 —— 与对话框是同一个坑。
+    if (userText.includes(PLAYBOOKS['download-verify'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_ax_snapshot', { limit: 30 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'link', name: '导出报表 CSV' }); return; }
+      // 页面不会变，唯一的凭据来自浏览器自己的下载事件
+      if (done === 2) { toolStep(res, 'read_diagnostics', { kind: 'downloads' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      finalText(res, '已从浏览器下载事件确认报表已导出，文件名是 report.csv（页面上不会有任何变化，这正是要说明的地方）。', 90);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2351,6 +2387,15 @@ const llm = http.createServer((req, res) => {
 
 const main = http.createServer((req, res) => {
   const url = String(req.url || '');
+  // ⚠ 下载路由要**先于**页面路由处理：它返回的是附件而不是 HTML。
+  if (url.startsWith('/files/report.csv')) {
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="report.csv"',
+    });
+    res.end('月份,金额\n2026-01,100\n2026-02,200\n');
+    return;
+  }
   // ⚠ CSP 夹具需要**不同的响应头**：`script-src 'self' 'unsafe-inline'` 放行页面自己的内联脚本
   // （否则连夹具页的脚本都跑不起来，难点就不是"eval 被拒"了），但**不放行 `unsafe-eval`** ——
   // 这正是 run_javascript 默认沙箱（`new Function`）会撞上的东西。其余夹具页仍用宽松的头。
@@ -2389,7 +2434,8 @@ const main = http.createServer((req, res) => {
                                                       : req.url && req.url.startsWith('/validate') ? validatePage()
                                                         : req.url && req.url.startsWith('/paywall') ? paywallPage()
                                                           : req.url && req.url.startsWith('/dialog') ? dialogPage()
-                                                            : mainPage()
+                                                            : req.url && req.url.startsWith('/download') ? downloadPage()
+                                                              : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

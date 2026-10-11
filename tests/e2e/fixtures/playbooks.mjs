@@ -725,6 +725,30 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['试看', '180'],
     },
   },
+
+  'download-verify': {
+    id: 'download-verify',
+    title: '复杂场景：下载文件 —— 页面上不会发生任何变化，凭据只能来自浏览器',
+    trigger: '报表',
+    // 难点：点一下之后**页面什么都不变**（无 DOM 变化、无状态文案）——
+    // 于是"点了链接"与"文件真的下载了"分家 ✗
+    // 唯一可信来源是**浏览器自己报的下载事件**（CDP `Page.downloadWillBegin`
+    // → `read_diagnostics({kind:"downloads"})`），而它同样要求**点击之前已 attach CDP**
+    // （所以脚本路径第一步用 CDP 支撑的读取）。
+    tools: ['get_ax_snapshot', 'click_element', 'read_diagnostics', 'inspect_element'],
+    success: '点击导出后，从浏览器事件确认下载真的发生、并报出真实的文件名',
+    eval: {
+      url: '/download',
+      cdp: true,
+      instruction: '帮我把这个月的报表导出来，导出后告诉我文件名是什么。',
+      // 下载是**浏览器级结果**：页面上没有任何东西可断言（这正是本场景的难点）。
+      // 真实的"下载发生了"由 E2E 用 Playwright 的 download 事件断言；
+      // 这条剧本的结果因此落在**回执**上：浏览器报的文件名必须到模型手里。
+      outcome: 'payload',
+      pageChecks: [],
+      mustSeeInToolResults: ['report.csv'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
