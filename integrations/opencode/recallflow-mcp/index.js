@@ -926,7 +926,10 @@ const TOOLS = [
       '就会复制一段带 RF-XXXXXX 标识的指令贴给你——**只要用户消息里出现这种标识，或说「看下这个会话 / 接手这个前端问题」，就应当调用本工具**。' +
       '返回自包含的交接包：页面 URL 与标题、面板里的完整对话、用户拾取的元素（含前端源码 file:line）、' +
       '以及用户复制那一刻的控制台错误/警告快照（错误之后再查往往已消失，因此快照才是定位问题的关键）。' +
-      '不传 id 时返回最近可用的会话标识列表，用于向用户确认要用哪一个。',
+      '不传 id 时返回最近可用的会话标识列表，用于向用户确认要用哪一个。' +
+      '⚠ 返回里的 `toolTrail` 只是**摘要**：`trailStored` 是可取回的步数、`trailOmitted` 是真正取不回的步数。' +
+      '复杂会话（几十步以上）应先用 `trailFrom` / `trailTo` 把更早的探索**分段取回**，再判断"前一个 AI 试过哪些路"，' +
+      '不要凭摘要就重做一遍。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -935,6 +938,15 @@ const TOOLS = [
           description: '会话标识，形如 RF-7K2M9X（大小写、连字符与空格都可宽松处理）。不填则返回最近的标识列表。',
         },
         limit: { type: 'integer', description: '不填 id 时，返回多少条最近标识，默认 20，最大 50。' },
+        trailFrom: {
+          type: 'integer',
+          description:
+            '传了它（或 trailTo）就改为**分段读取完整工具轨迹**，返回该区间，且不再重复返回整份记录。从 0 开始。',
+        },
+        trailTo: {
+          type: 'integer',
+          description: '轨迹区间的**开区间上界**（与数组 slice 一致；取第 0–4 步就传 trailTo=5）。越界会被夹到实际长度。',
+        },
       },
     },
   },
@@ -1038,9 +1050,28 @@ async function recallflowSession(args) {
         : '目前没有已交接的 RecallFlow 会话。请让用户在网页的 RecallFlow 面板上点击会话标识芯片，把复制的指令发给你。',
     };
   }
-  const r = await callExtension('handoff_get', { id: raw });
+  const r = await callExtension('handoff_get', {
+    id: raw,
+    // 分页取完整轨迹：记录里只有摘要，这里按区间补齐更早的探索（见 lib/shared/handoff-store.js）。
+    trailFrom: args && args.trailFrom,
+    trailTo: args && args.trailTo,
+  });
   if (!r || r.ok === false) {
     return { ok: false, notFound: Boolean(r && r.notFound), error: (r && r.error) || '读取会话失败' };
+  }
+  // 分页请求：直接返回那一段轨迹，不把记录再塞一遍（省上下文）
+  const wantsTrail = (args && (args.trailFrom !== undefined || args.trailTo !== undefined)) || r.trail !== undefined;
+  if (wantsTrail && r.trail !== undefined) {
+    return {
+      ok: true,
+      trail: r.trail,
+      trailFrom: r.trailFrom,
+      trailTo: r.trailTo,
+      trailStored: r.trailStored,
+      trailTotal: r.trailTotal,
+      trailOmitted: r.trailOmitted,
+      note: r.note,
+    };
   }
   return {
     ok: true,
@@ -1051,9 +1082,9 @@ async function recallflowSession(args) {
       // 复杂会话（实测一次检索类任务可达 ~60 次工具调用）会因体积上限被裁，
       // 所以**必须让接手方知道自己拿到的是不是完整的** —— 否则它会以为"前一个 AI 只做了这些"，
       // 把已经试过的路再试一遍。
-      '⚠ `toolTrail` 受体积上限约束：`trailTotal` 是实际步数、`trailOmitted` 是被省略的步数。' +
-      '只要 `trailOmitted > 0`，就说明**更早的探索不在快照里**，不要把它当成完整历史；' +
-      '需要那部分时请让用户在面板上「导出记录」并把范围说明给你。',
+      '⚠ `toolTrail` 只是**摘要**：`trailTotal` 是会话真实步数，`trailStored` 是可取回的步数，' +
+      '`trailOmitted` 是**真正取不回**的步数。只要 `trailStored > toolTrail.length`，' +
+      '就说明有更早的探索可查 —— 用 `trailFrom`/`trailTo`（开区间上界）分段取，不要凭摘要就断定"前面的 AI 没查过"。',
   };
 }
 

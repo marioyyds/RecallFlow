@@ -12,7 +12,9 @@ import {
   formatHandoffPrompt,
   deriveToolTrail,
   buildToolTrail,
+  prepareHandoffTrail,
   MAX_TOOL_TRAIL,
+  MAX_TRAIL_FULL,
   handoffByteSize,
   fitRecordToBudget,
 } from '../lib/shared/handoff.js';
@@ -239,8 +241,13 @@ test('buildToolTrail：返回全量且不截断（省略计数的依据）', () 
 
 // 起因（用户反馈）：一次"检索动画"的会话有约 60 次工具调用，而记录只留最近 24 步、
 // 每步结果 300 字符 —— 接手方看不到前面的探索，也就判断不了"哪些路已经试过了"。
-// 上限已放宽；但**更根本**的是：**省略了却不说，接手方会以为记录是完整的**。
-test('省略了多少步必须显式记在记录里（省略而不说＝谎报完整）', () => {
+//
+// 现在的三个数**语义要分清**（上一轮只有 trailTotal/trailOmitted，那时还没有独立存储）：
+//   trailTotal   会话真实步数
+//   trailStored  可通过分段读取**取回**的步数
+//   trailOmitted **真正取不回**的步数（超出全量预算）
+// 接手方据此判断"我拿到的是不是完整的、缺的能不能取回"。
+test('轨迹的三个数必须自洽：total = stored + omitted，且摘要不超过 stored', () => {
   const parts = [];
   for (let i = 0; i < 140; i++) {
     parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
@@ -248,42 +255,69 @@ test('省略了多少步必须显式记在记录里（省略而不说＝谎报�
   }
   const rec = buildHandoffRecord({ id: 'RF-7K2M9X', messages: [{ role: 'assistant', parts }] });
   assert.equal(rec.trailTotal, 140, '要记下轨迹**总数**');
-  assert.equal(rec.toolTrail.length, MAX_TOOL_TRAIL, '交付的轨迹受上限约束');
-  assert.equal(rec.trailOmitted, 140 - MAX_TOOL_TRAIL, '省略的步数必须写明');
-  // 没超上限时不能虚报省略
+  assert.equal(rec.trailStored, 140, '140 步未超全量上限，应当**全部可检索**');
+  assert.equal(rec.trailOmitted, 0, '没丢东西就不能说丢了');
+  assert.equal(rec.toolTrail.length, MAX_TOOL_TRAIL, '随包交付的只是摘要');
+  // 这才是"还有更多"的信号：接手方看 stored > 摘要长度 就知道该去取
+  assert.ok(rec.trailStored > rec.toolTrail.length, '摘要小于可检索步数 → 接手方应知道还有更早的探索');
+  // 不变量
+  assert.equal(rec.trailTotal, rec.trailStored + rec.trailOmitted);
+  // 没超上限时不能虚报
   const small = buildHandoffRecord({
     id: 'RF-7K2M9X',
     messages: [{ role: 'assistant', parts: [{ type: 'tool-call', callId: 'a', name: 'x', args: {} }, { type: 'tool-result', callId: 'a', status: 'completed', result: 'ok' }] }],
   });
-  assert.equal(small.trailOmitted, 0);
   assert.equal(small.trailTotal, 1);
+  assert.equal(small.trailStored, 1);
+  assert.equal(small.trailOmitted, 0);
+  assert.equal(small.toolTrail.length, 1, '摘要不超过可检索步数');
 });
 
-test('**降级**砍轨迹时也必须同步更新省略计数（否则接手方更严重地高估完整性）', () => {
-  // 造一条**确实超预算**的记录，逼 fitRecordToBudget 走到「工具轨迹只留 10 步」那一档
+test('超出**全量**上限的部分才算"真正取不回"，并被如实计入 omitted', () => {
+  const parts = [];
+  const n = MAX_TRAIL_FULL + 35;
+  for (let i = 0; i < n; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const rec = buildHandoffRecord({ id: 'RF-7K2M9X', messages: [{ role: 'assistant', parts }] });
+  assert.equal(rec.trailTotal, n);
+  assert.equal(rec.trailStored, MAX_TRAIL_FULL, '可检索部分受全量上限约束');
+  assert.equal(rec.trailOmitted, n - MAX_TRAIL_FULL, '取不回的部分必须写明');
+  assert.equal(rec.trailTotal, rec.trailStored + rec.trailOmitted, '不变量');
+});
+
+test('prepareHandoffTrail：三者同源（记录与独立存储各取所需，不会各算一遍而漂移）', () => {
+  const raw = Array.from({ length: 5 }, (_, i) => ({ name: 't' + i, args: '', status: 'completed', result: 'r' }));
+  const p = prepareHandoffTrail(raw);
+  assert.equal(p.total, 5);
+  assert.equal(p.items.length, 5);
+  assert.equal(p.omitted, 0);
+  assert.equal(p.summary.length, 5, '不足摘要上限时摘要=全部');
+  assert.deepEqual(p.summary, p.items.slice(-MAX_TOOL_TRAIL));
+});
+
+test('**降级**只影响随包摘要，不得谎报"数据丢了"', () => {
+  // 造一条确实超预算的记录，逼 fitRecordToBudget 走到「工具轨迹只留 10 步」那一档
   const parts = [];
   for (let i = 0; i < 60; i++) {
     parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: { pad: 'y'.repeat(200) } });
     parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r'.repeat(600) });
   }
   const rec = buildHandoffRecord({ id: 'RF-7K2M9X', messages: [{ role: 'assistant', parts }] });
-  const before = rec.trailOmitted;
   const out = fitRecordToBudget(rec, 6000);
   assert.ok(out.truncated, '小预算下应当被降级（否则这条用例没验到东西）');
-  assert.ok(
-    out.record.trailOmitted >= before,
-    '降级后省略计数只能增加，不能变小：少报了就等于谎报完整'
+  // 摘要被砍了 ✓ 但可检索性没变 ✓ 所以 omitted 不能变 ✗
+  assert.equal(
+    out.record.trailOmitted,
+    rec.trailOmitted,
+    '降级砍的是**随包摘要**，完整轨迹仍在独立 key 里可取回 —— 报成"丢了"就是谎报'
   );
-  if (out.record.toolTrail.length < rec.toolTrail.length) {
-    assert.equal(
-      out.record.trailOmitted,
-      before + (rec.toolTrail.length - out.record.toolTrail.length),
-      '降级砍掉的步数必须计进省略数'
-    );
-  }
-  // 牙齿：一个"降级但忘了更新计数"的实现必须被判不合格
-  const naive = Object.assign({}, rec, { toolTrail: rec.toolTrail.slice(-10) });
-  assert.notEqual(naive.trailOmitted, before + (rec.toolTrail.length - 10), '朴素写法不更新计数，应被这条断言识别');
+  assert.equal(out.record.trailStored, rec.trailStored, '可检索步数不因降级而改变');
+  assert.ok(out.record.toolTrail.length <= rec.toolTrail.length, '摘要确实变小了');
+  // 牙齿：一个"降级时顺手把 omitted 加上去"的实现必须被判不合格（上一版就是这样，存储拆开后成了错）
+  const naive = Object.assign({}, out.record, { trailOmitted: rec.trailOmitted + (rec.toolTrail.length - out.record.toolTrail.length) });
+  assert.notEqual(naive.trailOmitted, rec.trailOmitted, '朴素写法会多报丢失，应被这条断言识别');
 });
 
 test('buildHandoffRecord: 工具轨迹进入交接包（此前 parts 被 trimMessages 丢掉）', () => {

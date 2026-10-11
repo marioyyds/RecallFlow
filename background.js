@@ -108,7 +108,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'handoff:get') {
-    getHandoff(msg.id)
+    // 带上 trailFrom / trailTo 时改为分页读取**完整轨迹**（见 getHandoff 的说明）：
+    // 记录里只有摘要，完整轨迹在独立 key 里，按区间取才不至于一次灌爆接手方的上下文。
+    getHandoff(msg.id, { trailFrom: msg.trailFrom, trailTo: msg.trailTo })
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
