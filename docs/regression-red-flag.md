@@ -40,6 +40,27 @@
 3. **只在对照差异明显时下结论**，并把数字写进仓库（源码注释 + 本文档）；
 4. 把结论**钉成门禁**（方向可能是"不要做某事"）。
 
+### 可直接粘贴的测量循环
+
+单条 eval 场景跑 N 次并打印「PASS/FAIL + LLM 请求数」（第 26 轮就是这么测出 3/7 与 5/5 的）：
+
+```powershell
+$env:E2E_LLM_REAL='1'; $env:E2E_LLM_REAL_KEY='<key>'
+$env:E2E_LLM_REAL_BASE='https://api.deepseek.com'; $env:E2E_LLM_REAL_MODEL='deepseek-flash'
+foreach ($i in 1..6) {
+  $out = cmd /c "npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep 付费墙 2>&1" 2>&1
+  $req = ($out | Select-String -Pattern "LLM 请求次数：(\d+)").Matches.Groups[1].Value
+  $ok  = if (($out | Select-String -Pattern "1 passed").Count -gt 0) { 'PASS' } else { 'FAIL' }
+  Write-Output ("第 $i 次: $ok  请求=$req")
+}
+```
+
+⚠ **注意事项**（都是第 26 轮踩过的）：
+- 必须用 `cmd /c` 包住 `npx`（否则 `npx.ps1` 会被策略挡住 ✗）；
+- **两边样本量要相当**：只有一边 1 次、另一边 7 次，是**判不了**的 ✗；
+- 请求数**不是**判据：第 26 轮的样本里失败是 7–10、通过是 8–12，**有重叠** ⇒
+  我曾根据"失败时请求更少"下判断，被新样本推翻了 ✗（幸好当时只标为"观察"✓）。
+
 ## 历史记录（判定之前）
 
 <details>
