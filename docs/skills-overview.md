@@ -1,0 +1,64 @@
+# 技能清单（自动生成，勿手改）
+
+本文件由 `node scripts/gen-skills-overview.mjs` 从 `lib/assistant/skill-defs.js` 与
+`tests/e2e/fixtures/playbooks.mjs` 推导得出，并由 `tests/skills-overview.test.mjs` 门禁
+比对"产物变了而本文件没跟上"。**不要手写这份清单** —— 手写的必然腐烂。
+
+## 总览
+
+| 指标 | 值 |
+| --- | --- |
+| 技能总数 | **36** |
+| 有剧本归属（真浏览器验收覆盖） | **27** |
+| **孤儿技能**（无验收覆盖） | **9** |
+| 能力剧本总数 | **27** |
+
+## 有剧本归属的技能（每一项都有夹具页 + E2E 判据）
+
+| 技能 | 展示名 | 分类 | 对应剧本 |
+| --- | --- | --- | --- |
+| `canvas-coordinate-click` | canvas / 画布上的按钮（按坐标点击） | browser-automation | `canvas-coordinate-click` |
+| `cascade-select` | 级联下拉框（选了父项，子项异步填充） | browser-automation | `cascade-select` |
+| `cdp-drag-slider` | 拖拽（滑块 / 自定义排序等鼠标事件型控件） | browser-automation | `cdp-drag-slider` |
+| `checkout-form` | 下单 / 多步表单（选商品 → 填写 → 勾选确认 → 提交） | browser | `checkout-form` |
+| `cross-tab-handoff` | 跨标签页搬运（在 A 页读到的东西填进新开的 B 页） | browser-automation | `cross-tab-handoff` |
+| `page-world-js` | 读页面 JS 状态 / 严格 CSP 页面（沙箱被拒会自动改用页面主世界） | browser-automation | `csp-page-world-js` |
+| `date-picker-custom` | 自定义日期选择器：打字没用，要点日历 | browser-automation | `date-picker-custom` |
+| `debug-console-error` | 排查「点了没反应」（先复现，再读运行期事实） | browser-automation | `debug-console-error` |
+| `dismiss-overlay` | 被弹窗/遮罩挡住（先处理干扰，再干活） | browser | `dismiss-overlay` |
+| `download-verify` | 下载文件：页面上不会变，凭据只能来自浏览器事件 | browser-automation | `download-verify` |
+| `extract-merged-table` | 表格提取（含合并单元格，按列对齐） | browser | `extract-merged-table` |
+| `form-validation` | 提交没反应：HTML5 原生校验静默拦住（页面上什么都不说） | browser-automation | `form-validation` |
+| `knowledge-save-retrieve` | 知识库：存进去要能原样取回来（同一个网址会互相覆盖） | knowledge | `knowledge-save-retrieve` |
+| `knowledge-search-fallback` | 知识库检索查不到时（查不到 ≠ 没有） | knowledge | `knowledge-search-fallback` |
+| `macro-save-replay` | 宏：把已验证的多步操作存下来，之后零 token 回放 | browser-automation | `macro-save-replay` |
+| `new-tab-takeover` | 新标签页接管（点击后换页继续干活） | browser | `new-tab-takeover` |
+| `operate-in-cross-origin-iframe` | 跨域 iframe 内操作（先读合并快照，再按复合 ref 路由） | browser | `operate-in-cross-origin-iframe` |
+| `paginate-async` | 分页 + 异步加载（跨页找到目标，并等它真的渲染出来） | browser | `paginate-async` |
+| `paywall-boundary` | 付费墙 / 试看边界：「能打开」不等于「能看」 | browser-automation | `paywall-preview-limit` |
+| `pierce-shadow-dom` | 组件内操作（穿透 Shadow DOM） | browser | `pierce-shadow-dom` |
+| `read-select-options` | 读下拉框选项（"选最便宜/最合适"之前先看有哪些） | browser-automation | `read-select-options` |
+| `readability-fix` | 可读性美化（把难读的页面调成易读） | browser | `readability-fix` |
+| `recover-from-rejection` | 被拒后自适应（读懂原因、补齐、再试） | browser | `recover-from-rejection` |
+| `search-within-site` | 站内检索（搜索 + 结构化取回结果） | browser | `site-search` |
+| `undo-last-action` | 撤销上一步（只回退最后一次可撤销动作） | browser-automation | `undo-last-action` |
+| `upload-file` | 文件上传（工具只说"未观测"，必须读回） | browser-automation | `upload-file` |
+| `virtual-list-scroll` | 虚拟列表 / 长列表（DOM 里没有 ≠ 页面上没有） | browser-automation | `virtual-list-scroll` |
+
+## ⚠ 孤儿技能（**没有**真浏览器验收 —— 文案写了，但没人验过）
+
+这些技能只在"模型读到文案"这一层有效，**没有**夹具页与 E2E 判据。
+要么给它们补一个能力剧本，要么在技能定义里写一行 `// 无剧本：<原因>` 显式声明。
+
+| 技能 | 展示名 | 分类 | 为什么没有剧本 |
+| --- | --- | --- | --- |
+| `agent-browser` | Agent Browser（浏览器自动化） | browser-automation | **（未声明）** |
+| `clip-to-knowledge` | 剪藏到知识库 | knowledge | **（未声明）** |
+| `dialog-handling` | 浏览器对话框（confirm 阻塞 / prompt 要回填值） | browser-automation | **（未声明）** |
+| `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | **（未声明）** |
+| `highlight-key-points` | 划重点 / 高亮关键信息 | reading | **（未声明）** |
+| `humanizer` | Humanizer（去 AI 味） | content-creation | **（未声明）** |
+| `remove-ads` | 去广告 / 屏蔽推广 | browser | **（未声明）** |
+| `summarize` | Summarize（总结） | reading | **（未声明）** |
+| `userscript-task` | 用户脚本任务（下载/展开/签到/抢购） | browser | **（未声明）** |
+
