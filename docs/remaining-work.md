@@ -16,34 +16,31 @@
 4. **不要用 PowerShell 改写源文件**（`Get-Content`/`Set-Content` 破坏 UTF-8）✗ 用 `edit` 工具 ✓
 5. **夹具模板字符串里不能有反引号** ✗（会终止模板字符串）✓
 
-## 二、① 多模态：让面板内 Agent 能"看到"截图（**完全未动**）
+## 二、① 多模态：让面板内 Agent 能"看到"截图（**核心链路已打通，开关仍关**）
 
-事实基础（前几轮已实测/已确认）：
-- `deepseek-flash` **支持看图**，约 **400 token/图** ✓
-- 传输层**已透传** `messages`：`lib/assistant/llm.js` 把 `messages` 原样发出 ⇒ **不需要改传输** ✓
-- 但 `lib/assistant/llm.js` / `agent.js` 里**没有任何** `image_url` 或内容数组的构造 ✗（当前是纯文本）
+**已完成**（全部在 `VISION_ENABLED = false` 之后 ⇒ 今天模型可见内容**一字未变** ✓）：
 
-要改的 5 个点（都已定位）：
-
-| # | 位置 | 问题 | 方向 |
+| # | 事项 | 状态 | 位置 |
 | --- | --- | --- | --- |
-| 1 | `lib/assistant/context.js:42` 附近 | `typeof h.content !== 'string'` 时 **`continue` 整条丢掉** ✗ ⇒ 数组内容（含图）的历史被**静默丢弃** | 改成保留并归一化；**必须加门禁**（这条最容易复发）|
-| 2 | `take_screenshot` 的结果装配（`lib/assistant/screenshot-tool.js`）| 工具消息**只能放文本** ⇒ 图不能塞进 tool message | 图走**追加的 user 消息**（OpenAI 兼容格式，`{role:'user',content:[{type:'image_url',...}]}`）✓ |
-| 3 | `lib/shared/utils.js:522` | 文案说"你看不到图像" | **条件化**：仅当模型/开关不支持视觉时才出现 |
-| 4 | `lib/assistant/tool-schemas.js:556` | 同上 | 同上 |
-| 5 | `lib/assistant/skill-defs.js:344` | 同上 | 同上 |
+| 1 | 数组 content 的历史不再被**静默丢弃**（归一化为文本 + 说明图片未传下去）| ✅ | `lib/assistant/context.js` 的 `flattenHistoryContent` |
+| 2 | **开关**（单一事实来源）+ 文案函数 | ✅ | `lib/shared/utils.js` 的 `VISION_ENABLED` / `visionLimitationNote` |
+| 3 | 多模态消息装配 + 预算（张数 / 单片体积 / **丢弃必说明**）| ✅ | `lib/assistant/vision.js` |
+| 4 | **接线**：截图在 tool 消息之后作为**追加的 user 消息**进入上下文 | ✅ | `lib/assistant/agent.js`（`messages.push({role:'tool'…})` 之后）|
 
-外加两件：
-- **开关**（默认关）：设置项 + 面板 UI；关时行为与现在完全一致 ✓
-- **预算**：每图约 400 token ⇒ 需要"最多带几张 / 多大尺寸"的显式上限，并在超出时**如实说明省略了什么** ✓
-  （与 handoff 那条"省略必说明"同一纪律 ✓）
+对应门禁：`tests/history-array-content.test.mjs`(8)、`tests/vision-switch.test.mjs`(6)、
+`tests/vision-messages.test.mjs`(9)、`tests/vision-wiring.test.mjs`(4)
 
-判据建议（双层）：
-- **模型实际收到了什么**：断言请求里**真的**出现了 `image_url` 部件，且 base64 大小在预算内 ✓
-- **页面状态**：截图本身仍然被存下、面板仍能渲染（不能因为多模态改造把原路径弄坏 ✓）
-- **开关关闭时**：请求里**不得**出现任何 `image_url`（用同一个夹具页跑一遍对照 ✓）
+**还剩（按顺序做，第 5 步才需要跑 eval）**：
 
-⚠ 按纪律 1：这项改动**动了模型可见内容** ⇒ 必须按 `docs/regression-red-flag.md` 的方法测量 ✓
+| # | 事项 | 注意 |
+| --- | --- | --- |
+| 5 | 三处"你看不到图像"文案改用 `visionLimitationNote()` 条件化 | ⚠ 这会**改变模型可见文本**（措辞不同）⇒ 按 `docs/regression-red-flag.md` **必须测量** |
+| 6 | 打开开关（`VISION_ENABLED = true`）| 与第 5 步**一起**做，一次测量即可 |
+| 7 | 对照门禁：开关关闭时请求里**不得**出现任何 `image_url`；开启时**应当**出现 | 可在 E2E 里读 mock LLM 收到的请求断言（夹具已有 `getLlmRequests()`）|
+| 8 | 预算实测：确认 ~400 token/图、以及 `maxImages` 取几合适 | 打开后按真实会话量一量 |
+
+⚠ **不要**跳过去做第 6 步：开关一开，截图就真的进模型输入了 ✗ 而"改了模型能看到的内容必须测量"
+是本仓库最贵的一条教训（第 23→26 轮：没测量就标完成，实测通过率 3/7 vs 5/5 后回退 ✗）。
 
 ## 三、④ 场景泛化：还剩 5 个
 
