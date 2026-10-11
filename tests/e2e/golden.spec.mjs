@@ -30,6 +30,7 @@ import {
   flowOrder,
   panelStyle,
   panelText,
+  readTextAsAgent,
   PANEL,
 } from './helpers.mjs';
 
@@ -1175,8 +1176,14 @@ test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读
   await expect.poll(() => page.evaluate(() => window.__clicked), { timeout: 20_000 }).toBe('i87');
   await expect(page.locator('#status')).toHaveText('已点开：87');
 
-  // ③ 模型视角：滚动的**实际位置**要回到它手里（它能据此判断"滚到哪了"）
-  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('scrollTop=3480');
+  // ③ 容器**真的被滚动过**（scrollTop > 0），而且滚动的动作在回执里。
+  //   ⚠ 判据**不认"滚了多少"**：滚 3400 与滚 3480 都能把第 87 条带进窗口，写死数值就是**路径断言**
+  //     （真模型 eval 实测：它滚 3400、三条页面判据全过，却因为回执里没有 `scrollTop=3480` 被判红）。
+  //     这里要的仍然是"必须滚**容器**"这个难点：窗口滚不动它（基线③ 已经用 `window.scrollBy` 证明过）。
+  await expect.poll(() => page.evaluate(() => window.__maxScrollTop), { timeout: 30_000 }).toBeGreaterThan(0);
+  //   ⚠ `已滚动容器` 来自 `lib/page/commands.js` 的容器滚动回执 —— 它证的是"滚动这个**动作**发生过"，
+  //     与偏移量无关（`scrollTop=<n>` 那一半被刻意忽略）。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已滚动容器');
 
   await page.close();
 });
@@ -1856,13 +1863,29 @@ test('golden: 多候选收敛 —— 决定性属性在详情里，且缓存报�
 
   // ③ A4 的机制：**每个候选的第一次读必然是缓存报价**（与读得多快无关）——
   //    这条是本场景可判的前提，所以先在本用例里直接验一次机制本身。
+  //
+  //    ⚠ 关键：读要**按 agent 的口径**读（`readTextAsAgent` = 取文本 + 派发
+  //      `recallflow:element-read`）。夹具的"重新询价"时钟**只由这一次读启动**；
+  //      裸 `page.textContent()` 读不出这个信号，等于模拟了一个"从没读过"的 agent
+  //      ⇒ 页面永远不会重新询价（实测：这样改完这里直接等超时）。
   await page.locator('#toggle-p105').click();
+  // 展开只摆上缓存价（**没有任何刷新被安排**）：这时还没有读过 ⇒ fresh 必须仍是 false
+  expect(
+    await page.evaluate(() => {
+      const r = window.__det.records.p105;
+      return { fresh: r.fresh, shown: document.getElementById('total-p105').textContent, clientReads: r.clientReads };
+    }),
+    '展开详情时显示的不是缓存总价 / 或者已经安排了刷新'
+  ).toEqual({ fresh: false, shown: '¥309', clientReads: 0 });
+  // 第一次读：**在刷新被安排之前**拿到的就是缓存价（结构性，与读得多快无关）
+  const firstReadText = await readTextAsAgent(page, '#total-p105');
+  expect(firstReadText, '第一次读到的不是缓存总价').toBe('¥309');
   const firstP105 = await page.evaluate(() => {
     const r = window.__det.records.p105;
-    return { fresh: r.fresh, shown: document.getElementById('total-p105').textContent, raw: r.rawTotal, live: r.total, reads: r.reads };
+    return { fresh: r.fresh, raw: r.rawTotal, live: r.total, reads: r.reads, clientReads: r.clientReads };
   });
   expect(firstP105.fresh, '第一次读竟然是实时值：那"缓存报价"这个陷阱不成立').toBe(false);
-  expect(firstP105.shown, '展开详情时显示的不是缓存总价').toBe('¥309');
+  expect(firstP105.clientReads, '第一次读没有被记成"agent 读了"').toBe(1);
   expect(firstP105.raw, '缓存总价与实时总价本来就相等：那"重读"这一步不必要').not.toBe(firstP105.live);
   expect(firstP105.reads).toBeGreaterThanOrEqual(1);
   // 等实时报价真的生效（页面自己写下那行说明）→ 重读 → 值变了
@@ -1870,11 +1893,10 @@ test('golden: 多候选收敛 —— 决定性属性在详情里，且缓存报�
     () => page.evaluate(() => String(window.__det.records.p105.refreshMsg || '')),
     { timeout: 10_000 }
   ).toContain('实时报价已重新询价');
-  await page.locator('#toggle-p105').click(); // 收起
-  await page.locator('#toggle-p105').click(); // 再展开（**重读**一次）
-  await expect.poll(() => page.textContent('#total-p105'), { timeout: 10_000 }).toBe('¥283');
-  expect(await page.evaluate(() => window.__det.records.p105.reads)).toBeGreaterThanOrEqual(2);
-  expect(await page.textContent('#total-p105'), '重读之后还是缓存值：那"重读能拿到实时报价"不成立').not.toBe('¥309');
+  // 重读（**同一个节点**，不用收起再展开）：这次拿到的必须是实时价
+  const secondReadText = await readTextAsAgent(page, '#total-p105');
+  expect(secondReadText, '重读之后还是缓存值：那"重读能拿到实时报价"不成立').toBe('¥283');
+  expect(await page.evaluate(() => window.__det.records.p105.clientReads)).toBe(2);
 
   // 复位到干净起点，再让 agent 从头做（与分页/级联/无限滚动三条用例同样的处理）
   await page.reload();

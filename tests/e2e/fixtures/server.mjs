@@ -1013,10 +1013,19 @@ function virtualListPage() {
     window.__clicked = null;
     window.__renderedIds = [];
     window.__windowStart = 0;
+    // 容器**真的被滚过**的证据：记 scrollTop 的最大值。
+    // ⚠ 这里刻意不记"滚了多少"这个具体量 —— 目标行（第 87 条）在 3400 与 3480 这类
+    //   不同偏移下都会进窗口，"必须恰好滚 3480"是**路径断言**，会把合法的另一种滚法判红
+    //   （真模型 eval 实测：它滚 3400，页面判据全过，却因为回执里没有 scrollTop=3480 而红）。
+    //   判据要的是"**这个容器真的滚动过**"（窗口滚不动它 ⇒ 只能是滚了容器）+ "第 87 条真的进了窗口"。
+    window.__maxScrollTop = 0;
     var list = document.getElementById('list');
     var pad = document.getElementById('pad');
     var win = document.getElementById('win');
     pad.style.height = (TOTAL * ROW) + 'px';
+    list.addEventListener('scroll', function () {
+      if (list.scrollTop > window.__maxScrollTop) window.__maxScrollTop = list.scrollTop;
+    });
     function render() {
       var start = Math.floor(list.scrollTop / ROW);
       if (start > TOTAL - VISIBLE) start = Math.max(0, TOTAL - VISIBLE);
@@ -1301,14 +1310,14 @@ function pickPage() {
     <p>每家都标了到货天数与退货政策，请逐条核对后再提交。</p>
   </div>
   <div id="quote-banner" class="quote" role="status">
-    报价单已缓存；系统会**逐个候选**重新询价一次，候选的**实时报价在详情里刷新**（读后约 2 秒生效）。
+    报价单已缓存；系统会**逐个候选**重新询价一次，候选的**实时报价在详情里刷新**（**第一次读到详情后**约 2 秒生效）。
   </div>
   <div id="picks" role="list"></div>
   <div id="status" role="status"></div>
   <script>
     // ---- 每个候选的 5 个可核对属性 ----
-    // quote  = 展开详情时**先**显示的缓存报价（第一次读一定是它）
-    // live   = 该候选读后 1200ms 才生效的实时报价（**总价与天数都可能变**）
+    // quote  = 展开详情时**先**显示的缓存报价（第一次读必然是它）
+    // live   = 该候选**第一次被读到之后** REFRESH_MS 才生效的实时报价（**总价与天数都可能变**）
     //
     // ★★ 数值是**算过**的，且与文件下方服务端的 PICK_PARTS.liveTotal **必须逐条相等**
     //    （liveTotal = list + live.fee）。理由：服务端是判定的权威，页面是展示 ——
@@ -1334,8 +1343,9 @@ function pickPage() {
         retOk: false, note: '退货：可退，但要收订单金额 8% 的手续费。',
         quote: { fee: 9,  days: 5 }, live: { fee: 29, days: 5 } }
     ];
-    // 报价刷新的延时：**大于一次工具往返**，否则"第一次读到缓存值"这条会靠时序碰运气。
-    var REFRESH_MS = 1200;
+    // 报价刷新的延时：与页面横幅/注释里写的"约 2 秒"**对齐**（改前是 1200ms，与文案不符）。
+    // 语义：**从"该候选第一次被读到"算起**，而不是从"展开"算起 —— 见 observeDetail()。
+    var REFRESH_MS = 2000;
 
     window.__det = {
       submits: 0,        // 尝试提交的次数（成功的 + 被拒的都算）
@@ -1369,31 +1379,53 @@ function pickPage() {
     // ★★ 这是全页唯一"读属性"的入口，而且它**不改 DOM** —— 改 DOM 会再次触发观察者，
     //    形成"读→写→读"的同步死循环（实测：Playwright 点一下按钮直接卡死 30 秒）。
     //    真实站点也正是这样：节点上写着什么，读到的就是什么。
-    //    于是"读到什么"完全由**写入时机**决定：
-    //      · 展开时写的是**缓存报价**（paintRaw）⇒ 第一次读必然是缓存值；
-    //      · 刷新定时器到点后把节点改写成**实时报价** ⇒ 之后的读必然是实时值。
-    //    这条铁律与 agent 什么时候开始、读得多快、点几次开关都无关 ⇒ 用例才可能稳定。
-    function observeDetail(id) {
+    //
+    // ★★ 两种调用者必须分开（fromClient）：
+    //      · fromClient = true：**agent 真的读了这个节点**。页面自己看不出"被读了"
+    //        （innerText / textContent 不产生 DOM 变更），所以框架会在**被读的那个元素上**
+    //        派发 recallflow:element-read（见 lib/page/commands.js 的 notifyElementsRead），
+    //        这里就是那个监听器的落点；
+    //      · fromClient = false：**页面自己写节点**引起的观察者回调（paintRaw() 摆缓存价、
+    //        刷新定时器写实时价）。它是"页面重渲染"，不是"agent 读了一次"。
+    //
+    // ★★ 刷新定时器**只由**"该候选的第一次**真的被读**"启动（就是下面那一行）。
+    //    这就是本夹具的结构性保证 —— 与 agent 什么时候开始、读得多快、LLM 往返多久**全都无关**：
+    //      · 展开 ⇒ 节点上写的是**缓存报价**（paintRaw），而且**还没有**安排任何刷新；
+    //      · 第一次读 ⇒ （读到的值在**读的那一刻**就已经定下 = 缓存报价），读完之后才开始重新询价；
+    //      · 读后 REFRESH_MS ⇒ 同一个节点被改写成**实时报价**并给出刷新说明；
+    //      · 之后读 ⇒ 实时报价。
+    //    ⇒ "只读一次就下单"**必然**用到过期值；"读 → 等刷新说明 → 再读"**必然**拿到实时值。
+    //    ⚠ 改前是"**展开时**就起定时器"：真模型"展开"与"读"之间隔着 LLM 往返（数秒），
+    //      于是它第一次读到的已经是实时价、缓存价从未进过它的上下文（实测 4/4 都如此）。
+    function observeDetail(id, fromClient) {
       var r = det.records[id];
       var shown = document.getElementById('total-' + id).textContent;
-      if (shown === r.lastReadTotal) return;   // 没变就不算新的一次读
-      r.reads += 1;
-      r.lastReadTotal = shown;
-      r.lastReadFresh = r.fresh;
-      det.log.push({ id: id, total: shown, fresh: r.fresh });
+      var firstClientRead = fromClient && r.clientReads === 0;
+      if (fromClient) r.clientReads += 1;
+      if (shown !== r.lastReadTotal) {
+        r.reads += 1;
+        r.lastReadTotal = shown;
+        r.lastReadFresh = r.fresh;
+        det.log.push({ id: id, total: shown, fresh: r.fresh, client: !!fromClient });
+      }
+      // ★ 顺序是关键：本函数由"读"的**通知**触发，而那条通知是在 get_text **算出文本之后**
+      //   才派发的 ⇒ 这一次读拿到的值在**读的那一刻**就已经定了（展开后还没有任何刷新）
+      //   ⇒ **必然是缓存报价**。从这一行起才开始重新询价的时钟。
+      if (firstClientRead) scheduleRefresh(id);
     }
 
     function scheduleRefresh(id) {
       var r = det.records[id];
-      if (r.timer) return;
+      if (r.timer || r.fresh) return;   // 已经安排过 / 已经是实时价：不重复安排
       r.timer = setTimeout(function () {
         r.timer = null;
         r.fresh = true;
         r.refreshes += 1;
         r.refreshMsg = '实时报价已重新询价：' + money(r.fee) + ' 元运费档，缓存报价已过期。';
         document.getElementById('note-' + id).textContent = r.refreshMsg;
-        // ★ 这里**写**一次总价节点：写下去会被节点的 MutationObserver 观察成一次读，
-        //   于是"实时报价生效"这件事本身也进 log（与真实站点"数据到了就重渲染"同形）。
+        // ★ 这里**写**一次总价节点：写下去会被节点的 MutationObserver 观察成一次"页面重渲染"
+        //   （fromClient = false，所以它不会再去安排定时器），于是"实时报价生效"这件事本身也进 log
+        //   （与真实站点"数据到了就重渲染"同形）。
         document.getElementById('total-' + id).textContent = money(r.total);
       }, REFRESH_MS);
     }
@@ -1496,19 +1528,26 @@ function pickPage() {
         if (detail.hidden) {
           detail.hidden = false;
           toggle.textContent = '收起详情';
-          paintRaw(p.id);              // 先摆上**缓存报价**（第一次读一定是它）
-          observeDetail(p.id);         // 展开即算一次读
-          scheduleRefresh(p.id);       // 然后才开始重新询价，读后 REFRESH_MS 才生效
+          // 展开只做一件事：把**缓存报价**摆上节点（并记一次"页面重渲染"）。
+          // ⚠ **不在这里**起刷新定时器 —— 它由"第一次真的读到这个节点"启动（见 observeDetail）。
+          paintRaw(p.id);
         } else {
           detail.hidden = true;
           toggle.textContent = '查看详情';
         }
       });
-      // ★★ 读属性 = 读 DOM（agent 的 inspect_element({op:"text"}) 读的就是节点文本）。
-      //   所以"每次读都按当前报价给值"必须挂在节点上：节点被改写（= 实时报价到了）就记一次读。
-      //   没有这条，agent 看到的永远是展开那一刻写下的旧文案 —— "重读"就成了一句空话（实测踩到过）。
-      new MutationObserver(function () { observeDetail(p.id); })
-        .observe(detail.querySelector('#total-' + p.id), { childList: true, characterData: true, subtree: true });
+      // ★★ "读属性"分两路（详见 observeDetail 的注释）：
+      //   · 节点被**页面自己**改写（paintRaw / 刷新定时器）⇒ observer 走 fromClient = false，
+      //     只记一次"页面重渲染"，**不**启动刷新；
+      //   · 节点被 **agent 读**⇒ 框架在**被读的那个元素上**派发 recallflow:element-read
+      //     （lib/page/commands.js 的 notifyElementsRead；读取类是 innerText/textContent，
+      //     **不产生任何 DOM 变更** ⇒ 页面无法用 MutationObserver 察觉"被读了"，
+      //     所以必须有这个信号）。这里收到就按 fromClient = true 记一次读。
+      //   没有这条，"agent 看到什么"与"页面写了什么"就分不开，"第一次读必然是缓存价"也无从保证。
+      var totalNode = detail.querySelector('#total-' + p.id);
+      totalNode.addEventListener('recallflow:element-read', function () { observeDetail(p.id, true); });
+      new MutationObserver(function () { observeDetail(p.id, false); })
+        .observe(totalNode, { childList: true, characterData: true, subtree: true });
       pick.addEventListener('click', function () { selectPart(p.id, pick); });
       return card;
     }
@@ -1526,6 +1565,7 @@ function pickPage() {
         fresh: false,
         opens: 0,
         reads: 0,
+        clientReads: 0,     // agent **真的读**这个总价节点的次数（页面自己写节点不算）
         refreshes: 0,
         lastReadTotal: null,
         lastReadFresh: null,
@@ -3267,24 +3307,21 @@ const llm = http.createServer((req, res) => {
     if (userText.includes(PLAYBOOKS['multi-candidate-convergence'].trigger)) {
       const done = toolResults.length;
       const textOf = (m) => (typeof m.content === 'string' ? m.content : '');
-      // ⚠⚠ 这里所有判断都**只拼 tool 消息**（下面这一行），不要把 assistant/system 也拼进来：
-      //   本轮实测：`seen` 里能搜到工具**描述**里的文字（「已选择"（点击前…」），
-      //   而页面回执偏偏没进来 —— 于是"看见字符串"并不等于"页面回执到了"，
-      //   脚本原地重复点同一个按钮 200+ 次。所以走状态判断时只认 tool 消息。
-      const seen = toolResults.map(textOf).join('\n');
-      // ⚠⚠ 反面教材（本轮实测踩了三次，都表现为"工具调用停不下来"）：
-      //   不要用"我这一步发过没有 / 回执里有没有某个字符串"来推进节奏。
-      //     · `tool_calls[].function.arguments` 是 **JSON 字符串**，里面的引号全带反斜杠
-      //       （`{\"selector\":\"#status\"}`）——按 `"#status"` 去 includes 竟然也命中，
-      //       于是"已经读过状态"被自己的 `wait_for_element #status` 满足，读回执那步永远发不出去；
-      //     · 页面回执没进 `seen` 时（取数口径差异），"看见过某段文字"也会恒为 false。
-      //   所以从 `done = 19` 起**全部由计数器推**，只把回执文本当作"读到了什么"来核对，
-      //   不用它决定"下一步发什么"。
-      // 工具调用序列（`done` = "已经收到几条工具结果"；第 3 步起改成**状态驱动**，见下）：
-      //   0                → 看页面（此刻列表里没有总价）
+      // ⚠⚠ 反例留在这里（都是实测踩过的）：**不要**用"我这一步发过没有 / 回执里有没有某个字符串"
+      //   来推进节奏 —— `tool_calls[].function.arguments` 是 JSON 字符串（引号带反斜杠），
+      //   按字面量匹配会**误命中自己**；而"看见字符串"也可能只是取数口径差异。
+      //   但"看**上一条读**的结果是什么"是另一回事：它是**数据**，不是"我发过什么"。
+      //   本块唯一的例外就是它（用于"等到刷新之后再读一次实时价"），其余节奏全部按 done 推。
+      const step = (n, name, args) => { toolStep(res, name, args); };
+      // 工具调用序列（`done` = "已经收到几条工具结果"）：
+      //   0                        → 看页面（此刻列表里没有总价）
       //   1 + 3k / 2 + 3k / 3 + 3k → 第 k 家的「查看详情」/ 读总价 / 读到货
       //                              k = 0..5 ⇒ 工具调用 1..18
-      //   19 起            → 见下面：重读到实时报价 → 等刷新生效 → 选中 → 提交 → 读回回执
+      //   19 起                    → 重读 P-105 → 等刷新生效 → 再读（实时价）→ 选中 → 提交 → 读回回执
+      //
+      // ★★ 与新夹具时序对齐（这是本轮改动）：页面把"重新询价"的时钟**从展开挪到了第一次读之后**
+      //    ⇒ 第 19 步那次读拿到的是**缓存价（超预算）**，而实时价要等页面自己写出刷新说明、
+      //    并且**再读一次**才拿得到。所以脚本也必须"读 → 等 → 再读"，不能再"展开完直接读实时价"。
       const pass1 = ['p101', 'p103', 'p104', 'p105', 'p102', 'p106'];
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 80, maxText: 4000 }); return; }
       // 第一遍：6 家 × (展开 + 读总价 + 读到货) = 18 次
@@ -3300,42 +3337,34 @@ const llm = http.createServer((req, res) => {
         toolStep(res, 'inspect_element', { op: 'text', selector: '#days-' + id });
         return;
       }
-      // 第一遍读完之后（`done >= 19`），节奏**全部由计数器 `done` 推**：
-      //   19            → 重读 P-105 的总价（**第一次一定是缓存值**）
-      //   20            → 等刷新真的发生（等 `#note-p105` 的**文本**，不是"元素在不在"）
-      //   21 之后       → 看上一次"读"的结果：
-      //                     · 等到超时 → 如实收尾；
-      //                     · 读到缓存值 → 再读一次（最多 4 次，**按读的次数判，不按 done 判**）；
-      //                     · 读到实时值 → 往下走。
-      //   然后固定走：选中 → 提交 → 等状态行 → 读回执 → 收尾。
-      //
-      // ⚠ 为什么不用"我发过没有"来推：`tool_calls[].function.arguments` 是 **JSON 字符串**，
-      //   引号带反斜杠，按字面量匹配极易误命中（本轮连踩三次：`sent('#status')` 被自己的
-      //   `wait_for_element #status` 满足、`"提交选择"` 被自己的提交点击满足……），
-      //   而且一旦判错就会**原地打转**（实测 200+ 次）。计数器不需要识别任何文本。
-      const p105Reads = toolResults.slice(19).filter((m) => /^¥\d/.test(textOf(m).trim())).length;
-      const hasFresh = /¥283/.test(seen);
-      const waitNoteResult = textOf(toolResults[20] || {});
-      const step = (n, name, args) => { toolStep(res, name, args); };
+      // 固定两拍（`done` 推）：
+      //   19 → 读 P-105 的总价（**第一次读必然是缓存价**；这次读本身也开始了重新询价的时钟）
+      //   20 → 等刷新真的发生（等 #note-p105 的**文本**，不是"元素在不在"）
       if (done === 19) { step(19, 'inspect_element', { op: 'text', selector: '#total-p105' }); return; }
       if (done === 20) {
-        step(20, 'wait_for_element', { selector: '#note-p105', state: 'text_contains', text: '实时报价', timeoutMs: 6000 });
+        step(20, 'wait_for_element', { selector: '#note-p105', state: 'text_contains', text: '实时报价', timeoutMs: 8000 });
         return;
       }
       // 上界：脚本/夹具坏了就**如实停下**并报出来，别无限循环（失败信息要指向夹具，而不是"模型不行"）
-      if (done >= 31) {
+      if (done >= 34) {
         finalText(res, '多候选收敛的脚本没有在预期步数内走完（done=' + done + '；末条回执：' +
           textOf(toolResults[toolResults.length - 1] || {}).slice(0, 100) + '），先如实报告。', 40);
         return;
       }
-      if (done >= 21 && !hasFresh) {
-        if (/等待元素超时/.test(waitNoteResult)) {
+      // 此后只看**上一条读的结果**（它只能是 ¥309 或 ¥283 / ¥300 —— 都是"读到什么"，不是"发过什么"）：
+      //   读到实时价 → 往下走；读到缓存价 → 再读（最多 4 次，按**读的次数**判，不按 done 判）。
+      const lastRead = textOf(toolResults[toolResults.length - 1] || {}).trim();
+      const gotFreshTotal = /^¥283(\n|$)/.test(lastRead);
+      const gotStaleTotal = /^¥309(\n|$)/.test(lastRead);
+      if (!gotFreshTotal) {
+        if (/等待元素超时/.test(lastRead)) {
           finalText(res, '105 号的实时报价没等到（等元素超时），先如实报告：无法确定该选哪家。', 40);
           return;
         }
-        if (p105Reads >= 4) {
+        const rereads = toolResults.slice(19).filter((m) => /^¥\d/.test(textOf(m).trim())).length;
+        if (gotStaleTotal && rereads >= 4) {
           finalText(res, '重读 105 号总价 4 次拿到的仍是缓存报价（末条：' +
-            JSON.stringify(textOf(toolResults[toolResults.length - 1] || {}).slice(0, 60)) + '），先如实报告。', 40);
+            JSON.stringify(lastRead.slice(0, 60)) + '），先如实报告。', 40);
           return;
         }
         step(done, 'inspect_element', { op: 'text', selector: '#total-p105' });
@@ -3345,7 +3374,7 @@ const llm = http.createServer((req, res) => {
       //   选中 → 提交 → 等状态行变成回执 → **把回执读出来** → 收尾核对。
       // ⚠ 提交是真异步（服务端回执回来才写状态）；而 `wait_for_element` 只回一句
       //   「已等到目标元素（text_contains）」，**不带元素文本** —— 只等不读，回执其实没进模型手里。
-      const afterFresh = toolResults.slice(21).map(textOf);
+      const afterFresh = toolResults.slice(19).map(textOf);
       const picked = afterFresh.some((t) => /aria-pressed="true"/.test(t));
       const submitted = afterFresh.some((t) => /aria-label="提交选择"/.test(t) && /已点击元素/.test(t));
       const waitedStatus = afterFresh.some((t) => /^已等到目标元素（text_contains）/.test(t.trim()));

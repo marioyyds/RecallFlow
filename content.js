@@ -2023,7 +2023,18 @@
     const els = findElementsFor(params);
     if (!els.length) return { ok: false, error: targetMissError(params) };
     const text = els.map((el) => (el.innerText || el.textContent || "").trim()).filter(Boolean).join("\n---\n").slice(0, 4e3);
+    notifyElementsRead(els);
     return { ok: true, result: text || "\uFF08\u7A7A\u5185\u5BB9\uFF09" };
+  }
+  function notifyElementsRead(els) {
+    try {
+      const list = Array.isArray(els) ? els : [els];
+      for (const el of list) {
+        if (!el || typeof el.dispatchEvent !== "function") continue;
+        el.dispatchEvent(new CustomEvent("recallflow:element-read", { bubbles: false, detail: { op: "text" } }));
+      }
+    } catch (e) {
+    }
   }
   function firstTarget(params, includeText = true) {
     const source = params || {};
