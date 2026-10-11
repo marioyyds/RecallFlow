@@ -2566,6 +2566,35 @@ function textDelta(content) {
 function reasoningDelta(content) {
   return { choices: [{ delta: { reasoning_content: content } }] };
 }
+
+/** 思考记录场景里"思考进行中"这个窗口的长度（见 sseThinkStream 的注释）。 */
+const THINK_HOLD_MS = 4000;
+
+/**
+ * 思考记录场景的流：先给两片思维链，**压住连接 `THINK_HOLD_MS`**，再补正文与第二段。
+ *
+ * 为什么必须留这个窗口：思考记录的新默认是**折叠**，而"进行中也是折叠的"这条断言
+ * 只能在 `data-state="running"` 时观察。模拟 LLM 默认瞬间返回，整段思考几十毫秒就跑完，
+ * E2E 拿到 locator 时状态早已是 `done` —— 于是"进行中"根本无从观察（实测踩过）。
+ * 窗口由**夹具自己**留，不借 `E2E_LLM_CHUNK_DELAY_MS`：那是全局开关，
+ * 会让所有场景一起变慢，而且全量 E2E 默认就是 0。
+ */
+function sseThinkStream(res) {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+  const write = (c) => res.write('data: ' + JSON.stringify(c) + '\n\n');
+  write(reasoningDelta('先确认页面结构，'));
+  write(reasoningDelta('再决定点击哪个按钮。'));
+  const timer = setTimeout(() => {
+    write(textDelta('我想好了：结论如下。'));
+    write(reasoningDelta('再复核一下边界情况。'));
+    write(textDelta('补充一句。'));
+    write({ choices: [{ delta: {}, finish_reason: 'stop' }] });
+    write({ usage: { total_tokens: 42 } });
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }, THINK_HOLD_MS);
+  res.on('close', () => clearTimeout(timer));
+}
 function toolCallDelta(name, args) {
   return {
     choices: [{
@@ -2864,20 +2893,13 @@ const llm = http.createServer((req, res) => {
     // 场景 F：思考记录（思维链）。
     // 为什么需要：`reasoning_content` 是**推理模型独有**的字段，此前全仓库没有任何地方读它，
     // 于是「模型在思考时界面一片空白」这个问题既没被测过、也没被看见过。
-    // 这里让模拟模型先吐思维链、再吐正文，用来验证面板真的渲染出可折叠的思考记录、
-    // 并且在正文开始时自动收起。
+    // 这里让模拟模型先吐思维链、再吐正文，用来验证面板真的渲染出**可折叠**的思考记录，
+    // 且**默认是折叠的**（进行中也折叠，用户点开才看全文）。
     if (userText.includes('思考')) {
       // 刻意发**两段**思维链，中间夹着正文 —— 用来验证"穿插"而不是"聚成一个总块"：
       // 期望的面板结构是 思考块 → 正文 → 思考块 → 正文。
-      sse(res, [
-        reasoningDelta('先确认页面结构，'),
-        reasoningDelta('再决定点击哪个按钮。'),
-        textDelta('我想好了：结论如下。'),
-        reasoningDelta('再复核一下边界情况。'),
-        textDelta('补充一句。'),
-        { choices: [{ delta: {}, finish_reason: 'stop' }] },
-        { usage: { total_tokens: 42 } },
-      ]);
+      // 前两片之后压住 4 秒（见 sseThinkStream）：让"思考进行中 + 折叠"成为可稳定断言的窗口。
+      sseThinkStream(res);
       return;
     }
 

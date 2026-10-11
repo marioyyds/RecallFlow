@@ -262,3 +262,46 @@ test('技能文件里写的技法必须与剧本一致（防止技能教一套�
   assert.match(fs.readFileSync('lib/assistant/skill-defs.js', 'utf8'), /不是先断言"页面上没有这个输入框"/,
     '必须提醒"定位失败先怀疑定位条件，而不是断言页面没有这个元素"（本轮真实踩到）');
 });
+
+test('付费墙技能的**口径**是「找合法免费可看的那一份」，不是「绕过付费 / 鉴权」', () => {
+  // 用户原话：「这条技能我需要免费的，可以绕开 vip」；澄清后的口径是：
+  // **只把技能名/描述改清楚** —— 它是「找免费内容」，不是「攻破付费墙」。
+  // 能力不变，也不加任何"绕过鉴权"的做法。
+  //
+  // 这条门禁钉的是**文案口径**三件事：
+  //   ① 合法免费的那一份有哪些（免费集 / 试看窗口 / 官方免费入口 / 限时免费）；
+  //   ② 「能打开」不等于「能看」，必须**如实判定能不能看**；
+  //   ③ 确实要付费时如实报告"拿不到内容"、**不假装看过**、**不绕过付费与鉴权**。
+  // 它**不**声称测过"模型照做没有" —— 那只有真模型 eval 能回答（docs/real-model-eval-log.md）。
+  //
+  // 判定写成局部纯函数并顺手验一次**反向样张**：否则"文案里有没有这些词"很容易退化成恒真断言
+  //（本仓库对"没牙齿的断言"有专门纪律，见 scripts/mutation-check.mjs 的开头）。
+  const judge = (text) => {
+    const t = String(text || '');
+    const missing = [];
+    const freeRoutes = ['免费集', '试看窗口', '官方', '限时免费'].filter((k) => !t.includes(k));
+    if (freeRoutes.length) missing.push('没写清「合法免费的那一份」（缺：' + freeRoutes.join('、') + '）');
+    const refusals = ['不解析播放地址', '不用盗播站', '不伪造会员身份', '不绕过'].filter((k) => !t.includes(k));
+    if (refusals.length) missing.push('没写清「不绕过付费/鉴权」（缺：' + refusals.join('、') + '）');
+    if (!t.includes('能打开')) missing.push('没点明「能打开」不等于「能看」');
+    if (!/如实/.test(t)) missing.push('没写"如实"报告');
+    if (!t.includes('拿不到')) missing.push('没写"确实要付费就如实说拿不到内容"');
+    if (!t.includes('假装看过')) missing.push('没写"不假装看过"');
+    return { ok: missing.length === 0, missing };
+  };
+
+  const skill = skillWithPlaybook('paywall-preview-limit');
+  assert.ok(skill, 'paywall-preview-limit 应有对应技能');
+  // 模型可见的三处都算口径：目录里发出去的是 `name：description`，正文由 load_skill 取回。
+  const surface = [skill.displayName, skill.description, String(skill.content || '')].join('\n');
+  const r = judge(surface);
+  assert.deepEqual(r.missing, [], '这条技能的口径没写清楚：\n  ' + r.missing.join('\n  '));
+
+  // 反向样张 ①：写成"绕过"的样子必须被判不合格
+  assert.ok(
+    !judge('# 绕过 VIP\n1. 找解析脚本抓取付费内容\n2. 用盗播站看全集\n').ok,
+    '"绕过付费/鉴权"的文案必须被判不合格'
+  );
+  // 反向样张 ②：把口径写回"能打开就算能看"的糊弄版也必须不合格
+  assert.ok(!judge('打开页面就算能看了。').ok, '"能打开就算能看"的糊弄口径必须被判不合格');
+});

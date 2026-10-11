@@ -28,6 +28,7 @@ import {
   waitForPage,
   autoApprove,
   flowOrder,
+  thinkState,
   panelStyle,
   panelText,
   readTextAsAgent,
@@ -219,14 +220,38 @@ test('golden: CDP 坐标点击真的落到页面上（可信输入）', async ()
 // 也就是说「模型在思考时界面一片空白」这件事既没有实现、也没有任何测试能发现。
 // 单测能证明 agent 发了事件、面板认了事件类型，但证明不了**面板上真的出现了一块记录**：
 // DOM 结构、CSS 类名、折叠状态、穿插顺序，任何一环错都只有真浏览器能看出来。
-test('golden: 思考记录按顺序穿插在对话中、可展开、无内层滚动条', async () => {
+//
+// **默认折叠**（用户要求：「思考中时应该折叠比较好，用户自己根据其需要展开」）：
+// 这里断言的是"进行中就是折叠的" —— 夹具为此在头两片思维链之后压住 4 秒（`sseThinkStream`），
+// 让"思考进行中"成为一个确定存在的窗口，而不是靠抢时机。
+test('golden: 思考记录默认折叠、按顺序穿插在对话中、点击后才展开、无内层滚动条', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);
 
   await sendInstruction(page, '说说你的思考');
 
-  // 模拟模型发了**两段**思维链（中间夹着正文）→ 应该是**两块**，而不是一个总块。
   const blocks = page.locator(PANEL + ' .think-block');
+
+  // 「状态 / 是否展开 / 折叠条文字」用 `thinkState` **一次 evaluate 原子地**读出来
+  //（它内部收好了 shadow DOM 那一步）。为什么必须原子：拆成多条 Playwright 重试断言时，
+  // 第一条一旦通过，后两条会一直重试到"思考窗口已经关闭"之后才满足 —— 于是缺陷被漏过
+  //（实测：注入"进行中展开"之后，红灯落在了后面一条与折叠无关的标签断言上，而不是这里）。
+
+  // ① **新默认：折叠** —— 而且**思考进行中也是折叠的**（这是本次改动的核心）。
+  //    旧行为是"进行中自动展开、正文开始时才收起"，正好相反。
+  //    夹具为此在头两片思维链之后压住 4 秒（`sseThinkStream`），这是**确定存在**的窗口：
+  //    模拟 LLM 默认瞬间返回，靠它才观察得到 running 态。
+  await expect.poll(() => thinkState(page), { timeout: 30_000 }).toBe('running/false/思考中…');
+  await expect(blocks.nth(0).locator('.think-body')).toBeHidden();
+
+  // ② **用户的选择优先**：流式思考**还在继续**时点开 —— 后续增量不许把它改回折叠。
+  //    这里同样原子断言（`running/true`）：它只在"点击确实落在流式窗口内"时为真 ——
+  //    宁可显式红，也不要一个在最坏时机下静默通过的断言。
+  await blocks.nth(0).locator('.think-head').click();
+  await expect.poll(() => thinkState(page), { timeout: 10_000 }).toBe('running/true/思考中…');
+  await expect(blocks.nth(0).locator('.think-body')).toBeVisible();
+
+  // ③ 模拟模型发了**两段**思维链（中间夹着正文）→ 应该是**两块**，而不是一个总块。
   await expect(blocks).toHaveCount(2, { timeout: 30_000 });
 
   // 两段内容各自在自己的块里（不是都堆进同一块）
@@ -237,7 +262,7 @@ test('golden: 思考记录按顺序穿插在对话中、可展开、无内层滚
   // 正文**不在**思考记录里（混在一起就再也分不出哪段是思考、哪段是回答）
   await expect(blocks.nth(0).locator('.think-body')).not.toContainText('我想好了：结论如下');
 
-  // 核心断言：思考块**穿插**在对话里，而不是都堆到最上面。
+  // ④ 核心断言：思考块**穿插**在对话里，而不是都堆到最上面。
   // flowOrder 内部已处理 shadow DOM（见 helpers.mjs 里的说明）。
   const order = await flowOrder(page);
   //
@@ -249,33 +274,37 @@ test('golden: 思考记录按顺序穿插在对话中、可展开、无内层滚
   expect(order).toEqual(['think', 'content', 'think']);
   expect(order).not.toEqual(['think', 'think', 'content']);
 
-  // 定稿后自动收起，但仍留在面板里作为记录
-  await expect(blocks.nth(0)).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
-  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'false', { timeout: 30_000 });
-  await expect(blocks.nth(0).locator('.think-body')).toBeHidden();
+  // ⑤ 第二块**没人点过** → 定稿后仍是折叠的（"默认折叠"在定稿态同样成立）。
+  await expect(blocks.nth(1)).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  await expect(blocks.nth(1)).toHaveAttribute('data-open', 'false', { timeout: 30_000 });
+  await expect(blocks.nth(1).locator('.think-body')).toBeHidden();
 
-  // 收起状态下**标题本身要能说明有多少内容** —— 否则用户没有任何理由去点开它。
+  // ⑥ 第一块被用户手动展开过 → 定稿后**仍然是展开的**：用户的选择优先于"定稿自动收起"。
+  await expect(blocks.nth(0)).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'true', { timeout: 30_000 });
+  await expect(blocks.nth(0).locator('.think-body')).toBeVisible();
+  await expect(blocks.nth(0).locator('.think-body')).toContainText('先确认页面结构，再决定点击哪个按钮。');
+
+  // 折叠条（这里读的是第一块）要能说明有多少内容 —— 否则用户没有任何理由去点开它。
   // 用 panelText 读（穿透 shadow DOM），顺带验证 helpers 的查询路径。
   const label = await panelText(page, '.think-block .think-label');
   expect(label).toMatch(/^已思考（\d+ 字）$/);
   // 「先确认页面结构，再决定点击哪个按钮。」共 18 字
   expect(label).toBe('已思考（18 字）');
 
-  // **没有内层滚动条**：思考应该跟着对话一起滚，而不是自己一个小滚动区。
+  // ⑦ **没有内层滚动条**：思考应该跟着对话一起滚，而不是自己一个小滚动区。
   // （CSS 里写死 max-height 不会报错，只有真浏览器算出来的 computed style 能证伪。）
+  // 在**已展开**的那一块上验：这才是内层滚动条真的会出现（并能被抓到）的状态。
   const overflow = await panelStyle(page, '.think-block .think-body', ['overflowY', 'maxHeight']);
   expect(overflow).not.toBeNull();
   expect(overflow.overflowY).not.toBe('auto');
   expect(overflow.overflowY).not.toBe('scroll');
   expect(overflow.maxHeight).toBe('none');
 
-  // 用户手动点开后应能读到完整思维链 —— 这就是「可以折叠和展开」
+  // ⑧ 再点一次能折回去（用户的选择两个方向都算数），两块互不影响。
   await blocks.nth(0).locator('.think-head').click();
-  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'true');
-  await expect(blocks.nth(0).locator('.think-body')).toBeVisible();
-  await expect(blocks.nth(0).locator('.think-body')).toContainText('先确认页面结构，再决定点击哪个按钮。');
-
-  // 两块的折叠互不影响（历史段各自独立开合）
+  await expect(blocks.nth(0)).toHaveAttribute('data-open', 'false');
+  await expect(blocks.nth(0).locator('.think-body')).toBeHidden();
   await expect(blocks.nth(1)).toHaveAttribute('data-open', 'false');
 
   await page.close();

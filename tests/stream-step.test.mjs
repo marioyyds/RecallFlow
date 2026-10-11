@@ -273,7 +273,7 @@ test('思维链：reasoning_content 流式转发为独立事件，且**不混进
   globalThis.fetch = async () => sseResponse(lines);
   const out = await streamAgentStep(null, SETTINGS, [], undefined, [], (e) => events.push(e));
 
-  // 思维链走单独事件类型：面板要把它渲染成可折叠的思考记录，并在正文开始时收起。
+  // 思维链走单独事件类型：面板要把它渲染成**默认折叠**的思考记录（用户点开才看全文）。
   const reasoning = events.filter((e) => e.type === 'reasoning');
   assert.equal(reasoning.length, 2, '两段思维链应发两条 reasoning 事件');
   assert.equal(reasoning.map((e) => e.text).join(''), '先看再看');

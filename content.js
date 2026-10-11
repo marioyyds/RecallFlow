@@ -5048,12 +5048,12 @@
     const text = seg.done ? "\u5DF2\u601D\u8003\uFF08" + seg.text.length + " \u5B57\uFF09" : "\u601D\u8003\u4E2D\u2026";
     if (label.textContent !== text) label.textContent = text;
   }
-  function mountThinkSegment(seg) {
+  function mountThinkSegment(seg, open) {
     if (!flowEl) return null;
     const block = document.createElement("div");
     block.className = "think-block";
     block.dataset.state = seg.done ? "done" : "running";
-    block.dataset.open = seg.done ? "false" : "true";
+    block.dataset.open = open === true ? "true" : "false";
     const head = document.createElement("button");
     head.type = "button";
     head.className = "think-head";
@@ -5121,7 +5121,7 @@
     if (thinkSeg && thinkSeg.text) {
       thinkSeg.block = null;
       thinkSeg.body = null;
-      mountThinkSegment(thinkSeg);
+      mountThinkSegment(thinkSeg, thinkExpandedManual === true);
     }
     typingEl = pendingNarration ? null : contentEl;
     pendingStarted = pendingStarted || Boolean(pendingNarration || pendingAcc);
@@ -5959,7 +5959,6 @@
       }
       const seg = thinkSeg;
       seg.text += piece;
-      if (seg.block && thinkExpandedManual === null) seg.block.dataset.open = "true";
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
         refreshThinkHead(seg);

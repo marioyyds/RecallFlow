@@ -358,6 +358,32 @@ export function flowOrder(page) {
 }
 
 /**
+ * 读第 `index` 块思考记录的折叠状态**三元组**：`状态/是否展开/折叠条文字`
+ *（例：`running/false/思考中…`、`done/false/已思考（18 字）`）。
+ *
+ * 为什么要**一次**读三样、而不是三条 Playwright 重试断言：思考记录默认折叠，
+ * 而"进行中也是折叠的"这条只能在 `data-state="running"` 的窗口里观察 ——
+ * 拆成多条断言时，第一条一旦通过，后面的会一路重试到**窗口关闭之后**才满足，
+ * 于是"进行中把块展开了"这种缺陷被静默漏过（实测：注入该缺陷后，红灯落到了
+ * 后面一条与折叠无关的标签断言上）。三元组一次 evaluate 读出来，就没有这个缝隙。
+ *
+ * 顺带满足 shadow DOM 约束：`host.shadowRoot` 这一步收在这里，spec 不碰原生查询。
+ */
+export function thinkState(page, index = 0) {
+  return page.evaluate(
+    ({ hostSel, i }) => {
+      const host = document.querySelector(hostSel);
+      const root = host && host.shadowRoot ? host.shadowRoot : document;
+      const b = root.querySelectorAll('.think-block')[i];
+      if (!b) return 'no-block';
+      const label = b.querySelector('.think-label');
+      return b.dataset.state + '/' + b.dataset.open + '/' + (label ? label.textContent : '');
+    },
+    { hostSel: PANEL, i: index }
+  );
+}
+
+/**
  * 读面板内某元素的**计算样式**（穿透 shadow DOM）。
  *
  * 为什么要它：像"思考记录不得有内层滚动条"这种约束，CSS 里写错 `max-height`

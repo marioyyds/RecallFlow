@@ -106,6 +106,48 @@ test('chat.js：思考记录的展开状态是**三态**，不是布尔', () => 
   assert.match(chatSrc, /thinkExpandedManual = opening;/, '点击时应记录用户的选择');
 });
 
+test('chat.js：思考块**默认折叠** —— 进行中也是折叠的', () => {
+  // 用户要求：「思考中时应该折叠比较好，用户自己根据其需要展开」。
+  // 旧实现是反的：进行中自动展开（`seg.done ? 'false' : 'true'`），正文开始时才收起。
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
+  const mountBody = mount.slice(0, mount.indexOf('\n}'));
+  assert.match(
+    mountBody,
+    /block\.dataset\.open = open === true \? 'true' : 'false';/,
+    '挂载初值只能由显式传入的 `open` 决定（不传 = 折叠）'
+  );
+  assert.ok(
+    !/dataset\.open\s*=\s*seg\.done/.test(mountBody),
+    '不得再按"定稿了才折叠"来决定初值 —— 默认折叠与是否定稿无关'
+  );
+  // 新段（pushReasoning）与历史段（pendingParts 重建）都不传展开态 ⇒ 折叠
+  const push = chatSrc.slice(chatSrc.indexOf('function pushReasoning('));
+  const pushBody = push.slice(0, push.indexOf('\n  }'));
+  assert.match(pushBody, /mountThinkSegment\(thinkSeg\);/, '新段必须以折叠挂载（不传展开态）');
+});
+
+test('chat.js：流式增量**不碰**用户的展开状态，也不重置滚动位置', () => {
+  // 用户选择优先是**结构性**保证的：思考增量路径一个字都不写 data-open / scrollTop，
+  // 所以新事件到达时在结构上不可能把用户手动展开/折叠改回去，也不会把滚动位置重置。
+  //
+  // ⚠ 只看**活代码**（先剥掉注释行）：否则"这里故意不写 dataset.open"这类**说明性注释**
+  // 会把这条门禁自己判红 —— 那正是本仓库踩过的"门禁把解释当成违规"的形态
+  //（`skill-content-structure.test.mjs` 的标记原文就是这么把自己判红的）。
+  const live = chatSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const at = live.indexOf("resp.type === 'reasoning'");
+  assert.ok(at >= 0, '应能找到 reasoning 分支');
+  const branch = live.slice(at, live.indexOf("resp.type === 'chunk'"));
+  assert.ok(!/scrollTop/.test(branch), '思考增量分支不得设置 scrollTop（会把用户的滚动位置重置）');
+  assert.ok(!/dataset\.open/.test(branch), '思考增量分支不得写 data-open（会覆盖用户的选择）');
+
+  const push = live.slice(live.indexOf('function pushReasoning('));
+  const pushBody = push.slice(0, push.indexOf('\n  }'));
+  assert.ok(!/dataset\.open/.test(pushBody), 'pushReasoning 不得写 data-open（增量不许改用户的选择）');
+  assert.ok(!/scrollTop/.test(pushBody), 'pushReasoning 不得设置 scrollTop');
+  // 反向样张：这种写法必须被抓住（否则上面两条是恒真的）
+  assert.ok(/dataset\.open/.test('    seg.block.dataset.open = "true";'), '反向样张：写 data-open 应被认出');
+});
+
 test('chat.js：新一轮开始时清掉上一轮的思考记录指针', () => {
   assert.match(chatSrc, /function resetReasoning\(/, '应有 resetReasoning');
   assert.match(chatSrc, /resetReasoning\(\);/, 'run() 里应调用它');
