@@ -18,6 +18,20 @@ import { PLAYBOOKS } from '../tests/e2e/fixtures/playbooks.mjs';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
+/** 孤儿技能的原因表（从 skill-defs.js 里读，避免复制粘贴导致两边漂移）。 */
+const ORPHAN_REASONS = (() => {
+  const src = read('lib/assistant/skill-defs.js');
+  const at = src.indexOf('export const ORPHAN_SKILL_REASONS');
+  if (at < 0) return {};
+  const end = src.indexOf('});', at);
+  const body = src.slice(at, end);
+  const out = {};
+  for (const m of body.matchAll(/'([a-z0-9-]+)':\s*\n?\s*'([\s\S]*?)',\n/g)) {
+    out[m[1]] = m[2].replace(/\s+/g, ' ').trim();
+  }
+  return out;
+})();
+
 export function buildSkillsOverview() {
   const src = read('lib/assistant/skill-defs.js');
   // 技能块：以 `name: '...'` 起，到下一个 `name: '...'` 之前（够用且不脆）
@@ -39,14 +53,16 @@ export function buildSkillsOverview() {
   const skills = blocks.map((b) => {
     const playbook = (/: {[\s\S]*?playbook:\s*'([a-z0-9-]+)'/.exec(b.body) || [])[1] ||
       (/playbook:\s*'([a-z0-9-]+)'/.exec(b.body) || [])[1] || '';
-    // 孤儿技能可以按约定写一行 `// 无剧本：<原因>` 来说明自己为什么没有验收
-    const reason = (/\/\/\s*无剧本：\s*(.+)/.exec(b.body) || [])[1] || '';
+    // 孤儿技能的原因来自 `ORPHAN_SKILL_REASONS`（集中声明，便于复核与"只减不增"）。
+    // 也兼容在技能块里就地写 `// 无剧本：<原因>`。
+    const inline = (/\/\/\s*无剧本：\s*(.+)/.exec(b.body) || [])[1] || '';
+    const reason = (inline || ORPHAN_REASONS[b.name] || '').trim();
     return {
       name: b.name,
       displayName: pick(b.body, 'displayName'),
       category: pick(b.body, 'category'),
       playbook,
-      reason: reason.trim(),
+      reason,
     };
   });
 

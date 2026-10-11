@@ -122,13 +122,13 @@
 
 | 技能 | 展示名 | 分类 | 为什么没有剧本 |
 | --- | --- | --- | --- |
-| `agent-browser` | Agent Browser（浏览器自动化） | browser-automation | **（未声明）** |
-| `clip-to-knowledge` | 剪藏到知识库 | knowledge | **（未声明）** |
-| `dialog-handling` | 浏览器对话框（confirm 阻塞 / prompt 要回填值） | browser-automation | **（未声明）** |
-| `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | **（未声明）** |
-| `highlight-key-points` | 划重点 / 高亮关键信息 | reading | **（未声明）** |
-| `humanizer` | Humanizer（去 AI 味） | content-creation | **（未声明）** |
-| `remove-ads` | 去广告 / 屏蔽推广 | browser | **（未声明）** |
-| `summarize` | Summarize（总结） | reading | **（未声明）** |
-| `userscript-task` | 用户脚本任务（下载/展开/签到/抢购） | browser | **（未声明）** |
+| `agent-browser` | Agent Browser（浏览器自动化） | browser-automation | 通用底座类技能（讲 agent-browser 的用法与边界），没有单一页面形态可造夹具；其纪律由各剧本间接覆盖。 |
+| `clip-to-knowledge` | 剪藏到知识库 | knowledge | 走知识库读写，页面侧不变量少；能力由「知识库往返与召回边界」剧本间接覆盖，尚未单独立剧本。 |
+| `dialog-handling` | 浏览器对话框（confirm 阻塞 / prompt 要回填值） | browser-automation | **场景未收敛**：/dialog 夹具页已就绪，但 Playwright 的对话框管理与外部 attach 的 debugger 冲突（页面会直接死掉），需要换一套驱动方式。现状与已排除的原因见 docs/next-steps-handoff.md。 |
+| `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | 依赖第三方技能市场站点（外部服务），不适合做本地夹具；技能本身只是接口说明。 |
+| `highlight-key-points` | 划重点 / 高亮关键信息 | reading | 能力由 annotate 系列工具承担，已有工具级单测；页面侧只是"高亮生效"的视觉结果，自动断言价值低。 |
+| `humanizer` | Humanizer（去 AI 味） | content-creation | 纯文案改写，不涉及页面操作，没有可断言的页面状态。 |
+| `remove-ads` | 去广告 / 屏蔽推广 | browser | 判据需要"隐藏得对不对"的人工确认（隐藏广告时不能连带藏掉正文）；已有的 mainContent 提醒是一条弱保障，但造不出可信的"广告与正文同构"夹具来自动断言。 |
+| `summarize` | Summarize（总结） | reading | 纯文案处理（对已有内容做摘要），不涉及页面操作，没有可断言的页面状态。 |
+| `userscript-task` | 用户脚本任务（下载/展开/签到/抢购） | browser | 覆盖多种任务形态（下载 / 展开 / 签到 / 抢购），尚未拆出最小可断言的一种；拆出后应当补剧本并从本表移除。 |
 
