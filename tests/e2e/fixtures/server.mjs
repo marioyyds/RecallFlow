@@ -2479,6 +2479,9 @@ const llm = http.createServer((req, res) => {
       if (done === 3) { toolStep(res, 'get_page_snapshot', { maxElements: 60, maxText: 800 }); return; }
       if (done === 4) { toolStep(res, 'click_element', { role: 'button', name: '下个月' }); return; }
       if (done === 5) {
+        // 翻月后先等目标格子出现（日历异步渲染）。
+        // ⚠ 也曾试过"等月份标题含 3 月"，但那一步会让路径跑不完（回执判据仍然拿不到标签），
+        //   已回退到这个**验证过可用**的等待方式。原因未查（不再建假设）。
         toolStep(res, 'wait_for_element', { selector: 'button[data-date="2026-03-15"]', state: 'visible', timeoutMs: 4000 });
         return;
       }
