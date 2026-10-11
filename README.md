@@ -120,6 +120,8 @@ npm run build:content
   能力清单与产物一致、README 声明 ↔ 代码锚点。
 - **E2E 怎么写**：[完整指南](docs/e2e-testing-guide.md)（原理 / 操作手册 / 踩过的坑 / 验不了什么）
   与 [目录速查](tests/e2e/README.md)。
+- **真模型 eval 怎么跑、历次结果**：[真模型 eval 运行记录](docs/real-model-eval-log.md)
+  —— 它是"通过率有没有退化"的**基线**，并记着 harness 的盲点与待决项。
 
 ## 架构
 
