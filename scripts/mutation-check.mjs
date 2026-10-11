@@ -68,17 +68,38 @@ for (const m of MUTATIONS) {
 
   let output = '';
   try {
-    output = execFileSync(process.execPath, ['--test', 'tests/page-debug-hook.test.mjs'], {
+    // ⚠ **必须显式指定报告器**：Node 的默认报告器会随"是不是 TTY"变化
+    //（本地终端是 `spec`，输出 `✖ 用例名`；CI 里没有 TTY ⇒ 默认变成 TAP，输出 `not ok 1 - 用例名`）。
+    // 这里曾经只按 `✖ ` 前缀解析 ✗ ⇒ 在 CI 里**一条都匹配不到**，
+    // 于是 5 条变异全被误判成"没被抓住"✗（本地却全绿，极难发现）。
+    // 固定成 tap + 同时认两种形态，才能让本地与 CI 判定一致。
+    output = execFileSync(process.execPath, ['--test', '--test-reporter=tap', 'tests/page-debug-hook.test.mjs'], {
       encoding: 'utf8',
       env: { ...process.env, RF_DEBUG_HOOK_SRC: tmp },
     });
   } catch (e) {
     output = String((e && e.stdout) || '') + String((e && e.stderr) || '');
   }
-  const failed = output
-    .split('\n')
-    .filter((l) => l.startsWith('✖ '))
-    .map((l) => l.slice(2).trim());
+  const lines = output.split('\n');
+  const failed = lines
+    // 认两种：TAP 的 `not ok N - 名字`，以及 spec 的 `✖ 名字`（保留旧形态以防有人改回报告器）
+    .map((l) => {
+      const tap = /^\s*not ok\s+\d+\s*-\s*(.+?)\s*$/.exec(l);
+      if (tap) return tap[1];
+      const spec = /^\s*✖\s+(.+?)\s*$/.exec(l);
+      return spec ? spec[1] : null;
+    })
+    .filter(Boolean);
+  // ⚠ 一条测试结果都解析不出来时，**必须显式报错**：
+  // 否则"报告器换了 / 测试文件加载失败"会被静默当成"断言没牙齿"✗
+  //（这正是 CI 那次红报的误导来源 —— 报的是断言弱，其实是解析器对不上）
+  const sawAnyResult = lines.some((l) => /^\s*(ok|not ok)\s+\d+/.test(l) || /^\s*✔\s+/.test(l) || /^\s*✖\s+/.test(l));
+  if (!sawAnyResult) {
+    console.log('  ✗ 测试结果**无法解析**（报告器形态变了？测试文件没跑起来？）：' + m.name);
+    console.log('      原始输出前 300 字：' + output.slice(0, 300).replace(/\n/g, ' ⏎ '));
+    allGood = false;
+    continue;
+  }
   const caught = failed.some((f) => f.includes(m.expectFail));
   console.log('  ' + (caught ? '✓' : '✗') + ' ' + m.name);
   console.log('      预期变红: ' + m.expectFail);
