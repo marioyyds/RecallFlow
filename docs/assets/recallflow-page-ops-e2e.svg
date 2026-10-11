@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 680" width="100%"
+     font-family="-apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L0,6.4 L8,3.2 Z" fill="#64748b"/>
+    </marker>
+    <marker id="ahg" markerWidth="9" markerHeight="9" refX="8" refY="3.2" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L0,6.4 L8,3.2 Z" fill="#059669"/>
+    </marker>
+  </defs>
+
+  <!-- 标题 -->
+  <text x="600" y="44" text-anchor="middle" font-size="23" font-weight="700" fill="#2563eb">RecallFlow：操作真实页面 · 双层判据验收</text>
+  <text x="600" y="70" text-anchor="middle" font-size="13" fill="#64748b">面板里的 Agent 操作真实网页 · E2E 只认两类证据同时成立</text>
+
+  <!-- ================= 带 A：面板内的 Agent 在操作页面 ================= -->
+  <rect x="24" y="84" width="1152" height="176" rx="14" fill="none" stroke="#64748b" stroke-opacity=".45"/>
+  <text x="48" y="110" font-size="14" font-weight="700" fill="#2563eb">带 A · 面板内的 Agent 在操作页面</text>
+  <text x="1152" y="110" text-anchor="end" font-size="12" fill="#64748b">网页窗口 ← 面板：工具链逐步落地</text>
+
+  <!-- 浏览器窗口 -->
+  <rect x="48" y="124" width="560" height="126" rx="10" fill="#64748b" fill-opacity=".04" stroke="#64748b" stroke-opacity=".5"/>
+  <circle cx="66" cy="140" r="3.5" fill="none" stroke="#64748b" stroke-opacity=".7"/>
+  <circle cx="79" cy="140" r="3.5" fill="none" stroke="#64748b" stroke-opacity=".7"/>
+  <circle cx="92" cy="140" r="3.5" fill="none" stroke="#64748b" stroke-opacity=".7"/>
+  <rect x="104" y="131" width="492" height="18" rx="9" fill="#64748b" fill-opacity=".12"/>
+  <rect x="60" y="158" width="536" height="82" rx="8" fill="none" stroke="#64748b" stroke-opacity=".45"/>
+
+  <!-- 页面里的三个真难点：日历格子 / 播放器 / 下载链接 -->
+  <rect x="88" y="166" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="106" y="166" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="124" y="166" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="142" y="166" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="88" y="184" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="106" y="184" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="142" y="184" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="88" y="202" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="106" y="202" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="124" y="202" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="142" y="202" width="18" height="18" rx="2" fill="none" stroke="#64748b" stroke-opacity=".4"/>
+  <rect x="124" y="184" width="18" height="18" rx="2" fill="#2563eb" fill-opacity=".18" stroke="#2563eb" stroke-opacity=".9"/>
+
+  <circle cx="272" cy="186" r="16" fill="none" stroke="#64748b" stroke-opacity=".7"/>
+  <path d="M266,177 L266,195 L281,186 Z" fill="#2563eb" fill-opacity=".85"/>
+  <rect x="230" y="214" width="84" height="5" rx="2.5" fill="#64748b" fill-opacity=".22"/>
+  <rect x="230" y="214" width="38" height="5" rx="2.5" fill="#2563eb" fill-opacity=".8"/>
+
+  <path d="M412,176 L412,192" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <path d="M406,186 L412,192 L418,186" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M402,198 L422,198" stroke="#2563eb" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+  <line x1="428" y1="196" x2="500" y2="196" stroke="#2563eb" stroke-opacity=".6"/>
+
+  <text x="124" y="233" text-anchor="middle" font-size="12" fill="#475569">日历格子</text>
+  <text x="272" y="233" text-anchor="middle" font-size="12" fill="#475569">播放器</text>
+  <text x="451" y="233" text-anchor="middle" font-size="12" fill="#475569">下载链接</text>
+
+  <!-- Agent 面板 -->
+  <rect x="624" y="124" width="528" height="126" rx="10" fill="#2563eb" fill-opacity=".04" stroke="#64748b" stroke-opacity=".5"/>
+  <text x="640" y="146" font-size="12.5" font-weight="700" fill="#2563eb">Agent 面板 · 工具调用链</text>
+  <text x="1136" y="230" text-anchor="end" font-size="11.5" fill="#64748b">每一步都真实落在页面上</text>
+
+  <rect x="640" y="160" width="130" height="20" rx="6" fill="#2563eb" fill-opacity=".07" stroke="#2563eb" stroke-opacity=".45"/>
+  <line x1="776" y1="170" x2="794" y2="170" stroke="#64748b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <rect x="800" y="160" width="104" height="20" rx="6" fill="#2563eb" fill-opacity=".07" stroke="#2563eb" stroke-opacity=".45"/>
+  <rect x="640" y="188" width="204" height="20" rx="6" fill="#2563eb" fill-opacity=".07" stroke="#2563eb" stroke-opacity=".45"/>
+  <line x1="850" y1="198" x2="868" y2="198" stroke="#64748b" stroke-width="1.4" marker-end="url(#ah)"/>
+  <rect x="874" y="188" width="104" height="20" rx="6" fill="#2563eb" fill-opacity=".07" stroke="#2563eb" stroke-opacity=".45"/>
+  <rect x="640" y="216" width="104" height="20" rx="6" fill="#2563eb" fill-opacity=".07" stroke="#2563eb" stroke-opacity=".45"/>
+
+  <g font-family="ui-monospace, Consolas, monospace" fill="#2563eb">
+    <text x="116" y="140" dominant-baseline="central" font-size="10.5" fill="#64748b">https://shop.example.com/booking</text>
+    <text x="428" y="191" font-size="12">report.pdf</text>
+    <text x="650" y="170" dominant-baseline="central" font-size="11">get_page_snapshot</text>
+    <text x="810" y="170" dominant-baseline="central" font-size="11">click_element</text>
+    <text x="650" y="198" dominant-baseline="central" font-size="11">run_javascript(engine:"page")</text>
+    <text x="884" y="198" dominant-baseline="central" font-size="11">handle_dialog</text>
+    <text x="650" y="226" dominant-baseline="central" font-size="11">complete_task</text>
+  </g>
+
+  <!-- ================= 带 B：工具层（能力） ================= -->
+  <rect x="24" y="272" width="1152" height="124" rx="14" fill="none" stroke="#64748b" stroke-opacity=".45"/>
+  <text x="48" y="298" font-size="14" font-weight="700" fill="#2563eb">带 B · 工具层：指令怎么落到真实页面</text>
+  <text x="1152" y="298" text-anchor="end" font-size="12" fill="#64748b">四个能力，缺一不可</text>
+
+  <rect x="60" y="312" width="252" height="74" rx="10" fill="#2563eb" fill-opacity=".03" stroke="#64748b" stroke-opacity=".45"/>
+  <rect x="332" y="312" width="252" height="74" rx="10" fill="#2563eb" fill-opacity=".03" stroke="#64748b" stroke-opacity=".45"/>
+  <rect x="604" y="312" width="252" height="74" rx="10" fill="#2563eb" fill-opacity=".03" stroke="#64748b" stroke-opacity=".45"/>
+  <rect x="876" y="312" width="252" height="74" rx="10" fill="#2563eb" fill-opacity=".03" stroke="#64748b" stroke-opacity=".45"/>
+
+  <text x="76" y="336" font-size="13.5" font-weight="700" fill="#2563eb">元素定位</text>
+  <text x="76" y="376" font-size="11.5" fill="#64748b">ref 会失效，逐级回退</text>
+  <text x="348" y="336" font-size="13.5" font-weight="700" fill="#2563eb">可信输入</text>
+  <text x="348" y="358" font-size="12" fill="#64748b">经 CDP 派发真实输入事件</text>
+  <text x="348" y="376" font-size="11.5" fill="#64748b">很多控件只信 isTrusted</text>
+  <text x="620" y="336" font-size="13.5" font-weight="700" fill="#2563eb">结构穿透</text>
+  <text x="620" y="376" font-size="11.5" fill="#64748b">复合 ref 逐层路由</text>
+  <text x="892" y="336" font-size="13.5" font-weight="700" fill="#2563eb">页面世界执行</text>
+  <text x="892" y="358" font-size="12" fill="#64748b">需 CDP 才能执行</text>
+  <text x="892" y="376" font-size="11.5" fill="#64748b">沙箱在 MV3 下跑不起来</text>
+
+  <g font-family="ui-monospace, Consolas, monospace" font-size="11.5" fill="#64748b">
+    <text x="76" y="358">role + name · ref · selector</text>
+    <text x="620" y="358">iframe · Shadow DOM</text>
+  </g>
+
+  <!-- ================= 带 C：E2E 验收：双层判据 ================= -->
+  <rect x="24" y="408" width="1152" height="248" rx="14" fill="none" stroke="#64748b" stroke-opacity=".45"/>
+  <text x="48" y="434" font-size="14" font-weight="700" fill="#2563eb">带 C · E2E 验收：双层判据（只过一层不算通过）</text>
+  <rect x="968" y="418" width="192" height="24" rx="12" fill="#d97706" fill-opacity=".08" stroke="#d97706" stroke-opacity=".5"/>
+  <text x="1064" y="430" dominant-baseline="central" text-anchor="middle" font-size="11.5" fill="#d97706">证伪的结论也记进仓库</text>
+
+  <rect x="64" y="444" width="340" height="116" rx="10" fill="#2563eb" fill-opacity=".05" stroke="#2563eb" stroke-opacity=".6"/>
+  <text x="84" y="474" font-size="14" font-weight="700" fill="#2563eb">页面状态</text>
+  <text x="84" y="492" font-size="11.5" fill="#64748b">页面真的变了吗</text>
+  <circle cx="92" cy="506" r="2.5" fill="#2563eb" fill-opacity=".8"/>
+  <text x="104" y="510" font-size="12.5" fill="#475569">真实播放进度</text>
+  <circle cx="92" cy="526" r="2.5" fill="#2563eb" fill-opacity=".8"/>
+  <text x="104" y="530" font-size="12.5" fill="#475569">浏览器下载事件</text>
+  <circle cx="92" cy="546" r="2.5" fill="#2563eb" fill-opacity=".8"/>
+  <text x="104" y="550" font-size="12.5" fill="#475569">日历选中值</text>
+
+  <rect x="520" y="444" width="340" height="116" rx="10" fill="#2563eb" fill-opacity=".05" stroke="#2563eb" stroke-opacity=".6"/>
+  <text x="540" y="474" font-size="14" font-weight="700" fill="#2563eb">模型实际收到了什么</text>
+  <text x="540" y="492" font-size="11.5" fill="#64748b">证据真的到模型手里了吗</text>
+  <circle cx="548" cy="506" r="2.5" fill="#2563eb" fill-opacity=".8"/>
+  <text x="560" y="510" font-size="12.5" fill="#475569">请求里的 image_url</text>
+  <circle cx="548" cy="526" r="2.5" fill="#2563eb" fill-opacity=".8"/>
+  <text x="560" y="530" font-size="12.5" fill="#475569">工具结果含「已订满」</text>
+
+  <text x="462" y="498" text-anchor="middle" font-size="12.5" fill="#d97706">只过一层</text>
+  <text x="462" y="520" text-anchor="middle" font-size="12.5" fill="#d97706">不算通过</text>
+
+  <path d="M234,560 V572 H474" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M690,560 V572 H474" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linejoin="round"/>
+  <line x1="474" y1="572" x2="474" y2="581" stroke="#059669" stroke-width="1.5" marker-end="url(#ahg)"/>
+
+  <rect x="344" y="582" width="260" height="46" rx="10" fill="#059669" fill-opacity=".07" stroke="#059669" stroke-opacity=".6"/>
+  <text x="474" y="600" text-anchor="middle" font-size="13" font-weight="700" fill="#059669">✅ 两层都成立 → 通过</text>
+  <text x="474" y="618" text-anchor="middle" font-size="11.5" fill="#d97706">❌ 缺任何一层 → 不通过</text>
+
+  <rect x="880" y="582" width="136" height="46" rx="10" fill="#64748b" fill-opacity=".06" stroke="#64748b" stroke-opacity=".5"/>
+  <text x="948" y="601" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2563eb">全量单元测试</text>
+  <text x="948" y="617" text-anchor="middle" font-size="10.5" fill="#64748b">数字见下方能力表</text>
+  <rect x="1024" y="582" width="136" height="46" rx="10" fill="#64748b" fill-opacity=".06" stroke="#64748b" stroke-opacity=".5"/>
+  <text x="1092" y="601" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2563eb">真浏览器 E2E</text>
+  <text x="1092" y="617" text-anchor="middle" font-size="10.5" fill="#64748b">数字见下方能力表</text>
+
+  <text x="600" y="648" text-anchor="middle" font-size="13" fill="#d97706">只过一层不算通过：页面状态 · 模型收到的证据，必须同时成立</text>
+</svg>
