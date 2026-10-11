@@ -12,7 +12,7 @@
 
 | 文件 | 作用 |
 | --- | --- |
-| `golden.spec.mjs` | 黄金任务 7 条：role+name 点击 / 跨域 iframe / 审批拒绝 + 阳性对照 / `type_text` value / CDP 坐标点击 / **思考记录穿插顺序** |
+| `golden.spec.mjs` | 黄金任务 **38 条**（role+name 点击 / 跨域 iframe / 审批 / `type_text` / CDP 坐标 / 思考记录穿插顺序 / 站内检索 / 多步表单 / 可读性 / 排查 / 遮挡 / 失败恢复 / 合并单元格表格 / 跨域 iframe 表单 / 新标签页 / Shadow DOM / 拖拽 / canvas / 宏 / 上传 / 知识库 / 跨标签页 / 虚拟列表 / 分页 / 下拉选项 / 级联 / 严格 CSP / 撤销 / 表单原生校验 / 付费墙 / 下载 / 日期选择器 / 无限滚动 + hover 预览 / **多候选收敛** 等；逐条见 `docs/capability-inventory.md`） |
 | `resume.spec.mjs` | 断线恢复 1 条。**独立文件**，因为它要求夹具把第一次 LLM 调用挂起 |
 | `vision-switch.spec.mjs` | 视觉（多模态）**两臂对照门禁**：断言"Agent 真发出去的请求体里有没有图像内容"。按 `VISION_ENABLED` 的**实际值**跳过不适用的那一臂 ⇒ 开关一打开自动变成开启臂 |
 | `helpers.mjs` | 三个 spec 共用的启动、设置、面板操作与 **shadow DOM 查询**工具 |

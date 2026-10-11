@@ -1239,6 +1239,346 @@ function feedPage() {
 </body></html>`;
 }
 
+// 比价下单页：**多候选收敛**（6 个候选 × 5 个可核对属性 + 详情里才有的决定属性 + 实时报价重读）。
+//
+// 这一类要造的是"**看起来都行**"的下一层：多个候选在**第一个属性**（标价，页面上最显眼）
+// 上都说得通，只有逐条核对**全部约束**、并且把某些属性**重新读一次**，才能收敛到唯一正确的那个。
+//
+// ## 六个难点（每条都对应下面一段机制，不是装饰）
+//
+// ① **候选多、属性多**：6 个候选 × 5 个可核对属性（标价 / 到货天数 / 退货政策 / 供货方式 + 详情里的总价）。
+// ② **第一个属性不足以决断**：标价最低的是 P-106（¥262），而它**退货要收 8% 手续费** ⇒
+//    "看一眼标价就选"必然错。标价第二低的是 P-102（¥240），按缓存报价它**恰好是唯一过关的**（见④）。
+// ③ **决定属性藏在额外动作后面**：**含运费的总价**只在展开详情之后才存在 ——
+//    初始 HTML 的正文里既没有「总价」二字、也没有任何一个候选的总价数字。也就是说
+//    "不展开详情就选"在**结构上**不可能（不是被 CSS 藏起来）。
+// ④ **陈旧读取陷阱（本页的核心）**：展开详情时显示的是**缓存报价** `rawTotal`，
+//    而页面上方的横幅写着"实时报价在详情里刷新"。每个候选的**第一次读一定是缓存值**，
+//    而缓存值与实时值的差**会让决策翻转**（三条约束：总价 < 290 / ≤3 天 / 支持 7 天无理由退货）：
+//      · 按**缓存**值：唯一过关的是 P-102（¥243）；P-105 是 ¥304（**超预算**）被排掉；
+//      · 按**实时**值：P-102 跳到 ¥300（超预算，**被服务端拒**），过关的只剩 P-105（¥284）。
+//    ⇒ "只读一次就下单"必然选到 P-102（次优且是错的），正确答案是 P-105。
+//    ⚠ 这条铁律必须保住：**每个候选的第一次读一定是缓存值**（`fresh:false`），
+//    与 agent 什么时候开始、读得多快无关 ⇒ 用例才可能稳定（不是靠时序碰运气）。
+// ⑤ **约束落在指令里**，其中一条**容易被忽略**：「**支持 7 天无理由退货**」。
+//    它在**不显眼的位置**（详情面板的最后一行，而不是列表上的徽标），且是排除 P-104 的那条；
+//    而 P-106 的"退货要收手续费"只写在列表那一行里 —— 两条合起来才说明"退货"这个属性
+//    真的要逐条核对（P-104 与 P-106 都被它排除）。
+// ⑥ **提交要有服务端回执**：点「提交选择」后由 `/pick-commit` **在服务端按实时报价重算并校验**，
+//    服务端记下**每一次尝试**（成功的 + 被拒的及原因）。因此"错误候选没有被提交过"这句话
+//    有服务端日志作证，而不是"页面上看起来没点"。页面自己只把服务端的回执渲染出来。
+//
+// ## 页面自己记录的可断言状态（`window.__det`）
+//   · `records[id]` = `{ rawTotal, total, rawDays, days, returnable, fresh, opens, reads, refreshes }`
+//     —— **读的次数**与**最后一次读到的值**都记在里面 ⇒ 用例能区分"重读过"与"没重读"；
+//     ⚠ `records` 是页面加载时**预建**好的（6 个键）⇒ "详情展开过没有"要看 `opens`，
+//     不能看 `Object.keys(records).length`（那样写恒等于 6，实测踩到过）；
+//   · `log` = 按顺序记下的每一次读 `{ id, total, fresh }` ⇒ 能证明"第一次读到的是缓存值"；
+//   · `submits` / `rejected` / `submitted` / `picked` ⇒ 提交历史（服务端那一份才是权威，这里是镜像）。
+function pickPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具比价下单</title>
+<style>
+  /* ⚠ body 收窄到 560px 与 feedPage 同样的理由：RecallFlow 面板默认贴右、宽 640px，
+     而 CDP 类工具用元素**中心点**的视口坐标 —— 整行铺满时中心点会落在面板底下。 */
+  body { max-width: 560px; }
+  .intro { padding: 10px 0; color: #334155; }
+  .quote { padding: 8px 0; color: #7c2d12; }
+  .card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  .row1 { display: block; color: #334155; font-size: 13px; line-height: 1.6; }
+  .back { color: #64748b; font-size: 12px; }
+  .bad { color: #b91c1c; }
+  .toggle { margin-top: 6px; }
+  .detail { margin-top: 8px; padding: 8px 10px; background: #f8fafc; border-radius: 4px; }
+  .line { display: block; font-size: 13px; line-height: 1.7; }
+  .note { color: #0369a1; font-size: 12px; }
+</style></head>
+<body>
+  <h1>备件询价 · 摄像头模组</h1>
+  <div class="intro">
+    <p>下面是 6 家供应商对同一支摄像头模组（型号 CM-40）的报价。列表上是**标价**（货价）；</p>
+    <p>**含运费的实际金额只在展开详情之后才显示**，所以别只看列表那一列就下单。</p>
+    <p>每家都标了到货天数与退货政策，请逐条核对后再提交。</p>
+  </div>
+  <div id="quote-banner" class="quote" role="status">
+    报价单已缓存；系统会**逐个候选**重新询价一次，候选的**实时报价在详情里刷新**（读后约 2 秒生效）。
+  </div>
+  <div id="picks" role="list"></div>
+  <div id="status" role="status"></div>
+  <script>
+    // ---- 每个候选的 5 个可核对属性 ----
+    // quote  = 展开详情时**先**显示的缓存报价（第一次读一定是它）
+    // live   = 该候选读后 1200ms 才生效的实时报价（**总价与天数都可能变**）
+    //
+    // ★★ 数值是**算过**的，且与文件下方服务端的 PICK_PARTS.liveTotal **必须逐条相等**
+    //    （liveTotal = list + live.fee）。理由：服务端是判定的权威，页面是展示 ——
+    //    两边一旦漂移，"缓存值 vs 实时值会让决策翻转"这条就静默失效（真实踩过一次：
+    //    服务端 liveTotal 写 265 而页面算出来 249，结果**服务端接受了错误候选**）。
+    //
+    // 按**缓存**报价（第一次读到的）：只有一个候选同时满足三条约束 —— P-102（¥243）；
+    // 按**实时**报价：唯一满足的是 P-105（¥283），而 P-102 跳到 ¥300（超 290 预算）。
+    // ⇒ 正确答案从 P-102 **翻转**成 P-105，"只读一次就下单"必然选错（详见文件顶部④）。
+    var PARTS = [
+      { id: 'p101', name: '锐视 S1 摄像头模组', supplier: '锐视光电', list: 285, days: 2, ret: '支持 7 天无理由退货',
+        retOk: true, note: '', quote: { fee: 8,  days: 2 }, live: { fee: 20, days: 2 } },
+      { id: 'p102', name: '星野 X2 摄像头模组', supplier: '星野影像', list: 240, days: 3, ret: '支持 7 天无理由退货',
+        retOk: true, note: '', quote: { fee: 3,  days: 3 }, live: { fee: 60, days: 3 } },
+      { id: 'p103', name: '云台 Y3 摄像头模组', supplier: '云台科技', list: 268, days: 4, ret: '支持 7 天无理由退货',
+        retOk: true, note: '', quote: { fee: 25, days: 4 }, live: { fee: 28, days: 3 } },
+      { id: 'p104', name: '铭匠 M1 摄像头模组', supplier: '铭匠精工', list: 296, days: 1, ret: '',
+        retOk: false, note: '退货：仅支持质量问题换货，不支持无理由退货。',
+        quote: { fee: 4,  days: 1 }, live: { fee: 4,  days: 1 } },
+      { id: 'p105', name: '昊远 H5 摄像头模组', supplier: '昊远电子', list: 279, days: 3, ret: '支持 7 天无理由退货',
+        retOk: true, note: '', quote: { fee: 30, days: 3 }, live: { fee: 4,  days: 3 } },
+      { id: 'p106', name: '安视 A9 摄像头模组', supplier: '安视安防', list: 262, days: 5, ret: '',
+        retOk: false, note: '退货：可退，但要收订单金额 8% 的手续费。',
+        quote: { fee: 9,  days: 5 }, live: { fee: 29, days: 5 } }
+    ];
+    // 报价刷新的延时：**大于一次工具往返**，否则"第一次读到缓存值"这条会靠时序碰运气。
+    var REFRESH_MS = 1200;
+
+    window.__det = {
+      submits: 0,        // 尝试提交的次数（成功的 + 被拒的都算）
+      rejected: 0,       // 被服务端拒掉的次数
+      rejectedIds: [],   // 被拒的候选 id（服务端判的）
+      submitted: [],     // 被服务端**接受**过的候选 id（服务端判的）
+      lastSubmitted: null,
+      picked: null,      // 当前选中的候选（页面上只有一个）
+      records: {},       // id -> 每个候选的属性 + 读次数 + 最后一次读到的值
+      log: []            // 按顺序记下每一次读（含 fresh 标记）
+    };
+    var det = window.__det;
+    var picksEl = document.getElementById('picks');
+    var statusEl = document.getElementById('status');
+
+    function money(n) { return '¥' + Math.round(n); }
+
+    // 把某个候选的详情面板填成"缓存报价的样子"（展开的那一刻先显示它）。
+    // ★★ 展开之前**没有任何地方**把总价写进 DOM —— 列表里只有标价，
+    //    所以"初始快照里没有决定性属性"是**结构性**的（不是靠 CSS 藏起来）。
+    function paintRaw(id) {
+      var r = det.records[id];
+      document.getElementById('total-' + id).textContent = money(r.rawTotal);
+      document.getElementById('fee-' + id).textContent = money(r.rawFee);
+      document.getElementById('days-' + id).textContent = String(r.rawDays) + ' 天';
+      document.getElementById('detail-' + id).setAttribute('data-live', '0');
+    }
+
+    // **记一次读**：把 DOM 上**当前实际显示**的那个总价记下来（值与"是否实时"一起记）。
+    //
+    // ★★ 这是全页唯一"读属性"的入口，而且它**不改 DOM** —— 改 DOM 会再次触发观察者，
+    //    形成"读→写→读"的同步死循环（实测：Playwright 点一下按钮直接卡死 30 秒）。
+    //    真实站点也正是这样：节点上写着什么，读到的就是什么。
+    //    于是"读到什么"完全由**写入时机**决定：
+    //      · 展开时写的是**缓存报价**（paintRaw）⇒ 第一次读必然是缓存值；
+    //      · 刷新定时器到点后把节点改写成**实时报价** ⇒ 之后的读必然是实时值。
+    //    这条铁律与 agent 什么时候开始、读得多快、点几次开关都无关 ⇒ 用例才可能稳定。
+    function observeDetail(id) {
+      var r = det.records[id];
+      var shown = document.getElementById('total-' + id).textContent;
+      if (shown === r.lastReadTotal) return;   // 没变就不算新的一次读
+      r.reads += 1;
+      r.lastReadTotal = shown;
+      r.lastReadFresh = r.fresh;
+      det.log.push({ id: id, total: shown, fresh: r.fresh });
+    }
+
+    function scheduleRefresh(id) {
+      var r = det.records[id];
+      if (r.timer) return;
+      r.timer = setTimeout(function () {
+        r.timer = null;
+        r.fresh = true;
+        r.refreshes += 1;
+        r.refreshMsg = '实时报价已重新询价：' + money(r.fee) + ' 元运费档，缓存报价已过期。';
+        document.getElementById('note-' + id).textContent = r.refreshMsg;
+        // ★ 这里**写**一次总价节点：写下去会被节点的 MutationObserver 观察成一次读，
+        //   于是"实时报价生效"这件事本身也进 log（与真实站点"数据到了就重渲染"同形）。
+        document.getElementById('total-' + id).textContent = money(r.total);
+      }, REFRESH_MS);
+    }
+
+    // 选中：页面上只有一个候选处于选中态（服务端以"提交时的选中项"为准）。
+    function selectPart(id, btn) {
+      det.picked = id;
+      var all = picksEl.querySelectorAll('.pick');
+      for (var i = 0; i < all.length; i++) {
+        all[i].textContent = '选择此项';
+        all[i].setAttribute('aria-pressed', 'false');
+      }
+      btn.textContent = '已选择';
+      btn.setAttribute('aria-pressed', 'true');
+      statusEl.textContent = '已选择 ' + id.toUpperCase() + '，尚未提交。';
+    }
+
+    // 提交：服务端按**实时报价**重算约束并记下每一次尝试（含被拒的原因）。
+    // 页面只把服务端回执渲染出来 —— **界面的成功态不作为任何证据**。
+    function submitPick() {
+      if (!det.picked) { statusEl.textContent = '请先选择一个候选。'; return; }
+      fetch('pick-commit?part=' + encodeURIComponent(det.picked))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          det.submits += 1;
+          if (data && data.ok) {
+            det.lastSubmitted = data.part;
+            det.submitted.push(data.part);
+            statusEl.textContent = data.message;
+          } else if (data && data.rejected) {
+            det.rejected += 1;
+            det.rejectedIds.push(data.part);
+            statusEl.textContent = '提交被拒：' + data.message;
+          } else {
+            statusEl.textContent = '提交失败：' + ((data && data.error) || '服务端没有回执');
+          }
+        })
+        .catch(function (e) {
+          statusEl.textContent = '提交失败：' + e.message;
+        });
+    }
+
+    function buildCard(p) {
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.id = 'card-' + p.id;
+      card.setAttribute('data-part', p.id);
+      card.setAttribute('role', 'listitem');
+
+      var h = document.createElement('h3');
+      h.textContent = p.name + ' · 供应商：' + p.supplier;
+      card.appendChild(h);
+
+      var row1 = document.createElement('div');
+      row1.className = 'row1';
+      row1.textContent = '编号 ' + p.id.toUpperCase() + ' · 标价 ' + money(p.list) +
+        ' · 到货 ' + p.days + ' 天 · ' + (p.ret || '（退货政策见详情）') +
+        (p.note ? ' · ' + p.note : '') + ' · 供货方式：' + (p.id === 'p104' ? '要定金' : '无定金');
+      card.appendChild(row1);
+
+      var bar = document.createElement('div');
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'toggle';
+      toggle.id = 'toggle-' + p.id;
+      toggle.setAttribute('role', 'button');
+      toggle.setAttribute('aria-label', '查看详情 ' + p.id.toUpperCase());
+      toggle.textContent = '查看详情';
+      bar.appendChild(toggle);
+
+      var pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'pick';
+      pick.id = 'pick-' + p.id;
+      pick.setAttribute('role', 'button');
+      pick.setAttribute('aria-label', '选择 ' + p.id.toUpperCase());
+      pick.setAttribute('aria-pressed', 'false');
+      pick.textContent = '选择此项';
+      bar.appendChild(pick);
+      card.appendChild(bar);
+
+      var detail = document.createElement('div');
+      detail.className = 'detail';
+      detail.id = 'detail-' + p.id;
+      detail.setAttribute('data-live', '0');
+      detail.hidden = true;
+      detail.setAttribute('role', 'group');
+      detail.setAttribute('aria-label', '详情 ' + p.id.toUpperCase());
+      detail.innerHTML =
+        '<span class="line">总价（含运费）：<span id="total-' + p.id + '"></span></span>' +
+        '<span class="line">运费：<span id="fee-' + p.id + '"></span></span>' +
+        '<span class="line">到货：<span id="days-' + p.id + '"></span></span>' +
+        '<span class="line">退货：' + (p.ret || p.note || '—') + '</span>' +
+        '<span class="line note" id="note-' + p.id + '"></span>';
+      card.appendChild(detail);
+
+      toggle.addEventListener('click', function () {
+        var r = det.records[p.id];
+        r.opens += 1;
+        if (detail.hidden) {
+          detail.hidden = false;
+          toggle.textContent = '收起详情';
+          paintRaw(p.id);              // 先摆上**缓存报价**（第一次读一定是它）
+          observeDetail(p.id);         // 展开即算一次读
+          scheduleRefresh(p.id);       // 然后才开始重新询价，读后 REFRESH_MS 才生效
+        } else {
+          detail.hidden = true;
+          toggle.textContent = '查看详情';
+        }
+      });
+      // ★★ 读属性 = 读 DOM（agent 的 inspect_element({op:"text"}) 读的就是节点文本）。
+      //   所以"每次读都按当前报价给值"必须挂在节点上：节点被改写（= 实时报价到了）就记一次读。
+      //   没有这条，agent 看到的永远是展开那一刻写下的旧文案 —— "重读"就成了一句空话（实测踩到过）。
+      new MutationObserver(function () { observeDetail(p.id); })
+        .observe(detail.querySelector('#total-' + p.id), { childList: true, characterData: true, subtree: true });
+      pick.addEventListener('click', function () { selectPart(p.id, pick); });
+      return card;
+    }
+
+    PARTS.forEach(function (p) {
+      det.records[p.id] = {
+        list: p.list,
+        rawFee: p.quote.fee,
+        fee: p.live.fee,
+        rawDays: p.quote.days,
+        days: p.live.days,
+        rawTotal: p.list + p.quote.fee,   // 缓存总价 = **第一次**读到的那个
+        total: p.list + p.live.fee,       // 实时总价 = 刷新之后才是它
+        returnable: p.retOk,
+        fresh: false,
+        opens: 0,
+        reads: 0,
+        refreshes: 0,
+        lastReadTotal: null,
+        lastReadFresh: null,
+        timer: null,
+        refreshMsg: ''
+      };
+      picksEl.appendChild(buildCard(p));
+    });
+
+    var submitBtn = document.createElement('button');
+    submitBtn.type = 'button';
+    submitBtn.id = 'submit';
+    submitBtn.setAttribute('role', 'button');
+    submitBtn.setAttribute('aria-label', '提交选择');
+    submitBtn.textContent = '提交选择';
+    submitBtn.addEventListener('click', submitPick);
+    picksEl.parentNode.insertBefore(submitBtn, statusEl);
+  </script>
+</body></html>`;
+}
+
+// 比价下单的**服务端**数据与提交记录（权威副本，与 pickPage 的 PARTS 必须一致）。
+//
+// 为什么要两份：① 页面那份是"客户端的缓存/展示"，而**判定必须由服务端做** ——
+// 这正是本块要的"提交要有服务端回执"（界面的成功态不作为证据）；
+// ② 服务端按**实时报价**重算约束，于是"只读了一次缓存报价就下单"会在服务端被拒，
+//    而不是被页面悄悄放过。
+//
+// `PICK_COMMITS` 是**每一次尝试**的日志：成功的与被拒的（含原因）都在里面 ——
+// "错误候选没有被提交过"这句话因此有服务端证据。
+const PICK_PARTS = {
+  p101: { name: '锐视 S1 摄像头模组', supplier: '锐视光电', liveTotal: 305, liveDays: 2, returnable: true, deposit: false },
+  p102: { name: '星野 X2 摄像头模组', supplier: '星野影像', liveTotal: 300, liveDays: 3, returnable: true, deposit: false },
+  p103: { name: '云台 Y3 摄像头模组', supplier: '云台科技', liveTotal: 296, liveDays: 3, returnable: true, deposit: false },
+  p104: { name: '铭匠 M1 摄像头模组', supplier: '铭匠精工', liveTotal: 300, liveDays: 1, returnable: false, deposit: true },
+  p105: { name: '昊远 H5 摄像头模组', supplier: '昊远电子', liveTotal: 283, liveDays: 3, returnable: true, deposit: false },
+  p106: { name: '安视 A9 摄像头模组', supplier: '安视安防', liveTotal: 291, liveDays: 5, returnable: false, deposit: false },
+};
+/** 提交约束（唯一事实来源）。指令里的三条必须与这三条一致。 */
+const PICK_RULES = { maxTotal: 290, maxDays: 3, needReturnable: true };
+let PICK_COMMITS = [];
+
+/** 服务端校验：按**实时报价**逐条核对约束，返回拒绝原因（通过则返回 null）。 */
+function pickRejectReason(part) {
+  const p = PICK_PARTS[part];
+  if (!p) return '没有这个候选编号：' + part;
+  const bad = [];
+  if (!(p.liveTotal < PICK_RULES.maxTotal)) bad.push('总价 ' + p.liveTotal + ' 元不低于 ' + PICK_RULES.maxTotal + ' 元');
+  if (!(p.liveDays <= PICK_RULES.maxDays)) bad.push('到货 ' + p.liveDays + ' 天超过 ' + PICK_RULES.maxDays + ' 天');
+  if (PICK_RULES.needReturnable && !p.returnable) bad.push('不支持 7 天无理由退货');
+  return bad.length ? bad.join('；') : null;
+}
+
 // 信息流的数据：**标题与订单号都只在服务端**（夹具页的 HTML/JS 里一个字都没有）。
 //
 // 这是两个难点的**结构性**保证（不是"藏在 CSS 后面"，而是页面里根本没有这些文本）：
@@ -2902,6 +3242,136 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：多候选收敛 —— 比价 + 详情 + **实时报价重读**（playbook id = 'multi-candidate-convergence'）。
+    //
+    // 节奏即能力，而且要**逐条**核对：
+    //   ① 先看页面（列表的标价里没有任何一个候选的总价）；
+    //   ② **逐个展开详情并读一次总价** —— 这一步得到的**必然**是缓存报价（每个候选的第一次读）；
+    //   ③ 读到的任何一个缓存总价都**不足以决断**（唯一过关的 P-102 恰好是标价最低的那个）；
+    //   ④ 回到页面横幅写的"实时报价在详情里刷新"，**等它生效（1200ms）再重读一次**；
+    //   ⑤ 按"总价 < 290 且 ≤3 天且 7 天无理由退货"逐条过滤 → 实时价下只有 P-105 同时成立；
+    //   ⑥ 选中 → 提交 → **读回服务端回执**。
+    //
+    // ⚠ 第 ④ 步的等待**不是**装饰：`wait_for_element` 等的是页面自己写的
+    //   「实时报价已重新询价」那行说明 —— 它是"刷新真的发生了"的可判信号。
+    //   少了它，第 ⑤ 步的输入就是过期数据，而结论会翻转成 P-102（脚本会照实报出来）。
+    //
+    // ⚠⚠ 节奏用**计数器**推（`done` = 已经收到几条工具结果），不要用"回执里有没有某个字符串"推。
+    //   本轮实测踩到两个都会让脚本**原地打转**的坑，两个都不报错、只表现为"工具调用停不下来"：
+    //     ① `'¥300'` 这个字面量在写脚本的人这边是 U+FFE5（全角￥），而页面 `'¥' + n` 是
+    //        U+00A5 —— 人眼看着一模一样，`includes()` 却永远为 false；
+    //     ② `wait_for_element` 的成功回执是「已等到目标元素（text_contains）」，**不带 selector**
+    //        （写成 `/…（text_contains）[^\n]*#note-p105/` 永远匹配不上）；
+    //        更阴的是：那个等待块排在后面，于是它一旦为真就**吃掉下一步**（选中的点击发不出去）。
+    //   计数器版与文案、编码、截断全部无关。
+    if (userText.includes(PLAYBOOKS['multi-candidate-convergence'].trigger)) {
+      const done = toolResults.length;
+      const textOf = (m) => (typeof m.content === 'string' ? m.content : '');
+      // ⚠⚠ 这里所有判断都**只拼 tool 消息**（下面这一行），不要把 assistant/system 也拼进来：
+      //   本轮实测：`seen` 里能搜到工具**描述**里的文字（「已选择"（点击前…」），
+      //   而页面回执偏偏没进来 —— 于是"看见字符串"并不等于"页面回执到了"，
+      //   脚本原地重复点同一个按钮 200+ 次。所以走状态判断时只认 tool 消息。
+      const seen = toolResults.map(textOf).join('\n');
+      // ⚠⚠ 反面教材（本轮实测踩了三次，都表现为"工具调用停不下来"）：
+      //   不要用"我这一步发过没有 / 回执里有没有某个字符串"来推进节奏。
+      //     · `tool_calls[].function.arguments` 是 **JSON 字符串**，里面的引号全带反斜杠
+      //       （`{\"selector\":\"#status\"}`）——按 `"#status"` 去 includes 竟然也命中，
+      //       于是"已经读过状态"被自己的 `wait_for_element #status` 满足，读回执那步永远发不出去；
+      //     · 页面回执没进 `seen` 时（取数口径差异），"看见过某段文字"也会恒为 false。
+      //   所以从 `done = 19` 起**全部由计数器推**，只把回执文本当作"读到了什么"来核对，
+      //   不用它决定"下一步发什么"。
+      // 工具调用序列（`done` = "已经收到几条工具结果"；第 3 步起改成**状态驱动**，见下）：
+      //   0                → 看页面（此刻列表里没有总价）
+      //   1 + 3k / 2 + 3k / 3 + 3k → 第 k 家的「查看详情」/ 读总价 / 读到货
+      //                              k = 0..5 ⇒ 工具调用 1..18
+      //   19 起            → 见下面：重读到实时报价 → 等刷新生效 → 选中 → 提交 → 读回回执
+      const pass1 = ['p101', 'p103', 'p104', 'p105', 'p102', 'p106'];
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 80, maxText: 4000 }); return; }
+      // 第一遍：6 家 × (展开 + 读总价 + 读到货) = 18 次
+      if (done >= 1 && done <= 18) {
+        const k = Math.floor((done - 1) / 3);
+        const phase = (done - 1) % 3;
+        const id = pass1[k];
+        if (phase === 0) {
+          toolStep(res, 'click_element', { role: 'button', name: '查看详情 ' + id.toUpperCase() });
+          return;
+        }
+        if (phase === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '#total-' + id }); return; }
+        toolStep(res, 'inspect_element', { op: 'text', selector: '#days-' + id });
+        return;
+      }
+      // 第一遍读完之后（`done >= 19`），节奏**全部由计数器 `done` 推**：
+      //   19            → 重读 P-105 的总价（**第一次一定是缓存值**）
+      //   20            → 等刷新真的发生（等 `#note-p105` 的**文本**，不是"元素在不在"）
+      //   21 之后       → 看上一次"读"的结果：
+      //                     · 等到超时 → 如实收尾；
+      //                     · 读到缓存值 → 再读一次（最多 4 次，**按读的次数判，不按 done 判**）；
+      //                     · 读到实时值 → 往下走。
+      //   然后固定走：选中 → 提交 → 等状态行 → 读回执 → 收尾。
+      //
+      // ⚠ 为什么不用"我发过没有"来推：`tool_calls[].function.arguments` 是 **JSON 字符串**，
+      //   引号带反斜杠，按字面量匹配极易误命中（本轮连踩三次：`sent('#status')` 被自己的
+      //   `wait_for_element #status` 满足、`"提交选择"` 被自己的提交点击满足……），
+      //   而且一旦判错就会**原地打转**（实测 200+ 次）。计数器不需要识别任何文本。
+      const p105Reads = toolResults.slice(19).filter((m) => /^¥\d/.test(textOf(m).trim())).length;
+      const hasFresh = /¥283/.test(seen);
+      const waitNoteResult = textOf(toolResults[20] || {});
+      const step = (n, name, args) => { toolStep(res, name, args); };
+      if (done === 19) { step(19, 'inspect_element', { op: 'text', selector: '#total-p105' }); return; }
+      if (done === 20) {
+        step(20, 'wait_for_element', { selector: '#note-p105', state: 'text_contains', text: '实时报价', timeoutMs: 6000 });
+        return;
+      }
+      // 上界：脚本/夹具坏了就**如实停下**并报出来，别无限循环（失败信息要指向夹具，而不是"模型不行"）
+      if (done >= 31) {
+        finalText(res, '多候选收敛的脚本没有在预期步数内走完（done=' + done + '；末条回执：' +
+          textOf(toolResults[toolResults.length - 1] || {}).slice(0, 100) + '），先如实报告。', 40);
+        return;
+      }
+      if (done >= 21 && !hasFresh) {
+        if (/等待元素超时/.test(waitNoteResult)) {
+          finalText(res, '105 号的实时报价没等到（等元素超时），先如实报告：无法确定该选哪家。', 40);
+          return;
+        }
+        if (p105Reads >= 4) {
+          finalText(res, '重读 105 号总价 4 次拿到的仍是缓存报价（末条：' +
+            JSON.stringify(textOf(toolResults[toolResults.length - 1] || {}).slice(0, 60)) + '），先如实报告。', 40);
+          return;
+        }
+        step(done, 'inspect_element', { op: 'text', selector: '#total-p105' });
+        return;
+      }
+      // 到这里：已经等到刷新、并且读到了实时报价（¥283）。剩下的是固定五步：
+      //   选中 → 提交 → 等状态行变成回执 → **把回执读出来** → 收尾核对。
+      // ⚠ 提交是真异步（服务端回执回来才写状态）；而 `wait_for_element` 只回一句
+      //   「已等到目标元素（text_contains）」，**不带元素文本** —— 只等不读，回执其实没进模型手里。
+      const afterFresh = toolResults.slice(21).map(textOf);
+      const picked = afterFresh.some((t) => /aria-pressed="true"/.test(t));
+      const submitted = afterFresh.some((t) => /aria-label="提交选择"/.test(t) && /已点击元素/.test(t));
+      const waitedStatus = afterFresh.some((t) => /^已等到目标元素（text_contains）/.test(t.trim()));
+      const readStatus = afterFresh.some((t) => /已下单：/.test(t));
+      if (!picked) { step(done, 'click_element', { role: 'button', name: '选择 P105' }); return; }
+      if (!submitted) { step(done, 'click_element', { role: 'button', name: '提交选择' }); return; }
+      if (!waitedStatus) {
+        step(done, 'wait_for_element', { selector: '#status', state: 'text_contains', text: '已下单', timeoutMs: 6000 });
+        return;
+      }
+      if (!readStatus) { step(done, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      // 收尾前核对：**刚读到的那条**回执里必须有服务端判定的结果（编号要能对上）。
+      // ⚠ 判据只用"服务端回执那句话本身"（编号由服务端决定），不写"恰好等于某段长文案"：
+      //   文案里带金额，而金额字面量最容易与页面漂移（本轮已经因此踩过两次）。
+      if (!/已下单：P-105/.test(textOf(toolResults[toolResults.length - 1] || {}))) {
+        finalText(res, '提交后读到的页面回执不是「已下单：P-105」（末条回执：' +
+          JSON.stringify(textOf(toolResults[toolResults.length - 1] || {}).slice(0, 140)) + '），先如实报告。', 40);
+        return;
+      }
+      finalText(res,
+        '逐条核对后只有 P-105 同时满足三条：总价 ¥283（含运费）< 290 元、到货 3 天、支持 7 天无理由退货。' +
+        '⚠ 它的**缓存报价是 ¥309（超预算）**，重读实时报价才变成 ¥283 —— 只读一次的话会误判成不合格。' +
+        '页面回执：已下单 P-105 昊远 H5 摄像头模组。', 110);
+      return;
+    }
+
     // 场景 G：拾取元素后的追问。
     // 只回文本、**不调工具** —— 这条测的是"拾取信息有没有留在对话里"，
     // 不希望页面被工具动作改动（否则断言分不清是拾取还是点击造成的）。
@@ -2952,6 +3422,33 @@ const main = http.createServer((req, res) => {
     res.end(JSON.stringify(item ? { order: item[1], owner: item[2], state: item[3] } : { error: '没有这条反馈' }));
     return;
   }
+  // 比价下单的**服务端提交回执**（先在页面路由之前处理：它返回 JSON 而不是 HTML）。
+  //
+  // 服务端按**实时报价**逐条核对约束 —— 所以"只读了一次缓存报价就下单"会在这里被拒。
+  // 每一次尝试都进 `PICK_COMMITS`（成功的 + 被拒的及原因），于是用例可以断言
+  // "错误候选**没有被提交过**"，而且依据是**服务端自己记的**，不是"页面上看起来没点"。
+  if (url.startsWith('/pick-commit')) {
+    const m = /[?&]part=([a-z0-9]+)/.exec(url);
+    const part = m ? m[1] : '';
+    const reason = pickRejectReason(part);
+    const p = PICK_PARTS[part];
+    const record = { part, ok: !reason, reason: reason || '', at: Date.now() };
+    PICK_COMMITS.push(record);
+    res.writeHead(reason ? 409 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(reason
+      ? { ok: false, rejected: true, part, reason, message: reason }
+      : {
+          ok: true,
+          part,
+          name: p.name,
+          supplier: p.supplier,
+          total: p.liveTotal,
+          days: p.liveDays,
+          message: '已下单：' + part.replace(/^p/, 'P-').toUpperCase() + ' ' + p.name + ' · 总价 ¥' + p.liveTotal +
+            ' · 到货 ' + p.liveDays + ' 天 · 支持 7 天无理由退货 · 供应商 ' + p.supplier,
+        }));
+    return;
+  }
   // ⚠ CSP 夹具需要**不同的响应头**：`script-src 'self' 'unsafe-inline'` 放行页面自己的内联脚本
   // （否则连夹具页的脚本都跑不起来，难点就不是"eval 被拒"了），但**不放行 `unsafe-eval`** ——
   // 这正是 run_javascript 默认沙箱（`new Function`）会撞上的东西。其余夹具页仍用宽松的头。
@@ -2984,6 +3481,7 @@ const main = http.createServer((req, res) => {
                                           : req.url && req.url.startsWith('/handoff') ? handoffPage()
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/feed') ? feedPage()
+                                              : req.url && req.url.startsWith('/pick') ? pickPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()
@@ -3017,3 +3515,4 @@ export function stopServers() {
   frame.close();
   llm.close();
 }
+

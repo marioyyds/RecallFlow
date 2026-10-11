@@ -1770,3 +1770,194 @@ test('golden: 无限滚动 + hover 预览 —— 目标在第 4 批，预览只�
 
   await page.close();
 });
+
+// 能力验收（复杂场景）：**多候选收敛**（playbook 'multi-candidate-convergence'）。
+//
+// 这条路要造的是"**看起来都行**"的下一层：6 家供应商对同一支摄像头模组的报价，
+// 第一个属性（标价，列表上最显眼的那一列）**不足以决断**，只有逐条核对**全部约束**、
+// 并且把某些属性**重新读一次**，才能收敛到唯一正确的那一个。
+//
+// ## 难点怎么造的（每条都有下面的基线把它变成可复现的事实）
+//   A1 候选多、属性多：6 个候选 × 5 个可核对属性（标价 / 到货 / 退货 / 供货方式 + 详情里的总价）。
+//   A2 第一个属性不足以决断：**标价最低的 P-102（¥240）在实时口径下超预算**，
+//      而标价**第二低**的 P-106（¥262）"退货要收 8% 手续费" ⇒
+//      "按列表那一列排序取第一/取最便宜"必然错（基线②把这件事变成可断言的事实）。
+//   A3 决定性属性藏在额外动作后面：**总价（含运费）只在展开详情之后才写进 DOM**
+//      （基线①：初始正文与**页面源码**里既没有「总价」二字、也没有任何一个候选的总价数字）。
+//   A4 陈旧读取陷阱（本场景的核心）：展开详情先显示**缓存报价**，页面上方写明
+//      "实时报价在详情里刷新（读后约 2 秒生效）"。每个候选的**第一次读必然是缓存值**，
+//      而缓存值与实时值的差**会让决策翻转**（三条约束：总价 < 290 / ≤3 天 / 支持 7 天无理由退货）：
+//        · 按缓存值：唯一过关的是 P-102（¥243）；P-105 是 ¥309，**超预算**被排掉；
+//        · 按实时值：P-102 跳到 ¥300（超预算，**被服务端拒**），过关的只剩 P-105（¥283）。
+//      （基线③用页面自己记的读次数与"读到过缓存值"证明第一次读真的是缓存值。）
+//   A5 约束落在指令里，其中一条**容易被忽略**：「支持 7 天无理由退货」—— 它在详情面板的
+//      最后一行（不在列表徽标里），且是排除 P-104 的那条；P-106 的"退货要收手续费"只写在
+//      列表那一行里 —— 两条合起来才说明"退货"这个属性真的要逐条核对。
+//   A6 提交有**服务端回执**：`/pick-commit` 在服务端按**实时报价**重算约束并记下**每一次尝试**
+//      （成功的 + 被拒的原因）⇒"错误候选没有被提交过"有服务端日志作证。
+//
+// ## 捷径必然失败（三条都实测过）
+//   · 只看第一个属性（标价）→ 会选 P-106（¥262，列表最便宜），而它退货要收 8% 手续费（A2 / A5）；
+//   · 只看初始快照 → 快照里**没有总价**（A3 基线①，已用候选列表标记 / 详情节点展开前为空 / 模型回执三侧证明）；
+//   · 不重读 → 会把 P-105 当超预算排掉，选到 P-102，而服务端按实时报价 ¥300 会**拒掉**它
+//     ⇒ 这条捷径连"看起来成功"都做不到（这正是把 P-102 的实时价从 ¥249 改成 ¥300 的原因：
+//     原先它在实时口径下仍然合格，服务端会接受错误候选，本用例的第二层判据就失去意义了）。
+test('golden: 多候选收敛 —— 决定性属性在详情里，且缓存报价会让决策翻转（必须重读）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/pick');
+
+  // ---- 基线：三个难点真的存在（全部先于 agent 运行）----
+  // ① 6 个候选都在，且**初始正文里没有决定性属性**
+  await expect.poll(() => page.locator('.card').count(), { timeout: 20_000 }).toBe(6);
+  const body0 = await page.locator('body').innerText();
+  expect(body0, '初始正文里就有「总价」二字：那"必须展开详情"这个难点不成立').not.toContain('总价');
+  expect(body0, '初始正文里就有某个候选的总价：那"必须展开详情"这个难点不成立').not.toContain('¥309');
+  expect(body0, '初始正文里就有实时报价：那"必须重读"这个难点不成立').not.toContain('¥283');
+  // 强证据：**候选列表的标记里也没有**（不是"正文抽取漏了它"）⇒ 值只在展开详情时才写进 DOM。
+  //   ⚠ 这里**刻意不用 `page.content()`**：它返回 documentElement.outerHTML，**包含内联 `<script>` 的
+  //     源码**，而这一页的报价数据本来就必须写在脚本里（PARTS 数组）——
+  //     于是"整页源码里没有某个字符串"是个假判据：任何一句**注释**提到那个数字都会让它红
+  //     （实测踩到：把注释里的 ¥284 改成正确的 ¥283 就让这条基线与判据双双变红 ✗）。
+  //     判据要盯的是「DOM 里写没写」（模型能读到的东西），而不是「脚本源码里提没提」。
+  const listHtml0 = await page.locator('#picks').innerHTML();
+  expect(listHtml0, '候选列表里就有总价：那"必须展开详情"这个难点不成立').not.toContain('¥309');
+  expect(listHtml0, '候选列表里就有实时报价：那"必须重读"这个难点不成立').not.toContain('¥283');
+  // 更精确的一条：详情节点**展开之前是空的**（值由 paintRaw() 在展开那一刻写入）
+  expect(
+    await page.locator('#total-p105').innerText(),
+    '详情节点在展开前就有值：那"必须展开详情"这个难点不成立'
+  ).toBe('');
+  // 页面自己记的：还没有任何详情被展开过。
+  // ⚠ 判据是 `opens`（展开动作计数），**不能**用 `Object.keys(records).length` ——
+  //   records 是页面加载时就预建好的 6 个键，那样写恒等于 6（实测踩到：基线与判据双双恒真）。
+  const opens0 = await page.evaluate(() =>
+    Object.values(window.__det.records).reduce((n, r) => n + r.opens, 0)
+  );
+  expect(opens0, '还没有任何详情被展开过（不是"页面上看起来没展开"）').toBe(0);
+  expect(await page.evaluate(() => window.__det.log.length)).toBe(0);
+
+  // ② 第一个属性不足以决断 —— 把"标价排序"与"真正能不能选"摆在一起：
+  //    · 标价**最低**的是 P-102（¥240），而它在**实时口径下超预算**（服务端会拒）；
+  //    · 标价**第二低**的是 P-106（¥262），而它"退货要收 8% 手续费" ⇒ 违反退货约束；
+  //    · 正确答案 P-105 的标价是 ¥279（在 6 家里排第 4）—— 按任何一列排序取第一都取不到它。
+  expect(await page.locator('#card-p106 .row1').innerText()).toContain('8% 的手续费');
+  const listPrices = await page.locator('.card .row1').evaluateAll((els) =>
+    els.map((e) => Number((/标价 ¥(\d+)/.exec(e.textContent) || [])[1]))
+  );
+  expect(Math.min.apply(null, listPrices), '标价最低的应当是 P-102（¥240）').toBe(240);
+  expect(listPrices.filter((n) => n === 240).length, '标价最低的应当只有一个 —— 否则"第一列能决断"这个前提不成立').toBe(1);
+  // 最便宜的标价（¥240）与决策要用的实时总价（¥300）**不是一回事** ⇒ 只看标价必错
+  const p102Totals = await page.evaluate(() => ({
+    raw: window.__det.records.p102.rawTotal,
+    live: window.__det.records.p102.total,
+  }));
+  expect(p102Totals.live, '标价最低的那家在实时口径下也合格 —— 那"看标价就选会错"不成立').toBeGreaterThan(290);
+  expect(p102Totals.raw, '标价最低的那家在缓存口径下也不合格 —— 那"陈旧值骗人"这条不成立').toBeLessThan(290);
+
+  // ③ A4 的机制：**每个候选的第一次读必然是缓存报价**（与读得多快无关）——
+  //    这条是本场景可判的前提，所以先在本用例里直接验一次机制本身。
+  await page.locator('#toggle-p105').click();
+  const firstP105 = await page.evaluate(() => {
+    const r = window.__det.records.p105;
+    return { fresh: r.fresh, shown: document.getElementById('total-p105').textContent, raw: r.rawTotal, live: r.total, reads: r.reads };
+  });
+  expect(firstP105.fresh, '第一次读竟然是实时值：那"缓存报价"这个陷阱不成立').toBe(false);
+  expect(firstP105.shown, '展开详情时显示的不是缓存总价').toBe('¥309');
+  expect(firstP105.raw, '缓存总价与实时总价本来就相等：那"重读"这一步不必要').not.toBe(firstP105.live);
+  expect(firstP105.reads).toBeGreaterThanOrEqual(1);
+  // 等实时报价真的生效（页面自己写下那行说明）→ 重读 → 值变了
+  await expect.poll(
+    () => page.evaluate(() => String(window.__det.records.p105.refreshMsg || '')),
+    { timeout: 10_000 }
+  ).toContain('实时报价已重新询价');
+  await page.locator('#toggle-p105').click(); // 收起
+  await page.locator('#toggle-p105').click(); // 再展开（**重读**一次）
+  await expect.poll(() => page.textContent('#total-p105'), { timeout: 10_000 }).toBe('¥283');
+  expect(await page.evaluate(() => window.__det.records.p105.reads)).toBeGreaterThanOrEqual(2);
+  expect(await page.textContent('#total-p105'), '重读之后还是缓存值：那"重读能拿到实时报价"不成立').not.toBe('¥309');
+
+  // 复位到干净起点，再让 agent 从头做（与分页/级联/无限滚动三条用例同样的处理）
+  await page.reload();
+  await expect.poll(() => page.locator('.card').count(), { timeout: 20_000 }).toBe(6);
+  expect(await page.evaluate(() => window.__det.log.length)).toBe(0);
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['multi-candidate-convergence'].eval.instruction);
+
+  // ---- ① 页面状态 ----
+  // 6 个候选的详情都被展开并读过；关键候选被**重读**过。
+  // ⚠ 逐条轮询（不是"先等一个弱信号再就地断言"）：`submitted` 只有服务端回执到了才会变，
+  //   而各候选的 `opens` 是**异步**发生的 —— 分开等，别让"某个更早的信号"把断言放过去。
+  await expect.poll(
+    () => page.evaluate(() => Object.values(window.__det.records).filter((r) => r.opens >= 1).length),
+    { timeout: 60_000 }
+  ).toBe(6);
+  await expect.poll(
+    () => page.evaluate(() => window.__det.records.p105.reads),
+    { timeout: 20_000 }
+  ).toBeGreaterThanOrEqual(2);
+  // ★ 判据是**服务端判的**：接受的是 P-105，而且**一个错误候选都没被接受过**
+  await expect.poll(() => page.evaluate(() => window.__det.submitted.join(',')), { timeout: 30_000 }).toBe('p105');
+  expect(await page.evaluate(() => window.__det.rejected), '有错误候选被服务端接受过').toBe(0);
+  expect(await page.evaluate(() => window.__det.submits)).toBeGreaterThanOrEqual(1);
+  expect(await page.evaluate(() => window.__det.records.p105.fresh)).toBe(true);
+  // 陈旧读取陷阱的判据（也是"夹具没坏"的自检）：缓存总价 ≠ 实时总价
+  expect(
+    await page.evaluate(() => window.__det.records.p105.rawTotal !== window.__det.records.p105.total),
+    'P-105 的缓存总价与实时总价相等 —— 陈旧读取陷阱被改没了'
+  ).toBe(true);
+  // 页面渲染的是**服务端回执**，不是页面自己编的成功态
+  await expect(page.locator('#status')).toHaveText(/^已下单：P-105 /);
+
+  // ---- ② 模型回执：决定性数值必须真的到模型手里（证明它是**读出来的**）----
+  const seenText = toolResultsText();
+  expect(seenText, '缓存总价没进到模型手里 —— 那它凭什么知道报价过期了？').toContain('¥309');
+  expect(seenText, '实时总价没进到模型手里 —— 那"重读"这一步没有发生').toContain('¥283');
+  // 服务端回执文本（含编号与总价）也在模型手里。
+  //   ⚠ 这条必须用 `expect.poll` **等**它到，不能就地断言：`llmRequests` 记的是**请求体**，
+  //     所以刚产生的工具结果要等**下一次请求**才会出现在记录里；上面那条 `seenText` 是**同步读取**
+  //     ⇒ 它漏掉的是"最后一条工具结果"，而这是**时序**问题，**不是**取数口径问题：
+  //     `toolResultsText()` 是 `toolMessagesInOrder()` 的**超集**（后者只多做一层按
+  //     `tool_call_id` 去重），不可能只在前者里缺失；`llmRequests` 另有 40 条上限、超出丢最旧的。
+  //     （本轮提交时曾把"同步读漏了最后一条"误记成"两个口径不一致" —— 已改正 ✗）
+  await expect
+    .poll(() => toolMessagesInOrder().map((m) => String(m.content)).join('\n'), { timeout: 20_000 })
+    .toContain('已下单：P-105');
+  // ①③ 逐条过滤的依据：6 个候选各自的缓存总价都读到过
+  //   ⚠ ¥293 是 p101 与 p103 共有的缓存价（两者都超预算），所以这里只用它证明"读到了"，
+  //     不区分是哪一个 —— 判据要盯"数据到没到模型手上"，不是"它是从哪一行读到的"。
+  for (const t of ['¥243', '¥293', '¥296', '¥300', '¥271']) {
+    expect(seenText, '候选 ' + t + ' 的总价没有进到模型手里 —— 那它没有逐条核对').toContain(t);
+  }
+  // ★ "读了两次"与"读了一次"必须可区分：读 P-105 总价的那些回执里，
+  //   **第一次必须是缓存值（¥309）、之后必须出现实时值（¥283）**，而且两者都在模型手里。
+  //   ⚠ 用"以该值开头"而不是"包含"：`click_element` 的结果里会带一段**正文摘要**
+  //     （展开详情后它按 textContent 抽 300 字），那里面当然也有这些数字 —— 拿"包含"去判定
+  //     会把点击回执错认成"读过总价"。
+  //   ⚠ 不写成 `toEqual(['¥309','¥283'])`：那是**路径断言**（把"多读了一次"误判成"能力不行"）。
+  //     这里要的结果是"过期值在前、实时值在后、后者真的读到过"。
+  const p105Reads = toolMessagesInOrder()
+    .map((m) => String(m.content).trim())
+    .filter((t) => /^¥(309|283)(\n|$)/.test(t))
+    .map((t) => t.slice(0, 4));
+  expect(p105Reads[0], '读 P-105 总价的第一次不是缓存值 —— 那"陈旧读取"这条不成立（' + JSON.stringify(p105Reads) + '）').toBe('¥309');
+  expect(p105Reads, 'P-105 的实时报价没有被重读出来 —— "重读"这一步没有发生（' + JSON.stringify(p105Reads) + '）').toContain('¥283');
+  expect(
+    p105Reads.indexOf('¥283'),
+    '实时值出现在缓存值之前 —— 顺序不对，说明"第一次读到的是过期值"这条不成立（' + JSON.stringify(p105Reads) + '）'
+  ).toBeGreaterThan(0);
+
+  // ---- ③ 阴性对照（模型回执层）：**第一次**快照里没有决定性属性 ----
+  const firstTool = toolMessagesInOrder()[0];
+  expect(firstTool, '一条工具结果都没记录到').toBeTruthy();
+  // ⚠ 这里只断言**决定性的数值**，不断言「总价」这个词：那个词确实写在详情面板的 HTML 里
+  //   （页面自带"总价（含运费）："这行文案），只是**没有布局盒子** —— 正文抽取按"不可见"跳过它。
+  //   要证的是"**值**拿不到"，不是"字眼不存在"（后者是假的，会给人错的安全感）。
+  expect(String(firstTool.content), '第一次快照里就有缓存总价：那这条用例不需要展开详情').not.toContain('¥309');
+  expect(String(firstTool.content), '第一次快照里就有实时总价：那这条用例不需要重读').not.toContain('¥283');
+
+  await page.close();
+});
+
+
+
