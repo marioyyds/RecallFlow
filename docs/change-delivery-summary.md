@@ -6,7 +6,7 @@
 >
 > 每条都经过四层验证中的至少一层：
 > - `npm test` —— **1385 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
-> - `npm run test:e2e` —— 真实 Chromium，**40 个用例**（黄金任务 36 + 断线恢复 1 + 视觉两臂对照门禁 3，分三阶段；开启臂今天按开关跳过）；
+> - `npm run test:e2e` —— 真实 Chromium，**41 个用例**（黄金任务 37 + 断线恢复 1 + 视觉两臂对照门禁 3，分三阶段；开启臂今天按开关跳过）；
 > - `node scripts/verify-bridge-ws-handshake.mjs` —— 桥接 WS 鉴权（真实 server + 真实客户端）；
 > - `integrations/opencode/recallflow-mcp/test/session-isolation.test.mjs` —— 跨会话响应隔离。
 >
@@ -82,7 +82,7 @@ E2E 断言两条：任务最终完成 + 后台**跑了不止一次**（区分"�
 
 ```powershell
 npm test                            # 1385 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
-npm run test:e2e                     # 真实 Chromium：黄金任务 36 + 断线恢复 1 + 视觉两臂 3（三阶段）
+npm run test:e2e                     # 真实 Chromium：黄金任务 37 + 断线恢复 1 + 视觉两臂 3（三阶段）
 npm run build:content -- --check     # 内容脚本打包（自包含性不合格会以退出码 2 拒绝）
 node scripts/test-count.mjs          # 测试数（文档数字由它生成，不手写）
 node scripts/verify-bridge-ws-handshake.mjs   # 桥接 WS 鉴权（真实 server + 真实客户端）
@@ -98,7 +98,7 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 | 指标 | 值 |
 | --- | --- |
 | 单元测试 | **1385 项 / 110 个文件**，全通过 |
-| 真实浏览器 E2E | **40 个用例**（黄金任务 36 + 断线恢复 1 + 视觉两臂 3；其中视觉开启臂今天按开关跳过），全通过 |
+| 真实浏览器 E2E | **41 个用例**（黄金任务 37 + 断线恢复 1 + 视觉两臂 3；其中视觉开启臂今天按开关跳过），全通过 |
 | 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试），全通过 |
 | 变异测试 | 5/5 条变异都被断言抓住（证明断言不是摆设） |
 | 集成方向 | 已收敛为唯一事实来源（`docs/integration-status.md`） |

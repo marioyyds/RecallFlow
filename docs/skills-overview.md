@@ -8,10 +8,10 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **36** |
-| 有剧本归属（真浏览器验收覆盖） | **27** |
+| 技能总数 | **37** |
+| 有剧本归属（真浏览器验收覆盖） | **28** |
 | **孤儿技能**（无验收覆盖） | **9** |
-| 能力剧本总数 | **27** |
+| 能力剧本总数 | **28** |
 
 ## 有剧本归属的技能（每一项都有夹具页 + E2E 判据）
 
@@ -29,6 +29,7 @@
 | `download-verify` | 下载文件：页面上不会变，凭据只能来自浏览器事件 | browser-automation | `download-verify` |
 | `extract-merged-table` | 表格提取（含合并单元格，按列对齐） | browser | `extract-merged-table` |
 | `form-validation` | 提交没反应：HTML5 原生校验静默拦住（页面上什么都不说） | browser-automation | `form-validation` |
+| `infinite-scroll-hover-preview` | 无限滚动 + hover 预览（滚到底才加载，预览只在悬停后出现） | browser-automation | `infinite-scroll-hover-preview` |
 | `knowledge-save-retrieve` | 知识库：存进去要能原样取回来（同一个网址会互相覆盖） | knowledge | `knowledge-save-retrieve` |
 | `knowledge-search-fallback` | 知识库检索查不到时（查不到 ≠ 没有） | knowledge | `knowledge-search-fallback` |
 | `macro-save-replay` | 宏：把已验证的多步操作存下来，之后零 token 回放 | browser-automation | `macro-save-replay` |
@@ -53,20 +54,20 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 33 |
-| `get_page_snapshot` | 31 |
-| `inspect_element` | 28 |
-| `click_element` | 24 |
+| `complete_task` | 34 |
+| `get_page_snapshot` | 32 |
+| `inspect_element` | 29 |
+| `click_element` | 25 |
 | `type_text` | 10 |
 | `select_option` | 8 |
-| `wait_for_element` | 7 |
+| `wait_for_element` | 8 |
 | `read_current_page` | 4 |
+| `scroll_page` | 4 |
 | `add_entry` | 3 |
 | `annotate` | 3 |
 | `check_box` | 3 |
 | `get_ax_snapshot` | 3 |
 | `read_diagnostics` | 3 |
-| `scroll_page` | 3 |
 
 （全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）
 
@@ -74,20 +75,20 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 33 |
-| `get_page_snapshot` | 31 |
-| `inspect_element` | 28 |
-| `click_element` | 24 |
+| `complete_task` | 34 |
+| `get_page_snapshot` | 32 |
+| `inspect_element` | 29 |
+| `click_element` | 25 |
 | `type_text` | 10 |
 | `select_option` | 8 |
-| `wait_for_element` | 7 |
+| `wait_for_element` | 8 |
 | `read_current_page` | 4 |
+| `scroll_page` | 4 |
 | `add_entry` | 3 |
 | `annotate` | 3 |
 | `check_box` | 3 |
 | `get_ax_snapshot` | 3 |
 | `read_diagnostics` | 3 |
-| `scroll_page` | 3 |
 | `fetch_webpage` | 2 |
 | `knowledge_read` | 2 |
 | `run_javascript` | 2 |
@@ -96,6 +97,7 @@
 | `get_attribute` | 1 |
 | `get_entry` | 1 |
 | `handle_dialog` | 1 |
+| `hover_element` | 1 |
 | `install_skill` | 1 |
 | `install_userscript` | 1 |
 | `list_frames` | 1 |

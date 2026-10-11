@@ -22,6 +22,7 @@
 | `download-verify` | 报表 | `/download` ✓ | 4 | `dialog-handling` | ✓ | 0 | 1 | payload |
 | `extract-merged-table` | 表格 | `/table` ✓ | 2 | `extract-merged-table` | ✓ | 1 | 4 | page |
 | `form-validation` | 报名表 | `/validate` ✓ | 5 | `form-validation` | ✓ | 4 | 1 | page |
+| `infinite-scroll-hover-preview` | 信息流 | `/feed` ✓ | 6 | `infinite-scroll-hover-preview` | ✓ | 4 | 3 | page |
 | `knowledge-save-retrieve` | 知识库 | `/notes` ✓ | 3 | `knowledge-save-retrieve` | ✓ | 0 | 4 | storage |
 | `knowledge-search-fallback` | 打开很慢 | `/notes` ✓ | 3 | `knowledge-search-fallback` | ✓ | 0 | 3 | storage |
 | `macro-save-replay` | 存成宏 | `/macro` ✓ | 6 | `macro-save-replay` | ✓ | 3 | 3 | page |
@@ -38,4 +39,4 @@
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 3 | 1 | page |
 
-**合计**：27 个剧本；页面判据 81 条、回执判据 55 条；夹具路由已接线 27/27；E2E 已引用 27/27；有内置技能 27/27。
+**合计**：28 个剧本；页面判据 85 条、回执判据 58 条；夹具路由已接线 28/28；E2E 已引用 28/28；有内置技能 28/28。

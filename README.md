@@ -49,10 +49,10 @@ flowchart TB
 | **记忆与技能** | 重复劳动不该再花 token | **四类知识库**（标记 / 标签 / 搜索 / 导入导出，Agent 可读写）；**技能中心增删改查与导入导出**；宏按站点零 token 回放 |
 | **扩展与安全** | 能力要能长，权限要能收 | 用户脚本运行时（含**权限预览**）；**MCP 客户端**（连接远程 MCP 服务器，工具并入 Agent）；写操作逐次审批或按类别自动批准 |
 
-**24 类复杂场景**按同一形状逐条沉淀 —— 遮挡弹层、失败恢复、跨域 iframe、分页 / 异步、
+**28 类复杂场景**按同一形状逐条沉淀 —— 遮挡弹层、失败恢复、跨域 iframe、分页 / 异步、
 合并单元格表格、新标签页接管、Shadow DOM 穿透、canvas 坐标点击、CDP 拖拽、虚拟列表、
-级联下拉、宏保存回放、文件上传、跨标签页搬运、知识库往返与召回边界、严格 CSP 页面世界执行、
-撤销、表单原生校验……逐条见 **[能力清单](docs/capability-inventory.md)**。
+无限滚动 + 悬停预览、级联下拉、宏保存回放、文件上传、跨标签页搬运、知识库往返与召回边界、
+严格 CSP 页面世界执行、撤销、表单原生校验……逐条见 **[能力清单](docs/capability-inventory.md)**。
 
 ## E2E 测试架构
 
@@ -102,9 +102,9 @@ flowchart TB
 
 | | 数量 |
 | --- | --- |
-| 能力剧本（与夹具页、技能一一对应） | **27** |
-| 真浏览器 E2E 场景 | **40**（黄金任务 36 + 断线恢复 1 + 视觉两臂对照门禁 3；开启臂今天按开关跳过）|
-| 页面状态判据 / 模型回执判据 | **74 / 51** 条 |
+| 能力剧本（与夹具页、技能一一对应） | **28** |
+| 真浏览器 E2E 场景 | **41**（黄金任务 37 + 断线恢复 1 + 视觉两臂对照门禁 3；开启臂今天按开关跳过）|
+| 页面状态判据 / 模型回执判据 | **85 / 58** 条 |
 | 单元测试与门禁 | **1385** 项单元测试（110 个文件） |
 
 ```bash
@@ -250,7 +250,7 @@ sequenceDiagram
 
 | 想了解 | 看这里 |
 | --- | --- |
-| **24 类能力各由什么保证**（夹具页 / 剧本 / E2E / 技能 / 判据） | [docs/capability-inventory.md](docs/capability-inventory.md)（自动生成） |
+| **28 类能力各由什么保证**（夹具页 / 剧本 / E2E / 技能 / 判据） | [docs/capability-inventory.md](docs/capability-inventory.md)（自动生成） |
 | **真浏览器 E2E 怎么写**（原理 / 操作手册 / 踩过的坑 / 验不了什么） | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
