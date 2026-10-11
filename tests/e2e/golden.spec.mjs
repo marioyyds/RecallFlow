@@ -1844,9 +1844,32 @@ test('golden: 视频播放器状态 —— 「看起来在播」不等于真的�
 
   // ---- 基线：每一层假象/难点都先于 agent 运行被变成可断言的事实 ----
   // ① 媒体**真的**准备完成（页面内录的 2 秒 WebM 已挂上，duration 是真实数字）
+  //    ⚠ 这里的 `__ready === true` 不是"挂上 src 了"的意思：夹具页只在**时长真的合格**之后才设它。
+  //      夹具对**两副**时好时坏的面孔各有一道保险（详见 fixtures/server.mjs 的实测注释与下面的
+  //      `__durFix` 断言）：元数据没解析完（duration 还是 `Infinity`）＝逼完整解析；
+  //      录制本身录短了（实测满载时抓到 `0.979969`）＝量真实解码时长、不合格就重录。
   await expect.poll(() => page.evaluate(() => window.__ready === true), { timeout: 40_000 }).toBe(true);
   const dur0 = await page.evaluate(() => Number(document.getElementById('v').duration));
   expect(dur0, '媒体没有真实时长：那段 WebM 没被真的解码').toBeGreaterThan(1);
+  // ⑥ 把夹具那两道保险钉住（`__durFix`）：
+  //    · `recordDur` 是夹具**量出来的真实解码时长**（不是"应该约 2 秒"）；
+  //    · `attempts` 是录了几次才拿到合格素材（录短了就重录，上限 3 次）；
+  //    · `forced` 是主播放器"逼完整解析"用了几次。
+  //    ⚠ 这条**不是**新判据、也没放宽任何东西：它只是不允许日后有人把这些保险删掉
+  //      （删掉之后本机多数情况下仍是绿的 —— 而"多数情况绿"正是这次要修的毛病）。
+  //      `forced` / `attempts` 允许是 0/1：blob 本地瞬间可读、录制一般一次就合格，
+  //      此时**不需要**这些保险；需要时它们必须真的起作用（起作用后 `dur0` 仍须 > 1）。
+  //      实测：本机一轮 `--repeat-each=6` 里 `attempts=2` 出现过（重录那一道真的被用上了）。
+  const durFix = await page.evaluate(() => window.__durFix);
+  expect(Number.isFinite(durFix.recordDur), '夹具没记下录制媒体的真实解码时长：时长那道保险没生效').toBe(true);
+  expect(durFix.recordDur, '夹具量到的录制时长 <= 1 秒：那段 WebM 本身就不是"约 2 秒"').toBeGreaterThan(1);
+  expect(Number.isInteger(durFix.attempts) && durFix.attempts >= 1, '录制次数账本不合法：' + durFix.attempts).toBe(true);
+  expect(durFix.attempts, '录了 ' + durFix.attempts + ' 次还没通过：那道"录短了就重录"的保险没生效').toBeLessThanOrEqual(3);
+  expect(Number.isInteger(durFix.forced), '`__durFix.forced` 不是整数：逼解析的账本坏了').toBe(true);
+  expect(
+    await page.evaluate(() => window.__probePlayError),
+    '夹具报出了媒体准备错误（时长读不出来 / 录制失败 / 录短了）：媒体这一层没准备好'
+  ).toBe('');
 
   // ② "看起来在播"这句话真的在页面上（而真实状态是 paused）
   expect(await page.textContent('#statusbar'), '「看起来在播」这层假象不成立（状态栏没写「播放中」）').toContain(
@@ -1996,6 +2019,13 @@ test('golden: 视频播放器状态 —— 「看起来在播」不等于真的�
   expect(seenWaits, '回执里说缓冲 0 次：那"卡顿"这条结论没有依据').toBeGreaterThanOrEqual(1);
   expect(seenWaits).toBeLessThanOrEqual(live.waits);
   // 播放位置：回执里的位置必须落在 [0, duration] 且真的推进过（> 1 秒）
+  // ⚠ 上界必须先确认**上界本身是真的**：`duration` 若是 `Infinity`，`<= Infinity` 恒真 ——
+  //   那条上界检查就成了摆设（实测：`duration` 在 `loadedmetadata` 那一刻确实可能是
+  //   `Infinity`，见夹具的 `ensureFiniteDuration` 说明）。所以先钉死它是有限真数字。
+  expect(Number.isFinite(live.dur), '页面此刻的 duration 不是有限数字（' + live.dur + '）：上界检查会变成恒真').toBe(
+    true
+  );
+  expect(live.dur, '页面此刻的 duration <= 1：那段 WebM 没被真的解码').toBeGreaterThan(1);
   expect(Number.isFinite(seenPos), '回执里没解析出「播放位置」').toBe(true);
   expect(seenPos, '回执里的播放位置没有推进过（' + seenPos + '）').toBeGreaterThan(1);
   expect(seenPos).toBeLessThanOrEqual(live.dur + 0.01);

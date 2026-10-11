@@ -1286,20 +1286,31 @@ function feedPage() {
 //   事件序列每次都出现 play → playing → (waiting) → … → pause → ended
 //   （见 golden.spec.mjs 里这条用例的基线断言）。
 //
-// ⚠⚠ **时长（duration）必须等"完整解析"之后才是真的** —— 这是这条用例**唯一**的 flaky 来源，
-//    已经做成确定的（细节与实测数字见脚本里 `ensureFiniteDuration` 的注释）：
-//    MediaRecorder 录出来的 WebM，"时长"要等解复用器**读到文件尾**才知道。实测事件顺序是
-//    `durationchange:Infinity` → `loadedmetadata`（那一刻 duration 仍可能是 `Infinity`）
-//    → `durationchange:<真时长>`；文件没解析完时 Chromium 会把"已读到的部分"当整段，
-//    duration 于是落成 `0` / `0.001` / `0.086` / `0.32` 这种**极小值**
-//    （把同一段素材截到前 1024 字节实测 `0.086`、截到 4096 字节实测 `0.787`、截 512 字节实测 `0`）。
-//    blob URL 是本地瞬间可读的，所以**多数时候**解析会在 `loadedmetadata` 之前完成（直接就是真数字）
-//    —— 这就是"上一轮连跑 4 次全绿、本轮首次抓到 `0.001`"的成因。
-//    ⇒ 处理：`loadedmetadata` 之后若 `!isFinite(duration) || duration < 1`，就把 `currentTime`
-//      设成 `1e101` **逼 Chromium 完整解析**，等 `durationchange` 拿到真时长后再复位 `currentTime = 0`；
-//      **只有拿到有限真时长才设 `__ready = true`**（`__durFix.rounds` 记着这一手用了几次）。
-//      该页里**两处**读时长的地方（主播放器 + 「跳转到末尾」用的副本播放器）都走同一个入口，
-//      因为 `duration - 1` 在 duration 还是 Infinity 时是空操作 ⇒ 那条"中途缓冲"判据也会跟着 flaky。
+// ⚠⚠ **时长（duration）是这条用例唯一的 flaky 来源**，有两副面孔，**两副都做成确定的**：
+//
+//   面孔 A：**元数据还没解析完**。MediaRecorder 录出来的 WebM，"时长"要等解复用器**读到文件尾**
+//     才知道。实测事件顺序是 `durationchange:Infinity` → `loadedmetadata`（那一刻 duration
+//     仍可能是 `Infinity`）→ `durationchange:<真时长>`。blob URL 是本地瞬间可读的，所以
+//     **多数时候**解析会在 `loadedmetadata` 之前完成（直接就是真数字）—— 时好时坏就来自这里。
+//     ⇒ 处理：`loadedmetadata` 之后若 duration 不是有限正值，就把 `currentTime` 设成 `1e101`
+//       **逼 Chromium 完整解析**，拿到真时长后再复位 `currentTime = 0`；
+//       **只有拿到有限真时长才设 `__ready = true`**（`__durFix.forced` 记着这一手用了几次）。
+//       该页里**两处**读时长的地方（主播放器 + 「跳转到末尾」用的副本播放器）都走同一个入口，
+//       因为 `duration - 1` 在 duration 还是 Infinity 时是空操作 ⇒ 那条"中途缓冲"判据也会跟着 flaky。
+//       实测（同一段素材，直接读 vs 逼解析后读）：直接读 `Infinity` ／ 逼解析后 `1.97`。
+//
+//   面孔 B：**录制本身就录短了**（更隐蔽，实测在满载时抓到过红）。本轮 `--repeat-each=10`
+//     （同时还有别的测试在跑、机器很忙）实测出现过 `v.duration === 0.979969`：文件是完整的、
+//     也真的被解码了，**只是那段 WebM 的真实时长不到 1 秒**（同一轮还有 1.52 秒的）；
+//     此时 `__probePlayError` 是空、`__durFix.forced` 是 0 —— 面孔 A 那手**救不了它**
+//     （逼解析只会把 0.98 如实读出来）。任务里报的 `0.001` 就是这一副面孔的极端值
+//     （WebM 的 Duration 字段写下来本就是极小值；我把**另一段**素材截到 1024 字节复现过
+//     `0.086`、截到 4096 字节复现过 `0.787`，仅作形态旁证，不当作同一段素材的实测）。
+//     ⇒ 处理：录完**先量一遍真实解码时长**，不在 [1.5, 12] 秒就**重录**（最多 3 次），
+//       仍然不合格就**如实失败**（`__ready` 不会设成 true）。`__durFix.attempts` 记着录了几次。
+//
+//   ⇒ 判据 `dur0 > 1` **没有被放宽**：它验的是"这段 WebM 真的被解码出时长"，
+//     而夹具保证的是"交给它的素材真的约 2 秒" —— 两件事各自都还在验。
 //
 // ⚠ body 收窄到 560px：CDP 的坐标类工具用元素**中心点**，面板贴右宽 640px，
 //   全宽元素的中心会落在面板底下（点击/悬停会打到面板上）。见 /feed 的说明。
@@ -1345,10 +1356,12 @@ function videoPage() {
     //   中途缓冲（位置 > 0.5 秒）才说明"播着播着卡住了" —— 那只能由 seek 到**未缓冲区间**造出来。
     window.__midWaits = 0;
     window.__lastMidWaitAt = -1;
-    // ⑥ 「逼 Chromium 完整解析媒体」这一手的账本：rounds > 0 表示真的需要这一手
-    //    （loadedmetadata 那一刻 duration 还不是真数字）。用例里有一条断言把它钉住，
-    //    免得日后有人把这一手删掉却以为"反正一直都很绿"。
-    window.__durFix = { rounds: 0, recordDur: null, targetDur: null };
+    // ⑥ 「逼 Chromium 完整解析媒体」与「录制长度不合格就重录」这一手的账本：
+    //    forced > 0 表示主播放器真的需要过"逼解析"（loadedmetadata 那一刻 duration 还不是真数字）；
+    //    copyForced 单独记副本播放器（「跳转到末尾」那次），免得把主播放器的数字顶上去；
+    //    recordDur 是**量出来的真实解码时长**，attempts 是录了几次才拿到合格素材。
+    //    用例里有一条断言把它钉住，免得日后有人把这些保险删掉却以为"反正一直都很绿"。
+    window.__durFix = { forced: 0, copyForced: 0, recordDur: null, targetDur: null, attempts: 0 };
     window.__seeked = 0;
     window.__events = [];
     window.__lastWaitingAt = -1;
@@ -1368,36 +1381,26 @@ function videoPage() {
     //   只有它空白）。而"事件序列"恰恰是本场景判断"在播/卡住/播完"的关键证据。
     function evLogNow() { return document.getElementById('ev-log'); }
 
-    // ⑥ **时长必须是真的**（这一手是为了把"时好时坏"变成确定）：等 video 的 duration 落成
-    //    一个**有限且 > 0** 的真数字，再对外宣称"媒体准备好了"；否则**逼 Chromium 完整解析**。
+    // ⑥ **时长必须是真的**：等 video 的 duration 落成**有限且 > 0** 的真数字，才对外宣称
+    //    "媒体准备好了"；否则**逼 Chromium 完整解析**（loadedmetadata 之后 duration 可能还是
+    //    Infinity 那种"还没解析完"的哨兵值）。
     //
     // 为什么必须有这一手（实测，不是推测）：
-    //   · 媒体是页面内 MediaRecorder 现录的 WebM。它走 MediaRecorder 自己的写头路径，
-    //     时长是要**把整段文件解析完**才知道的（我的实测里录出来的文件其实**带** Duration
-    //     字段 0x4489，但 Chromium 的读法分两步，见下）。
-    //   · 实测事件顺序：durationchange:Infinity → loadedmetadata（duration 当时=Infinity）
-    //     →（解析到文件末尾）→ durationchange:<真时长>。也就是说
-    //     **loadedmetadata 触发那一刻 duration 可能是 Infinity**（"媒体还没解析完"的哨兵值）。
-    //     blob URL 因为是本地瞬间可读，多数时候解析会在 loadedmetadata 之前完成（那就直接是真数字），
-    //     —— 这正是这条用例"上一轮连跑 4 次全绿、本轮首次抓到"的**时好时坏**来源。
-    //   · 另一头：文件没解析完时 Chromium 会把"已读到的部分"当成整段，于是 duration 会落成
-    //     0 / 0.001 / 0.086 / 0.32 这种**极小值**。把文件截成前 1024 字节复现到 0.086，
-    //     截 4096 字节复现到 0.787，截 512 字节复现到 0 —— 与"本轮拿到 0.001"同一形态。
-    //     判据 dur0 > 1 要验的正是"这段 WebM 真的被解码了"，它被这种形态打红**不是判据的问题**。
-    //   · 标准解法（本函数）：loadedmetadata 之后若 !isFinite(duration) || duration < 1，
-    //     就把 currentTime 设成一个天文数字（1e101）—— Chromium 会**为了 seek 去完整解析媒体**，
-    //     解析完发出 durationchange，此时 duration 才是真的；拿到真时长后再把 currentTime 复位 0。
-    //     ⚠ 反过来也实测过（所以顺序不能变）：**先读到的 duration 不作数** —— 必须等
-    //     durationchange 之后再读。实测（直接读 vs 逼解析后读，同一段录出来的素材）：
-    //       · 完整文件：直接读 Infinity ／ 逼解析后 1.97 ← **这一手治的就是它**
-    //       · 截断文件：逼解析后 0 / 0.086 / 0.32 / 0.787（**文件真的不完整，救不回来**）
-    //     ⇒ 所以本函数只负责"把已经录完整的那段文件解析完"，**不会**、也不该把残缺文件变成合格素材：
-    //       残缺文件仍然会走超时分支，__ready 不会被设成 true，用例会**红在"媒体没准备好"**上
-    //       （而不是"红在一个骗人的数字"上）。判据一个字都没放宽。
-    function ensureFiniteDuration(el, cb) {
+    //   · 媒体是页面内 MediaRecorder 现录的 WebM，时长要**把整段文件解析完**才知道。
+    //   · 实测事件顺序：durationchange:Infinity → loadedmetadata（那一刻 duration 仍是 Infinity）
+    //     →（解析到文件尾）→ durationchange:<真时长>。blob URL 本地瞬间可读，多数时候解析会在
+    //     loadedmetadata 之前完成（那就直接是真数字）—— 这就是这条用例时好时坏的来源。
+    //   · 处理：loadedmetadata 之后若 !isFinite(duration) || duration <= 0，就把 currentTime 设成
+    //     一个天文数字（1e101）迫使解复用器读到文件尾，等真时长出来后再复位 currentTime = 0。
+    //     ⚠ **必须等 durationchange/seeked 之后再读** —— 先读到的那个不作数。
+    //   · **它救不了"素材本身就短"**（实测的边界）：对一段真实时长 0.98 秒的完整文件，
+    //     逼解析也是如实读回 0.98 —— 那种红属于**录制长度**问题，见下面"媒体准备"那段
+    //     的"量出来不合格就重录"。两件事分开兜，判据 dur0 > 1 一个字都没改。
+    function ensureFiniteDuration(el, counterKey, cb) {
       var done = false;
       var rounds = 0;
       var timer = null;
+      function forcedCount() { return Number(window.__durFix[counterKey]) || 0; }
       function finish(res) {
         if (done) return;
         done = true;
@@ -1409,8 +1412,8 @@ function videoPage() {
       // 兜底：残余不确定性（例如某天 Chromium 改了行为、seek 不再触发完整解析）必须
       // **如实失败**，不许把 __ready 设成 true 把用例拖绿 —— 所以这里有硬超时。
       timer = setTimeout(function () {
-        finish({ dur: el.duration, forced: window.__durFix.rounds > 0, timedOut: true });
-      }, 15000);
+        finish({ dur: el.duration, forced: forcedCount() > 0, timedOut: true });
+      }, 8000);
       function round() {
         // ⚠ 这里**不靠 durationchange 当唯一判决**（实测的坑）：如果 duration 本来就已经是
         //   有限值，seek 之后 Chromium **不会**再发一次 durationchange（它没"变过"）——
@@ -1437,10 +1440,12 @@ function videoPage() {
         // 逼解析：这个天文数字不需要是"合法时间"，Chromium 会把它夹到媒体末尾，
         // 关键是这一步**迫使解复用器读到文件尾**，从而算出真时长。
         el.currentTime = 1e101;
-        window.__durFix.rounds += 1;
+        // ⚠ 两个播放器分开计数：主播放器的 round 数被 spec 的断言钉住，而 agent 一轮里
+        //   还会点「跳转到末尾」触发**副本**播放器的同一手；共用一个计数器会把它顶上去 ⇒ 假红。
+        window.__durFix[counterKey] = forcedCount() + 1;
       }
       function verify() {
-        if (ok()) { finish({ dur: el.duration, forced: window.__durFix.rounds > 0, timedOut: false }); return; }
+        if (ok()) { finish({ dur: el.duration, forced: forcedCount() > 0, timedOut: false }); return; }
         // ⚠ readyState 还是 0（连元数据都没到）时 seek 是空操作，必须等 loadedmetadata，
         //   否则会把"逼解析"浪费在一次无效 seek 上。
         if (el.readyState >= 1) round();
@@ -1519,7 +1524,8 @@ function videoPage() {
         'probeError=' + (window.__probePlayError || 'none') +
         ' decoded=' + window.__decoded + ' waits=' + window.__waits + ' midWaits=' + window.__midWaits +
         ' t=' + t.toFixed(2) + ' dur=' + d.toFixed(2) + ' paused=' + v.paused +
-        ' ended=' + v.ended + ' durFixRounds=' + window.__durFix.rounds + ' statusbar=' + statusEl.textContent;
+        ' ended=' + v.ended + ' durFix=' + window.__durFix.forced + ' takes=' + window.__durFix.attempts +
+        ' statusbar=' + statusEl.textContent;
     }
 
     // ⑤ 真证据：RVFC 帧计数（真解码过多少帧）+ currentTime 推进。
@@ -1586,7 +1592,7 @@ function videoPage() {
       //   那一刻它的 duration 同样可能是 Infinity（实测），于是 duration - 1 还是 Infinity、
       //   seek 变成空操作 ⇒ waiting 不出现 ⇒ 用例的"中途缓冲"判据时好时坏地红。
       //   这是**同一条 flaky 的另一处入口**，一并做确定（判据本身一个字没改）。
-      ensureFiniteDuration(d2, function (res2) {
+      ensureFiniteDuration(d2, 'copyForced', function (res2) {
         if (!isFinite(res2.dur) || res2.dur <= 0) {
           window.__probePlayError = res2.timedOut ? 'copy-duration-timeout' : 'copy-duration-unreadable';
           update();
@@ -1633,7 +1639,24 @@ function videoPage() {
       update();
     });
 
-    // ① 媒体准备：页面内录 2 秒真 WebM（零二进制资产），交给 video 播放
+    // ① 媒体准备：页面内录 2 秒真 WebM（零二进制资产），交给 video 播放。
+    //
+    // ⚠⚠ **录制长度必须是确定的** —— 这是本页第二个、也是更隐蔽的 flaky 来源（实测抓到过红）：
+    //    本机实测（--repeat-each=10，同时还有别的测试在跑、机器很忙的那一轮）出现过
+    //    v.duration === 0.979969：**文件是完整的、也被真的解码了，只是"录短了"** ——
+    //    2000ms 那次录制在满载下产出的 WebM 真实时长不到 1 秒（同一轮里还有 1.52 秒的），
+    //    于是判据 dur0 > 1 红，而 __probePlayError 是 empty、__durFix.forced 是 0
+    //    （逼解析把真实时长 0.98 如实读了出来，它**救不了"素材本身就短"**）。
+    //    任务里给的 0.001 就是这个形态的极端值（WebM 的 Duration 字段写下来就是极小值）。
+    //    ⇒ 处理：录完**先量一遍真实解码时长**，不在 [1.5, 12] 秒就**重录**（最多 3 次；
+    //      每次都是新的 MediaRecorder + 新的 canvas）；仍然不合格就让它**如实失败**
+    //      （__ready 不会被设成 true）。这样"约 2 秒素材"是**量出来的**，不是"一般都能录到"。
+    //    ⚠ 判据 dur0 > 1 因此**没有被放宽**：它验的是"这段 WebM 真的被解码出时长"，
+    //      而这里保证的是"交给它的那段素材真的约 2 秒" —— 两件事，各自都还在验。
+    var DUR_MIN_OK = 1.5;
+    var DUR_MAX_OK = 12;
+    var RECORD_MS = 2000;
+    var MAX_TAKES = 3;
     try {
       var canvas = document.createElement('canvas');
       canvas.width = 320; canvas.height = 180;
@@ -1646,52 +1669,81 @@ function videoPage() {
         g.fillStyle = '#fff'; g.font = '28px sans-serif';
         g.fillText('F' + n2, 14, 104);
       }, 33);
-      var rec = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
-      var chunks = [];
-      rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
-      rec.onstop = function () {
-        // ⚠⚠ **不要把 canvas 的 MediaStream 挂到这个 video 上**（第一版就是这么写的）：
-        //   video 元素挂 MediaStream（srcObject）属于"实时流"，**自动播放策略对它不生效** ——
-        //   于是"首帧探测"这条路会静默变成"自动播放成功"，与真实站点不同。
-        //   这里只挂**录好的 blob URL**（文件型媒体）。素材本身仍然是真的：
-        //   canvas 的动画帧被 MediaRecorder 编成真 WebM，再由 video 真解码播放。
-        v.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
-        // ① 挂上 src 之后**先等时长变成真的**（见 ensureFiniteDuration 的实测说明：必要时由它
-        //    把 currentTime 设成 1e101 逼 Chromium 完整解析，再复位 0），**然后**才宣称"准备好了"、
-        //    才做首帧自动播放探针。这样 __ready === true 就等于"媒体真被解码、时长是真的"，
-        //    用例读取到的 duration 不可能是 Infinity / 0 / 0.001 这类没解析完的中间值。
-        ensureFiniteDuration(v, function (res) {
+      window.__durFix.attempts = 0;
+      // 每次重录都要把"媒体状态"清干净（否则上一段媒体的 readyState/duration 会串到下一段）
+      function resetRecordState() {
+        try { v.pause(); } catch (e) { /* 还没挂 src，忽略 */ }
+        window.__durFix.recordDur = null;
+        window.__durFix.forced = 0;
+        window.__durFix.copyForced = 0;
+      }
+      function announceReady(res) {
+        // ⚠ 顺序是判据的一部分，不能随手改：**先把播放位置复位到 0，再宣告 ready 并做探针**。
+        //   实测踩到过：如果在"位置还没复位"时就把 __ready 设成 true，用例会在
+        //   initial.t === 0 那条基线上读到 0.0001 —— 探针那次 play() 已经推进了一点点。
+        //   复位是同步生效的 property：赋值后如果 seekable 非空，currentTime 立刻就是 0
+        //   （实测 12/12 次都是 0），所以这里读一次确认，没到 0 就等 seeked。
+        v.currentTime = 0;
+        var go = function () {
+          window.__ready = true;
+          update();
+          probeAutoplay();
+        };
+        if (v.currentTime === 0) { go(); return; }
+        var done = false;
+        var once = function () { if (done) return; done = true; go(); };
+        v.addEventListener('seeked', once, { once: true });
+        setTimeout(once, 1000);
+      }
+      function startRecording(take) {
+        resetRecordState();
+        var rec = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
+        var chunks = [];
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
           try {
-          window.__durFix.recordDur = isFinite(res.dur) ? Number(res.dur) : String(res.dur);
-          window.__durFix.targetDur = 2;
-          if (!isFinite(res.dur) || res.dur <= 0) {
-            // 文件真的不完整（或 15 秒内没解析出来）：**不设 __ready**，让用例红在
-            // "媒体没有准备好"上，而不是拿一个骗人的数字继续往下跑。
-            window.__probePlayError = res.timedOut ? 'duration-timeout' : 'duration-unreadable';
+            // ⚠⚠ **不要把 canvas 的 MediaStream 挂到这个 video 上**（第一版就是这么写的）：
+            //   video 元素挂 MediaStream（srcObject）属于"实时流"，**自动播放策略对它不生效** ——
+            //   于是"首帧探测"这条路会静默变成"自动播放成功"，与真实站点不同。
+            //   这里只挂**录好的 blob URL**（文件型媒体）。素材本身仍然是真的：
+            //   canvas 的动画帧被 MediaRecorder 编成真 WebM，再由 video 真解码播放。
+            window.__durFix.attempts = take;
+            v.src = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+            // ① 挂上 src 之后**先等时长变成真的**（见 ensureFiniteDuration 的实测说明：必要时由它
+            //    把 currentTime 设成 1e101 逼 Chromium 完整解析，再复位 0），**然后**才宣称"准备好了"。
+            //    这样 __ready === true 就等于"媒体真被解码、时长是真的"。
+            ensureFiniteDuration(v, 'forced', function (res) {
+              window.__durFix.recordDur = isFinite(res.dur) ? Number(res.dur) : String(res.dur);
+              window.__durFix.targetDur = RECORD_MS / 1000;
+              var sane = isFinite(res.dur) && res.dur > 0;
+              if (!sane) {
+                // 连时长都读不出来（文件不完整 / 8 秒内没解析完）：不设 __ready，如实失败。
+                window.__probePlayError = res.timedOut ? 'duration-timeout' : 'duration-unreadable';
+                update();
+                return;
+              }
+              // ⚠ 这一步是"录制长度确定"的关键：**量出来的真实解码时长**说了算。
+              if ((res.dur < DUR_MIN_OK || res.dur > DUR_MAX_OK) && take < MAX_TAKES) {
+                startRecording(take + 1);
+                return;
+              }
+              if (res.dur < DUR_MIN_OK || res.dur > DUR_MAX_OK) {
+                // 重录到上限仍然不合格：如实留下错误标记，**不设 __ready**（用例会红在媒体这一层）。
+                window.__probePlayError = 'record-duration-out-of-range:' + Number(res.dur).toFixed(3);
+                update();
+                return;
+              }
+              announceReady(res);
+            });
+          } catch (e) {
+            window.__probePlayError = 'ready-handler:' + (e && e.message ? e.message : String(e));
             update();
-            return;
           }
-          // ⚠ 顺序是判据的一部分，不能随手改：**先把播放位置复位到 0，再宣告 ready 并做探针**。
-          //   实测踩到过：如果在"位置还没复位"时就把 __ready 设成 true，用例会在
-          //   initial.t === 0 那条基线上读到 0.0001 —— 探针那次 play() 已经推进了一点点。
-          //   复位是同步生效的 property：赋值后如果 seekable 非空，currentTime 立刻就是 0
-          //   （实测 12/12 次都是 0），所以这里读一次确认，没到 0 就等 seeked。
-          v.currentTime = 0;
-          var announce = function () {
-            window.__ready = true;
-            update();
-            probeAutoplay();
-          };
-          if (v.currentTime === 0) { announce(); return; }
-          var announced = false;
-          var announceOnce = function () { if (announced) return; announced = true; announce(); };
-          v.addEventListener('seeked', announceOnce, { once: true });
-          setTimeout(announceOnce, 1000);
-          } catch (e) { window.__probePlayError = 'ready-handler:' + (e && e.message ? e.message : String(e)); }
-        });
-      };
-      rec.start();
-      setTimeout(function () { rec.stop(); }, 2000);
+        };
+        rec.start();
+        setTimeout(function () { rec.stop(); }, RECORD_MS);
+      }
+      startRecording(1);
     } catch (e) {
       window.__probePlayError = 'record-failed:' + (e && e.message ? e.message : String(e));
     }
