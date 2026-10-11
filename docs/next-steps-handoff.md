@@ -114,7 +114,7 @@ export async function executeTool(name, args, ctx) {
 
 ```powershell
 npm test                 # 1140 项单测 + 3 道独立脚本门禁 + 刷新测试数快照 —— 必须先全绿
-npm run test:e2e         # 真实 Chromium，34 个场景（两阶段：黄金任务 / 断线恢复）
+npm run test:e2e         # 真实 Chromium，35 个场景（两阶段：黄金任务 / 断线恢复）
 ```
 
 改动前的**安全网**（照这个顺序用）：
