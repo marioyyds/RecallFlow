@@ -1829,6 +1829,48 @@ function richTextPage() {
     '<\/script></body></html>';
 }
 
+// HTML5 原生拖放夹具（`/h5drag`）：**"看起来拖过去了 ≠ 真的收到了"**（④ 场景泛化 · HTML5 拖放）
+//   ① 原生拖放**不走鼠标事件**（合成 mousedown/mousemove 无效）⇒ 必须派发真的 DragEvent / 用 DataTransfer ✗
+//   ② `drop` 只有在 `dragover` 里 `preventDefault()` 过才可能触发（**时机错 ⇒ drop 被浏览器吞掉**）
+//   ③ payload 必须在 **`drop` 里**读（`dragover` 里读 `getData` 拿到空串）⇒ 空读记 `emptyDrops++` ✗
+//   ④ 两个落点：只有右区接受 `RF-7391`；放错记 `wrongZone++` ✗
+//   ⑤ 迷惑项：卡片看着能拖，但它的 `dragstart` 被 `preventDefault()` 取消（`fakeDrags++`）✗
+// 状态写进 `#dd-status`（供 inspect_element 读回）与 `window.__dd`（供 E2E 断言）。
+function html5DragPage() {
+  return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具 HTML5 拖放</title>' +
+    '<style>body{max-width:560px;font:15px/1.7 system-ui}' +
+    '.zone{min-height:64px;border:2px dashed #94a3b8;border-radius:8px;padding:8px;margin:8px 0}' +
+    '#dd-card{display:inline-block;padding:6px 12px;border:1px solid #475569;border-radius:6px;cursor:grab}' +
+    '#dd-fake{display:inline-block;padding:6px 12px;border:1px solid #cbd5e1;border-radius:6px;cursor:grab;color:#94a3b8}' +
+    '</style></head><body>' +
+    '<h1>工单派发（拖放）</h1>' +
+    '<p>把工单卡片拖到右边「收件区」；左边是退回区。</p>' +
+    '<span id="dd-card" draggable="true" role="button" tabindex="0">工单 RF-7391</span>' +
+    '<span id="dd-fake" draggable="true" role="button" tabindex="0">工单 RF-0000（已归档）</span>' +
+    '<div id="dd-left" class="zone">退回区</div>' +
+    '<div id="dd-right" class="zone">收件区</div>' +
+    '<div id="dd-result" role="status">尚未收到任何工单</div>' +
+    '<div id="dd-status" role="status">就绪</div>' +
+    '<script>' +
+    'var st = window.__dd = { dragStarts:0, dragOverAccepted:0, drops:0, acceptedDrops:0, wrongZone:0, emptyDrops:0, fakeDrags:0, lastPayload:"", lastZone:"" };' +
+    'var res = document.getElementById("dd-result"); var stEl = document.getElementById("dd-status");' +
+    'function paint(){ stEl.textContent = "拖动" + st.dragStarts + " 接受dragover" + st.dragOverAccepted + " 落下" + st.drops + " 收下" + st.acceptedDrops + " 放错" + st.wrongZone + " 空读" + st.emptyDrops + " 假卡" + st.fakeDrags; }' +
+    'document.getElementById("dd-card").addEventListener("dragstart", function(ev){ st.dragStarts += 1; ev.dataTransfer.setData("text/plain", "RF-7391"); ev.dataTransfer.effectAllowed = "move"; paint(); });' +
+    'document.getElementById("dd-fake").addEventListener("dragstart", function(ev){ st.fakeDrags += 1; ev.preventDefault(); paint(); });' +
+    'function wire(id, isRight){ var z = document.getElementById(id);' +
+    ' z.addEventListener("dragover", function(ev){ ev.preventDefault(); st.dragOverAccepted += 1; paint(); });' +
+    ' z.addEventListener("drop", function(ev){ ev.preventDefault(); st.drops += 1;' +
+    '  var payload = ev.dataTransfer ? String(ev.dataTransfer.getData("text/plain") || "") : "";' +
+    '  if (!payload) { st.emptyDrops += 1; res.textContent = "落下了但没读到数据（payload 为空）"; paint(); return; }' +
+    '  st.lastPayload = payload; st.lastZone = id;' +
+    '  if (isRight && payload === "RF-7391") { st.acceptedDrops += 1; res.textContent = "已收下 " + payload + "（落点：" + id + "）"; }' +
+    '  else { st.wrongZone += 1; res.textContent = "落点/内容不对：" + payload + " 落在 " + id; }' +
+    '  paint(); }); }' +
+    'wire("dd-left", false); wire("dd-right", true);' +
+    'paint();' +
+    '<\/script></body></html>';
+}
+
 function pickPage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具比价下单</title>
 <style>
@@ -4172,7 +4214,8 @@ const main = http.createServer((req, res) => {
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/feed') ? feedPage()
                                               : req.url && req.url.startsWith('/video') ? videoPage()
-                                              : req.url && req.url.startsWith('/rich') ? richTextPage()
+                                              : req.url && req.url.startsWith('/h5drag') ? html5DragPage()
+        : req.url && req.url.startsWith('/rich') ? richTextPage()
         : req.url && req.url.startsWith('/pick') ? pickPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
