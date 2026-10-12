@@ -504,3 +504,25 @@ node --test tests/context.test.mjs tests/agent-prompt.test.mjs tests/silent-fail
 - **阴性对照**：初始 `#dd-result` 为"尚未收到任何工单"；`#dd-fake` 卡片拖它 ⇒ `fakeDrags++` 而 `drops` 不变 ✗
 
 **两步之后**：`gen-*` 重跑 → 注入必红 ×2 → 连跑两次 → 全量 E2E → **真模型 ×3**（`--grep` 取自 `title`，先 `--list` 确认 `Total: 1`）→ 数字同步 → 提交 ✓
+
+### 富文本脚本化用例：**根因已定性**（第 74 轮）—— 两条待决修法 + 一个新发现
+
+**新发现（本轮，很关键）**：`run_javascript` 的 schema 里写明 **"每次执行都需用户批准"** ✗
+⇒ 脚本化 E2E 里若没有自动批准，这一步**拿不到工具结果、整轮就停在那里**
+（观测：mock 用计数器推进，但结果数**卡在 3 条**、`#rt-bold` 的事件序列为 `[]` ✓ 完全吻合）
+⇒ **任何依赖 `run_javascript` 的脚本化剧本，都必须先确认"批准"这条链路**（否则会静默停在那里 ✗），
+这条对 `<video>`（`inspect_element` 读状态那条不走 JS）与 CSP 场景也有参考价值 ✓
+
+**根因（一条）**：夹具难点①要求 **`isTrusted` 输入**，而产品的 `type_text` **只发合成事件**
+（实测：`cdpEnabled:true` 下仍然 `syntheticIgnored:1`、`inputs:0`；`click_element` 也发合成事件
+`mousedown/mouseup/click` 全是 `isTrusted=false`、`detail=0`）⇒ **这个难点落在产品能力之外** ✗
+（`cdpEnabled:true` 的写法经核对是对的 ✓；`type_text` 的两个真错误已修：必填参数是 **`value`**、
+且**必须给定位符** ✓）
+
+**两条修法（二选一，都已评估）**：
+1. **改夹具判据（小、推荐）**：把"必须 `isTrusted`"改成"必须带 **`inputType` 的 `beforeinput`/`input`**"✓
+   陷阱仍然成立（**直接改 DOM / 纯赋值根本没有 `beforeinput`** ⇒ 仍然被拒 ✓），而产品的打字能通过 ✓
+   ⚠ 配套：还需一条**选区**路径（`press_key({key:'Control+a'})` 在这次实测里没造出选区 ✗ ——
+   怀疑是编辑区当时**没有焦点**；下一步先加一次 `click_element('#rt-editor')` 再按 Ctrl+A，
+   或确认 `run_javascript` 的批准链路后用它设 Range ✓）
+2. **改产品**：让 `type_text` 走 CDP **可信输入** ✗（影响面大：所有输入类场景都要重测 ✓）
