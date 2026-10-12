@@ -868,20 +868,16 @@ export const PLAYBOOKS = Object.freeze({
         // ★ "真在播"的**真证据**：RVFC 帧计数 > 0（真解码过）+ currentTime 推进过。
         //   `paused === false` 只作参考，**不作判据** —— 它可能只是"这一刻还在播"。
         { expr: 'window.__decoded > 0', label: '视频真的解码过帧（RVFC 帧计数 > 0，不是"paused=false 就算在播"）' },
-        { expr: 'window.__seeked >= 1', label: '「跳转到末尾」真的做过（那是缓冲证据的来源）' },
-        // ★ 真缓冲：必须是**播放途中**的缓冲（副播放器 seek 到未缓冲区间时位置 > 0.5s 的那次 waiting）。
-        //   ⚠ 原判据 `__waits >= 1` **近似恒真** ✗ —— 媒体**加载那一刻**天然会 fire 一次 waiting，
-        //   于是这条判据谁也咬不住（夹具里早就备好了 `__midWaits` = 播放中途的 waiting，见 server.mjs），
-        //   这里换成它才是"真的卡住过"的状态证据 ✓（判据不进模型上下文 ⇒ 改它不触发测量义务）
-        { expr: 'window.__midWaits > 0', label: '播放**中途**真的出现过缓冲（位置 > 0.5s 的 waiting；加载那一刻的天然 waiting 不算）' },
-        { expr: 'window.__pauses >= 1', label: '中途真的暂停过 —— 「在播 / 停了」必须分得开' },
+        // ⚠ **动作计数不进真模型判据** ✗（`__seeked` / `__midWaits` / `__pauses` / `__decoyPresses` / `__realPlays`）：
+        //   它们是**路径断言**（要求模型必须走那条动作路线 ✗），且 `__midWaits` **只有**"点跳到末尾"才可能产生
+        //   ⇒ 拿它判真模型 = 拿产品做不到的事判它 ✗（实测：模型压根没点「跳到末尾」）
+        //   这些**页面侧不变量**由**脚本化用例的基线**用**真点击**证明 —— 一条不落，见
+        //   `golden.spec.mjs:2038-2051`（`__midWaits` / `__seeked` / `__pauses` / `__decoyPresses` / `__realPlays` ✓）
+        //   ⇒ 真模型判据只留**状态**：解码过帧（上面那条）+ 播到片尾 + 打开过详情节点（下面那条）✓
         {
           expr: 'window.__events.indexOf("ended") >= 0',
-          label: '事件序列里出现过 ended（真的播完了，而不是"停住了"）',
+          label: '事件序列里出现过 ended（真的播完了，而不是"停住了"）—— 按一次真播放键、2 秒素材自然到片尾即可满足 ✓',
         },
-        // ★ 迷惑控件：点过，但**真实播放状态没被它推动**（它的次数只记在 decoy 计数上）
-        { expr: 'window.__decoyPresses >= 1', label: '那个装饰性播放键真的被点过' },
-        { expr: 'window.__realPlays >= 1', label: '真播放按钮也真的被按过（对比项：推得动 / 推不动）' },
         // ★ 决定性状态只在点开详情之后才写进 DOM —— 初始没有任何进度数值
         { expr: "document.getElementById('diag-body').innerHTML !== ''", label: '「播放详情」被打开过（决定性状态藏在它后面）' },
       ],
