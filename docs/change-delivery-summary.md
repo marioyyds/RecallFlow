@@ -5,7 +5,7 @@
 > 以及 **C-4 的 5 个可重构档**（内置工具 55 → 44）与**思考记录**（推理模型的思维链展示）。
 >
 > 每条都经过四层验证中的至少一层：
-> - `npm test` —— **1422 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
+> - `npm test` —— **1435 项单元测试** + 3 道独立脚本门禁 + 刷新测试数快照；
 > - `npm run test:e2e` —— 真实 Chromium，**43 个用例**（黄金任务 39 + 断线恢复 1 + 视觉两臂对照门禁 3，分三阶段；开关已打开 ⇒ 现在跑的是开启臂，关闭臂按开关跳过）；
 > - `node scripts/verify-bridge-ws-handshake.mjs` —— 桥接 WS 鉴权（真实 server + 真实客户端）；
 > - `integrations/opencode/recallflow-mcp/test/session-isolation.test.mjs` —— 跨会话响应隔离。
@@ -81,7 +81,7 @@ E2E 断言两条：任务最终完成 + 后台**跑了不止一次**（区分"�
 ## 六、如何验证本轮的每一条
 
 ```powershell
-npm test                            # 1422 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
+npm test                            # 1435 项单测 + 3 道独立脚本门禁 + 刷新测试数快照
 npm run test:e2e                     # 真实 Chromium：黄金任务 39 + 断线恢复 1 + 视觉两臂 3（三阶段；只跑开启臂那条）
 npm run build:content -- --check     # 内容脚本打包（自包含性不合格会以退出码 2 拒绝）
 node scripts/test-count.mjs          # 测试数（文档数字由它生成，不手写）
@@ -97,7 +97,7 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 
 | 指标 | 值 |
 | --- | --- |
-| 单元测试 | **1422 项 / 114 个文件**（视觉开关那一轮 +6；**目标 ⑤ 技能归纳**那一轮 +9 / −3 / +1 —— 见「九、目标 ⑤ 技能归纳」；付费墙技能口径 +1（`lib/assistant/skill-defs.js` 的 `paywall-boundary`，见 `docs/real-model-eval-log.md` 第八轮）、思考记录默认折叠 +2 —— 见下表的"思考记录"一行）|
+| 单元测试 | **1435 项 / 114 个文件**（视觉开关那一轮 +6；**目标 ⑤ 技能归纳**那一轮 +9 / −3 / +1 —— 见「九、目标 ⑤ 技能归纳」；付费墙技能口径 +1（`lib/assistant/skill-defs.js` 的 `paywall-boundary`，见 `docs/real-model-eval-log.md` 第八轮）、思考记录默认折叠 +2 —— 见下表的"思考记录"一行；**目标 ③ 收口** +13 —— 见 `docs/remaining-work.md` 第五节）|
 | 真实浏览器 E2E | **43 个用例**（黄金任务 39 + 断线恢复 1 + 视觉两臂 3；开关已打开 ⇒ 跑的是开启臂，关闭臂按开关跳过），全通过 |
 | 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试），全通过 |
 | 变异测试 | 5/5 条变异都被断言抓住（证明断言不是摆设） |
