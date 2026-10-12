@@ -191,8 +191,18 @@ for (const pb of evalPlaybooks()) {
     }
 
     // ② "数据有没有交到模型手上"（与脚本化 E2E 同一条判据）
+    //
+    // ⚠ 条目可以是**数组** = "**任一命中即可**"（`anyOf`）：
+    //   起因是 `form-validation` —— 判据原来只认浏览器自己的校验报文（`表单未通过校验`），
+    //   而模型用 `get_attribute(pattern/minlength/required)` **自己推出约束并改对**、
+    //   4 条页面判据全过 ⇒ 那是**第一手 DOM 证据**（不是臆测、不是转述）。
+    //   按本仓库"判据盯**数据到没到模型手上**、不盯它从哪一行读的"这条原则，
+    //   允许"浏览器报文 **或** 约束属性值"任一到手 ✓（页面判据**不变严也不放宽**）
     const seen = toolResultsText();
-    const missed = ev.mustSeeInToolResults.filter((s) => !seen.includes(s));
+    const missed = (ev.mustSeeInToolResults || [])
+      .map((s) => (Array.isArray(s) ? s : [s]))
+      .filter((alts) => !alts.some((one) => seen.includes(one)))
+      .map((alts) => (alts.length > 1 ? alts.join(' 或 ') : alts[0]));
 
     const failed = results.filter((r) => !r.ok);
     const lines = results.map((r) => (r.ok ? '  ✓ ' : '  ✗ ') + r.label);

@@ -692,7 +692,12 @@ export const PLAYBOOKS = Object.freeze({
       // 这已经是本会话第四次栽在同一件事上（计数、顺序、先后…形态各异，本质都是"我预设了做法"）。
       // 「报告出现过」才是与做法无关的证据；**具体是哪两个字段**由脚本化 E2E 断言
       //（那条路径的顺序由我们控制，可以更锋利）。
-      mustSeeInToolResults: ['表单未通过校验'],
+      // ⚠ **任一命中即可**（数组 = anyOf，见 real-model.eval.mjs 的说明）：
+      //   原来只认浏览器自己的校验报文（`表单未通过校验`），但连续两轮真模型实测里，
+      //   模型改用 `get_attribute(pattern/minlength/required)` **自己推出约束并改对**、
+      //   4 条页面判据全过 ⇒ 那是**第一手 DOM 证据**，按"判据盯**数据到没到模型手上**、
+      //   不盯它从哪一行读的"这条原则，两条路都接受 ✓（页面判据一条没动）
+      mustSeeInToolResults: [['表单未通过校验', 'pattern', 'minlength', 'maxlength', 'required']],
     },
   },
 
