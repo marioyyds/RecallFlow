@@ -36,11 +36,11 @@
 | `read-select-options` | 最便宜 | `/shipping` ✓ | 4 | `read-select-options` | ✓ | 3 | 2 | page |
 | `readability-fix` | 美化 | `/article` ✓ | 3 | `readability-fix` | ✓ | 6 | 1 | page |
 | `recover-from-rejection` | 购买 | `/recover` ✓ | 5 | `recover-from-rejection` | ✓ | 7 | 2 | page |
-| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `rich-text-structure` | ✓ | 6 | 2 | page |
+| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `rich-text-structure` | ✓ | 3 | 2 | page |
 | `site-search` | 站内搜 | `/search` ✓ | 5 | `find-skill-skillhub` | ✓ | 3 | 4 | page |
 | `undo-last-action` | 撤销 | `/undo` ✓ | 7 | `undo-last-action` | ✓ | 2 | 2 | page |
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `video-playback-verify` | 视频在播 | `/video` ✓ | 4 | `video-playback-verify` | ✓ | 8 | 4 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 4 | 1 | page |
 
-**合计**：32 个剧本；页面判据 111 条、回执判据 67 条；夹具路由已接线 32/32；E2E 已引用 32/32；有内置技能 32/32。
+**合计**：32 个剧本；页面判据 108 条、回执判据 67 条；夹具路由已接线 32/32；E2E 已引用 32/32；有内置技能 32/32。
