@@ -460,3 +460,47 @@ node --test tests/context.test.mjs tests/agent-prompt.test.mjs tests/silent-fail
 **对写 mock 剧本的两条直接约束**（少走弯路）：
 1. **拖放**：页面**不查 `isTrusted`** ⇒ mock 剧本可以用**合成 `DragEvent` + `DataTransfer`** 驱动（不必走 CDP）✓
 2. **富文本打字**：页面**只认可信 / 带 `inputType` 的输入** ⇒ mock 剧本**必须用可信键入（CDP）**，纯合成会被拒 ✗
+
+### ④ 剩下两步的**可照抄骨架**（把"要先读几千行"这件事提前做掉，避免下一会话再停滞 ✗）
+
+> 目标：下一会话**不必先勘察**，照下面的骨架填即可。所有字段名/工具名都已核对过真实存在。
+
+#### A. 富文本（`/rich`）—— 剧本 + E2E 用例（技能已落地 `rich-text-structure` ✓）
+
+**mock LLM 分派块**（`tests/e2e/fixtures/server.mjs`，放在既有的剧本分派区，**用计数器 `done = toolResults.length` 推进** ✗不要用文案匹配）：
+1. `get_page_snapshot({maxElements:40})` —— 看清 `#rt-editor` 与工具栏
+2. `click_element({selector:'#rt-editor'})` + **可信输入**（CDP 键入，如 `type_text` 走可信事件；⚠ 合成会被页面拒 ✗）
+3. **选中一段文字**（`run_javascript({engine:'page'})` 里 `getSelection()` 选 Range，或键盘 Shift+Home —— 二选一，后者更"可信"）
+4. `click_element({selector:'#rt-bold'})` —— 结构应出现 `<strong>`（`__rt.strong >= 1`）
+5. `click_element({selector:'#rt-list'})` —— 列表（`__rt.list >= 1`）
+6. `click_element({selector:'#rt-bold'})` **不选**任何文字 —— 页面记 `__rt.noopClicks += 1`，结构**不变** ✓
+7. `click_element({selector:'#rt-fake-bold'})` —— 装饰键：`__rt.fakeBold += 1`，结构**不变** ✓
+8. `click_element({selector:'h1'})` —— **让编辑区失焦** ⇒ `__rt.syncs += 1` 且 `#rt-hidden` 被写入 ✓
+9. `inspect_element({op:'text', text:'结构'})`（读 `#rt-status`）—— 把结构计数读回（**回执判据**靠它）
+10. `complete_task(...)`
+
+**playbook 条目**（`tests/e2e/fixtures/playbooks.mjs`）：
+- `id: 'rich-text-structure'`、`trigger: '富文本'`（⚠ 必须**逐字**出现在 `instruction` 里）
+- `tools: ['get_page_snapshot','click_element','type_text','press_key','inspect_element','complete_task']`（技能 `x.tools` 已 ⊇ 它 ✓）
+- `eval.url: '/rich'`；`pageChecks`（**全是真状态**）：
+  `window.__rt.strong >= 1`、`window.__rt.list >= 1`、`window.__rt.noopClicks >= 1`、
+  `window.__rt.syncs >= 1`、`window.__rt.fakeBold >= 1`、
+  `document.getElementById('rt-hidden').value.indexOf('strong') >= 0`
+- `mustSeeInToolResults: ['strong', 'ul']`（或状态串里的结构计数 —— **只可能来自读回**）
+
+**E2E 用例**（`tests/e2e/golden.spec.mjs`）：先跑**基线**（`__rt.strong/list/links` 全 0、`#rt-hidden` 为空、
+点一次 `#rt-fake-bold` 后结构**一位不变**）→ `page.reload()` 复位 → `sendInstruction(...)` → 双层判据
+（页面状态见上 + `toolResultsText()` 里出现结构证据）✓
+
+#### B. HTML5 拖放（`/h5drag`）—— 技能 + 剧本 + 用例
+
+- **技能** `html5-drag-drop`（照 `rich-text-structure` 的形态写：编号步骤 —— 先看清卡片与两个落点 →
+  用**真 DragEvent / DataTransfer**（⚠ 合成鼠标事件无效 ✗）→ 落点必须 `dragover` 里 `preventDefault()` 过 →
+  payload 在 **`drop` 里**读 → 读回 `#dd-result` 与 `window.__dd` 计数 → 结论只用读回的数据；`x.tools ⊇ 剧本 tools`）
+- **mock 剧本的捷径**：探针已证明**页面不查 `isTrusted`** ⇒ 可用 `run_javascript({engine:'page'})` 里
+  `new DataTransfer()` + `dispatchEvent(new DragEvent('dragover'|'drop', {dataTransfer}))` 驱动（**不必走 CDP** ✓）
+- `pageChecks`：`__dd.acceptedDrops >= 1`、`__dd.drags`…（`dragStarts >= 1`）、**`__dd.wrongZone === 0`**、
+  `__dd.emptyDrops === 0`、`#dd-result` 文本含 `RF-7391`；`mustSeeInToolResults: ['RF-7391', '收下']`（或 `#dd-result` 原文）
+- **阴性对照**：初始 `#dd-result` 为"尚未收到任何工单"；`#dd-fake` 卡片拖它 ⇒ `fakeDrags++` 而 `drops` 不变 ✗
+
+**两步之后**：`gen-*` 重跑 → 注入必红 ×2 → 连跑两次 → 全量 E2E → **真模型 ×3**（`--grep` 取自 `title`，先 `--list` 确认 `Total: 1`）→ 数字同步 → 提交 ✓
