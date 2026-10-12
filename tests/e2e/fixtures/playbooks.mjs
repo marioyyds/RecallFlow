@@ -888,6 +888,45 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已解码帧数', '缓冲等待次数', '播放位置：', '事件序列：'],
     },
   },
+  'html5-drag-drop': {
+    id: 'html5-drag-drop',
+    title: '复杂场景：HTML5 原生拖放 —— 「看起来拖过去了」不等于页面收到了',
+    trigger: '拖放',
+    // 难点（全部造在 /h5drag 夹具页里，且已用探针**实测生效**）：
+    //   ① 原生拖放**不走鼠标事件**：合成 mousedown/mousemove/mouseup 根本不触发 dragstart/drop ✗
+    //   ② 落点必须先在 `dragover` 里 `preventDefault()` 放行，否则 `drop` 被浏览器吞掉 ✗
+    //   ③ payload **只能在 `drop` 里读**（在 `dragover` 里 `getData` 是空串 ⇒ 页面记 emptyDrops++）✗
+    //   ④ 两个落点只有一个接受 `RF-7391`（放错 ⇒ wrongZone++）✗
+    //   ⑤ 迷惑项：归档卡片看着能拖，而它的 `dragstart` 里 `preventDefault()` 取消了拖放（fakeDrags++）✗
+    // 顺序即能力：看清卡片与两个落点 → 先记下初始状态（还没有工单被收下）→ 派发 dragstart/dragover/drop
+    //            → 从**页面状态**读回"真的收下了"，而不是"我拖过去了"
+    tools: ['get_page_snapshot', 'run_javascript', 'inspect_element'],
+    success:
+      '用真的拖放事件把 RF-7391 落到唯一接受它的收件区，页面状态显示已收下（acceptedDrops ≥ 1），' +
+      '且放错区域 / 空读均为 0；结论来自页面状态读回，不是"拖过了"这句话',
+    eval: {
+      url: '/h5drag',
+      // 页面主世界执行（`run_javascript`）需要 CDP：默认沙箱用 `new Function`，
+      // 而 MV3 扩展自身的 CSP 不允许 eval（与页面无关，任何页面都一样）。
+      cdp: true,
+      instruction:
+        '这个工单派发页面上有一张工单卡片和两个区域（退回区 / 收件区）。帮我把工单 RF-7391 拖放到收件区完成派发，' +
+        '弄完请把页面状态读回来告诉我到底收下没有 —— 别只说"已经拖过去了"。',
+      pageChecks: [
+        { expr: 'window.__dd.acceptedDrops >= 1', label: '收件区**真的收下**了这张工单（不是只有 dragover 通过）' },
+        { expr: 'window.__dd.wrongZone === 0', label: '没有把工单放进不接受它的区域' },
+        {
+          expr: 'window.__dd.emptyDrops === 0',
+          label: '没有出现"落下了但 payload 读成空串"（说明 payload 是在 drop 里读的）',
+        },
+        {
+          expr: "document.getElementById('dd-result').textContent.indexOf('RF-7391') >= 0",
+          label: '页面结果区里就是那张工单',
+        },
+      ],
+      mustSeeInToolResults: ['RF-7391'],
+    },
+  },
   'rich-text-structure': {
     id: 'rich-text-structure',
     title: '复杂场景：富文本编辑器 —— 结构要真的改上（选区 / 可信输入 / 失焦同步）',

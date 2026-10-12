@@ -22,6 +22,7 @@
 | `download-verify` | 报表 | `/download` ✓ | 4 | `dialog-handling` | ✓ | 0 | 1 | payload |
 | `extract-merged-table` | 表格 | `/table` ✓ | 2 | `extract-merged-table` | ✓ | 1 | 4 | page |
 | `form-validation` | 报名表 | `/validate` ✓ | 5 | `form-validation` | ✓ | 4 | 1 | page |
+| `html5-drag-drop` | 拖放 | `/h5drag` ✓ | 3 | `html5-drag-drop` | ✓ | 4 | 1 | page |
 | `infinite-scroll-hover-preview` | 信息流 | `/feed` ✓ | 6 | `infinite-scroll-hover-preview` | ✓ | 4 | 3 | page |
 | `knowledge-save-retrieve` | 知识库 | `/notes` ✓ | 3 | `knowledge-save-retrieve` | ✓ | 0 | 4 | storage |
 | `knowledge-search-fallback` | 打开很慢 | `/notes` ✓ | 3 | `knowledge-search-fallback` | ✓ | 0 | 3 | storage |
@@ -35,11 +36,11 @@
 | `read-select-options` | 最便宜 | `/shipping` ✓ | 4 | `read-select-options` | ✓ | 3 | 2 | page |
 | `readability-fix` | 美化 | `/article` ✓ | 3 | `readability-fix` | ✓ | 6 | 1 | page |
 | `recover-from-rejection` | 购买 | `/recover` ✓ | 5 | `recover-from-rejection` | ✓ | 7 | 2 | page |
-| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `html5-drag-drop` | ✓ | 6 | 2 | page |
+| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `rich-text-structure` | ✓ | 6 | 2 | page |
 | `site-search` | 站内搜 | `/search` ✓ | 5 | `find-skill-skillhub` | ✓ | 3 | 4 | page |
 | `undo-last-action` | 撤销 | `/undo` ✓ | 7 | `undo-last-action` | ✓ | 2 | 2 | page |
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `video-playback-verify` | 视频在播 | `/video` ✓ | 4 | `video-playback-verify` | ✓ | 8 | 4 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 4 | 1 | page |
 
-**合计**：31 个剧本；页面判据 107 条、回执判据 66 条；夹具路由已接线 31/31；E2E 已引用 31/31；有内置技能 31/31。
+**合计**：32 个剧本；页面判据 111 条、回执判据 67 条；夹具路由已接线 32/32；E2E 已引用 32/32；有内置技能 32/32。

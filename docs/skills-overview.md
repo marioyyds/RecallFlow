@@ -9,9 +9,9 @@
 | 指标 | 值 |
 | --- | --- |
 | 技能总数 | **41** |
-| 有剧本归属（真浏览器验收覆盖） | **31** |
-| **孤儿技能**（无验收覆盖） | **10** |
-| 能力剧本总数 | **31** |
+| 有剧本归属（真浏览器验收覆盖） | **32** |
+| **孤儿技能**（无验收覆盖） | **9** |
+| 能力剧本总数 | **32** |
 
 ## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）
 
@@ -56,6 +56,7 @@
 | `download-verify` | 下载文件：页面上不会变，凭据只能来自浏览器事件 | browser-automation | `download-verify` |
 | `extract-merged-table` | 表格提取（含合并单元格，按列对齐） | browser | `extract-merged-table` |
 | `form-validation` | 提交没反应：HTML5 原生校验静默拦住（页面上什么都不说） | browser-automation | `form-validation` |
+| `html5-drag-drop` | HTML5 原生拖放（「看起来拖过去了」不等于页面收到了） | browser-automation | `html5-drag-drop` |
 | `infinite-scroll-hover-preview` | 无限滚动 + hover 预览（滚到底才加载，预览只在悬停后出现） | browser-automation | `infinite-scroll-hover-preview` |
 | `knowledge-save-retrieve` | 知识库：存进去要能原样取回来（同一个网址会互相覆盖） | knowledge | `knowledge-save-retrieve` |
 | `knowledge-search-fallback` | 知识库检索查不到时（查不到 ≠ 没有） | knowledge | `knowledge-search-fallback` |
@@ -173,7 +174,6 @@
 | `dialog-handling` | 浏览器对话框（confirm 阻塞 / prompt 要回填值） | browser-automation | **场景未收敛**：/dialog 夹具页已就绪，但 Playwright 的对话框管理与外部 attach 的 debugger 冲突（页面会直接死掉），需要换一套驱动方式。现状与已排除的原因见 docs/next-steps-handoff.md。 |
 | `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | 依赖第三方技能市场站点（外部服务），不适合做本地夹具；技能本身只是接口说明。 |
 | `highlight-key-points` | 划重点 / 高亮关键信息 | reading | 能力由 annotate 系列工具承担，已有工具级单测；页面侧只是"高亮生效"的视觉结果，自动断言价值低。 |
-| `html5-drag-drop` | HTML5 原生拖放（「看起来拖过去了」不等于页面收到了） | browser-automation | **本轮先落地夹具页与技能**：`/h5drag` 夹具页已就绪（5 个难点：原生拖放不走鼠标事件、`drop` 需 `dragover` 放行、payload 只能在 `drop` 里读、两个落点只认一个、归档卡片拖不动），且**难点机制已用探针实测生效**。剧本与 E2E 用例在下一步落地（骨架见 docs/remaining-work.md）。缺的判据是"模型是否用**真拖放事件**驱动、是否在 `drop` 里读 payload、是否**放错区域/空读**都能如实说"这一类 —— 没有它，这套动作就没有验收网。 |
 | `humanizer` | Humanizer（去 AI 味） | content-creation | 纯文案改写：输入与产出都在回复文本里，不涉及页面操作，没有可断言的页面状态 —— 造一个夹具页也只能验"模型改得对不对"，那是主观判断，不是 E2E 判据。 |
 | `remove-ads` | 去广告 / 屏蔽推广 | browser | 判据需要"隐藏得对不对"的人工确认（隐藏广告时不能连带藏掉正文）；已有的 mainContent 提醒是一条弱保障，但造不出可信的"广告与正文同构"夹具来自动断言。**最小可行验收**（未做，留给接手者）：夹具页放一个 `#ad-slot` 广告块 + 与它同容器的正文段落，判据 = 广告块不可见 **且** 正文可见。 |
 | `summarize` | Summarize（总结） | reading | 纯文案处理（对已有内容做摘要），不涉及页面操作，没有可断言的页面状态。 |

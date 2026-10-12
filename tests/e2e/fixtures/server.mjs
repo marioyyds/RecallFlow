@@ -3334,6 +3334,37 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 场景：**HTML5 原生拖放**（剧本 `html5-drag-drop`，夹具页 `/h5drag`）
+    //   ⚠ 与 `cdp-drag-slider`（鼠标事件型滑块）是**两回事**：原生拖放**不走鼠标事件**，
+    //   必须派发真的 `DragEvent`；落点要先 `dragover`（放行），payload **只能在 `drop` 里读**。
+    //   探针已实测：夹具页**不查 `isTrusted`** ⇒ `new DataTransfer()` + `DragEvent` 就能驱动 ✓
+    //   ⚠ 用**计数器**推进（`toolResults.length`），不要用"回执里有没有某串"推进 ✗
+    //   工具集与 fixtures/playbooks.mjs 的 'html5-drag-drop' 对齐（契约门禁保证不漂移）。
+    if (userText.includes(PLAYBOOKS['html5-drag-drop'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      // **初始证据**：此刻页面上还没有任何工单被收下（阴性起点，也证明"收下"不是初始状态）
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '#dd-result' }); return; }
+      // 真拖放：构造 DataTransfer → **先 dragover 再 drop**（顺序是承重的）→ payload 在 drop 里被页面读走。
+      // ⚠ 代码字符串里**不用**反引号 / 模板拼接（外层是模板字符串）
+      if (done === 2) {
+        toolStep(res, 'run_javascript', {
+          engine: 'page',
+          code: 'var dt = new DataTransfer(); dt.setData("text/plain", "RF-7391");' +
+            ' var card = document.getElementById("dd-card"); var right = document.getElementById("dd-right");' +
+            ' card.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }));' +
+            ' right.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));' +
+            ' right.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));' +
+            ' return { dd: window.__dd, result: document.getElementById("dd-result").textContent };',
+        });
+        return;
+      }
+      // 读回**页面状态**（"我拖过去了"不算证据：要看落点真的收下了、有没有放错 / 空读）
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#dd-result' }); return; }
+      finalText(res, '已用真拖放事件把工单 RF-7391 落到收件区：页面读回「已收下 RF-7391（落点：dd-right）」，放错 0 次、空读 0 次。', 90);
+      return;
+    }
+
     if (userText.includes('来张截图')) {
       const done = toolResults.length;
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }

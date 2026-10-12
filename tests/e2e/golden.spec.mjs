@@ -2348,5 +2348,60 @@ test('golden: 富文本 —— 结构要真的改上（选区 / 可信输入 / �
   await page.close();
 });
 
+// 能力验收（复杂场景）：**HTML5 原生拖放**（playbook 'html5-drag-drop'，夹具页 /h5drag）。
+//
+// 难点全部造在夹具页里，并且已用探针**实测生效**（不是"页面能打开"就算数）：
+//   ① 原生拖放**不走鼠标事件** ⇒ 合成 mousedown/mousemove 根本不触发 dragstart/drop ✗
+//   ② 落点必须先在 `dragover` 里 `preventDefault()` 放行，否则 `drop` 被浏览器吞掉 ✗
+//   ③ payload **只能在 `drop` 里读**（在 `dragover` 里读是空串，页面记 emptyDrops++）✗
+//   ④ 两个落点只有一个接受 `RF-7391`（放错记 wrongZone++）✗
+//   ⑤ 迷惑项：归档卡片看着能拖，但它的 `dragstart` 里 `preventDefault()` 取消了拖放（fakeDrags++）✗
+// 双层判据：**页面状态**（落点真的收下了、没有放错/空读）AND **模型回执**（RF-7391 真的到手）。
+test('golden: HTML5 拖放 —— 「看起来拖过去了」不等于页面收到了', async () => {
+  // 剧本用 `run_javascript({engine:"page"})`：默认沙箱依赖 eval（MV3 扩展自身 CSP 不允许），
+  // 实际总是落到页面主世界 ⇒ **必须开 CDP**；且它是 alwaysRequireApproval，必须自动批审批。
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/h5drag');
+
+  // ---- 基线：难点真的存在（全部先于 agent 运行）----
+  const dd0 = await page.evaluate(() => window.__dd);
+  expect(dd0.acceptedDrops, '初始就收下过工单：那"必须真的拖放才收下"这个难点不成立').toBe(0);
+  expect(dd0.drops, '初始就有 drop 计数：难点不成立').toBe(0);
+  await expect(page.locator('#dd-result')).toHaveText('尚未收到任何工单');
+  // ⑤ 迷惑项：拖归档卡片只记 fakeDrags，**不产生 drop**（它的 dragstart 被 preventDefault 取消）
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    document
+      .getElementById('dd-fake')
+      .dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt }));
+  });
+  const dd1 = await page.evaluate(() => window.__dd);
+  expect(dd1.fakeDrags, '归档卡片的 dragstart 没被页面记下').toBeGreaterThan(0);
+  expect(dd1.drops, '被取消的 dragstart 竟然还产生了 drop —— 那它不是迷惑项').toBe(dd0.drops);
+  expect(dd1.acceptedDrops, '归档卡片竟然被收下了 —— 那它不是迷惑项').toBe(dd0.acceptedDrops);
+
+  // 复位到干净起点，再让 agent 从头做（与富文本/分页/多候选几条用例同样的处理）
+  await page.reload();
+  resetLlmRequests();
+  const stopApproveDrop = autoApprove(page);
+  try {
+    await sendInstruction(page, PLAYBOOKS['html5-drag-drop'].eval.instruction);
+
+    // ---- 双层判据 ①：页面状态 ----
+    await expect.poll(() => page.evaluate(() => window.__dd.acceptedDrops), { timeout: 90_000 }).toBeGreaterThan(0);
+    const dd2 = await page.evaluate(() => window.__dd);
+    expect(dd2.wrongZone, '工单被放进了不接受它的区域').toBe(0);
+    expect(dd2.emptyDrops, '出现了"落下了但 payload 是空串" —— 说明 payload 没在 drop 里读').toBe(0);
+    expect(await page.textContent('#dd-result'), '页面结果区里不是那张工单').toContain('RF-7391');
+
+    // ---- 双层判据 ②：模型回执（RF-7391 必须真的到手）----
+    await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('RF-7391');
+  } finally {
+    await stopApproveDrop();
+  }
+
+  await page.close();
+});
+
 
 
