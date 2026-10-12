@@ -577,3 +577,22 @@ i=18..24 h=366 t=0  c=199 dist=167   ← 第二块挂载后：scrollTop **被重
 
 **本轮结束状态**：临时测量代码**已回退** ✓；思考用例 `1 passed` ✓；全量 E2E 绿 ✓；(b) 仍未完成，
 但**根因已从"置底没生效"修正为"挂第二块时被重置到顶部"** ✓ —— 这是一次有价值的修正 ✓
+
+### (b) 追查"谁把 scrollTop 归零"：**已缩小到两处候选**（第 91 轮）
+
+**重要的排除**：全文件**没有任何一处**把 `scrollTop` 写成 **0** ✗（14 处全是**受守卫的置底**
+`if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;` ✓），
+`mountThinkSegment`（`chat.js:604`）也只是**新建块 + 追加**（没有重建 ✗）⇒
+**嫌疑指向"整块 DOM 被重建"** ✓（重建本身就会把 scrollTop 归零 ✓）
+
+**两处候选（按嫌疑排序）**：
+1. **`chat.js:1882`** —— `flowEl = document.createElement('div'); flowEl.className = 'agent-flow';` +
+   `aiMsg.appendChild(flowEl)` ⇒ **每次调用都会造一个新的流容器** ✗
+   ⇒ 要确认它是不是在**一轮之内**也会被调用（若"正文开始 / 收到 chunk"时调用了它，就会把流容器换新 ✓
+   而新容器插入会把滚动位置归零 ✓ ⇒ 与观测到的 i=18 时刻（第二块挂载 + 正文到达 ✓）**高度吻合** ✓）
+2. **`chat.js:1645`** —— `flowEl = null;`（某个重置路径 ✓）⇒ 之后第一次 append 会走别的分支 ✓
+
+**插桩方案（下一轮照做，一次定位）**：在 `chat.js` 里临时给这两处 + 每一处置底加 `window.__probe`
+（`pins` / `newFlow` / `nullFlow` / `lastScrollWrite` ✓），跑同一条思考用例读序列 ✓
+⇒ 若 `newFlow` 恰好在 i=18 出现 ⇒ 根因确定 ✓；之后**改实现 + 加门禁**（"挂块/开新流后必须仍在底部" ✓），
+⚠ 仍**不许**放宽阈值凑绿 ✗
