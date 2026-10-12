@@ -53,7 +53,10 @@ test.afterAll(async () => {
 async function waitForRunToFinish(page) {
   const stop = page.locator(PANEL + ' .stop-btn');
   await stop.waitFor({ state: 'visible', timeout: 30_000 });
-  await stop.waitFor({ state: 'hidden', timeout: 170_000 });
+  // ⚠ 上限从 170s 提到 280s：第五轮实测 `multi-candidate-convergence` 曾因"等刷新"绕圈
+  //   在 2.9m 处被**原来的上限**掐掉（不是模型做不完，而是它被掐在收尾前）。
+  //   配套地，夹具把"等刷新"的代价从 2000ms 降到 700ms（见 server.mjs 的 REFRESH_MS）。
+  await stop.waitFor({ state: 'hidden', timeout: 280_000 });
 }
 
 /** 把模型的工具轨迹打印出来 —— 失败时**先看它**，再决定改什么。
