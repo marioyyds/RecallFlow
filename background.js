@@ -102,7 +102,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // 交接包：面板复制「会话标识」时写入；外部 agent 凭标识经 MCP 取回。
   if (msg && msg.type === 'handoff:save') {
-    saveHandoff(msg.record || {})
+    // ⚠ 必须把**完整轨迹**一起转交：面板发来的是**已建好的 record**（里面只有交付用的摘要），
+    //   若不带 `trailItems`，`saveHandoff` 只能从摘要重算"全量" ⇒ 独立 key 里存的其实是摘要 ✗
+    //   （`trailItems` 最多 MAX_TRAIL_FULL 步、并受 MAX_FULL_TRAIL_BYTES 约束）
+    saveHandoff(msg.record || {}, { trailItems: msg.trailItems })
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;

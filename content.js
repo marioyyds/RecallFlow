@@ -5389,22 +5389,26 @@
       }
     }
     let record;
+    let trailItems = [];
     try {
       record = buildHandoffRecord({
         id,
         pageUrl: location.href,
         pageTitle: document.title,
+        // ⚠ 这一句**必须**保持对 `messagesForExport()` 的直接调用：门禁
+        //   `export-completeness-wiring`（「两条路径都走 messagesForExport」）就盯它
         messages: messagesForExport(),
         pickedElements: picked,
         selection: lastText,
         consoleEntries
       });
+      trailItems = prepareHandoffTrail(buildToolTrail(messagesForExport())).items;
     } catch (e) {
       return false;
     }
     return await new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({ type: "handoff:save", record }, (resp) => {
+        chrome.runtime.sendMessage({ type: "handoff:save", record, trailItems }, (resp) => {
           resolve(!chrome.runtime.lastError && !(resp && resp.ok === false));
         });
       } catch (e) {

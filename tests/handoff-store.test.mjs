@@ -3,6 +3,40 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { saveHandoff, getHandoff, listHandoffs, KEY_PREFIX, TRAIL_KEY_PREFIX, INDEX_KEY, MAX_RECORDS } from '../lib/shared/handoff-store.js';
+import { buildHandoffRecord, buildToolTrail, prepareHandoffTrail, MAX_TOOL_TRAIL } from '../lib/shared/handoff.js';
+
+// ⚠ 这条钉住的是 ② 「存全量」在**生产链路**上曾经整体失效的那个点：
+//   面板发来的是**已建好的 record**（里面 `toolTrail` 只是交付用摘要），
+//   而 `saveHandoff` 上一版会对 record **再建一次** ⇒ 独立 key 里存的其实是摘要 ✗
+//   （完整轨迹根本没离开面板）⇒ 这里同时钉住"不带 extras 就是病根"与"带了才是全量"。
+test('saveHandoff：record 形态必须靠 extras.trailItems 才能真的存全量', async () => {
+  const { store } = installStorage();
+  const id = idFor(999);
+  const parts = [];
+  for (let i = 0; i < 120; i++) {
+    parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
+    parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
+  }
+  const messages = [{ role: 'assistant', parts }];
+  const record = buildHandoffRecord({ id, pageUrl: 'https://x/', pageTitle: 't', messages });
+  assert.equal(record.toolTrail.length, MAX_TOOL_TRAIL, '记录里交付的只是摘要');
+  assert.equal(record.trailStored, 120, '记录如实写着"可检索 120 步"');
+
+  await saveHandoff(record);
+  assert.equal(
+    (store[TRAIL_KEY_PREFIX + id] || []).length,
+    MAX_TOOL_TRAIL,
+    '不带完整轨迹时，独立 key 只能存到摘要 —— 这正是上一版的病根（记录说 120 步可检索，实际只有摘要）'
+  );
+
+  const trailItems = prepareHandoffTrail(buildToolTrail(messages)).items;
+  await saveHandoff(record, { trailItems });
+  assert.equal(
+    (store[TRAIL_KEY_PREFIX + id] || []).length,
+    120,
+    '面板把完整轨迹一起带来之后，独立 key 必须真的存全量'
+  );
+});
 
 // 安装 chrome.storage.local 桩（行为对齐真实 API：get 接受字符串或数组）。
 function installStorage() {
