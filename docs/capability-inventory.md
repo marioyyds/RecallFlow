@@ -35,7 +35,7 @@
 | `read-select-options` | 最便宜 | `/shipping` ✓ | 4 | `read-select-options` | ✓ | 3 | 2 | page |
 | `readability-fix` | 美化 | `/article` ✓ | 3 | `readability-fix` | ✓ | 6 | 1 | page |
 | `recover-from-rejection` | 购买 | `/recover` ✓ | 5 | `recover-from-rejection` | ✓ | 7 | 2 | page |
-| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `rich-text-structure` | ✓ | 6 | 2 | page |
+| `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `html5-drag-drop` | ✓ | 6 | 2 | page |
 | `site-search` | 站内搜 | `/search` ✓ | 5 | `find-skill-skillhub` | ✓ | 3 | 4 | page |
 | `undo-last-action` | 撤销 | `/undo` ✓ | 7 | `undo-last-action` | ✓ | 2 | 2 | page |
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |

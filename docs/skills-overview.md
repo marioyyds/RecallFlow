@@ -8,9 +8,9 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **40** |
+| 技能总数 | **41** |
 | 有剧本归属（真浏览器验收覆盖） | **31** |
-| **孤儿技能**（无验收覆盖） | **9** |
+| **孤儿技能**（无验收覆盖） | **10** |
 | 能力剧本总数 | **31** |
 
 ## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）
@@ -84,14 +84,15 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 37 |
-| `get_page_snapshot` | 35 |
-| `inspect_element` | 33 |
-| `click_element` | 28 |
+| `complete_task` | 38 |
+| `get_page_snapshot` | 36 |
+| `inspect_element` | 34 |
+| `click_element` | 29 |
 | `type_text` | 11 |
 | `wait_for_element` | 10 |
 | `select_option` | 8 |
 | `read_current_page` | 6 |
+| `run_javascript` | 4 |
 | `scroll_page` | 4 |
 | `add_entry` | 3 |
 | `annotate` | 3 |
@@ -99,7 +100,6 @@
 | `get_ax_snapshot` | 3 |
 | `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
-| `run_javascript` | 3 |
 
 （全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）
 
@@ -107,14 +107,15 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 37 |
-| `get_page_snapshot` | 35 |
-| `inspect_element` | 33 |
-| `click_element` | 28 |
+| `complete_task` | 38 |
+| `get_page_snapshot` | 36 |
+| `inspect_element` | 34 |
+| `click_element` | 29 |
 | `type_text` | 11 |
 | `wait_for_element` | 10 |
 | `select_option` | 8 |
 | `read_current_page` | 6 |
+| `run_javascript` | 4 |
 | `scroll_page` | 4 |
 | `add_entry` | 3 |
 | `annotate` | 3 |
@@ -122,7 +123,6 @@
 | `get_ax_snapshot` | 3 |
 | `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
-| `run_javascript` | 3 |
 | `fetch_webpage` | 2 |
 | `click_at` | 1 |
 | `drag_element` | 1 |
@@ -173,6 +173,7 @@
 | `dialog-handling` | 浏览器对话框（confirm 阻塞 / prompt 要回填值） | browser-automation | **场景未收敛**：/dialog 夹具页已就绪，但 Playwright 的对话框管理与外部 attach 的 debugger 冲突（页面会直接死掉），需要换一套驱动方式。现状与已排除的原因见 docs/next-steps-handoff.md。 |
 | `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | 依赖第三方技能市场站点（外部服务），不适合做本地夹具；技能本身只是接口说明。 |
 | `highlight-key-points` | 划重点 / 高亮关键信息 | reading | 能力由 annotate 系列工具承担，已有工具级单测；页面侧只是"高亮生效"的视觉结果，自动断言价值低。 |
+| `html5-drag-drop` | HTML5 原生拖放（「看起来拖过去了」不等于页面收到了） | browser-automation | **本轮先落地夹具页与技能**：`/h5drag` 夹具页已就绪（5 个难点：原生拖放不走鼠标事件、`drop` 需 `dragover` 放行、payload 只能在 `drop` 里读、两个落点只认一个、归档卡片拖不动），且**难点机制已用探针实测生效**。剧本与 E2E 用例在下一步落地（骨架见 docs/remaining-work.md）。缺的判据是"模型是否用**真拖放事件**驱动、是否在 `drop` 里读 payload、是否**放错区域/空读**都能如实说"这一类 —— 没有它，这套动作就没有验收网。 |
 | `humanizer` | Humanizer（去 AI 味） | content-creation | 纯文案改写：输入与产出都在回复文本里，不涉及页面操作，没有可断言的页面状态 —— 造一个夹具页也只能验"模型改得对不对"，那是主观判断，不是 E2E 判据。 |
 | `remove-ads` | 去广告 / 屏蔽推广 | browser | 判据需要"隐藏得对不对"的人工确认（隐藏广告时不能连带藏掉正文）；已有的 mainContent 提醒是一条弱保障，但造不出可信的"广告与正文同构"夹具来自动断言。**最小可行验收**（未做，留给接手者）：夹具页放一个 `#ad-slot` 广告块 + 与它同容器的正文段落，判据 = 广告块不可见 **且** 正文可见。 |
 | `summarize` | Summarize（总结） | reading | 纯文案处理（对已有内容做摘要），不涉及页面操作，没有可断言的页面状态。 |
