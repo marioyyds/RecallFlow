@@ -17,7 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { previewArgsJson, formatOmittedItems, OMIT_MARK_START, OMIT_MARK_END } from '../lib/page/transcript.js';
+import { previewArgsJson, formatOmittedItems, OMIT_MARK_START, OMIT_MARK_END, OMIT_ARGS_KEY, serializeConversationMessages } from '../lib/page/transcript.js';
 
 const debugHookSrc = fs.readFileSync('lib/page/debug-hook.js', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/page/transcript.js', 'utf8');
@@ -62,7 +62,39 @@ test('④ debug-hook（MAIN world 裸脚本，不能 import）必须用**同一�
   assert.ok(debugHookSrc.includes('⟨…省略 '), 'debug-hook 必须用同一字面量');
 });
 
-test('⑤ 控制台数据的省略标记不会被误当成字段名（键也要可辨）', () => {
+test('⑤ 省略标记不会被误当成字段名（**两个**渲染器都要扫）', () => {
   // 旧写法 `out['…'] = '共 N 个字段'` 里，键名 `…` 看起来像一个真实字段名
-  assert.ok(!/out\['…'\]\s*=/.test(debugHookSrc), '不该再用 `…` 当键名');
+  assert.ok(!/out\['…'\]\s*=/.test(debugHookSrc), 'debug-hook 不该再用 `…` 当键名');
+  // ⚠ 上面这条以前**只扫了 debug-hook**：同一个坑在本文件（导出渲染器）里还留着 ——
+  // clipPart 把整个 args 换成 `{ '…': '参数过长（945 字符），已省略' }`，
+  // 键名与真实参数名同形；previewArgsJson 退化时也一样。收口时才发现（漏扫 = 门禁没牙齿）。
+  assert.ok(!/\{\s*'…':/.test(transcriptSrc), 'transcript.js 不该再用 `…` 当键名');
+  assert.match(transcriptSrc, /OMIT_ARGS_KEY/, '退化说明要共用统一的元信息键名常量');
+});
+
+test('⑥ 参数太长被整段替换时，键名必须是**可辨的元信息**，且要说清原文取不回', () => {
+  // 行为面：走真实的序列化入口（clipPart 那条路）
+  const args = { a: 'z'.repeat(600), b: 'y'.repeat(600) };
+  const ser = serializeConversationMessages([{ role: 'assistant', parts: [{ type: 'tool-call', name: 'read_current_page', args }] }]);
+  const parsed = JSON.parse(JSON.stringify(ser[0].parts[0].args));
+  const keys = Object.keys(parsed);
+  assert.equal(keys.length, 1, '应当只剩一条说明，实际：' + JSON.stringify(parsed));
+  assert.equal(keys[0], OMIT_ARGS_KEY, '键名要用统一常量，不能是 `…`');
+  assert.ok(keys[0].startsWith('⟨'), '键名要落在一眼可辨的元信息形态族里');
+  assert.match(String(parsed[keys[0]]), /取不回/, '原文没有留存 ⇒ 必须明说取不回（A5 判据）');
+
+  // 行为面：previewArgsJson 的"退化为字段名列表"那条路
+  const long = { a: 'x'.repeat(200), b: 'y'.repeat(200), c: 'z'.repeat(200) };
+  const degraded = JSON.parse(previewArgsJson(long));
+  assert.deepEqual(Object.keys(degraded), [OMIT_ARGS_KEY], '退化时同样是可辨的元信息键名：' + JSON.stringify(degraded));
+
+  // 牙齿：旧形态（键名 `…`）确实会被上面的判据抓住
+  const legacy = JSON.parse(JSON.stringify({ '…': '参数过长（945 字符），已省略' }));
+  assert.ok(!Object.keys(legacy)[0].startsWith('⟨'), '旧形态的键名 `…` 不满足"可辨" —— 这就是被修掉的缺陷');
+});
+
+test('⑦ 正常参数不受影响：键名与内容逐字节保留', () => {
+  const args = { texts: ['甲', '乙'], query: '两个空格  也要保留' };
+  const ser = serializeConversationMessages([{ role: 'assistant', parts: [{ type: 'tool-call', name: 'x', args }] }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(ser[0].parts[0].args)), args, '未超长时一个字节都不许改');
 });

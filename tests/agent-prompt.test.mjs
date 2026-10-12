@@ -176,11 +176,37 @@ test('compactSessionMessages: 保留 system + 配对消息', () => {
   assert.equal(out.length, 4);
 });
 
-test('compactSessionMessages: 尾部超过 39 条时只保留最近', () => {
+// ⚠ 这条用例**被改写过**（旧版本断言 `out.length === 40` 且 `out[1].content === 'u11'`）：
+// 那两个断言把**静默丢弃**当契约钉住了 —— 落盘快照会丢 11 条消息，而恢复时模型看到的
+// 只是"对话就这么短"，没有任何提示 ✗。现在断言更严：既要有说明，也要保住最近 39 条。
+test('compactSessionMessages: 尾部超过 39 条时只保留最近，且**必须说明丢了多少**', () => {
   const msgs = [{ role: 'system', content: 'sys' }];
   for (let i = 0; i < 50; i++) msgs.push({ role: 'user', content: 'u' + i });
   const out = compactSessionMessages(msgs);
-  assert.equal(out.length, 40);
-  assert.equal(out[1].content, 'u11');
+  assert.equal(out[0].role, 'system');
+  assert.equal(out.length, 41, 'system + 1 条说明 + 最近 39 条');
+  assert.match(out[1].content, /更早的 11 条消息未随快照保存/, '丢了多少必须写明：' + JSON.stringify(out[1].content));
+  assert.match(out[1].content, /取不回原文/, '这类消息没有 id 可给 ⇒ 必须明说取不回（A5 判据）');
+  assert.equal(out[2].content, 'u11', '保住的是最近 39 条');
+  assert.equal(out[out.length - 1].content, 'u49');
+
+  // 没丢东西时不许凭空多出说明（避免每次都塞废话）
+  const short = compactSessionMessages([{ role: 'system', content: 'sys' }, { role: 'user', content: 'u' }]);
+  assert.equal(short.length, 2);
+  assert.ok(!short.some((m) => /未随快照保存/.test(String(m.content))));
+});
+
+test('compactSessionMessages: 单条超长时**留尾 + 前置说明**（静默 slice 会让恢复后的模型看不到开头）', () => {
+  const long = 'A'.repeat(13000) + 'TAIL_MARK';
+  const out = compactSessionMessages([{ role: 'user', content: long }]);
+  assert.equal(out.length, 1);
+  const text = out[0].content;
+  assert.match(text, /只保留末尾/, '必须说明被截掉的是开头：' + text.slice(0, 40));
+  assert.match(text, /共 13009 字符/);
+  assert.match(text, /取不回原文/, '要明说取不回（没有 id 可给）');
+  assert.ok(text.endsWith('TAIL_MARK'), '保留的应当是**尾部**（结论通常在后面）');
+  // 正常长度逐字节不变
+  const ok = compactSessionMessages([{ role: 'user', content: 'A'.repeat(12000) }]);
+  assert.equal(ok[0].content, 'A'.repeat(12000), '正好等于上限时一个字都不许多');
 });
 

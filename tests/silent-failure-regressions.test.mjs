@@ -377,6 +377,11 @@ test('truncateEvidenceText：截断必须如实标注长度，不能让人误以
   // 必须出现「共 N 字符 / 已截断」的说明，否则调用方基于片段下结论而不自知。
   assert.match(long.text, /共 50 字符/);
   assert.match(long.text, /截断/);
+  // ⚠ 只说"少了"还不够（本仓库对截断的判据：给可恢复 id，或明确说取不回 + 怎么拿回来）：
+  // `browser_read` 的原文不进任何暂存 ⇒ 必须说清"没有 id 可取回"，并给出唯一可行的下一步
+  //（调大 maxChars 重新调用）—— 否则调用方只知道少了内容，不知道该做什么。
+  assert.match(long.text, /无法用 id 取回/, '要明确说取不回，不能暗示有 id');
+  assert.match(long.text, /maxChars/, '要给出可行的下一步（调大 maxChars 重读）');
 
   // 脏输入不得抛，也不得把上限算成 0（那会返回空正文，比不截断更危险）。
   assert.equal(truncateEvidenceText(null, 100).fullChars, 0);

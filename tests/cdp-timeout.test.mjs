@@ -20,10 +20,11 @@
 // 所以判据有三条：① 命令要超时；② 附加要超时；③ 超时后**不许留下毒缓存**。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 /** 装 chrome 桩。`hang: true` 表示 Chrome **永不回调**（真实发生过的情形）。 */
-function installChrome({ hang = true } = {}) {
-  const calls = { attach: 0, send: 0 };
+function installChrome({ hang = true, hangDetach = false } = {}) {
+  const calls = { attach: 0, send: 0, detach: 0 };
   const listeners = [];
   globalThis.chrome = {
     runtime: { lastError: null },
@@ -32,6 +33,10 @@ function installChrome({ hang = true } = {}) {
       attach(target, version, cb) {
         calls.attach += 1;
         if (!hang) cb();
+      },
+      detach(target, cb) {
+        calls.detach += 1;
+        if (!hangDetach) cb();
       },
       sendCommand(target, method, params, cb) {
         calls.send += 1;
@@ -90,6 +95,49 @@ test('⑤ 默认超时必须存在且有界（工具调用方不会自己传超�
   const cdp = await freshCdp();
   assert.ok(Number.isFinite(cdp.DEFAULT_CDP_TIMEOUT_MS), '要有默认超时常量');
   assert.ok(cdp.DEFAULT_CDP_TIMEOUT_MS > 0 && cdp.DEFAULT_CDP_TIMEOUT_MS <= 15000, '默认值应在 0~15s 内（agent 的包装是 15s）');
+});
+
+// ---------------- 不变式：**每一条** chrome.debugger 调用都有界 ----------------
+//
+// ①②③ 盯的是 attach / sendCommand。收口时逐行核对 cdp.js，发现**还有一条漏网**：
+// `detach` 把 `chrome.debugger.detach` 的回调直接包进 `new Promise(resolve => …)`，
+// 回调不触发时那条 promise **永不 settle** ✗
+//
+// 今天它还没造成挂起（调用方 `detachAll` 是"发射后不管"），所以症状为 0 ——
+// 但"每一条 CDP 调用都有界"是**不变式**：只要留一个例外，下一个人就会照抄那个例外。
+test('⑨ 解除附加（detach）也必须有界：回调永不返回时不许留下永不 settle 的 promise', async () => {
+  const { calls } = installChrome({ hang: false, hangDetach: true });
+  const cdp = await freshCdp();
+  await cdp.attach(11, { timeoutMs: 500 }); // 先真的附加成功（否则 detach 会提前 return）
+  const t0 = Date.now();
+  await cdp.detach(11, 120);
+  const ms = Date.now() - t0;
+  assert.ok(calls.detach >= 1, '应当真的调用过 chrome.debugger.detach');
+  assert.ok(ms < 2000, '应在超时附近返回而不是永不 settle，实际 ' + ms + 'ms');
+
+  // 牙齿：同一形状的**朴素实现**（不带超时）在同样的桩下压根不会 settle ——
+  // 证明上面那条"应在超时内返回"不是恒真的空断言。
+  let naiveSettled = false;
+  new Promise((resolve) => {
+    globalThis.chrome.debugger.detach({ tabId: 11 }, () => resolve());
+  }).then(() => {
+    naiveSettled = true;
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(naiveSettled, false, '朴素实现确实会永久挂住 —— 这就是本条要防的东西');
+});
+
+test('⑨b detach 的**源码**也必须包在 withTimeout 里（行为用例可能被桩绕过）', async () => {
+  const src = fs.readFileSync('lib/backend/cdp.js', 'utf8');
+  const m = /export async function detach\(([\s\S]*?)\n}/.exec(src);
+  assert.ok(m, '应能定位 detach 函数体');
+  assert.match(m[1], /withTimeout\(/, 'detach 必须走 withTimeout —— 否则回调不触发时 promise 永不 settle');
+  // 每条 chrome.debugger.* 调用都必须在 cdp.js 里（别处私自直连就会绕过这层保障）
+  const files = ['lib/assistant/target-manager.js', 'lib/assistant/tools.js', 'lib/bridge/relay.js'];
+  for (const f of files) {
+    const other = fs.readFileSync(f, 'utf8');
+    assert.ok(!/chrome\.debugger\.(attach|detach|sendCommand)\(/.test(other), f + ' 不得自己直连 chrome.debugger（会绕过超时层）');
+  }
 });
 
 // ---------------- 截图工具：阶梯重试必须受**总预算**约束 ----------------
@@ -167,4 +215,55 @@ test('⑧ 截图：正常路径不受影响（回读尺寸，成功返回）', a
   assert.equal(r.ok, true);
   assert.match(r.result, /已截图/);
   assert.ok(r.screenshot && r.screenshot.width === 800, '应带回尺寸供面板渲染');
+});
+
+// ---------------- ⑩ 阶梯只有一份实现：桥接侧也不许再漂一份 ----------------
+//
+// 收口时发现：`lib/bridge/relay.js` 的 `screenshotCapture` 把同一段降质阶梯**又抄了一遍**，
+// 而且抄漏了两件事（面板侧有、桥接侧没有）：**总预算**与**"超时 vs 附加失败"的区分**。
+// 实测症状：桥接那份三档各等默认 8s ⇒ 最坏 24s+；失败一律报"无法附加"（把人指向 DevTools 占用）。
+// 修法是把它抽成共享的 `captureWithLadder`（面板与桥接共用），并在这里钉住"两端都用它"。
+const { captureWithLadder, DEFAULT_SCREENSHOT_BUDGET_MS } = await import('../lib/assistant/screenshot-tool.js');
+
+test('⑩ captureWithLadder：预算约束 + 超时标记（桥接侧的失败语义靠它才有）', async () => {
+  let calls = 0;
+  const cdp = {
+    async screenshot(tabId, opts) {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, Math.min(Number(opts.timeoutMs) || 100, 100)));
+      throw new Error('CDP 命令 Page.captureScreenshot 未响应（' + opts.timeoutMs + 'ms 未响应）');
+    },
+  };
+  const ladder = [{ format: 'jpeg', quality: 70 }, { format: 'jpeg', quality: 50 }, { format: 'png' }];
+  const t0 = Date.now();
+  const r = await captureWithLadder({ cdp, tabId: 5, ladder, budgetMs: 150 });
+  const ms = Date.now() - t0;
+  assert.equal(r.data, '');
+  assert.equal(r.timedOut, true, '超时必须被标记出来（否则桥接只能笼统报"无法附加"）');
+  assert.ok(calls <= 2, '受预算约束：最多两档，实际 ' + calls);
+  assert.ok(ms < 1200, '总耗时应在预算附近，实际 ' + ms + 'ms');
+  assert.ok(r.deadline > t0, '要返回 deadline，供后续命令（Page.getLayoutMetrics）共用同一份预算');
+
+  // 牙齿：**朴素实现**（不带预算的 for 循环）在同样的桩下会试满三档 ——
+  // 证明"最多两档"不是恒真，而是预算真的在起作用。
+  let naive = 0;
+  for (let i = 0; i < ladder.length; i++) {
+    try {
+      await cdp.screenshot(5, { timeoutMs: 100 });
+    } catch (e) {
+      /* 与旧实现一样吞掉 */
+    }
+    naive += 1;
+  }
+  assert.equal(naive, 3, '朴素实现确实会走满三档（3 × 8s 才是最坏情况）');
+});
+
+test('⑩b 桥接的截图必须走共享阶梯（源码级：不许再抄一份）', () => {
+  const relaySrc = fs.readFileSync('lib/bridge/relay.js', 'utf8');
+  assert.match(relaySrc, /captureWithLadder\(/, 'relay 的 screenshotCapture 必须用共享实现');
+  assert.match(relaySrc, /shot\.timedOut/, '失败要按"超时 / 无法附加"分开报（原实现一律报无法附加）');
+  assert.ok(!/for \(let i = 0; i < ladder\.length; i\+\+\)/.test(relaySrc), 'relay 里不该再有自己那份阶梯循环');
+  // 两份真值不许各写一遍体积上限
+  assert.ok(!/MAX_B64\s*=\s*400000/.test(relaySrc), '体积上限应共用 MAX_SHOT_B64');
+  assert.ok(DEFAULT_SCREENSHOT_BUDGET_MS > 0 && DEFAULT_SCREENSHOT_BUDGET_MS < 15000, '默认预算要小于 agent 的 15s 包装');
 });

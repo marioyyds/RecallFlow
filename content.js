@@ -3337,7 +3337,10 @@
       } catch (e) {
         s = "";
       }
-      if (s.length > MAX_PART_ARGS_CHARS) out.args = { "\u2026": "\u53C2\u6570\u8FC7\u957F\uFF08" + s.length + " \u5B57\u7B26\uFF09\uFF0C\u5DF2\u7701\u7565" };
+      if (s.length > MAX_PART_ARGS_CHARS) {
+        out.args = {};
+        out.args[OMIT_ARGS_KEY] = "\u53C2\u6570\u8FC7\u957F\uFF08" + s.length + " \u5B57\u7B26\uFF09\uFF0C\u5DF2\u7701\u7565\uFF08\u539F\u6587\u672A\u7559\u5B58\uFF0C\u53D6\u4E0D\u56DE\uFF09";
+      }
     }
     return out;
   }
@@ -3386,6 +3389,7 @@
   function formatOmittedItems(n) {
     return OMIT_MARK_START + n + OMIT_MARK_END;
   }
+  var OMIT_ARGS_KEY = "\u27E8\u2026\u7701\u7565\u53C2\u6570\u27E9";
   function previewArgsJson(args, maxLen = 240) {
     const shorten = (v, depth) => {
       if (typeof v === "string") return v.length > 80 ? v.slice(0, 80) + "\u2026" : v;
@@ -3407,7 +3411,10 @@
       const json = JSON.stringify(shorten(args || {}, 0));
       if (json && json.length <= maxLen) return json;
       const keys = Object.keys(args || {});
-      return JSON.stringify(keys.length ? { "\u2026": "\u53C2\u6570\u8FC7\u957F\uFF0C\u5B57\u6BB5\uFF1A" + keys.slice(0, 8).join(", ") } : {});
+      if (!keys.length) return "{}";
+      const out = {};
+      out[OMIT_ARGS_KEY] = "\u53C2\u6570\u8FC7\u957F\uFF0C\u5B57\u6BB5\uFF1A" + keys.slice(0, 8).join(", ") + "\uFF08\u5176\u4F59\u672A\u5217\u51FA\uFF09";
+      return JSON.stringify(out);
     } catch (e) {
       return "{\u2026}";
     }

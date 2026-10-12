@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { estimateTokens, estimateMessagesTokens, collapseOldToolResults, normalizeHistory } from '../lib/assistant/context.js';
+import fs from 'node:fs';
+import { estimateTokens, estimateMessagesTokens, collapseOldToolResults, normalizeHistory, formatHistoryTruncationNotice, stripHistoryTruncationNotice, isDuplicateInstruction, HISTORY_MAX_CHARS } from '../lib/assistant/context.js';
 
 test('estimateTokens: CJK counts heavier than latin', () => {
   assert.ok(estimateTokens('你好世界') >= 4);
@@ -119,9 +120,82 @@ test('normalizeHistory: 受 maxMessages 限制，保留最近的', () => {
   assert.equal(out[out.length - 1].content, '最近问题');
 });
 
-test('normalizeHistory: 单条按 maxChars 截断', () => {
+// ⚠ 这条用例**被改写过**（旧版本断言 `out[0].content.length === 10`，即"静默截断"本身）：
+// 旧断言把**缺陷**当契约钉住了 —— 单条历史被 slice 到 10 个字符，而模型看到的是一段
+// 没有任何说明的前缀，它会把这半句当成用户原话 ✗
+// 现在的断言更严：既要截断，也要**标注**，且未超长时**一个字都不多**（正常路径不受影响）。
+test('normalizeHistory: 单条按 maxChars 截断，且截断必须说明（不许静默 slice）', () => {
   const out = normalizeHistory([{ role: 'user', content: 'x'.repeat(100) }], { maxChars: 10 });
-  assert.equal(out[0].content.length, 10);
+  assert.equal(out[0].content.slice(0, 10), 'x'.repeat(10), '送入的应当是前 10 个字符');
+  assert.match(out[0].content, /本条历史已截断/, '截断必须标注：否则模型把前半段当完整原文');
+  assert.match(out[0].content, /取不回原文/, '这条路径没有 id 可给 ⇒ 必须明说取不回（A5 判据）');
+  assert.match(out[0].content, /共 100 字符/, '要给出原文长度，便于判断值不值得追');
+  // 正常路径逐字节不变：未超长时不得多出任何标记
+  const short = normalizeHistory([{ role: 'user', content: 'x'.repeat(10) }], { maxChars: 10 });
+  assert.equal(short[0].content, 'x'.repeat(10));
+});
+
+test('normalizeHistory: 上一轮执行摘要超长也要标注（否则摘要看起来是完整的）', () => {
+  const out = normalizeHistory([{ role: 'assistant', content: 'ok', toolSummary: 'T'.repeat(900) }]);
+  assert.match(out[0].content, /上一轮执行摘要/);
+  assert.match(out[0].content, /摘要已截断，共 900 字符/, '摘要被截断必须标注');
+});
+
+// ⚠ 「更早的历史被丢掉」必须能被说明 —— 而且**两种上限都要算丢弃**。
+// 旧实现只在 token 预算那条路上置位：`for (…; picked.length < maxMessages; …)`
+// 让"条数上限"这条路上连置位点都没有 ⇒ 实测 20 条历史、maxMessages=3、开关打开，
+// 提示出现 **0 次**，模型把"只剩 3 轮"当成"对话本来就这么短"✗
+test('normalizeHistory: 条数上限裁掉更早历史时，开关打开就必须给出提示', () => {
+  const hist = [];
+  for (let i = 0; i < 20; i++) hist.push({ role: 'user', content: 'm' + i });
+  const on = normalizeHistory(hist, { maxMessages: 3, maxTokens: 8000, noticeOnTruncation: true });
+  assert.equal(on.length, 4, '3 条历史 + 1 条提示');
+  assert.match(on[0].content, /更早的对话/, '条目被裁掉必须有提示：' + JSON.stringify(on.map((m) => m.content)));
+  assert.deepEqual(on.slice(1).map((m) => m.content), ['m17', 'm18', 'm19']);
+  // 牙齿：旧行为（只在 token 那条路置位）在这个形状下给不出提示 ——
+  // 上面的断言若换成"没有提示也算通过"，这条用例就抓不到它。
+  const off = normalizeHistory(hist, { maxMessages: 3, maxTokens: 8000 });
+  assert.equal(off.some((m) => /更早的对话/.test(m.content)), false, '开关关闭时不加提示（显式 opt-in 仍保留）');
+});
+
+test('normalizeHistory: 生产调用方必须打开"裁剪要说"的开关（源码级门禁）', () => {
+  // 光有开关没用：这个 flag 曾经**只有测试传过**，生产两处调用都没打开
+  // ⇒ 提示在生产里一次也没出现过。这里直接把两处调用点钉住。
+  const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
+  const ragSrc = fs.readFileSync('lib/shared/rag.js', 'utf8');
+  assert.match(agentSrc, /normalizeHistory\(history, \{[\s\S]{0,200}?noticeOnTruncation: true/, 'agent.js 必须显式打开');
+  assert.match(ragSrc, /normalizeHistory\(payload\.history, \{[\s\S]{0,200}?noticeOnTruncation: true/, 'rag.js 必须显式打开');
+});
+
+test('stripHistoryTruncationNotice: 剥掉通知能拿回正文（agent.js 去重判据依赖它）', () => {
+  const notice = formatHistoryTruncationNotice(9000, 3000);
+  assert.equal(stripHistoryTruncationNotice('正文' + notice), '正文');
+  assert.equal(stripHistoryTruncationNotice('没有通知的正文'), '没有通知的正文');
+  assert.equal(stripHistoryTruncationNotice(null), '');
+  // 牙齒：通知在**中间**（不是末尾）时不许被剥掉 —— 否则会误判成"历史就是这段"
+  assert.equal(stripHistoryTruncationNotice('前' + notice + '后'), '前' + notice + '后');
+});
+
+// 这条判据原先写在 agent.js 里、**没有任何测试**（只有一条 E2E 间接覆盖），
+// 而它有一个字面量副本 `last.length === 3000`。A5 收口给截断历史追加说明时，
+// 那个副本会静默失效（症状：用户指令在请求里出现两次）。抽成纯函数 + 在这里钉住。
+test('isDuplicateInstruction: 未截断的重复指令要被认出并丢掉', () => {
+  assert.equal(isDuplicateInstruction('帮我看看这个按钮', '帮我看看这个按钮'), true);
+  assert.equal(isDuplicateInstruction('别的历史', '帮我看看这个按钮'), false);
+  assert.equal(isDuplicateInstruction('  ', '帮我看看这个按钮'), false, '空历史不是重复');
+  assert.equal(isDuplicateInstruction('帮我看看这个按钮', ''), false, '没有当前指令时不该丢历史');
+});
+
+test('isDuplicateInstruction: **被截断的**副本同样要认出（剥掉通知再比）', () => {
+  const instr = 'x'.repeat(4000); // 这条指令比 maxChars 长 ⇒ 历史里那份是它的截断副本
+  const out = normalizeHistory([{ role: 'user', content: instr }], { maxChars: HISTORY_MAX_CHARS, maxTokens: 8000 });
+  const lastContent = out[out.length - 1].content;
+  assert.ok(lastContent.length > HISTORY_MAX_CHARS, '前置：历史那条真的被截断并带了说明');
+  assert.equal(isDuplicateInstruction(lastContent, instr), true, '截断副本也算重复 —— 否则指令会出现两次');
+
+  // 牙齿：旧写法（拿**原始** content 与字面量 3000 比）在同样的输入下判不出来。
+  const legacy = (lastRaw, instruction) => instruction.startsWith(lastRaw) && lastRaw.length === 3000;
+  assert.equal(legacy(lastContent, instr), false, '旧写法确实认不出（长度已不是 3000）—— 这就是本条要防的静默失效');
 });
 
 test('normalizeHistory: token 预算裁掉更早内容并给出提示', () => {

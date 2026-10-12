@@ -241,9 +241,156 @@ VISION_ENABLED ? '' : '<这里原样保留当时那段"你看不到图像"的文
 2. **薄技能充实或合并**：`remove-ads`(246) / `clip-to-knowledge`(292) / `userscript-task`(357)
    —— 注意这**三个同时是孤儿技能** ⇒ 它们是最弱的一环；要么补剧本、要么明确承认只是文案层 ✓
 
-## 五、② ③ 已收口（无需再动）
+## 五、② 已收口；③（A3/A4/A5）本轮**逐条复核**后的结论
 
-- ② 会话容量：handoff 全量存储 + 按需分段取 + 面板两档导出 + 对话持久化上限重设 ✓
-- ③ A3：CDP 层自己超时 + 禁毒缓存 + 截图阶梯总预算 ✓
-  A4：省略标记不再与数据同形（并纠正了我两次误判 ✓）
-  A5：验证链路可达，并把跨模块格式耦合抽成单一来源 ✓
+> **本节是重写的。** 原文只有三行结论（"已收口 + 禁毒缓存 + 单一来源 ✓"），
+> 没有 file:line、没有测试名、没有命令输出 —— 属于"结论先行、证据缺失"，而且**已经过期**：
+> 逐行核对时发现 A3 还有一条 CDP 调用没有超时、桥接侧的截图阶梯**根本没修**、
+> A4 的标记形态在**两个渲染器**里只修了一个、A5 有一条**完全静默**的截断路径。
+> 以下每条都给：判据 → 现状（file:line）→ 测试 → 实跑命令 → **没做到的部分**。
+
+### 5.1 A3：CDP 每条命令都要自己超时 —— **部分收口 → 本轮补齐后 = 已收口（仍有一处未复现）**
+
+复核方法：`git grep -n "chrome\.debugger"` 找出**全部**入口，再逐个看调用链；
+`git grep -n "cdp\."` 找出所有调用方，确认没有任何一处绕过 `command/attach/sendRaw`。
+
+| 判据 | 现状（file:line） | 结论 |
+| --- | --- | --- |
+| 每条命令有超时 | `lib/backend/cdp.js:138` `command()` → `sendRaw()`（`:97`，`withTimeout` 包裹 `chrome.debugger.sendCommand`）；`attach()` `:25` 同样超时；`Page.enable` 走 `sendRaw` 默认超时（`:52` 那段） | ✓ |
+| 默认超时存在且 <15s | `lib/backend/cdp.js:118` `DEFAULT_CDP_TIMEOUT_MS = 8000` | ✓ |
+| attach 缓存的是**带超时**的 promise | `lib/backend/cdp.js:48` 缓存 `task`（= `withTimeout(...)`），注释在 `:45-47` 写明"缓存原始 promise 会让这个标签页再也用不了 CDP" | ✓ |
+| 失败清缓存（无毒化） | `lib/backend/cdp.js:54-58`（`catch` 里 `attached.delete(id)`）；`onDetach` 也清（`:19-23`） | ✓ |
+| **✗ 漏网的一条：`detach`** | 原 `detach()` 把 `chrome.debugger.detach` 的回调直接包进 `new Promise`，回调不触发 ⇒ **永不 settle** | **本轮补**：`lib/backend/cdp.js:72` 现在走 `withTimeout(...).catch(()=>{})`（解绑是尽力而为，超时吞掉但不许挂住） |
+| 截图阶梯受**总预算**约束 | 面板侧：`lib/assistant/screenshot-tool.js:69` `captureWithLadder`（预算 → 剩余预算下传 `timeoutMs`），默认 `:28` `DEFAULT_SCREENSHOT_BUDGET_MS = 12000`，`takeScreenshot` 的预算入口 `:124`；`Page.getLayoutMetrics` 共用同一份 deadline（`:148`） | ✓（12s < 15s） |
+| **✗ 桥接侧完全没有预算** | `lib/bridge/relay.js:234` `screenshotCapture` **自己抄了一份阶梯**：无 deadline、每档默认 8s（最坏 24s+），失败一律报"无法附加" | **本轮补**：`:263` 改用共享的 `captureWithLadder`，失败按 `:276` 的 `shot.timedOut` 分两种措辞 |
+| 超时 vs 附加失败**分开报** | 面板侧 `screenshot-tool.js` 的成功/失败分支；桥接侧同上 | ✓（两处都有门禁） |
+
+**实跑**：
+```
+node --test tests/cdp-timeout.test.mjs
+ℹ tests 12   ℹ pass 12   ℹ fail 0      （复核前是 8 条）
+```
+新增 4 条：⑨ detach 有界（含"朴素实现必挂"的牙齿断言）、⑨b detach 源码必须在 `withTimeout` 里 +
+其它文件不得直连 `chrome.debugger`、⑩ `captureWithLadder` 预算/超时标记（含"朴素循环会走满三档"的牙齿）、
+⑩b relay 必须走共享阶梯（源码级）。
+
+**⚠ 没有做到的部分（如实写）**：
+1. **"15s 挂起"的原始复现从未做到过** —— 本环境里没有可复现该现象的页面/会话
+   （当时的症状来自用户会话：`take_screenshot` 与 `list_frames` 各挂满 15 秒）。
+   本轮能证明的只是"**症状已由超时梯子兜住**"：Chrome 永不回调时，命令在
+   `DEFAULT_CDP_TIMEOUT_MS=8000` 内拒绝、阶梯在 12s 预算内收口、错误能指出卡在哪一步。
+   **原始复现未完成** ⇒ 不要写成"根因已在真实页面复现"。
+2. 桥接侧的预算**只有静态 + 单测证据**（`tests/cdp-timeout.test.mjs` ⑩），
+   **没有**在真实浏览器里对 `screenshotCapture` 跑过超时场景（E2E 不覆盖桥接截图）。
+
+### 5.2 A4：省略标记不能与数据同形 —— **本轮从"部分"补到"已收口"**
+
+复核方法：`git grep -n "共 N 项\|省略\|⟨…省略"`，逐个判断"这处产物**进不进模型上下文**"。
+
+**两条链路必须分清（这是本轮才写清的事）**：
+
+| 产物 | 谁生成 | 谁读 | file:line |
+| --- | --- | --- | --- |
+| **进模型上下文**：控制台/网络数据的省略标记 | 页面主世界的裸脚本 | `page_health` / `read_console` 的工具结果 → 模型消息 | `lib/page/debug-hook.js:92`（数组元素）、`:103`（对象键）；取数链：`lib/page/debug-capture.js` → `lib/page/chat.js:1014-1021` → `content.js:5356-5384` → `lib/bridge/relay.js:187` → MCP `page_health` |
+| **渲染器产物**（人看 / 导出 / 粘贴给别人） | 导出与面板渲染器 | 导出记录、面板持久化 —— **不进本次模型的请求** | `lib/page/transcript.js:247` `previewArgsJson`、`:133` `clipPart`、`:279` `toolLine`；调用方 `lib/page/chat.js:922/937` |
+
+| 判据 | 现状 | 结论 |
+| --- | --- | --- |
+| 省略标记用可辨形态（不是 `…共 N 项`） | `lib/page/transcript.js:226` `OMIT_MARK_START = '⟨…省略 '` / `formatOmittedItems`；debug-hook 用同一字面量（`:92`） | ✓ |
+| 数组元素形态不与数据同形 | 上面两处 | ✓ |
+| **✗ 键名仍与数据同形**：`clipPart` 与 `previewArgsJson` 的退化分支原先写 `{ '…': … }`（键名与真实字段名同形） | 旧形态在 `lib/page/transcript.js` 的 `clipPart`（现在 `:156`）与 `previewArgsJson` 退化分支（现在 `:271`）—— 改动前两处都是 `'…'` 键 | **本轮补**：新增 `:239` `OMIT_ARGS_KEY = '⟨…省略参数⟩'`，两处都改用它；`debug-hook.js:103` 早已是 `⟨…省略字段⟩` |
+| 门禁是否**两边都扫** | 旧 `tests/omit-mark.test.mjs` ⑤ **只正则扫 debug-hook.js** ⇒ transcript.js 那个坑一直没被管 | **本轮补**：⑤ 现在同时扫两个文件；新增 ⑥（行为面：键名必须是 `OMIT_ARGS_KEY`、要说"取不回"）、⑦（正常参数逐字节不变） |
+
+**实跑**：
+```
+node --test tests/omit-mark.test.mjs
+ℹ tests 7   ℹ pass 7   ℹ fail 0        （复核前 5 条）
+```
+
+**没有做到的部分**：`transcript.js:143-158` 的 `resultTruncated` / `textTruncated` 只是**布尔标记**，
+导出文本里读不出"截掉了多少"（`clipInline` 有"共 N 字符，已截断"，但 `clipPart` 只置位）。
+本轮**没有**改它 —— 它不改变"元信息 vs 内容"的形态判定（没有与数据同形），
+属于可读性问题；要改的话得连导出测试一起动，列在这里而不是假装已经修了。
+
+### 5.3 A5：每条截断路径都要"给可恢复 id"或"明说取不回" —— **本轮从"部分"补到"已收口"**
+
+复核方法：`git grep -n "formatTruncationNotice|collapseOldToolResults|MAX_TOOL_TRAIL|MAX_TRAIL_RESULT_CHARS|omittedBySize|noticeOnTruncation|truncateEvidenceText"`，
+逐个看调用点是否**既能说明又给得出下一步**。
+
+| 截断路径 | 现状（file:line） | 判据 |
+| --- | --- | --- |
+| 工具结果 > 6000 字符 | `lib/assistant/agent.js:1734` 用 `formatTruncationNotice(res.result.length, rid)`（格式单一来源 `:327`），全文进 `ctx.resultStore` | ✓ 有 id=res-N + 用法 |
+| 历史折叠（`collapseOldToolResults`） | `lib/assistant/context.js:261` `buildCollapsed`：认得出整条通知就**保住 id**（`id=…，可用 expand_result(id=…) 分段取回`），认不出就明说"**中段内容已省略且取不回原文**，请重新调用产生它的工具" | ✓ 两条分歧都有措辞 |
+| handoff 轨迹上限（`MAX_TOOL_TRAIL=60` / `MAX_TRAIL_RESULT_CHARS=600`） | `lib/shared/handoff.js:30/:32`；`buildHandoffRecord` 写 `trailTotal/trailStored/trailOmitted`（`:330-332`），全量另存一个 key（`:170` `MAX_TRAIL_FULL=200`），MCP 侧把三个数的语义写给调用方（`integrations/opencode/recallflow-mcp/index.js:930`、`:1085-1086`） | ✓ 可恢复的步数 vs 取不回的步数分开 |
+| 快照体积预算（`omittedBySize`） | 生产 `lib/page/page-text.js:606-617`；提示语 `lib/assistant/page-read-tools.js:168-182`（"另有 N 个…，需要它们时先 scroll_page…"） | ✓ |
+| 单图超预算（视觉） | `lib/assistant/vision.js:138-143`：全部被跳过时仍产出一条说明消息 | ✓ |
+| **✗ 历史单条超长（`normalizeHistory`）** | `lib/assistant/context.js:219` 原来是 `content.slice(0, maxChars)`——**一个字节的说明都没有** | **本轮补**：`:223` 追加 `formatHistoryTruncationNotice`（共 N 字符 / 只送入前 M / **被截掉的部分取不回原文**） |
+| **✗ 上一轮执行摘要超长** | 同一处 `toolSummary.slice(0, 400)` 静默 | **本轮补**：`:225-233` 追加 `⟨…摘要已截断，共 N 字符⟩`（上限改由 `:99` `HISTORY_SUMMARY_MAX_CHARS` 单一来源） |
+| **✗ 更早历史被丢弃（两种上限）** | `noticeOnTruncation` 这个开关**生产从未打开**（`git grep noticeOnTruncation` 旧结果只有测试），且"条数上限"那条路连置位点都没有（循环条件里退出） | **本轮补**：`lib/assistant/context.js:205`+`:211` 两种上限都置 `dropped`；`lib/assistant/agent.js:210` 与 `lib/shared/rag.js:213` 显式传 `noticeOnTruncation: true` |
+| **✗ 指令去重判据的字面量耦合** | `agent.js` 原判据 `last.length === 3000`：一旦历史被截断（长度变了）就静默失效 ⇒ 当前指令在请求里出现两次 | **本轮补**：抽成 `lib/assistant/context.js:160` `isDuplicateInstruction`（先剥通知再比，`:97` `HISTORY_MAX_CHARS` 单一来源），`lib/assistant/agent.js:220` 调用它 |
+| **✗ 桥接 `browser_read` 的截断** | `lib/bridge/relay.js:396` `truncateEvidenceText` 只说"已截断" | **本轮补**：说明改成"**被截掉的部分无法用 id 取回**，需要时请用更大的 maxChars 重新调用 browser_read" |
+| **✗ 落盘快照单条超长（`compactSessionMessages`）** | `lib/assistant/agent.js:168` 原为 `message.content.slice(-12000)`——静默留尾 | **本轮补**：`:186-193` 前置 `formatTailKeptTruncationNotice`（`lib/assistant/context.js` 新增），说明"共 N 字符 / 只保留末尾 / 前半段取不回"；上限改由 `:165` `SESSION_MESSAGE_MAX_CHARS` 单一来源 |
+| **✗ 落盘快照丢整条消息** | 同一函数 `source.filter(…).slice(-39)`：超出 39 条的历史**静默消失** | **本轮补**：`:175-182` 补一条"更早的 N 条消息未随快照保存，取不回原文"的说明消息 |
+
+> ⚠ 为什么落盘快照也算 A5：它在"继续上一次运行"时被**原样恢复成发给模型的 messages**
+>（`lib/assistant/agent.js:1279-1283`）。快照里的静默截断 = 模型看到一段没有开头的文本，
+> 却以为那就是全部对话 —— 与 `normalizeHistory` 那条是同一个错，只是发生在恢复路径上。
+
+**实跑**：
+```
+node --test tests/expand-result.test.mjs
+ℹ tests 7   ℹ pass 7   ℹ fail 0
+
+node --test tests/context.test.mjs tests/agent-prompt.test.mjs tests/silent-failure-regressions.test.mjs
+ℹ tests 100   ℹ pass 100   ℹ fail 0
+```
+（`tests/context.test.mjs` 15 → 21 条；`tests/agent-prompt.test.mjs` 的 `compactSessionMessages` 两条
+**被改写过** —— 旧断言把"静默 slice"与"静默丢弃 11 条"当契约钉住了。现在断言更严：
+既要截断/丢弃，也要**说明**，并且"没超限时逐字节不变"。两处都属于**收紧**而非放宽。）
+
+**没有做到的部分（如实写）**：
+1. **模型可见文本被改动，但没有做真模型测量** ✗
+   本轮动的模型可见文本有三类：① 截断说明（**只在真的发生截断时才出现**：单条历史 >3000 字符、
+   历史条数/token 超限、上一轮摘要 >400 字符、落盘快照单条 >12000 字符或超过 39 条）；
+   ② 桥接的错误/截断措辞；③ 恢复时新增的"更早的 N 条未保存"提示。
+   本环境里 `E2E_LLM_REAL_KEY` / `RECALLFLOW_EVAL_API_KEY` **都没有设置** ⇒
+   `docs/regression-red-flag.md` 要求的"改模型可见内容必须测量"**未能执行**。
+   能给的确定性证据只有：正常路径（未截断）**逐字节不变**（有断言：`tests/context.test.mjs`
+   的"未超长时一个字都不多"、`tests/agent-prompt.test.mjs` 的"正好等于上限时一个字都不许多"、
+   `tests/omit-mark.test.mjs` ⑦），以及 `scripts/check-prefix-stability.mjs` 全绿。
+   ⚠ **不要把它当成"已测量"** ✗
+2. **`noticeOnTruncation` 打开后的前缀缓存影响没有实测**：那条提示会作为**第一条**历史消息出现，
+   首次出现时整段前缀失效一次（与本仓库已知的折叠行为同类）。没有测过它的成本。
+3. **`sanitizeToolPairing` 仍会静默剔除"配对不全"的消息**（`lib/assistant/agent.js:147-159`）：
+   这是协议硬要求（悬空的 tool 结果会让请求非法），但它剔掉的**内容**没有留痕。
+   本轮**没有**动它（要动得先想清"合法请求"与"留痕"如何兼得）。
+4. 历史截断的说明里写的是"请让用户重新说明 / 改用工具重新读取页面"——
+   **没有**做"自动把原文存进 `resultStore` 并给 id"（那需要把前端会话历史也接入暂存，是行为改动）。
+
+### 5.4 本轮的牙齿证据（构造坏输入 ⇒ 必红）
+
+在**仓库副本**（`%TEMP%` 下，未改动本工作树）里做了 **11 组**定向变异，逐条确认对应门禁变红：
+
+| 变异（改回旧实现） | 变红的门禁 | 退出码 |
+| --- | --- | --- |
+| `detach` 去掉 `withTimeout` | `cdp-timeout` ⑨（12s test-timeout 兜底）+ ⑨b | 1 |
+| `captureWithLadder` 忽略总预算 | `cdp-timeout` ⑥ + ⑩ | 1 |
+| relay 换回自己的阶梯 | `cdp-timeout` ⑩b | 1 |
+| `clipPart` 键名改回 `'…'` | `omit-mark` ⑤ + ⑥ | 1 |
+| 历史截断改回静默 `slice` | `context.test` 截断说明 + `isDuplicateInstruction` | 1 |
+| 条数上限不置 `dropped` | `context.test` 条数上限提示 | 1 |
+| agent.js 不传 `noticeOnTruncation` | `context.test` 生产调用方源码门禁 | 1 |
+| `truncateEvidenceText` 去掉"取不回" | `silent-failure-regressions` 截断标注 | 1 |
+| `isDuplicateInstruction` 不剥通知 | `context.test` 截断副本去重 | 1 |
+| `compactSessionMessages` 单条改回静默 `slice(-12000)` | `agent-prompt.test` 留尾+说明 | 1 |
+| `compactSessionMessages` 丢整条消息不补说明 | `agent-prompt.test` "丢了多少必须写明" | 1 |
+
+### 5.5 一句话状态
+
+- **② 会话容量：已收口**（原文结论，本轮未复核这一条 —— 别把它当成刚验过）。
+- **③ A3：已收口**（"每一条 CDP 调用都有界"现在成立）；
+  ⚠ 但**"15s 挂起的原始复现"未完成**，桥接侧预算只有单测证据。
+- **③ A4：已收口**（两个渲染器的省略标记形态统一 + 门禁两边都扫）。
+- **③ A5：已收口**（逐条截断路径都有 id 或明说取不回）；
+  ⚠ 但**新增的模型可见文本没有真模型测量**（无密钥），这一条如实标注为未测量。
+
