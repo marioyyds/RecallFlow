@@ -16,10 +16,12 @@ export default defineConfig({
   testMatch: /.*\.eval\.mjs/,
   // eval 可能很慢（真模型 + 多轮工具调用），给足时间；一次只跑一条，避免并发干扰夹具计数。
   //
-  // ⚠ 180s → 360s（阈值暴露，实测）：有些场景模型**做得到但收尾慢** —— 例如「富文本」真模型一次跑了
-  //   **53 次工具调用**（inspect_element / read_current_page / styles 反复核验），在 180s 处被
-  //   Playwright 的**测试超时**掐掉，读数因此不可信 ✗。探针是"跑完再看判据"，不是"跑得快才算过" ✓
-  timeout: 360_000,
+  // ⚠ 180s → 360s → **540s**（阈值暴露，实测）：有些场景模型**做得到但收尾慢** ——
+  //   富文本真模型一次跑了 **53 次工具调用**（inspect_element / read_current_page / styles 反复核验），
+  //   在 180s 被测试超时掐掉；提到 360s 后又出现"跑了 55 次仍未收尾"被**运行上限**掐掉 ✗
+  //   ⇒ 测试超时 = 运行上限（real-model.eval.mjs 的 420s）+ 起停余量 ⇒ **必须配套改** ✓
+  //   探针是"跑完再看判据"，不是"跑得快才算过" ✓
+  timeout: 540_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,

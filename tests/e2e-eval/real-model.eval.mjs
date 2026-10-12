@@ -56,7 +56,13 @@ async function waitForRunToFinish(page) {
   // ⚠ 上限从 170s 提到 280s：第五轮实测 `multi-candidate-convergence` 曾因"等刷新"绕圈
   //   在 2.9m 处被**原来的上限**掐掉（不是模型做不完，而是它被掐在收尾前）。
   //   配套地，夹具把"等刷新"的代价从 2000ms 降到 700ms（见 server.mjs 的 REFRESH_MS）。
-  await stop.waitFor({ state: 'hidden', timeout: 280_000 });
+  // ⚠ 上限从 170s 提到 280s，再提到 **420s**：
+  //   ① 第五轮实测 `multi-candidate-convergence` 曾因"等刷新"绕圈在 2.9m 被**原来的上限**掐掉；
+  //   ② 富文本实测：模型在 180s（当时的测试超时）处已跑 **53 次**工具调用，
+  //      提到 360s 后又出现"**跑了 55 次仍未收尾**、被 280s 的**运行上限**掐掉" ⇒ 读数不可信 ✗
+  //   ⇒ 运行上限与测试超时**必须配套**（测试超时 = 运行上限 + 起停余量，见 playwright.config.mjs 的 540s）。
+  //   ⚠ 再往上就要问"模型是不是在绕圈"了：420s / 50+ 次调用已经很宽 ✓
+  await stop.waitFor({ state: 'hidden', timeout: 420_000 });
 }
 
 /** 把模型的工具轨迹打印出来 —— 失败时**先看它**，再决定改什么。
