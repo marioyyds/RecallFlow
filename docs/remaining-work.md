@@ -85,7 +85,7 @@
    - 原来的"改 true 就该红"那条牙齿用例重写成：**开启侧文案没接上（仍写"看不到图"）必须被判为不合格** ✓
 6. **E2E 开启臂真的跑了**（真 Chromium + 真扩展 + 真 CDP 截图）：视觉阶段
    `1 skipped`（关闭臂，按常量 skip）+ `2 passed`（开启臂 + 牙齿）；全量三阶段
-   黄金任务 39 / 断线恢复 1 / 视觉两臂 2 passed + 1 skipped，`run-e2e` 退出码 **0** ✓
+   黄金任务 40 / 断线恢复 1 / 视觉两臂 2 passed + 1 skipped，`run-e2e` 退出码 **0** ✓
    开启臂断言：图出现在 `take_screenshot` 结果**之后追加的 user 消息**里、`tool` 消息仍是纯字符串、
    `image_url` 是 `data:image/…` 形态 ✓
 
