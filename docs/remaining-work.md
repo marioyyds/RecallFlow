@@ -425,3 +425,22 @@ node --test tests/context.test.mjs tests/agent-prompt.test.mjs tests/silent-fail
 夹具 → 剧本（`tools` 序列 + `pageChecks` + `mustSeeInToolResults`）→ 脚本化 E2E（双层判据 + 阴性对照）→
 技能（**编号步骤**，`x.tools ⊇ 剧本 tools`）→ 生成脚本重跑 → **注入必红 ×2** → 连跑两次 → 全量 E2E →
 **真模型 eval ×3**（`--grep` **必须取自剧本 `title`**，跑前 `--list` 确认 `Total: 1`）→ 数字同步 → 提交 ✓
+
+### ④ 的**当前真实状态**（第 62 轮定格；下一会话从这里继续）
+
+**已落地并提交（都真起服务验证过）**：
+- `/rich` —— `richTextPage()`：`window.__rt = { syntheticIgnored, noopClicks, syncs, fakeBold, inputs, strong, list, links }`，
+  元素 `#rt-editor` / `#rt-hidden` / `#rt-bold` / `#rt-list` / `#rt-link` / `#rt-fake-bold` / `#rt-status`
+  （HTTP 200 / 2819 字节 / 12 项全命中 ✓）
+- `/h5drag` —— `html5DragPage()`：`window.__dd = { dragStarts, dragOverAccepted, drops, acceptedDrops, wrongZone, emptyDrops, fakeDrags, lastPayload, lastZone }`，
+  元素 `#dd-card` / `#dd-fake` / `#dd-left` / `#dd-right` / `#dd-result` / `#dd-status`
+  （HTTP 200 / 2434 字节 / 全部命中 ✓）
+
+**每个场景还剩 3 个小步**（**原子单元**：少任何一个契约门禁都会红 ✗ —— "剧本要有技能""技能 tools ⊇ 剧本 tools""清单要看到 E2E 引用"）：
+1. mock LLM 分派块（**计数器推进**，不要用"回执里有没有某串"推进 ✗）+ 剧本（`pageChecks` 必须是**真状态**）+ 技能（**编号步骤**）+ 一条 E2E 用例（**基线 + 双层判据 + 至少一处"走捷径就达不到"**）+ 生成脚本重跑；
+2. **注入必红**（例如"让合成事件也能更新状态"/"让隐藏字段实时同步"/"让 drop 不需要 preventDefault"）+ 连跑两次 + 全量 E2E；
+3. **真模型 eval ×3**（`--grep` 必须取自剧本 `title`，跑前 `--list` 确认 `Total: 1`）→ 数字同步 → 提交。
+
+**为什么停在这里（如实）**：这一步对**委托**连试 5 次、其中 4 次在 2–3 轮内 0 落盘（含"只造一个夹具页"这种极小任务 ✗）；
+规律是"先读几千行再写"会把预算烧光 ⇒ 有效做法是**每轮只做一小步且必须落盘**（夹具页两步就是这么落地的 ✓）。
+会话上下文也已耗尽 ⇒ 剩下的"读形状再写 100+ 行"留给下一会话，按上面 3 个小步走 ✓
