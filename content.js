@@ -4961,6 +4961,7 @@
   }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
+    const wasPinned = !!observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
     if (panel._manualSize) return;
     const dockGap = getDockGap();
     const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
@@ -4985,6 +4986,7 @@
       panel.style.top = "auto";
       panel.style.bottom = dockGap + "px";
     }
+    if (wasPinned) panelBody.scrollTop = panelBody.scrollHeight;
   }
   function getDockGap() {
     return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));

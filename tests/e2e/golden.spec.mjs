@@ -251,6 +251,32 @@ test('golden: 思考记录默认折叠、按顺序穿插在对话中、点击后
   await expect.poll(() => thinkState(page), { timeout: 10_000 }).toBe('running/true/思考中…');
   await expect(blocks.nth(0).locator('.think-body')).toBeVisible();
 
+  // ⓪ **思考流式进行中，视图必须贴底**（用户反馈："模型在思考的时候，没有流式置底"）。
+  //    根因（第 92 轮定位）：`fitPanelHeight()` 有 28 个调用点、其中一大批在**流式渲染路径**上，
+  //    而它每次都把 `panel`/`panelBody` 的高度重置成 `auto` 再重算 ⇒ **滚动容器高度一变，
+  //    浏览器就把 `scrollTop` 归零/夹紧** ✗ ⇒ 视图一遍遍跳回顶部。修法在 `chat.js` 的
+  //    `fitPanelHeight()`：入口记住"是否本来贴底"，出口再置底一次 ✓（只认本来贴底 ✓）。
+  //    ⚠ 放在**展开之后**：折叠态下正文不计入高度 ⇒ 溢出守卫过不了 ⇒ 断言会**恒真**（假绿 ✗）。
+  //    ⚠ 用**轮询**：流式渲染按帧合并、且 fitPanelHeight 会多次重算 ⇒ 读一次容易落在中间态 ✗。
+  {
+    const metrics = () =>
+      page.locator(PANEL + ' .p-body').evaluate((el) => ({ h: el.scrollHeight, t: el.scrollTop, c: el.clientHeight }));
+    const overflow = async () => {
+      const m = await metrics();
+      return m.h - m.c;
+    };
+    await expect.poll(overflow, { timeout: 20_000 }).toBeGreaterThan(60);
+    await expect
+      .poll(
+        async () => {
+          const m = await metrics();
+          return m.h - m.t - m.c;
+        },
+        { timeout: 20_000 }
+      )
+      .toBeLessThan(40);
+  }
+
   // ③ 模拟模型发了**两段**思维链（中间夹着正文）→ 应该是**两块**，而不是一个总块。
   await expect(blocks).toHaveCount(2, { timeout: 30_000 });
 
