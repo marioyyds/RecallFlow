@@ -184,15 +184,27 @@ for (const pb of evalPlaybooks()) {
     expect(finished, '这一轮没有跑完（超时）。先看上面的工具轨迹：是卡在某个工具上，还是模型绕圈？').toBe(true);
 
     // ① 页面判据（与脚本化 E2E 同一套表达式）
+    //
+    // ⚠ **给"有尾延迟"的状态一个宽限期（8s）**：只读一次会把"还没到"误判成"做不到" ✗。
+    //   实测（`<video>` 场景）：模型确实按了真播放键（`__decoded > 0` ✓）、也打开了播放详情 ✓，
+    //   但 2 秒素材在它**收尾时往往还没播完** ⇒ `ended` 次次读成"没有" ✗ —— 那是**时序**，不是能力 ✓。
+    //   判据问的是"最终状态"，不是"模型收尾那一瞬间的状态"，所以这里轮询到宽限期结束 ✓
+    const GRACE_MS = 8000;
     const results = [];
     for (const c of ev.pageChecks) {
-      const ok = await page.evaluate((expr) => {
-        try {
-          return Boolean(new Function('return (' + expr + ')')());
-        } catch (e) {
-          return false;
-        }
-      }, c.expr);
+      let ok = false;
+      const started = Date.now();
+      for (;;) {
+        ok = await page.evaluate((expr) => {
+          try {
+            return Boolean(new Function('return (' + expr + ')')());
+          } catch (e) {
+            return false;
+          }
+        }, c.expr);
+        if (ok || Date.now() - started >= GRACE_MS) break;
+        await page.waitForTimeout(250);
+      }
       results.push({ label: c.label, ok });
     }
 
