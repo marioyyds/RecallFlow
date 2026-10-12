@@ -137,15 +137,32 @@ test('chat.js：流式增量**不碰**用户的展开状态，也不重置滚动
   const at = live.indexOf("resp.type === 'reasoning'");
   assert.ok(at >= 0, '应能找到 reasoning 分支');
   const branch = live.slice(at, live.indexOf("resp.type === 'chunk'"));
-  assert.ok(!/scrollTop/.test(branch), '思考增量分支不得设置 scrollTop（会把用户的滚动位置重置）');
+  // ⚠ 口径升级（用户反馈"模型思考时没有流式置底"之后）：这条**不是**"思考路径一个字都不许碰滚动"，
+  //   而是"**不许无条件重置滚动位置**" —— 与正文/工具路径一致的**受守卫**写法
+  //   （`if (observerAutoScroll && panelBody) panelBody.scrollTop = …`，即"只有用户没自己滚上去时才置底"）
+  //   本来就是"用户选择优先"的实现 ✓；真正违规的是**不带守卫**的 `scrollTop =` ✗。
+  //   原先按"出现 scrollTop 即违规"判 ⇒ 把受守卫的置底也禁掉了，思考期间视图就不跟手了。
+  const unguardedScroll = (src) =>
+    src.split('\n').filter((l) => /scrollTop\s*=/.test(l) && !/observerAutoScroll/.test(l));
+  assert.deepEqual(unguardedScroll(branch), [], '思考增量分支不得**无条件**设置 scrollTop（会重置用户的滚动位置）');
   assert.ok(!/dataset\.open/.test(branch), '思考增量分支不得写 data-open（会覆盖用户的选择）');
 
   const push = live.slice(live.indexOf('function pushReasoning('));
   const pushBody = push.slice(0, push.indexOf('\n  }'));
   assert.ok(!/dataset\.open/.test(pushBody), 'pushReasoning 不得写 data-open（增量不许改用户的选择）');
-  assert.ok(!/scrollTop/.test(pushBody), 'pushReasoning 不得设置 scrollTop');
-  // 反向样张：这种写法必须被抓住（否则上面两条是恒真的）
+  assert.deepEqual(unguardedScroll(pushBody), [], 'pushReasoning 不得**无条件**设置 scrollTop');
+  // 反向样张：这些写法必须被抓住（否则上面的断言是恒真的）
   assert.ok(/dataset\.open/.test('    seg.block.dataset.open = "true";'), '反向样张：写 data-open 应被认出');
+  assert.equal(
+    unguardedScroll('    panelBody.scrollTop = panelBody.scrollHeight;').length,
+    1,
+    '反向样张：**无条件**置底必须被认出（否则守卫形同虚设）'
+  );
+  assert.equal(
+    unguardedScroll('    if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;').length,
+    0,
+    '受守卫的置底必须被允许（那正是"用户选择优先"）'
+  );
 });
 
 test('chat.js：新一轮开始时清掉上一轮的思考记录指针', () => {
