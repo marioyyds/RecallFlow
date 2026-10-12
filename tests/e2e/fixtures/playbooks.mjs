@@ -864,8 +864,11 @@ export const PLAYBOOKS = Object.freeze({
         //   `paused === false` 只作参考，**不作判据** —— 它可能只是"这一刻还在播"。
         { expr: 'window.__decoded > 0', label: '视频真的解码过帧（RVFC 帧计数 > 0，不是"paused=false 就算在播"）' },
         { expr: 'window.__seeked >= 1', label: '「跳转到末尾」真的做过（那是缓冲证据的来源）' },
-        // ★ 真缓冲：waiting 是**真的触发过**（副播放器 seek 到未缓冲区间），累计计数 >= 1
-        { expr: 'window.__waits >= 1', label: '真的出现过缓冲（waiting 累计次数 >= 1）' },
+        // ★ 真缓冲：必须是**播放途中**的缓冲（副播放器 seek 到未缓冲区间时位置 > 0.5s 的那次 waiting）。
+        //   ⚠ 原判据 `__waits >= 1` **近似恒真** ✗ —— 媒体**加载那一刻**天然会 fire 一次 waiting，
+        //   于是这条判据谁也咬不住（夹具里早就备好了 `__midWaits` = 播放中途的 waiting，见 server.mjs），
+        //   这里换成它才是"真的卡住过"的状态证据 ✓（判据不进模型上下文 ⇒ 改它不触发测量义务）
+        { expr: 'window.__midWaits > 0', label: '播放**中途**真的出现过缓冲（位置 > 0.5s 的 waiting；加载那一刻的天然 waiting 不算）' },
         { expr: 'window.__pauses >= 1', label: '中途真的暂停过 —— 「在播 / 停了」必须分得开' },
         {
           expr: 'window.__events.indexOf("ended") >= 0',
