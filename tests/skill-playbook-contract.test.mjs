@@ -284,6 +284,8 @@ test('付费墙技能的**口径**是「找合法免费可看的那一份」，�
     const refusals = ['不解析播放地址', '不用盗播站', '不伪造会员身份', '不绕过'].filter((k) => !t.includes(k));
     if (refusals.length) missing.push('没写清「不绕过付费/鉴权」（缺：' + refusals.join('、') + '）');
     if (!t.includes('能打开')) missing.push('没点明「能打开」不等于「能看」');
+    // ⚠ 用户口径（明确要求过）：这条技能**不是**"纠结要不要钱"，而是"用户要免费的 ⇒ **去找**" ✓
+    if (!t.includes('去找')) missing.push('没写"去找"（用户要免费的 ⇒ 任务就是去找合法免费能看的来源）');
     if (!/如实/.test(t)) missing.push('没写"如实"报告');
     if (!t.includes('拿不到')) missing.push('没写"确实要付费就如实说拿不到内容"');
     if (!t.includes('假装看过')) missing.push('没写"不假装看过"');

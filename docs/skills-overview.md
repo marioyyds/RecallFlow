@@ -65,7 +65,7 @@
 | `new-tab-takeover` | 新标签页接管（点击后换页继续干活） | browser | `new-tab-takeover` |
 | `operate-in-cross-origin-iframe` | 跨域 iframe 内操作（先读合并快照，再按复合 ref 路由） | browser | `operate-in-cross-origin-iframe` |
 | `paginate-async` | 分页 + 异步加载（跨页找到目标，并等它真的渲染出来） | browser | `paginate-async` |
-| `paywall-boundary` | 找免费可看的那一份：「能打开」不等于「能看」 | browser-automation | `paywall-preview-limit` |
+| `paywall-boundary` | 用户要免费的 → 就**去找**能看的那一份（「能打开」不等于「能看」） | browser-automation | `paywall-preview-limit` |
 | `pierce-shadow-dom` | 组件内操作（穿透 Shadow DOM） | browser | `pierce-shadow-dom` |
 | `read-select-options` | 读下拉框选项（"选最便宜/最合适"之前先看有哪些） | browser-automation | `read-select-options` |
 | `readability-fix` | 可读性美化（把难读的页面调成易读） | browser | `readability-fix` |
