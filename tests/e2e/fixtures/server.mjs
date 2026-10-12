@@ -3292,6 +3292,38 @@ const llm = http.createServer((req, res) => {
     //   由 tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住 ✓
     // 触发词用**字面量**而不是 PLAYBOOKS：见 vision-switch.spec.mjs 的说明
     // （不把它登记成"能力剧本"，它验的是传输管道，不是一条新能力）。
+    // 场景：**富文本编辑器**（剧本 `rich-text-structure`，夹具页 `/rich`）
+    //   ⚠ 用**计数器**推进（`toolResults.length`），**不要**用"回执里有没有某串"推进 ✗
+    //   难点对应：选中才动结构（不选就点 ⇒ `noopClicks++`）/ 打字要可信输入 / 失焦才同步 / 装饰键不动结构
+    if (userText.includes('富文本')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { selector: '#rt-editor' }); return; }
+      // ⚠ 可信输入（CDP）：探针已证明纯合成编辑会被页面拒（syntheticIgnored++）
+      if (done === 2) { toolStep(res, 'type_text', { text: '补充一句。' }); return; }
+      if (done === 3) {
+        toolStep(res, 'run_javascript', {
+          engine: 'page',
+          code: "var p=document.querySelector('#rt-editor p');var r=document.createRange();r.selectNodeContents(p);var s=window.getSelection();s.removeAllRanges();s.addRange(r);return '已选中一段文字';",
+        });
+        return;
+      }
+      if (done === 4) { toolStep(res, 'click_element', { selector: '#rt-bold' }); return; }
+      if (done === 5) { toolStep(res, 'click_element', { selector: '#rt-list' }); return; }
+      // 不选任何文字就点「加粗」⇒ 页面记一次空操作，结构**不应**改变
+      if (done === 6) {
+        toolStep(res, 'run_javascript', { engine: 'page', code: "window.getSelection().removeAllRanges();return '已取消选区';" });
+        return;
+      }
+      if (done === 7) { toolStep(res, 'click_element', { selector: '#rt-bold' }); return; }
+      if (done === 8) { toolStep(res, 'click_element', { selector: '#rt-fake-bold' }); return; }
+      // 让编辑区失焦 ⇒ 隐藏字段才被同步（`__rt.syncs++`）
+      if (done === 9) { toolStep(res, 'click_element', { selector: 'h1' }); return; }
+      if (done === 10) { toolStep(res, 'inspect_element', { op: 'text', selector: '#rt-status' }); return; }
+      finalText(res, '已从结构读回：粗体与列表都在，装饰键没有改变结构，隐藏字段已同步。', 60);
+      return;
+    }
+
     if (userText.includes('来张截图')) {
       const done = toolResults.length;
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
