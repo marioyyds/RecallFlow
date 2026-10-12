@@ -1788,6 +1788,47 @@ function videoPage() {
 //     不能看 `Object.keys(records).length`（那样写恒等于 6，实测踩到过）；
 //   · `log` = 按顺序记下的每一次读 `{ id, total, fresh }` ⇒ 能证明"第一次读到的是缓存值"；
 //   · `submits` / `rejected` / `submitted` / `picked` ⇒ 提交历史（服务端那一份才是权威，这里是镜像）。
+// 富文本编辑器夹具（`/rich`）：**"看起来改上了 ≠ 真的改上了"**（④ 场景泛化 · 富文本）
+//   ① `contenteditable` 只认**可信 / 带 inputType** 的输入：纯合成事件或直接赋值 ⇒ 状态**不更新**（`syntheticIgnored++`）✗
+//   ② 必须保住**结构**（加粗 / 列表 / 链接）—— 页面自己数，判据**从结构取证**（不看 innerText）
+//   ③ 工具栏作用于**选区**：没有选区就点 ⇒ 什么都不做（`noopClicks++`）✗
+//   ④ 隐藏字段**只在 blur 时**同步（不失焦就读 = **旧值**；`syncs++`）✗
+//   ⑤ 装饰性「B」图标：点了只动它自己（`fakeBold++`）✗
+// 页面把状态写进 `#rt-status`（供 inspect_element 读回）与 `window.__rt`（供 E2E 断言）。
+function richTextPage() {
+  return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具富文本编辑器</title>' +
+    '<style>body{max-width:560px;font:15px/1.7 system-ui}' +
+    '#rt-editor{min-height:90px;border:1px solid #cbd5e1;padding:8px}' +
+    '.tb{display:inline-block;padding:4px 10px;margin-right:6px;border:1px solid #94a3b8;border-radius:6px;cursor:pointer}' +
+    '</style></head><body>' +
+    '<h1>富文本编辑器</h1>' +
+    '<p>用工具栏按钮改格式；改完请把内容<b>读回来</b>确认。</p>' +
+    '<div><span class="tb" id="rt-bold" role="button" tabindex="0">加粗</span>' +
+    '<span class="tb" id="rt-list" role="button" tabindex="0">项目符号</span>' +
+    '<span class="tb" id="rt-link" role="button" tabindex="0">插入链接</span>' +
+    '<span class="tb" id="rt-fake-bold" role="button" tabindex="0">B</span></div>' +
+    '<div id="rt-editor" contenteditable="true" role="textbox" aria-label="正文"><p>第一段：这里是可以编辑的正文。</p></div>' +
+    '<input type="hidden" id="rt-hidden" value="">' +
+    '<div id="rt-status" role="status">尚未同步</div>' +
+    '<script>' +
+    'var st = window.__rt = { syntheticIgnored:0, noopClicks:0, syncs:0, fakeBold:0, inputs:0, strong:0, list:0, links:0 };' +
+    'var ed = document.getElementById("rt-editor");' +
+    'var hid = document.getElementById("rt-hidden");' +
+    'var stEl = document.getElementById("rt-status");' +
+    'function counts(){ st.strong = ed.querySelectorAll("strong,b").length; st.list = ed.querySelectorAll("ul li,ol li").length; st.links = ed.querySelectorAll("a[href]").length; }' +
+    'function paint(){ counts(); stEl.textContent = "输入" + st.inputs + " 结构:粗" + st.strong + "列" + st.list + "链" + st.links + " 合成被拒" + st.syntheticIgnored + " 空操作" + st.noopClicks + " 同步" + st.syncs + " 装饰键" + st.fakeBold; }' +
+    'ed.addEventListener("beforeinput", function(ev){ if (ev.isTrusted && ev.inputType) { st.inputs += 1; paint(); return; } if (ev.cancelable) ev.preventDefault(); st.syntheticIgnored += 1; paint(); });' +
+    'ed.addEventListener("input", function(ev){ if (!ev.isTrusted) { st.syntheticIgnored += 1; paint(); } });' +
+    'ed.addEventListener("blur", function(){ hid.value = ed.innerHTML; st.syncs += 1; paint(); });' +
+    'function needSel(ev, fn){ ev.preventDefault(); var s = window.getSelection(); if (!s || s.isCollapsed || !ed.contains(s.anchorNode)) { st.noopClicks += 1; paint(); return; } fn(); paint(); }' +
+    'document.getElementById("rt-bold").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("bold"); }); });' +
+    'document.getElementById("rt-list").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("insertUnorderedList"); }); });' +
+    'document.getElementById("rt-link").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("createLink", false, "https://example.com/rf"); }); });' +
+    'document.getElementById("rt-fake-bold").addEventListener("mousedown", function(ev){ ev.preventDefault(); st.fakeBold += 1; var me = this; me.style.color = me.style.color === "red" ? "" : "red"; paint(); });' +
+    'paint();' +
+    '<\/script></body></html>';
+}
+
 function pickPage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具比价下单</title>
 <style>
@@ -4131,7 +4172,8 @@ const main = http.createServer((req, res) => {
                                             : req.url && req.url.startsWith('/vlist') ? virtualListPage()
                                               : req.url && req.url.startsWith('/feed') ? feedPage()
                                               : req.url && req.url.startsWith('/video') ? videoPage()
-                                              : req.url && req.url.startsWith('/pick') ? pickPage()
+                                              : req.url && req.url.startsWith('/rich') ? richTextPage()
+        : req.url && req.url.startsWith('/pick') ? pickPage()
                                               : req.url && req.url.startsWith('/cascade') ? cascadePage()
                                                 : req.url && req.url.startsWith('/shipping') ? shippingPage()
                                                   : req.url && req.url.startsWith('/csp') ? cspPage()
