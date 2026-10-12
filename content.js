@@ -6018,6 +6018,7 @@
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
         refreshThinkHead(seg);
+        if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
       });
     }
     function finishReasoning() {
@@ -6032,6 +6033,7 @@
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
         refreshThinkHead(seg);
+        if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
       });
       pendingParts.push({ type: "thinking", text: seg.text });
       thinkSeg = null;
