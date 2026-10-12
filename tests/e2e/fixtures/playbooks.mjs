@@ -888,6 +888,40 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['已解码帧数', '缓冲等待次数', '播放位置：', '事件序列：'],
     },
   },
+  'rich-text-structure': {
+    id: 'rich-text-structure',
+    title: '复杂场景：富文本编辑器 —— 结构要真的改上（选区 / 可信输入 / 失焦同步）',
+    trigger: '富文本',
+    // 难点（都造在 /rich 夹具页里，且已用探针实测生效）：
+    //   ① 工具栏**作用于选区**：没选中就点 ⇒ 页面只记一次"空操作"，结构不变 ✗
+    //   ② 直接改 DOM / 派发合成事件**不算输入** ⇒ 页面状态与隐藏字段都不更新 ✗
+    //   ③ 隐藏字段**只在失焦时**同步 ⇒ 不失焦就读 = 旧值 ✗
+    //   ④ 装饰性「B」图标点了只动它自己，结构一位不变 ✗
+    // 顺序即能力：看清 → 点进编辑区 → 可信输入 → **选中** → 加粗 → 列表 → 取消选区再点一次（证明空操作被记下）
+    //            → 装饰键 → 失焦 → 从**结构**读回
+    tools: ['get_page_snapshot', 'click_element', 'type_text', 'run_javascript', 'inspect_element'],
+    success: '加粗与列表结构真的写进编辑器、隐藏字段在失焦后被同步，且装饰键没有改变结构；结论来自结构读回',
+    eval: {
+      url: '/rich',
+      instruction:
+        '这个富文本编辑器里有一段正文：帮我补充一句，并把其中一段加粗、再加成项目符号列表。' +
+        '弄完请把结果读回来，告诉我结构到底改上没改上（别只说"点了按钮"）。',
+      pageChecks: [
+        { expr: 'window.__rt.strong >= 1', label: '加粗结构真的写进了编辑器（不是只点了按钮）' },
+        { expr: 'window.__rt.list >= 1', label: '列表结构真的写进了编辑器' },
+        { expr: 'window.__rt.noopClicks >= 1', label: '没有选区时点按钮的**空操作**被页面记下了（说明这一步真的被验到）' },
+        { expr: 'window.__rt.syncs >= 1', label: '编辑区失焦过 —— 隐藏字段才有机会被同步' },
+        { expr: 'window.__rt.fakeBold >= 1', label: '那个装饰性「B」图标真的被点过（对比项：它推不动结构）' },
+        {
+          expr: "document.getElementById('rt-hidden').value.indexOf('strong') >= 0",
+          label: '隐藏字段里**有**加粗结构（同步发生过，且内容是结构化的）',
+        },
+      ],
+      // 回执判据盯"**结构证据有没有交到模型手上**"：状态节点读回来的正是结构计数（`结构:粗2 列2 链0`）✓
+      //   ⚠ 别写成 HTML 字面量（如 `strong`）—— 页面状态里给的是**计数**，那样写就变成路径断言 ✗
+      mustSeeInToolResults: ['结构:粗', '列'],
+    },
+  },
   'multi-candidate-convergence': {
     id: 'multi-candidate-convergence',
     title: '复杂场景：多候选收敛 —— 6 家报价只差一点，决定性属性藏在详情里且会刷新',

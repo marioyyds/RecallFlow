@@ -9,9 +9,9 @@
 | 指标 | 值 |
 | --- | --- |
 | 技能总数 | **40** |
-| 有剧本归属（真浏览器验收覆盖） | **30** |
-| **孤儿技能**（无验收覆盖） | **10** |
-| 能力剧本总数 | **30** |
+| 有剧本归属（真浏览器验收覆盖） | **31** |
+| **孤儿技能**（无验收覆盖） | **9** |
+| 能力剧本总数 | **31** |
 
 ## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）
 
@@ -69,6 +69,7 @@
 | `read-select-options` | 读下拉框选项（"选最便宜/最合适"之前先看有哪些） | browser-automation | `read-select-options` |
 | `readability-fix` | 可读性美化（把难读的页面调成易读） | browser | `readability-fix` |
 | `recover-from-rejection` | 被拒后自适应（读懂原因、补齐、再试） | browser | `recover-from-rejection` |
+| `rich-text-structure` | 富文本编辑（结构要真的改上，不能只看纯文本） | browser-automation | `rich-text-structure` |
 | `search-within-site` | 站内检索（搜索 + 结构化取回结果） | browser | `site-search` |
 | `undo-last-action` | 撤销上一步（只回退最后一次可撤销动作） | browser-automation | `undo-last-action` |
 | `upload-file` | 文件上传（工具只说"未观测"，必须读回） | browser-automation | `upload-file` |
@@ -98,6 +99,7 @@
 | `get_ax_snapshot` | 3 |
 | `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
+| `run_javascript` | 3 |
 
 （全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）
 
@@ -120,8 +122,8 @@
 | `get_ax_snapshot` | 3 |
 | `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
+| `run_javascript` | 3 |
 | `fetch_webpage` | 2 |
-| `run_javascript` | 2 |
 | `click_at` | 1 |
 | `drag_element` | 1 |
 | `get_attribute` | 1 |
@@ -173,7 +175,6 @@
 | `highlight-key-points` | 划重点 / 高亮关键信息 | reading | 能力由 annotate 系列工具承担，已有工具级单测；页面侧只是"高亮生效"的视觉结果，自动断言价值低。 |
 | `humanizer` | Humanizer（去 AI 味） | content-creation | 纯文案改写：输入与产出都在回复文本里，不涉及页面操作，没有可断言的页面状态 —— 造一个夹具页也只能验"模型改得对不对"，那是主观判断，不是 E2E 判据。 |
 | `remove-ads` | 去广告 / 屏蔽推广 | browser | 判据需要"隐藏得对不对"的人工确认（隐藏广告时不能连带藏掉正文）；已有的 mainContent 提醒是一条弱保障，但造不出可信的"广告与正文同构"夹具来自动断言。**最小可行验收**（未做，留给接手者）：夹具页放一个 `#ad-slot` 广告块 + 与它同容器的正文段落，判据 = 广告块不可见 **且** 正文可见。 |
-| `rich-text-structure` | 富文本编辑（结构要真的改上，不能只看纯文本） | browser-automation | **本轮先落地夹具页与技能**：`/rich` 夹具页已就绪（5 个难点，且难点机制已用探针实测生效：合成编辑被拒 / 可信键入被认 / 无选区点按钮记空操作 / 结构计数可从页面读回），剧本与 E2E 用例在下一步落地（见 docs/remaining-work.md）。缺的判据是"模型是否**先选选区**再点按钮、是否用**可信输入**、是否**失焦后从结构**读回"这一类 —— 没有它，这套动作就没有验收网。 |
 | `summarize` | Summarize（总结） | reading | 纯文案处理（对已有内容做摘要），不涉及页面操作，没有可断言的页面状态。 |
 | `userscript-task` | 用户脚本任务（下载/展开/签到/抢购） | browser | 覆盖多种任务形态（下载 / 展开 / 签到 / 抢购），尚未拆出最小可断言的一种；而且它依赖 GreasyFork 这类**外部站点**提供的脚本，夹具页给不出可信的等价物。拆出后应当补剧本并从本表移除。 |
 

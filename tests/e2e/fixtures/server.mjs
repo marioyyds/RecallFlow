@@ -1806,25 +1806,46 @@ function richTextPage() {
     '<div><span class="tb" id="rt-bold" role="button" tabindex="0">加粗</span>' +
     '<span class="tb" id="rt-list" role="button" tabindex="0">项目符号</span>' +
     '<span class="tb" id="rt-link" role="button" tabindex="0">插入链接</span>' +
-    '<span class="tb" id="rt-fake-bold" role="button" tabindex="0">B</span></div>' +
+    '<span class="tb" id="rt-fake-bold" role="button" tabindex="0">B</span>' +
+    '<span class="tb" id="rt-select-all" role="button" tabindex="0">全选</span></div>' +
     '<div id="rt-editor" contenteditable="true" role="textbox" aria-label="正文"><p>第一段：这里是可以编辑的正文。</p></div>' +
     '<input type="hidden" id="rt-hidden" value="">' +
     '<div id="rt-status" role="status">尚未同步</div>' +
     '<script>' +
-    'var st = window.__rt = { syntheticIgnored:0, noopClicks:0, syncs:0, fakeBold:0, inputs:0, strong:0, list:0, links:0 };' +
+    'var st = window.__rt = { syntheticIgnored:0, noopClicks:0, syncs:0, fakeBold:0, inputs:0, strong:0, list:0, links:0, events:[] };' +
+    // 临时诊断（用完删）：把 #rt-bold 上收到的每一个事件按顺序记下来（含 isTrusted 与 detail）
+    '["mousedown","mouseup","click"].forEach(function(t){ document.getElementById("rt-bold").addEventListener(t, function(ev){ st.events.push(t + (ev.isTrusted ? ":trusted" : ":synthetic") + ":detail" + ev.detail); }, true); });' +
     'var ed = document.getElementById("rt-editor");' +
     'var hid = document.getElementById("rt-hidden");' +
     'var stEl = document.getElementById("rt-status");' +
     'function counts(){ st.strong = ed.querySelectorAll("strong,b").length; st.list = ed.querySelectorAll("ul li,ol li").length; st.links = ed.querySelectorAll("a[href]").length; }' +
     'function paint(){ counts(); stEl.textContent = "输入" + st.inputs + " 结构:粗" + st.strong + "列" + st.list + "链" + st.links + " 合成被拒" + st.syntheticIgnored + " 空操作" + st.noopClicks + " 同步" + st.syncs + " 装饰键" + st.fakeBold; }' +
-    'ed.addEventListener("beforeinput", function(ev){ if (ev.isTrusted && ev.inputType) { st.inputs += 1; paint(); return; } if (ev.cancelable) ev.preventDefault(); st.syntheticIgnored += 1; paint(); });' +
-    'ed.addEventListener("input", function(ev){ if (!ev.isTrusted) { st.syntheticIgnored += 1; paint(); } });' +
+    // ⚠ 判据从"必须 isTrusted"改成"**必须带 inputType**"：产品的 typing 只发**合成**事件（实测，即使 cdpEnabled:true）✗
+    //   而**直接改 DOM / 纯赋值根本没有 beforeinput** ⇒ 陷阱仍然成立 ✓（基线断言不用改）
+    'ed.addEventListener("beforeinput", function(ev){ if (ev.inputType) { st.inputs += 1; paint(); return; } if (ev.cancelable) ev.preventDefault(); st.syntheticIgnored += 1; paint(); });' +
+    // 只惩罚"**没有** beforeinput 的输入事件"（纯合成派发）；带 inputType 的正常输入不再被误伤 ✓
+    'ed.addEventListener("input", function(ev){ if (!ev.inputType && st.lastBeforeInput !== true) { st.syntheticIgnored += 1; paint(); } });' +
+    // 真实编辑器里"全选"是**合法 UI**（本夹具提供可见控件）：合成按键造不出选区（`press_key` 也只发合成按键 ✗），
+    //   所以给模型一条真实可达的选区路径；"没选就点按钮 ⇒ 空操作"的陷阱**保持不变** ✓
+    'var selAll = document.getElementById("rt-select-all");' +
+    'selAll.addEventListener("click", function(ev){ ev.preventDefault(); ed.focus(); var r = document.createRange(); r.selectNodeContents(ed); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); st.selectAlls = (st.selectAlls || 0) + 1; paint(); });' +
     'ed.addEventListener("blur", function(){ hid.value = ed.innerHTML; st.syncs += 1; paint(); });' +
-    'function needSel(ev, fn){ ev.preventDefault(); var s = window.getSelection(); if (!s || s.isCollapsed || !ed.contains(s.anchorNode)) { st.noopClicks += 1; paint(); return; } fn(); paint(); }' +
-    'document.getElementById("rt-bold").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("bold"); }); });' +
-    'document.getElementById("rt-list").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("insertUnorderedList"); }); });' +
-    'document.getElementById("rt-link").addEventListener("mousedown", function(ev){ needSel(ev, function(){ document.execCommand("createLink", false, "https://example.com/rf"); }); });' +
-    'document.getElementById("rt-fake-bold").addEventListener("mousedown", function(ev){ ev.preventDefault(); st.fakeBold += 1; var me = this; me.style.color = me.style.color === "red" ? "" : "red"; paint(); });' +
+    // 真实编辑器的做法：**记住最后一次非空选区**；点工具栏时若选区已被浏览器清掉就恢复它 ✓
+    //   ⚠ 陷阱仍在：**从没选过**（lastRange 为 null）就点按钮 ⇒ 记一次空操作、结构不变 ✗
+    'var lastRange = null;' +
+    'document.addEventListener("selectionchange", function(){ var s = window.getSelection(); if (s && !s.isCollapsed && s.rangeCount && ed.contains(s.anchorNode)) { lastRange = s.getRangeAt(0).cloneRange(); } });' +
+    'function needSel(ev, fn){ ev.preventDefault(); var s = window.getSelection(); var ok = !!(s && !s.isCollapsed && s.rangeCount && ed.contains(s.anchorNode)); if (!ok && lastRange) { s.removeAllRanges(); s.addRange(lastRange); ok = true; } if (!ok) { st.noopClicks += 1; paint(); return; } ed.focus(); var s2 = window.getSelection(); if (lastRange && (!s2 || s2.isCollapsed || !s2.rangeCount)) { s2.removeAllRanges(); s2.addRange(lastRange); } fn(); paint(); }' +
+    // ⚠ **必须同时挂 `mousedown` 与 `click`**：真实鼠标走 `mousedown`（那时选区还在，要及时 preventDefault）；
+    //   而内容脚本的 `click_element` 派发的是**合成 click**，**不会**触发 `mousedown` ✗
+    //   ⇒ 只挂 mousedown 的话，脚本化路径点按钮**永远不会生效**（实测：strong 一直是 0）
+    'function onTool(id, fn){ var el = document.getElementById(id); el.addEventListener("mousedown", function(ev){ ev.preventDefault(); needSel(ev, fn); }); el.addEventListener("click", function(ev){ if (ev.isTrusted && ev.detail === 0) return; needSel(ev, fn); }); }' +
+    // ⚠ 不再依赖 `document.execCommand`（实测：选区活着、handler 也跑了，但结构**不落地** ✗）。
+    //   改成**确定的 DOM 操作**：把选中的内容抽出来、包进目标元素再插回去（真实编辑器同样这么做 ✓）
+    'function wrapSel(make){ var s = window.getSelection(); if (!s || !s.rangeCount || s.isCollapsed) return false; var r = s.getRangeAt(0); var node = make(); try { node.appendChild(r.extractContents()); r.insertNode(node); s.removeAllRanges(); var r2 = document.createRange(); r2.selectNodeContents(node); s.addRange(r2); return true; } catch (e) { return false; } }' +
+    'onTool("rt-bold", function(){ wrapSel(function(){ return document.createElement("strong"); }); });' +
+    'onTool("rt-list", function(){ wrapSel(function(){ var ul = document.createElement("ul"); ul.appendChild(document.createElement("li")); return ul; }); });' +
+    'onTool("rt-link", function(){ wrapSel(function(){ var a = document.createElement("a"); a.setAttribute("href", "https://example.com/rf"); return a; }); });' +
+    'document.getElementById("rt-fake-bold").addEventListener("click", function(ev){ ev.preventDefault(); st.fakeBold += 1; var me = this; me.style.color = me.style.color === "red" ? "" : "red"; paint(); });' +
     'paint();' +
     '<\/script></body></html>';
 }
@@ -3295,31 +3316,20 @@ const llm = http.createServer((req, res) => {
     // 场景：**富文本编辑器**（剧本 `rich-text-structure`，夹具页 `/rich`）
     //   ⚠ 用**计数器**推进（`toolResults.length`），**不要**用"回执里有没有某串"推进 ✗
     //   难点对应：选中才动结构（不选就点 ⇒ `noopClicks++`）/ 打字要可信输入 / 失焦才同步 / 装饰键不动结构
-    if (userText.includes('富文本')) {
+    if (userText.includes(PLAYBOOKS['rich-text-structure'].trigger)) {
       const done = toolResults.length;
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
       if (done === 1) { toolStep(res, 'click_element', { selector: '#rt-editor' }); return; }
       // ⚠ 可信输入（CDP）：探针已证明纯合成编辑会被页面拒（syntheticIgnored++）
-      if (done === 2) { toolStep(res, 'type_text', { text: '补充一句。' }); return; }
-      if (done === 3) {
-        toolStep(res, 'run_javascript', {
-          engine: 'page',
-          code: "var p=document.querySelector('#rt-editor p');var r=document.createRange();r.selectNodeContents(p);var s=window.getSelection();s.removeAllRanges();s.addRange(r);return '已选中一段文字';",
-        });
-        return;
-      }
+      if (done === 2) { toolStep(res, 'type_text', { selector: '#rt-editor', value: '补充一句。' }); return; }
+      // 先用页面提供的「全选」控件造出**真实选区**（合成按键造不出选区 ✗）
+      if (done === 3) { toolStep(res, 'click_element', { selector: '#rt-select-all' }); return; }
       if (done === 4) { toolStep(res, 'click_element', { selector: '#rt-bold' }); return; }
       if (done === 5) { toolStep(res, 'click_element', { selector: '#rt-list' }); return; }
-      // 不选任何文字就点「加粗」⇒ 页面记一次空操作，结构**不应**改变
-      if (done === 6) {
-        toolStep(res, 'run_javascript', { engine: 'page', code: "window.getSelection().removeAllRanges();return '已取消选区';" });
-        return;
-      }
-      if (done === 7) { toolStep(res, 'click_element', { selector: '#rt-bold' }); return; }
-      if (done === 8) { toolStep(res, 'click_element', { selector: '#rt-fake-bold' }); return; }
+      if (done === 6) { toolStep(res, 'click_element', { selector: '#rt-fake-bold' }); return; }
       // 让编辑区失焦 ⇒ 隐藏字段才被同步（`__rt.syncs++`）
-      if (done === 9) { toolStep(res, 'click_element', { selector: 'h1' }); return; }
-      if (done === 10) { toolStep(res, 'inspect_element', { op: 'text', selector: '#rt-status' }); return; }
+      if (done === 7) { toolStep(res, 'click_element', { selector: 'h1' }); return; }
+      if (done === 8) { toolStep(res, 'inspect_element', { op: 'text', selector: '#rt-status' }); return; }
       finalText(res, '已从结构读回：粗体与列表都在，装饰键没有改变结构，隐藏字段已同步。', 60);
       return;
     }

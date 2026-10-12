@@ -2295,5 +2295,58 @@ test('golden: 多候选收敛 —— 决定性属性在详情里，且缓存报�
   await page.close();
 });
 
+// 能力验收（复杂场景）：**富文本编辑器**（playbook 'rich-text-structure'，夹具页 /rich）。
+//
+// 难点全部造在夹具页里，并且已用探针**实测生效**（不是"页面能打开"就算数）：
+//   ① 工具栏**作用于选区**：没选中就点 ⇒ 页面只记一次"空操作"，结构一位不变 ✗
+//   ② 直接改 DOM / 派发合成事件**不算输入**（页面记 syntheticIgnored）✗
+//   ③ 隐藏字段**只在失焦时**同步 ⇒ 不失焦就读 = 旧值 ✗
+//   ④ 装饰性「B」图标点了只动它自己，结构不变 ✗
+// 双层判据：**页面状态**（结构真的写进编辑器 + 隐藏字段被同步）AND **模型回执**（结构证据真的到手）。
+test('golden: 富文本 —— 结构要真的改上（选区 / 可信输入 / 失焦同步）', async () => {
+  // mock 剧本里的打字走**可信输入**（探针已证明合成编辑会被页面拒）⇒ 必须开 CDP
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/rich');
+
+  // ---- 基线：难点真的存在（全部先于 agent 运行）----
+  const st0 = await page.evaluate(() => window.__rt);
+  expect(st0.strong, '初始就有加粗结构：那"必须真的改结构"这个难点不成立').toBe(0);
+  expect(st0.list, '初始就有列表结构：那这个难点不成立').toBe(0);
+  expect(await page.inputValue('#rt-hidden'), '初始隐藏字段就该是空的（不失焦不同步）').toBe('');
+  // ④ 装饰键推不动结构
+  await page.click('#rt-fake-bold');
+  const st1 = await page.evaluate(() => window.__rt);
+  expect(st1.fakeBold, '装饰键没被页面记下').toBeGreaterThan(0);
+  expect(st1.strong, '点装饰键竟然改了结构 —— 那它不是装饰键').toBe(st0.strong);
+  expect(st1.list, '点装饰键竟然改了结构').toBe(st0.list);
+  // ① 没有选区时点「加粗」⇒ 只记空操作、结构不变
+  await page.evaluate(() => window.getSelection().removeAllRanges());
+  await page.click('#rt-bold');
+  const st2 = await page.evaluate(() => window.__rt);
+  expect(st2.noopClicks, '没有选区点按钮竟然没被记成空操作').toBeGreaterThan(0);
+  expect(st2.strong, '没有选区竟然也能加粗 —— 那"选区是承重件"这个难点不成立').toBe(st0.strong);
+
+  // 复位到干净起点，再让 agent 从头做（与分页/多候选两条用例同样的处理）
+  await page.reload();
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['rich-text-structure'].eval.instruction);
+
+  // ---- 双层判据 ①：页面状态 ----
+  await expect.poll(() => page.evaluate(() => window.__rt.strong), { timeout: 90_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__rt.list), '列表结构没写进编辑器').toBeGreaterThan(0);
+  // ⚠「空操作」与「失焦同步」不放在 agent 判据里：它们由**基线**用真点击证明（页面侧不变量 ✓）。
+  //   原因：agent 的工具派发的是**合成事件**（实测 `isTrusted=false`、`detail=0`）⇒ 合成点击**不能让编辑区失焦**，
+  //   也没法要求它"故意不选就点"✗ 把这两条塞进 agent 判据，等于拿产品做不到的事去判它 ✗
+  expect(await page.evaluate(() => window.__rt.fakeBold), '装饰键没被点过（对比项缺失）').toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__rt.selectAlls || 0), '没有用页面提供的「全选」造出选区').toBeGreaterThan(0);
+
+  // ---- 双层判据 ②：模型回执（**结构证据**必须真的到手）----
+  // ⚠ 页面状态里给的是**结构计数**（`结构:粗2 列2 链0`），不是 HTML 字面量 ⇒ 判据照它写 ✓
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('结构:粗');
+  expect(toolResultsText(), '回执里没有列表计数 —— 说明结构证据没交到模型手上').toContain('列');
+
+  await page.close();
+});
+
 
 
