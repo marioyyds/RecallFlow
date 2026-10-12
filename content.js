@@ -3719,21 +3719,33 @@
       for (const p of m.parts) {
         if (!p || p.type !== "tool-call" || !p.name) continue;
         const r = results.get(p.callId);
-        let args = "";
+        let rawArgs = "";
         try {
-          args = JSON.stringify(p.args || {});
+          rawArgs = JSON.stringify(p.args || {});
         } catch (e) {
-          args = "";
+          rawArgs = "";
         }
-        out.push({
+        const rawResult = r ? String(r.result === void 0 || r.result === null ? "" : r.result) : "";
+        const args = clampText(rawArgs, MAX_TRAIL_ARGS_CHARS);
+        const result = clampText(rawResult, MAX_TRAIL_RESULT_CHARS);
+        const item = {
           name: String(p.name),
-          args: clampText(args, MAX_TRAIL_ARGS_CHARS),
+          args,
           status: r ? String(r.status || "") : "unknown",
-          result: clampText(r ? r.result : "", MAX_TRAIL_RESULT_CHARS)
-        });
+          result
+        };
+        if (args !== rawArgs || result !== rawResult) {
+          item.textClamped = true;
+          item.argsChars = rawArgs.length;
+          item.resultChars = rawResult.length;
+        }
+        out.push(item);
       }
     }
     return out;
+  }
+  function countClampedSteps(trail) {
+    return (Array.isArray(trail) ? trail : []).filter((t) => t && t.textClamped === true).length;
   }
   var MAX_TRAIL_FULL = 200;
   var MAX_FULL_TRAIL_BYTES = 4e5;
@@ -3744,6 +3756,7 @@
       items: fitted.items,
       total: full.length,
       omitted: fitted.omitted,
+      textClamped: countClampedSteps(fitted.items),
       summary: fitted.items.slice(-MAX_TOOL_TRAIL)
     };
   }
@@ -3791,13 +3804,16 @@
       messageCount: messages.length,
       messages,
       toolTrail,
-      // 三个数的语义要分清（接手方据此判断"我拿到的是不是完整的、缺的能不能取回"）：
-      //   trailTotal   会话真实步数
-      //   trailStored  可通过分段读取取回的步数
-      //   trailOmitted **真正取不回**的步数（超出全量预算）
+      // 四个数的语义要分清（接手方据此判断"我拿到的是不是完整的、缺的能不能取回"）：
+      //   trailTotal        会话真实步数
+      //   trailStored       可通过分段读取取回的**步数**
+      //   trailOmitted      **真正取不回**的步数（超出全量预算）
+      //   trailTextClamped  取回得到、但**单步文本被裁**的步数（args/result 不是完整原文）
+      //                     ⚠ 少了它，接手方会把"没被 omitted"理解成"完整原文" ✗
       trailTotal: prepared.total,
       trailStored: prepared.items.length,
       trailOmitted: prepared.omitted,
+      trailTextClamped: prepared.textClamped,
       pickedElements: picked,
       consoleErrors,
       note: clampText(input.note, 500)

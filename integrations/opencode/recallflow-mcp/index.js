@@ -927,7 +927,7 @@ const TOOLS = [
       '返回自包含的交接包：页面 URL 与标题、面板里的完整对话、用户拾取的元素（含前端源码 file:line）、' +
       '以及用户复制那一刻的控制台错误/警告快照（错误之后再查往往已消失，因此快照才是定位问题的关键）。' +
       '不传 id 时返回最近可用的会话标识列表，用于向用户确认要用哪一个。' +
-      '⚠ 返回里的 `toolTrail` 只是**摘要**：`trailStored` 是可取回的步数、`trailOmitted` 是真正取不回的步数。' +
+      '⚠ 返回里的 `toolTrail` 只是**摘要**：`trailStored` 是可取回的步数、`trailOmitted` 是真正取不回的步数、`trailTextClamped` 是**取回得到但单步文本被裁**的步数（步骤在、原文不在）。' +
       '复杂会话（几十步以上）应先用 `trailFrom` / `trailTo` 把更早的探索**分段取回**，再判断"前一个 AI 试过哪些路"，' +
       '不要凭摘要就重做一遍。',
     inputSchema: {
@@ -1070,6 +1070,7 @@ async function recallflowSession(args) {
       trailStored: r.trailStored,
       trailTotal: r.trailTotal,
       trailOmitted: r.trailOmitted,
+      trailTextClamped: r.trailTextClamped,
       note: r.note,
     };
   }
@@ -1083,7 +1084,7 @@ async function recallflowSession(args) {
       // 所以**必须让接手方知道自己拿到的是不是完整的** —— 否则它会以为"前一个 AI 只做了这些"，
       // 把已经试过的路再试一遍。
       '⚠ `toolTrail` 只是**摘要**：`trailTotal` 是会话真实步数，`trailStored` 是可取回的步数，' +
-      '`trailOmitted` 是**真正取不回**的步数。只要 `trailStored > toolTrail.length`，' +
+      '`trailOmitted` 是**真正取不回**的步数、`trailTextClamped` 是**取回得到但文本被裁**的步数（步骤在、原文不在，别把它当完整原文）。只要 `trailStored > toolTrail.length`，' +
       '就说明有更早的探索可查 —— 用 `trailFrom`/`trailTo`（开区间上界）分段取，不要凭摘要就断定"前面的 AI 没查过"。',
   };
 }

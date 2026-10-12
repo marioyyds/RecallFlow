@@ -12,6 +12,7 @@ import {
   formatHandoffPrompt,
   deriveToolTrail,
   buildToolTrail,
+  countClampedSteps,
   prepareHandoffTrail,
   MAX_TOOL_TRAIL,
   MAX_TRAIL_FULL,
@@ -229,14 +230,30 @@ test('deriveToolTrail: 丢 user、容错脏数据、只留最近 N 步', () => {
   assert.equal(trail[0].name, 'tool' + (140 - MAX_TOOL_TRAIL));
 });
 
-test('buildToolTrail：返回全量且不截断（省略计数的依据）', () => {
+test('buildToolTrail：**步数**全量不截断，但**单步文本会被裁**且必须留下痕迹（省略计数的依据）', () => {
   const parts = [];
   for (let i = 0; i < 140; i++) {
     parts.push({ type: 'tool-call', callId: 'c' + i, name: 'tool' + i, args: {} });
     parts.push({ type: 'tool-result', callId: 'c' + i, status: 'completed', result: 'r' + i });
   }
   const all = buildToolTrail([{ role: 'assistant', parts }]);
-  assert.equal(all.length, 140, 'buildToolTrail 是"全量"那份，不能自己截断');
+  assert.equal(all.length, 140, 'buildToolTrail 是"全量步数"那份，不能自己丢步');
+  // ⚠ 上一版的标题写的是"返回全量**且不截断**" —— 而实现一直在裁单步文本 ✗
+  //   于是"被裁"这件事既没进数据也没进说明，接手方会以为拿到的是完整原文。
+  //   下面两条把"必须留下痕迹"钉住（行为级：真跑，不看源码字符串）。
+  assert.equal(all[0].textClamped, undefined, '短文本不该被标成"被裁"');
+  assert.equal(countClampedSteps(all), 0, '这批数据没有任何一步该被标为被裁');
+
+  const longParts = [
+    { type: 'tool-call', callId: 'x', name: 'run_javascript', args: { code: 'y'.repeat(500) } },
+    { type: 'tool-result', callId: 'x', status: 'completed', result: 'z'.repeat(2000) },
+  ];
+  const one = buildToolTrail([{ role: 'assistant', parts: longParts }]);
+  assert.equal(one[0].textClamped, true, '文本被裁的步必须**留下痕迹**（否则接手方以为它是完整原文）');
+  assert.ok(one[0].resultChars > one[0].result.length, '要能看出"原文比取回的长"');
+  assert.equal(countClampedSteps(one), 1, '被裁步数要能汇总');
+  // 汇总必须**同时**出现在 prepareHandoffTrail 的返回里（交付侧据此说明）
+  assert.equal(prepareHandoffTrail(one).textClamped, 1, 'prepareHandoffTrail 要把"被裁步数"一起报出来');
 });
 
 // 起因（用户反馈）：一次"检索动画"的会话有约 60 次工具调用，而记录只留最近 24 步、
