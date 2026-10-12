@@ -1843,7 +1843,19 @@ function richTextPage() {
     //   改成**确定的 DOM 操作**：把选中的内容抽出来、包进目标元素再插回去（真实编辑器同样这么做 ✓）
     'function wrapSel(make){ var s = window.getSelection(); if (!s || !s.rangeCount || s.isCollapsed) return false; var r = s.getRangeAt(0); var node = make(); try { node.appendChild(r.extractContents()); r.insertNode(node); s.removeAllRanges(); var r2 = document.createRange(); r2.selectNodeContents(node); s.addRange(r2); return true; } catch (e) { return false; } }' +
     'onTool("rt-bold", function(){ wrapSel(function(){ return document.createElement("strong"); }); });' +
-    'onTool("rt-list", function(){ wrapSel(function(){ var ul = document.createElement("ul"); ul.appendChild(document.createElement("li")); return ul; }); });' +
+    // ⚠ 列表**不能**把整段内容整体包进一个 `<ul>`：选区跨多个块时那属**非法 HTML**，
+    //   浏览器规整时会把结构挪走 ⇒ `ul li` 计数为 0 ✗（实测：这正是那条**间歇红**的根因 ✓）
+    //   改成"把选区覆盖的**每个块**替换成一个 `<li>`，再统一包进 `<ul>`" ⇒ 结构确定落地 ✓
+    'function listify(){ var s = window.getSelection(); if (!s || !s.rangeCount || s.isCollapsed) return false;' +
+    ' var r = s.getRangeAt(0); var blocks = [];' +
+    ' for (var n = 0; n < ed.children.length; n += 1) { var ch = ed.children[n]; try { if (r.intersectsNode(ch)) blocks.push(ch); } catch (e) {} }' +
+    ' if (!blocks.length) return false;' +
+    ' var ul = document.createElement("ul");' +
+    ' for (var i = 0; i < blocks.length; i += 1) { var li = document.createElement("li"); li.innerHTML = blocks[i].innerHTML; ul.appendChild(li); }' +
+    ' ed.replaceChild(ul, blocks[0]);' +
+    ' for (var j = blocks.length - 1; j >= 1; j -= 1) { if (blocks[j].parentNode === ed) ed.removeChild(blocks[j]); }' +
+    ' return true; }' +
+    'onTool("rt-list", function(){ listify(); });' +
     'onTool("rt-link", function(){ wrapSel(function(){ var a = document.createElement("a"); a.setAttribute("href", "https://example.com/rf"); return a; }); });' +
     'document.getElementById("rt-fake-bold").addEventListener("click", function(ev){ ev.preventDefault(); st.fakeBold += 1; var me = this; me.style.color = me.style.color === "red" ? "" : "red"; paint(); });' +
     'paint();' +
