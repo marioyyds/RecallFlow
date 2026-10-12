@@ -191,3 +191,25 @@ test('E2E 对照门禁存在、且按常量实际值选臂（不是写死"今天
   const guilty = "test('关闭臂：请求里没有图', async () => { expect(count()).toBe(0); });";
   assert.ok(!/test\.skip\(VISION_ENABLED/.test(guilty), '写死一臂的假源码不该被这条判为合格');
 });
+
+// ── 任务级截图上限（(e) 成本上界）──────────────────────────────────────────
+// 为什么要有这条：视觉打开后每张图约 600 token 进上下文，而 take_screenshot 模型可以反复调用 ⇒
+// 没有上界时一次任务能把上下文塞满图 ✗。ctx.visionBudget（按 token）**无人赋值** ⇒
+// 唯一兜得住的就是这个**按张数**的上界；到上界后必须**留痕**（纯文字说明），不许静默丢 ✗
+test('任务级截图上限：到上界后不再送图，但必须**留痕**（纯文字说明）', async () => {
+  const { MAX_IMAGES_PER_TASK, shouldSendImage, imageCapNote } = await import('../lib/assistant/vision.js');
+  assert.equal(MAX_IMAGES_PER_TASK, 3, '上界默认值（改了要同步说明与文档）');
+  for (const n of [0, 1, 2]) assert.equal(shouldSendImage(n), true, '第 ' + (n + 1) + ' 张应当送');
+  for (const n of [3, 4, 99]) assert.equal(shouldSendImage(n), false, '第 ' + (n + 1) + ' 张超出上界，不该送');
+
+  const note = imageCapNote(3, '页面截图');
+  assert.ok(/不再送出图像/.test(note), '说明里必须讲清这一张不送图');
+  assert.ok(/达到上限 3 张/.test(note), '说明里要有张数');
+  assert.ok(/页面截图/.test(note), '说明里要带上标签（能对上号）');
+  assert.ok(!/看不到/.test(note), '别说看不到图 —— 开关是开的，那句话与事实矛盾 ✗');
+
+  // 反向样张：上界 0 / 负数 ⇒ 全部不送，但说明仍然出现（否则计数很容易退化成恒真断言）
+  assert.equal(shouldSendImage(0, 0), false, '上界 0 时第一张也不送');
+  assert.equal(shouldSendImage(0, -1), false, '负数上界按不送处理');
+  assert.ok(imageCapNote(0, '', 0).length > 10, '上界 0 时仍然要给出说明（不静默丢）');
+});
