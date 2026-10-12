@@ -3344,33 +3344,62 @@
     }
     return out;
   }
+  var MAX_MESSAGES = 20;
+  var MAX_TOOL_SUMMARY_CHARS = 600;
+  var MAX_CITATIONS = 20;
+  var MAX_CITATION_SNIPPET_CHARS = 300;
   function serializeConversationMessages(conversation2) {
-    return (Array.isArray(conversation2) ? conversation2 : []).slice(-20).map((m) => {
+    const all = Array.isArray(conversation2) ? conversation2 : [];
+    const kept = all.slice(-MAX_MESSAGES);
+    return kept.map((m, i) => {
       const copy = { role: m.role };
+      if (i === 0 && all.length > kept.length) {
+        copy.earlierMessagesOmitted = all.length - kept.length;
+        copy.messagesTotal = all.length;
+      }
       if (typeof m.content === "string") {
         copy.content = m.content.slice(0, MAX_MESSAGE_CONTENT_CHARS);
         if (m.content.length > MAX_MESSAGE_CONTENT_CHARS) copy.contentTruncated = true;
       }
-      if (typeof m.toolSummary === "string" && m.toolSummary) copy.toolSummary = m.toolSummary.slice(0, 600);
-      if (Array.isArray(m.pickedElements) && m.pickedElements.length) copy.pickedElements = m.pickedElements.slice(0, 8);
+      if (typeof m.toolSummary === "string" && m.toolSummary) {
+        copy.toolSummary = m.toolSummary.slice(0, MAX_TOOL_SUMMARY_CHARS);
+        if (m.toolSummary.length > MAX_TOOL_SUMMARY_CHARS) copy.toolSummaryTruncated = true;
+      }
+      if (Array.isArray(m.pickedElements) && m.pickedElements.length) {
+        copy.pickedElements = m.pickedElements.slice(0, 8);
+        if (m.pickedElements.length > copy.pickedElements.length) {
+          copy.pickedElementsTotal = m.pickedElements.length;
+          copy.pickedElementsOmitted = m.pickedElements.length - copy.pickedElements.length;
+        }
+      }
       if (Array.isArray(m.parts)) {
-        const all = m.parts;
-        const kept = all.slice(-MAX_PARTS);
-        copy.parts = kept.map(clipPart);
-        if (all.length > kept.length) {
-          copy.partsTotal = all.length;
-          copy.partsOmitted = all.length - kept.length;
+        const partsAll = m.parts;
+        const partsKept = partsAll.slice(-MAX_PARTS);
+        copy.parts = partsKept.map(clipPart);
+        if (partsAll.length > partsKept.length) {
+          copy.partsTotal = partsAll.length;
+          copy.partsOmitted = partsAll.length - partsKept.length;
         }
       }
       if (Array.isArray(m.citations)) {
-        copy.citations = m.citations.slice(0, 20).map((c) => ({
-          index: c.index,
-          source: c.source,
-          id: c.id,
-          title: c.title,
-          url: c.url,
-          snippet: String(c.snippet || "").slice(0, 300)
-        }));
+        const keptCites = m.citations.slice(0, MAX_CITATIONS);
+        copy.citations = keptCites.map((c) => {
+          const snippet = String(c.snippet || "");
+          const out = {
+            index: c.index,
+            source: c.source,
+            id: c.id,
+            title: c.title,
+            url: c.url,
+            snippet: snippet.slice(0, MAX_CITATION_SNIPPET_CHARS)
+          };
+          if (snippet.length > MAX_CITATION_SNIPPET_CHARS) out.snippetTruncated = true;
+          return out;
+        });
+        if (m.citations.length > keptCites.length) {
+          copy.citationsTotal = m.citations.length;
+          copy.citationsOmitted = m.citations.length - keptCites.length;
+        }
       }
       if (Array.isArray(m.plan)) copy.plan = m.plan;
       return copy;
@@ -3647,7 +3676,7 @@
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
   var ID_LENGTH = 6;
   var ID_RE = /^RF-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
-  var MAX_MESSAGES = 20;
+  var MAX_MESSAGES2 = 20;
   var MAX_MESSAGE_CHARS = 4e3;
   var MAX_PICKED = 10;
   var MAX_CONSOLE = 30;
@@ -3680,7 +3709,7 @@
     const s = String(v === void 0 || v === null ? "" : v);
     return s.length > max ? s.slice(0, max) + "\u2026\uFF08\u5DF2\u622A\u65AD\uFF09" : s;
   }
-  function trimMessages(messages, limit = MAX_MESSAGES, maxChars = MAX_MESSAGE_CHARS) {
+  function trimMessages(messages, limit = MAX_MESSAGES2, maxChars = MAX_MESSAGE_CHARS) {
     const list = Array.isArray(messages) ? messages : [];
     return list.filter((m) => m && typeof m === "object" && (m.role === "user" || m.role === "assistant")).slice(-limit).map((m) => ({ role: m.role, content: clampText(m.content, maxChars) }));
   }
