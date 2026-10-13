@@ -114,7 +114,7 @@ flowchart TB
 | 能力剧本（与夹具页、技能一一对应） | **30** |
 | 真浏览器 E2E 场景 | **45**（黄金任务 41 + 断线恢复 1 + 视觉两臂对照门禁 3；开关已打开 ⇒ 现在跑的是**开启臂**，关闭臂按开关跳过）|
 | 页面状态判据 / 模型回执判据 | **101 / 64** 条 |
-| 单元测试与门禁 | **1475** 项单元测试（116 个文件） |
+| 单元测试与门禁 | **1523** 项单元测试（119 个文件） |
 
 ```bash
 npm test          # 单元测试 + 三道独立脚本门禁 + 刷新测试数快照
@@ -191,6 +191,19 @@ flowchart TD
 1. **安装**：Edge 打开 `edge://extensions/`，启用「开发人员模式」→「加载解压缩的扩展」→ 指向本目录。
 2. **配置**：点击扩展图标 → 设置，填入 DeepSeek API Key（未配置时知识库仍可正常使用）。
 3. **使用**：选中网页文字 → 点「RecallFlow」气泡 → 输入指令，或直接选用快捷语句。
+
+> **外部 agent（MCP）用到的本地服务不需要手动启动**：先跑一次
+> `node scripts/install-native-host.mjs`，再在扩展页点一次「重新加载」；此后**浏览器一开，
+> `127.0.0.1:7801` 上的服务自动就绪**（服务中途崩了，宿主的看门狗会在 20s 内拉回来）。
+> 注意服务生命周期跟着浏览器：关掉浏览器它就停，重开浏览器自动恢复；需要它独立常驻
+> （DSH/opencode 长期跑）用 `bash scripts/dev-up.sh --daemon`。
+> 状态灯、重启/停止按钮在设置页「本地服务」，原理与排障见
+> [integrations/native-host/README.md](integrations/native-host/README.md)。
+
+> **要给不写代码的人用？** 有一条一键路线：`node scripts/build-dist.mjs` 产出
+> `dist/RecallFlow-Setup-<版本>.exe`（约 24 MB，内含便携 Node，目标机器**不需要装 Node**），
+> 双击安装、从"应用和功能"卸载。原理、体积构成与扩展 ID 识别顺序见
+> [packaging/README.md](packaging/README.md)。
 
 ## 前端调试闭环
 

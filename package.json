@@ -12,7 +12,11 @@
     "build:content": "node scripts/build-content.mjs",
     "test": "node scripts/run-all-checks.mjs",
     "test:e2e": "node scripts/run-e2e.mjs",
-    "render:icons": "node scripts/render-icons.mjs"
+    "render:icons": "node scripts/render-icons.mjs",
+    "install:native-host": "node scripts/install-native-host.mjs",
+    "verify:native-host": "node scripts/verify-native-host.mjs",
+    "build:dist": "node scripts/build-dist.mjs",
+    "verify:installer": "node scripts/verify-installer.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.47.0",

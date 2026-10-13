@@ -11,6 +11,15 @@ tests/e2e/playwright-report/
 test-results/
 playwright-report/
 
+# native messaging 宿主的构建产物与机器相关配置（由 scripts/install-native-host.mjs 生成）：
+#   bin/            编译出来的启动器 exe / 生成的 .cs / 宿主 manifest
+#   host.config.json 里是本机的绝对路径（node 路径、MCP 入口），不该提交
+integrations/native-host/bin/
+integrations/native-host/host.config.json
+
+# 发行包构建产物（scripts/build-dist.mjs）：payload 里有 88MB 便携 Node 与安装器，绝不入库
+dist/
+
 # 操作系统 / 编辑器杂项
 .DS_Store
 Thumbs.db
