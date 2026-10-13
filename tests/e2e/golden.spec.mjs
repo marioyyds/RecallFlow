@@ -333,6 +333,47 @@ test('golden: 思考记录默认折叠、按顺序穿插在对话中、点击后
   await expect(blocks.nth(0).locator('.think-body')).toBeHidden();
   await expect(blocks.nth(1)).toHaveAttribute('data-open', 'false');
 
+  // ⑨ **关掉面板再打开：思考记录必须原样回来**（用户实测反馈：
+  //    「关闭 recallflow 对话，再打开，思考历史消失了」）。
+  //    根因不在存储：parts（含 thinking）一直随对话存进 chrome.storage.session；
+  //    少的是**重建分支** —— renderConversation 只认 narration/text/tool-*/screenshot，
+  //    思考块整块掉进 `return ''`。
+  //    为什么以往 E2E 没抓到：这条用例此前只验到"流式**进行中**重开"
+  //   （那条路 restoreStreamingUI 早就有 thinking 分支），从没在**一轮结束之后**关过面板。
+  await page.locator(PANEL + ' .close').click();
+  await expect(page.locator(PANEL + ' .panel')).toHaveCount(0);
+  await openPanel(page);
+  const restored = page.locator(PANEL + ' .think-block');
+  await expect(restored).toHaveCount(2, { timeout: 30_000 });
+  // 顺序：**如实断言**，并写明这里与实时视图的已知差异。
+  //   实时是 ['think','content','think']（正文那个元素在第二段思考之前就建好了）；
+  //   重建后是 ['think','think','content']，因为 `parts` 只在**固化**时才记录位置：
+  //   本场景两段思考之间**没有工具步骤**，那段正文从没被固化成 narration part
+  //   （它一路留在 pendingNarration 里，直到 'end' 才作为 text part 追加在最后）。
+  //   ⇒ 正文的位置信息在 parts 模型里本来就不存在，这不是本次修复引入的回归；
+  //   要让它也忠实，需要在"新思考段开始"时把已流出的正文固化一次（同 appendStep 的做法），
+  //   那会改变实时 DOM 的分段与 assistant.content 的语义 —— 属独立改动，未做。
+  expect(await flowOrder(page)).toEqual(['think', 'think', 'content']);
+  // 状态才是这次修复的要点：两块都在、都是**定稿**态、都回到**默认折叠**
+  //（折叠条文字用它自带的字数，说明各自装的是哪一段思考）
+  expect(await thinkState(page, 0)).toBe('done/false/已思考（18 字）');
+  expect(await thinkState(page, 1)).toMatch(/^done\/false\/已思考（\d+ 字）$/);
+  // 折叠只是初始态：点开必须能看到各自的原文（重建的块也要能点开 —— 开合是委托处理的）
+  await restored.nth(0).locator('.think-head').click();
+  await expect(restored.nth(0)).toHaveAttribute('data-open', 'true');
+  await expect(restored.nth(0).locator('.think-body')).toContainText('先确认页面结构，再决定点击哪个按钮。');
+  await restored.nth(1).locator('.think-head').click();
+  await expect(restored.nth(1).locator('.think-body')).toContainText('再复核一下边界情况。');
+  // 两块互不影响（各自开合）
+  await expect(restored.nth(0)).toHaveAttribute('data-open', 'true');
+
+  // ⑩ 刷新页面：这一次 parts 真的来自 chrome.storage.session（loadConversation → renderConversation），
+  //    覆盖"SPA 跳转 / 刷新后仍保留上下文"那条路。
+  await page.reload();
+  await openPanel(page);
+  await expect(page.locator(PANEL + ' .think-block')).toHaveCount(2, { timeout: 30_000 });
+  expect(await thinkState(page, 0)).toBe('done/false/已思考（18 字）');
+
   await page.close();
 });
 

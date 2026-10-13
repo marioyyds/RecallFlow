@@ -3236,12 +3236,11 @@
     // 原先这个键叫 runJavascriptApproval，UI 标签也只写「运行 JavaScript」——
     // 于是把它设为 'auto' 会在用户以为只放开 JavaScript 的情况下，一并放开第三方脚本。
     codeExecutionApproval: "session",
-    // 本机 MCP 桥接的共享 token。**刻意不给默认值**：此前它与 server 侧共用常量
-    // 'recallflow-local-bridge-v1' 并被 README 公开，等于把密钥提交进仓库 ——
-    // 任何本机进程都能冒充扩展、伪造证据快照。
-    // 留空 = 不连接桥接（扩展其余功能不受影响）。需与 server 的
-    // RECALLFLOW_BRIDGE_TOKEN 环境变量完全一致。
-    bridgeToken: ""
+    // 本机 MCP 桥接的共享 token。默认值与 recallflow-mcp 内置默认值一致，
+    // 开箱即用（用户明确要求先用默认 token 跑通，见 integrations/opencode/recallflow-mcp/index.js）。
+    // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
+    // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
+    bridgeToken: "recallflow-local-bridge-v1"
   };
   function resolveCodeExecutionApproval(settings) {
     const s = settings || {};
@@ -5095,35 +5094,31 @@
       fitPanelHeight();
     }
   }
+  function thinkLabelText(done, len, truncated) {
+    if (!done) return "\u601D\u8003\u4E2D\u2026";
+    return "\u5DF2\u601D\u8003\uFF08" + len + " \u5B57" + (truncated ? "\uFF0C\u4FDD\u5B58\u65F6\u5DF2\u622A\u65AD" : "") + "\uFF09";
+  }
   function refreshThinkHead(seg) {
     if (!seg || !seg.block) return;
     const label = seg.block.querySelector(".think-label");
     if (!label) return;
-    const text = seg.done ? "\u5DF2\u601D\u8003\uFF08" + seg.text.length + " \u5B57\uFF09" : "\u601D\u8003\u4E2D\u2026";
+    const text = thinkLabelText(seg.done === true, String(seg.text || "").length, seg.truncated === true);
     if (label.textContent !== text) label.textContent = text;
+  }
+  function thinkBlockHtml(text, opts) {
+    const o = opts || {};
+    const body = String(text == null ? "" : text);
+    return '<div class="think-block" data-state="' + (o.done === true ? "done" : "running") + '" data-open="' + (o.open === true ? "true" : "false") + '"><button type="button" class="think-head"><span class="think-dots"><span></span><span></span><span></span></span><span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span><span class="think-caret" aria-hidden="true">\u25BE</span></button><div class="think-body">' + escHtml(body) + "</div></div>";
   }
   function mountThinkSegment(seg, open) {
     if (!flowEl) return null;
-    const block = document.createElement("div");
-    block.className = "think-block";
-    block.dataset.state = seg.done ? "done" : "running";
-    block.dataset.open = open === true ? "true" : "false";
-    const head = document.createElement("button");
-    head.type = "button";
-    head.className = "think-head";
-    head.innerHTML = '<span class="think-dots"><span></span><span></span><span></span></span><span class="think-label"></span><span class="think-caret" aria-hidden="true">\u25BE</span>';
-    head.addEventListener("click", () => {
-      const opening = block.dataset.open !== "true";
-      block.dataset.open = opening ? "true" : "false";
-      if (seg === thinkSeg) thinkExpandedManual = opening;
-    });
-    const body = document.createElement("div");
-    body.className = "think-body";
-    body.textContent = seg.text;
-    block.appendChild(head);
-    block.appendChild(body);
+    const frag = document.createRange().createContextualFragment(
+      thinkBlockHtml(seg.text, { open, done: seg.done, truncated: seg.truncated })
+    );
+    const block = frag.firstElementChild;
+    if (!block) return null;
     seg.block = block;
-    seg.body = body;
+    seg.body = block.querySelector(".think-body");
     refreshThinkHead(seg);
     flowEl.appendChild(block);
     return block;
@@ -5262,6 +5257,9 @@
         }
         if (p.type === "screenshot") {
           return screenshotHtml(p);
+        }
+        if (p.type === "thinking" && p.text) {
+          return thinkBlockHtml(p.text, { done: true, truncated: p.textTruncated === true });
         }
         if (p.type === "narration" && p.text) {
           return '<div class="agent-content">' + renderAnswer(p.text, m.citations, false) + "</div>";
@@ -5557,6 +5555,16 @@
       observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
     });
     panelBody.addEventListener("click", (e) => {
+      const thinkHead = e.target.closest(".think-head");
+      if (thinkHead) {
+        const block = thinkHead.closest(".think-block");
+        if (block) {
+          const opening = block.dataset.open !== "true";
+          block.dataset.open = opening ? "true" : "false";
+          if (thinkSeg && thinkSeg.block === block) thinkExpandedManual = opening;
+        }
+        return;
+      }
       const rewind = e.target.closest(".act-rewind");
       if (rewind) {
         if (streaming) return;
@@ -6219,10 +6227,12 @@
             toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3))
           );
           if (resp.requiresApproval) {
-            const codeText = resp.name === "run_javascript" && resp.args ? String(resp.args.code || "") : "";
-            const approvalArgs = resp.name === "type_text" && resp.args ? { ...resp.args, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : codeText ? { ...resp.args, code: "[\u5B8C\u6574\u4EE3\u7801\u89C1\u4E0B\u65B9]" } : resp.args;
+            const LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
+            const longField = LONG_TEXT_FIELD[resp.name];
+            const longText = longField && resp.args ? String(resp.args[longField] || "") : "";
+            const approvalArgs = resp.name === "type_text" && resp.args ? { ...resp.args, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...resp.args, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : resp.args;
             const detail = approvalArgs && Object.keys(approvalArgs).length ? " \u53C2\u6570\uFF1A" + JSON.stringify(approvalArgs) : "";
-            const codeBlock = codeText ? '<div class="tool-approval-label">\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801</div><pre class="tool-approval-code">' + escHtml(codeText) + "</pre>" : "";
+            const codeBlock = longText ? '<div class="tool-approval-label">' + (resp.name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801") + '</div><pre class="tool-approval-code">' + escHtml(longText) + "</pre>" : "";
             const riskLabel = resp.risk === "high" ? "\u9AD8\u98CE\u9669" : resp.risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C";
             const sessionBtn = resp.allowSession === false ? "" : '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>';
             approvalArea.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(resp.name) + '</span><span class="tool-approval-risk">' + riskLabel + "</span></div>" + (detail ? '<div class="tool-approval-detail">' + escHtml(detail.replace(/^ 参数：/, "")) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';

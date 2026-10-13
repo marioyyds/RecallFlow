@@ -109,21 +109,74 @@ test('chat.js：思考记录的展开状态是**三态**，不是布尔', () => 
 test('chat.js：思考块**默认折叠** —— 进行中也是折叠的', () => {
   // 用户要求：「思考中时应该折叠比较好，用户自己根据其需要展开」。
   // 旧实现是反的：进行中自动展开（`seg.done ? 'false' : 'true'`），正文开始时才收起。
+  //
+  // ⚠ 口径升级（修复"重开面板后思考记录整块消失"之后）：标记现在只有**一处来源** ——
+  //   `thinkBlockHtml()`，实时挂载与历史重建都从它出。因此"初值由显式传入的 open 决定"
+  //   这条规则钉在 **builder** 里，mount 那条路只负责把 open 原样传进去。
+  const builder = chatSrc.slice(chatSrc.indexOf('function thinkBlockHtml('));
+  const builderBody = builder.slice(0, builder.indexOf('\n}'));
+  assert.ok(builderBody.length > 0, '应有 thinkBlockHtml（标记的唯一来源）');
+  assert.match(builderBody, /data-open=/, 'data-open 必须在 builder 里产出');
+  assert.match(builderBody, /o\.open === true \? 'true' : 'false'/, '初值只能由显式 open 决定（不传 = 折叠）');
+  assert.ok(!/data-open="[^\n]*o\.done/.test(builderBody), '不得按"定稿了才折叠"来决定初值');
+
   const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
   const mountBody = mount.slice(0, mount.indexOf('\n}'));
-  assert.match(
-    mountBody,
-    /block\.dataset\.open = open === true \? 'true' : 'false';/,
-    '挂载初值只能由显式传入的 `open` 决定（不传 = 折叠）'
-  );
-  assert.ok(
-    !/dataset\.open\s*=\s*seg\.done/.test(mountBody),
-    '不得再按"定稿了才折叠"来决定初值 —— 默认折叠与是否定稿无关'
-  );
+  assert.match(mountBody, /thinkBlockHtml\(seg\.text, \{ open: open,/, 'mount 必须把显式 open 传进 builder');
   // 新段（pushReasoning）与历史段（pendingParts 重建）都不传展开态 ⇒ 折叠
   const push = chatSrc.slice(chatSrc.indexOf('function pushReasoning('));
   const pushBody = push.slice(0, push.indexOf('\n  }'));
   assert.match(pushBody, /mountThinkSegment\(thinkSeg\);/, '新段必须以折叠挂载（不传展开态）');
+});
+
+test('chat.js：思考块标记**只有一处来源**（两条路共用，重复一份必然漂移）', () => {
+  // 修复"重开面板后思考整块消失"时立下的规矩：标记只写一遍。
+  // 重复一份的后果不是报错，而是两条路各自演进 —— 而这次的缺陷正是
+  // "一条路有标记、另一条路压根没有这个分支"。
+  const markup = chatSrc.match(/class="think-block"/g) || [];
+  assert.equal(markup.length, 1, '思考块标记只能出现一次，实际 ' + markup.length + ' 处');
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
+  assert.match(mount.slice(0, 900), /createContextualFragment\(\s*thinkBlockHtml\(/, '流式挂载必须用 thinkBlockHtml 解析出节点');
+  const restore = chatSrc.slice(chatSrc.indexOf('function renderConversation('));
+  assert.match(restore.slice(0, 6000), /return thinkBlockHtml\(/, '历史重建必须用 thinkBlockHtml');
+});
+
+test('chat.js：重开面板时必须重建思考记录（renderConversation 要有 thinking 分支）', () => {
+  // 用户实测反馈：「关闭 recallflow 对话，再打开，思考历史消失了」。
+  // 根因**不在存储**：`parts`（含 thinking）一直随对话存进 chrome.storage.session。
+  // 少的是**重建分支** —— renderConversation 只认 narration / text / tool-* / screenshot，
+  // 思考块整块掉进 `return ''`。为什么以往 E2E 没抓到：它们只验过"流式进行中重开"
+  //（那条路 restoreStreamingUI 早就有 thinking 分支），从没在**一轮结束之后**关过面板。
+  const at = chatSrc.indexOf('function renderConversation(');
+  assert.ok(at >= 0);
+  const body = chatSrc.slice(at, at + 6000);
+  assert.match(body, /p\.type === 'thinking'/, '重建循环必须处理 thinking 部件');
+  assert.match(
+    body,
+    /thinkBlockHtml\(p\.text, \{ done: true/,
+    '历史段必须按**定稿**态重建 —— 静止的历史不该继续跑"思考中"的动画'
+  );
+});
+
+test('chat.js：重建出来的思考块也要能点开（开合必须是委托的）', () => {
+  // 重建的块是 innerHTML 生成的，**没有**自己的监听器 ⇒ 开合必须委托在 panelBody 上；
+  // 否则重开后思考块点了没反应（比"看不到"更隐蔽：块在，但打不开）。
+  assert.match(chatSrc, /e\.target\.closest\('\.think-head'\)/, 'panelBody 的 click 处理里必须认 .think-head');
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
+  const mountBody = mount.slice(0, mount.indexOf('\n}'));
+  assert.ok(
+    !/addEventListener\('click'/.test(mountBody),
+    'mountThinkSegment 不得再自己挂 click —— 与委托叠加会让一次点击切换两次'
+  );
+});
+
+test('chat.js：被持久化截断的思考必须标明（丢东西要说明）', () => {
+  // clipPart 会按 MAX_PART_TEXT_CHARS 裁掉超长思维链。若重建后当成完整全文展示，
+  // 用户会以为模型只想到这儿 —— 那正是本仓库最忌的"静默丢失"。
+  assert.match(chatSrc, /function thinkLabelText\(done, len, truncated\)/, '文案要有唯一来源');
+  assert.match(chatSrc, /保存时已截断/, '截断必须有一句可读的标注');
+  const restore = chatSrc.slice(chatSrc.indexOf('function renderConversation('));
+  assert.match(restore.slice(0, 6000), /truncated: p\.textTruncated === true/, '重建时要把 parts 上的截断标记传进去');
 });
 
 test('chat.js：流式增量**不碰**用户的展开状态，也不重置滚动位置', () => {
