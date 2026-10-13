@@ -122,6 +122,20 @@
           生成示例：<code>node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"</code>
         </span>
       </label>
+      <div class="field">
+        <span class="field-label">本地服务（浏览器自动启动）</span>
+        <div class="native-host-row">
+          <span id="native-host-dot" class="native-host-dot" data-tone="wait"></span>
+          <span id="native-host-text" class="native-host-text">检查中…</span>
+          <button id="native-host-restart" class="btn btn-ghost" type="button">重启本地服务</button>
+          <button id="native-host-stop" class="btn btn-ghost" type="button">停止</button>
+        </div>
+        <span class="hint">
+          浏览器会自动把 <code>127.0.0.1:7801</code> 的 MCP server 拉起来，不需要再开终端。
+          首次使用（或状态异常）时：在仓库里跑一次 <code>node scripts/install-native-host.mjs</code>，
+          然后在扩展页点「重新加载」。日志：<code>%LOCALAPPDATA%\RecallFlow\logs</code>
+        </span>
+      </div>
       <label class="field">
         <span class="field-label">翻译目标语言</span>
         <input id="target-lang" type="text" placeholder="中文">

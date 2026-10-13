@@ -224,12 +224,42 @@ test('HTTP: 会话内 tools/list 包含全部必需工具', async () => {
   }
 });
 
-test('HTTP: 未知会话 ID → 404', async () => {
+test('HTTP: 未知会话 ID → 用无状态模式把这次请求处理掉（客户端自愈，不因服务重启而永久失效）', async () => {
+  // 背景（真实事故）：服务现在由浏览器 native host 自动拉起，而浏览器重启/服务崩溃后被重拉时，
+  // 进程换了一个，长期运行的客户端（DSH / opencode）仍带着**上一个进程**的 mcp-session-id。
+  // 规范建议这种请求回 404，但实测 SDK 客户端只把 404 当错误抛出、**不会重新 initialize**，
+  // 结果是所有工具调用永久失效，用户只能重启客户端。所以服务端改为无状态处理
+  // （见 index.js 的 handleStaleSession，附带读 SDK 源码得到的依据）。
   const r = await rawRequest(httpPort, {
     headers: mcpHeaders({ 'mcp-session-id': 'not-a-real-session' }),
     body: { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
   });
+  assert.equal(r.status, 200, r.body);
+  const names = (JSON.parse(r.body).result.tools || []).map((t) => t.name);
+  assert.ok(names.includes('browser_read'), '自愈请求必须真的拿到工具列表：' + r.body);
+});
+
+test('HTTP: 无状态自愈不分配新会话 id（否则客户端会误以为自己有会话）', async () => {
+  const r = await rawRequest(httpPort, {
+    headers: mcpHeaders({ 'mcp-session-id': 'stale-session-2' }),
+    body: { jsonrpc: '2.0', id: 5, method: 'tools/list', params: {} },
+  });
+  assert.equal(r.status, 200, r.body);
+  assert.equal(r.headers['mcp-session-id'], undefined, '无状态模式不应返回会话 id');
+});
+
+test('HTTP: 未知会话的 GET（SSE 续流）无法无状态恢复 → 仍按规范 404', async () => {
+  const r = await rawRequest(httpPort, {
+    method: 'GET',
+    headers: mcpHeaders({ 'mcp-session-id': 'not-a-real-session', Accept: 'text/event-stream' }),
+  });
   assert.equal(r.status, 404, r.body);
+});
+
+test('HTTP: /health 带 pid（宿主据此判断端口上是不是自己启动的那个进程）', async () => {
+  const r = await rawRequest(httpPort, { method: 'GET', reqPath: '/health', headers: {} });
+  const j = JSON.parse(r.body);
+  assert.ok(Number.isInteger(j.pid) && j.pid > 0, r.body);
 });
 
 test('HTTP: 多个并发会话各自独立工作（多 opencode 实例的关键性质）', async () => {

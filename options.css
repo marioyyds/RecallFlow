@@ -1,5 +1,4 @@
 /* 设计令牌与基础样式见 base.css */
-
 body {
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--bg);
@@ -287,4 +286,38 @@ main {
   .module-nav {
     padding-inline: 10px;
   }
+}
+
+/* 本地服务状态（native messaging 宿主）：状态灯颜色走设计令牌，深色模式自动跟随 */
+.native-host-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0 4px;
+}
+
+.native-host-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+
+.native-host-dot[data-tone="ok"] {
+  background: var(--success);
+}
+
+.native-host-dot[data-tone="warn"] {
+  background: var(--star-on);
+}
+
+.native-host-dot[data-tone="bad"] {
+  background: var(--danger);
+}
+
+.native-host-text {
+  font-size: 13px;
+  color: var(--text);
 }

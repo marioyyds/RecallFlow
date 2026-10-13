@@ -3,6 +3,7 @@ import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecut
 import { esc } from './lib/shared/utils.js';
 import { getUserscriptSettings, saveUserscriptSettings } from './lib/userscript/settings.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
+import { NATIVE_HOST_STATE_KEY, stateLabel } from './lib/bridge/native-host.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -165,4 +166,47 @@ $('approval-preset').addEventListener('change', (e) => {
 });
 document.querySelectorAll('.approval-list input').forEach((el) => el.addEventListener('change', syncApprovalPreset));
 
+// ---- 本地服务（native messaging 宿主）状态 ----
+// 真正的启动由 background 的 service worker 负责；设置页只读它写进 storage 的状态。
+// 这样用户能"看见"服务是否就绪，而不是面对一个不知道有没有生效的开关。
+function renderNativeHost(state) {
+  const { tone, text } = stateLabel(state);
+  const dot = $('native-host-dot');
+  const label = $('native-host-text');
+  if (dot) dot.dataset.tone = tone;
+  if (label) label.textContent = text;
+}
+
+async function loadNativeHost() {
+  try {
+    const stored = await chrome.storage.local.get(NATIVE_HOST_STATE_KEY);
+    if (stored && stored[NATIVE_HOST_STATE_KEY]) renderNativeHost(stored[NATIVE_HOST_STATE_KEY]);
+  } catch (e) {}
+  // storage 里可能是上一次的旧值（SW 刚醒来还没回写），所以再主动问一次最新状态。
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'nativeHostStatus' });
+    if (r && r.state) renderNativeHost(r.state);
+  } catch (e) {}
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[NATIVE_HOST_STATE_KEY]) return;
+  renderNativeHost(changes[NATIVE_HOST_STATE_KEY].newValue);
+});
+
+$('native-host-restart').addEventListener('click', async () => {
+  renderNativeHost({ status: 'connecting' });
+  try {
+    const r = await chrome.runtime.sendMessage({ type: 'nativeHostRestart' });
+    if (r && r.state) renderNativeHost(r.state);
+  } catch (e) {}
+});
+
+$('native-host-stop').addEventListener('click', async () => {
+  try {
+    await chrome.runtime.sendMessage({ type: 'nativeHostStop' });
+  } catch (e) {}
+});
+
+loadNativeHost();
 load();

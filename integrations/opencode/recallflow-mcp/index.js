@@ -269,6 +269,9 @@ const httpServer = http.createServer((req, res) => {
         queued: queuedTotal,
         sessions: sessionBuckets.size,
         bySession: perSession,
+        // pid 是给"谁在服务这个端口"用的：宿主（native-host）在服务重启后要靠它确认
+        // 端口上这个进程是不是自己启动的那个，从而决定 stop 该不该动手。
+        pid: process.pid,
       })
     );
     return;
@@ -402,14 +405,54 @@ httpServer.listen(PORT, '127.0.0.1', () => {
 // 每个客户端一条独立会话（mcp-session-id），互不干扰，因此不再需要「一个 opencode 一个 server」。
 const mcpSessions = new Map(); // sessionId -> transport
 
+/**
+ * 客户端手里的会话在服务端已不存在时怎么办。
+ *
+ * 触发场景（现在很常见）：由浏览器 native-host 自动拉起的服务进程被重启过
+ * （浏览器重启、进程崩溃后重拉），而长期运行的 MCP 客户端（DSH / opencode）
+ * 仍带着**上一个进程**的 mcp-session-id。规范建议这种请求回 404，
+ * 但实测 SDK 客户端只把 404 当错误抛出、**不会重新 initialize** ——
+ * 结果是所有工具调用永久失效，用户只能重启客户端。
+ *
+ * 因此这里改成：用**无状态 transport** 把这一个请求正常处理掉。
+ * 依据（读 SDK 源码确认过）：
+ *   · `webStandardStreamableHttp.js` 的 validateSession 在 `sessionIdGenerator === undefined`
+ *     时直接放行，所以无状态 transport 允许"首请求就是 tools/call"；
+ *   · 客户端只要在响应头里看到 mcp-session-id 就会自动换用（所以无状态模式不返回该头，
+ *     客户端会带着旧 id 继续来，每个请求都走这条自愈路径，功能上等价）。
+ * 代价：每次请求新建一个 Server/transport（本项目工具调用是低频的请求-响应，可接受）。
+ * GET（SSE 续流）无法在无状态模式下恢复，仍按规范回 404。
+ */
+async function handleStaleSession(req, res, staleSid) {
+  if (req.method !== 'POST') {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: '未知会话：' + staleSid } }));
+    return;
+  }
+  log('收到未知会话的请求（服务重启过？）：' + staleSid + ' → 用无状态模式处理本次请求');
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  transport.onerror = (e) => log('MCP 传输错误（无状态自愈）：' + (e && e.message));
+  const server = createMcpServer();
+  await server.connect(transport);
+  // 无状态请求也要有自己的桶：否则扩展回的响应会和别的会话搅在一起（见 sessionBuckets 的说明）。
+  const ctxId = 'stateless:' + randomUUID();
+  try {
+    await sessionContext.run(ctxId, () => transport.handleRequest(req, res));
+  } finally {
+    // 一次请求一个 transport，用完即关，避免句柄泄漏。
+    await Promise.resolve(transport.close()).catch(() => {});
+    await Promise.resolve(server.close()).catch(() => {});
+    sessionBuckets.delete(ctxId);
+  }
+}
+
 async function handleMcpHttp(req, res) {
   try {
     const sid = req.headers['mcp-session-id'];
     if (sid) {
       const existing = mcpSessions.get(sid);
       if (!existing) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: '未知会话：' + sid } }));
+        await handleStaleSession(req, res, sid);
         return;
       }
       // 把「当前是哪个 MCP 会话」注入异步上下文：本次请求内所有 callExtension

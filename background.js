@@ -5,6 +5,7 @@ import { buildAiMessages } from './lib/shared/rag.js';
 import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
 import { startMcpRelay } from './lib/bridge/relay.js';
+import { startNativeHost, restartNativeHost, getNativeHostState, stopNativeServer } from './lib/bridge/native-host.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
@@ -274,12 +275,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-// 浏览器启动 / 扩展安装后，重新对齐脚本注册状态。
+// 浏览器启动 / 扩展安装后，重新对齐脚本注册状态与本地宿主连接。
 chrome.runtime.onStartup.addListener(() => {
   syncUserscriptRegistrations().catch(() => {});
+  startNativeHost();
 });
 chrome.runtime.onInstalled.addListener(() => {
   syncUserscriptRegistrations().catch(() => {});
+  startNativeHost();
 });
 
 // 标签页关闭时清理其对话持久化数据。
@@ -449,6 +452,47 @@ chrome.runtime.onConnect.addListener((port) => {
 // 启动 RecallFlow ↔ opencode 的本地中继（连接本机 MCP server）。
 // 未运行 MCP server 时连接失败会自动重试，不影响扩展其它功能。
 startMcpRelay();
+
+// 让浏览器自己把本地 MCP server 拉起来（native messaging）：
+// 用户不用再开终端敲 `node index.js --http`；服务随浏览器自动就绪。
+startNativeHost();
+
+// 设置页的「本地服务」面板用这两个消息读写宿主状态。
+// 注意：这里单独加一个监听器而不是塞进上面那个大 switch —— 那个 switch 的分支是
+// 面板/AI 流程专用的，宿主状态属于"设置页自检"，混进去只会让两边都难读。
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || typeof msg.type !== 'string') return false;
+  if (msg.type === 'nativeHostStatus') {
+    sendResponse({ ok: true, state: getNativeHostState() });
+    return false;
+  }
+  if (msg.type === 'nativeHostRestart') {
+    restartNativeHost();
+    sendResponse({ ok: true, state: getNativeHostState() });
+    return false;
+  }
+  if (msg.type === 'nativeHostStop') {
+    const sent = stopNativeServer();
+    sendResponse({ ok: sent, state: getNativeHostState() });
+    return false;
+  }
+  return false;
+});
+
+// 兜底自愈：MV3 的 service worker 会被回收，端口一旦断掉且当时没人再调 startNativeHost()，
+// 宿主就再也不会被拉起 —— 实测踩过：连着杀掉宿主两次后，扩展从此不再重连
+// （launcher.log 里再也没有新的启动记录，而 relay 的 WebSocket 还连着，说明 SW 活着）。
+// chrome.alarms 是唯一能**唤醒**已被回收的 SW 的机制，所以用它每分钟兜一次；
+// startNativeHost() 本身幂等且会识别"僵尸端口"，健康时它什么都不做。
+const NATIVE_HOST_ALARM = 'recallflow-native-host-ensure';
+try {
+  chrome.alarms.create(NATIVE_HOST_ALARM, { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm && alarm.name === NATIVE_HOST_ALARM) startNativeHost();
+  });
+} catch (e) {
+  /* alarms 不可用也不影响主路径：SW 每次启动仍会自己连一次 */
+}
 
 // 初始化统一 Target 管理：订阅对话框 / 下载 / 文件选择等浏览器级事件。
 initTargetManager();

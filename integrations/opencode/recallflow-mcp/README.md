@@ -185,6 +185,18 @@ node index.js --http
 node <仓库路径>/integrations/opencode/recallflow-mcp/index.js --http
 ```
 
+日常开发更推荐用仓库里的启动器：它自带端口占用检测（7801 已有实例就复用，而不是撞 EADDRINUSE）、
+健康检查、日志与 status/stop，还能顺带把本地目录挂成可调试站点：
+
+```bash
+bash scripts/dev-up.sh                      # 前台常驻（Ctrl-C 回收本次启动的进程）
+bash scripts/dev-up.sh --daemon             # 后台常驻
+bash scripts/dev-up.sh status|logs|stop     # 端口 / 进程 / 健康检查 / 停止
+bash scripts/dev-up.sh --with-static docs   # 额外把 docs/ 挂成 http://127.0.0.1:8099
+```
+
+Windows 上用 `scripts\dev-up.cmd`（参数相同，内部转发给 Git Bash）。详见 `scripts/README.md`。
+
 ```bash
 # 确认存活 + 扩展是否已接入
 curl http://127.0.0.1:7801/health
