@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, stripTrailingSources, serializeConversationMessages, MAX_PARTS, MAX_PART_RESULT_CHARS, MAX_MESSAGE_CONTENT_CHARS, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
+import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, buildInterruptedTurn, stripTrailingSources, serializeConversationMessages, MAX_PARTS, MAX_PART_RESULT_CHARS, MAX_MESSAGE_CONTENT_CHARS, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -686,8 +686,7 @@ test('导出：失败的一轮用「### 失败」，且保留失败前的叙述�
 
 test('导出：正常收尾的一轮仍然是「### 结论」（不误伤）', () => {
   const text = wrap([{ role: 'user', content: '问' }, { role: 'assistant', content: '答', parts: [] }]);
-  assert.match(text, /### 结论/);
-});
+  assert.match(text, /### 结论/);});
 
 // ---------------------------------------------------------------- 参考来源去重
 //
@@ -752,4 +751,60 @@ test('导出：模型自带来源段时不与导出器追加的那份重复', ()
   assert.equal(count, 1, '参考来源只应出现一次，实际 ' + count + ' 次');
   assert.ok(!text.includes('模型自己写的'), '模型那份应被去掉，保留导出器统一格式的那份');
   assert.match(text, /\[1\] 页面 — http:\/\/x\//, '导出器那份要在');
+});
+
+// ---------------------------------------------------------------- 异常收尾（中断）
+//
+// 起因：断线重试耗尽 / 后台未能恢复会话 / 45 秒无响应这三条路原先**直接 endStream()**，
+// 而 endStream 会清空 pendingParts ⇒ 屏幕上已经出现的思考与工具步骤**只在 DOM 里**，
+// 关掉面板再打开就全没了（数据从未进过 conversation）。
+// 用 `buildPartialTurn` 会让导出写「任务仍在进行中」—— 而这时任务**已经结束**，那是假话，
+// 因此单独有 buildInterruptedTurn 与「### 中断」。
+
+test('buildInterruptedTurn: 原因 + 已流出正文一起进 content，并标记 interrupted', () => {
+  const m = buildInterruptedTurn([{ type: 'thinking', text: '先确认页面结构' }], '我想好了：', '任务中断：连接反复断开');
+  assert.equal(m.role, 'assistant');
+  assert.equal(m.interrupted, true);
+  assert.ok(!m.partial, '中断不是"进行中"：两者在导出里必须能分开');
+  assert.match(m.content, /^任务中断：连接反复断开/);
+  assert.match(m.content, /我想好了：/);
+  assert.match(m.content, /已中断/);
+  assert.equal(m.parts.length, 1, '中断前的思考/步骤必须保留');
+});
+
+test('buildInterruptedTurn: 说明文案不得声称"任务仍在进行中"（那是假话）', () => {
+  const m = buildInterruptedTurn([], '半截正文', '');
+  assert.ok(!/仍在进行中/.test(m.content), '任务已经结束了：' + m.content);
+  assert.match(m.content, /已中断/);
+});
+
+test('buildInterruptedTurn: 四项入参都可以缺（只要有可读文本）', () => {
+  const m = buildInterruptedTurn(null, null, null);
+  assert.equal(m.parts.length, 0);
+  assert.match(m.content, /已中断/, '没有正文也要给一句可读说明');
+  assert.equal(buildInterruptedTurn([{ type: 'thinking', text: 'x' }], '', '').parts.length, 1);
+});
+
+test('buildInterruptedTurn: 不改动传入数组（面板还会继续用它）', () => {
+  const parts = [{ type: 'thinking', text: 'a' }];
+  buildInterruptedTurn(parts, 'b', 'c');
+  assert.equal(parts.length, 1);
+});
+
+test('导出：中断的一轮用「### 中断」，且保留中断前的思考与工具行', () => {
+  const text = wrap([
+    { role: 'user', content: '跑一下' },
+    buildInterruptedTurn(
+      [
+        { type: 'thinking', text: '先确认页面结构' },
+        { type: 'tool-result', callId: 'c1', name: 'get_page_snapshot', status: 'completed', result: '{"ok":true}' },
+      ],
+      '我想好了',
+      '任务中断：连接反复断开'
+    ),
+  ]);
+  assert.match(text, /### 中断/);
+  assert.ok(!text.includes('### 结论'), '被打断的一轮不该叫结论');
+  assert.match(text, /任务中断：连接反复断开/);
+  assert.match(text, /get_page_snapshot/, '中断前的工具轨迹必须保留');
 });

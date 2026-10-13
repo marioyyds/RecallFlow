@@ -243,6 +243,80 @@ test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（
   );
 });
 
+// ---------------------------------------------------------------- 「半途收尾」也不能丢思考
+//
+// 起因（用户实测）：关掉面板再打开，思考不见了。上面几条修的是**正常收尾**（'end'）那条路；
+// 而"停止 / 断线 / 无响应"这几条**半途收尾**的路各有一处独立的丢数据点：
+//   · interrupt()（■ 停止）只把 content + toolSummary 入栈，**没带 parts** ——
+//     而思考只存在 parts 里 ⇒ 停止过的轮次重开后思考/步骤整块消失，正文却还在
+//    （所以症状看起来恰恰是"只有思考丢了"）。
+//   · 断线重试耗尽 / 后台未能恢复会话 / 45s 无响应这三条直接 endStream()，
+//     而 endStream 会清空 pendingParts ⇒ 这一轮**从未入库**。
+
+test('chat.js：点「停止」也要把思考与步骤入库（interrupt 必须带 parts）', () => {
+  const at = chatSrc.indexOf('function interrupt()');
+  assert.ok(at >= 0);
+  const body = chatSrc.slice(at, at + 2600);
+  assert.match(body, /finishReasoning\(\);/, '停止前必须把**进行中**的那段思考定稿，否则它只活在 DOM 里');
+  assert.match(body, /parts: pendingParts\.slice\(\)/, '入栈必须带 parts（思考/工具步骤只存在这里）');
+  // 反向样张：原先那种"只带 content + toolSummary"的写法必须被判为不合格
+  assert.ok(
+    !/conversation\.push\(\{ role: 'assistant', content: acc, toolSummary: [^}]*\}\);/.test(body),
+    '不得再出现"不带 parts"的入栈（那正是思考消失的原因）'
+  );
+  assert.match(body, /pendingParts\.length/, '要有"连思考都没有"时的分支（不塞空记录）');
+});
+
+test('chat.js：三条"半途收尾"的路都必须先入库再 endStream（否则整轮只活在 DOM 里）', () => {
+  // 为什么用静态断言而不是 E2E：其中两条要靠 45s 超时或"杀掉 service worker"才触发，
+  // 代价与不确定性都太高。这里的判据是**结构性的**：这些分支必须经过同一个入库函数。
+  const at = chatSrc.indexOf('function commitInterruptedTurn(');
+  assert.ok(at >= 0, '应有 commitInterruptedTurn（统一入库）');
+  const helper = chatSrc.slice(at, at + 1200);
+  assert.match(helper, /buildInterruptedTurn\(/, '要复用 transcript.js 的纯函数（与导出/交接同一份语义）');
+  assert.match(helper, /saveConversation\(\);/, '入库后必须落盘');
+  assert.match(helper, /interrupted\) return;/, '要幂等：断线重连过程中可能被走两次');
+
+  const calls = chatSrc.match(/commitInterruptedTurn\(/g) || [];
+  assert.ok(calls.length >= 4, '除了定义处，三条收尾路径都要调用它，实际出现 ' + calls.length + ' 次');
+  for (const marker of ['portRetries >= MAX_PORT_RETRIES', 'if (!ready)', 'respFailTimer = setTimeout']) {
+    const i = chatSrc.indexOf(marker);
+    assert.ok(i >= 0, '找不到 ' + marker);
+    assert.match(chatSrc.slice(i, i + 700), /commitInterruptedTurn\(/, marker + ' 这条收尾路必须先入库');
+  }
+});
+
+test('chat.js：中断轮的"原因 + 已中断"说明必须可见（不能因为 parts 有叙述就被藏掉）', () => {
+  // 与 failed 同一个坑：说明只放 content，而 hasInlineText 只统计 parts。
+  const at = chatSrc.indexOf('function renderConversation(');
+  const body = chatSrc.slice(at, at + 6000);
+  assert.match(body, /!m\.failed && !m\.interrupted/, '失败与中断都要强制渲染 content');
+});
+
+test('chat.js：停止的那一轮也要把执行计划留下（否则重开后计划条回退到更早一轮）', () => {
+  const at = chatSrc.indexOf('function interrupt()');
+  const body = chatSrc.slice(at, at + 2600);
+  assert.match(body, /plan: lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
+});
+
+test('chat.js：展开/折叠思考块之后要重新贴底（否则视图停在离底一段距离不动）', () => {
+  // 实测：E2E 里「思考流式置底」那条断言时红时绿（3/8 上下）。根因不是断言写错，
+  // 而是**展开 `.think-body` 会改变内容高度，却没有任何一处会在开合后重新贴底** ——
+  // 于是视图停在离底 ~167px 的地方，直到下一条增量/下一次 fitPanelHeight 才可能被拉回去。
+  // 真实使用里的表现："展开一条历史思考，面板莫名往上跳。"
+  const live = chatSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const at = live.indexOf("e.target.closest('.think-head')");
+  assert.ok(at >= 0, '应能找到思考块的开合处理');
+  // ⚠ 只取这一个分支（到下一个分支标记为止）：否则会把相邻分支里合法的受守卫置底也算进来。
+  const end = live.indexOf("e.target.closest('.act-rewind')");
+  const body = live.slice(at, end > at ? end : at + 1400);
+  assert.match(body, /wasPinned/, '开合前必须先记住"是否本来贴底"');
+  assert.match(body, /observerAutoScroll/, '判定要复用既有的跟随标记');
+  // 反向样张：**没有**任何守卫的置底必须被判为不合格（那会把正在翻历史的用户拽回底部）
+  const unguarded = body.split('\n').filter((l) => /scrollTop\s*=/.test(l) && !/wasPinned|observerAutoScroll/.test(l));
+  assert.deepEqual(unguarded, [], '开合后的置底必须受守卫（wasPinned / observerAutoScroll）');
+});
+
 // ---------------------------------------------------------------- 样式
 
 test('CSS：思考记录**不得**有内层滚动条（否则与面板滚动打架）', () => {

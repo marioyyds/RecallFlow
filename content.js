@@ -3270,6 +3270,19 @@
 
   // lib/page/transcript.js
   var PARTIAL_TURN_NOTE = "\uFF08\u672C\u6BB5\u5728\u5BFC\u51FA\u65F6\u5C1A\u672A\u7ED3\u675F\uFF1A\u4EFB\u52A1\u4ECD\u5728\u8FDB\u884C\u4E2D\uFF0C\u4EE5\u4E0B\u662F\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
+  var INTERRUPTED_TURN_NOTE = "\uFF08\u4EFB\u52A1\u5DF2\u4E2D\u65AD\uFF1A\u4EE5\u4E0B\u662F\u4E2D\u65AD\u524D\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
+  function buildInterruptedTurn(parts, liveText, reasonText) {
+    const list = (Array.isArray(parts) ? parts : []).slice();
+    const live = String(liveText === void 0 || liveText === null ? "" : liveText).trim();
+    const reason = String(reasonText === void 0 || reasonText === null ? "" : reasonText).trim();
+    const head = [reason, live].filter(Boolean).join("\n\n");
+    return {
+      role: "assistant",
+      content: (head ? head + "\n\n" : "") + INTERRUPTED_TURN_NOTE,
+      parts: list,
+      interrupted: true
+    };
+  }
   function buildPartialTurn(parts, liveText) {
     const list = (Array.isArray(parts) ? parts : []).slice();
     const live = String(liveText === void 0 || liveText === null ? "" : liveText).trim();
@@ -3555,7 +3568,7 @@
       const content = String(m.content || "").trim();
       const alreadyShownFull = Boolean(content) && (content === lastText2 || fullyInline(lastToolText) && norm(content) === lastToolText);
       if (content && !alreadyShownFull) {
-        out.push(m.failed ? "### \u5931\u8D25" : m.partial ? "### \u8FDB\u884C\u4E2D" : "### \u7ED3\u8BBA");
+        out.push(m.failed ? "### \u5931\u8D25" : m.partial ? "### \u8FDB\u884C\u4E2D" : m.interrupted ? "### \u4E2D\u65AD" : "### \u7ED3\u8BBA");
         out.push("");
         out.push(stripTrailingSources(content));
         out.push("");
@@ -5270,8 +5283,8 @@
         return "";
       }).join("");
       const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
-      const contentHtml = hasInlineText && !m.failed ? "" : renderAnswer(m.content || "", m.citations);
-      const failedStyle = m.failed ? ' style="color:#e74c3c"' : "";
+      const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : renderAnswer(m.content || "", m.citations);
+      const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
       return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + citeSourcesHtml(m.citations) + (m.content ? msgActionsHtml(index === conversation.length - 1) : "") + "</div>";
     }).join("");
     const withPlan = [...conversation].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
@@ -5559,9 +5572,11 @@
       if (thinkHead) {
         const block = thinkHead.closest(".think-block");
         if (block) {
+          const wasPinned = !!observerAutoScroll || panelBody && panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
           const opening = block.dataset.open !== "true";
           block.dataset.open = opening ? "true" : "false";
           if (thinkSeg && thinkSeg.block === block) thinkExpandedManual = opening;
+          if (wasPinned && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
         }
         return;
       }
@@ -6068,31 +6083,50 @@
     }
     function interrupt() {
       if (!streaming) return;
+      finishReasoning();
       const acc = pendingAcc;
       closePort();
       if (pendingAiMsg && pendingAiMsg.parentNode) {
+        lastResponse = pendingNarration || lastNarration || acc;
         if (acc) {
-          lastResponse = pendingNarration || lastNarration || acc;
           if (pendingContentEl) pendingContentEl.innerHTML = renderAnswer(pendingNarration || lastResponse, currentCitations, false);
           pendingAiMsg._raw = acc;
-          if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) pendingParts.push({ type: "text", text: lastResponse });
-          conversation.push({ role: "assistant", content: acc, toolSummary: summarizeToolParts(pendingParts) });
-          saveConversation();
-          const note = document.createElement("div");
-          note.className = "stopped-note";
-          note.textContent = "\xB7 \u5DF2\u505C\u6B62\u751F\u6210";
-          pendingAiMsg.appendChild(note);
-          pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
-        } else {
+        } else if (!pendingParts.length) {
           if (pendingContentEl) {
             pendingContentEl.textContent = "\uFF08\u5DF2\u505C\u6B62\uFF09";
             pendingContentEl.style.color = "#999";
           }
         }
+        if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) pendingParts.push({ type: "text", text: lastResponse });
+        if (acc || pendingParts.length) {
+          conversation.push({
+            role: "assistant",
+            content: acc,
+            toolSummary: summarizeToolParts(pendingParts),
+            parts: pendingParts.slice(),
+            // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
+            // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
+            plan: lastPlan.slice()
+          });
+          saveConversation();
+        }
+        const note = document.createElement("div");
+        note.className = "stopped-note";
+        note.textContent = "\xB7 \u5DF2\u505C\u6B62\u751F\u6210";
+        pendingAiMsg.appendChild(note);
+        pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
       }
       endStream();
       fitPanelHeight();
       if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+    }
+    function commitInterruptedTurn(reasonText) {
+      const last = conversation.length ? conversation[conversation.length - 1] : null;
+      if (last && last.role === "assistant" && last.interrupted) return;
+      const turn = buildInterruptedTurn(pendingParts, pendingNarration || pendingAcc, reasonText);
+      if (!turn.parts.length && !String(pendingNarration || pendingAcc || "").trim()) return;
+      conversation.push(turn);
+      saveConversation();
     }
     const MAX_PORT_RETRIES = 2;
     let portRetries = 0;
@@ -6469,6 +6503,7 @@
         if (port === conn) port = null;
         if (!streaming) return;
         if (portRetries >= MAX_PORT_RETRIES) {
+          commitInterruptedTurn("\u4EFB\u52A1\u4E2D\u65AD\uFF1A\u4E0E\u6269\u5C55\u7684\u8FDE\u63A5\u53CD\u590D\u65AD\u5F00\uFF0C\u5DF2\u505C\u6B62\u91CD\u8FDE\u3002");
           endStream();
           return;
         }
@@ -6498,6 +6533,7 @@
           if (!ready) {
             removeTypingEl();
             showCitationHint("\u4EFB\u52A1\u88AB\u4E2D\u65AD\u4E14\u540E\u53F0\u672A\u80FD\u6062\u590D\u4F1A\u8BDD\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u6307\u4EE4\u3002");
+            commitInterruptedTurn("\u4EFB\u52A1\u4E2D\u65AD\uFF1A\u540E\u53F0\u672A\u80FD\u6062\u590D\u4F1A\u8BDD\uFF08\u6269\u5C55\u53EF\u80FD\u521A\u88AB\u66F4\u65B0\u6216\u56DE\u6536\uFF09\u3002");
             endStream();
             return;
           }
@@ -6554,6 +6590,7 @@
           el.textContent = "\u672A\u6536\u5230\u6A21\u578B\u54CD\u5E94\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u6216 API \u914D\u7F6E\u540E\u91CD\u8BD5\u3002";
           el.style.color = "#e74c3c";
         }
+        commitInterruptedTurn("\u4EFB\u52A1\u4E2D\u65AD\uFF1A45 \u79D2\u5185\u672A\u6536\u5230\u6A21\u578B\u54CD\u5E94\u3002");
         endStream();
         closePort();
       }, 45e3);

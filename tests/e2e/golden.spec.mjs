@@ -377,6 +377,45 @@ test('golden: 思考记录默认折叠、按顺序穿插在对话中、点击后
   await page.close();
 });
 
+// 「半途收尾」的那一轮也不能丢思考（用户实测：关掉面板再打开，思考不见了）。
+//
+// 分两条路，前面的用例只覆盖了**正常收尾**（'end'）：
+//   ① ■ 停止（interrupt）：原先只把 content + toolSummary 入栈，**没带 parts** ——
+//      而思考只存在 parts 里 ⇒ 停止过的轮次重开后思考/步骤整块消失，正文却还在。
+//   ② 断线重试耗尽 / 后台未能恢复 / 45s 无响应：原先直接 endStream()（清空 pendingParts），
+//      这一轮**从未入库**。②要靠 45s 超时或杀 service worker 才能触发，因此由单测里的
+//      结构性断言守着（见 tests/thinking-record.test.mjs），这里验①。
+test('golden: 停止后关闭面板再打开 —— 已流出的思考与步骤必须还在', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await sendInstruction(page, '说说你的思考');
+
+  // 夹具在头两片思维链后压住 4 秒（sseThinkStream），这是一个**确定存在**的"思考进行中"窗口：
+  // 在这个窗口里点停止，才能覆盖"进行中的那一段还没定稿"的真实处境。
+  await expect.poll(() => thinkState(page), { timeout: 30_000 }).toBe('running/false/思考中…');
+  await page.locator(PANEL + ' .stop-btn').click();
+  await expect(page.locator(PANEL + ' .stopped-note')).toBeVisible();
+
+  // 关闭 → 重开
+  await page.locator(PANEL + ' .close').click();
+  await expect(page.locator(PANEL + ' .panel')).toHaveCount(0);
+  await openPanel(page);
+
+  // ① 进行中被打断的那段思考必须已定稿入库并重建出来（原先它只活在 DOM 里）
+  const blocks = page.locator(PANEL + ' .think-block');
+  await expect(blocks).toHaveCount(1, { timeout: 30_000 });
+  expect(await thinkState(page, 0)).toBe('done/false/已思考（18 字）');
+  await blocks.nth(0).locator('.think-head').click();
+  await expect(blocks.nth(0).locator('.think-body')).toContainText('先确认页面结构，再决定点击哪个按钮。');
+  // ② 这一轮确实进了对话（不是只在 DOM 里）：有助手消息，且它带着那条思考
+  await expect(page.locator(PANEL + ' .msg.ai .think-block')).toHaveCount(1);
+  // ③ 「· 已停止生成」是**实时**的 DOM 提示（不随对话持久化）：重建后它不在，这是预期行为 ——
+  //    写在这里是为了防止将来有人误以为停止标记也被持久化了。
+  await expect(page.locator(PANEL + ' .stopped-note')).toHaveCount(0);
+
+  await page.close();
+});
+
 // 拾取页面元素后，它必须**留在对话里**（显示 + 持久化）。
 //
 // 起因：用户反馈「选中页面元素时，对话中不显示所选元素的信息」。
