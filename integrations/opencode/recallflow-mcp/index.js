@@ -11,6 +11,7 @@
 //   RECALLFLOW_MCP_PORT          本地端口（默认 7801）
 //   RECALLFLOW_EXT_TIMEOUT_MS    等待扩展响应超时（默认 60000）
 //   RECALLFLOW_EVIDENCE_DIR      证据归档目录（默认 ~/.recallflow-evidence）
+//   RECALLFLOW_BRIDGE_TOKEN      桥接鉴权 token（留空则用内置默认值，见下方说明）
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,25 +39,22 @@ const POLL_HOLD_MS = 25000;
 // 而网页脚本既无法绕过 Host 校验（防 DNS rebinding），也无法携带自定义头（无 CORS 预检放行），
 // 因此「Host 白名单 + 共享 token 头」即可把网页挡在门外。
 //
-// **不再有公开的默认 token。** 原先这里的回退值是 'recallflow-local-bridge-v1'，
-// 它与扩展侧写死成同一个常量、并且被 README 印了出来 —— 等于把一个"共享密钥"提交进了仓库。
-// 任何本机进程（或读到该文档的人）都能拿它冒充扩展，进而**伪造任意"证据"快照**，
-// 而证据链（时间戳 + 哈希归档）正是本项目的对外承诺。
-// 现在必须显式提供 token；缺失则快速失败，并给出可直接照做的生成命令。
-const BRIDGE_TOKEN = String(process.env.RECALLFLOW_BRIDGE_TOKEN || '');
-if (!BRIDGE_TOKEN) {
+// **默认 token 已恢复（用户明确要求，先跑通优先）。**
+// 历史：这个回退值 'recallflow-local-bridge-v1' 与扩展侧共用、且被 README 印出来，
+// 等于把一个"共享密钥"提交进仓库；任何本机进程（或读到该文档的人）都能拿它冒充扩展，
+// 进而**伪造任意"证据"快照**。所以中间版本一度改成"缺失即拒绝启动"。
+// 现在为了开箱即用改回默认值，但保留显式覆盖：设了 RECALLFLOW_BRIDGE_TOKEN 就用你的值，
+// 扩展侧「设置页 → 桥接 Token」填同一个值即可。启动时会打印一行警告提醒当前用的是默认值。
+const DEFAULT_BRIDGE_TOKEN = 'recallflow-local-bridge-v1';
+const BRIDGE_TOKEN = String(process.env.RECALLFLOW_BRIDGE_TOKEN || '').trim() || DEFAULT_BRIDGE_TOKEN;
+if (!String(process.env.RECALLFLOW_BRIDGE_TOKEN || '').trim()) {
   process.stderr.write(
-    '[recallflow-mcp] 缺少桥接鉴权 token，已拒绝启动。\n' +
-      '  桥接端口用于「扩展 ↔ MCP server」通信，必须共享一个只有你知道的密钥；\n' +
-      '  此前存在一个写死在仓库里的默认值，任何人都能用它冒充扩展并伪造证据，因此已移除。\n\n' +
-      '  生成并设置（PowerShell）：\n' +
-      "    $t = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })\n" +
-      '    $env:RECALLFLOW_BRIDGE_TOKEN = $t\n' +
-      '    # 把同一个 $t 填进扩展：设置页 → 桥接 Token（选项页可保存）\n\n' +
-      '  bash/zsh：\n' +
-      '    export RECALLFLOW_BRIDGE_TOKEN=$(openssl rand -hex 24)\n'
+    '[recallflow-mcp] 警告：未设置 RECALLFLOW_BRIDGE_TOKEN，正在使用内置默认 token。\n' +
+      '  默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照。\n' +
+      '  仅建议本机开发/自用；要收紧就设一个只有你知道的值，扩展设置页填同一个：\n' +
+      '    PowerShell: $env:RECALLFLOW_BRIDGE_TOKEN = -join ((1..48) | ForEach-Object { "{0:x}" -f (Get-Random -Max 16) })\n' +
+      '    bash/zsh : export RECALLFLOW_BRIDGE_TOKEN=$(openssl rand -hex 24)\n'
   );
-  process.exit(1);
 }
 const ALLOWED_HOSTS = new Set(['127.0.0.1:' + PORT, 'localhost:' + PORT, '[::1]:' + PORT]);
 // 无需鉴权的探活路径（只读、无副作用）。刻意不含任何秘密或页面内容。
@@ -340,8 +338,9 @@ wss.on('connection', (socket, req) => {
   // 曾尝试改成「先连上、服务端发 nonce、客户端用 hello 回 token」的握手，
   // 但该实现出现无法解释的行为（服务端记录 connected 后立即 close、而客户端直到
   // 自己的超时才观测到关闭），在无法稳定解释前不采用 —— 见本轮变更说明。
-  // 缓解措施：Host 白名单仍生效；token 必须由用户显式配置且不再有仓库内默认值，
-  // 因此「猜一个公开常量」这条路已被切断。
+  // 缓解措施：Host 白名单仍生效；token 默认值虽在仓库里公开（见上方说明），
+  // 但用户可以设 RECALLFLOW_BRIDGE_TOKEN + 扩展「桥接 Token」把它换掉，
+  // 换掉之后「猜一个公开常量」这条路就断了。
   let ok = false;
   try {
     const host = (req && req.headers && req.headers.host) || '';
@@ -1134,3 +1133,9 @@ if (USE_HTTP_MCP) {
   await createMcpServer().connect(transport);
 }
 log('ready. evidence dir: ' + dir());
+log(
+  'bridge auth: ' +
+    (String(process.env.RECALLFLOW_BRIDGE_TOKEN || '').trim()
+      ? 'RECALLFLOW_BRIDGE_TOKEN（自定义）'
+      : '内置默认 token（扩展设置页留空即为同一默认值）')
+);

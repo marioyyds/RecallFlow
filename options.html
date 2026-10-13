@@ -113,11 +113,12 @@
       </label>
       <label class="field">
         <span class="field-label">桥接 Token（本机 MCP 集成）</span>
-        <input id="bridge-token" type="password" autocomplete="off" placeholder="留空则不连接本机 MCP server">
+        <input id="bridge-token" type="password" autocomplete="off" placeholder="留空 = 用内置默认 token（recallflow-local-bridge-v1）">
         <span class="hint">
-          与启动 recallflow-mcp 时的环境变量 <code>RECALLFLOW_BRIDGE_TOKEN</code> 必须完全一致。
-          留空 = 不连接（扩展其余功能不受影响）。<b>不再有内置默认值</b>：此前那个公开常量
-          会让任何本机进程都能冒充本扩展并伪造证据。
+          需与启动 recallflow-mcp 时的环境变量 <code>RECALLFLOW_BRIDGE_TOKEN</code> 完全一致。
+          <b>留空即用内置默认值</b>，默认值和 server 侧默认值相同，因此不用配置也能连上。
+          注意默认值是公开常量：本机任何进程都能用它冒充本扩展、伪造证据快照；
+          在意证据可信度就换成随机串（两侧填同一个值）。
           生成示例：<code>node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"</code>
         </span>
       </label>

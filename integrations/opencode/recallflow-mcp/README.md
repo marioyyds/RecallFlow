@@ -67,8 +67,10 @@ npm install
 
 ```bash
 node index.js --http
-# 建议用强 token：
+# 默认即用内置桥接 token（'recallflow-local-bridge-v1'），扩展侧留空就是同一个值，零配置可连。
+# 想收紧（默认值是公开的，本机任何进程都能拿它冒充扩展、伪造证据快照）：
 # RECALLFLOW_BRIDGE_TOKEN=<随机长字符串> node index.js --http
+# 然后把同一个值填进扩展「设置页 → 桥接 Token」。
 ```
 
 再在 `opencode.json` 里配远程 MCP：
@@ -81,13 +83,16 @@ node index.js --http
       "type": "remote",
       "url": "http://127.0.0.1:7801/mcp",
       "enabled": true,
-      "headers": { "X-RecallFlow-Token": "<你的 RECALLFLOW_BRIDGE_TOKEN>" },
+      "headers": { "X-RecallFlow-Token": "recallflow-local-bridge-v1" },
       "oauth": false,
       "timeout": 90000
     }
   }
 }
 ```
+
+> `headers` 里的值必须与 server 的 `RECALLFLOW_BRIDGE_TOKEN` 一致。
+> 用默认 token 时就是上面那个常量；自己设了强 token 就换成自己的值。
 
 > **⚠️ `timeout` 必须显式设置。** opencode 的 MCP 请求超时默认只有 **5000ms**，
 > 而 `browser_read` / `page_health` / `verify_change` 需要等扩展响应（可能数十秒）。
@@ -110,7 +115,7 @@ node index.js --http
       "type": "remote",
       "url": "http://127.0.0.1:7801/mcp",
       "enabled": true,
-      "headers": { "X-RecallFlow-Token": "<你的 RECALLFLOW_BRIDGE_TOKEN>" },
+      "headers": { "X-RecallFlow-Token": "recallflow-local-bridge-v1" },
       "oauth": false,
       "timeout": 90000
     }
@@ -215,7 +220,7 @@ lsof -ti:7801 | xargs kill
 | `RECALLFLOW_MCP_HTTP` | 未设置 | 设为 `1` 启用 Streamable HTTP 模式（等价于 `--http`） |
 | `RECALLFLOW_MCP_TRANSPORT` | 未设置 | 设为 `http` 同样启用 HTTP 模式 |
 | `RECALLFLOW_MCP_PORT` | `7801` | 扩展连接的桥接端口，也是 HTTP MCP 端点的端口 |
-| `RECALLFLOW_BRIDGE_TOKEN` | **无默认值（必填）** | 与扩展共享的密钥。**必须显式设置**，否则 server 拒绝启动：此前存在一个写死的默认值并被本文档公开，任何本机进程都能用它冒充扩展、伪造证据快照。生成方式见下方「生成桥接 Token」 |
+| `RECALLFLOW_BRIDGE_TOKEN` | `recallflow-local-bridge-v1` | 与扩展共享的密钥，扩展「设置页 → 桥接 Token」需填同一个值（留空即用同一默认值）。默认值是公开常量：本机任何进程都能用它冒充扩展、**伪造证据快照**，因此只建议本机开发自用；要收紧就换成随机长串（`openssl rand -hex 24`），并在扩展设置页同步修改 |
 | `RECALLFLOW_EXT_TIMEOUT_MS` | `60000` | 等待扩展响应超时（应小于 opencode 的 `timeout`） |
 | `RECALLFLOW_EVIDENCE_DIR` | `~/.recallflow-evidence` | 证据归档目录（`dev-session.json` 也在此） |
 
@@ -224,11 +229,16 @@ lsof -ti:7801 | xargs kill
 `/mcp` 与桥接共用两道防护，且**不做 CORS 放行**：
 
 1. **Host 白名单**（`127.0.0.1` / `localhost` / `[::1]`）—— 防 DNS rebinding；
-2. **必须携带 token**：`X-RecallFlow-Token` 头或 `Authorization: Bearer <token>`。
+2. **必须携带 token**：`X-RecallFlow-Token` 头或 `Authorization: Bearer <token>`；扩展桥接走 `?token=`（浏览器 WebSocket 无法设请求头）。
 
 要求「自定义头」本身就是关键防线：网页脚本无法在无 CORS 预检的情况下携带自定义头，
 而我们从不放行预检 —— 因此恶意页面即使能向本机端口发请求也拿不到鉴权。
 `/health` 是唯一免鉴权路径（只读、无副作用，供扩展探活）。
+
+> **默认 token 是公开的**（`recallflow-local-bridge-v1`，同时写在 server、扩展和本文档里）。
+> 它挡得住普通网页（网页仍受 Host 白名单 + 无 CORS 预检约束），但**挡不住本机其它进程**：
+> 任何能读到这个仓库的本地程序都可以冒充扩展返回伪造的"证据"快照。
+> 当前取舍是「先开箱即用」，需要证据链可信时请务必改成只有你知道的随机值。
 
 ## 前置条件
 
@@ -245,7 +255,7 @@ curl http://127.0.0.1:7801/health
 curl -s -X POST http://127.0.0.1:7801/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -H "X-RecallFlow-Token: $RECALLFLOW_BRIDGE_TOKEN" \
+  -H "X-RecallFlow-Token: recallflow-local-bridge-v1" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
 ```
 
