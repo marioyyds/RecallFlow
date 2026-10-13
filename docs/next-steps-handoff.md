@@ -66,7 +66,7 @@ export async function executeTool(name, args, ctx) {
 `cdp-input-tools.js`（click_element / click_at / hover_element / drag_element / upload_file）、
 `page-read-tools.js`（read_current_page / get_page_snapshot / list_frames + listFramesRaw / prefixFrameRefs）、
 `userscript-tools.js`（list / search / install / run —— 安装受用户设置约束）、
-`skill-tools.js`（load_skill / install_skill）、
+`skill-tools.js`（load_skill / install_skill / save_skill —— 读手册 / 从 SkillHub 装 / 把做法写成技能），
 `code-access-tools.js`（run_javascript / get_ax_snapshot —— 页面活状态的深路径）、
 `page-command-tools.js`（annotate / inspect_element / scroll_page / get_element_source / undo_last_action）、
 `knowledge-store-tools.js`（knowledge_read / add_entry / remove_entry —— 权限类别不同，**刻意不合并**）。

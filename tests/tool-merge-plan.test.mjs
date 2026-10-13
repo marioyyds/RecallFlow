@@ -34,7 +34,11 @@ const PLAN = [
   { id: 4, label: '知识库（只读三件套）', from: ['knowledge_read'], to: 1, kind: 'merge', merged: true },
   { id: 4.1, label: '知识库（写/删）', from: ['add_entry', 'remove_entry'], to: 2, kind: 'blocked' },
   { id: 5, label: '宏', from: ['macro'], to: 1, kind: 'merge', merged: true },
-  { id: 6, label: '技能', from: ['load_skill', 'install_skill'], to: 1, kind: 'blocked' },
+  // 技能族现在是**三个**工具：load_skill（read）/ install_skill（external）/
+  // save_skill（high + alwaysRequireApproval，见 tool-metadata.js）。
+  // 合并成 skill(op) 的结论**更不成立**了：继承最严的 save_skill 会让每次「加载技能手册」
+  // 都变成逐次审批（高频、只读、安全的动作），而不继承就丢掉了保存技能正文的闸门。
+  { id: 6, label: '技能', from: ['load_skill', 'install_skill', 'save_skill'], to: 1, kind: 'blocked' },
   { id: 7, label: '帧 + AX', from: ['list_frames', 'get_ax_snapshot'], to: 1, kind: 'blocked' },
   { id: 8, label: '指针族', from: ['click_element', 'click_at', 'hover_element', 'drag_element'], to: 1, kind: 'tradeoff' },
   { id: 9, label: '用户脚本', from: ['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript'], to: 1, kind: 'tradeoff' },
@@ -57,12 +61,13 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   const pendingMerges = PLAN.filter((g) => g.kind === 'merge' && !g.merged);
   const pendingAll = PLAN.filter((g) => !g.merged);
   const byId = (ids) => PLAN.filter((g) => ids.includes(g.id));
-  // 现状：55 - 2（诊断）- 2（宏）- 2（知识库只读）- 2（元素检查只读）- 3（视觉标注）= 44
-  assert.equal(TOTAL, 44, '当前工具数应为 44（第 1、2、3、4、5 档已合并）');
+  // 现状：55 - 2（诊断）- 2（宏）- 2（知识库只读）- 2（元素检查只读）- 3（视觉标注）= 44，
+  // 再 **+1**（本轮新增 `save_skill`，不是合并产物）= 45
+  assert.equal(TOTAL, 45, '当前工具数应为 45（第 1、2、3、4、5 档已合并，另有新增的 save_skill）');
 
   // 可做档已全部执行完；剩下 8/9 两档属"需取舍"（指针族 / 用户脚本）
-  assert.equal(TOTAL - saveOf(byId([8])), 41, '再做指针族应为 41');
-  assert.equal(TOTAL - saveOf(byId([8, 9])), 38, '全部做完应为 38');
+  assert.equal(TOTAL - saveOf(byId([8])), 42, '再做指针族应为 42');
+  assert.equal(TOTAL - saveOf(byId([8, 9])), 39, '全部做完应为 39');
   // 所有"可重构"档已执行完（pendingMerges 应为空）。剩下的只有"需取舍"档 ——
   // 若将来又出现未执行的 merge 档，这里会失败，提醒同步方案与本文档。
   assert.deepEqual(pendingMerges.map((g) => g.label), [], '所有可重构档应已执行完；若有新增，请同步方案文档与下方数字');
@@ -129,7 +134,7 @@ test('每档的权限"取最高"可被自动算出（不靠人记）', () => {
     mergedRows.push(g.label + ' → 必须继承 ' + strongest + '（' + (byName[strongest] ? byName[strongest].risk : '?') + '）');
   }
   // 三条最容易出错的继承关系，逐条钉住（用未被 blocked 的档）
-  assert.match(rows.join('\n'), /技能 → 必须继承 install_skill（external）/, '技能合并必须继承 external');
+  assert.match(rows.join('\n'), /技能 → 必须继承 save_skill（high）/, '技能合并必须继承 save_skill（现在族里最严的是它）');
   assert.match(rows.join('\n'), /用户脚本 → 必须继承 (install_userscript|run_userscript)（high）/, '用户脚本合并必须继承 high');
   // 第 4.1 档（知识库写/删）虽被判为 blocked，但它的"必须继承 destructive"依然要钉住 ——
   // 若将来有人真的把它合并了，这条断言会提醒他 add_entry 会变成 destructive。

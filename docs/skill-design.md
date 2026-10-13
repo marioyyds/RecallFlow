@@ -27,6 +27,12 @@ system prompt  ┌────────────────────�
   `intent-router.js` 的 `buildSystemPrompt()`。
 - 技能的完整正文**只在 `load_skill` 被调用后**才进上下文（`lib/assistant/skill-tools.js`）。
   这是**按需加载**（省 token），也是"模型有选择权"的来源。
+- 技能族一共三个工具，方向各不相同：`load_skill`（**读**手册，只读常驻）、
+  `install_skill`（从 SkillHub **装**，`external` + 审批）、
+  `save_skill`（把一段做法**写**成技能，`high` + **逐次审批**）。
+  第三个是后来补的：此前"写技能"只能用技能页，用户说「沉淀为技能」时 Agent 无路可走
+  （实测会话 RF-FY6PUP）。它的风险档取最严，因为**技能正文会进入今后的系统提示** ——
+  这是一条持久化的注入面，比一次性的页面操作影响更长远（见 `lib/assistant/tool-metadata.js`）。
 - **没有**正则、**没有**关键词打分、**没有**"命中即注入"。
 
 ## 2 被删掉的那条路：`detectSkill()`（关键词匹配）

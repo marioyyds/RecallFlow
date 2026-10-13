@@ -168,7 +168,17 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       已在 `vision.js` 的 `visionMessagesFor` 修掉）。工具数仍 44，权限元数据不变。
   //                       ⚠ 这两处（文案 + 说明修复）同样属于"改了模型可见内容"⇒ 同样需要测量，
   //                       而本轮环境无密钥 ⇒ 未测量（如实记录在 docs/real-model-eval-log.md 第六轮）。
-  const EXPECTED = '972b98d1b7c0f3d6';
+  //   2cfd7d9f6eea088c —— **有意改动**：新增 `save_skill`（技能族第一个**写**工具），44 → 45。
+  //                       起因是会话 RF-FY6PUP 的能力缺口：用户说「沉淀为技能」，
+  //                       而技能族只有 load_skill（读）与 install_skill（从 SkillHub 装）——
+  //                       没有工具能写一份技能，模型只能拿 macro(op=save) 去顶，最后两头落空
+  //                       （用户看到的就是「不能保存 skill 和宏」）。
+  //                       风险取最严一档：`high` + `alwaysRequireApproval`
+  //                       （技能正文会进入今后的系统提示 ⇒ 这是一条**持久化**的注入面，
+  //                       比单次 run_javascript 影响更长远）。理由与残余风险见 tool-metadata.js。
+  //                       `alwaysAvailable: true` 是必需的：实测该请求被判成 knowledge_task，
+  //                       而知识库意图只带 6 个工具 —— 不常驻就永远看不到这个能力。
+  const EXPECTED = '7ed104bf155648d3';
   assert.equal(
     fp,
     EXPECTED,

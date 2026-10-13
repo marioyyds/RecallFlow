@@ -13,7 +13,7 @@ import {
   USERSCRIPT_TOOLS,
   handleUserscriptTool,
 } from '../lib/assistant/userscript-tools.js';
-import { loadSkill, installSkill, SKILL_TOOLS, handleSkillTool } from '../lib/assistant/skill-tools.js';
+import { loadSkill, installSkill, saveSkill, normalizeSkillName, SKILL_TOOLS, handleSkillTool, MIN_SKILL_CONTENT } from '../lib/assistant/skill-tools.js';
 
 // ---------------------------------------------------------------- 用户脚本族
 
@@ -116,14 +116,18 @@ test('run_userscript：把 ctx.tabId 传给执行器（在当前页执行）', a
 function mkSkillDeps(overrides = {}) {
   return {
     getMergedSkills: async () => [],
+    getDefaultSkills: () => [],
+    getUserSkills: async () => [],
+    addUserSkill: async (skill) => skill,
+    updateUserSkill: async (name, patch) => Object.assign({}, patch, { name }),
     validateSkillTools: () => [],
     installSkillFromSkillHub: async () => ({ ok: true, result: '已安装' }),
     ...overrides,
   };
 }
 
-test('SKILL_TOOLS 覆盖两个工具名', () => {
-  assert.deepEqual([...SKILL_TOOLS].sort(), ['install_skill', 'load_skill']);
+test('SKILL_TOOLS 覆盖三个工具名（读 / 装 / 写）', () => {
+  assert.deepEqual([...SKILL_TOOLS].sort(), ['install_skill', 'load_skill', 'save_skill']);
 });
 
 test('handleSkillTool：不属于本族返回 null', async () => {
@@ -180,4 +184,107 @@ test('install_skill：缺 identifier 时失败；identifier 与 url 等价', asy
   const viaUrl = await installSkill(mkSkillDeps({ installSkillFromSkillHub: async (id) => { seen = id; return { ok: true, result: 'ok' }; } }), { url: '@ns/slug' });
   assert.equal(viaUrl.ok, true);
   assert.equal(seen, '@ns/slug', 'url 应作为 identifier 的别名');
+});
+
+// ---------------------------------------------------------------- save_skill
+//
+// 这条能力来自会话 RF-FY6PUP 的真实缺口：用户说「沉淀为技能」，而技能族当时只有
+// load_skill（读）与 install_skill（从 SkillHub 装）—— 没有任何工具能**写**一份技能，
+// 模型只能拿 macro(op=save) 去顶，最后两头落空（用户看到「不能保存 skill 和宏」）。
+
+const LONG_CONTENT = '适用于「发表图文笔记」这类流程。\n\n1. 先切到图文标签；\n2. 填标题与正文；\n3. 回读确认后提交。\n';
+
+test('normalizeSkillName：空格/下划线/大写/非法字符都归一化成 kebab-case', () => {
+  assert.equal(normalizeSkillName('Publish XHS Note'), 'publish-xhs-note');
+  assert.equal(normalizeSkillName('  publish__xhs  '), 'publish-xhs');
+  assert.equal(normalizeSkillName('发布笔记'), '', '纯中文无法归一化 ⇒ 空串（由调用方拒绝并给出可读原因）');
+  assert.equal(normalizeSkillName('a---b'), 'a-b');
+  assert.equal(normalizeSkillName(null), '');
+});
+
+test('save_skill：缺 name / name 无法归一化时失败，并说明要什么形状', async () => {
+  const missing = await saveSkill(mkSkillDeps(), { content: LONG_CONTENT });
+  assert.equal(missing.ok, false);
+  assert.match(missing.result, /kebab-case/);
+
+  const chinese = await saveSkill(mkSkillDeps(), { name: '发布笔记', content: LONG_CONTENT });
+  assert.equal(chinese.ok, false);
+  assert.match(chinese.result, /kebab-case/);
+});
+
+test('save_skill：正文过短/过长都拒绝（短到写不清做法，长到稀释上下文）', async () => {
+  const short = await saveSkill(mkSkillDeps(), { name: 'x-skill', content: '很短' });
+  assert.equal(short.ok, false);
+  assert.match(short.result, new RegExp('至少 ' + MIN_SKILL_CONTENT));
+  assert.match(short.result, /以后怎么做/, '要告诉模型正文该写什么，而不是只说"太短"');
+
+  const long = await saveSkill(mkSkillDeps(), { name: 'x-skill', content: 'x'.repeat(20001) });
+  assert.equal(long.ok, false);
+  assert.match(long.result, /过长/);
+});
+
+test('save_skill：与**内置技能**重名必须拒绝（内置优先会静默盖掉它）', async () => {
+  // 这是最坏的一种失败：保存返回成功，但技能永远不生效（getMergedSkills 里内置优先）。
+  const r = await saveSkill(
+    mkSkillDeps({ getDefaultSkills: () => [{ name: 'readability-fix' }] }),
+    { name: 'readability-fix', content: LONG_CONTENT }
+  );
+  assert.equal(r.ok, false);
+  assert.match(r.result, /与\*\*内置技能\*\*重名/);
+  assert.match(r.result, /readability-fix-custom/, '要给一个可用的替代名');
+});
+
+test('save_skill：新建走 addUserSkill，同名已存在时走 updateUserSkill', async () => {
+  const calls = [];
+  const deps = mkSkillDeps({
+    getUserSkills: async () => [{ name: 'existing-skill' }],
+    addUserSkill: async (s) => { calls.push('add:' + s.name); return s; },
+    updateUserSkill: async (name, patch) => { calls.push('update:' + name); return Object.assign({}, patch, { name }); },
+  });
+  await saveSkill(deps, { name: 'brand-new', content: LONG_CONTENT });
+  await saveSkill(deps, { name: 'existing-skill', content: LONG_CONTENT });
+  assert.deepEqual(calls, ['add:brand-new', 'update:existing-skill']);
+});
+
+test('save_skill：依赖工具写错要当场报出来（运行时会被忽略）', async () => {
+  const r = await saveSkill(
+    mkSkillDeps({ validateSkillTools: () => ['「boost」不是可用工具'] }),
+    { name: 'x-skill', tags: 'a, b', intents: ['browser_task', '不存在的意图'], tools: ['click_element', 'boost'], content: LONG_CONTENT }
+  );
+  assert.match(r.result, /boost/, '依赖工具的警告必须出现在保存结果里');
+  assert.match(r.result, /技能.*页核对/, '要告诉用户去哪核对（正文会进入今后的系统提示）');
+});
+
+test('save_skill：归一化后的字段形状与技能页写入的完全一致（同一份 toStorageShape）', async () => {
+  let saved = null;
+  await saveSkill(mkSkillDeps({ addUserSkill: async (s) => { saved = s; return s; } }), {
+    name: 'Publish XHS Note',
+    displayName: '发布小红书图文笔记',
+    description: '用户要发图文笔记时用',
+    tags: '小红书, 图文',
+    intents: ['browser_task'],
+    keywords: ['发笔记|发布'],
+    tools: ['type_text'],
+    content: LONG_CONTENT,
+  });
+  assert.equal(saved.name, 'publish-xhs-note');
+  assert.deepEqual(saved.tags, ['小红书', '图文']);
+  assert.equal(saved.skill_type, 'prompt-template', '没给 skill_type 时取默认值');
+  assert.deepEqual(saved.x.intents, ['browser_task']);
+  assert.deepEqual(saved.x.tools, ['type_text']);
+  assert.ok(saved.content.includes('发表图文笔记'));
+});
+
+test('save_skill：存储抛错时如实报错，不得假报成功', async () => {
+  const r = await saveSkill(
+    mkSkillDeps({ addUserSkill: async () => { throw new Error('QUOTA_BYTES exceeded'); } }),
+    { name: 'x-skill', content: LONG_CONTENT }
+  );
+  assert.equal(r.ok, false);
+  assert.match(r.result, /QUOTA_BYTES/);
+});
+
+test('handleSkillTool：save_skill 已接入本族分派', async () => {
+  const r = await handleSkillTool('save_skill', { name: 'nope', content: '' }, mkSkillDeps());
+  assert.equal(r.ok, false, '空正文应被本族处理并给出可读原因，而不是返回 null');
 });
