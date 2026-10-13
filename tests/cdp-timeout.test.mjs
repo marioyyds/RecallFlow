@@ -230,7 +230,10 @@ test('⑩ captureWithLadder：预算约束 + 超时标记（桥接侧的失败�
   const cdp = {
     async screenshot(tabId, opts) {
       calls += 1;
-      await new Promise((r) => setTimeout(r, Math.min(Number(opts.timeoutMs) || 100, 100)));
+      // ⚠ **等满它被授予的那段时间**（原先写的是 `min(timeoutMs, 100)`）：两次调用合起来正好落在
+      //   预算边缘 ⇒ 第 3 次能否开始取决于调度抖动 ⇒ 偶发红 ✗（实测：门禁里红过一次、单跑 12/12 绿 ✓）
+      //   等满授予时长 ⇒ 预算**确定**被耗尽 ⇒ "最多两档"与 `calls <= 2` 变成确定性断言 ✓
+      await new Promise((r) => setTimeout(r, Math.max(1, Number(opts.timeoutMs) || 100)));
       throw new Error('CDP 命令 Page.captureScreenshot 未响应（' + opts.timeoutMs + 'ms 未响应）');
     },
   };
