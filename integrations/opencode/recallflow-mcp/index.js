@@ -795,10 +795,31 @@ const TOOLS = [
     },
   },
   {
+    name: 'open_tab',
+    description:
+      '打开一个页面（若同 URL 已打开则**复用**它），并把它设为本会话后续动作的目标 —— 这是「驱动一次完整流程」的第一步。' +
+      '不开它，外部客户端就只能等用户手动把目标页面打开并保持为活动标签页，多步流程在第一步就断了。' +
+      '只支持 http/https（会拒绝 chrome://、file:// 等）。单次调用只新开一个标签页。' +
+      '返回 tabId；之后的 page_action / page_screenshot 不传 tabId 时会默认作用在这个标签页上（本会话内有效）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要打开的绝对 http(s) 地址。' },
+        newTab: {
+          type: 'boolean',
+          description: '默认 false：同 URL 已在某个标签页打开时复用它。true 则强制新开一个标签页。',
+        },
+      },
+      required: ['url'],
+    },
+  },
+  {
     name: 'page_action',
     description:
-      '在浏览器**当前活动标签页**上执行一次页面动作，用于「调试必须触发交互」的场景：点击、输入、按键、滚动、等待元素出现。' +
+      '在浏览器标签页上执行一次页面动作，用于「必须触发交互」的场景：点击、输入、按键、滚动、等待元素出现。' +
       '这是唯一会改变页面的工具 —— 只读能力请优先用 browser_read / page_health / read_console。\n' +
+      '目标标签页：默认是用户当前的活动标签页；也可以传 tabId（通常来自 open_tab）锁定目标。' +
+      '**多步流程请始终指定 tabId**：用户随时可能切走窗口，否则动作会落到别的页面上。\n' +
       '允许的工具（白名单）：click_element、type_text、press_key、wait_for_element、scroll_page、select_option、check_box、get_page_snapshot、get_ax_snapshot、list_frames。\n' +
       '**不开放**：run_javascript（任意代码执行）、用户脚本、文件上传、本地知识库写入 —— 这些只能在浏览器面板里由用户当次批准。\n' +
       '返回值包含 verification / hadEffect，用于判断这一步是否真的产生了页面变化（不要只看 ok:true 就认为生效）。\n' +
@@ -827,6 +848,12 @@ const TOOLS = [
           description:
             '传给该工具的参数对象。定位优先用快照里的 ref；也可用 selector / text / role+name / testid。' +
             'type_text 的输入内容放在 args.value（args.text 是"按文本定位"，不是输入内容）。',
+        },
+        tabId: {
+          type: 'integer',
+          description:
+            '可选：目标标签页 ID（一般来自 open_tab 的返回）。不传则用本会话上次 open_tab 打开的标签页，' +
+            '再没有才回退到用户当前的活动标签页。指定的标签页已关闭时会明确报错，不会静默换页。',
         },
       },
       required: ['tool'],
@@ -1007,7 +1034,15 @@ async function pageAction(args) {
   const tool = String((args && args.tool) || '').trim();
   if (!tool) return { ok: false, error: 'page_action 需要 tool（要执行的工具名）。' };
   const actionArgs = (args && args.args) || {};
-  const r = await callExtension('page_action', { tool, args: actionArgs });
+  // 目标标签页：显式 tabId 优先；否则沿用本 MCP 会话上一次 open_tab 打开的那个。
+  //
+  // 为什么服务端也要记住：调用方是模型，它很容易在第二步就漏掉 tabId。
+  // 而漏掉的后果不是报错，是**动作打到用户当前正在看的页面上**（见扩展侧 resolveActionTab）。
+  // 记住 open_tab 的返回值把这条路变成确定性的；用户自己切窗口也不会影响它。
+  const explicitTabId = Number(args && args.tabId);
+  const tabId =
+    Number.isInteger(explicitTabId) && explicitTabId > 0 ? explicitTabId : currentTargetTab();
+  const r = await callExtension('page_action', { tool, args: actionArgs, tabId });
   if (!r || r.ok === false) {
     return {
       ok: false,
@@ -1026,6 +1061,52 @@ async function pageAction(args) {
     tabId: r.tabId,
     pageUrl: r.pageUrl,
     hint: r.hadEffect ? '' : '本次未观测到页面变化（可能是动作未生效，也可能该交互本就不改变 DOM）。请用 get_page_snapshot 复核实际状态，不要假定成功。',
+  };
+}
+
+// ---------------- 目标标签页（每个 MCP 会话各自记住 open_tab 的结果） ----------------
+//
+// 放在**服务端**而不是让模型每次都传：模型漏传时不会有任何报错，
+// 只会把动作做到别的页面上 —— 这种错误看起来像"点击没生效"，极难归因。
+//
+// 分会话存（与 sessionBuckets 同理）：多个客户端各自驱动自己的页面，不能互相覆盖目标。
+const targetTabBySession = new Map();
+
+function currentTargetTab() {
+  const id = Number(targetTabBySession.get(currentSession()));
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+/**
+ * open_tab：由外部客户端打开一个页面（或在已打开时复用），作为多步流程的第一步。
+ *
+ * 它同时把打开的 tabId 记进本会话，后续 page_action / page_screenshot 不传 tabId 也落在同一页面上。
+ * 只放行 http(s)（扩展侧还会再查一遍）；单次调用只新开一个标签页。
+ */
+async function openTab(args) {
+  const url = String((args && args.url) || '').trim();
+  const r = await callExtension('open_tab', { url, newTab: args && args.newTab === true });
+  if (!r || r.ok === false) {
+    return {
+      ok: false,
+      url,
+      error: (r && r.error) || '打开标签页失败',
+      code: (r && r.code) || '',
+      blocked: Boolean(r && r.blocked),
+    };
+  }
+  if (Number.isInteger(Number(r.tabId)) && Number(r.tabId) > 0) {
+    targetTabBySession.set(currentSession(), Number(r.tabId));
+  }
+  return {
+    ok: true,
+    tabId: r.tabId,
+    reused: Boolean(r.reused),
+    pageUrl: r.pageUrl || url,
+    pageTitle: r.pageTitle || '',
+    ready: Boolean(r.ready),
+    result: r.result || '',
+    note: '后续 page_action / page_screenshot 不传 tabId 时会默认作用在这个标签页上（本会话内有效）。',
   };
 }
 
@@ -1113,6 +1194,7 @@ function createMcpServer() {
       else if (name === 'dev_session_get') result = readDevSession();
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
       else if (name === 'page_action') result = await pageAction(args);
+      else if (name === 'open_tab') result = await openTab(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {

@@ -461,6 +461,49 @@ test('桥接写入：缺定位参数时拒绝并给出获取 ref 的路径', () 
   assert.equal(validateBridgeWrite('click_element', null).ok, false);
 });
 
+// ---------------- 导航（open_tab）：多步流程的第一步 ----------------
+//
+// 背景：外部客户端要跑完一次完整流程（如"发一条内容"），第一步就是**到达目标页面**。
+// 此前只能让用户手动打开并保持为活动标签页，多步流程在第一步就断了。
+// 放开它换来的是「新开一个标签页」这一件事，因此边界必须钉死：
+//   · 只放行 http(s) —— chrome:// / file:// / javascript: 会越过浏览器安全边界；
+//   · 它**不需要**定位参数（判据是"这个工具需要什么"，不是"它在不在白名单里"）——
+//     若沿用页面动作的 NO_TARGET 校验，open_tab 会被自己的校验误拒。
+
+test('桥接导航：open_tab 允许 http(s)，且不因缺少定位参数被误拒', () => {
+  const ok = validateBridgeWrite('open_tab', { url: 'https://example.com/publish' });
+  assert.equal(ok.ok, true, '合法 http(s) 地址应放行：' + ok.error);
+  assert.equal(ok.name, 'open_tab');
+  // 关键回归：导航类工具没有 ref/selector，不能被定位校验挡住。
+  assert.notEqual(ok.code, 'NO_TARGET');
+});
+
+test('桥接导航：非 http(s) 一律拒绝，并说明越过了什么边界', () => {
+  for (const url of ['chrome://settings', 'file:///C:/secret.txt', 'javascript:alert(1)', 'data:text/html,x']) {
+    const v = validateBridgeWrite('open_tab', { url });
+    assert.equal(v.ok, false, url + ' 不得放行');
+    assert.equal(v.code, 'BAD_URL');
+    assert.match(v.error, /http/, '拒绝信息应说明只支持 http(s)');
+  }
+  // 缺 url 与非法 url 要能区分：前者是"没给"，后者是"给了但不允许"。
+  const missing = validateBridgeWrite('open_tab', {});
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'NO_URL');
+});
+
+test('桥接导航：switch_tab 仍不开放（它会改变用户当前视图）', () => {
+  const v = validateBridgeWrite('switch_tab', { tabId: 12 });
+  assert.equal(v.ok, false, 'switch_tab 不得经桥接开放');
+  assert.equal(v.code, 'TOOL_NOT_EXPOSED');
+  assert.match(v.error, /open_tab/, '拒绝信息应给出替代路径（open_tab 可复用已开页面）');
+});
+
+test('桥接导航放开后，上传与任意代码执行仍必须被拒', () => {
+  // 放开一个导航能力，绝不能顺带把这两个高风险能力一起放开。
+  assert.equal(validateBridgeWrite('upload_file', { selector: '#f', path: 'C:/x.png' }).ok, false);
+  assert.equal(validateBridgeWrite('run_javascript', { code: 'alert(1)' }).ok, false);
+});
+
 test('桥接方法清单必须包含 page_action（清单与 dispatch 分支不得漂移）', () => {
   assert.ok(BRIDGE_METHODS.includes('page_action'), 'page_action 必须登记在唯一来源里');
   const src = readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
