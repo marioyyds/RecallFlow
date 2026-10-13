@@ -24,6 +24,8 @@
 | 写入许可（桥接层自己的白名单） | `lib/shared/bridge-write-policy.js` | 桥接是独立入口、不经 agent 审批，因此单独设闸 |
 | 会话隔离 | `sessionBuckets` + `AsyncLocalStorage`（`index.js`） | `recallflow-mcp/test/session-isolation.test.mjs` |
 | 鉴权 | `RECALLFLOW_BRIDGE_TOKEN`（默认 `recallflow-local-bridge-v1`，可覆盖） | `scripts/verify-bridge-ws-handshake.mjs` |
+| **服务怎么起**（不再需要手动开终端） | `integrations/native-host/`（宿主 + 启动器）、`lib/bridge/native-host.js`（扩展侧连接） | 浏览器按需拉起；自检 `scripts/verify-native-host.mjs`；用户视角见 [local-service.md](local-service.md) |
+| 一键安装（免 Node，给不写代码的人） | `packaging/` + `scripts/build-dist.mjs` | 真机验收 `scripts/verify-installer{,-upgrade}.mjs`（20 + 13 项） |
 
 工具面共 **13 个**：12 个只读 + `page_action`（受白名单约束的写通道）。
 

@@ -192,18 +192,10 @@ flowchart TD
 2. **配置**：点击扩展图标 → 设置，填入 DeepSeek API Key（未配置时知识库仍可正常使用）。
 3. **使用**：选中网页文字 → 点「RecallFlow」气泡 → 输入指令，或直接选用快捷语句。
 
-> **外部 agent（MCP）用到的本地服务不需要手动启动**：先跑一次
-> `node scripts/install-native-host.mjs`，再在扩展页点一次「重新加载」；此后**浏览器一开，
-> `127.0.0.1:7801` 上的服务自动就绪**（服务中途崩了，宿主的看门狗会在 20s 内拉回来）。
-> 注意服务生命周期跟着浏览器：关掉浏览器它就停，重开浏览器自动恢复；需要它独立常驻
-> （DSH/opencode 长期跑）用 `bash scripts/dev-up.sh --daemon`。
-> 状态灯、重启/停止按钮在设置页「本地服务」，原理与排障见
-> [integrations/native-host/README.md](integrations/native-host/README.md)。
-
-> **要给不写代码的人用？** 有一条一键路线：`node scripts/build-dist.mjs` 产出
-> `dist/RecallFlow-Setup-<版本>.exe`（约 24 MB，内含便携 Node，目标机器**不需要装 Node**），
-> 双击安装、从"应用和功能"卸载。原理、体积构成与扩展 ID 识别顺序见
-> [packaging/README.md](packaging/README.md)。
+> **外部 agent（MCP）用的本地服务不需要手动启动** —— 浏览器会自动把它拉起来。
+> 怎么装、怎么卸、状态灯与日志在哪、出问题怎么查，全部在
+> **[本地服务（127.0.0.1:7801）](docs/local-service.md)** 这一份文档里；
+> 给不写代码的人用还有一键安装包（双击即装，目标机器不需要 Node）。
 
 ## 前端调试闭环
 
@@ -258,6 +250,9 @@ sequenceDiagram
 配置 remote 时**必须显式设置 `timeout`**（opencode 默认 5000 ms，而这些工具可能要等数十秒）。
 安装与配置见 [recallflow-mcp/README.md](integrations/opencode/recallflow-mcp/README.md)。
 
+**服务本身怎么起**（浏览器自动拉起 / 一键安装包 / 开发态脚本）、状态灯、日志与排障，
+见 **[本地服务（127.0.0.1:7801）](docs/local-service.md)**。
+
 ### 会话交接（把面板现场交给外部 AI）
 
 点击对话面板的会话标识芯片即可复制一段交接指令：接收方凭 `RF-XXXXXX` 标识取回
@@ -280,6 +275,7 @@ sequenceDiagram
 | **真浏览器 E2E 怎么写**（原理 / 操作手册 / 踩过的坑 / 验不了什么） | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
+| **本地服务（7801）怎么起、怎么装、出问题怎么查** | [docs/local-service.md](docs/local-service.md) |
 | 集成路线到底实现了哪些（唯一事实来源） | [docs/integration-status.md](docs/integration-status.md) |
 | 新增 / 重构工具时必须遵守的规范 | [docs/tool-design.md](docs/tool-design.md) |
 
