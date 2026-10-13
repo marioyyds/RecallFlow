@@ -299,6 +299,42 @@ test('chat.js：停止的那一轮也要把执行计划留下（否则重开后�
   assert.match(body, /plan: lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
 });
 
+test('chat.js：流式重开面板时，flowEl 必须**先**指向新的 flow（否则思考挂到孤儿节点上）', () => {
+  // 用户实测：「流式输出中途关掉再打开，停止与思考都没了」。
+  // 根因之一：restoreStreamingUI() 里那个 pendingParts 循环用 mountThinkSegment() 渲染思考，
+  // 而它往**模块级 flowEl** 追加；`flowEl = flow` 却在循环**之后**才赋值 ——
+  // 而关面板时 removePanel() 并**不**清空 flowEl ⇒ 思考块全被追加到上一个面板的**孤儿节点**上
+  //（叙述段与工具步骤用的是局部 flow，所以它们没事）⇒ 症状正好是"其它都在、只有思考没了"。
+  // 这条路径此前**没有任何 E2E**走过（旧用例都只在"一轮结束之后"关面板，那时走 renderConversation）。
+  const at = chatSrc.indexOf('function restoreStreamingUI(');
+  assert.ok(at >= 0);
+  // ⚠ 先剥掉注释行再判位置：注释里提到 `mountThinkSegment()` 会让 `indexOf` 命中注释而不是调用
+  //（第一版就是这么把自己判红的 ✗）
+  const live = chatSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  const liveAt = live.indexOf('function restoreStreamingUI(');
+  const body = live.slice(liveAt, live.indexOf('\nfunction ', liveAt + 10));
+  const flowAssign = body.indexOf('flowEl = flow;');
+  const mountCall = body.indexOf('mountThinkSegment(');
+  assert.ok(flowAssign > 0, '恢复路径必须把 flowEl 指向新的 flow');
+  assert.ok(mountCall > 0, '恢复路径必须重新挂载思考记录');
+  assert.ok(
+    flowAssign < mountCall,
+    '`flowEl = flow` 必须**早于**任何 mountThinkSegment 调用 —— 否则思考会被挂到孤儿节点上'
+  );
+});
+
+test('chat.js：流式重开时「停止 / 发送」的初值必须跟着 streaming 走', () => {
+  // 根因之二：新面板的停止按钮初值写死 display:none，而 restoreStreamingUI() 跑在
+  // **按钮创建之前**（它碰到的只会是上一个面板遗留的按钮）⇒ 任务还在跑但按不到「■ 停止」。
+  // 判据：按钮初值必须由 `streaming` 决定，且恢复函数里**不许**去动它们。
+  assert.match(chatSrc, /stopBtn\.style\.display = streaming \? '' : 'none';/, '停止按钮初值要跟着 streaming');
+  assert.match(chatSrc, /sendBtn\.disabled = streaming === true;/, '"发送"的初值同样要跟着 streaming');
+  const at = chatSrc.indexOf('function restoreStreamingUI(');
+  const body = chatSrc.slice(at, chatSrc.indexOf('\nfunction ', at + 10));
+  assert.ok(!/stopBtn\.style\.display/.test(body), '恢复函数不得去动停止按钮（它跑在按钮创建之前）');
+  assert.ok(!/sendBtn\.disabled/.test(body), '恢复函数不得去动发送按钮（同上）');
+});
+
 test('chat.js：展开/折叠思考块之后要重新贴底（否则视图停在离底一段距离不动）', () => {
   // 实测：E2E 里「思考流式置底」那条断言时红时绿（3/8 上下）。根因不是断言写错，
   // 而是**展开 `.think-body` 会改变内容高度，却没有任何一处会在开合后重新贴底** ——

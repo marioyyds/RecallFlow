@@ -29,6 +29,7 @@ import {
   autoApprove,
   flowOrder,
   thinkState,
+  streamRestoreSnapshot,
   panelStyle,
   panelText,
   readTextAsAgent,
@@ -412,6 +413,46 @@ test('golden: 停止后关闭面板再打开 —— 已流出的思考与步骤�
   // ③ 「· 已停止生成」是**实时**的 DOM 提示（不随对话持久化）：重建后它不在，这是预期行为 ——
   //    写在这里是为了防止将来有人误以为停止标记也被持久化了。
   await expect(page.locator(PANEL + ' .stopped-note')).toHaveCount(0);
+
+  await page.close();
+});
+
+// 流式输出**中途**关掉面板再打开（用户实测：「停止与思考都没了」）。
+//
+// 两个独立的缺陷，都在 `restoreStreamingUI()` 这条恢复路上，而这条路径此前**没有任何 E2E**走过
+//（旧用例只在"一轮结束之后"关面板，那时走的是 `renderConversation`，根本不经过本函数）：
+//   ① 它用 `mountThinkSegment()` 渲染思考，而那个函数往**模块级 `flowEl`** 追加；
+//      `flowEl = flow` 却在那个循环**之后**才赋值 ⇒ 思考块被追加到上一个面板的**孤儿节点**上
+//      （叙述段/工具步骤用的是局部 `flow`，所以它们正常）⇒ 症状正好是"其它都在、只有思考没了"。
+//   ② 重开后新面板的停止按钮初值是 `display:none`，而**没有任何地方**会在流式中把它显示回来
+//      ⇒ 任务还在跑，但用户按不到「■ 停止」。
+test('golden: 流式输出中途关掉面板再打开 —— 思考与「停止」都必须回来', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await sendInstruction(page, '说说你的思考');
+  // 夹具在这两片思维链后压住 4 秒 ⇒ "思考进行中"是一个确定存在的窗口，重开就发生在窗口内。
+  await expect.poll(() => thinkState(page), { timeout: 30_000 }).toBe('running/false/思考中…');
+
+  await page.locator(PANEL + ' .close').click();
+  await expect(page.locator(PANEL + ' .panel')).toHaveCount(0);
+  await openPanel(page);
+
+  // 一次读数同时看三件事，并按"任务是否仍在跑"给出可判定的结论（见 helpers 的说明）：
+  // 这样断言**不依赖**重开是否恰好落在 4 秒窗口内，而两个缺陷都会被抓住。
+  await expect
+    .poll(
+      async () => {
+        const s = await streamRestoreSnapshot(page);
+        if (!s.blocks) return 'thinking-missing';
+        if (s.progressOn && !s.stopVisible) return 'stop-missing';
+        return 'ok';
+      },
+      { timeout: 20_000 }
+    )
+    .toBe('ok');
+
+  // 思考块的内容也要真的在（不是空壳；`.first()`：轮询期间这一轮可能已经跑完并产生第二段思考）
+  await expect(page.locator(PANEL + ' .think-body').first()).toContainText('先确认页面结构', { timeout: 10_000 });
 
   await page.close();
 });

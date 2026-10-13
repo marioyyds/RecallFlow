@@ -4723,6 +4723,7 @@
   var fab = null;
   var conversation = [];
   var stopBtn = null;
+  var sendBtn = null;
   var streaming = false;
   var pendingAcc = "";
   var pendingAiMsg = null;
@@ -5144,6 +5145,7 @@
     const flow = document.createElement("div");
     flow.className = "agent-flow";
     aiMsg.appendChild(flow);
+    flowEl = flow;
     for (const p of pendingParts) {
       if (p.type === "thinking" && p.text) {
         mountThinkSegment({ text: p.text, done: true, block: null, body: null });
@@ -5179,7 +5181,6 @@
     panelBody.appendChild(aiMsg);
     pendingAiMsg = aiMsg;
     pendingContentEl = contentEl;
-    flowEl = flow;
     if (thinkSeg && thinkSeg.text) {
       thinkSeg.block = null;
       thinkSeg.body = null;
@@ -5770,9 +5771,10 @@
     cmdInput.className = "cmd-input";
     cmdInput.rows = 1;
     cmdInput.placeholder = "\u8F93\u5165\u6307\u4EE4\u540E\u56DE\u8F66\uFF0C\u5982\uFF1A\u7FFB\u8BD1\u6210\u4E2D\u6587 / \u89E3\u91CA\u8FD9\u6BB5\u4EE3\u7801 / \u4F18\u5316\u5E76\u8865\u5168\u2026";
-    const sendBtn = document.createElement("button");
+    sendBtn = document.createElement("button");
     sendBtn.className = "cmd-send";
     sendBtn.textContent = "\u53D1\u9001";
+    sendBtn.disabled = streaming === true;
     const pickBtn = document.createElement("button");
     pickBtn.type = "button";
     pickBtn.className = "cmd-pick";
@@ -5936,7 +5938,7 @@
     stopBtn = document.createElement("button");
     stopBtn.className = "stop-btn";
     stopBtn.textContent = "\u25A0 \u505C\u6B62";
-    stopBtn.style.display = "none";
+    stopBtn.style.display = streaming ? "" : "none";
     stopBtn.addEventListener("click", interrupt);
     foot.appendChild(clearBtn);
     foot.appendChild(copyBtn);

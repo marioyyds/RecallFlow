@@ -384,6 +384,34 @@ export function thinkState(page, index = 0) {
 }
 
 /**
+ * 流式**中途**重开面板后的一次性观测：思考块数量 / 进度条是否在跑 / 停止按钮是否可见。
+ *
+ * 为什么要一次读完、并且按"任务是否仍在跑"给出**条件式**结论：
+ * 重开之后任务是否还在跑，取决于夹具那 4 秒"思考进行中"窗口是否已经过去 ——
+ * 拆成三条断言就会变成"看时机"的假绿/假红。而两个真实缺陷都能被这个三元结论抓住：
+ *   · thinking-missing：思考块没回来（mountThinkSegment 往孤儿 flowEl 追加那个顺序 bug）
+ *   · stop-missing：任务还在跑，但「■ 停止」不可见（重开后按钮初值是 display:none）
+ *   · ok：思考在，且（在跑 ⇒ 停止可见）/（已结束 ⇒ 不要求）
+ * 同 thinkState：`host.shadowRoot` 这一步收在这里，spec 不碰原生查询。
+ */
+export function streamRestoreSnapshot(page) {
+  return page.evaluate((hostSel) => {
+    const host = document.querySelector(hostSel);
+    const root = host && host.shadowRoot ? host.shadowRoot : document;
+    const visible = (el) => {
+      if (!el) return false;
+      const cs = getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && el.getClientRects().length > 0;
+    };
+    return {
+      blocks: root.querySelectorAll('.think-block').length,
+      progressOn: visible(root.querySelector('.p-progress')),
+      stopVisible: visible(root.querySelector('.stop-btn')),
+    };
+  }, PANEL);
+}
+
+/**
  * 读面板内某元素的**计算样式**（穿透 shadow DOM）。
  *
  * 为什么要它：像"思考记录不得有内层滚动条"这种约束，CSS 里写错 `max-height`
