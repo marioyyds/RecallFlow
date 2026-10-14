@@ -814,6 +814,66 @@ const TOOLS = [
     },
   },
   {
+    name: 'agent_task',
+    description:
+      '把**一整条任务**交给 RecallFlow 扩展内置的 agent 去完成（它自己规划、自己动手），本次调用**立刻返回 jobId**，' +
+      '进度用 agent_task_status 轮询。\n' +
+      '与 page_action 的分工：page_action 是你逐步驱动（每步可见、可断言，适合调试）；' +
+      'agent_task 是让浏览器那侧自己跑完一条流程（省往返与上下文，适合"跑完这条固定流程"）。\n' +
+      '**必须声明 allowRisk**：桥接场景下没有面板可以弹审批，所以授权改为开工前一次性声明。' +
+      '可用类别：page（页面内点击/输入）、browser（开关标签页）、network（网络请求）、' +
+      'write/destructive（本地数据写删）、external（外部 MCP）。' +
+      '**high（任意代码执行、第三方用户脚本）任何声明都换不到**，只能在浏览器面板里由用户当次批准。\n' +
+      '任务期间 page_action / open_tab 会被拒绝，直到它结束 —— 两个执行者同时动手会互相踩标签页。\n' +
+      '前置条件：扩展必须已配置 API Key（否则任务立即失败，错误里会说明）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: {
+          type: 'string',
+          description: '要完成的任务（自然语言，交给扩展内 agent 自己规划执行）。',
+        },
+        allowRisk: {
+          type: 'array',
+          items: { type: 'string', enum: ['page', 'browser', 'network', 'write', 'destructive', 'external'] },
+          description:
+            '本次允许的风险类别（开工前声明，任务结束后失效，不会累积）。read 永远允许，不必声明。' +
+            'high 不接受（任意代码执行/第三方脚本只能面板批准）。',
+        },
+        tabId: {
+          type: 'integer',
+          description: '可选：任务绑定的标签页 ID。不传则用本会话上次 open_tab 打开的，再没有就用当前活动标签页。',
+        },
+      },
+      required: ['instruction'],
+    },
+  },
+  {
+    name: 'agent_task_status',
+    description:
+      '读取 agent 任务的进度。**按游标增量返回**：传上次拿到的 seq 作为 sinceSeq，只返回其后的新事件。\n' +
+      '不传 jobId 时返回"当前有没有任务在跑"与最近的 job 清单。\n' +
+      '返回里 `running` 为 false 即任务已结束；`omitted` 表示有多少条最旧事件因上限被丢弃 —— ' +
+      '它不是 0 时说明这份日志有缺口，不要当成完整记录。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        jobId: { type: 'string', description: 'agent_task 返回的 jobId。不传则返回运行中任务与 job 清单。' },
+        sinceSeq: { type: 'integer', description: '上次读到的 seq（缺省 0 = 从头）。用于只取增量。' },
+      },
+    },
+  },
+  {
+    name: 'agent_task_cancel',
+    description:
+      '请求取消正在运行的 agent 任务（不传 jobId 则取消当前运行中的那个）。\n' +
+      '取消是**异步**的：本调用只发出信号，最终状态要用 agent_task_status 确认 —— 不要假定它立刻变成 cancelled。',
+    inputSchema: {
+      type: 'object',
+      properties: { jobId: { type: 'string', description: '要取消的 jobId；缺省取消当前运行中的任务。' } },
+    },
+  },
+  {
     name: 'page_action',
     description:
       '在浏览器标签页上执行一次页面动作，用于「必须触发交互」的场景：点击、输入、按键、滚动、等待元素出现。' +
@@ -1110,6 +1170,87 @@ async function openTab(args) {
   };
 }
 
+// ---------------- agent 任务（服务端只是转发 + 记住 jobId） ----------------
+//
+// 服务端**不解释**进度事件，也不做缓冲：job 活在扩展侧（`lib/bridge/agent-job.js`），
+// 因为 agent 循环、工具执行、假 port 都在那边。这里只做两件事：
+//   1. 把调用转发过去，并把返回的 jobId 记进本会话（可省略后续调用里的 jobId）；
+//   2. 把错误原样带出来 —— 授权失败（allowRisk 缺失/含 high）必须让调用方看清原因，
+//      它是要据此**改参数重试**的，而不是据此放弃。
+const agentJobBySession = new Map();
+
+function currentAgentJobId() {
+  const id = agentJobBySession.get(currentSession());
+  return id ? String(id) : '';
+}
+
+/**
+ * agent_task：启动一个后台 agent 任务，立刻返回 jobId。
+ *
+ * 注意这里**不做**长等待：扩展侧会立刻返回（任务在后台跑）。
+ * 若这里改成等任务结束，必然会撞上 DSH 的 90s 工具调用超时 ——
+ * 那正是这个工具被设计成"启动 + 轮询"而不是"同步等结果"的原因。
+ */
+async function agentTask(args) {
+  const a = args || {};
+  const instruction = String(a.instruction || '').trim();
+  if (!instruction) {
+    return { ok: false, error: 'agent_task 需要 instruction（要让扩展内 agent 完成的任务）。' };
+  }
+  const allowRisk = Array.isArray(a.allowRisk) ? a.allowRisk.map((x) => String(x)) : [];
+  const explicitTabId = Number(a.tabId);
+  const tabId =
+    Number.isInteger(explicitTabId) && explicitTabId > 0 ? explicitTabId : currentTargetTab();
+  const r = await callExtension('agent_task', { instruction, allowRisk, tabId });
+  if (!r || r.ok === false) {
+    return {
+      ok: false,
+      error: (r && r.error) || '启动 agent 任务失败',
+      code: (r && r.code) || '',
+      runningJobId: (r && r.runningJobId) || undefined,
+      // 可操作提示：授权类失败是可以靠改参数重试的，别让调用方以为这条路走不通。
+      hint:
+        (r && r.code) === 'BAD_ALLOW_RISK'
+          ? 'allowRisk 只接受 page / browser / network / write / destructive / external；' +
+            'high（任意代码执行、第三方脚本）任何声明都换不到，只能在浏览器面板里由用户当次批准。'
+          : (r && r.code) === 'AGENT_TASK_BUSY'
+            ? '浏览器里同时只能跑一个 agent 任务。请用 agent_task_status 查看在跑的那个，或先 agent_task_cancel。'
+            : undefined,
+    };
+  }
+  if (r.jobId) agentJobBySession.set(currentSession(), String(r.jobId));
+  return Object.assign({}, r, {
+    note:
+      (r.note ? r.note + ' ' : '') +
+      '本会话后续的 agent_task_status / agent_task_cancel 不传 jobId 时会默认用这个任务。',
+  });
+}
+
+async function agentTaskStatus(args) {
+  const a = args || {};
+  const jobId = String(a.jobId || '').trim() || currentAgentJobId();
+  const r = await callExtension('agent_task_status', { jobId, sinceSeq: a.sinceSeq });
+  if (!r || r.ok === false) {
+    return { ok: false, error: (r && r.error) || '读取 agent 任务进度失败', jobId };
+  }
+  // 任务结束后清掉会话记忆，避免下一次 status 误指一个已经结束的任务。
+  if (jobId && r.running === false) {
+    const remembered = currentAgentJobId();
+    if (remembered && remembered === jobId) agentJobBySession.delete(currentSession());
+  }
+  return r;
+}
+
+async function agentTaskCancel(args) {
+  const a = args || {};
+  const jobId = String(a.jobId || '').trim() || currentAgentJobId();
+  const r = await callExtension('agent_task_cancel', { jobId });
+  if (!r || r.ok === false) {
+    return { ok: false, error: (r && r.error) || '取消 agent 任务失败', jobId };
+  }
+  return r;
+}
+
 // recallflow_session：读取用户在浏览器面板里交接出来的会话。
 // 用户点一下面板上的标识芯片，就能复制一段带着 RF-XXXXXX 的指令贴给 AI；
 // 这个工具就是把那份「自包含交接包」取回来（对话 + 页面 + 拾取元素 + 控制台错误快照）。
@@ -1195,6 +1336,9 @@ function createMcpServer() {
       else if (name === 'dev_session_set') result = writeDevSession(args || {});
       else if (name === 'page_action') result = await pageAction(args);
       else if (name === 'open_tab') result = await openTab(args);
+      else if (name === 'agent_task') result = await agentTask(args);
+      else if (name === 'agent_task_status') result = await agentTaskStatus(args);
+      else if (name === 'agent_task_cancel') result = await agentTaskCancel(args);
       else return { content: [{ type: 'text', text: '未知工具：' + name }], isError: true };
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
