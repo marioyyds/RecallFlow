@@ -151,3 +151,40 @@ test('executeAnyTool: 守卫抛异常不得让整轮崩掉（只读守卫失败�
   // 抛出来是可接受的（调用方能看到栈），但必须是可归因的异常，而不是静默放行。
   await assert.rejects(() => executeAnyTool('click_element', { ref: 'rf-1' }, ctx), /守卫内部错误/);
 });
+
+// ---------------- 守卫的**接线**必须有牙齿 ----------------
+//
+// 这一组的存在理由是一次真实的自查发现：守卫最初被写成 ctx.agentBudgetGuard，
+// 但 runAgentStream **自己造 ctx**，调用方根本没有参数能塞进去 ——
+// 于是判定永不生效、也不会报错，只会静默放行。
+// 对一条安全边界来说，"没生效"比"报错"危险得多，所以把它钉成门禁。
+
+test('接线：runAgentStream 必须把 settings.agentBudgetGuard 装到 ctx 上', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+  // ctx 初始化里必须出现该字段
+  assert.match(src, /agentBudgetGuard:/, 'agent.js 的 ctx 初始化里必须有 agentBudgetGuard（否则守卫永不生效）');
+  // 且必须从 settings 上取 —— 这是调用方唯一能传进来的通道
+  assert.match(
+    src,
+    /agentBudgetGuard:[\s\S]{0,200}settings\.agentBudgetGuard/,
+    'agentBudgetGuard 必须从 settings 上取：runAgentStream 自己造 ctx，调用方没有别的通道'
+  );
+});
+
+test('接线：relay 必须经 settings 把守卫传进 runAgentStream', async () => {
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
+  assert.match(src, /agentBudgetGuard:/, 'relay 必须设置 agentBudgetGuard');
+  // 必须带在传给 runAgentStream 的那个 settings 对象上，而不是挂在别的东西上。
+  assert.match(
+    src,
+    /agentBudgetGuard: guard/,
+    'relay 应把 checkAgentToolBudget 包装出的 guard 挂到 settings 上'
+  );
+  assert.match(
+    src,
+    /runAgentStream\(/,
+    'relay 必须真的调用 runAgentStream'
+  );
+});
