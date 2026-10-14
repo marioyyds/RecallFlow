@@ -172,19 +172,18 @@ test('接线：runAgentStream 必须把 settings.agentBudgetGuard 装到 ctx 上
   );
 });
 
-test('接线：relay 必须经 settings 把守卫传进 runAgentStream', async () => {
+test('接线：relay 必须经 settings 把守卫传进 agent 运行入口', async () => {
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
   assert.match(src, /agentBudgetGuard:/, 'relay 必须设置 agentBudgetGuard');
-  // 必须带在传给 runAgentStream 的那个 settings 对象上，而不是挂在别的东西上。
+  // 必须带在传给运行入口的那个 settings 对象上，而不是挂在别的东西上。
   assert.match(
     src,
     /agentBudgetGuard: guard/,
     'relay 应把 checkAgentToolBudget 包装出的 guard 挂到 settings 上'
   );
-  assert.match(
-    src,
-    /runAgentStream\(/,
-    'relay 必须真的调用 runAgentStream'
-  );
+  // 运行入口必须是可注入的变量（测试用它确定性地驱动 running 路径），
+  // 而不是直接写死 runAgentStream —— 写死的话"并发/取消/互斥"这几条就测不了。
+  assert.match(src, /let agentRunner = runAgentStream/, 'agentRunner 默认必须是真实的 runAgentStream');
+  assert.match(src, /await agentRunner\(/, '启动任务必须走 agentRunner（而不是直接调 runAgentStream）');
 });
