@@ -61,10 +61,35 @@ __setAgentRunnerForTests(async (port, payload, settings, book, signal) => {
   if (runnerBehavior === 'throw') throw new Error('注入的失败');
 });
 
-/** 确保没有任务占着串行槽（用例之间互不污染）。 */
+/** 等到注入的 runner 真的被调用（dispatch 是立刻返回的，runner 在后台异步启动）。 */
+async function waitForRun() {
+  for (let i = 0; i < 100; i += 1) {
+    if (lastRun) return lastRun;
+    await new Promise((res) => setTimeout(res, 5));
+  }
+  return null;
+}
+
+/**
+ * 确保没有任务占着串行槽（用例之间互不污染）。
+ *
+ * 必须**等到终态**再返回，不能只发一个 cancel 就走：
+ * 注入的 runner 收到 abort 后是在**自己的微任务里**结束的，
+ * cancel 一返回任务仍是 running —— 下一个用例于是会撞上 AGENT_TASK_BUSY，
+ * 表现为"与被测行为无关的失败"（这类失败最浪费时间）。
+ */
 async function clearJobs() {
-  const st = await dispatch('agent_task_status', {});
-  if (st.runningJobId) await dispatch('agent_task_cancel', { jobId: st.runningJobId });
+  for (let round = 0; round < 5; round += 1) {
+    const st = await dispatch('agent_task_status', {});
+    const id = st.runningJobId;
+    if (!id) return;
+    await dispatch('agent_task_cancel', { jobId: id });
+    for (let i = 0; i < 50; i += 1) {
+      const s = await dispatch('agent_task_status', { jobId: id });
+      if (!s || s.running === false) break;
+      await new Promise((res) => setTimeout(res, 5));
+    }
+  }
 }
 
 // ---------------- 未知方法 ----------------
@@ -131,7 +156,8 @@ test('agent_task：合法声明会真的启动任务，并给出 approvedTools�
 test('agent_task：把 allowRisk 归一化后的授权面交给运行入口（且经 settings 传守卫）', async () => {
   await clearJobs();
   runnerBehavior = 'hang';
-  await dispatch('agent_task', { instruction: 'x', allowRisk: ['page'] });
+  const started = await dispatch('agent_task', { instruction: 'x', allowRisk: ['page'] });
+  await waitForRun();
   assert.ok(lastRun, '注入的运行入口应被调用');
   // 守卫必须真的挂在 settings 上 —— 挂错了地方不会报错，只会静默放行（这是本轮修过的真缺陷）
   assert.equal(typeof lastRun.settings.agentBudgetGuard, 'function', '守卫必须经 settings 传给运行入口');
@@ -140,6 +166,30 @@ test('agent_task：把 allowRisk 归一化后的授权面交给运行入口（�
   assert.equal(verdict.allowed, false, 'upload_file 未声明，守卫必须拒绝');
   const allowed = lastRun.settings.agentBudgetGuard('click_element');
   assert.equal(allowed.allowed, true, 'click_element 属 page，已声明，应放行');
+  await clearJobs();
+  lastRun = null;
+});
+
+test('agent_task：预放行清单必须以 agent 循环真正读的那个键名传进去', async () => {
+  // 这是最容易静默失效的一处接线：agent 循环读的是 `payload.sessionApprovedTools`
+  //（见 agent.js 的 `new Set(canResume ? persisted.sessionApprovedTools : payload.sessionApprovedTools)`）。
+  // 键名写错或塞进 settings 都不会报错 —— 只表现为任务**卡在等一个没人回答的审批上**，
+  // 最后被 stalled 收割，而错误信息里看不出"其实是预放行没送到"。
+  await clearJobs();
+  runnerBehavior = 'hang';
+  const started = await dispatch('agent_task', { instruction: 'x', allowRisk: ['page'] });
+  await waitForRun();
+  assert.ok(lastRun, '注入的运行入口应被调用');
+  const payload = lastRun.payload;
+  assert.ok(Array.isArray(payload.sessionApprovedTools), 'sessionApprovedTools 必须是数组（键名不能变）');
+  assert.deepEqual(
+    payload.sessionApprovedTools.slice().sort(),
+    started.approvedTools.slice().sort(),
+    '启动返回的 approvedTools 与真正交给循环的清单必须一致（否则调用方看到的授权面是假的）'
+  );
+  assert.ok(payload.sessionApprovedTools.length > 0, '声明 page 后必须真有页面动作被预放行');
+  assert.equal(payload.runId, started.jobId, 'runId 必须是 jobId（恢复与落盘都靠它对齐）');
+  assert.equal(payload.question, 'x', '指令要以 question 传给循环');
   await clearJobs();
   lastRun = null;
 });
