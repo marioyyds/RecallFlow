@@ -212,3 +212,69 @@ test('失败/取消时不去捞答复（那不是"结果"，别把过程文字�
   assert.equal(r.result, '', '失败时不应把过程文字当结果');
   assert.equal(r.error, '炸了');
 });
+
+// ---------------- 卡住的任务必须有个终态 ----------------
+//
+// 扩展侧等审批是挂在 port 上的、**没有超时兜底**（客户端那 60s/90s 只约束单次调用，
+// 管不到已经启动的长任务）。不判 stalled 的话，job 会永远停在 running，
+// 调用方一直轮询却永远等不到终态，而且**看不出**这是"卡住"还是"还在干活"。
+
+/** 可注入时钟的 store，便于直测"卡住"（真实时钟要等 90 秒没法测）。 */
+function clockStore(opts = {}) {
+  let t = 1000000;
+  const s = new AgentJobStore(Object.assign({ stallMs: 1000, now: () => t }, opts));
+  return { s, advance: (ms) => { t += ms; }, at: () => t };
+}
+
+test('reapStale：长时间没有新事件的在跑任务被判定为 stalled，并给出原因', () => {
+  const { s, advance } = clockStore();
+  const { job } = s.create({ instruction: '发一条内容' });
+  advance(1001);
+  const reaped = s.reapStale();
+  assert.equal(reaped.length, 1, '超时未动的任务应被收割');
+  const r = s.read(job.id, 0);
+  assert.equal(r.state, JOB_STATE.STALLED);
+  assert.equal(r.running, false, '必须变得不再 running，否则调用方会继续轮询');
+  assert.match(r.error, /没有任何进展/, '应说明为什么被判定卡住');
+  assert.match(r.error, /审批|无响应/, '应指出常见原因，便于归因');
+  assert.match(r.error, /agent_task_cancel/, '应给出下一步能做什么');
+});
+
+test('reapStale：有新事件进账的任务不会被误判（长任务不该被当成卡住）', () => {
+  const { s, advance } = clockStore();
+  const { job } = s.create({});
+  for (let i = 0; i < 5; i += 1) {
+    advance(900); // 每次都在阈值内
+    s.append(job.id, { type: 'chunk', text: 'x' });
+    s.reapStale();
+  }
+  assert.equal(s.read(job.id, 0).state, JOB_STATE.RUNNING, '持续有进展的任务必须保持 running（不构成进度墙）');
+});
+
+test('reapStale：已结束的任务不受影响', () => {
+  const { s, advance } = clockStore();
+  const a = s.create({});
+  s.finish(a.job.id, JOB_STATE.COMPLETED, { result: '好了' });
+  advance(99999);
+  assert.deepEqual(s.reapStale(), [], '已结束的任务不该被收割');
+  assert.equal(s.read(a.job.id, 0).state, JOB_STATE.COMPLETED, '终态不得被改写成 stalled');
+});
+
+test('reapStale：收割后能开新任务（卡住的不会永久占住串行槽）', () => {
+  const { s, advance } = clockStore();
+  s.create({});
+  assert.equal(s.create({}).ok, false, '有任务在跑时应拒绝并发');
+  advance(1001);
+  s.reapStale();
+  assert.equal(s.create({}).ok, true, '卡住的任务被收割后应当能开新的（否则串行槽被永久占死）');
+});
+
+test('reapStale 的错误信息里秒数是真实的闲置时长（不是 0）', () => {
+  // 这条钉一个很容易写错的细节：若先改写 updatedAt 再算差值，得到的是 0。
+  const { s, advance } = clockStore();
+  const { job } = s.create({});
+  advance(3000);
+  s.reapStale();
+  const r = s.read(job.id, 0);
+  assert.match(r.error, /3s/, '应报告真实的闲置时长；写成 0s 说明算差值时更新了 updatedAt');
+});
