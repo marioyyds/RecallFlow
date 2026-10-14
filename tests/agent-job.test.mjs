@@ -164,6 +164,33 @@ test('finalAnswerFrom：取最后一段连续 chunk，而不是把所有 chunk �
   );
 });
 
+test('finalAnswerFrom：答复之后还跟着收尾元数据时，仍然拿得到答复（真实流的形状）', () => {
+  // 这条来自一次真实浏览器 E2E 的实测：线上表现为"任务成功但拿不到答复"，
+  // 而当时的单测是绿的 —— 因为假事件流结尾恰好没有这些元数据。
+  // 真实结尾（实测）：chunk("。") → usage → agent-state(completed) → end
+  const events = [
+    { type: 'chunk', text: '这个页面是用于' },
+    { type: 'chunk', text: '探活的。' },
+    { type: 'usage', totalTokens: 28404 },
+    { type: 'agent-state', state: 'completed', step: 2 },
+    { type: 'end' },
+  ];
+  assert.equal(
+    finalAnswerFrom(events),
+    '这个页面是用于探活的。',
+    '收尾元数据（usage / agent-state / end）不得让答复丢失 —— 它们排在答复之后是常态'
+  );
+});
+
+test('finalAnswerFrom：夹杂 reasoning 时不会把推理当成答复', () => {
+  // reasoning 是模型的思考流，混进答复里会把"过程"当"结论"。
+  const events = [
+    { type: 'reasoning', text: '让我想想……' },
+    { type: 'chunk', text: '答复。' },
+  ];
+  assert.equal(finalAnswerFrom(events), '答复。');
+});
+
 test('finalAnswerFrom：没有 chunk / 空输入都返回空串，不抛异常', () => {
   assert.equal(finalAnswerFrom([{ type: 'end' }]), '');
   assert.equal(finalAnswerFrom([]), '');
