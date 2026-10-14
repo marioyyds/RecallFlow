@@ -197,6 +197,30 @@ agent_task_cancel(jobId)            → 取消（对应 runAgentStream 的 Abort
 5. **页面判据**：用一个夹具页跑通一次真实任务，断言页面状态确实变了
    （而不是只看 agent 自称完成 —— 仓库里 `claim-check` / `verifier` 的存在就是为了这件事）。
 
+### 实测结论（2026-10-14，真实浏览器非模拟）
+
+```
+node scripts/verify-agent-task.mjs --run   → 16 通过 / 0 失败（exit 0）
+```
+
+覆盖了：`open_tab` 打开目标页（tabId=968150624）→ `agent_task` 启动（jobId）→
+`agent_task_status` 按游标读增量（17 → 174 → 177 条）→ `completed` → **答复回传**。
+答复内容正确（agent 真的读了页面并总结），不是"自称完成"：
+
+> "当前页面的标题为空（页面 `<title>` 没有内容），所在地址是 `http://127.0.0.1:7801/health`。
+> 一句话：这个页面是一个本地服务的健康检查接口，正文只有一段 JSON 状态数据……"
+
+**这一跑抓到了一个所有单测都漏掉的真实缺陷**：`state=completed` 但拿不到答复。
+原因是真实事件流把收尾元数据排在答复**之后**
+（实测结尾：`chunk("。") → usage → agent-state(completed) → end`），
+而答复提取只跳过了 `end`，于是第一个非 chunk 事件就让它停住并返回空。
+**单测之所以是绿的**：我构造的假事件流结尾恰好只有 `end`，少了 `usage` / `agent-state`。
+教训记在 `finalAnswerFrom` 的注释里，并补了一条**直接照抄真实流形状**的测试。
+
+`docs/integration-status.md` 里记着的那条落差（改扩展侧代码要重载扩展）在本轮被完整验证了一遍：
+服务端早就就绪，而扩展不重载时调用一直返回 `unknown method: agent_task`。
+
+
 ---
 
 ## 九、风险登记
