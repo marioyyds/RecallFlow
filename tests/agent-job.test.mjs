@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AgentJobStore, JOB_STATE } from '../lib/bridge/agent-job.js';
+import { AgentJobStore, JOB_STATE, finalAnswerFrom } from '../lib/bridge/agent-job.js';
 
 function store(opts) {
   return new AgentJobStore(opts);
@@ -140,4 +140,75 @@ test('running()：多个已结束 job 不会误报有任务在跑', () => {
   const a = s.create({});
   s.finish(a.job.id, JOB_STATE.CANCELLED);
   assert.equal(s.running(), null);
+});
+
+// ---------------- 结果回传：任务成功必须能拿到答复 ----------------
+//
+// agent 的答复是一串 {type:'chunk', text} 流式发出来的，而事件缓冲有上限。
+// 一个跑了几十步的任务，最后那段答复完全可能把前面的 chunk 挤掉 ——
+// 若只依赖"答复还在事件里"，调用方会拿到 state=completed 但 result 为空。
+
+test('finalAnswerFrom：取最后一段连续 chunk，而不是把所有 chunk 拼起来', () => {
+  const events = [
+    { type: 'chunk', text: '先看一下页面……' },
+    { type: 'tool-call', name: 'get_page_snapshot' },
+    { type: 'tool-result', name: 'get_page_snapshot' },
+    { type: 'chunk', text: '已经填好了' },
+    { type: 'chunk', text: '，标题是「测试」。' },
+    { type: 'end' },
+  ];
+  assert.equal(
+    finalAnswerFrom(events),
+    '已经填好了，标题是「测试」。',
+    '应只取最后一段连续 chunk —— 把过程里的解释也拼进来会把「过程」当成「结论」'
+  );
+});
+
+test('finalAnswerFrom：没有 chunk / 空输入都返回空串，不抛异常', () => {
+  assert.equal(finalAnswerFrom([{ type: 'end' }]), '');
+  assert.equal(finalAnswerFrom([]), '');
+  assert.equal(finalAnswerFrom(null), '');
+});
+
+test('finish(COMPLETED) 且调用方没给 result 时，自动从事件里捞最终答复', () => {
+  const s = store();
+  const { job } = s.create({});
+  s.append(job.id, { type: 'chunk', text: '任务完成：' });
+  s.append(job.id, { type: 'chunk', text: '已发布。' });
+  s.append(job.id, { type: 'end' });
+  s.finish(job.id, JOB_STATE.COMPLETED);
+  const r = s.read(job.id, 0);
+  assert.equal(r.state, JOB_STATE.COMPLETED);
+  assert.equal(r.result, '任务完成：已发布。', '成功结束必须能读到答复，否则调用方只看到 completed 而拿不到内容');
+});
+
+test('finish(COMPLETED) 时调用方显式给的 result 优先于从事件里捞的', () => {
+  const s = store();
+  const { job } = s.create({});
+  s.append(job.id, { type: 'chunk', text: '流式文本' });
+  s.finish(job.id, JOB_STATE.COMPLETED, { result: '显式结果' });
+  assert.equal(s.read(job.id, 0).result, '显式结果');
+});
+
+test('答复即使超出事件上限也仍能回传（这正是必须单独固化的理由）', () => {
+  const s = store({ eventLimit: 2 });
+  const { job } = s.create({});
+  s.append(job.id, { type: 'chunk', text: '关' });
+  s.append(job.id, { type: 'chunk', text: '键' });
+  s.append(job.id, { type: 'chunk', text: '答' });
+  s.append(job.id, { type: 'chunk', text: '复' }); // 触发丢弃前两条
+  s.finish(job.id, JOB_STATE.COMPLETED);
+  const r = s.read(job.id, 0);
+  assert.equal(r.omitted, 2, '前两条确实被丢了');
+  assert.equal(r.result, '答复', '即便事件被裁剪，答复仍必须能拿到（否则长任务的结果就是空的）');
+});
+
+test('失败/取消时不去捞答复（那不是"结果"，别把过程文字当成结论）', () => {
+  const s = store();
+  const { job } = s.create({});
+  s.append(job.id, { type: 'chunk', text: '正在尝试……' });
+  s.finish(job.id, JOB_STATE.FAILED, { error: '炸了' });
+  const r = s.read(job.id, 0);
+  assert.equal(r.result, '', '失败时不应把过程文字当结果');
+  assert.equal(r.error, '炸了');
 });
