@@ -13,6 +13,8 @@
 //
 // 退出码：0 全通过 / 1 有失败项。
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.RECALLFLOW_MCP_PORT) || 7801;
@@ -88,7 +90,45 @@ async function callTool(headers, name, args, id = 2) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 哪个浏览器加载了本仓库的扩展？
+ *
+ * 为什么需要它：重载扩展是**浏览器 UI 动作**，没法自动化；
+ * 而一台机器上可能同时装了 Chrome 与 Edge。若把"重新加载"点在**没加载本仓库**的那个浏览器上，
+ * 现象完全一样（我这边仍然探测到旧代码），于是会一直以为是重载没生效 ——
+ * 实测这台机器就是这种情况：Chrome 没加载本仓库，Edge 加载了。
+ *
+ * 只读 Preferences（不碰 LevelDB），失败就静默跳过：这只是把提示指得更准，不是硬依赖。
+ */
+function detectBrowser() {
+  const local = process.env.LOCALAPPDATA || '';
+  const candidates = [
+    ['Edge', path.join(local, 'Microsoft', 'Edge', 'User Data', 'Default', 'Preferences')],
+    ['Chrome', path.join(local, 'Google', 'Chrome', 'User Data', 'Default', 'Preferences')],
+  ];
+  const hits = [];
+  for (const [name, file] of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const txt = fs.readFileSync(file, 'utf8');
+      // 解压扩展在 Preferences 里只记 path，不记 manifest/name（见 docs/local-service.md），
+      // 所以只能按"工作区路径片段"判断，且必须限定在用户数据目录之内，避免把
+      // 浏览器历史/下载记录里的同名路径也算进来。
+      if (txt.includes('bookmark-sorter')) hits.push(name);
+    } catch (e) {
+      /* 读不到就跳过 */
+    }
+  }
+  return hits;
+}
+
+const browsers = detectBrowser();
+const reloadHint = browsers.length
+  ? '请在 ' + browsers.join(' / ') + ' 打开 ' + browsers.map((b) => (b === 'Edge' ? 'edge://extensions' : 'chrome://extensions')).join(' 或 ') + '，点一次 RecallFlow 的「重新加载」'
+  : '请在加载了 RecallFlow 的那个浏览器打开 chrome://extensions（或 edge://extensions），点一次「重新加载」';
+
 console.log('RecallFlow agent_task 自检 → http://' + HOST + ':' + PORT);
+if (browsers.length) console.log('（检测到本仓库扩展装在：' + browsers.join('、') + '）');
 console.log('');
 
 // ---------- 1. 服务活着吗 + 扩展连上了吗 ----------
@@ -135,8 +175,9 @@ if (/unknown method/.test(rawProbe)) {
   bad(
     '扩展仍是旧代码',
     '调用 agent_task 返回：' + rawProbe + '\n' +
-      '请在 chrome://extensions（或 edge://extensions）点一次 RecallFlow 的「重新加载」。\n' +
-      '服务端已就绪，但扩展必须重载才能认识新方法 —— 这不会自动发生。'
+      reloadHint + '。\n' +
+      '服务端已就绪，但扩展必须重载才能认识新方法 —— 这不会自动发生。\n' +
+      '⚠ 点错浏览器不会有任何不同：我这边同样只看到旧代码。'
   );
   console.log('\n结果：' + passed + ' 通过 / ' + failed + ' 失败（扩展重载后重跑本脚本）');
   process.exit(1);
