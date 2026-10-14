@@ -21,8 +21,9 @@ import { resolveCodeExecutionApproval } from '../lib/shared/settings.js';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.js';
-import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
+import { validateBridgeWrite, BRIDGE_INSPECT_TOOLS } from '../lib/shared/bridge-write-policy.js';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
+import { TOOL_METADATA } from '../lib/assistant/tool-metadata.js';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.js';
 import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
@@ -502,6 +503,43 @@ test('桥接导航放开后，上传与任意代码执行仍必须被拒', () =>
   // 放开一个导航能力，绝不能顺带把这两个高风险能力一起放开。
   assert.equal(validateBridgeWrite('upload_file', { selector: '#f', path: 'C:/x.png' }).ok, false);
   assert.equal(validateBridgeWrite('run_javascript', { code: 'alert(1)' }).ok, false);
+});
+
+// ---------------- 只读观测：ref 的来源不能要求先有 ref ----------------
+//
+// 实测缺陷：get_page_snapshot / list_frames / get_ax_snapshot 的 schema 里**没有**定位参数，
+// 但它们此前被并进"页面动作"组，于是无参调用被 NO_TARGET 拒绝。后果是死循环 ——
+//   要拿 ref → 必须调 get_page_snapshot
+//   调 get_page_snapshot → 被要求提供 ref → 拒
+// 即外部 agent 连"取快照"这一步都做不到，而文档把这条路径写成标准闭环。
+
+test('桥接只读观测：三个无参观测工具必须能不带定位参数调用', () => {
+  for (const t of ['get_page_snapshot', 'list_frames', 'get_ax_snapshot']) {
+    const v = validateBridgeWrite(t, {});
+    assert.equal(v.ok, true, t + ' 不应因缺少定位参数被拒：' + v.error);
+    assert.notEqual(v.code, 'NO_TARGET');
+  }
+  // 带可选参数（如 frameId / maxElements）同样要放行。
+  assert.equal(validateBridgeWrite('get_page_snapshot', { frameId: 3, maxElements: 20 }).ok, true);
+});
+
+test('桥接只读观测：真正的写动作仍然必须带定位参数（放开观测没放宽写）', () => {
+  for (const t of ['click_element', 'type_text', 'press_key', 'scroll_page', 'select_option', 'check_box']) {
+    const v = validateBridgeWrite(t, {});
+    assert.equal(v.ok, false, t + ' 缺定位参数时必须被拒');
+    assert.equal(v.code, 'NO_TARGET', t + ' 应按定位校验拒绝');
+  }
+});
+
+test('分组不变式：只读观测组里的每个工具在元数据里都必须是 readOnly', () => {
+  // 分组的意义是"不需要定位参数"，这个放行前提是**它们不改变页面**。
+  // 若将来有人把一个写工具塞进 BRIDGE_INSPECT_TOOLS，它就绕过了定位校验 —— 这里拦住。
+  for (const t of BRIDGE_INSPECT_TOOLS) {
+    const meta = TOOL_METADATA[t];
+    assert.ok(meta, t + ' 必须有风险元数据');
+    assert.equal(meta.readOnly, true, t + ' 在只读观测组里，必须 readOnly: true');
+    assert.equal(meta.risk, 'read', t + ' 在只读观测组里，risk 必须是 read');
+  }
 });
 
 test('桥接方法清单必须包含 page_action（清单与 dispatch 分支不得漂移）', () => {
