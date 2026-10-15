@@ -174,3 +174,77 @@ test('未注入 rAF 时退化为 setTimeout，不抛错', () => {
   assert.doesNotThrow(() => sched.schedule('a', () => {}));
   sched.cancel();
 });
+
+// ---------------------------------------------------------------- 隐藏标签页兜底
+//
+// 用户实测缺陷："对话进行中切到其它 tab，流式也没有到最底下"。
+// 根因：浏览器在**隐藏标签页**里暂停 rAF —— 排出去的帧回调根本不执行，
+// 而"已经排了帧就不再排"的合并逻辑让后续 chunk 全部只更新 Map、不排新帧
+// ⇒ 整个隐藏期间一次渲染与置底都不发生。setTimeout 只是被降频、不会被暂停，
+// 所以兜底定时器必须存在。
+
+test('rAF 不来时，兜底定时器仍会把这一批渲染执行掉（隐藏标签页的根因）', () => {
+  const timers = new Map();
+  let nextTimer = 1;
+  const frames = fakeFrames();
+  const sched = createFrameScheduler({
+    requestFrame: frames.requestFrame,
+    cancelFrame: frames.cancelFrame,
+    setFallbackTimer: (cb, ms) => { const h = nextTimer++; timers.set(h, cb); return h; },
+    clearFallbackTimer: (h) => timers.delete(h),
+  });
+  const ran = [];
+  sched.schedule('answer', () => ran.push('正文'));
+  assert.equal(timers.size, 1, '排帧的同时必须安排一个兜底定时器');
+  assert.deepEqual(ran, [], '排入阶段不应立即执行');
+
+  // 关键：**一次 frames.tick() 都不做** —— 模拟 rAF 被暂停。
+  const cb = Array.from(timers.values())[0];
+  cb();
+  assert.deepEqual(ran, ['正文'], 'rAF 不来时，兜底必须把这一批画出去');
+  assert.equal(timers.size, 0, '兜底句柄要清掉');
+});
+
+test('兜底与帧都到齐时只渲染一次（正常可见标签页不会重复渲染）', () => {
+  const timers = new Map();
+  let nextTimer = 1;
+  const frames = fakeFrames();
+  const sched = createFrameScheduler({
+    requestFrame: frames.requestFrame,
+    cancelFrame: frames.cancelFrame,
+    setFallbackTimer: (cb) => { const h = nextTimer++; timers.set(h, cb); return h; },
+    clearFallbackTimer: (h) => timers.delete(h),
+  });
+  const ran = [];
+  sched.schedule('answer', () => ran.push('正文'));
+  frames.tick(); // rAF 先到
+  assert.deepEqual(ran, ['正文']);
+  assert.equal(timers.size, 0, '帧先到时必须清掉兜底，否则稍后会重复渲染一次');
+
+  // 即便那个兜底句柄真的漏跑了，也不该再画一次
+  sched.schedule('answer', () => ran.push('第二次'));
+  frames.tick();
+  assert.deepEqual(ran, ['正文', '第二次']);
+});
+
+test('兜底句柄会被 flush / cancel 一并清掉（不留悬挂定时器）', () => {
+  const timers = new Map();
+  let nextTimer = 1;
+  const frames = fakeFrames();
+  const mk = () => createFrameScheduler({
+    requestFrame: frames.requestFrame,
+    cancelFrame: frames.cancelFrame,
+    setFallbackTimer: (cb) => { const h = nextTimer++; timers.set(h, cb); return h; },
+    clearFallbackTimer: (h) => timers.delete(h),
+  });
+
+  const a = mk();
+  a.schedule('x', () => {});
+  a.flush();
+  assert.equal(timers.size, 0, 'flush 后不应留下兜底定时器');
+
+  const b = mk();
+  b.schedule('x', () => {});
+  b.cancel();
+  assert.equal(timers.size, 0, 'cancel 后不应留下兜底定时器');
+});

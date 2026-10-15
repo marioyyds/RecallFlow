@@ -3586,13 +3586,35 @@
   }
 
   // lib/page/render-scheduler.js
+  var FRAME_FALLBACK_MS = 32;
   function createFrameScheduler(options = {}) {
     const requestFrame = options.requestFrame || (typeof requestAnimationFrame === "function" ? (cb) => requestAnimationFrame(cb) : (cb) => setTimeout(cb, 16));
     const cancelFrame = options.cancelFrame || (typeof cancelAnimationFrame === "function" ? (h) => cancelAnimationFrame(h) : (h) => clearTimeout(h));
+    const setFallbackTimer = options.setFallbackTimer || ((cb, ms) => typeof setTimeout === "function" ? setTimeout(cb, ms) : null);
+    const clearFallbackTimer = options.clearFallbackTimer || ((h) => {
+      if (typeof clearTimeout === "function") clearTimeout(h);
+    });
     let handle = null;
+    let fallbackHandle = null;
     let pending = /* @__PURE__ */ new Map();
+    const clearScheduled = () => {
+      if (handle !== null) {
+        try {
+          cancelFrame(handle);
+        } catch (e) {
+        }
+        handle = null;
+      }
+      if (fallbackHandle !== null) {
+        try {
+          clearFallbackTimer(fallbackHandle);
+        } catch (e) {
+        }
+        fallbackHandle = null;
+      }
+    };
     const runPending = () => {
-      handle = null;
+      clearScheduled();
       if (!pending.size) return;
       const entries = Array.from(pending.values());
       pending = /* @__PURE__ */ new Map();
@@ -3613,27 +3635,16 @@
         if (typeof fn !== "function") return;
         pending.set(String(key), fn);
         if (handle === null) handle = requestFrame(runPending);
+        if (fallbackHandle === null) fallbackHandle = setFallbackTimer(runPending, FRAME_FALLBACK_MS);
       },
       /** 立即执行待处理的绘制，并取消已排的帧。用于收尾：保证最后一次渲染不会被后续帧覆盖。 */
       flush() {
-        if (handle !== null) {
-          try {
-            cancelFrame(handle);
-          } catch (e) {
-          }
-          handle = null;
-        }
+        clearScheduled();
         runPending();
       },
       /** 丢弃待处理的绘制（不执行）。 */
       cancel() {
-        if (handle !== null) {
-          try {
-            cancelFrame(handle);
-          } catch (e) {
-          }
-          handle = null;
-        }
+        clearScheduled();
         pending = /* @__PURE__ */ new Map();
       },
       /** 待处理的目标数量，供测试与断言使用。 */
@@ -4744,6 +4755,13 @@
   var planExpanded = null;
   var planWasAllDone = false;
   var streamRender = createFrameScheduler();
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      streamRender.flush();
+      pinToBottom();
+    });
+  }
   var THEME_KEY = "recallflow-panel-theme";
   var themeBtn = null;
   function savedThemeOverride() {
@@ -4999,10 +5017,23 @@
       panel.style.top = "auto";
       panel.style.bottom = dockGap + "px";
     }
+    markSelfScroll();
     if (wasPinned) panelBody.scrollTop = panelBody.scrollHeight;
   }
   function getDockGap() {
     return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));
+  }
+  function pinToBottom() {
+    if (!observerAutoScroll) return false;
+    if (!panelBody || !panelBody.isConnected) return false;
+    markSelfScroll();
+    panelBody.scrollTop = panelBody.scrollHeight;
+    return true;
+  }
+  var SELF_SCROLL_MUTE_MS = 300;
+  var selfScrollMuteUntil = 0;
+  function markSelfScroll() {
+    selfScrollMuteUntil = Date.now() + SELF_SCROLL_MUTE_MS;
   }
   function msgActionsHtml(isLast) {
     return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>";
@@ -5196,7 +5227,7 @@
       if (!progressTimer) progressTimer = setInterval(renderProgress, 1e3);
     }
     fitPanelHeight();
-    if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+    pinToBottom();
   }
   function showCitationHint(text) {
     if (!panelBody) return;
@@ -5324,7 +5355,7 @@
     planBar.innerHTML = '<div class="agent-plan-title" role="button" tabindex="0" title="\u70B9\u51FB\u5C55\u5F00/\u6298\u53E0">' + escHtml(title) + '</div><div class="agent-plan-items">' + items + "</div>";
     planBar.style.display = "";
     fitPanelHeight();
-    if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+    pinToBottom();
   }
   function summarizeToolParts(parts) {
     const done = (Array.isArray(parts) ? parts : []).filter((p) => p && p.type === "tool-result");
@@ -5566,6 +5597,7 @@
     const pbEl = panelBody;
     pbEl.addEventListener("scroll", () => {
       if (!pbEl) return;
+      if (Date.now() < selfScrollMuteUntil) return;
       observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
     });
     panelBody.addEventListener("click", (e) => {
@@ -5591,7 +5623,7 @@
           saveConversation();
           renderConversation();
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
           if (undone && typeof undone.content === "string") {
             cmdInput.value = undone.content;
             cmdInput.style.height = "auto";
@@ -5747,8 +5779,6 @@
     });
     renderConversation();
     restoreStreamingUI();
-    fitPanelHeight();
-    if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
     renderDecisionButtonsIfPresent();
     const cmdArea = document.createElement("div");
     cmdArea.className = "cmd-area";
@@ -6045,7 +6075,7 @@
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
         refreshThinkHead(seg);
-        if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+        pinToBottom();
       });
     }
     function finishReasoning() {
@@ -6060,7 +6090,7 @@
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
         refreshThinkHead(seg);
-        if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+        pinToBottom();
       });
       pendingParts.push({ type: "thinking", text: seg.text });
       thinkSeg = null;
@@ -6120,7 +6150,7 @@
       }
       endStream();
       fitPanelHeight();
-      if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+      pinToBottom();
     }
     function commitInterruptedTurn(reasonText) {
       const last = conversation.length ? conversation[conversation.length - 1] : null;
@@ -6224,7 +6254,7 @@
       panelBody.appendChild(userMsg);
       panelBody.appendChild(aiMsg);
       fitPanelHeight();
-      if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+      pinToBottom();
       pendingAcc = "";
       renderPlan([]);
       lastPlan = [];
@@ -6284,7 +6314,7 @@
             approvalArea.querySelector(".tool-reject").addEventListener("click", () => decide("reject"));
           }
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "tool-result") {
           pendingParts.push({ type: "tool-result", callId: resp.callId, name: resp.name, status: resp.status, result: resp.result || "" });
           appendStep(
@@ -6297,7 +6327,7 @@
             )
           );
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "agent-state") {
           const st = resp.state || resp.status;
           const label = stateLabel(st);
@@ -6312,7 +6342,7 @@
           pendingParts.push({ type: "screenshot", id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
           appendStep(screenshotElement(resp));
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "stuck-warning") {
           const step = document.createElement("div");
           step.className = "agent-step";
@@ -6320,7 +6350,7 @@
           step.textContent = "\u26A0 " + (resp.message || "\u52A8\u4F5C\u6682\u672A\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55");
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "tool-disabled") {
           const step = document.createElement("div");
           step.className = "agent-step";
@@ -6328,7 +6358,7 @@
           step.textContent = "\u26D4 \u5DF2\u505C\u6B62\u4F7F\u7528\u5DE5\u5177\u300C" + (resp.name || "") + "\u300D\uFF1A" + (resp.reason || "");
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "budget-exceeded") {
           budgetStopped = true;
           const step = document.createElement("div");
@@ -6337,14 +6367,14 @@
           step.textContent = "\u23F9 " + (resp.message || "Agent \u5DF2\u8FBE\u5230\u5B89\u5168\u4E0A\u9650\u5E76\u505C\u6B62");
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "tab-switched") {
           const step = document.createElement("div");
           step.className = "agent-step";
           step.textContent = "\u2197 \u5DF2\u5207\u6362\u6807\u7B7E\u9875\uFF1A" + (resp.title || resp.url || "tabId=" + resp.tabId);
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "tabs-closed") {
           const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
           if (count) {
@@ -6354,7 +6384,7 @@
             step.textContent = "\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + count + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875";
             appendStep(step);
             fitPanelHeight();
-            if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+            pinToBottom();
           }
         } else if (resp.type === "intent") {
           const step = document.createElement("div");
@@ -6362,14 +6392,14 @@
           step.textContent = "\u{1F9ED} \u610F\u56FE\u8BC6\u522B\uFF1A" + (resp.label || resp.intent || "\u666E\u901A\u5BF9\u8BDD");
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "intent-upgraded") {
           const step = document.createElement("div");
           step.className = "agent-step";
           step.textContent = "\u{1F504} \u5DF2\u5207\u6362\u4E3A" + (resp.label || "\u8D44\u6599\u7814\u7A76") + "\u6A21\u5F0F\uFF0C\u53EF\u7528\u6D4F\u89C8\u5668/\u7F51\u7EDC\u5DE5\u5177\u7EE7\u7EED";
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "verify") {
           const step = document.createElement("div");
           step.className = "agent-step";
@@ -6383,7 +6413,7 @@
           }
           appendStep(step);
           fitPanelHeight();
-          if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+          pinToBottom();
         } else if (resp.type === "usage") {
           if (usageEl) usageEl.textContent = "tokens " + (resp.totalTokens || 0);
         } else if (resp.type === "plan") {
@@ -6396,7 +6426,7 @@
             step.textContent = "\u{1F6E0} \u542F\u7528\u6280\u80FD\uFF1A" + skills.map((s) => s.title || s.name).join("\u3001");
             appendStep(step);
             fitPanelHeight();
-            if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+            pinToBottom();
           }
         } else if (resp.type === "reasoning") {
           removeTypingEl();
@@ -6417,7 +6447,7 @@
           });
           streamRender.schedule("layout", () => {
             fitPanelHeight();
-            if (observerAutoScroll && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
+            pinToBottom();
           });
         } else if (resp.type === "end") {
           removeTypingEl();
@@ -6653,6 +6683,8 @@
       panel.style.top = dragState.origTop + "px";
       e.preventDefault();
     });
+    fitPanelHeight();
+    pinToBottom();
   }
   function refreshPanelForSelection() {
     if (!streaming) closePort();

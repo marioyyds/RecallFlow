@@ -63,6 +63,9 @@ const baseEnv = Object.assign({}, process.env, { E2E_LLM_CHUNK_DELAY_MS: chunkDe
 //     改由 tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住，不是没人管。
 const phases = [
   { name: '黄金任务', spec: 'golden.spec.mjs', hold: '', visionShot: '' },
+  // 面板滚动跟随（关掉会话再打开 / 回到标签页时贴底）。
+  // 与黄金任务同档：**不需要**挂起流，也不需要截图，用默认夹具即可。
+  { name: '滚动跟随', spec: 'scroll-follow.spec.mjs', hold: '', visionShot: '' },
   { name: '断线恢复', spec: 'resume.spec.mjs', hold: '1', visionShot: '' },
   { name: '视觉两臂', spec: 'vision-switch.spec.mjs', hold: '', visionShot: '1' },
 ];

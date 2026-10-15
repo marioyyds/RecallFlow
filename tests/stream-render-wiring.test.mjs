@@ -71,10 +71,15 @@ test('chunk 分支里只有一处正文重绘，且必须在 schedule 回调内'
 });
 
 test('chunk 分支里只有一处自动滚动，且必须在 layout 回调内', () => {
-  const calls = chunkBranch.match(/panelBody\.scrollTop =/g) || [];
-  assert.equal(calls.length, 1, 'chunk 分支应恰好有一处 scrollTop 赋值，实测 ' + calls.length);
+  // ⚠ 判据从"字面的 `panelBody.scrollTop =`"升级为"置底入口 `pinToBottom()`"：
+  //   置底统一收进 `pinToBottom()`（它内部会认 `observerAutoScroll`，并 `markSelfScroll()`
+  //   屏蔽掉"容器改高度→浏览器夹紧 scrollTop→派发 scroll"这条把自动跟随误关掉的路径）。
+  //   断言意图不变：**这一分支只能有一处置底，且必须排在 layout 回调里**（不能被合并逻辑漏掉）。
+  const calls = chunkBranch.match(/pinToBottom\(\)/g) || [];
+  assert.equal(calls.length, 1, 'chunk 分支应恰好有一处置底（pinToBottom），实测 ' + calls.length);
   const schedAt = chunkBranch.indexOf("streamRender.schedule('layout'");
-  assert.ok(chunkBranch.indexOf('panelBody.scrollTop =') > schedAt, 'scrollTop 必须在 layout 回调里');
+  assert.notEqual(schedAt, -1, 'layout 必须通过 streamRender.schedule 合并');
+  assert.ok(chunkBranch.indexOf('pinToBottom()') > schedAt, '置底必须在 layout 回调里');
 });
 
 test('解析入口只出现在 schedule 回调里（不经合并的解析一律视为退化）', () => {
