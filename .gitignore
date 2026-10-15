@@ -11,6 +11,9 @@ tests/e2e/playwright-report/
 test-results/
 playwright-report/
 
+# 录屏源文件：体积大，只提交转换后的 GIF（如 docs/assets/recallflow-xhs-publish.gif）。
+docs/*.webm
+
 # 操作系统 / 编辑器杂项
 .DS_Store
 Thumbs.db

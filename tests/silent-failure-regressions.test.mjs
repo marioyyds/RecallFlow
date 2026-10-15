@@ -294,22 +294,18 @@ test('这条表格门禁本身有牙齿：多一列的行必须被认出，正�
   assert.equal(cols(merged), 3, '前缀替换后应能看出列数变多');
 });
 
-test('README 声称的测试数必须等于已提交的快照', () => {
+test('README 不手写测试数，改为链接到生成物（手写数字必然腐烂）', () => {
   // 驱动这条的原因：同一个数字曾在三份文档里以 562 / 382 / 526 三个互相矛盾的值出现，
-  // 且三个都不对。手写数字必然腐烂，因此把它变成会失败的断言。
+  // 且三个都不对。README 精简后不再手写任何数字，改为链接 tests/.test-count.json 与自动生成文档，
+  // 于是门禁守住这个决定：谁把数字写回 README、或把链接删掉，都会变红。
   //
-  // 这里读**快照**而不是现场跑测试：在测试进程里再 spawn 整套测试是自我引用，
-  // 输出会被嵌套，解析结果为 null（实测踩过）。
+  // 这里读**快照**：在测试进程里再 spawn 整套测试是自我引用，输出会被嵌套，解析结果为 null（实测踩过）。
   // 快照由 `node scripts/test-count.mjs --write` 刷新（run-all-checks.mjs 会自动调用）。
   const snap = readSnapshot();
   assert.ok(snap && Number.isInteger(snap.tests), '缺少 tests/.test-count.json，请运行 node scripts/test-count.mjs --write');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.match(
-    readme,
-    new RegExp('\\*\\*' + snap.tests + '\\*\\* 项单元测试（' + snap.files + ' 个文件）'),
-    'README 的测试数与快照不一致（快照 ' + snap.tests + ' 项 / ' + snap.files + ' 个文件）。' +
-      '请运行 node scripts/test-count.mjs --write 并更新 README。'
-  );
+  assert.doesNotMatch(readme, /\*\*\d+\*\* 项单元测试/, 'README 不应再手写测试数；改为链接 tests/.test-count.json');
+  assert.match(readme, /tests\/\.test-count\.json/, 'README 应链接到测试数快照 tests/.test-count.json');
 });
 
 test('文档里不得再把已证伪的测试数当作当前事实', () => {
