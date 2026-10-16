@@ -2839,6 +2839,7 @@ function toolStep(res, name, args) {
 }
 /** 回一段最终文本（本步之后这一轮就结束了）。 */
 function finalText(res, text, tokens) {
+  finalizedRuns += 1;
   sse(res, [
     textDelta(text),
     { choices: [{ delta: {}, finish_reason: 'stop' }] },
@@ -3055,11 +3056,19 @@ let holdOpenRunCount = 0;
 // 能证明的是：**工具结果里到底有没有把数据交到模型手上**。
 // 把每次请求的 messages 记下来，spec 就能直接断言这件事。
 const llmRequests = [];
+// 记录周期内"回了最终文本"的次数 —— 供 live spec 断言"run 真的正常跑完了"。
+// 一个 stalled 的 run（如 GitHub 仓库页卡在第一次快照）不会触发 finalText，
+// 于是即使页面判据碰巧全过，这条也能把"没跑完"抓出来。
+let finalizedRuns = 0;
 export function getLlmRequests() {
   return llmRequests.slice();
 }
 export function resetLlmRequests() {
   llmRequests.length = 0;
+  finalizedRuns = 0;
+}
+export function finalizedRunCount() {
+  return finalizedRuns;
 }
 /** 把**当前记录周期内**所有请求里的 tool 消息文本拼起来 —— 断言"模型看到过什么"用这个。
  *

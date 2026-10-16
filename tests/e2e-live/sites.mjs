@@ -18,6 +18,9 @@ export const LIVE_SITES = Object.freeze([
     trigger: '在必应搜索',
     instruction: '在必应搜索「数据库索引」，然后把前三条结果的标题告诉我。',
     tools: ['get_page_snapshot', 'type_text', 'press_key', 'wait_for_element', 'inspect_element'],
+    // 搜索提交是**全页跳转**：新文档重注入内容脚本、SW 侧本轮任务中断 → mock 收不到 finalText。
+    // 这是已知产品缺口（见 README 第 8 条），页面判据仍成立（动作已生效）。
+    navigationInterruptsRun: true,
     checks: [
       { expr: "(document.querySelector('#sb_form_q') || {}).value === '数据库索引'", label: '搜索框被填入查询词' },
       { expr: "document.title.indexOf('数据库索引') >= 0", label: '页面标题反映已提交搜索' },
@@ -139,6 +142,8 @@ export const LIVE_SITES = Object.freeze([
     trigger: '填这个表单',
     instruction: '帮我填这个表单：在 httpbin 的 Customer name 填 Codex，然后提交订单。',
     tools: ['get_page_snapshot', 'type_text', 'click_element'],
+    // 同上：表单 POST 提交是全页跳转，会中断本轮 run。
+    navigationInterruptsRun: true,
     checks: [
       { expr: "location.pathname === '/post'", label: '表单真的提交到 /post' },
       { expr: "document.body.innerText.indexOf('Codex') >= 0", label: '回显里带着填进去的 Customer name（站点自己的数据）' },

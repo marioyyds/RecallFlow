@@ -57,9 +57,17 @@ node scripts/run-e2e-live.mjs
    注：GitHub 点进仓库的场景仍暂时收敛为"读结果并沉淀"——点击后是否还会中断本轮任务
    （端口级而非 UI 级）待下一步复核。
 7. **GitHub 仓库页上任务停在第一次快照**：`github.com/<owner>/<repo>` 直接打开时，
-   脚本化 run 只做了一次 get_page_snapshot 就停（面板文本为空、不再发下一次 LLM 请求），
-   而同样的流程在 Wikipedia/arXiv/MDN 都能跑完。与第 5/6 条同属"GitHub 站点特有问题"，
-   待单独排查；仓库 README 阅读场景暂不收录。
+   run 只做了一次 get_page_snapshot 就停 —— 已确认**宿主还在、面板还开着、mock 也收到了
+   正确的指令**（reqs=2，两次 userText 都命中触发词），但第二次 agent 请求始终没发出。
+   同流程在 Wikipedia/arXiv/MDN 都能跑完，所以是 SW 侧在"快照结果回传 → 下一轮请求"之间
+   卡住，不是 UI/宿主问题。待深挖（怀疑与 GitHub 仓库页快照体量/内容触发某条路径有关）。
+   仓库 README 阅读场景暂不收录。
+8. **全页跳转会中断本轮 run**：必应搜索提交、httpbin 表单提交这类**表单导致的整页导航**
+   会重新注入内容脚本，SW 侧正在跑的这轮任务随之中断（mock 收不到 finalText），
+   而页面动作已经生效、旧页面判据照样通过 —— 于是"没跑完"被静默放过去。
+   已在 live spec 里加 `finalizedRunCount()` 判据把这类 stall/中断抓出来，
+   并把这两类站点标 `navigationInterruptsRun: true`（以页面判据为准）。
+   这也是一个**产品缺口**：同一 tab 内的整页刷新无法把进行中的任务续跑下去。
 
 ## 下一步
 
