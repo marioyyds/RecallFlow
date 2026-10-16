@@ -46,7 +46,7 @@ RecallFlow 不是把 HTML 塞给模型，而是**在你的真实浏览器里动�
 ## Agent 设计
 
 ```mermaid
-%%{init: {"flowchart":{"curve":"basis","nodeSpacing":40,"rankSpacing":55,"padding":10},"themeVariables":{"fontSize":"14px"}}}%%
+%%{init: {"flowchart":{"curve":"basis","nodeSpacing":22,"rankSpacing":34,"padding":5},"themeVariables":{"fontSize":"11px"}}}%%
 flowchart TD
     A(["收到指令"]) --> B["组装上下文<br/>意图路由 · 系统提示 · 历史 · 预算"]
     B --> C{"模型输出"}
