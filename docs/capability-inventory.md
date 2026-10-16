@@ -10,10 +10,12 @@
 
 | 剧本 | 触发词 | 夹具页 | 工具 | 技能 | E2E | 页面判据 | 回执判据 | 结果所在 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `annotate-highlight` | 划重点 | `/hl` ✓ | 3 | `annotate-highlight` | ✓ | 2 | 3 | page |
 | `canvas-coordinate-click` | 画布 | `/canvas` ✓ | 4 | `canvas-coordinate-click` | ✓ | 3 | 2 | page |
 | `cascade-select` | 配送范围 | `/cascade` ✓ | 5 | `cascade-select` | ✓ | 3 | 1 | page |
 | `cdp-drag-slider` | 拖拽 | `/drag` ✓ | 3 | `cdp-drag-slider` | ✓ | 3 | 1 | page |
 | `checkout-form` | 下单 | `/checkout` ✓ | 6 | `checkout-form` | ✓ | 6 | 2 | page |
+| `control-shadow` | 加阴影 | `/ui` ✓ | 3 | `control-shadow` | ✓ | 3 | 1 | page |
 | `cross-tab-handoff` | 验证码 | `/handoff` ✓ | 4 | `cross-tab-handoff` | ✓ | 2 | 1 | page |
 | `csp-page-world-js` | 核对总价 | `/csp` ✓ | 3 | `page-world-js` | ✓ | 2 | 1 | page |
 | `date-picker-custom` | 入住 | `/datepicker` ✓ | 5 | `date-picker-custom` | ✓ | 3 | 1 | page |
@@ -37,10 +39,12 @@
 | `readability-fix` | 美化 | `/article` ✓ | 3 | `readability-fix` | ✓ | 6 | 1 | page |
 | `recover-from-rejection` | 购买 | `/recover` ✓ | 5 | `recover-from-rejection` | ✓ | 7 | 2 | page |
 | `rich-text-structure` | 富文本 | `/rich` ✓ | 5 | `rich-text-structure` | ✓ | 3 | 2 | page |
+| `site-assistant` | 客服 | `/assistant` ✓ | 3 | `site-assistant` | ✓ | 3 | 1 | page |
 | `site-search` | 站内搜 | `/search` ✓ | 5 | `find-skill-skillhub` | ✓ | 3 | 4 | page |
 | `undo-last-action` | 撤销 | `/undo` ✓ | 7 | `undo-last-action` | ✓ | 2 | 2 | page |
 | `upload-file` | 上传文件 | `/upload` ✓ | 4 | `upload-file` | ✓ | 3 | 2 | page |
 | `video-playback-verify` | 视频在播 | `/video` ✓ | 4 | `video-playback-verify` | ✓ | 2 | 4 | page |
 | `virtual-list-scroll` | VL-87 | `/vlist` ✓ | 4 | `virtual-list-scroll` | ✓ | 4 | 1 | page |
+| `web-research` | 帮我调研 | `/rsearch` ✓ | 5 | `web-research` | ✓ | 3 | 2 | page |
 
-**合计**：32 个剧本；页面判据 102 条、回执判据 67 条；夹具路由已接线 32/32；E2E 已引用 32/32；有内置技能 32/32。
+**合计**：36 个剧本；页面判据 113 条、回执判据 74 条；夹具路由已接线 36/36；E2E 已引用 36/36；有内置技能 36/36。

@@ -2845,6 +2845,97 @@ function finalText(res, text, tokens) {
   ]);
 }
 
+// 划重点页：一篇正文 + 两个目标短语（各出现一次）。
+// 难点不是「点一下」，而是高亮是**视觉浮层**：真正的判据是浮层真的出现、正文一字没少 ——
+// 而不是 annotate 回执那句「已高亮 N / M 处」（把正文隐藏也能让回执看起来成立）。
+function highlightPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具划重点</title></head>
+<body>
+  <h1>线性代数笔记</h1>
+  <article id="art">
+    <p>矩阵的秩等于其列空间的维数，也等于非零奇异值的个数。</p>
+    <p>特征向量满足 Ax = λx；同一个特征值可以对应多个线性无关的特征向量。</p>
+    <p>线性无关的向量组经过初等变换后仍然线性无关。</p>
+  </article>
+  <script>
+    window.__artTextBefore = document.getElementById('art').innerText.length;
+    window.__artLen = () => document.getElementById('art').innerText.length;
+    // 高亮浮层：内容脚本用 position:fixed + pointer-events:none 的 div 覆盖目标文本。
+    // 注意用 style.zIndex 属性判断（浏览器会把 style 属性串规范化，写 [style*=...] 会匹配不上）。
+    window.__hlCount = () => Array.from(document.body.children)
+      .filter((el) => el.style && el.style.zIndex === '2147483646' && el.style.pointerEvents === 'none')
+      .length;
+  </script>
+</body></html>`;
+}
+
+// 控件阴影页：一个可定位的控件。
+// 难点是「已修改 N 个元素」只证明调用发出去了：值可能非法被忽略、也可能被 !important 覆盖，
+// 所以判据必须是**计算后**的 box-shadow（getComputedStyle），而不是工具回执。
+function controlShadowPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具控件阴影</title></head>
+<body>
+  <h1>控件样式</h1>
+  <div id="card" style="padding:16px;background:#fff;border:1px solid #ddd">要优化的控件</div>
+  <script>
+    window.__cardTextBefore = document.getElementById('card').innerText.length;
+    window.__cardLen = () => document.getElementById('card').innerText.length;
+    window.__shadowed = () => {
+      const v = getComputedStyle(document.getElementById('card')).boxShadow;
+      return Boolean(v) && v !== 'none';
+    };
+  </script>
+</body></html>`;
+}
+
+// 检索调研页：结果列表 + 点击后**异步渲染**的详情。
+// 难点一：详情是请求回来才有（真实站点同理），点完立刻读会拿到空 —— 必须先等标题出现。
+// 难点二：调研的成果要**沉淀**（存进知识库），那是与页面状态并列的另一半判据。
+function researchPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具检索调研</title></head>
+<body>
+  <h1>检索结果</h1>
+  <button id="r1" role="button">打开 r1</button>
+  <button id="r2" role="button">打开 r2</button>
+  <button id="r3" role="button">打开 r3</button>
+  <div id="detail"></div>
+  <script>
+    window.__opened = '';
+    const TITLES = { r1: '数据库索引', r2: '事务隔离级别', r3: '查询优化器' };
+    const BODIES = { r1: 'B+ 树：非叶子节点只存键，叶子节点用链表串联，适合范围查询。', r2: '可重复读通过 MVCC 快照实现。', r3: '优化器依赖统计信息选择执行计划。' };
+    for (const id of ['r1', 'r2', 'r3']) {
+      document.getElementById(id).addEventListener('click', () => {
+        window.__opened = id;
+        setTimeout(() => {
+          document.getElementById('detail').innerHTML =
+            '<h2 id="detail-title">' + TITLES[id] + '</h2><div id="detail-body">' + BODIES[id] + '</div>';
+        }, 120);
+      });
+    }
+  </script>
+</body></html>`;
+}
+
+// 站点 AI 助手页：一个迷你客服工单列表。
+// 难点是**对话与页面操作交错**：先读清现状 → 只改目标那条 → 读回变化后的状态 → 再回话。
+// 判据用**状态**（第 2 条已完成、第 1/3 条仍是待处理），不用"点了几次"这种路径断言。
+function siteAssistantPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具客服后台</title></head>
+<body>
+  <h1>客服工单</h1>
+  <div id="task-1" class="task"><span class="status">待处理</span><button role="button">完成第 1 条工单</button></div>
+  <div id="task-2" class="task"><span class="status">待处理</span><button role="button">完成第 2 条工单</button></div>
+  <div id="task-3" class="task"><span class="status">待处理</span><button role="button">完成第 3 条工单</button></div>
+  <script>
+    for (const n of [1, 2, 3]) {
+      document.querySelector('#task-' + n + ' button').addEventListener('click', () => {
+        document.querySelector('#task-' + n + ' .status').textContent = '已完成';
+      });
+    }
+  </script>
+</body></html>`;
+}
+
 function sse(res, chunks) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   // 可选的「慢速流」模式：分片之间加延迟，从而**真实存在一个生成中的窗口**。
@@ -3615,6 +3706,24 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：检索调研（playbook id = 'web-research'）。
+    //
+    // ⚠ 必须排在知识库那两个剧本**之前**：本剧本指令同时含「帮我调研」（自己）与「知识库」
+    // （knowledge-save-retrieve 的触发词），分派是 includes 顺序匹配 —— 门禁要求更具体的
+    // 触发词先检查（tests/skill-playbook-contract.test.mjs 的分派顺序断言）。
+    // 节奏：看结果页 → 点开第一条 → **等详情异步渲染** → 读详情正文 → 存进知识库。
+    if (userText.includes(PLAYBOOKS['web-research'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 800 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '打开 r1' }); return; }
+      // 详情是异步渲染的：点完立刻读会读到空，必须等标题真的出现。
+      if (done === 2) { toolStep(res, 'wait_for_element', { selector: '#detail-title', state: 'visible' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#detail-body' }); return; }
+      if (done === 4) { toolStep(res, 'add_entry', { type: 'note', title: '数据库索引要点', note: 'B+ 树：非叶子节点只存键，叶子节点用链表串联，适合范围查询。' }); return; }
+      finalText(res, '已点开第一条结果、读到 B+ 树要点，并存入知识库「数据库索引要点」。', 60);
+      return;
+    }
+
     // 剧本：知识库检索的召回边界（playbook id = 'knowledge-search-fallback'）。
     //
     // ⚠ 这一块必须排在「知识库往返」那一块**之前**：本剧本的指令里同时含
@@ -4197,6 +4306,39 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 剧本：划重点（playbook id = 'annotate-highlight'）。
+    // 节奏：看页面 → 批量高亮两个目标短语 → 读回正文（确认没被删/盖）。
+    if (userText.includes(PLAYBOOKS['annotate-highlight'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 1200 }); return; }
+      if (done === 1) { toolStep(res, 'annotate', { op: 'highlight', texts: ['矩阵的秩', '特征向量'] }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#art' }); return; }
+      finalText(res, '已把「矩阵的秩」和「特征向量」两处关键信息高亮，正文保持原样。', 60);
+      return;
+    }
+
+    // 剧本：控件加阴影（playbook id = 'control-shadow'）。
+    // 节奏：看页面 → 改样式（box-shadow）→ 读回**计算后**的样式才算验证过。
+    if (userText.includes(PLAYBOOKS['control-shadow'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) { toolStep(res, 'annotate', { op: 'style', selector: '#card', styles: { boxShadow: 'rgba(0, 0, 0, 0.25) 0px 6px 16px' } }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'styles', selector: '#card', props: ['box-shadow'] }); return; }
+      finalText(res, '已给 #card 加外阴影，并读回计算样式确认 box-shadow 生效。', 60);
+      return;
+    }
+
+    // 剧本：站点 AI 助手（playbook id = 'site-assistant'）。
+    // 节奏：读页面看清现状 → 只改目标那条 → 读回变化后的状态 → 基于状态回话。
+    if (userText.includes(PLAYBOOKS['site-assistant'].trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '完成第 2 条工单' }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#task-2 .status' }); return; }
+      finalText(res, '第 2 条工单现在是「已完成」；第 1、3 条仍是「待处理」。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
@@ -4311,7 +4453,11 @@ const main = http.createServer((req, res) => {
                                                           : req.url && req.url.startsWith('/dialog') ? dialogPage()
                                                             : req.url && req.url.startsWith('/download') ? downloadPage()
                                                               : req.url && req.url.startsWith('/datepicker') ? datePickerPage()
-                                                                : mainPage()
+                                                                : req.url && req.url.startsWith('/hl') ? highlightPage()
+                                                                  : req.url && req.url.startsWith('/ui') ? controlShadowPage()
+                                                                    : req.url && req.url.startsWith('/rsearch') ? researchPage()
+                                                                      : req.url && req.url.startsWith('/assistant') ? siteAssistantPage()
+                                                                        : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

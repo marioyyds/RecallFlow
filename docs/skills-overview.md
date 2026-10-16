@@ -8,10 +8,10 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **41** |
-| 有剧本归属（真浏览器验收覆盖） | **32** |
+| 技能总数 | **45** |
+| 有剧本归属（真浏览器验收覆盖） | **36** |
 | **孤儿技能**（无验收覆盖） | **9** |
-| 能力剧本总数 | **32** |
+| 能力剧本总数 | **36** |
 
 ## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）
 
@@ -44,10 +44,12 @@
 
 | 技能 | 展示名 | 分类 | 对应剧本 |
 | --- | --- | --- | --- |
+| `annotate-highlight` | 划重点（高亮关键句） | browser | `annotate-highlight` |
 | `canvas-coordinate-click` | canvas / 画布上的按钮（按坐标点击） | browser-automation | `canvas-coordinate-click` |
 | `cascade-select` | 级联下拉框（选了父项，子项异步填充） | browser-automation | `cascade-select` |
 | `cdp-drag-slider` | 拖拽（滑块 / 自定义排序等鼠标事件型控件） | browser-automation | `cdp-drag-slider` |
 | `checkout-form` | 下单 / 多步表单（选商品 → 填写 → 勾选确认 → 提交） | browser | `checkout-form` |
+| `control-shadow` | 给控件加阴影 / 描边 | browser | `control-shadow` |
 | `cross-tab-handoff` | 跨标签页搬运（在 A 页读到的东西填进新开的 B 页） | browser-automation | `cross-tab-handoff` |
 | `page-world-js` | 读页面 JS 状态 / 严格 CSP 页面（沙箱被拒会自动改用页面主世界） | browser-automation | `csp-page-world-js` |
 | `date-picker-custom` | 自定义日期选择器：打字没用，要点日历 | browser-automation | `date-picker-custom` |
@@ -71,11 +73,13 @@
 | `readability-fix` | 可读性美化（把难读的页面调成易读） | browser | `readability-fix` |
 | `recover-from-rejection` | 被拒后自适应（读懂原因、补齐、再试） | browser | `recover-from-rejection` |
 | `rich-text-structure` | 富文本编辑（结构要真的改上，不能只看纯文本） | browser-automation | `rich-text-structure` |
+| `site-assistant` | 站点 AI 助手：读页面、改状态、再回话 | browser-automation | `site-assistant` |
 | `search-within-site` | 站内检索（搜索 + 结构化取回结果） | browser | `site-search` |
 | `undo-last-action` | 撤销上一步（只回退最后一次可撤销动作） | browser-automation | `undo-last-action` |
 | `upload-file` | 文件上传（工具只说"未观测"，必须读回） | browser-automation | `upload-file` |
 | `video-playback-verify` | 视频播放器状态（「看起来在播」不等于真的在播） | browser-automation | `video-playback-verify` |
 | `virtual-list-scroll` | 虚拟列表 / 长列表（DOM 里没有 ≠ 页面上没有） | browser-automation | `virtual-list-scroll` |
+| `web-research` | 检索调研并把要点沉淀进知识库 | research | `web-research` |
 
 ## 重复的通用纪律（抽「底座」的依据，数出来的不是感觉）
 
@@ -85,21 +89,21 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 38 |
-| `get_page_snapshot` | 36 |
-| `inspect_element` | 34 |
-| `click_element` | 29 |
+| `complete_task` | 42 |
+| `get_page_snapshot` | 40 |
+| `inspect_element` | 38 |
+| `click_element` | 31 |
 | `type_text` | 11 |
-| `wait_for_element` | 10 |
+| `wait_for_element` | 11 |
 | `select_option` | 8 |
 | `read_current_page` | 6 |
+| `annotate` | 5 |
+| `add_entry` | 4 |
+| `knowledge_read` | 4 |
 | `run_javascript` | 4 |
 | `scroll_page` | 4 |
-| `add_entry` | 3 |
-| `annotate` | 3 |
 | `check_box` | 3 |
 | `get_ax_snapshot` | 3 |
-| `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
 
 （全部工具的出现次数见下方明细；`tools` 为空或未声明的技能不参与统计。）
@@ -108,21 +112,21 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 38 |
-| `get_page_snapshot` | 36 |
-| `inspect_element` | 34 |
-| `click_element` | 29 |
+| `complete_task` | 42 |
+| `get_page_snapshot` | 40 |
+| `inspect_element` | 38 |
+| `click_element` | 31 |
 | `type_text` | 11 |
-| `wait_for_element` | 10 |
+| `wait_for_element` | 11 |
 | `select_option` | 8 |
 | `read_current_page` | 6 |
+| `annotate` | 5 |
+| `add_entry` | 4 |
+| `knowledge_read` | 4 |
 | `run_javascript` | 4 |
 | `scroll_page` | 4 |
-| `add_entry` | 3 |
-| `annotate` | 3 |
 | `check_box` | 3 |
 | `get_ax_snapshot` | 3 |
-| `knowledge_read` | 3 |
 | `read_diagnostics` | 3 |
 | `fetch_webpage` | 2 |
 | `click_at` | 1 |

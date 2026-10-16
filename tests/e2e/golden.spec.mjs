@@ -58,6 +58,102 @@ test('golden: 用 role+name 定位并点击页面按钮', async () => {
   await page.close();
 });
 
+
+// 能力验收（视觉标注）：**划重点**（playbook 'annotate-highlight'）。
+// 难点是"达标可以靠作弊"：把正文隐藏或删除也能让工具回执看起来成功，
+// 所以判据是页面上真的出现高亮浮层，且正文一字没少。
+test('golden: 划重点 —— 高亮浮层真的出现，正文一字没少', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/hl');
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['annotate-highlight'].eval.instruction);
+
+  // ① 页面状态：至少两个高亮浮层；正文长度与改动前一致（不靠删内容达标）
+  await expect.poll(() => page.evaluate(() => window.__hlCount()), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+  const before = await page.evaluate(() => window.__artTextBefore);
+  const after = await page.evaluate(() => window.__artLen());
+  expect(after, '高亮不得删改正文').toBe(before);
+
+  // ② 模型视角：目标短语与高亮回执都到了模型手里
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已高亮');
+  expect(toolResultsText()).toContain('矩阵的秩');
+  expect(toolResultsText()).toContain('特征向量');
+
+  await page.close();
+});
+
+// 能力验收（视觉标注）：**给控件加阴影**（playbook 'control-shadow'）。
+// 难点是"已修改 N 个元素"只证明调用发出去了，必须读回**计算后**的 box-shadow 才算验证过。
+test('golden: 加阴影 —— 计算样式真的变了，控件仍可见', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/ui');
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['control-shadow'].eval.instruction);
+
+  await expect.poll(() => page.evaluate(() => window.__shadowed()), { timeout: 30_000 }).toBe(true);
+  await expect(page.locator('#card')).toBeVisible();
+  const before = await page.evaluate(() => window.__cardTextBefore);
+  const after = await page.evaluate(() => window.__cardLen());
+  expect(after).toBe(before);
+
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('box-shadow=');
+
+  await page.close();
+});
+
+// 能力验收（调研）：**检索调研**（playbook 'web-research'）。
+// 难点有两个：详情是点击后**异步渲染**的（不等待就读到空），以及调研成果必须**沉淀**进知识库。
+test('golden: 检索调研 —— 点开详情读到事实，并沉淀进知识库', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/rsearch');
+
+  await resetKnowledgeBase(context);
+  expect(Object.keys(await readKnowledgeBase(context))).toEqual([]);
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['web-research'].eval.instruction);
+
+  // ① 页面状态：第一条结果被点开、详情真的渲染出来
+  await expect.poll(() => page.evaluate(() => window.__opened), { timeout: 30_000 }).toBe('r1');
+  await expect(page.locator('#detail-title')).toContainText('数据库索引');
+  await expect(page.locator('#detail-body')).toContainText('B+ 树');
+
+  // ② 权威事实：要点真的写进了扩展侧知识库
+  await expect
+    .poll(async () => {
+      const book = await readKnowledgeBase(context);
+      return Object.values(book).some((it) => it.title === '数据库索引要点' && String(it.note || '').includes('B+ 树'));
+    }, { timeout: 40_000 })
+    .toBe(true);
+
+  // ③ 模型视角：写入回执与读到的正文要点都到了模型手里
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已保存条目');
+  expect(toolResultsText()).toContain('B+ 树');
+
+  await page.close();
+});
+
+// 能力验收（站点助手）：**多轮对话里改业务状态并回话**（playbook 'site-assistant'）。
+// 难点是"对话与页面操作交错"：只改目标那条、改完读回变化后的状态再回话。
+test('golden: 站点助手 —— 只改目标工单，状态读回模型上下文', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/assistant');
+
+  resetLlmRequests();
+  await sendInstruction(page, PLAYBOOKS['site-assistant'].eval.instruction);
+
+  // ① 页面状态：第 2 条已完成，第 1/3 条没被误改（状态判据，不是"点了几次"）
+  await expect(page.locator('#task-2 .status')).toHaveText('已完成', { timeout: 30_000 });
+  await expect(page.locator('#task-1 .status')).toHaveText('待处理');
+  await expect(page.locator('#task-3 .status')).toHaveText('待处理');
+
+  // ② 模型视角：变化后的状态读回模型上下文（「已完成」只可能来自读回）
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已完成');
+
+  await page.close();
+});
 test('golden: 跨域 iframe 内点击（frame 路由 + f<frameId>: 前缀 ref）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);

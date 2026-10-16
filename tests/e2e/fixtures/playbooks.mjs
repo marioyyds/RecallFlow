@@ -1034,6 +1034,88 @@ export const PLAYBOOKS = Object.freeze({
       mustSeeInToolResults: ['¥309', '¥283'],
     },
   },
+
+  'annotate-highlight': {
+    id: 'annotate-highlight',
+    title: '划重点：把关键句高亮出来，且不靠删内容或盖文字达标',
+    trigger: '划重点',
+    // 高亮是"视觉标注"：真正的判据不是工具回执，而是页面上真的出现浮层、
+    // 且正文一个字都没少（把正文隐藏也能让"高亮成功"这条回执看起来成立）。
+    tools: ['get_page_snapshot', 'annotate', 'inspect_element'],
+    success: '两个目标短语都被高亮（页面出现 ≥2 个浮层），正文一字没少、仍可读',
+    eval: {
+      url: '/hl',
+      instruction: '把这一页里「矩阵的秩」和「特征向量」这两处关键信息划重点（高亮）。',
+      pageChecks: [
+        { expr: "Array.from(document.body.children).filter((el) => el.style.zIndex === '2147483646' && el.style.pointerEvents === 'none').length >= 2", label: '页面出现至少两个高亮浮层' },
+        { expr: "document.querySelector('#art').innerText.length === window.__artTextBefore", label: '正文一个字都没少（不靠删内容达标）' },
+      ],
+      mustSeeInToolResults: ['已高亮', '矩阵的秩', '特征向量'],
+    },
+  },
+
+  'control-shadow': {
+    id: 'control-shadow',
+    title: '给控件加阴影：改完样式要读回计算值才算数',
+    trigger: '加阴影',
+    // 「已修改 N 个元素」只证明调用发出去了；值可能非法被忽略、也可能被 !important 覆盖。
+    // 所以最后必须 inspect_element({op:"styles"}) 读回**计算后**的 box-shadow 才算验证过。
+    tools: ['get_page_snapshot', 'annotate', 'inspect_element'],
+    success: '目标控件的 box-shadow 计算值不再是 none，且控件仍可见、内容没变少',
+    eval: {
+      url: '/ui',
+      instruction: '给这个页面里 id 为 card 的控件加阴影（一个柔和的 box-shadow 外阴影），加完读回计算样式确认真的生效。',
+      pageChecks: [
+        { expr: 'window.__shadowed() === true', label: 'box-shadow 计算值不再是 none' },
+        { expr: "document.querySelector('#card').offsetParent !== null", label: '控件仍然可见（没被隐藏）' },
+        { expr: "document.querySelector('#card').innerText.length === window.__cardTextBefore", label: '控件内容没变少' },
+      ],
+      mustSeeInToolResults: ['box-shadow='],
+    },
+  },
+
+  'web-research': {
+    id: 'web-research',
+    title: '检索调研：结果页 → 点开详情 → 读事实 → 沉淀进知识库',
+    // 触发词取「帮我调研」而不是「调研」：本剧本的指令里同时含「知识库」（另一个剧本的触发词），
+    // 分派是 includes 顺序匹配，门禁要求"更具体的触发词先检查"——所以自己的触发词必须更长，
+    // 且分派块要排在知识库那两个剧本之前（见 server.mjs 对应注释）。
+    trigger: '帮我调研',
+    // 难点有两个：详情是**点击后异步渲染**的（不等待就读到"加载中/空"），
+    // 以及"调研的成果"必须**沉淀**下来 —— 存进知识库这一步和页面动作是两个判据。
+    tools: ['get_page_snapshot', 'click_element', 'wait_for_element', 'inspect_element', 'add_entry'],
+    success: '点开第一条结果的详情（等异步渲染后读到 B+ 树要点）、把要点存进知识库',
+    eval: {
+      url: '/rsearch',
+      instruction: '帮我调研「数据库索引」：在这个结果页点开第一条结果，把详情里关于 B+ 树的要点存进知识库（标题「数据库索引要点」）。',
+      pageChecks: [
+        { expr: "window.__opened === 'r1'", label: '第一条结果真的被点开' },
+        { expr: "document.querySelector('#detail-title').textContent.indexOf('数据库索引') === 0", label: '详情区渲染出第一条结果的标题' },
+        { expr: "document.querySelector('#detail-body').innerText.indexOf('B+ 树') >= 0", label: '详情正文（含 B+ 树）已渲染' },
+      ],
+      mustSeeInToolResults: ['已保存条目', 'B+ 树'],
+    },
+  },
+
+  'site-assistant': {
+    id: 'site-assistant',
+    title: '站点 AI 助手：多轮对话里读页面、改业务状态、再回话',
+    trigger: '客服',
+    // 这一类的难点不是"点一下"，而是**对话与页面操作交错**：
+    // 先读页面看清现状 → 只改目标那条 → 再读回变化后的状态 → 基于状态回话。
+    tools: ['get_page_snapshot', 'click_element', 'inspect_element'],
+    success: '第 2 条工单被标记为已完成，第 1/3 条没被误改，且变化后的状态读回模型上下文',
+    eval: {
+      url: '/assistant',
+      instruction: '你是这个客服后台的助手：帮我把第 2 条工单标记为「已完成」，然后告诉我现在的状态。',
+      pageChecks: [
+        { expr: "document.querySelector('#task-2 .status').textContent === '已完成'", label: '第 2 条工单状态变成已完成' },
+        { expr: "document.querySelector('#task-1 .status').textContent === '待处理'", label: '第 1 条没被误改' },
+        { expr: "document.querySelector('#task-3 .status').textContent === '待处理'", label: '第 3 条没被误改' },
+      ],
+      mustSeeInToolResults: ['已完成'],
+    },
+  },
 });
 /** 某剧本用到的工具名（数组副本，调用方改不坏常量）。 */
 export function playbookTools(id) {
