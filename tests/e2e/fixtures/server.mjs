@@ -16,6 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLAYBOOKS } from './playbooks.mjs';
+import { LIVE_SITES } from '../../e2e-live/sites.mjs';
 
 // 上传夹具的绝对路径：`upload_file` 要的是真实本地路径（CDP 的 DOM.setFileInputFiles）。
 // 剧本指令里用 {{UPLOAD_FILE}} 占位，由 tests/e2e/helpers.mjs 的 resolveInstruction 解析 ——
@@ -4336,6 +4337,131 @@ const llm = http.createServer((req, res) => {
       if (done === 1) { toolStep(res, 'click_element', { role: 'button', name: '完成第 2 条工单' }); return; }
       if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#task-2 .status' }); return; }
       finalText(res, '第 2 条工单现在是「已完成」；第 1、3 条仍是「待处理」。', 60);
+      return;
+    }
+
+    // ===================== T1 真实站点实验室（不进 CI，E2E_LIVE=1 手动跑） =====================
+    //
+    // 这里仍是**脚本化模型**：协议是真的、生产代码是真的，只有"模型决定"被换成脚本。
+    // 它验证的是**定位器/时序在真实 DOM 上的成色**，不花真钱。
+    // 与上面夹具剧本的区别只有一点：页面是真实站点，判据看**站点自己的数据**。
+
+    // 必应搜索（live site id = 'bing-search'）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'bing-search').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { selector: '#sb_form_q', value: '数据库索引', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'press_key', { key: 'Enter' }); return; }
+      // 结果容器是异步渲染的：点完立刻读会拿到空。
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#b_results', state: 'visible' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#b_results' }); return; }
+      finalText(res, '已提交必应搜索「数据库索引」并读回结果条目。', 60);
+      return;
+    }
+
+    // 维基百科调研（live site id = 'wikipedia-research'）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'wikipedia-research').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 600 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '#firstHeading' }); return; }
+      if (done === 2) {
+        toolStep(res, 'add_entry', {
+          type: 'note',
+          title: '数据库索引要点',
+          note: 'B+ 树：非叶子节点只存键，叶子节点用链表串联，适合范围查询。',
+        });
+        return;
+      }
+      finalText(res, '已从维基百科「数据库索引」词条读到 B+ 树要点，并存入知识库。', 60);
+      return;
+    }
+
+    // SauceDemo 登录 + 多步结算（live site id = 'saucedemo-checkout'）。
+    // 页面是 JS 渲染的 SPA：每个关键控件都要先 wait_for_element，否则 type/click 会打到还没挂上的 DOM。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'saucedemo-checkout').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'wait_for_element', { selector: '[data-test="username"]', state: 'visible' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { selector: '[data-test="username"]', value: 'standard_user', clearFirst: true }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { selector: '[data-test="password"]', value: 'secret_sauce', clearFirst: true }); return; }
+      if (done === 4) { toolStep(res, 'click_element', { selector: '[data-test="login-button"]' }); return; }
+      if (done === 5) { toolStep(res, 'wait_for_element', { selector: '.inventory_item', state: 'visible' }); return; }
+      if (done === 6) { toolStep(res, 'click_element', { selector: '[data-test="add-to-cart-sauce-labs-backpack"]' }); return; }
+      if (done === 7) { toolStep(res, 'click_element', { selector: '.shopping_cart_link' }); return; }
+      if (done === 8) { toolStep(res, 'wait_for_element', { selector: '[data-test="checkout"]', state: 'visible' }); return; }
+      if (done === 9) { toolStep(res, 'click_element', { selector: '[data-test="checkout"]' }); return; }
+      if (done === 10) { toolStep(res, 'type_text', { selector: '[data-test="firstName"]', value: 'Codex', clearFirst: true }); return; }
+      if (done === 11) { toolStep(res, 'type_text', { selector: '[data-test="lastName"]', value: 'Agent', clearFirst: true }); return; }
+      if (done === 12) { toolStep(res, 'type_text', { selector: '[data-test="postalCode"]', value: '200000', clearFirst: true }); return; }
+      if (done === 13) { toolStep(res, 'click_element', { selector: '[data-test="continue"]' }); return; }
+      if (done === 14) { toolStep(res, 'wait_for_element', { selector: '[data-test="finish"]', state: 'visible' }); return; }
+      if (done === 15) { toolStep(res, 'click_element', { selector: '[data-test="finish"]' }); return; }
+      if (done === 16) { toolStep(res, 'wait_for_element', { selector: '.complete-header', state: 'visible' }); return; }
+      if (done === 17) { toolStep(res, 'inspect_element', { op: 'text', selector: '.complete-header' }); return; }
+      finalText(res, '已登录并把 Sauce Labs Backpack 走完结算：订单确认页显示 Thank you for your order。', 60);
+      return;
+    }
+
+    // SauceDemo 站点助手（live site id = 'saucedemo-assistant'）。
+    // 与上一条的区别：判据是**业务状态变化**（购物车徽标数），而不是流程走完。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'saucedemo-assistant').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'wait_for_element', { selector: '[data-test="username"]', state: 'visible' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { selector: '[data-test="username"]', value: 'standard_user', clearFirst: true }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { selector: '[data-test="password"]', value: 'secret_sauce', clearFirst: true }); return; }
+      if (done === 4) { toolStep(res, 'click_element', { selector: '[data-test="login-button"]' }); return; }
+      if (done === 5) { toolStep(res, 'wait_for_element', { selector: '.inventory_item', state: 'visible' }); return; }
+      if (done === 6) { toolStep(res, 'click_element', { selector: '[data-test="add-to-cart-sauce-labs-backpack"]' }); return; }
+      if (done === 7) { toolStep(res, 'inspect_element', { op: 'text', selector: '.shopping_cart_badge' }); return; }
+      finalText(res, '已登录并把一个背包加入购物车：购物车徽标现在是 1。', 60);
+      return;
+    }
+
+    // GitHub 检索调研（live site id = 'github-research'）。
+    // 难点：真实搜索结果页 + 结构化读回结果 + 沉淀进知识库。
+    //
+    // ⚠ 本场景**刻意不点开结果里的仓库链接**：GitHub 用 Turbo 客户端导航替换页面内容，
+    //   实测点击后面板宿主被替换、本轮任务中断（run 只做到"点击"就停）。
+    //   这是真实站点实验室暴露的产品问题，记在 tests/e2e-live/README.md；待深挖修法，
+    //   在那之前用"读结果并沉淀"覆盖检索调研这类能力。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'github-research').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '[data-testid="results-list"]' }); return; }
+      if (done === 2) {
+        toolStep(res, 'add_entry', {
+          type: 'note',
+          title: 'GitHub 调研要点',
+          note: 'database index 搜索结果：w3c/IndexedDB（Indexed Database API 规范）等仓库。',
+        });
+        return;
+      }
+      finalText(res, '已从 GitHub 搜索结果结构化读回前几条仓库，并把要点沉淀进知识库。', 60);
+      return;
+    }
+
+    // MDN 划重点 + 加阴影（live site id = 'mdn-highlight-shadow'）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'mdn-highlight-shadow').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
+      if (done === 1) { toolStep(res, 'annotate', { op: 'highlight', texts: ['事务', 'IndexedDB'] }); return; }
+      if (done === 2) { toolStep(res, 'annotate', { op: 'style', selector: 'h1', styles: { boxShadow: 'rgba(0, 0, 0, 0.3) 0px 4px 12px' } }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'styles', selector: 'h1', props: ['box-shadow'] }); return; }
+      finalText(res, '已把「事务」「IndexedDB」两处高亮，并给 h1 加了外阴影，读回计算样式确认生效。', 60);
+      return;
+    }
+
+    // 百度搜索（live site id = 'baidu-search'）。
+    // 与必应并列的本地搜索引擎：DOM 完全不同（#kw/#su + .c-container 结果条目）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'baidu-search').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { selector: '#kw', value: '数据库索引', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { selector: '#su' }); return; }
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '.c-container', state: 'visible' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#content_left' }); return; }
+      finalText(res, '已提交百度搜索「数据库索引」并读回结果条目。', 60);
       return;
     }
 
