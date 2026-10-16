@@ -59,6 +59,30 @@ test('golden: 用 role+name 定位并点击页面按钮', async () => {
 });
 
 
+// 回归：SPA 客户端导航会整体替换 DOM 树，面板宿主被移除后要能自动重建。
+// 这是真实站点实验室（GitHub Turbo 导航）暴露的产品缺陷 —— 修复前宿主引用仍指向已脱离的节点，
+// FAB 永久消失；修复后由低频保活轮询重建（见 lib/page/chat.js 的 watchHostKeepalive）。
+test('golden: SPA 导航移除宿主后自动重建（FAB 回来且可再开面板）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+
+  await expect(page.locator(PANEL + ' .fab')).toBeVisible();
+
+  // 模拟 SPA 导航：把宿主从 DOM 里摘掉（内容脚本的 JS 上下文仍在，与 Turbo 一致）
+  await page.evaluate(() => {
+    const h = document.getElementById('__kb-ai-host');
+    if (h) h.remove();
+  });
+
+  // 修复前这里永远失败；修复后 ≤1s 的保活轮询会重建宿主
+  await expect(page.locator(PANEL + ' .fab')).toBeVisible({ timeout: 10_000 });
+
+  // 重建后的 FAB 要真的能开面板（不是只挂了个空壳）
+  await page.locator(PANEL + ' .fab').click();
+  await expect(page.locator(PANEL + ' .cmd-input')).toBeVisible();
+
+  await page.close();
+});
 // 能力验收（视觉标注）：**划重点**（playbook 'annotate-highlight'）。
 // 难点是"达标可以靠作弊"：把正文隐藏或删除也能让工具回执看起来成功，
 // 所以判据是页面上真的出现高亮浮层，且正文一字没少。

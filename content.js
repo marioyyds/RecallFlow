@@ -4905,6 +4905,7 @@
   var pageContextEnabled = true;
   var citeHighlightEntered2 = false;
   function ensureHost() {
+    if (host && !host.isConnected) resetDetachedHostState();
     if (host) return;
     if (!isExtContextAlive()) {
       warnExtDead();
@@ -4940,6 +4941,38 @@
     });
     shadow.appendChild(fab);
     document.documentElement.appendChild(host);
+  }
+  function resetDetachedHostState() {
+    if (picking) {
+      try {
+        chrome.runtime.sendMessage({ type: "pick:cancel" });
+      } catch (e) {
+      }
+      picking = false;
+      if (pickUi) pickUi = null;
+    }
+    if (panelKeyHandler) {
+      document.removeEventListener("keydown", panelKeyHandler, true);
+      panelKeyHandler = null;
+    }
+    panel = null;
+    panelBody = null;
+    panelTextEl = null;
+    planBar = null;
+    stopBtn = null;
+    sendBtn = null;
+    bubble = null;
+    host = null;
+    shadow = null;
+    fab = null;
+  }
+  function watchHostKeepalive() {
+    setInterval(() => {
+      try {
+        if (host && !host.isConnected) ensureHost();
+      } catch (e) {
+      }
+    }, 1e3);
   }
   function removeBubble() {
     if (bubble) {
@@ -6850,6 +6883,7 @@
       warnExtDead();
     }
     ensureHost();
+    watchHostKeepalive();
     conversationLoadPromise = loadConversation();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {
