@@ -258,7 +258,12 @@ async function loadWithVision(enabled, file) {
   assert.match(read('lib/shared/utils.js'), anchor, '开关定义锚点失效（`export const VISION_ENABLED = <bool>;`）');
   const patched = read('lib/shared/utils.js')
     .replace(anchor, 'export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';')
-    .replace("from './constants.js'", "from '" + ABS('lib/shared/constants.js') + "'");
+    // data: URL 模块**解析不了相对路径**（Node: ERR_UNSUPPORTED_RESOLVE_REQUEST）⇒
+    // 同目录的每个相对依赖都要换成绝对 file: URL。
+    // 原先只硬编码了 './constants.js'：utils.js 一有新依赖（2026-10-16 加了 './surrogates.js'），
+    // 这条门禁就会以"解析失败"的形式炸掉 —— 那是**门禁脆**，不是被测代码错。
+    .replace(/from '\.\/([A-Za-z0-9_.\-]+)'/g, (m, f) => "from '" + ABS('lib/shared/' + f) + "'");
+  assert.doesNotMatch(patched, /from '\.\//, '改写后不许再残留相对 import（data: URL 解析不了它）');
   assert.ok(
     patched.includes('export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';'),
     '改写锚点失效（开关定义变了？）'

@@ -8,6 +8,7 @@ import { startMcpRelay } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
 import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
+import { sanitizeMessages } from './lib/shared/surrogates.js';
 import { loadAgentSession } from './lib/assistant/session-store.js';
 import {
   listScripts,
@@ -368,6 +369,11 @@ chrome.runtime.onConnect.addListener((port) => {
       }
 
       const url = settings.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+      // 出站消毒：内容里只要有一个孤立代理（切裂的代理对），服务端会在**解析请求体**阶段
+      // 整单拒收 400（而且 400 不重试）。面板这条闲聊路径同样会带上页面文本，必须过一遍。
+      try {
+        sanitizeMessages(messages);
+      } catch (e) {}
       const resp = await fetch(url, {
         method: 'POST',
         headers: {

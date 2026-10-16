@@ -21,6 +21,31 @@
     [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
   };
 
+  // lib/shared/surrogates.js
+  var isHigh = (c) => c >= 55296 && c <= 56319;
+  var isLow = (c) => c >= 56320 && c <= 57343;
+  function alignRange(text, start, end) {
+    const s = String(text === void 0 || text === null ? "" : text);
+    const len = s.length;
+    const clamp = (v, fallback) => {
+      if (v === void 0 || v === null) return fallback;
+      const n = Math.trunc(Number(v));
+      if (!Number.isFinite(n)) return fallback;
+      return n < 0 ? Math.max(0, len + n) : Math.min(len, n);
+    };
+    let a = clamp(start, 0);
+    let b = clamp(end, len);
+    if (b < a) b = a;
+    if (a > 0 && a < len && isLow(s.charCodeAt(a)) && isHigh(s.charCodeAt(a - 1))) a -= 1;
+    if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
+    return { start: a, end: b };
+  }
+  function sliceSafe(text, start, end) {
+    const s = String(text === void 0 || text === null ? "" : text);
+    const { start: a, end: b } = alignRange(s, start, end);
+    return s.slice(a, b);
+  }
+
   // lib/shared/utils.js
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
@@ -37,10 +62,10 @@
     return picked.filter((p) => p && typeof p === "object").slice(0, 8).map((p) => {
       const src = p.source || {};
       return {
-        tag: String(p.tag || "").slice(0, 40),
-        label: String(p.label || "").slice(0, 60),
-        loc: src.file ? String(src.file).slice(0, 200) + (src.line ? ":" + src.line : "") : "",
-        locator: formatElementLocator(p.locator, p.selector, p.tag).slice(0, 200)
+        tag: sliceSafe(String(p.tag || ""), 0, 40),
+        label: sliceSafe(String(p.label || ""), 0, 60),
+        loc: src.file ? sliceSafe(String(src.file), 0, 200) + (src.line ? ":" + src.line : "") : "",
+        locator: sliceSafe(formatElementLocator(p.locator, p.selector, p.tag), 0, 200)
       };
     });
   }
@@ -170,7 +195,7 @@
     if (misses.length) {
       s += "\uFF1B\u672A\u627E\u5230 " + misses.length + " \u6761\uFF1A" + misses.map((m) => {
         const t = String(m == null ? "" : m);
-        return t.slice(0, 16) + (t.length > 16 ? "\u2026" : "");
+        return sliceSafe(t, 0, 16) + (t.length > 16 ? "\u2026" : "");
       }).join("\u3001");
     }
     if (dropped > 0) {
@@ -1119,7 +1144,7 @@
     const rows = Array.isArray(table && table.rows) ? table.rows : [];
     const cell = (v) => {
       const s = String(v === void 0 || v === null ? "" : v).replace(/\s+/g, " ").trim();
-      return s.length > maxCellChars ? s.slice(0, maxCellChars) + "\u2026" : s;
+      return s.length > maxCellChars ? sliceSafe(s, 0, maxCellChars) + "\u2026" : s;
     };
     const lines = [];
     if (headers.length) {
@@ -1334,7 +1359,7 @@
     }
     const type = (el.getAttribute("type") || "").toLowerCase();
     if (el.tagName === "INPUT" && (type === "submit" || type === "button" || type === "reset") && el.value) return String(el.value).trim();
-    return (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    return sliceSafe((el.innerText || el.textContent || "").replace(/\s+/g, " ").trim(), 0, 120);
   }
   function normName(s) {
     return String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1402,7 +1427,7 @@
     const parts = [];
     for (const attr of ["aria-label", "aria-pressed", "aria-checked", "aria-expanded", "aria-selected", "aria-disabled", "title"]) {
       const v = el.getAttribute && el.getAttribute(attr);
-      if (v !== null && v !== void 0 && String(v).trim()) parts.push(attr + "=" + JSON.stringify(String(v).replace(/\s+/g, " ").trim().slice(0, 60)));
+      if (v !== null && v !== void 0 && String(v).trim()) parts.push(attr + "=" + JSON.stringify(sliceSafe(String(v).replace(/\s+/g, " ").trim(), 0, 60)));
     }
     const text = String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
     if (text && text.length <= 80) parts.push("text=" + JSON.stringify(text));
@@ -1461,9 +1486,13 @@
       const els = findElementsFor(params || {});
       if (!els.length) return { found: false, reason: targetMissError(params) };
       const el = els[0];
-      const label = String(
-        el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.innerText || el.textContent || el.getAttribute("name") || ""
-      ).replace(/\s+/g, " ").trim().slice(0, 60);
+      const label = sliceSafe(
+        String(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.innerText || el.textContent || el.getAttribute("name") || ""
+        ).replace(/\s+/g, " ").trim(),
+        0,
+        60
+      );
       return {
         found: true,
         selector: elementSelector(el),
@@ -1488,7 +1517,7 @@
     }
   }
   function normalizeInnerText(el) {
-    return String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    return sliceSafe(String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim(), 0, 300);
   }
   function readElementState(el, styles) {
     const rect = el.getBoundingClientRect();
@@ -1500,14 +1529,14 @@
       text: normalizeInnerText(el),
       box: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) }
     };
-    if (typeof el.value === "string") state.value = el.value.slice(0, 300);
+    if (typeof el.value === "string") state.value = sliceSafe(el.value, 0, 300);
     if (Array.isArray(styles) && styles.length) {
       const out = {};
       for (const p of styles.slice(0, 12)) {
         const prop = String(p || "").trim();
         if (!prop) continue;
         try {
-          out[prop] = String(cs.getPropertyValue(prop) || "").trim().slice(0, 120);
+          out[prop] = sliceSafe(String(cs.getPropertyValue(prop) || "").trim(), 0, 120);
         } catch (e) {
         }
       }
@@ -1777,10 +1806,10 @@
         ].filter((k) => v[k] === true);
         out.push({
           selector: sel,
-          name: String(el.getAttribute("aria-label") || el.name || el.id || "").slice(0, 60),
+          name: sliceSafe(String(el.getAttribute("aria-label") || el.name || el.id || ""), 0, 60),
           reasons,
-          message: String(el.validationMessage || "").slice(0, 160),
-          value: typeof el.value === "string" ? el.value.slice(0, 80) : ""
+          message: sliceSafe(String(el.validationMessage || ""), 0, 160),
+          value: typeof el.value === "string" ? sliceSafe(el.value, 0, 80) : ""
         });
         if (out.length >= 12) return out;
       }
@@ -3335,11 +3364,11 @@
   function clipPart(p) {
     const out = Object.assign({}, p);
     if (typeof out.result === "string" && out.result.length > MAX_PART_RESULT_CHARS) {
-      out.result = out.result.slice(0, MAX_PART_RESULT_CHARS);
+      out.result = sliceSafe(out.result, 0, MAX_PART_RESULT_CHARS);
       out.resultTruncated = true;
     }
     if (typeof out.text === "string" && out.text.length > MAX_PART_TEXT_CHARS) {
-      out.text = out.text.slice(0, MAX_PART_TEXT_CHARS);
+      out.text = sliceSafe(out.text, 0, MAX_PART_TEXT_CHARS);
       out.textTruncated = true;
     }
     if (out.args && typeof out.args === "object") {
@@ -3370,11 +3399,11 @@
         copy.messagesTotal = all.length;
       }
       if (typeof m.content === "string") {
-        copy.content = m.content.slice(0, MAX_MESSAGE_CONTENT_CHARS);
+        copy.content = sliceSafe(m.content, 0, MAX_MESSAGE_CONTENT_CHARS);
         if (m.content.length > MAX_MESSAGE_CONTENT_CHARS) copy.contentTruncated = true;
       }
       if (typeof m.toolSummary === "string" && m.toolSummary) {
-        copy.toolSummary = m.toolSummary.slice(0, MAX_TOOL_SUMMARY_CHARS);
+        copy.toolSummary = sliceSafe(m.toolSummary, 0, MAX_TOOL_SUMMARY_CHARS);
         if (m.toolSummary.length > MAX_TOOL_SUMMARY_CHARS) copy.toolSummaryTruncated = true;
       }
       if (Array.isArray(m.pickedElements) && m.pickedElements.length) {
@@ -3403,7 +3432,7 @@
             id: c.id,
             title: c.title,
             url: c.url,
-            snippet: snippet.slice(0, MAX_CITATION_SNIPPET_CHARS)
+            snippet: sliceSafe(snippet, 0, MAX_CITATION_SNIPPET_CHARS)
           };
           if (snippet.length > MAX_CITATION_SNIPPET_CHARS) out.snippetTruncated = true;
           return out;
@@ -3420,7 +3449,7 @@
   function clipInline(text, max) {
     const t = norm(text);
     if (!t) return "";
-    return t.length > max ? t.slice(0, max) + "\u2026\uFF08\u5171 " + t.length + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF09" : t;
+    return t.length > max ? sliceSafe(t, 0, max) + "\u2026\uFF08\u5171 " + t.length + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF09" : t;
   }
   function norm(text) {
     return String(text === void 0 || text === null ? "" : text).replace(/\s+/g, " ").trim();
@@ -3433,7 +3462,7 @@
   var OMIT_ARGS_KEY = "\u27E8\u2026\u7701\u7565\u53C2\u6570\u27E9";
   function previewArgsJson(args, maxLen = 240) {
     const shorten = (v, depth) => {
-      if (typeof v === "string") return v.length > 80 ? v.slice(0, 80) + "\u2026" : v;
+      if (typeof v === "string") return v.length > 80 ? sliceSafe(v, 0, 80) + "\u2026" : v;
       if (Array.isArray(v)) {
         const cap = 3;
         const head = v.slice(0, cap).map((x) => shorten(x, depth + 1));

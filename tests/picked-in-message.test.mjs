@@ -164,7 +164,9 @@ test('定位串只有一处实现：三处调用点都走 formatElementLocator',
   // 存进会话的那一行（utils.js 内的 summarizePickedForMessage）
   assert.match(agentSrc, /formatElementLocator\(l\)/, 'agent.js 应走共用实现');
   assert.match(chatSrc, /formatElementLocator\(p && p\.locator/, 'chat.js 应走共用实现');
-  assert.match(utilsSrc, /locator: formatElementLocator\(p\.locator/, 'summarizePickedForMessage 应走共用实现');
+  // 锚点钉"这一处仍调用共用实现"，不钉它外面套了什么：
+  // 2026-10-16 外面包了一层 sliceSafe（截断不许切裂代理对），钉死外层写法会把门禁钉红。
+  assert.match(utilsSrc, /formatElementLocator\(p\.locator, p\.selector, p\.tag\)/, 'summarizePickedForMessage 应走共用实现');
   // 不该再有第二份手写：旧的畸形写法（把 role 拼成空串再补 name）必须消失。
   // ⚠ 必须先剥掉**注释**：那段畸形的写法本身就是作为"反面例子"写在 utils.js 的注释里的，
   // 不剥注释会把自己举的例子当成违规（实测踩过一次）。

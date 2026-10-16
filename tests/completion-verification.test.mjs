@@ -80,7 +80,10 @@ test('读类工具要单独留存**全文**（截断之前的原始结果）', (
 test('留存全文必须发生在截断之前', () => {
   // res.result 会被大结果截断改写；若在截断之后再取，留存的还是开头 3000 字，等于没改
   const rawAt = indexOfLine('const rawResult =');
-  const truncateAt = indexOfLine('res.result = res.result.slice(0, 3000)');
+  // 锚点钉**语义**（这次改写就是截断），不钉具体切法：2026-10-16 把裸 slice 换成了
+  // sliceSafe（防切裂代理对 → 请求体被服务端整单拒收），钉死字面量会连带把这条门禁钉红。
+  // 本仓库里"截断处必须用 formatTruncationNotice"另有 expand-result.test.mjs §⑥ 钉着。
+  const truncateAt = indexOfLine('formatTruncationNotice(res.result.length, rid)');
   assert.ok(rawAt < truncateAt, 'rawResult 必须在截断之前取');
 });
 
