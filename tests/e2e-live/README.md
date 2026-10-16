@@ -31,6 +31,9 @@ node scripts/run-e2e-live.mjs
 | GitHub 检索 | 真实搜索结果列表 + 沉淀知识库 | ✓ `[data-testid="results-list"]` 可用 |
 | MDN 长文标注 | 高亮 + 给 h1 加阴影 + 读回计算样式 | ✓ `h1` / `article` 可用 |
 | 百度搜索 | 本地搜索引擎、DOM 不同 | ⚠ **默认跳过**：自动化常被重定向到安全验证页（见下） |
+| arXiv 摘要 | 读论文摘要并沉淀 | ✓ `.abstract` 可用 |
+| 有道词典 | 查单词释义 | ✓ `.trans-container` 可用 |
+| httpbin 表单 | 填表单 + 提交 + 回显 JSON | ✓ `input[name]` / `form button` 可用 |
 
 ## 真实 DOM 上暴露的问题（就是这层存在的理由）
 
@@ -51,6 +54,10 @@ node scripts/run-e2e-live.mjs
    `tests/e2e/golden.spec.mjs`（「SPA 导航移除宿主后自动重建」）。
    注：GitHub 点进仓库的场景仍暂时收敛为"读结果并沉淀"——点击后是否还会中断本轮任务
    （端口级而非 UI 级）待下一步复核。
+7. **GitHub 仓库页上任务停在第一次快照**：`github.com/<owner>/<repo>` 直接打开时，
+   脚本化 run 只做了一次 get_page_snapshot 就停（面板文本为空、不再发下一次 LLM 请求），
+   而同样的流程在 Wikipedia/arXiv/MDN 都能跑完。与第 5/6 条同属"GitHub 站点特有问题"，
+   待单独排查；仓库 README 阅读场景暂不收录。
 
 ## 下一步
 

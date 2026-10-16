@@ -4465,6 +4465,38 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // arXiv 论文摘要（live site id = 'arxiv-abstract'，学生/科研场景）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'arxiv-abstract').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '.abstract' }); return; }
+      if (done === 2) {
+        toolStep(res, 'add_entry', { type: 'note', title: '论文要点 2310.11441', note: 'arXiv 2310.11441：Set-of-Mark 视觉提示方法的摘要要点。' });
+        return;
+      }
+      finalText(res, '已读 arXiv 2310.11441 摘要，并把要点存入知识库。', 60);
+      return;
+    }
+
+    // 有道词典查单词（live site id = 'youdao-dict'，学生场景）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'youdao-dict').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: '.trans-container' }); return; }
+      finalText(res, '已读有道词典里 serendipity 的释义。', 60);
+      return;
+    }
+
+    // httpbin 表单填写 + 提交（live site id = 'httpbin-form'，办公场景）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'httpbin-form').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { selector: 'input[name="custname"]', value: 'Codex', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { selector: 'form button' }); return; }
+      finalText(res, '已填 Customer name=Codex 并提交订单。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);

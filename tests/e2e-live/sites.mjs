@@ -105,4 +105,43 @@ export const LIVE_SITES = Object.freeze([
       { expr: "String((document.querySelector('h1') || {}).textContent || '').startsWith('IndexedDB')", label: '标题内容没被破坏' },
     ],
   },
+  {
+    id: 'arxiv-abstract',
+    name: 'arXiv 论文摘要阅读（学生/科研）',
+    url: 'https://arxiv.org/abs/2310.11441',
+    trigger: 'arxiv',
+    instruction: '帮我把 arxiv 2310.11441 这篇论文的摘要要点记成一条笔记（标题「论文要点 2310.11441」）。',
+    tools: ['get_page_snapshot', 'inspect_element', 'add_entry'],
+    checks: [
+      { expr: "location.pathname === '/abs/2310.11441'", label: '确实落在目标论文页' },
+      { expr: "(document.querySelector('.abstract') || { innerText: '' }).innerText.length > 0", label: '摘要块真的渲染出来' },
+    ],
+    knowledge: { title: '论文要点 2310.11441', noteIncludes: '2310.11441' },
+  },
+  {
+    id: 'youdao-dict',
+    name: '有道词典查单词（学生）',
+    url: 'https://dict.youdao.com/result?word=serendipity&lang=en',
+    trigger: '查单词',
+    instruction: '帮我查单词：在有道词典查一下 serendipity 的意思。',
+    tools: ['get_page_snapshot', 'inspect_element'],
+    checks: [
+      { expr: "document.title.toLowerCase().indexOf('serendipity') >= 0", label: '页面标题是目标单词' },
+      { expr: "(document.querySelector('.trans-container') || { innerText: '' }).innerText.length > 0", label: '释义容器真的渲染出来' },
+    ],
+  },
+  {
+    id: 'httpbin-form',
+    name: 'httpbin 表单填写并提交（办公）',
+    // 用 httpbin 而不是 w3schools：w3schools 的示例表单跑在**iframe**里，顶层 document 拿不到输入框；
+    // httpbin 的表单在顶层 document，提交后回显 JSON，是"站点自己的数据"。
+    url: 'https://httpbin.org/forms/post',
+    trigger: '填这个表单',
+    instruction: '帮我填这个表单：在 httpbin 的 Customer name 填 Codex，然后提交订单。',
+    tools: ['get_page_snapshot', 'type_text', 'click_element'],
+    checks: [
+      { expr: "location.pathname === '/post'", label: '表单真的提交到 /post' },
+      { expr: "document.body.innerText.indexOf('Codex') >= 0", label: '回显里带着填进去的 Customer name（站点自己的数据）' },
+    ],
+  },
 ]);
