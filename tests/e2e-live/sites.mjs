@@ -144,4 +144,28 @@ export const LIVE_SITES = Object.freeze([
       { expr: "document.body.innerText.indexOf('Codex') >= 0", label: '回显里带着填进去的 Customer name（站点自己的数据）' },
     ],
   },
+  {
+    id: 'pypi-package',
+    name: 'PyPI 包信息阅读（开发者）',
+    url: 'https://pypi.org/project/requests/',
+    trigger: 'pypi 包',
+    instruction: '帮我读一下 pypi 包 requests 的信息，把包名和一句话简介记成一条笔记（标题「requests 包」）。',
+    tools: ['get_page_snapshot', 'inspect_element', 'add_entry'],
+    checks: [
+      { expr: "location.pathname === '/project/requests/'", label: '确实落在目标包页面' },
+      { expr: "(document.querySelector('h1') || { textContent: '' }).textContent.indexOf('requests') >= 0", label: '包名标题渲染出来' },
+    ],
+    knowledge: { title: 'requests 包', noteIncludes: 'HTTP' },
+  },
+  {
+    id: 'demoqa-textbox',
+    name: 'demoqa 文本框表单填写（办公）',
+    url: 'https://demoqa.com/text-box',
+    trigger: '填文本框',
+    instruction: '帮我填文本框：在 demoqa 的 Full Name 填 Codex、Email 填 codex@example.com，然后提交。',
+    tools: ['get_page_snapshot', 'wait_for_element', 'type_text', 'click_element', 'inspect_element'],
+    checks: [
+      { expr: "(document.querySelector('#output') || { innerText: '' }).innerText.indexOf('Codex') >= 0 && (document.querySelector('#output') || { innerText: '' }).innerText.indexOf('codex@example.com') >= 0", label: '结果区回显了填进去的名字和邮箱（站点自己的数据）' },
+    ],
+  },
 ]);

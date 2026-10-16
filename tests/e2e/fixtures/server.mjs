@@ -4497,6 +4497,34 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // PyPI 包信息阅读（live site id = 'pypi-package'，开发者场景）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'pypi-package').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: 'h1' }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '.project-header__summary' }); return; }
+      if (done === 3) {
+        toolStep(res, 'add_entry', { type: 'note', title: 'requests 包', note: 'requests：Python HTTP for Humans. —— PyPI 上的 HTTP 库。' });
+        return;
+      }
+      finalText(res, '已读 PyPI 上 requests 的包名与简介，并存入知识库。', 60);
+      return;
+    }
+
+    // demoqa 文本框表单（live site id = 'demoqa-textbox'，办公场景）。
+    // 页面是 JS 渲染的 SPA：等输入框挂上再填，提交后读 #output 的回显。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'demoqa-textbox').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) { toolStep(res, 'wait_for_element', { selector: '#userName', state: 'visible' }); return; }
+      if (done === 2) { toolStep(res, 'type_text', { selector: '#userName', value: 'Codex', clearFirst: true }); return; }
+      if (done === 3) { toolStep(res, 'type_text', { selector: '#userEmail', value: 'codex@example.com', clearFirst: true }); return; }
+      if (done === 4) { toolStep(res, 'click_element', { selector: '#submit' }); return; }
+      if (done === 5) { toolStep(res, 'inspect_element', { op: 'text', selector: '#output' }); return; }
+      finalText(res, '已填 Full Name=Codex、Email=codex@example.com 并提交，读到结果回显。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);

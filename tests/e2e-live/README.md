@@ -34,6 +34,8 @@ node scripts/run-e2e-live.mjs
 | arXiv 摘要 | 读论文摘要并沉淀 | ✓ `.abstract` 可用 |
 | 有道词典 | 查单词释义 | ✓ `.trans-container` 可用 |
 | httpbin 表单 | 填表单 + 提交 + 回显 JSON | ✓ `input[name]` / `form button` 可用 |
+| PyPI 包信息 | 读包名与简介并沉淀 | ✓ `h1` / `.project-header__summary` 可用 |
+| demoqa 文本框表单 | JS SPA 表单填写 + 提交 + 结果回显 | ✓ `#userName` / `#userEmail` / `#submit` / `#output` 可用 |
 
 ## 真实 DOM 上暴露的问题（就是这层存在的理由）
 
