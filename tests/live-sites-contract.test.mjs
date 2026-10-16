@@ -6,6 +6,7 @@
 // 都是 E2E 里"页面对、知识库没写"这种看起来毫不相干的症状。所以在这里钉死。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 import { LIVE_SITES } from './e2e-live/sites.mjs';
 import { PLAYBOOKS } from './e2e/fixtures/playbooks.mjs';
@@ -41,4 +42,13 @@ test('真实站点：指令不得混入夹具剧本触发词（夹具分派块�
     }
   }
   assert.deepEqual(problems, []);
+});
+
+test('真实站点：server.mjs 必须有对应的分派块（漏接线 = 静默跑成兜底剧本）', () => {
+  const src = fs.readFileSync('tests/e2e/fixtures/server.mjs', 'utf8');
+  const unwired = LIVE_SITES.filter((s) => !src.includes("s.id === '" + s.id + "'"));
+  assert.deepEqual(
+    unwired.map((s) => s.id),
+    []
+  );
 });

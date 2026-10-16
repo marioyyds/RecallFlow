@@ -12,6 +12,7 @@ import { resetLlmRequests, finalizedRunCount } from '../e2e/fixtures/server.mjs'
 
 const LIVE = /^(1|true|yes)$/i.test(String(process.env.E2E_LIVE || ''));
 const FLAKY = /^(1|true|yes)$/i.test(String(process.env.E2E_LIVE_FLAKY || ''));
+const SITE_FILTER = String(process.env.E2E_LIVE_SITE || '').trim();
 test.skip(!LIVE, '真实站点实验室默认不跑：E2E_LIVE=1 node scripts/run-e2e-live.mjs');
 
 let context;
@@ -27,6 +28,7 @@ test.afterAll(async () => {
 for (const site of LIVE_SITES) {
   test(`live: ${site.name}`, async () => {
     test.skip(site.flaky && !FLAKY, '该站点已知会被安全验证/反爬拦截（见 sites.mjs 的 flaky 说明），需 E2E_LIVE_FLAKY=1 才跑');
+    test.skip(Boolean(SITE_FILTER) && site.id !== SITE_FILTER, 'E2E_LIVE_SITE=' + SITE_FILTER + ' 只跑指定站点');
     await configureSettings(context);
     await resetKnowledgeBase(context);
 

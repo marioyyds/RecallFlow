@@ -38,6 +38,7 @@ if (process.platform === 'linux' && !process.env.DISPLAY) {
 }
 
 console.log('真实站点实验室启动：' + process.env.E2E_LIVE + '（站点清单见 tests/e2e-live/sites.mjs）');
+if (process.env.E2E_LIVE_SITE) console.log('只跑站点：' + process.env.E2E_LIVE_SITE);
 
 const r = spawnSync('npx playwright test -c tests/e2e-live/playwright.config.mjs', {
   cwd: ROOT,
