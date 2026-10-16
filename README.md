@@ -21,12 +21,16 @@ RecallFlow 不是把 HTML 塞给模型，而是**在你的真实浏览器里动�
 
 ## 真实执行
 
-真实执行：在扩展面板里让 Agent（自配 DeepSeek）自动完成小红书发布 —— 打开创作页、填标题与正文、
-插入图片、添加话题、点击发布，右栏是面板逐步长出的工具记录。
+在扩展面板里让 Agent（自配 DeepSeek）在真实页面上干活，右栏是面板逐步长出的工具记录。
 
-![真实执行录屏：Agent 自动发布小红书](docs/assets/recallflow-xhs-publish.gif)
+| 场景 | 录屏 |
+| --- | --- |
+| 自动发布小红书：打开创作页、填标题与正文、插入图片、添加话题、点击发布 | ![自动发布小红书](docs/assets/recallflow-xhs-publish.gif) |
+| 页面操作：在真实页面上完成点击 / 输入 / 提交 | ![页面操作](docs/assets/recallflow-page-ops.gif) |
+| 当前页面搜索：在页面内检索目标并定位到结果 | ![当前页面搜索](docs/assets/recallflow-find-in-page.gif) |
+| 画出页面重点：高亮 / 标注页面上的关键信息 | ![画出页面重点](docs/assets/recallflow-highlight.gif) |
 
-> 录屏为**加速回放**。小红书是需登录的实时第三方站点，此条为真实场景展示，不在自动化测试覆盖范围内。
+> 均为**加速回放**；第三方站点需登录，属真实场景展示，不在自动化测试覆盖范围内。
 
 ## 核心能力
 
@@ -83,6 +87,8 @@ flowchart TD
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
 
+> 规模数字（能力剧本 / 技能 / 判据 / 测试数与文件数）一律由脚本生成，见上述清单与
+> [`tests/.test-count.json`](tests/.test-count.json)；README 不手写数字 —— 手写的必然腐烂。
 
 ## 项目结构
 
