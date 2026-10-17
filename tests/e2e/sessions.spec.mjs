@@ -122,3 +122,31 @@ test('运行锁：第二标签页提示冲突，可改在新会话里运行', as
   await a.close();
   await b.close();
 });
+
+test('面板开合：打开、关闭都会同步到其他标签页，新页面继承当前状态', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await openPanel(a);
+  await expect(a.locator(PANEL + ' .panel')).toBeVisible();
+
+  // 新标签页加载时直接继承“已打开”，无需再点 FAB。
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+
+  // A 显式关闭 → B 同步关闭。
+  await a.locator(PANEL + ' .close').click();
+  await expect(a.locator(PANEL + ' .panel')).toHaveCount(0);
+  await expect(b.locator(PANEL + ' .panel')).toHaveCount(0, { timeout: 15_000 });
+
+  // 反向：B 打开 → A 同步打开。
+  await openPanel(b);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible();
+  await expect(a.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+
+  // B 再关闭 → A 同步关闭。
+  await b.locator(PANEL + ' .close').click();
+  await expect(a.locator(PANEL + ' .panel')).toHaveCount(0, { timeout: 15_000 });
+
+  await a.close();
+  await b.close();
+});

@@ -302,3 +302,45 @@ test('并发创建被串行化：不会因为同时读旧索引而丢会话', as
     ['A', 'B', 'C', '新会话']
   );
 });
+
+test('panel ui: 全局打开、远端成员回执与关页只移除自己的成员', async () => {
+  const { store } = makeStore();
+  const initial = await store.getUi();
+  assert.equal(initial.open, false);
+  assert.equal(initial.seq, 0);
+
+  const opened = await store.setUi({ open: true, tabId: 11, scope: 'global' });
+  assert.equal(opened.ui.open, true);
+  assert.equal(opened.ui.seq, 1);
+  assert.deepEqual(opened.ui.openTabs, [11]);
+
+  const peer = await store.setUi({ open: true, tabId: 22, scope: 'membership' });
+  assert.equal(peer.ui.open, true);
+  assert.equal(peer.ui.seq, 1, '成员回执不应制造新的广播序号');
+  assert.deepEqual(peer.ui.openTabs, [11, 22]);
+
+  const firstClosed = await store.removeTabFromUi(11);
+  assert.equal(firstClosed.changed, false, '仍有页面显示面板时不能全局关闭');
+  assert.equal(firstClosed.ui.open, true);
+  assert.deepEqual(firstClosed.ui.openTabs, [22]);
+
+  const lastClosed = await store.removeTabFromUi(22);
+  assert.equal(lastClosed.changed, true);
+  assert.equal(lastClosed.ui.open, false);
+  assert.equal(lastClosed.ui.seq, 2);
+});
+
+test('panel ui: 用户主动关闭会清空所有成员；新页重新打开成为唯一成员', async () => {
+  const { store } = makeStore();
+  await store.setUi({ open: true, tabId: 1, scope: 'global' });
+  await store.setUi({ open: true, tabId: 2, scope: 'membership' });
+  const closed = await store.setUi({ open: false, tabId: 1, scope: 'global' });
+  assert.equal(closed.ui.open, false);
+  assert.deepEqual(closed.ui.openTabs, []);
+  assert.equal(closed.ui.seq, 2);
+
+  const reopened = await store.setUi({ open: true, tabId: 3, scope: 'global' });
+  assert.equal(reopened.ui.open, true);
+  assert.deepEqual(reopened.ui.openTabs, [3]);
+  assert.equal(reopened.ui.seq, 3);
+});

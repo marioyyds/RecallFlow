@@ -101,6 +101,22 @@ function broadcastPanelSessions(state, sourceTabId) {
   });
 }
 
+function broadcastPanelUi(ui, sourceTabId) {
+  const payload = {
+    type: 'panel:ui-changed',
+    open: Boolean(ui && ui.open),
+    seq: Number(ui && ui.seq) || 0,
+    updatedAt: Number(ui && ui.updatedAt) || 0,
+  };
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs || []) {
+      if (!tab || tab.id == null || tab.id === sourceTabId) continue;
+      if (tab.url && !/^https?:/i.test(tab.url)) continue;
+      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+    }
+  });
+}
+
 // 兜底日志：service worker 内未捕获的异常 / Promise 拒绝也打到 console，便于排障。
 try {
   self.addEventListener('unhandledrejection', (e) => {
@@ -153,6 +169,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
     sendResponse({ ok: true });
     return false;
+  }
+  // ---- 面板开合状态（全浏览器同步）----
+  if (msg && (msg.type === 'panel:ui:get' || msg.type === 'panel:ui:set')) {
+    const sourceTabId = sender.tab && sender.tab.id;
+    (async () => {
+      if (msg.type === 'panel:ui:get') {
+        const ui = await panelSessions.getUi();
+        sendResponse({ ok: true, ui });
+        return;
+      }
+      const result = await panelSessions.setUi({
+        open: msg.open === true,
+        tabId: sourceTabId,
+        scope: msg.scope === 'membership' ? 'membership' : 'global',
+      });
+      sendResponse({ ok: true, ui: result.ui });
+      if (result.changed) {
+        try {
+          broadcastPanelUi(result.ui, sourceTabId);
+        } catch (e) {}
+      }
+    })().catch((e) => {
+      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+    });
+    return true;
   }
   // ---- 面板会话（整个浏览器共享，可新建 / 切换 / 查看历史）----
   //
@@ -459,6 +500,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
         const state = await panelSessions.list();
         broadcastPanelSessions(state, null);
       }
+    })
+    .catch(() => {});
+  panelSessions
+    .removeTabFromUi(tabId)
+    .then((r) => {
+      if (r && r.changed) broadcastPanelUi(r.ui, null);
     })
     .catch(() => {});
   try {

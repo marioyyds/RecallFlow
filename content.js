@@ -4828,6 +4828,10 @@
   var panelSessionLockHeld = false;
   var panelSessionLockRunId = "";
   var activeInterruptFn = null;
+  var panelUiSeq = 0;
+  var panelUiOpen = false;
+  var suppressPanelUiPublish = false;
+  var panelUiReadyPromise = null;
   var stopBtn = null;
   var sendBtn = null;
   var streaming = false;
@@ -5038,9 +5042,9 @@
       try {
         if (host && !host.isConnected) {
           ensureHost();
-          if (streaming) {
+          if (panelUiOpen) {
             openPanel(0, 0, true);
-            restoreStreamingUI();
+            if (streaming) restoreStreamingUI();
           }
         }
       } catch (e) {
@@ -5053,7 +5057,65 @@
       bubble = null;
     }
   }
-  function removePanel() {
+  function publishPanelUi(open, scope) {
+    panelUiOpen = open === true;
+    if (suppressPanelUiPublish) return Promise.resolve(null);
+    return sendPanelMessage("panel:ui:set", {
+      open: panelUiOpen,
+      scope: scope === "membership" ? "membership" : "global"
+    }).then((res) => {
+      if (res && res.ok && res.ui) {
+        const seq = Number(res.ui.seq) || 0;
+        if (seq >= panelUiSeq) {
+          panelUiSeq = seq;
+          panelUiOpen = res.ui.open === true;
+        }
+      }
+      return res;
+    }).catch(() => null);
+  }
+  async function applyPanelUiState(ui) {
+    if (!ui) return;
+    const seq = Number(ui.seq) || 0;
+    if (seq < panelUiSeq) return;
+    panelUiSeq = seq;
+    panelUiOpen = ui.open === true;
+    if (panelUiOpen) {
+      if (!panel) {
+        suppressPanelUiPublish = true;
+        try {
+          ensureHost();
+          lastText = "";
+          pageText = pageContextEnabled ? extractPageText() : "";
+          openPanel(0, 0, true);
+        } finally {
+          suppressPanelUiPublish = false;
+        }
+      }
+      await publishPanelUi(true, "membership");
+    } else {
+      if (panel) {
+        suppressPanelUiPublish = true;
+        try {
+          removePanel({ publish: false });
+        } finally {
+          suppressPanelUiPublish = false;
+        }
+      }
+      await publishPanelUi(false, "membership");
+    }
+  }
+  async function syncPanelUiOnInit() {
+    const res = await sendPanelMessage("panel:ui:get");
+    if (!res || !res.ok || !res.ui) return;
+    const seq = Number(res.ui.seq) || 0;
+    if (seq < panelUiSeq) return;
+    panelUiSeq = seq;
+    panelUiOpen = res.ui.open === true;
+    if (panelUiOpen) await applyPanelUiState(res.ui);
+  }
+  function removePanel(options) {
+    const hadPanel = Boolean(panel);
     if (picking) {
       try {
         chrome.runtime.sendMessage({ type: "pick:cancel" });
@@ -5082,6 +5144,7 @@
       planBar = null;
       if (fab) fab.classList.remove("hidden");
     }
+    if (hadPanel && !(options && options.publish === false)) publishPanelUi(false, "global");
   }
   function closePort() {
     if (port) {
@@ -5095,7 +5158,7 @@
   function showBubble(x, y) {
     if (!shadow) return;
     removeBubble();
-    removePanel();
+    removePanel({ publish: false });
     bubble = document.createElement("div");
     bubble.className = "bubble";
     bubble.innerHTML = '<span class="dot"></span><span>RecallFlow</span>';
@@ -6162,7 +6225,7 @@
       return;
     }
     removeBubble();
-    removePanel();
+    removePanel({ publish: false });
     if (fab) fab.classList.add("hidden");
     panel = document.createElement("div");
     panel.className = "panel" + (preferredTheme() === "dark" ? " dark" : "");
@@ -6197,7 +6260,7 @@
     const close = document.createElement("button");
     close.className = "close";
     close.textContent = "\u2715";
-    close.addEventListener("click", removePanel);
+    close.addEventListener("click", () => removePanel());
     const usage = document.createElement("span");
     usage.className = "usage";
     usageEl = usage;
@@ -7466,6 +7529,7 @@
     pinToBottom();
     runAgent = run;
     activeInterruptFn = interrupt;
+    if (!suppressPanelUiPublish) publishPanelUi(true, "global");
   }
   function refreshPanelForSelection() {
     if (!streaming) closePort();
@@ -7501,15 +7565,29 @@
               if (conversationLoadPromise) await conversationLoadPromise;
             } catch (e) {
             }
+            try {
+              if (panelUiReadyPromise) await panelUiReadyPromise;
+            } catch (e) {
+            }
             if (streaming) return;
+            const keepClosed = !panelUiOpen;
+            suppressPanelUiPublish = keepClosed;
             openPanel(0, 0, true);
+            suppressPanelUiPublish = false;
             const last = conversation.length ? conversation[conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
+            let runPromise = null;
             if (runAgent) {
-              runAgent(String(resp.instruction), {
+              runPromise = runAgent(String(resp.instruction), {
                 continuation: true,
                 presetRunId: String(resp.runId),
                 skipUserTurn: Boolean(alreadyHas)
+              });
+            }
+            if (keepClosed && runPromise && typeof runPromise.finally === "function") {
+              runPromise.finally(() => {
+                if (panel) removePanel({ publish: false });
+              }).catch(() => {
               });
             }
           } else if (resp.pending) {
@@ -7657,6 +7735,9 @@
         } else if (msg.type === "panel:sessions-changed") {
           handleRemotePanelSessions(msg).catch(() => {
           });
+        } else if (msg.type === "panel:ui-changed") {
+          applyPanelUiState(msg).catch(() => {
+          });
         } else if (msg.type === "panel:lock-lost") {
           if (String(msg.id || "") !== panelSessionId) return;
           if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
@@ -7670,6 +7751,7 @@
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
+    panelUiReadyPromise = syncPanelUiOnInit();
     maybeResumeRunAfterReload();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {

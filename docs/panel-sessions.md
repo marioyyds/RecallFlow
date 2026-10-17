@@ -10,6 +10,7 @@
 - 切换会话会恢复该会话的消息、工具步骤、计划条与交接标识。
 - 每个会话可重命名、删除或单独导出为 Markdown。
 - 空闲标签页会跟随全局当前会话；运行中的标签页固定在原会话，等本轮结束后再同步，避免输出被切走。
+- 面板打开/关闭同样全浏览器同步：任一页面打开或关闭面板，其他已注入页面立即跟随；新页面加载时继承当前状态。
 - 同一会话同时只允许一个标签页运行 Agent。第二个标签页会提示“接管并运行”或“新建会话”。
 
 ## 存储模型
@@ -21,6 +22,7 @@
 | `recallflow.psess.index.v1` | `{ version, seq, sessions }`，只存列表摘要 |
 | `recallflow.psess.v1.<id>` | 单个会话的完整消息、标题、交接标识、最后 runId |
 | `recallflow.psess.active.v1` | 全浏览器当前会话 `{ id, seq, updatedAt }` |
+| `recallflow.psess.ui.v1` | 面板开合状态 `{ open, seq, openTabs, updatedAt }` |
 | `recallflow.psess.lock.v1.<id>` | 运行锁 `{ runId, tabId, at }`，TTL 120 秒 |
 
 保存只重写当前会话与索引，不会把所有历史会话反复写一遍。消息裁剪仍复用
@@ -33,6 +35,8 @@
 - 运行前先获取会话锁；心跳每 20 秒续期。标签页关闭会由 `tabs.onRemoved` 主动释放锁，
   崩溃等情况则由 TTL 兜底。
 - 接管会通知原标签页停止本轮，避免两个页面同时操作同一段对话。
+- `openTabs` 区分“用户主动关闭面板”和“某个标签页被关闭”：前者广播关闭所有页面，
+  后者只移除当前成员；最后一个显示面板的标签页关闭时才把全局状态改为关闭。
 
 ## 迁移
 
@@ -42,4 +46,4 @@
 ## 验证
 
 - `tests/panel-sessions.test.mjs`：迁移、过期写入、同 tab 连写、锁冲突 / TTL / 关页释放、裁剪、并发创建。
-- `tests/e2e/sessions.spec.mjs`：新建并切回历史、跨 tab 加载与 active 同步、第二标签页运行锁提示。
+- `tests/e2e/sessions.spec.mjs`：新建并切回历史、跨 tab 加载与 active 同步、第二标签页运行锁提示、面板开合双向同步。

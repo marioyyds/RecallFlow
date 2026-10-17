@@ -236,6 +236,10 @@ export async function readTextAsAgent(page, selector) {
 
 /** 展开助手面板。 */
 export async function openPanel(page) {
+  // 面板开合现在是全浏览器同步的：新标签页可能已经自动打开面板。
+  // helper 必须幂等，否则测试再点一次 FAB 反而会把面板关掉。
+  const panel = page.locator(PANEL + ' .panel');
+  if ((await panel.count()) > 0 && (await panel.first().isVisible())) return;
   await page.locator(PANEL + ' .fab').click();
 }
 
