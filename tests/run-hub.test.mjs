@@ -67,6 +67,34 @@ test('run state: 错误与结束状态会保留已生成的思考/正文，不�
   assert.ok(s.content.includes('部分回答'));
 });
 
+test('run state: 只登记来源但正文没写 [n] 时不生成“参考来源”', () => {
+  const s = state();
+  applyRunEvent(s, {
+    type: 'citations',
+    citations: [{ id: 'c1', index: 1, title: '数据库索引', url: 'https://example.test/' }],
+  });
+  applyRunEvent(s, { type: 'chunk', text: '这是一段还没有引用编号的回答。' });
+  const msg = runStateToAssistantMessage(s);
+  assert.deepEqual(msg.citations, [], '未被正文引用的来源不得进入参考来源区');
+});
+
+test('run state: live 引用按正文首次出现顺序过滤并重编号', () => {
+  const s = state();
+  applyRunEvent(s, {
+    type: 'citations',
+    citations: [
+      { id: 'c1', index: 1, title: '未引用来源' },
+      { id: 'c2', index: 2, title: '实际来源' },
+    ],
+  });
+  applyRunEvent(s, { type: 'chunk', text: '关键事实见 [2]。' });
+  const msg = runStateToAssistantMessage(s);
+  assert.equal(msg.citations.length, 1);
+  assert.equal(msg.citations[0].title, '实际来源');
+  assert.equal(msg.citations[0].index, 1);
+  assert.match(msg.parts.find((p) => p.type === 'narration').text, /\[1\]/);
+});
+
 test('hub: 文本增量按 flushMs 合并广播，结构化事件先冲刷文本', () => {
   const deltas = [];
   const starts = [];

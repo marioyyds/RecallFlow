@@ -4896,7 +4896,7 @@
   }
   function runStateToAssistantMessage(state) {
     if (!state) return null;
-    const parts = (state.parts || []).map((p) => Object.assign({}, p));
+    let parts = (state.parts || []).map((p) => Object.assign({}, p));
     if (state.reasoning) parts.push({ type: "thinking", text: state.reasoning, live: true });
     if (state.narration) parts.push({ type: "narration", text: state.narration });
     if (state.error) parts.push({ type: "notice", text: state.error, color: "#e74c3c" });
@@ -4907,15 +4907,60 @@
         color: "#b45309"
       });
     }
+    const bound = bindCitationsToText(parts, state.citations);
     return {
       role: "assistant",
       content: "",
-      parts,
+      parts: bound.parts,
       plan: Array.isArray(state.plan) ? state.plan.slice() : [],
-      citations: Array.isArray(state.citations) ? state.citations.slice() : [],
+      citations: bound.citations,
       live: true,
       liveStatus: state.status
     };
+  }
+  function citeNumber(inner) {
+    const m = String(inner || "").match(/(\d{1,2})\s*$/);
+    return m ? Number(m[1]) : null;
+  }
+  function bindCitationsToText(parts, citations) {
+    const list = Array.isArray(citations) ? citations : [];
+    const collect2 = /[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g;
+    const order = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const part of parts) {
+      if (!part || part.type !== "narration" && part.type !== "text" || !part.text) continue;
+      collect2.lastIndex = 0;
+      let m;
+      while (m = collect2.exec(String(part.text))) {
+        const n = citeNumber(m[1]);
+        if (n === null || seen.has(n)) continue;
+        seen.add(n);
+        order.push(n);
+      }
+    }
+    const oldToNew = /* @__PURE__ */ new Map();
+    const cited = [];
+    for (const old of order) {
+      const found = list.find((c) => Number(c && c.index) === old);
+      if (!found) continue;
+      oldToNew.set(old, cited.length + 1);
+      cited.push(Object.assign({}, found, { index: cited.length + 1 }));
+    }
+    if (!cited.length) return { parts, citations: [] };
+    const replace = (text) => {
+      const src = String(text || "");
+      return src.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (whole, inner) => {
+        const old = citeNumber(inner);
+        if (old === null || !oldToNew.has(old)) return whole;
+        const label = String(inner).replace(/\s*\d+\s*$/, "");
+        return "[" + label + oldToNew.get(old) + "]";
+      });
+    };
+    const nextParts = parts.map((p) => {
+      if (!p || p.type !== "narration" && p.type !== "text" || !p.text) return p;
+      return Object.assign({}, p, { text: replace(p.text) });
+    });
+    return { parts: nextParts, citations: cited };
   }
 
   // lib/page/chat.js
