@@ -10,6 +10,7 @@ import {
   tagsHtml,
   fmtTime,
   esc,
+  markdownExcerpt,
   sortItems,
   parseTags,
   bindStarKeyboard,
@@ -132,7 +133,7 @@ function itemHtml(it) {
         <textarea id="note-editor" class="note-editor doc-editor" rows="8" placeholder="写 Markdown 文档，支持标题、列表、表格、代码块和链接…">${esc(it.note || '')}</textarea>
       </div>`
     : it.note
-      ? `<div class="item-note" data-note>${esc(it.note)}</div>`
+      ? `<div class="item-note" data-note>${esc(markdownExcerpt(it.note, 180))}</div>`
       : '';
   const tagEditHtml = editing
     ? `<input id="tag-editor" class="note-editor" value="${esc((it.tags || []).join(', '))}" placeholder="标签，逗号分隔">`

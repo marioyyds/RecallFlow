@@ -468,6 +468,10 @@ header input[type="text"]:focus {
   cursor: text;
   word-break: break-all;
   transition: background 0.15s;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .item-note:hover {

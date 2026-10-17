@@ -7,6 +7,7 @@ import {
   levelNameHtml,
   sortItems,
   esc,
+  markdownExcerpt,
   typeBadgeHtml,
   tagsHtml,
   fmtTime,
@@ -102,7 +103,7 @@ function itemHtml(it) {
       ${it.url ? '<button class="icon-btn open" title="打开原文" aria-label="打开原文">↗</button>' : ''}
       <button class="icon-btn del" title="删除" aria-label="删除条目">✕</button>
     </div>
-    ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
+    ${it.note ? `<div class="item-note">${esc(markdownExcerpt(it.note, 120))}</div>` : ''}
     ${tagsHtml(it.tags)}
     <div class="item-meta">
       ${starBarHtml(it.status, true)}

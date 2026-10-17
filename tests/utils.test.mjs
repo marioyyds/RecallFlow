@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, markdownExcerpt, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.js';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');
@@ -12,6 +12,21 @@ test('cleanTitle strips platform suffix', () => {
 
 test('parseTags splits on separators', () => {
   assert.deepEqual(parseTags('a, b，c d'), ['a', 'b', 'c', 'd']);
+});
+
+test('markdownExcerpt: 列表只显示纯文本摘要，不暴露完整 Markdown', () => {
+  const md = '# 标题\n\n**重点** 与 [链接](https://example.com)\n\n```js\nconst x = 1;\n```\n' + '正文'.repeat(200);
+  const out = markdownExcerpt(md, 60);
+  assert.ok(out.startsWith('标题 重点 与 链接'));
+  assert.ok(out.includes('[代码块]'));
+  assert.ok(!out.includes('```'));
+  assert.ok(!out.includes('https://example.com'));
+  assert.ok(out.length <= 61, '应截断并加省略号');
+});
+
+test('markdownExcerpt: 空值与短文本安全', () => {
+  assert.equal(markdownExcerpt('', 80), '');
+  assert.equal(markdownExcerpt('普通摘要', 80), '普通摘要');
 });
 
 test('normalizeUrl drops hash', () => {
