@@ -17,6 +17,7 @@ import {
   configureSettings,
   openFixturePage,
   openPanel,
+  createFreshPanelSession,
   sendInstruction,
   clickApproval,
   isCovered,
@@ -25,6 +26,7 @@ import {
   readKnowledgeBase,
   resetKnowledgeBase,
   readAiSettings,
+  readActivePanelSession,
   waitForPage,
   autoApprove,
   flowOrder,
@@ -40,6 +42,10 @@ let context;
 
 test.beforeAll(async () => {
   context = await launchExtension();
+});
+
+test.beforeEach(async () => {
+  await createFreshPanelSession(context);
 });
 
 test.afterAll(async () => {
@@ -640,16 +646,12 @@ test('golden: 拾取元素后对话里看得到它，且刷新后仍在', async 
   // 刻意不等"答案文本出现"再刷新：那条路依赖模型回复的时序，脆弱且不是我要验的东西。
   // 真正要验的是**持久化白名单里有没有 pickedElements** —— 直接读存储最准，
   // 而且它能顺带证明"这条消息确实带着拾取被存下来了"，而不是只看界面。
-  const sw = context.serviceWorkers()[0];
-  const storedPicks = () =>
-    sw.evaluate(async () => {
-      const all = await chrome.storage.session.get(null);
-      const key = Object.keys(all).find((k) => k.startsWith('recallflow.conv.'));
-      if (!key) return null;
-      const conv = (all[key] && all[key].conversation) || [];
-      const mine = conv.find((m) => m.role === 'user' && String(m.content || '').includes('这是什么元素'));
-      return mine && Array.isArray(mine.pickedElements) ? mine.pickedElements : null;
-    });
+  const storedPicks = async () => {
+    const state = await readActivePanelSession(context);
+    const conv = (state.session && state.session.messages) || [];
+    const mine = conv.find((m) => m.role === 'user' && String(m.content || '').includes('这是什么元素'));
+    return mine && Array.isArray(mine.pickedElements) ? mine.pickedElements : null;
+  };
   await expect.poll(storedPicks, { timeout: 30_000 }).not.toBeNull();
   const persisted = await storedPicks();
   expect(persisted.length).toBeGreaterThan(0);
@@ -2707,14 +2709,9 @@ test('golden: 跳转搜索 —— 整页跳转后对话不丢、不重复', asyn
   await expect(page.locator('#results')).toHaveText('结果：jev');
 
   // ③ 对话随跳转被恢复，且用户消息恰好一条（不重复）
-  const [sw] = context.serviceWorkers();
-  const userTurns = await sw.evaluate(async () => {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tabId = tabs[0] && tabs[0].id;
-    const d = await chrome.storage.session.get('recallflow.conv.' + tabId);
-    const conv = ((d && d['recallflow.conv.' + tabId]) || {}).conversation || [];
-    return conv.filter((m) => m.role === 'user' && String(m.content || '').includes('跳转搜索')).length;
-  });
+  const stored = await readActivePanelSession(context);
+  const conv = (stored.session && stored.session.messages) || [];
+  const userTurns = conv.filter((m) => m.role === 'user' && String(m.content || '').includes('跳转搜索')).length;
   expect(userTurns, '跳转搜索这条用户消息必须恰好出现一次（不丢、不重复）').toBe(1);
 
   // ④ 模型输出必须**渲染在新页面的面板里**（不只是存进 storage）：

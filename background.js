@@ -10,6 +10,7 @@ import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
 import { sanitizeMessages } from './lib/shared/surrogates.js';
 import { loadAgentSession } from './lib/assistant/session-store.js';
+import { PanelSessionStore } from './lib/shared/panel-sessions.js';
 import {
   listScripts,
   installFromUrl,
@@ -25,6 +26,80 @@ import {
   userscriptXhr,
   syncUserscriptRegistrations,
 } from './lib/userscript/manager.js';
+
+const panelSessions = new PanelSessionStore({
+  storage: {
+    get: (keys) => chrome.storage.session.get(keys),
+    set: (items) => chrome.storage.session.set(items),
+    remove: (keys) => chrome.storage.session.remove(keys),
+  },
+  isTabAlive: (tabId) =>
+    new Promise((resolve) => {
+      try {
+        chrome.tabs.get(Number(tabId), (tab) => {
+          resolve(!chrome.runtime.lastError && Boolean(tab));
+        });
+      } catch (e) {
+        resolve(false);
+      }
+    }),
+});
+
+// Service Worker 可能被回收后重新启动；bootstrap 本身是幂等的，但同一生命周期内
+// 多个标签页同时打开面板时只应扫描一次旧数据。
+let panelBootstrapPromise = null;
+
+async function ensurePanelSessions() {
+  if (!panelBootstrapPromise) {
+    panelBootstrapPromise = (async () => {
+      const all = await chrome.storage.session.get(null);
+      const legacyEntries = Object.keys(all || {})
+        .filter((key) => /^recallflow\.conv\.\d+$/.test(key))
+        .map((key) => ({
+          key,
+          conversation: (all[key] && all[key].conversation) || [],
+          updatedAt: (all[key] && all[key].updatedAt) || 0,
+        }));
+      const state = await panelSessions.bootstrap({ legacyEntries });
+      if (state && Array.isArray(state.migratedKeys) && state.migratedKeys.length) {
+        try {
+          await chrome.storage.session.remove(state.migratedKeys);
+        } catch (e) {}
+      }
+      return state;
+    })();
+    panelBootstrapPromise = panelBootstrapPromise.catch((e) => {
+      // 存储暂时不可用时允许下次消息重新尝试，而不是把会话功能永久判死。
+      panelBootstrapPromise = null;
+      throw e;
+    });
+  }
+  return panelBootstrapPromise;
+}
+
+function panelSummary(state) {
+  const s = state || {};
+  return {
+    sessions: Array.isArray(s.sessions) ? s.sessions : [],
+    activeId: String(s.activeId || ''),
+    seq: Number(s.seq) || 0,
+  };
+}
+
+/**
+ * 会话变更广播：只发摘要，收到消息的标签页按 activeId 再取正文。
+ * 不回发给发起写入的标签页，避免它把自己的响应又当成一次远端更新。
+ */
+function broadcastPanelSessions(state, sourceTabId) {
+  const payload = Object.assign({ type: 'panel:sessions-changed' }, panelSummary(state));
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs || []) {
+      if (!tab || tab.id == null || tab.id === sourceTabId) continue;
+      if (tab.url && !/^https?:/i.test(tab.url)) continue;
+      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+    }
+  });
+}
 
 // 兜底日志：service worker 内未捕获的异常 / Promise 拒绝也打到 console，便于排障。
 try {
@@ -78,6 +153,92 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
     sendResponse({ ok: true });
     return false;
+  }
+  // ---- 面板会话（整个浏览器共享，可新建 / 切换 / 查看历史）----
+  //
+  // 所有写操作都在 Service Worker 里串行执行（PanelSessionStore 内部队列），
+  // 内容脚本只负责发消息与渲染，绝不直接写 storage.session。
+  if (msg && /^panel:(state|get|create|save|activate|rename|delete|lock|unlock)$/.test(String(msg.type || ''))) {
+    const sourceTabId = sender.tab && sender.tab.id;
+    const reply = (body) => sendResponse(Object.assign({ ok: true }, body || {}));
+    (async () => {
+      await ensurePanelSessions();
+      let result;
+      if (msg.type === 'panel:state') {
+        result = await panelSessions.list();
+        reply(panelSummary(result));
+        return;
+      }
+      if (msg.type === 'panel:get') {
+        result = await panelSessions.get(msg.id);
+        reply({
+          session: result.session || null,
+          activeId: result.activeId || '',
+          sessions: result.sessions || [],
+        });
+        return;
+      }
+      if (msg.type === 'panel:create') {
+        const origin = (sender.tab && sender.tab.url) || msg.origin || '';
+        result = await panelSessions.create({
+          title: msg.title,
+          messages: Array.isArray(msg.messages) ? msg.messages : [],
+          handoffId: msg.handoffId,
+          origin,
+        });
+      } else if (msg.type === 'panel:save') {
+        result = await panelSessions.save({
+          id: msg.id,
+          messages: msg.messages,
+          baseSeq: msg.baseSeq,
+          title: msg.title,
+          handoffId: msg.handoffId,
+          lastRunId: msg.lastRunId,
+          origin: msg.origin,
+          tabId: sourceTabId,
+        });
+      } else if (msg.type === 'panel:activate') {
+        result = await panelSessions.activate(msg.id);
+      } else if (msg.type === 'panel:rename') {
+        result = await panelSessions.rename(msg.id, msg.title);
+      } else if (msg.type === 'panel:delete') {
+        result = await panelSessions.remove(msg.id);
+      } else if (msg.type === 'panel:lock') {
+        result = await panelSessions.lock({
+          id: msg.id,
+          runId: msg.runId,
+          tabId: sourceTabId,
+          takeover: msg.takeover === true,
+        });
+        // 接管时通知原标签页停止本轮，避免两个标签页并发操作同一会话。
+        if (result && result.ok && msg.takeover === true && result.lock && result.lock.previous) {
+          const oldTabId = Number(result.lock.previous.tabId);
+          const oldRunId = String(result.lock.previous.runId || '');
+          if (oldTabId) {
+            chrome.tabs.sendMessage(
+              oldTabId,
+              { type: 'panel:lock-lost', id: String(msg.id || ''), runId: oldRunId },
+              { frameId: 0 },
+              () => void chrome.runtime.lastError
+            );
+          }
+        }
+      } else if (msg.type === 'panel:unlock') {
+        result = await panelSessions.unlock({ id: msg.id, runId: msg.runId });
+        if (result && result.ok) {
+          const state = await panelSessions.list();
+          result.sessions = state.sessions || [];
+          result.activeId = state.activeId || '';
+        }
+      }
+      reply(result || { ok: false, error: '未知会话操作' });
+      if (result && result.ok && Array.isArray(result.sessions)) {
+        broadcastPanelSessions(result, sourceTabId);
+      }
+    })().catch((e) => {
+      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+    });
+    return true;
   }
   if (msg && msg.type === 'conv:save') {
     const tabId = sender.tab && sender.tab.id;
@@ -291,6 +452,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     tabControllers.delete(tabId);
   }
   tabRuns.delete(tabId);
+  panelSessions
+    .releaseTabLocks(tabId)
+    .then(async (r) => {
+      if (r && r.released) {
+        const state = await panelSessions.list();
+        broadcastPanelSessions(state, null);
+      }
+    })
+    .catch(() => {});
   try {
     chrome.storage.session.remove('recallflow.conv.' + tabId);
   } catch (e) {}

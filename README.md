@@ -64,7 +64,7 @@ flowchart TD
 - **统一注册表**：模型工具列表、权限策略与参数校验共用一份定义。
 - **上下文与用量**：过大的工具结果自动截断并暂存全文（`expand_result` 分段取回），较早结果滚动折叠。
 - **可观测性**：逐轮记录缓存命中率与耗时分段（网络 / 预填充 / 生成 / 工具执行），保留含步骤、工具、耗时与错误码的运行轨迹。
-- **可靠性**：会话恢复、卡死检测、动作前后快照校验，SPA 异步渲染的变化同样可捕获。
+- **可靠性**：全浏览器共享会话（新建 / 历史 / 跨标签页同步 / 运行锁）、会话恢复、卡死检测、动作前后快照校验，SPA 异步渲染的变化同样可捕获。
 
 ## 与外部 AI 集成（MCP）
 
@@ -80,6 +80,7 @@ flowchart TD
 | 能力各由什么保证（夹具页 / 剧本 / E2E / 技能 / 判据，自动生成） | [docs/capability-inventory.md](docs/capability-inventory.md) |
 | 技能清单（技能 / 剧本归属 / 孤儿 / 薄技能，自动生成） | [docs/skills-overview.md](docs/skills-overview.md) |
 | 运行时到底怎么选技能 | [docs/skill-design.md](docs/skill-design.md) |
+| 面板会话如何共享、切换与加运行锁 | [docs/panel-sessions.md](docs/panel-sessions.md) |
 | 真浏览器 E2E 怎么写 | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 | 真模型 eval 怎么跑、历次结果 | [docs/real-model-eval-log.md](docs/real-model-eval-log.md) |
 | 集成路线到底实现了哪些（唯一事实来源） | [docs/integration-status.md](docs/integration-status.md) |

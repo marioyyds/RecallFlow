@@ -44,6 +44,7 @@ import {
   launchExtension,
   closeExtension,
   configureSettings,
+  createFreshPanelSession,
   openFixturePage,
   sendInstruction,
 } from './helpers.mjs';
@@ -54,6 +55,10 @@ let context;
 
 test.beforeAll(async () => {
   context = await launchExtension();
+});
+
+test.beforeEach(async () => {
+  await createFreshPanelSession(context);
 });
 
 test.afterAll(async () => {

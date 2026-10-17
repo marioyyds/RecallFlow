@@ -7,12 +7,24 @@
 // 两条都先量**事实**（贴底偏差 = scrollHeight - scrollTop - clientHeight）再下结论。
 // 各自的根因与修法见对应用例的注释（都写清了"为什么原来那条路不成立"）。
 import { test, expect } from '@playwright/test';
-import { launchExtension, closeExtension, configureSettings, openFixturePage, sendInstruction, PANEL } from './helpers.mjs';
+import {
+  launchExtension,
+  closeExtension,
+  configureSettings,
+  openFixturePage,
+  sendInstruction,
+  createFreshPanelSession,
+  PANEL,
+} from './helpers.mjs';
 
 let context;
 
 test.beforeAll(async () => {
   context = await launchExtension();
+});
+
+test.beforeEach(async () => {
+  await createFreshPanelSession(context);
 });
 
 test.afterAll(async () => {

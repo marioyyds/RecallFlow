@@ -4349,6 +4349,59 @@
 .p-head .handoff.copied { border-color: #27ae60; color: #27ae60; }
 .panel.dark .p-head .handoff { background: #262a30; border-color: #3a3f46; color: #b6bcc6; }
 .panel.dark .p-head .handoff:hover { border-color: #4a90d9; color: #4a90d9; }
+    .p-head .session-btn { border: 1px solid #d5d9e0; background: #fff; color: #4d5968; font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 999px; white-space: nowrap; max-width: 112px; overflow: hidden; text-overflow: ellipsis; }
+    .p-head .session-btn:hover { border-color: #4a90d9; color: #4a90d9; }
+    .panel.dark .p-head .session-btn { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
+    .session-menu { position: absolute; z-index: 30; top: 46px; right: 10px; width: min(340px, calc(100% - 20px)); max-height: min(470px, calc(100vh - 110px)); display: flex; flex-direction: column; background: #fff; border: 1px solid #dfe3e9; border-radius: 11px; box-shadow: 0 12px 34px rgba(22,34,51,.22); overflow: hidden; }
+    .session-menu[hidden] { display: none; }
+    .panel.dark .session-menu { background: #2a2e34; border-color: #444a53; box-shadow: 0 14px 38px rgba(0,0,0,.45); }
+    .session-menu-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: #7d8794; border-bottom: 1px solid #edf0f4; }
+    .panel.dark .session-menu-head { color: #aab2bd; border-color: #3b4149; }
+    .session-menu-close { border: none; background: none; color: #9aa3ae; cursor: pointer; font-size: 13px; padding: 2px 4px; border-radius: 4px; }
+    .session-menu-close:hover { background: rgba(0,0,0,.05); color: #596574; }
+    .session-list { overflow-y: auto; padding: 4px; min-height: 0; }
+    .session-item { display: flex; align-items: stretch; border-radius: 8px; border: 1px solid transparent; }
+    .session-item:hover { background: #f5f8fc; }
+    .session-item.active { background: #eef5ff; border-color: #cfe3fb; }
+    .session-item.running .session-title { color: #b45309; }
+    .panel.dark .session-item:hover { background: #323840; }
+    .panel.dark .session-item.active { background: #25364a; border-color: #36597f; }
+    .session-main { flex: 1; min-width: 0; border: none; background: none; text-align: left; padding: 7px 6px 7px 9px; cursor: pointer; color: #374151; display: flex; flex-direction: column; gap: 2px; }
+    .panel.dark .session-main { color: #e1e5eb; }
+    .session-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
+    .session-meta { font-size: 10px; color: #8a94a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .panel.dark .session-meta { color: #99a3af; }
+    .session-actions { display: flex; align-items: center; gap: 1px; padding-right: 4px; opacity: .72; transition: opacity .12s; }
+    .session-item:hover .session-actions, .session-item.active .session-actions, .session-item:focus-within .session-actions { opacity: 1; }
+    .session-actions button { border: none; background: none; color: #7e8996; cursor: pointer; width: 24px; height: 24px; border-radius: 5px; font-size: 12px; padding: 0; }
+    .session-actions button:hover { background: rgba(74,144,217,.12); color: #2f74b8; }
+    .session-actions button[data-session-action="delete"]:hover { background: rgba(231,76,60,.12); color: #c0392b; }
+    .panel.dark .session-actions button { color: #aab2bc; }
+    .session-empty { padding: 18px 10px; text-align: center; color: #98a0aa; font-size: 12px; }
+    .session-new { border: none; border-top: 1px solid #edf0f4; background: #fafbfc; color: #397cc0; padding: 9px 12px; text-align: left; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .session-new:hover { background: #f0f6fd; }
+    .panel.dark .session-new { background: #25292f; border-color: #3b4149; color: #72abe2; }
+    .panel.dark .session-new:hover { background: #2f3944; }
+    .session-dialog-backdrop { position: absolute; inset: 0; z-index: 60; background: rgba(26,32,40,.34); display: flex; align-items: center; justify-content: center; padding: 18px; }
+    .session-dialog { width: min(390px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.3); padding: 16px; }
+    .panel.dark .session-dialog { background: #2c3036; color: #e4e7ec; }
+    .session-dialog-title { font-size: 14px; font-weight: 700; margin-bottom: 7px; }
+    .session-dialog-message { font-size: 12px; line-height: 1.6; color: #66707d; margin-bottom: 11px; word-break: break-word; }
+    .panel.dark .session-dialog-message { color: #b1b9c3; }
+    .session-dialog-input { width: 100%; border: 1px solid #cfd5dd; border-radius: 7px; padding: 7px 9px; font-size: 13px; outline: none; margin-bottom: 13px; background: #fff; color: #333; }
+    .session-dialog-input:focus { border-color: #4a90d9; box-shadow: 0 0 0 3px rgba(74,144,217,.14); }
+    .panel.dark .session-dialog-input { background: #22262b; color: #e4e7ec; border-color: #49505a; }
+    .session-dialog-actions { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+    .session-dialog-actions button { border: 1px solid #d8dde4; background: #fff; color: #596575; border-radius: 7px; padding: 6px 11px; font-size: 12px; cursor: pointer; }
+    .session-dialog-actions button:hover { border-color: #4a90d9; color: #3b79b8; }
+    .session-dialog-actions .primary { background: #4a90d9; border-color: #4a90d9; color: #fff; }
+    .session-dialog-actions .primary:hover { background: #3b80c7; color: #fff; }
+    .session-dialog-actions .danger { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+    .session-dialog-actions .danger:hover { background: #cf3e2f; color: #fff; }
+    .session-dialog-actions .session-dialog-extra { margin-right: auto; color: #397cc0; }
+    .panel.dark .session-dialog-actions button { background: #343a42; border-color: #4a505a; color: #d9dee5; }
+    .panel.dark .session-dialog-actions .primary { background: #4a90d9; border-color: #4a90d9; color: #fff; }
+    .panel.dark .session-dialog-actions .danger { background: #d94b3e; border-color: #d94b3e; color: #fff; }
     .p-text {
       margin: 6px 12px 0; padding: 4px 10px; font-size: 12px; color: #888; line-height: 1.5;
       max-height: 30px; overflow: auto; border-left: 2px solid #e2e5ea; word-break: break-word;
@@ -4762,6 +4815,19 @@
   var panelTextEl = null;
   var fab = null;
   var conversation = [];
+  var panelSessionId = "";
+  var panelSessionSeq = 0;
+  var panelSessionList = [];
+  var panelSessionActiveId = "";
+  var panelSessionMenuEl = null;
+  var panelSessionBtnEl = null;
+  var panelSessionMenuOpen = false;
+  var panelSessionSaveChain = Promise.resolve();
+  var panelSessionSwitchInFlight = false;
+  var deferredRemoteSessionId = "";
+  var panelSessionLockHeld = false;
+  var panelSessionLockRunId = "";
+  var activeInterruptFn = null;
   var stopBtn = null;
   var sendBtn = null;
   var streaming = false;
@@ -5065,7 +5131,8 @@
     if (panel._manualSize) return;
     const dockGap = getDockGap();
     const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
-    const maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
+    let maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
+    const hardMaxH = Math.max(320, window.innerHeight - 24);
     panel.style.height = "auto";
     panelBody.style.height = "auto";
     panelBody.style.flex = "";
@@ -5074,8 +5141,10 @@
     for (const child of panel.children) {
       if (child !== panelBody && !child.classList.contains("resize-handle")) chromeH += child.offsetHeight;
     }
+    const MIN_BODY_H = 120;
+    if (chromeH + MIN_BODY_H > maxH) maxH = Math.min(hardMaxH, chromeH + MIN_BODY_H);
     const bodyNatH = panelBody.scrollHeight;
-    const bodyAvailableH = Math.max(120, maxH - chromeH);
+    const bodyAvailableH = Math.max(MIN_BODY_H, maxH - chromeH);
     const bodyH = Math.min(bodyNatH, bodyAvailableH);
     panelBody.style.flex = "none";
     panelBody.style.height = bodyH + "px";
@@ -5452,27 +5521,564 @@
   function serializeConversation() {
     return serializeConversationMessages(conversation);
   }
-  function saveConversation() {
+  function sendPanelMessage(type, payload) {
+    return new Promise((resolve) => {
+      if (!isExtContextAlive()) {
+        resolve({ ok: false, error: "\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5" });
+        return;
+      }
+      try {
+        chrome.runtime.sendMessage(Object.assign({ type }, payload || {}), (resp) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message || "\u4E0E\u6269\u5C55\u540E\u53F0\u901A\u4FE1\u5931\u8D25" });
+          } else {
+            resolve(resp || { ok: false, error: "\u6269\u5C55\u540E\u53F0\u65E0\u54CD\u5E94" });
+          }
+        });
+      } catch (e) {
+        resolve({ ok: false, error: e && e.message ? e.message : String(e) });
+      }
+    });
+  }
+  function sessionTimeText(ts) {
+    const n = Number(ts) || 0;
+    if (!n) return "";
+    const d = new Date(n);
+    const pad = (v) => String(v).padStart(2, "0");
+    return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function applyPanelSessionSummaries(state) {
+    if (!state) return;
+    if (Array.isArray(state.sessions)) panelSessionList = state.sessions.slice();
+    if (typeof state.activeId === "string") panelSessionActiveId = state.activeId;
+    renderSessionButton();
+    renderSessionMenu();
+  }
+  function mergePanelSessionSummary(session) {
+    if (!session || !session.id) return;
+    const summary = {
+      id: session.id,
+      title: session.title || "\u65B0\u4F1A\u8BDD",
+      createdAt: Number(session.createdAt) || 0,
+      updatedAt: Number(session.updatedAt) || 0,
+      messageCount: Array.isArray(session.messages) ? session.messages.length : Number(session.messageCount) || 0,
+      seq: Number(session.seq) || 0,
+      origin: String(session.origin || ""),
+      handoffId: String(session.handoffId || ""),
+      lastRunId: String(session.lastRunId || ""),
+      titleAuto: session.titleAuto !== false
+    };
+    const old = panelSessionList.find((s) => s.id === session.id);
+    if (old) Object.assign(old, summary);
+    else panelSessionList.push(summary);
+    panelSessionList.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+    renderSessionButton();
+    renderSessionMenu();
+  }
+  function renderSessionButton() {
+    if (!panelSessionBtnEl) return;
+    const current = panelSessionList.find((s) => s.id === panelSessionId);
+    const count = panelSessionList.length;
+    panelSessionBtnEl.textContent = "\u{1F5C2} \u4F1A\u8BDD" + (count ? " " + count : "");
+    const label = current ? "\u5F53\u524D\u4F1A\u8BDD\uFF1A" + current.title + "\uFF08" + count + " \u4E2A\u4F1A\u8BDD\uFF0C\u70B9\u51FB\u5207\u6362 / \u65B0\u5EFA\uFF09" : "\u4F1A\u8BDD\u5217\u8868\uFF08" + count + " \u4E2A\uFF0C\u70B9\u51FB\u5207\u6362 / \u65B0\u5EFA\uFF09";
+    panelSessionBtnEl.title = label;
+    panelSessionBtnEl.setAttribute("aria-label", label);
+  }
+  function closeSessionMenu() {
+    panelSessionMenuOpen = false;
+    if (panelSessionMenuEl) panelSessionMenuEl.hidden = true;
+    if (panelSessionBtnEl) panelSessionBtnEl.setAttribute("aria-expanded", "false");
+  }
+  function renderSessionMenu() {
+    if (!panelSessionMenuEl) return;
+    panelSessionMenuEl.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "session-menu-head";
+    const label = document.createElement("span");
+    label.textContent = "\u6700\u8FD1\u4F1A\u8BDD";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "session-menu-close";
+    close.textContent = "\u2715";
+    close.title = "\u5173\u95ED";
+    close.addEventListener("click", closeSessionMenu);
+    head.appendChild(label);
+    head.appendChild(close);
+    panelSessionMenuEl.appendChild(head);
+    const list = document.createElement("div");
+    list.className = "session-list";
+    if (!panelSessionList.length) {
+      const empty = document.createElement("div");
+      empty.className = "session-empty";
+      empty.textContent = "\u8FD8\u6CA1\u6709\u4F1A\u8BDD";
+      list.appendChild(empty);
+    }
+    for (const session of panelSessionList) {
+      const item = document.createElement("div");
+      item.className = "session-item";
+      item.setAttribute("data-session-id", session.id);
+      if (session.id === panelSessionId) item.classList.add("active");
+      if (session.id === panelSessionActiveId) item.classList.add("shared-active");
+      if (session.locked) item.classList.add("running");
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "session-main";
+      main.setAttribute("data-session-action", "switch");
+      main.setAttribute("data-session-id", session.id);
+      main.title = session.title + "\n" + (session.origin || "") + "\n" + session.messageCount + " \u6761\u6D88\u606F";
+      const title = document.createElement("span");
+      title.className = "session-title";
+      title.textContent = (session.locked ? "\u25CF " : "") + (session.title || "\u65B0\u4F1A\u8BDD");
+      const meta = document.createElement("span");
+      meta.className = "session-meta";
+      meta.textContent = sessionTimeText(session.updatedAt) + " \xB7 " + (Number(session.messageCount) || 0) + " \u6761" + (session.id === panelSessionActiveId ? " \xB7 \u6D4F\u89C8\u5668\u5F53\u524D" : "");
+      main.appendChild(title);
+      main.appendChild(meta);
+      item.appendChild(main);
+      const actions = document.createElement("div");
+      actions.className = "session-actions";
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.title = "\u91CD\u547D\u540D";
+      rename.setAttribute("aria-label", "\u91CD\u547D\u540D\u4F1A\u8BDD");
+      rename.textContent = "\u270E";
+      rename.setAttribute("data-session-action", "rename");
+      rename.setAttribute("data-session-id", session.id);
+      const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
+      exportBtn.title = "\u5BFC\u51FA\u8BE5\u4F1A\u8BDD\u4E3A Markdown";
+      exportBtn.setAttribute("aria-label", "\u5BFC\u51FA\u4F1A\u8BDD");
+      exportBtn.textContent = "\u2913";
+      exportBtn.setAttribute("data-session-action", "export");
+      exportBtn.setAttribute("data-session-id", session.id);
+      const del = document.createElement("button");
+      del.type = "button";
+      del.title = "\u5220\u9664";
+      del.setAttribute("aria-label", "\u5220\u9664\u4F1A\u8BDD");
+      del.textContent = "\u{1F5D1}";
+      del.setAttribute("data-session-action", "delete");
+      del.setAttribute("data-session-id", session.id);
+      actions.appendChild(rename);
+      actions.appendChild(exportBtn);
+      actions.appendChild(del);
+      item.appendChild(actions);
+      list.appendChild(item);
+    }
+    panelSessionMenuEl.appendChild(list);
+    const foot = document.createElement("button");
+    foot.type = "button";
+    foot.className = "session-new";
+    foot.textContent = "\uFF0B \u65B0\u5EFA\u4F1A\u8BDD";
+    foot.addEventListener("click", () => {
+      newPanelSession().catch(() => {
+      });
+    });
+    panelSessionMenuEl.appendChild(foot);
+  }
+  async function refreshPanelSessionState() {
+    const state = await sendPanelMessage("panel:state");
+    if (state && state.ok) applyPanelSessionSummaries(state);
+    return state;
+  }
+  function adoptPanelSession(session, options) {
+    if (!session || !session.id) return false;
+    const opts = options || {};
+    panelSessionId = session.id;
+    panelSessionSeq = Number(session.seq) || 0;
+    if (opts.activeId) panelSessionActiveId = String(opts.activeId);
+    conversation = Array.isArray(session.messages) ? session.messages : [];
+    handoffId = normalizeHandoffId(session.handoffId || "") || loadHandoffId() || newHandoffId();
     try {
-      chrome.runtime.sendMessage({ type: "conv:save", conversation: serializeConversation() });
+      localStorage.setItem(HANDOFF_ID_KEY, handoffId);
     } catch (e) {
     }
+    mergePanelSessionSummary(Object.assign({}, session, { messageCount: conversation.length, handoffId }));
+    if (panelBody && !streaming) {
+      renderConversation();
+      renderHandoffChip();
+      fitPanelHeight();
+      pinToBottom();
+    }
+    renderSessionButton();
+    return true;
+  }
+  function saveConversation() {
+    const id = panelSessionId;
+    if (!id) return Promise.resolve({ ok: false, skipped: true });
+    const messages = serializeConversation();
+    const baseSeq = panelSessionSeq;
+    const runId = activeRunId || "";
+    const savedHandoffId = handoffId;
+    panelSessionSaveChain = panelSessionSaveChain.catch(() => {
+    }).then(async () => {
+      const res = await sendPanelMessage("panel:save", {
+        id,
+        messages,
+        baseSeq,
+        handoffId: savedHandoffId,
+        lastRunId: runId,
+        origin: location.href
+      });
+      if (res && res.ok && res.session) {
+        if (id === panelSessionId) panelSessionSeq = Number(res.session.seq) || panelSessionSeq;
+        mergePanelSessionSummary(res.session);
+        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+        renderSessionButton();
+        renderSessionMenu();
+      } else if (res && res.conflict && res.session) {
+        if (id === panelSessionId && !streaming) {
+          adoptPanelSession(res.session, { activeId: res.activeId });
+          showCitationHint("\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u5176\u4ED6\u6807\u7B7E\u9875\u66F4\u65B0\uFF0C\u5DF2\u4E3A\u4F60\u5237\u65B0\u5230\u6700\u65B0\u5185\u5BB9\u3002");
+        }
+      }
+      return res;
+    });
+    return panelSessionSaveChain;
   }
   async function loadConversation() {
     try {
-      const res = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: "conv:get" }, (r) => resolve(r || { conversation: [] }));
-      });
-      if (res && Array.isArray(res.conversation) && res.conversation.length) {
-        conversation = res.conversation;
-        if (panelBody && !streaming) {
-          renderConversation();
-          fitPanelHeight();
+      const state = await sendPanelMessage("panel:state");
+      if (state && state.ok) applyPanelSessionSummaries(state);
+      const target = state && state.activeId || panelSessionList[0] && panelSessionList[0].id || "";
+      if (target) {
+        const got = await sendPanelMessage("panel:get", { id: target });
+        if (got && got.ok && got.session) {
+          adoptPanelSession(got.session, { activeId: got.activeId || target });
+          return;
         }
+      }
+      const created = await sendPanelMessage("panel:create", { handoffId: newHandoffId() });
+      if (created && created.ok && created.session) {
+        adoptPanelSession(created.session, { activeId: created.activeId });
       }
     } catch (e) {
     } finally {
       conversationLoaded = true;
+    }
+  }
+  function showPanelDialog(config) {
+    if (!panel) return;
+    const options = config || {};
+    const old = panel.querySelector(".session-dialog-backdrop");
+    if (old) old.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "session-dialog-backdrop";
+    const box = document.createElement("div");
+    box.className = "session-dialog";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    const title = document.createElement("div");
+    title.className = "session-dialog-title";
+    title.textContent = options.title || "\u4F1A\u8BDD";
+    const message = document.createElement("div");
+    message.className = "session-dialog-message";
+    message.textContent = options.message || "";
+    box.appendChild(title);
+    box.appendChild(message);
+    let input = null;
+    if (options.input) {
+      input = document.createElement("input");
+      input.className = "session-dialog-input";
+      input.type = "text";
+      input.maxLength = 60;
+      input.value = String(options.value || "");
+      input.placeholder = options.placeholder || "";
+      box.appendChild(input);
+    }
+    const actions = document.createElement("div");
+    actions.className = "session-dialog-actions";
+    const extra = options.extraText ? (() => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "session-dialog-extra";
+      b.textContent = options.extraText;
+      b.addEventListener("click", () => {
+        close();
+        try {
+          if (options.onExtra) options.onExtra();
+        } catch (e) {
+        }
+      });
+      return b;
+    })() : null;
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = options.cancelText || "\u53D6\u6D88";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = options.danger ? "danger" : "primary";
+    ok.textContent = options.confirmText || "\u786E\u5B9A";
+    const close = () => {
+      try {
+        backdrop.remove();
+      } catch (e) {
+      }
+    };
+    cancel.addEventListener("click", close);
+    const submit = async () => {
+      const value = input ? input.value.trim() : "";
+      if (input && !value) {
+        input.focus();
+        return;
+      }
+      ok.disabled = true;
+      cancel.disabled = true;
+      try {
+        const keep = await options.onConfirm?.(value);
+        if (keep !== false) close();
+      } catch (e) {
+        message.textContent = e && e.message ? e.message : String(e);
+      } finally {
+        ok.disabled = false;
+        cancel.disabled = false;
+      }
+    };
+    ok.addEventListener("click", () => void submit());
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          void submit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+    }
+    if (extra) actions.appendChild(extra);
+    actions.appendChild(cancel);
+    actions.appendChild(ok);
+    box.appendChild(actions);
+    backdrop.appendChild(box);
+    backdrop.addEventListener("mousedown", (e) => {
+      if (e.target === backdrop) close();
+    });
+    panel.appendChild(backdrop);
+    setTimeout(() => {
+      if (input) {
+        input.focus();
+        input.select();
+      } else {
+        ok.focus();
+      }
+    }, 0);
+    return { close };
+  }
+  async function switchPanelSession(id, options) {
+    const opts = options || {};
+    const wanted = String(id || "");
+    if (!wanted) return false;
+    if (streaming) {
+      showCitationHint("\u5F53\u524D\u4EFB\u52A1\u8FD8\u5728\u8FD0\u884C\uFF0C\u7ED3\u675F\u540E\u624D\u80FD\u5207\u6362\u4F1A\u8BDD\u3002");
+      return false;
+    }
+    if (wanted === panelSessionId && !opts.force) {
+      closeSessionMenu();
+      return true;
+    }
+    if (panelSessionSwitchInFlight) return false;
+    panelSessionSwitchInFlight = true;
+    try {
+      let res;
+      if (opts.activate === false) {
+        res = await sendPanelMessage("panel:get", { id: wanted });
+      } else {
+        res = await sendPanelMessage("panel:activate", { id: wanted });
+      }
+      if (!res || !res.ok || !res.session) {
+        showCitationHint(res && res.error || "\u5207\u6362\u4F1A\u8BDD\u5931\u8D25");
+        return false;
+      }
+      adoptPanelSession(res.session, { activeId: res.activeId || wanted });
+      if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+      renderSessionButton();
+      renderSessionMenu();
+      closeSessionMenu();
+      return true;
+    } finally {
+      panelSessionSwitchInFlight = false;
+      if (deferredRemoteSessionId && !streaming && deferredRemoteSessionId !== panelSessionId) {
+        const next = deferredRemoteSessionId;
+        deferredRemoteSessionId = "";
+        setTimeout(() => {
+          switchPanelSession(next, { activate: false, force: true }).catch(() => {
+          });
+        }, 0);
+      }
+    }
+  }
+  async function newPanelSession() {
+    if (streaming) {
+      showCitationHint("\u5F53\u524D\u4EFB\u52A1\u8FD8\u5728\u8FD0\u884C\uFF0C\u7ED3\u675F\u540E\u624D\u80FD\u65B0\u5EFA\u4F1A\u8BDD\u3002");
+      return false;
+    }
+    closeSessionMenu();
+    const res = await sendPanelMessage("panel:create", {
+      handoffId: newHandoffId(),
+      origin: location.href
+    });
+    if (!res || !res.ok || !res.session) {
+      showCitationHint(res && res.error || "\u65B0\u5EFA\u4F1A\u8BDD\u5931\u8D25");
+      return false;
+    }
+    adoptPanelSession(res.session, { activeId: res.activeId });
+    if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+    renderSessionButton();
+    renderSessionMenu();
+    closeSessionMenu();
+    if (panelBody) {
+      renderConversation();
+      fitPanelHeight();
+      pinToBottom();
+    }
+    return true;
+  }
+  function renamePanelSession(id) {
+    const session = panelSessionList.find((s) => s.id === id);
+    if (!session) return;
+    showPanelDialog({
+      title: "\u91CD\u547D\u540D\u4F1A\u8BDD",
+      message: "\u540D\u79F0\u53EA\u5F71\u54CD\u4F1A\u8BDD\u5217\u8868\uFF0C\u4E0D\u4F1A\u6539\u52A8\u5BF9\u8BDD\u5185\u5BB9\u3002",
+      input: true,
+      value: session.title,
+      placeholder: "\u4F8B\u5982\uFF1AGitHub \u641C\u7D22\u8C03\u7814",
+      confirmText: "\u4FDD\u5B58",
+      onConfirm: async (title) => {
+        const res = await sendPanelMessage("panel:rename", { id, title });
+        if (!res || !res.ok) {
+          showCitationHint(res && res.error || "\u91CD\u547D\u540D\u5931\u8D25");
+          return false;
+        }
+        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+        if (id === panelSessionId && res.session) {
+          panelSessionSeq = Number(res.session.seq) || panelSessionSeq;
+        }
+        renderSessionButton();
+        renderSessionMenu();
+        return true;
+      }
+    });
+  }
+  function deletePanelSession(id) {
+    const session = panelSessionList.find((s) => s.id === id);
+    if (!session) return;
+    showPanelDialog({
+      title: "\u5220\u9664\u4F1A\u8BDD",
+      message: "\u5C06\u6C38\u4E45\u5220\u9664\u300C" + session.title + "\u300D\u53CA\u5176\u4E2D\u7684 " + session.messageCount + " \u6761\u6D88\u606F\u3002",
+      confirmText: "\u5220\u9664",
+      danger: true,
+      onConfirm: async () => {
+        const res = await sendPanelMessage("panel:delete", { id });
+        if (!res || !res.ok) {
+          showCitationHint(res && res.error || "\u5220\u9664\u5931\u8D25");
+          return false;
+        }
+        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+        if (id === panelSessionId) {
+          const nextId = res.activeId || res.sessions && res.sessions[0] && res.sessions[0].id;
+          if (nextId) await switchPanelSession(nextId, { force: true });
+        } else {
+          panelSessionActiveId = res.activeId || panelSessionActiveId;
+          renderSessionButton();
+          renderSessionMenu();
+        }
+        return true;
+      }
+    });
+  }
+  async function exportPanelSession(id, btn) {
+    const session = panelSessionList.find((s) => s.id === id);
+    if (!session) return;
+    const res = await sendPanelMessage("panel:get", { id });
+    if (!res || !res.ok || !res.session) {
+      showCitationHint(res && res.error || "\u8BFB\u53D6\u4F1A\u8BDD\u5931\u8D25");
+      return;
+    }
+    let text = "";
+    try {
+      text = buildTranscript({
+        title: res.session.title || document.title || "(\u65E0\u6807\u9898)",
+        url: res.session.origin || location.href,
+        exportedAt: (/* @__PURE__ */ new Date()).toLocaleString(),
+        handoffId: res.session.handoffId || "",
+        conversation: res.session.messages || []
+      });
+    } catch (e) {
+    }
+    if (!text) {
+      showCitationHint("\u8BE5\u4F1A\u8BDD\u6682\u65E0\u53EF\u5BFC\u51FA\u7684\u5185\u5BB9\u3002");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      if (btn) {
+        const old = btn.textContent;
+        btn.textContent = "\u2713";
+        setTimeout(() => btn.textContent = old, 1200);
+      } else {
+        showCitationHint("\u5DF2\u590D\u5236\u4F1A\u8BDD\u8BB0\u5F55\uFF08" + text.length + " \u5B57\uFF09\u3002");
+      }
+    } catch (e) {
+      showCitationHint("\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u526A\u8D34\u677F\u6743\u9650\u3002");
+    }
+  }
+  async function acquirePanelSessionLock(runId, takeover) {
+    if (!panelSessionId) return { ok: false, error: "\u4F1A\u8BDD\u5C1A\u672A\u5C31\u7EEA" };
+    const res = await sendPanelMessage("panel:lock", {
+      id: panelSessionId,
+      runId,
+      takeover: takeover === true
+    });
+    if (res && res.ok) {
+      panelSessionLockHeld = true;
+      panelSessionLockRunId = runId;
+      if (Array.isArray(res.sessions)) {
+        panelSessionList = res.sessions.slice();
+        renderSessionMenu();
+      }
+    }
+    return res || { ok: false, error: "\u8FD0\u884C\u9501\u83B7\u53D6\u5931\u8D25" };
+  }
+  function releasePanelSessionLock() {
+    if (!panelSessionLockHeld || !panelSessionLockRunId) return Promise.resolve();
+    const id = panelSessionId;
+    const runId = panelSessionLockRunId;
+    panelSessionLockHeld = false;
+    panelSessionLockRunId = "";
+    return sendPanelMessage("panel:unlock", { id, runId });
+  }
+  function renewPanelSessionLock() {
+    if (!panelSessionLockHeld || !panelSessionLockRunId) return;
+    sendPanelMessage("panel:lock", {
+      id: panelSessionId,
+      runId: panelSessionLockRunId,
+      takeover: false
+    }).then((res) => {
+      if (res && res.locked && !res.ok) {
+        panelSessionLockHeld = false;
+        showCitationHint("\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u9875\u4EFB\u52A1\u5C06\u505C\u6B62\u3002");
+        if (activeInterruptFn) activeInterruptFn();
+      }
+    }).catch(() => {
+    });
+  }
+  async function handleRemotePanelSessions(state) {
+    if (!state) return;
+    const oldActive = panelSessionActiveId;
+    applyPanelSessionSummaries(state);
+    const nextActive = String(state.activeId || "");
+    if (!nextActive) return;
+    if (streaming || panelSessionSwitchInFlight) {
+      if (nextActive !== panelSessionId) deferredRemoteSessionId = nextActive;
+      return;
+    }
+    if (nextActive !== panelSessionId) {
+      await switchPanelSession(nextActive, { activate: false, force: true });
+      return;
+    }
+    const current = panelSessionList.find((s) => s.id === panelSessionId);
+    if (current && Number(current.seq) > panelSessionSeq && oldActive === nextActive) {
+      await switchPanelSession(panelSessionId, { activate: false, force: true });
     }
   }
   function whenConversationReady() {
@@ -5488,15 +6094,6 @@
     } catch (e) {
       return "";
     }
-  }
-  function resetHandoffId() {
-    handoffId = newHandoffId();
-    try {
-      localStorage.setItem(HANDOFF_ID_KEY, handoffId);
-    } catch (e) {
-    }
-    renderHandoffChip();
-    return handoffId;
   }
   function ensureHandoffId() {
     if (!handoffId) handoffId = loadHandoffId() || newHandoffId();
@@ -5604,6 +6201,43 @@
     const usage = document.createElement("span");
     usage.className = "usage";
     usageEl = usage;
+    panelSessionBtnEl = document.createElement("button");
+    panelSessionBtnEl.type = "button";
+    panelSessionBtnEl.className = "session-btn";
+    panelSessionBtnEl.setAttribute("aria-haspopup", "true");
+    panelSessionBtnEl.setAttribute("aria-expanded", "false");
+    renderSessionButton();
+    panelSessionMenuEl = document.createElement("div");
+    panelSessionMenuEl.className = "session-menu";
+    panelSessionMenuEl.hidden = true;
+    panelSessionMenuEl.setAttribute("role", "menu");
+    panelSessionBtnEl.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      panelSessionMenuOpen = !panelSessionMenuOpen;
+      panelSessionMenuEl.hidden = !panelSessionMenuOpen;
+      panelSessionBtnEl.setAttribute("aria-expanded", panelSessionMenuOpen ? "true" : "false");
+      if (panelSessionMenuOpen) {
+        renderSessionMenu();
+        await refreshPanelSessionState();
+        fitPanelHeight();
+      }
+    });
+    panelSessionMenuEl.addEventListener("click", (e) => {
+      const target = e.target.closest("[data-session-action]");
+      if (!target) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const id = target.getAttribute("data-session-id") || "";
+      const action = target.getAttribute("data-session-action");
+      if (action === "switch") switchPanelSession(id).catch(() => {
+      });
+      else if (action === "rename") renamePanelSession(id);
+      else if (action === "delete") deletePanelSession(id);
+      else if (action === "export") exportPanelSession(id, target).catch(() => {
+      });
+    });
+    panel.appendChild(panelSessionMenuEl);
     const handoffBtn = document.createElement("button");
     handoffBtn.className = "handoff";
     handoffEl = handoffBtn;
@@ -5632,10 +6266,16 @@
     head.appendChild(logo);
     head.appendChild(title);
     head.appendChild(usage);
+    head.appendChild(panelSessionBtnEl);
     head.appendChild(handoffBtn);
     head.appendChild(themeBtn);
     head.appendChild(close);
     panel.appendChild(head);
+    shadow.addEventListener("mousedown", (e) => {
+      if (!panelSessionMenuOpen) return;
+      if (e.target.closest(".session-menu") || e.target.closest(".session-btn")) return;
+      closeSessionMenu();
+    });
     progressEl = document.createElement("div");
     progressEl.className = "p-progress";
     const ppDot = document.createElement("span");
@@ -5990,15 +6630,11 @@
     const foot = document.createElement("div");
     foot.className = "p-foot";
     const clearBtn = document.createElement("button");
-    clearBtn.textContent = "\u6E05\u7A7A\u5BF9\u8BDD";
-    clearBtn.addEventListener("click", () => {
-      conversation = [];
-      saveConversation();
-      resetHandoffId();
-      snapshotHandoff();
-      renderConversation();
-      fitPanelHeight();
-    });
+    clearBtn.className = "new-session-btn";
+    clearBtn.textContent = "\uFF0B \u65B0\u5EFA\u4F1A\u8BDD";
+    clearBtn.title = "\u4FDD\u7559\u5F53\u524D\u5BF9\u8BDD\u5E76\u5F00\u542F\u4E00\u4E2A\u65B0\u4F1A\u8BDD";
+    clearBtn.addEventListener("click", () => newPanelSession().catch(() => {
+    }));
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
     copyBtn.textContent = "\u5BFC\u51FA\u8BB0\u5F55";
@@ -6116,6 +6752,15 @@
       typingEl = null;
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
+      panelSessionSaveChain.catch(() => {
+      }).then(() => releasePanelSessionLock()).catch(() => {
+      }).finally(() => {
+        if (!deferredRemoteSessionId || streaming) return;
+        const next = deferredRemoteSessionId;
+        deferredRemoteSessionId = "";
+        if (next !== panelSessionId) switchPanelSession(next, { activate: false, force: true }).catch(() => {
+        });
+      });
     }
     function removeTypingEl() {
       if (typingEl && typingEl.parentNode) {
@@ -6285,11 +6930,60 @@
         endStream();
       }
     }
-    function run(instruction, opts) {
-      closePort();
-      activeRunId = opts && opts.presetRunId || "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    async function run(instruction, opts) {
+      const runOptions = opts || {};
+      activeRunId = runOptions.presetRunId || "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
       activeInstruction = String(instruction || "");
-      lastRunOpts = opts || null;
+      try {
+        if (conversationLoadPromise) await conversationLoadPromise;
+      } catch (e) {
+      }
+      if (!panelSessionId) {
+        showCitationHint("\u4F1A\u8BDD\u5C1A\u672A\u6062\u590D\u5B8C\u6210\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+        endStream();
+        return;
+      }
+      if (panelSessionActiveId && panelSessionActiveId !== panelSessionId) {
+        const activated = await sendPanelMessage("panel:activate", { id: panelSessionId });
+        if (activated && activated.ok) {
+          panelSessionActiveId = panelSessionId;
+          if (Array.isArray(activated.sessions)) panelSessionList = activated.sessions.slice();
+          renderSessionButton();
+          renderSessionMenu();
+        }
+      }
+      const acquired = await acquirePanelSessionLock(activeRunId, runOptions._lockTakeover === true);
+      if (!acquired || !acquired.ok) {
+        if (acquired && acquired.locked && !runOptions._lockConflictShown) {
+          const owner = acquired.lock || {};
+          showPanelDialog({
+            title: "\u4F1A\u8BDD\u6B63\u5728\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u8FD0\u884C",
+            message: "\u8FD9\u4E2A\u4F1A\u8BDD\u5F53\u524D\u7531\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u64CD\u4F5C" + (owner.tabId ? "\uFF08\u6807\u7B7E\u9875 " + owner.tabId + "\uFF09" : "") + "\u3002\u63A5\u7BA1\u4F1A\u505C\u6B62\u90A3\u4E00\u8FB9\u7684\u672C\u8F6E\u4EFB\u52A1\uFF0C\u7136\u540E\u5728\u672C\u9875\u7EE7\u7EED\u3002",
+            confirmText: "\u63A5\u7BA1\u5E76\u8FD0\u884C",
+            cancelText: "\u6539\u5929\u518D\u8BD5",
+            extraText: "\u65B0\u5EFA\u4F1A\u8BDD",
+            onExtra: () => {
+              newPanelSession().then((ok) => {
+                if (ok) run(instruction, Object.assign({}, runOptions, { _lockConflictShown: true }));
+              }).catch(() => {
+              });
+            },
+            onConfirm: () => {
+              run(
+                instruction,
+                Object.assign({}, runOptions, { _lockTakeover: true, _lockConflictShown: true })
+              ).catch(() => {
+              });
+              return true;
+            }
+          });
+        } else {
+          showCitationHint(acquired && acquired.error || "\u65E0\u6CD5\u83B7\u53D6\u4F1A\u8BDD\u8FD0\u884C\u6743\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+        }
+        return;
+      }
+      closePort();
+      lastRunOpts = runOptions;
       portRetries = 0;
       let respTimer = null;
       let respFailTimer = null;
@@ -6306,7 +7000,7 @@
       };
       lastResponse = "";
       const pickedForMessage = summarizePickedForMessage(pickedElements);
-      const skipUserTurn = Boolean(opts && opts.skipUserTurn);
+      const skipUserTurn = Boolean(runOptions.skipUserTurn);
       if (!skipUserTurn) {
         conversation.push(
           Object.assign(
@@ -6662,6 +7356,7 @@
           conn.postMessage({ type: "keepalive" });
         } catch (e) {
         }
+        renewPanelSessionLock();
       }, 2e4);
       conn.postMessage({
         action: "agent",
@@ -6672,7 +7367,7 @@
         pageUrl: location.href,
         pageTitle: document.title,
         history: conversation.slice(),
-        ...opts && opts.continuation ? { continuation: true } : {},
+        ...runOptions.continuation ? { continuation: true } : {},
         ...pickedElements.length ? { pickedElements } : {}
       });
       if (pickedElements.length) {
@@ -6753,7 +7448,7 @@
     document.addEventListener("keydown", panelKeyHandler, true);
     cmdInput.focus();
     head.addEventListener("mousedown", (e) => {
-      if (e.target.closest(".close")) return;
+      if (e.target.closest("button")) return;
       dragState = {
         startX: e.clientX,
         startY: e.clientY,
@@ -6770,6 +7465,7 @@
     fitPanelHeight();
     pinToBottom();
     runAgent = run;
+    activeInterruptFn = interrupt;
   }
   function refreshPanelForSelection() {
     if (!streaming) closePort();
@@ -6842,6 +7538,7 @@
     }
     document.addEventListener("mousedown", (e) => {
       if (host && e.composedPath().includes(host)) return;
+      closeSessionMenu();
       removeBubble();
     });
     document.addEventListener("scroll", () => removeBubble(), true);
@@ -6957,6 +7654,14 @@
         } else if (msg.type === "kbPickCancel") {
           if (pickUi) pickUi.setActive(false);
           else picking = false;
+        } else if (msg.type === "panel:sessions-changed") {
+          handleRemotePanelSessions(msg).catch(() => {
+          });
+        } else if (msg.type === "panel:lock-lost") {
+          if (String(msg.id || "") !== panelSessionId) return;
+          if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
+          showCitationHint("\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u5DF2\u63A5\u7BA1\u8BE5\u4F1A\u8BDD\uFF0C\u672C\u9875\u4EFB\u52A1\u5DF2\u505C\u6B62\u3002");
+          if (activeInterruptFn) activeInterruptFn();
         }
       });
     } catch (e) {

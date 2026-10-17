@@ -55,6 +55,27 @@ export async function readAiSettings(context) {
 }
 
 /**
+ * 读全浏览器共享的面板会话仓库。
+ * 返回的 `session` 永远取**当前 active 会话**的完整正文，供跨 tab / 跳转用例断言。
+ */
+export async function readActivePanelSession(context) {
+  const [sw] = context.serviceWorkers();
+  if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
+  return await sw.evaluate(async () => {
+    const all = await chrome.storage.session.get(null);
+    const index = all['recallflow.psess.index.v1'] || { sessions: {}, seq: 0 };
+    const active = all['recallflow.psess.active.v1'] || { id: '' };
+    const key = 'recallflow.psess.v1.' + String(active.id || '');
+    return {
+      index,
+      active,
+      session: all[key] || null,
+      summaries: Object.values(index.sessions || {}),
+    };
+  });
+}
+
+/**
  * 读扩展侧的**知识库存储**（`knowledgeBase`）。
  *
  * 为什么必须有这个 helper：知识库场景的权威事实在**存储**里，不在页面上 ——
@@ -216,6 +237,34 @@ export async function readTextAsAgent(page, selector) {
 /** 展开助手面板。 */
 export async function openPanel(page) {
   await page.locator(PANEL + ' .fab').click();
+}
+
+/**
+ * 每个独立用例建一个新的面板会话。
+ *
+ * 会话现在按**整个浏览器**共享，不再按标签页隔离；如果测试不主动新建，
+ * 上一条用例的思考/工具记录会留在 active 会话里，顺序一变结果就变。
+ * 这里是测试隔离，不是产品清空：旧会话仍保留在历史列表中。
+ */
+export async function createFreshPanelSession(context) {
+  const before = await readActivePanelSession(context);
+  const oldId = before && before.active ? String(before.active.id || '') : '';
+  const page = await openFixturePage(context);
+  await openPanel(page);
+  await page.locator(PANEL + ' .new-session-btn').click();
+  let createdId = '';
+  for (let i = 0; i < 100; i++) {
+    const state = await readActivePanelSession(context);
+    createdId = state && state.active ? String(state.active.id || '') : '';
+    if (createdId && createdId !== oldId) break;
+    await page.waitForTimeout(50);
+  }
+  if (!createdId || createdId === oldId) {
+    await page.close();
+    throw new Error('创建测试会话失败（active 会话没有变化）');
+  }
+  await page.close();
+  return createdId;
 }
 
 /**

@@ -12,12 +12,24 @@
 //   ② 后台**跑了不止一次** —— 区分"重连接着跑"与"第一次自己就跑完了"。
 //      少了这条，测试会在"根本没断成功"的情况下假通过（这正是前几轮发生的事）。
 import { test, expect } from '@playwright/test';
-import { launchExtension, closeExtension, configureSettings, openFixturePage, openPanel, PANEL } from './helpers.mjs';
+import {
+  launchExtension,
+  closeExtension,
+  configureSettings,
+  openFixturePage,
+  openPanel,
+  createFreshPanelSession,
+  PANEL,
+} from './helpers.mjs';
 
 let context;
 
 test.beforeAll(async () => {
   context = await launchExtension();
+});
+
+test.beforeEach(async () => {
+  await createFreshPanelSession(context);
 });
 
 test.afterAll(async () => {
