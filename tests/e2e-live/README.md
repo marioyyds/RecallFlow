@@ -68,6 +68,13 @@ node scripts/run-e2e-live.mjs
    已在 live spec 里加 `finalizedRunCount()` 判据把这类 stall/中断抓出来，
    并把这两类站点标 `navigationInterruptsRun: true`（以页面判据为准）。
    这也是一个**产品缺口**：同一 tab 内的整页刷新无法把进行中的任务续跑下去。
+   复现夹具 `/reload` + `tests/e2e/golden.spec.mjs` 的 fixme 用例已就位。
+
+   **修复方向**（已定位，待实施）：
+   - SW 侧（background.js）端口断开时**不要立刻 abort**，让 run 继续用 tab 执行工具
+     （工具走 `chrome.tabs.sendMessage`，刷新后能到达新内容脚本）；
+   - 面板侧（chat.js）初始化时向 SW 询问"本 tab 是否有进行中的 run"，
+     有则用同一 runId 重连并把输出重新定向到新 port（复用 `session-ready` 握手）。
 
 ## 下一步
 
