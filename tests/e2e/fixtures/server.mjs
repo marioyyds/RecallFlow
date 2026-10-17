@@ -2981,6 +2981,31 @@ function navSearchPage() {
 </body></html>`;
 }
 
+// 客户端跳转页：模拟 Turbo/Turbolinks —— pushState + **整块替换 body**（不重新加载文档），
+// 面板宿主随之被移除。用于验证"SPA 导航把面板一起换掉"时任务与输出仍在。
+function turboNavPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具客户端跳转</title></head>
+<body>
+  <h1>客户端跳转</h1>
+  <input id="q" name="q" placeholder="搜索">
+  <button id="go">搜索</button>
+  <div id="results"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q');
+    if (q) {
+      document.body.innerHTML = '<h1>结果页</h1><div id="results">结果：' + q + '</div>';
+    } else {
+      document.getElementById('go').addEventListener('click', () => {
+        const v = document.getElementById('q').value.trim();
+        history.pushState({}, '', location.pathname + '?q=' + encodeURIComponent(v));
+        document.body.innerHTML = '<h1>结果页</h1><div id="results">结果：' + v + '</div>';
+      });
+    }
+  </script>
+</body></html>`;
+}
+
 function sse(res, chunks) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   // 可选的「慢速流」模式：分片之间加延迟，从而**真实存在一个生成中的窗口**。
@@ -4613,6 +4638,18 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 夹具场景：客户端跳转（模拟 Turbo）——pushState + 整块替换 body，验证面板被移除后能重建并续跑。
+    if (userText.includes('客户端跳转')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { selector: '#q', value: 'jev', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { selector: '#go' }); return; }
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#results', state: 'visible' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      finalText(res, '已客户端搜索 jev，结果页显示「结果：jev」。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
@@ -4733,7 +4770,8 @@ const main = http.createServer((req, res) => {
                                                                       : req.url && req.url.startsWith('/assistant') ? siteAssistantPage()
                                                                         : req.url && req.url.startsWith('/reload') ? reloadPage()
                                                                           : req.url && req.url.startsWith('/nav-search') ? navSearchPage()
-                                                                            : mainPage()
+                                                                            : req.url && req.url.startsWith('/turbo-nav') ? turboNavPage()
+                                                                              : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

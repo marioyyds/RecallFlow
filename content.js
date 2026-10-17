@@ -4970,7 +4970,13 @@
   function watchHostKeepalive() {
     setInterval(() => {
       try {
-        if (host && !host.isConnected) ensureHost();
+        if (host && !host.isConnected) {
+          ensureHost();
+          if (streaming) {
+            openPanel(0, 0, true);
+            restoreStreamingUI();
+          }
+        }
       } catch (e) {
       }
     }, 1e3);
@@ -5459,7 +5465,7 @@
       });
       if (res && Array.isArray(res.conversation) && res.conversation.length) {
         conversation = res.conversation;
-        if (panelBody) {
+        if (panelBody && !streaming) {
           renderConversation();
           fitPanelHeight();
         }
@@ -6569,7 +6575,14 @@
           });
           conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
           saveConversation();
-          renderSuggestionButtons(pendingAiMsg, finalText, run);
+          if (!pendingAiMsg || !pendingAiMsg.isConnected) {
+            try {
+              renderConversation();
+            } catch (e) {
+            }
+          } else {
+            renderSuggestionButtons(pendingAiMsg, finalText, run);
+          }
           fitPanelHeight();
           currentCitations = null;
           endStream();
@@ -6780,7 +6793,7 @@
       let handled = false;
       try {
         p = chrome.runtime.connect({ name: "ai-stream" });
-        p.onMessage.addListener((resp) => {
+        p.onMessage.addListener(async (resp) => {
           if (handled || !resp || resp.type !== "run-state") return;
           handled = true;
           try {
@@ -6788,6 +6801,11 @@
           } catch (e) {
           }
           if (resp.resumable && resp.runId && resp.instruction && !streaming) {
+            try {
+              if (conversationLoadPromise) await conversationLoadPromise;
+            } catch (e) {
+            }
+            if (streaming) return;
             openPanel(0, 0, true);
             const last = conversation.length ? conversation[conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();

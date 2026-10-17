@@ -2717,6 +2717,34 @@ test('golden: 跳转搜索 —— 整页跳转后对话不丢、不重复', asyn
   });
   expect(userTurns, '跳转搜索这条用户消息必须恰好出现一次（不丢、不重复）').toBe(1);
 
+  // ④ 模型输出必须**渲染在新页面的面板里**（不只是存进 storage）：
+  // 这正是"回退才有、前进没有"的那一半缺陷。
+  await expect.poll(() => panelText(page, '.p-body'), { timeout: 20_000 }).toContain('已搜索 jev');
+
+  await page.close();
+});
+
+
+// 回归：客户端导航（Turbo 式 pushState + 整块替换 body）会把面板宿主一起移除。
+// 任务必须继续，面板必须重建并恢复显示，模型输出不能丢。
+test('golden: 客户端跳转 —— 面板被替换后重建并继续显示输出', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/turbo-nav');
+
+  resetLlmRequests();
+  await sendInstruction(page, '客户端跳转');
+
+  // ① run 跑完（文档没重载，run 继续）
+  await expect.poll(() => finalizedRunCount(), { timeout: 40_000 }).toBeGreaterThan(0);
+
+  // ② 客户端导航真的发生（URL + 新 DOM）
+  await expect(page).toHaveURL(/\/turbo-nav\?q=jev/);
+  await expect(page.locator('#results')).toHaveText('结果：jev');
+
+  // ③ 面板被宿主重建后必须重新打开，并显示模型输出（不是只剩一个 FAB）
+  await expect(page.locator(PANEL + ' .cmd-input')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => panelText(page, '.p-body'), { timeout: 20_000 }).toContain('已客户端搜索 jev');
+
   await page.close();
 });
 
