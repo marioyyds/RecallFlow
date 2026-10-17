@@ -2938,6 +2938,26 @@ function siteAssistantPage() {
 </body></html>`;
 }
 
+// 整页刷新页：点按钮 → location.reload()，刷新后靠 sessionStorage 显示「已刷新并继续」。
+// 用于复现产品缺口「同一 tab 的整页刷新会中断进行中的任务」（见 golden.spec 的 fixme 用例）。
+function reloadPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具整页刷新</title></head>
+<body>
+  <h1>整页刷新夹具</h1>
+  <button id="do-reload">整页刷新</button>
+  <div id="after-reload"></div>
+  <script>
+    if (sessionStorage.getItem('recallflow-reload-clicked') === '1') {
+      document.getElementById('after-reload').textContent = '已刷新并继续';
+    }
+    document.getElementById('do-reload').addEventListener('click', () => {
+      sessionStorage.setItem('recallflow-reload-clicked', '1');
+      location.reload();
+    });
+  </script>
+</body></html>`;
+}
+
 function sse(res, chunks) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   // 可选的「慢速流」模式：分片之间加延迟，从而**真实存在一个生成中的窗口**。
@@ -4534,6 +4554,17 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 夹具场景：整页刷新后任务应能继续（产品缺口：当前在刷新处中断）。见 golden.spec 的 fixme 用例。
+    if (userText.includes('整页刷新')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { selector: '#do-reload' }); return; }
+      if (done === 2) { toolStep(res, 'wait_for_element', { selector: '#after-reload', state: 'visible' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#after-reload' }); return; }
+      finalText(res, '页面已整页刷新，并读到「已刷新并继续」。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
@@ -4652,7 +4683,8 @@ const main = http.createServer((req, res) => {
                                                                   : req.url && req.url.startsWith('/ui') ? controlShadowPage()
                                                                     : req.url && req.url.startsWith('/rsearch') ? researchPage()
                                                                       : req.url && req.url.startsWith('/assistant') ? siteAssistantPage()
-                                                                        : mainPage()
+                                                                        : req.url && req.url.startsWith('/reload') ? reloadPage()
+                                                                          : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

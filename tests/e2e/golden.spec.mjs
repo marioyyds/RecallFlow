@@ -9,7 +9,7 @@
 // 而本文件其余场景需要流正常结束；混在一起会让"第一次调用"的归属取决于执行顺序、
 // 测试时好时坏。那条在 tests/e2e/resume.spec.mjs。
 import { test, expect } from '@playwright/test';
-import { toolResultsText, resetLlmRequests, toolCallCount, toolMessagesInOrder } from './fixtures/server.mjs';
+import { toolResultsText, resetLlmRequests, toolCallCount, toolMessagesInOrder, finalizedRunCount } from './fixtures/server.mjs';
 import { PLAYBOOKS } from './fixtures/playbooks.mjs';
 import {
   launchExtension,
@@ -59,6 +59,23 @@ test('golden: 用 role+name 定位并点击页面按钮', async () => {
 });
 
 
+// 已知产品缺口（README 第 8 条）：同一 tab 的整页刷新会重注入内容脚本、旧 port 断开，
+// SW 侧进行中的任务随之中断 —— 页面动作生效了、但任务没跑完。
+// 这条用例钉住"应当"的行为：刷新后任务继续跑完。修复后把 test.fixme 改成 test。
+test.fixme('golden: 整页刷新后任务应继续跑完（当前会在刷新处中断）', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/reload');
+
+  resetLlmRequests();
+  await sendInstruction(page, '整页刷新');
+
+  // 修复前：run 在刷新处中断，mock 收不到 finalText（这条会失败，符合 fixme 预期）；
+  // 修复后：run 跨过刷新继续，finalizedRunCount 归零后变 1，这条转为通过。
+  await expect.poll(() => finalizedRunCount(), { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect(page.locator('#after-reload')).toHaveText('已刷新并继续');
+
+  await page.close();
+});
 // 回归：SPA 客户端导航会整体替换 DOM 树，面板宿主被移除后要能自动重建。
 // 这是真实站点实验室（GitHub Turbo 导航）暴露的产品缺陷 —— 修复前宿主引用仍指向已脱离的节点，
 // FAB 永久消失；修复后由低频保活轮询重建（见 lib/page/chat.js 的 watchHostKeepalive）。
