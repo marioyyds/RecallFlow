@@ -62,19 +62,14 @@ node scripts/run-e2e-live.mjs
    同流程在 Wikipedia/arXiv/MDN 都能跑完，所以是 SW 侧在"快照结果回传 → 下一轮请求"之间
    卡住，不是 UI/宿主问题。待深挖（怀疑与 GitHub 仓库页快照体量/内容触发某条路径有关）。
    仓库 README 阅读场景暂不收录。
-8. **全页跳转会中断本轮 run**：必应搜索提交、httpbin 表单提交这类**表单导致的整页导航**
-   会重新注入内容脚本，SW 侧正在跑的这轮任务随之中断（mock 收不到 finalText），
-   而页面动作已经生效、旧页面判据照样通过 —— 于是"没跑完"被静默放过去。
-   已在 live spec 里加 `finalizedRunCount()` 判据把这类 stall/中断抓出来，
-   并把这两类站点标 `navigationInterruptsRun: true`（以页面判据为准）。
-   这也是一个**产品缺口**：同一 tab 内的整页刷新无法把进行中的任务续跑下去。
-   复现夹具 `/reload` + `tests/e2e/golden.spec.mjs` 的 fixme 用例已就位。
-
-   **修复方向**（已定位，待实施）：
-   - SW 侧（background.js）端口断开时**不要立刻 abort**，让 run 继续用 tab 执行工具
-     （工具走 `chrome.tabs.sendMessage`，刷新后能到达新内容脚本）；
-   - 面板侧（chat.js）初始化时向 SW 询问"本 tab 是否有进行中的 run"，
-     有则用同一 runId 重连并把输出重新定向到新 port（复用 `session-ready` 握手）。
+8. **全页跳转会中断本轮 run —— 已修复**：端口断开不再自动 abort（整页刷新也会断开端口），
+   停止改为面板显式发 `{type:'stop'}`，标签页关闭由 `tabs.onRemoved` 兜底。
+   于是必应搜索提交、httpbin 表单提交这类整页导航后，任务会继续经 tab 执行（
+   工具走 `chrome.tabs.sendMessage`，刷新后到达新内容脚本）。
+   回归用例：`tests/e2e/golden.spec.mjs`「整页刷新后任务应继续跑完」。
+   **已知限制（未做）**：刷新后继续跑的这一轮在**新面板里不可见**（旧文档销毁、输出写到
+   死端口被吞掉）—— 任务能跑完、但 UI 不回显。要让新面板接管显示，需再补"本 tab 进行中
+   run 的发现 + 同 runId 重连重定向"（复用 `session-ready` 握手）。
 
 ## 下一步
 

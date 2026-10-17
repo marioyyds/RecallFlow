@@ -62,7 +62,7 @@ test('golden: 用 role+name 定位并点击页面按钮', async () => {
 // 已知产品缺口（README 第 8 条）：同一 tab 的整页刷新会重注入内容脚本、旧 port 断开，
 // SW 侧进行中的任务随之中断 —— 页面动作生效了、但任务没跑完。
 // 这条用例钉住"应当"的行为：刷新后任务继续跑完。修复后把 test.fixme 改成 test。
-test.fixme('golden: 整页刷新后任务应继续跑完（当前会在刷新处中断）', async () => {
+test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 run）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context, '/reload');
 

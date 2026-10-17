@@ -40,14 +40,10 @@ for (const site of LIVE_SITES) {
 
     // 先断言**这一轮真的正常跑完**：否则一个 stalled 的 run（页面判据恰好已满足）
     // 会被静默放过去 —— GitHub 仓库页"卡在第一次快照"就是这种形态。
-    //
-    // 例外：全页跳转（表单提交）会中断本轮 run（已知产品缺口，见 sites.mjs 的
-    // navigationInterruptsRun），这类站点以页面判据为准，不再要求 mock 收到 finalText。
-    if (!site.navigationInterruptsRun) {
-      await expect
-        .poll(() => finalizedRunCount(), { timeout: 90_000, message: '本轮 run 应在超时前正常结束（mock 未收到 finalText）' })
-        .toBeGreaterThan(0);
-    }
+    // （整页刷新/表单提交的中断此前已修：端口断开不再 abort，见 background.js。）
+    await expect
+      .poll(() => finalizedRunCount(), { timeout: 90_000, message: '本轮 run 应在超时前正常结束（mock 未收到 finalText）' })
+      .toBeGreaterThan(0);
 
     // 页面判据：站点自己的数据，不是「工具返回 ok」。
     for (const c of site.checks) {

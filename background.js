@@ -285,27 +285,37 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // 标签页关闭时清理其对话持久化数据。
 chrome.tabs.onRemoved.addListener((tabId) => {
+  const c = tabControllers.get(tabId);
+  if (c) {
+    try { c.abort(); } catch (e) {}
+    tabControllers.delete(tabId);
+  }
   try {
     chrome.storage.session.remove('recallflow.conv.' + tabId);
   } catch (e) {}
 });
 
+// tabId -> AbortController：标签页关闭时中止其进行中的 run。
+// 端口断开**不再**自动 abort：整页刷新（表单提交 / location.reload）也会断开端口，
+// 但任务应当继续经 tab 执行（工具走 chrome.tabs.sendMessage，刷新后能到达新内容脚本）。
+// 停止由面板显式发 {type:'stop'}，标签页关闭由 tabs.onRemoved 兜底 —— 见 README 第 8 条。
+const tabControllers = new Map();
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'ai-stream') return;
 
   const controller = new AbortController();
-  let aborted = false;
-  port.onDisconnect.addListener(() => {
-    aborted = true;
-    try {
-      controller.abort();
-    } catch (e) {
-      logError('Abort controller failed', e);
-    }
-  });
+  const senderTabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
+  if (senderTabId) tabControllers.set(senderTabId, controller);
+  port.onDisconnect.addListener(() => {});
 
   port.onMessage.addListener(async (payload) => {
     try {
+      // 停止：面板显式请求中止 run（端口断开不再自动 abort，见 tabControllers 的注释）。
+      if (payload && payload.type === 'stop') {
+        try { controller.abort(); } catch (e) {}
+        return;
+      }
       // 工具审批消息由 waitForToolApproval 的临时监听器处理，不能作为新的对话请求。
       if (payload && payload.type === 'tool-approval') return;
       // 心跳：保持 service worker 存活（长任务期间），不触发新请求。

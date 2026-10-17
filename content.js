@@ -6178,6 +6178,10 @@
     function interrupt() {
       if (!streaming) return;
       finishReasoning();
+      try {
+        if (activeConn) activeConn.postMessage({ type: "stop" });
+      } catch (e) {
+      }
       const acc = pendingAcc;
       closePort();
       if (pendingAiMsg && pendingAiMsg.parentNode) {
