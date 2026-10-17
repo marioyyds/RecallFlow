@@ -55,6 +55,13 @@ test('设置页：新增页面内导航，但不移动权限设置逻辑', () =>
   assert.match(optionsHtml, /id="approval-preset"/, '权限设置必须保留');
 });
 
+test('设置页：头部品牌、模块导航和内容区共用同一个 gutter', () => {
+  assert.match(optionsCss, /--settings-gutter:\s*16px/);
+  assert.match(optionsCss, /\.app-topbar \.app-header\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
+  assert.match(optionsCss, /\.app-topbar \.module-nav\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
+  assert.match(optionsCss, /\.settings-layout\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
+});
+
 test('技能页：有搜索、来源/分类筛选，卡片正文按需展开', () => {
   assert.match(skillsHtml, /id="skill-search"/);
   assert.match(skillsHtml, /id="skill-kind-filters"/);

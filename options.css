@@ -1,6 +1,7 @@
 /* 设计令牌与基础样式见 base.css */
 
 body {
+  --settings-gutter: 16px;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -16,6 +17,7 @@ body {
   align-items: start;
   max-width: 980px;
   margin: 18px auto 0;
+  padding-inline: var(--settings-gutter);
 }
 
 .settings-content {
@@ -65,10 +67,12 @@ body {
 .app-topbar .app-header {
   max-width: 980px;
   margin: 0 auto;
+  padding-inline: var(--settings-gutter);
 }
 
 .app-topbar .module-nav {
   max-width: 980px;
+  padding-inline: var(--settings-gutter);
 }
 
 .settings-subsection-title {
@@ -392,13 +396,12 @@ body {
 }
 
 @media (max-width: 620px) {
+  body {
+    --settings-gutter: 12px;
+  }
   .app-header {
     grid-template-columns: 1fr auto;
     gap: 12px;
-    padding: 12px 14px;
-  }
-  .module-nav {
-    padding-inline: 10px;
   }
   .settings-layout {
     display: block;
@@ -407,7 +410,7 @@ body {
     position: sticky;
     top: 112px;
     z-index: 15;
-    margin: 0 -4px 14px;
+    margin: 0 0 14px;
     padding: 4px;
     border-radius: 10px;
     background: var(--bg);
