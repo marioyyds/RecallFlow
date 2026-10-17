@@ -98,6 +98,16 @@ test('run state: live 引用按正文首次出现顺序过滤并重编号', () =
   assert.equal(runStateToAssistantMessage(s).showCitations, true, '收尾后才显示参考来源');
 });
 
+test('run state: 待关闭辅助页会显示在跟随时间线里', () => {
+  const s = state();
+  applyRunEvent(s, { type: 'tabs-close-pending', tabIds: [42, 43] });
+  const msg = runStateToAssistantMessage(s);
+  assert.ok(
+    msg.parts.some((p) => p.type === 'notice' && p.text.includes('最终回复保存后关闭 2 个辅助标签页')),
+    '跟随页应能解释辅助页为何还没关闭'
+  );
+});
+
 test('hub: 文本增量按 flushMs 合并广播，结构化事件先冲刷文本', () => {
   const deltas = [];
   const starts = [];

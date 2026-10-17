@@ -4864,6 +4864,13 @@
           pushStepNotice(state, "\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + event.tabIds.length + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875", "#6b7280");
         }
         break;
+      case "tabs-close-pending": {
+        const count = Array.isArray(event.tabIds) ? event.tabIds.length : 0;
+        if (count) {
+          pushStepNotice(state, "\u{1F5C2} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5C06\u5728\u6700\u7EC8\u56DE\u590D\u4FDD\u5B58\u540E\u5173\u95ED " + count + " \u4E2A\u8F85\u52A9\u6807\u7B7E\u9875", "#6b7280");
+        }
+        break;
+      }
       case "intent":
         pushStepNotice(state, "\u{1F9ED} \u610F\u56FE\u8BC6\u522B\uFF1A" + (event.label || event.intent || "\u666E\u901A\u5BF9\u8BDD"), "");
         break;
@@ -7203,6 +7210,8 @@
     }
     function endStream() {
       streamRender.cancel();
+      const endedRunId = activeRunId || "";
+      const endedSessionId = panelSessionId;
       streaming = false;
       stopProgress();
       if (stopBtn) stopBtn.style.display = "none";
@@ -7219,8 +7228,16 @@
       typingEl = null;
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
-      panelSessionSaveChain.catch(() => {
-      }).then(() => releasePanelSessionLock()).catch(() => {
+      panelSessionSaveChain.catch(() => null).then(async (saved) => {
+        await releasePanelSessionLock();
+        if (saved && saved.ok && endedRunId) {
+          await sendPanelMessage("panel:run:committed", {
+            runId: endedRunId,
+            sessionId: endedSessionId
+          }).catch(() => {
+          });
+        }
+      }).catch(() => {
       }).finally(() => {
         if (!deferredRemoteSessionId || streaming) return;
         const next = deferredRemoteSessionId;
@@ -7613,6 +7630,13 @@
           const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
           if (count) {
             appendNoticePart("\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + count + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875", "#6b7280");
+            fitPanelHeight();
+            pinToBottom();
+          }
+        } else if (resp.type === "tabs-close-pending") {
+          const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
+          if (count) {
+            appendNoticePart("\u{1F5C2} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5C06\u5728\u6700\u7EC8\u56DE\u590D\u4FDD\u5B58\u540E\u5173\u95ED " + count + " \u4E2A\u8F85\u52A9\u6807\u7B7E\u9875", "#6b7280");
             fitPanelHeight();
             pinToBottom();
           }

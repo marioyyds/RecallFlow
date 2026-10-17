@@ -121,6 +121,44 @@ function broadcastPanelUi(ui, sourceTabId) {
 // tabId -> 当前订阅的 sessionId。跟随页只在面板打开/会话切换时登记一次，
 // SW 按 session 定向广播，避免把每个 token 发给所有网页。
 const runSubscriptions = new Map();
+// runId -> 待关闭的辅助页/Agent 窗口。必须等发起页确认最终消息已落盘后再清。
+const pendingRunCleanup = new Map();
+
+function registerRunCleanup(runId, event) {
+  const id = String(runId || '');
+  if (!id) return;
+  let item = pendingRunCleanup.get(id);
+  if (!item) {
+    item = { tabIds: new Set(), windowId: null, timer: null };
+    pendingRunCleanup.set(id, item);
+  }
+  for (const tabId of Array.isArray(event && event.tabIds) ? event.tabIds : []) {
+    if (Number.isInteger(Number(tabId))) item.tabIds.add(Number(tabId));
+  }
+  if (Number.isInteger(Number(event && event.windowId))) item.windowId = Number(event.windowId);
+  if (item.timer) clearTimeout(item.timer);
+  // 兜底：发起页若已崩溃/关闭，不能让辅助页永久残留。
+  item.timer = setTimeout(() => finalizeRunCleanup(id), 15_000);
+}
+
+function finalizeRunCleanup(runId) {
+  const id = String(runId || '');
+  const item = pendingRunCleanup.get(id);
+  if (!item) return;
+  pendingRunCleanup.delete(id);
+  if (item.timer) clearTimeout(item.timer);
+  const ids = [...item.tabIds];
+  if (ids.length) {
+    try {
+      chrome.tabs.remove(ids, () => void chrome.runtime.lastError);
+    } catch (e) {}
+  }
+  if (item.windowId) {
+    try {
+      chrome.windows.remove(item.windowId, () => void chrome.runtime.lastError);
+    } catch (e) {}
+  }
+}
 
 function sendToRunSubscribers(sessionId, payload, excludeTabId) {
   const wanted = String(sessionId || '');
@@ -228,6 +266,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'openManager') {
     const focusId = msg.focusId || '';
     chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
+    sendResponse({ ok: true });
+    return false;
+  }
+  // 发起页确认最终 assistant 消息已写入共享会话。此时才允许清理本次 run 的辅助页，
+  // 避免“页先关、最后一条回复还没落盘”。
+  if (msg && msg.type === 'panel:run:committed') {
+    finalizeRunCleanup(msg.runId);
     sendResponse({ ok: true });
     return false;
   }
@@ -716,7 +761,10 @@ chrome.runtime.onConnect.addListener((port) => {
             book,
             controller.signal,
             tabId,
-            sessionId ? (event) => runHub.push(runId, event) : null
+            (event) => {
+              if (event && event.type === 'tabs-close-pending') registerRunCleanup(runId, event);
+              if (sessionId) runHub.push(runId, event);
+            }
           );
           console.log('[RecallFlow] agent run finished');
           if (sessionId) runHub.finish(runId, 'completed');
