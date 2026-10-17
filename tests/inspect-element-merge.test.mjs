@@ -15,7 +15,7 @@ import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
-test('inspect_element 的 op 枚举覆盖三个原工具，外加后来补的 styles 与 options', () => {
+test('inspect_element 的 op 枚举覆盖三个原工具，外加 styles / options / query', () => {
   const op = byName.inspect_element.inputSchema.properties.op;
   // 前三项对应 C-4 合并的三个原工具（get_element_text / inspect_element / extract_table）。
   // 后两项都不是合并来的 —— 是做能力剧本时**补**的只读档：
@@ -23,14 +23,14 @@ test('inspect_element 的 op 枚举覆盖三个原工具，外加后来补的 st
   //   · `options`：做「按属性挑选项」时发现**没有只读办法看下拉框有哪些选项** ——
   //     真模型探针实测只能借道 run_javascript（高危审批）。
   //     理由见 tests/read-options.test.mjs 与 commands.js 的 cmdReadOptions。
-  assert.deepEqual(op.enum, ['inspect', 'text', 'table', 'styles', 'options']);
+  assert.deepEqual(op.enum, ['inspect', 'text', 'table', 'styles', 'options', 'query']);
   assert.deepEqual(byName.inspect_element.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
 test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"页面命令无响应"）', async () => {
   // 这些命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
   const cli = fs.readFileSync(new URL('../lib/page/commands.js', import.meta.url), 'utf8');
-  for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles', 'read_options']) {
+  for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles', 'read_options', 'query_elements']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
@@ -43,7 +43,17 @@ test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"
     table: 'extract_table',
     styles: 'read_styles',
     options: 'read_options',
+    query: 'query_elements',
   });
+});
+
+test('run_javascript 的选择点必须指向 query（而不是让模型自己写 querySelector）', () => {
+  // 这段描述出现在模型**正要选择 run_javascript** 的那一刻；只写在系统提示里
+  // 离决策更远。实测小红书会话里 35 次 run_javascript 大多是普通 DOM 查询。
+  const desc = byName.run_javascript.description;
+  assert.match(desc, /inspect_element\(\{op:"query"\}\)/, '要给出 query 档的准确调用形状');
+  assert.match(desc, /找元素\/rect/, '要说清它替代的是哪类查询');
+  assert.equal(byName.run_javascript.alwaysRequireApproval, true, '逃生舱的审批不能被顺手放松');
 });
 
 test('被合并的两个工具名不得再出现在注册表里（否则模型会看到已失效的签名）', () => {

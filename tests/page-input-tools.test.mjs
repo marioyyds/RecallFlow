@@ -22,11 +22,25 @@ function mkDeps(overrides = {}) {
     calls,
     ctx: { tabId: 7, lastSnapshot: { fingerprint: 'fp-before' } },
     cdp: {
-      evaluate: async (tabId, expr) => calls.push({ op: 'cdp.evaluate', tabId, expr }),
-      evaluateInFrame: async (tabId, frameId, expr) => calls.push({ op: 'cdp.evaluateInFrame', tabId, frameId, expr }),
+      evaluate: async (tabId, expr) => {
+        calls.push({ op: 'cdp.evaluate', tabId, expr });
+        if (!expr.includes('rf-read-editable')) return undefined;
+        const i = Math.min(deps.readIndex, deps.readValues.length - 1);
+        deps.readIndex += 1;
+        return deps.readValues[i];
+      },
+      evaluateInFrame: async (tabId, frameId, expr) => {
+        calls.push({ op: 'cdp.evaluateInFrame', tabId, frameId, expr });
+        if (!expr.includes('rf-read-editable')) return undefined;
+        const i = Math.min(deps.readIndex, deps.readValues.length - 1);
+        deps.readIndex += 1;
+        return deps.readValues[i];
+      },
       pressKey: async (tabId, key, mods) => calls.push({ op: 'cdp.pressKey', tabId, key, mods }),
       insertText: async (tabId, text) => calls.push({ op: 'cdp.insertText', tabId, text }),
     },
+    readValues: ['', 'abc'],
+    readIndex: 0,
     cdpAllowed: () => true,
     executeContentAction: async (tabId, action, message, opts) => {
       calls.push({ op: 'content', action, message, opts });
@@ -80,7 +94,7 @@ test('type_text：合成失败时升级到 CDP 可信输入，并按观测算 ha
 });
 
 test('type_text：clearFirst=true 时先全选（Ctrl+A）再插入', async () => {
-  const deps = mkDeps({ contentResult: { ok: false } });
+  const deps = mkDeps({ contentResult: { ok: false }, readValues: ['', 'x'] });
   await typeText(deps, { value: 'x', clearFirst: true });
   const press = deps.calls.find((c) => c.op === 'cdp.pressKey');
   assert.ok(press, '应发一次按键');
@@ -89,7 +103,7 @@ test('type_text：clearFirst=true 时先全选（Ctrl+A）再插入', async () =
 });
 
 test('type_text：子框架用 evaluateInFrame 聚焦（否则会聚焦到主框架的错误元素）', async () => {
-  const deps = mkDeps({ contentResult: { ok: false }, frameIdFromArgs: () => 3 });
+  const deps = mkDeps({ contentResult: { ok: false }, frameIdFromArgs: () => 3, readValues: ['', 'x'] });
   await typeText(deps, { value: 'x' });
   assert.ok(deps.calls.some((c) => c.op === 'cdp.evaluateInFrame' && c.frameId === 3));
   assert.ok(!deps.calls.some((c) => c.op === 'cdp.evaluate'), '子框架不应走主框架 evaluate');
@@ -98,6 +112,7 @@ test('type_text：子框架用 evaluateInFrame 聚焦（否则会聚焦到主框
 test('type_text：合成后无观测变化时 hadEffect=false（不得谎报）', async () => {
   const deps = mkDeps({
     contentResult: { ok: false },
+    readValues: ['', 'x'],
     getPageSnapshot: async () => ({ fingerprint: 'fp-before' }), // 与 before 相同
   });
   const r = await typeText(deps, { value: 'x' });
@@ -122,10 +137,39 @@ test('type_text：找不到目标元素时不升级 CDP，返回合成失败原�
 });
 
 test('type_text：contenteditable 场景 value 为 null 时插入空串（不插 "null"）', async () => {
-  const deps = mkDeps({ contentResult: { ok: false } });
+  const deps = mkDeps({ contentResult: { ok: false }, readValues: ['', ''] });
   await typeText(deps, { clearFirst: true });
   const ins = deps.calls.find((c) => c.op === 'cdp.insertText');
   assert.equal(ins.text, '', '缺 value 时应插入空串');
+});
+
+test('type_text：富文本多行输入逐行插入，并以 Enter 建立段边界', async () => {
+  const deps = mkDeps({
+    contentResult: { ok: false, matchesIntent: false, partial: true },
+    resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
+    readValues: ['', '第一行\n第二行'],
+  });
+  const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
+  const inserted = deps.calls.filter((c) => c.op === 'cdp.insertText').map((c) => c.text);
+  assert.deepEqual(inserted.slice(-2), ['第一行', '第二行'], '应逐行插入，而不是一整段硬塞');
+  assert.ok(deps.calls.some((c) => c.op === 'cdp.pressKey' && c.key === 'Enter'), '行间应派发可信 Enter');
+  assert.equal(r.ok, true);
+  assert.equal(r.strategy, 'cdp-line-by-line');
+  assert.equal(r.matchesIntent, true);
+});
+
+test('type_text：CDP 输入后回读不一致必须失败（不许假报成功）', async () => {
+  const deps = mkDeps({
+    contentResult: { ok: false },
+    resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
+    readValues: ['', '第一行'],
+  });
+  const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
+  assert.equal(r.ok, false);
+  assert.equal(r.partial, true);
+  assert.equal(r.matchesIntent, false);
+  assert.match(r.result, /CDP 输入未达到预期/);
+  assert.match(r.result, /不要假设已写入/);
 });
 
 test('press_key：合成成功不碰 CDP；失败才升级', async () => {

@@ -1863,6 +1863,19 @@ function richTextPage() {
     '<\/script></body></html>';
 }
 
+// 自定义元素/结构化查询夹具：模拟“发布按钮不是原生 button，而是 custom element”的站点。
+function customElementsPage() {
+  return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具自定义组件</title></head>' +
+    '<body><h1>自定义组件</h1>' +
+    '<xhs-publish-btn data-testid="publish-btn"><span>发布笔记</span></xhs-publish-btn>' +
+    // 零命中诊断用：元素真实存在但不可见（折叠菜单的典型形态）。
+    '<button id="hidden-action" style="display:none">隐藏操作</button>' +
+    '<div id="scroller" style="height:60px;overflow:auto;border:1px solid #ccc">' +
+    '<div style="height:300px">滚动容器内容</div></div>' +
+    '<script>window.__customClicks = 0; document.querySelector("xhs-publish-btn").addEventListener("click", function(){ window.__customClicks += 1; });</script>' +
+    '</body></html>';
+}
+
 // HTML5 原生拖放夹具（`/h5drag`）：**"看起来拖过去了 ≠ 真的收到了"**（④ 场景泛化 · HTML5 拖放）
 //   ① 原生拖放**不走鼠标事件**（合成 mousedown/mousemove 无效）⇒ 必须派发真的 DragEvent / 用 DataTransfer ✗
 //   ② `drop` 只有在 `dragover` 里 `preventDefault()` 过才可能触发（**时机错 ⇒ drop 被浏览器吞掉**）
@@ -3515,6 +3528,38 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 场景：结构化元素查询（custom element / shadow / rect）—— 工具契约夹具。
+    if (userText.includes('验证结构化元素查询契约')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 30, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'query', text: '发布笔记', limit: 10 }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'query', selector: 'xhs-publish-btn' }); return; }
+      if (done === 3) { toolStep(res, 'inspect_element', { op: 'query', text: '滚动容器内容' }); return; }
+      // 零命中诊断：元素存在但 display:none，必须说清"隐藏"而不是"没有"。
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'query', text: '隐藏操作' }); return; }
+      finalText(res, '结构化查询返回了自定义元素、rect 与 ref；零命中给出了隐藏诊断。', 40);
+      return;
+    }
+
+    // 场景：**多行富文本写入契约**（type_text 的严格回读/换行保留）。
+    // 这是工具契约夹具，不是能力剧本：用字面量触发词，直接验证页面结构。
+    if (userText.includes('验证多行编辑写入契约')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
+      if (done === 1) {
+        toolStep(res, 'type_text', {
+          selector: '#rt-editor',
+          value: '第一行\n第二行\n第三行',
+          clearFirst: true,
+        });
+        return;
+      }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#rt-editor' }); return; }
+      if (done === 3) { toolStep(res, 'click_element', { selector: 'h1' }); return; }
+      finalText(res, '多行富文本已写入并按实际文本回读。', 60);
+      return;
+    }
+
     // 场景：**HTML5 原生拖放**（剧本 `html5-drag-drop`，夹具页 `/h5drag`）
     //   ⚠ 与 `cdp-drag-slider`（鼠标事件型滑块）是**两回事**：原生拖放**不走鼠标事件**，
     //   必须派发真的 `DragEvent`；落点要先 `dragover`（放行），payload **只能在 `drop` 里读**。
@@ -4727,7 +4772,8 @@ const main = http.createServer((req, res) => {
     : {};
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8' }, cspHeaders));
   res.end(
-    req.url && req.url.startsWith('/coord') ? coordPage()
+    req.url && req.url.startsWith('/custom') ? customElementsPage()
+      : req.url && req.url.startsWith('/coord') ? coordPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
           : req.url && req.url.startsWith('/article') ? articlePage()

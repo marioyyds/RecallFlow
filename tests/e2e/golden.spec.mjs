@@ -2636,6 +2636,53 @@ test('golden: 富文本 —— 结构要真的改上（选区 / 可信输入 / �
   await page.close();
 });
 
+test('golden: 多行富文本写入必须保留换行、无重复', async () => {
+  await configureSettings(context, { cdpEnabled: true });
+  const page = await openFixturePage(context, '/rich');
+  await sendInstruction(page, '验证多行编辑写入契约');
+
+  await expect
+    .poll(() => page.locator('#rt-editor').innerText(), { timeout: 30_000 })
+    .toMatch(/第一行\s*\n\s*第二行\s*\n\s*第三行/);
+
+  const text = await page.locator('#rt-editor').innerText();
+  const syntheticIgnored = await page.evaluate(() => window.__rt.syntheticIgnored);
+  expect(syntheticIgnored, '不应触发“无 inputType 的合成输入”陷阱').toBe(0);
+  expect(text.split('第一行').length - 1, '第一行不应重复').toBe(1);
+  expect(text.split('第二行').length - 1, '第二行不应重复').toBe(1);
+  expect(text.split('第三行').length - 1, '第三行不应重复').toBe(1);
+
+  await expect.poll(() => toolResultsText(), { timeout: 20_000 }).toContain('实际值');
+  await page.close();
+});
+
+test('golden: 结构化查询能定位 custom element 并返回可用 ref / rect', async () => {
+  await configureSettings(context, { cdpEnabled: true });
+  await createFreshPanelSession(context);
+  const page = await openFixturePage(context, '/custom');
+  // 工具结果文本是跨请求累积的：不清空会把上一个用例的结果也算进来，
+  // 让"看到了某段文案"的断言变成假阳性。
+  resetLlmRequests();
+  await sendInstruction(page, '验证结构化元素查询契约');
+
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('元素查询命中');
+  const text = toolResultsText();
+  expect(text, '按文本查询应找到自定义元素').toContain('xhs-publish-btn');
+  expect(text, '必须标出这是 custom element，后续才知道要走坐标/组件语义').toContain('custom=true');
+  expect(text, '必须返回可复用的 ref').toMatch(/ref=rf-/);
+  expect(text, '必须返回 rect 中心坐标作为 click_at 降级路径').toContain('center=(');
+  expect(text, '按 selector 查询也应命中同一个组件').toContain('selector=*[data-testid="publish-btn"]');
+  // 首次快照就要暴露页面能力，而不是等模型自己用 run_javascript 探。
+  expect(text, '快照应直接列出 customElements').toContain('"customElements"');
+  expect(text, '快照应给出内部滚动容器的选择器').toContain('"scrollContainers"');
+  expect(text, '内部滚动容器应带可直接使用的 selector').toContain('#scroller');
+  expect(text, '快照后应提示用 scroll_page 滚容器').toContain('scroll_page({selector');
+  // 零命中不是死路：元素存在但不可见时要说清"隐藏"，并给出 includeHidden 的下一步。
+  expect(text, '零命中应报出被隐藏的命中数').toContain('命中但当前不可见');
+  expect(text, '零命中应给出 includeHidden 的做法').toContain('includeHidden:true');
+  await page.close();
+});
+
 // 能力验收（复杂场景）：**HTML5 原生拖放**（playbook 'html5-drag-drop'，夹具页 /h5drag）。
 //
 // 难点全部造在夹具页里，并且已用探针**实测生效**（不是"页面能打开"就算数）：

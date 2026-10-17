@@ -168,7 +168,14 @@ test('ANNOTATE_OPS / INSPECT_OPS 的映射与内容脚本命令名逐一对齐',
   // options 同理**补**的一档：闭合的 `<select>` 里 option 没有布局盒子、正文抽取会跳过，
   // 而 get_attribute 只读属性读不了 outerHTML —— 于是"这个下拉框有哪些选项"
   // 此前没有只读办法（真模型探针实测只能借道 run_javascript）。详见 read-options.test.mjs。
-  assert.deepEqual(INSPECT_OPS, { text: 'get_text', inspect: 'inspect_element', table: 'extract_table', styles: 'read_styles', options: 'read_options' });
+  assert.deepEqual(INSPECT_OPS, {
+    text: 'get_text',
+    inspect: 'inspect_element',
+    table: 'extract_table',
+    styles: 'read_styles',
+    options: 'read_options',
+    query: 'query_elements',
+  });
 });
 
 test('annotate：未知 op 时报错并列出全部合法取值', async () => {

@@ -4,7 +4,7 @@
 // 沙箱用 `new Function` 实现，而内容脚本里的 eval 类构造**同样受页面 CSP 约束**。
 // 被拒时自动改用页面主世界重试（同一段代码、同一次审批，不会再弹一次审批）。
 // 这段逻辑以前埋在巨型 switch 里，只能靠真实 CSP 页面碰运气。
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -13,7 +13,10 @@ import {
   INTERACTIVE_ROLES,
   CODE_ACCESS_TOOLS,
   handleCodeAccessTool,
+  __resetPageWorldPreferenceForTests,
 } from '../lib/assistant/code-access-tools.js';
+import { buildPageWorldExpression } from '../lib/assistant/tools.js';
+import fs from 'node:fs';
 // 用**真实的** CSP 判定，而不是在测试里再写一个近似版：
 // 近似版会与实现漂移，而漂移的表现是"该重试的没重试"（或反过来无谓提权执行）。
 import { isCspEvalBlockError } from '../lib/shared/utils.js';
@@ -50,6 +53,10 @@ function mkDeps(overrides = {}) {
   return deps;
 }
 
+beforeEach(() => {
+  __resetPageWorldPreferenceForTests();
+});
+
 test('CODE_ACCESS_TOOLS 覆盖两个工具名', () => {
   assert.deepEqual([...CODE_ACCESS_TOOLS].sort(), ['get_ax_snapshot', 'run_javascript']);
 });
@@ -75,6 +82,34 @@ test('run_javascript：engine=page 时直接走页面主世界（跳过沙箱）
     assert.ok(deps.calls.some((c) => c.op === 'pageWorld'), JSON.stringify(args) + ' 应走主世界');
     assert.ok(!deps.calls.some((c) => c.op === 'content'), '不该先试沙箱');
   }
+});
+
+test('页面主世界表达式必须是 async IIFE（支持顶层 await 与 return）', () => {
+  const expr = buildPageWorldExpression('const x = await Promise.resolve(1); return x;');
+  assert.match(expr, /^\(async \(\) => \{/);
+  assert.match(expr, /await Promise\.resolve/);
+  assert.match(expr, /\}\)\(\)$/);
+});
+
+test('同一 tab 确认 CSP 拦截后，后续调用直接走页面主世界（不重复试沙箱）', async () => {
+  const deps = mkDeps({
+    contentResult: { ok: false, error: 'Content Security Policy blocks unsafe-eval' },
+    pageWorldResult: { ok: true, result: 'ok' },
+  });
+  await runJavascript(deps, { code: 'return 1' });
+  const contentCallsFirst = deps.calls.filter((c) => c.op === 'content').length;
+  assert.equal(contentCallsFirst, 1);
+  deps.calls.length = 0;
+  const r = await runJavascript(deps, { code: 'return 2' });
+  assert.equal(r.ok, true);
+  assert.equal(deps.calls.filter((c) => c.op === 'content').length, 0, '第二次不应再试已知不可用的沙箱');
+  assert.equal(deps.calls.filter((c) => c.op === 'pageWorld').length, 1);
+  assert.match(r.result, /直接走页面主世界/);
+});
+
+test('沙箱执行体也包成 async IIFE（源码级门禁）', () => {
+  const src = fs.readFileSync('lib/page/commands.js', 'utf8');
+  assert.match(src, /return \(async \(\) => \{/);
 });
 
 test('**关键**：沙箱 eval 被拒时自动改用页面主世界重试（模型不必多花一轮）', async () => {
@@ -171,6 +206,32 @@ test('get_ax_snapshot：优先提供 role+name 定位（比坐标稳）', async 
   const r = await getAxSnapshot(deps, {});
   assert.match(r.result, /优先用 role\+name 定位/);
   assert.match(r.result, /canvas\/虚拟列表等无 DOM 场景再用坐标 click_at/);
+});
+
+test('get_ax_snapshot：排除 RecallFlow 自身面板及其 shadow 子树', async () => {
+  const axNodes = [
+    { role: { value: 'button' }, name: { value: '整理会话到知识库' }, backendDOMNodeId: 101 },
+    { role: { value: 'button' }, name: { value: '页面真实按钮' }, backendDOMNodeId: 2 },
+    { role: { value: 'textbox' }, name: { value: '页面搜索框' }, backendDOMNodeId: 3 },
+  ];
+  const deps = mkDeps({
+    axNodes,
+    cdp: {
+      getFullAxTree: async () => axNodes,
+      getBoxModel: async () => ({ content: [0, 0, 10, 0, 10, 20, 0, 20] }),
+      command: async (tabId, method, params) => {
+        if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
+        if (method === 'DOM.querySelector') return { nodeId: 2 };
+        if (method === 'DOM.describeNode') {
+          return { node: { backendNodeId: 100, children: [{ backendNodeId: 101 }] } };
+        }
+        return {};
+      },
+    },
+  });
+  const r = await getAxSnapshot(deps, {});
+  assert.deepEqual(r.ax.map((n) => n.name), ['页面真实按钮', '页面搜索框']);
+  assert.equal(r.ax.length, 2, '助手面板节点不能占页面元素预算');
 });
 
 test('get_ax_snapshot：补坐标（取内容框四角均值）', async () => {

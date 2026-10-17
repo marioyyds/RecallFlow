@@ -31,7 +31,23 @@ test('提示必须给出**下一步**（滚进视口 / 直接按选择器操作�
 test('排序机制有代码依据：elements 按键值排序后截断（不是文档顺序）', () => {
   assert.match(PAGE, /inViewDist/, 'page-text.js 里确实按"离视口中心远近"排序');
   assert.match(PAGE, /\.slice\(0, maxElements\)/, '也确实按 maxElements 截断');
-  assert.match(PAGE, /trimElementsToBudget\(describedAll, text\.length\)/, '并再过体积预算');
+  assert.match(PAGE, /trimElementsToBudget\(describedAll, text\.length \+ capabilityChars\)/, '并再过体积预算');
+});
+
+test('capabilities 也占同一个快照预算（不能绕过体积裁剪）', () => {
+  // 能力元数据是随快照发给模型的正文，体积必须计入；否则元素列表会以为自己
+  // 还有一整份预算，合计反而超过 SNAPSHOT_CHAR_BUDGET。
+  assert.match(PAGE, /const capabilityChars = .*JSON\.stringify\(capabilitySummary\)\.length/, '要先算出能力元数据的字符数');
+  assert.match(PAGE, /text\.length \+ capabilityChars/, '再把它计入 trimElementsToBudget 的已用体积');
+});
+
+test('窗口滚动不算「内部滚动容器」（body/html 不得进 capabilities）', () => {
+  // 长页面的 body 天然可滚。若把它算成内部容器，提示会变成
+  // scroll_page({selector:"body"})，而正确做法是不带目标滚窗口。
+  const m = /const SCROLL_CONTAINER_TAGS = new Set\(\[([\s\S]*?)\]\)/.exec(PAGE);
+  assert.ok(m, '应能找到滚动容器标签白名单');
+  assert.ok(!/['"]BODY['"]/.test(m[1]), 'BODY 不得进白名单');
+  assert.ok(!/['"]HTML['"]/.test(m[1]), 'HTML 不得进白名单');
 });
 
 test('这条门禁本身有牙齿：没有省略说明时必须判为不合格', () => {

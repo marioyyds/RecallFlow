@@ -36,7 +36,7 @@ function fnBody(src, name) {
 test('INSPECT_OPS 把 options 映射到 read_options', () => {
   assert.equal(INSPECT_OPS.options, 'read_options');
   // 其余几档不能被这次改动挤掉
-  assert.deepEqual(Object.keys(INSPECT_OPS).sort(), ['inspect', 'options', 'styles', 'table', 'text']);
+  assert.deepEqual(Object.keys(INSPECT_OPS).sort(), ['inspect', 'options', 'query', 'styles', 'table', 'text']);
 });
 
 test('schema 的 op 枚举必须包含 options（否则模型根本传不进来）', () => {

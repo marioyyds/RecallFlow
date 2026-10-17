@@ -10,12 +10,34 @@ import assert from 'node:assert/strict';
 import {
   listFramesRaw,
   prefixFrameRefs,
+  formatCapabilityHint,
   readCurrentPage,
   getPageSnapshotTool,
   listFrames,
   PAGE_READ_TOOLS,
   handlePageReadTool,
 } from '../lib/assistant/page-read-tools.js';
+
+test('能力提示把快照元数据翻成下一步工具（而不是重复清单）', () => {
+  const hint = formatCapabilityHint({
+    customElements: { count: 2, samples: [{ tag: 'xhs-publish-btn', selector: 'xhs-publish-btn' }] },
+    shadowHosts: { count: 1, samples: [{ tag: 'rf-search', selector: 'rf-search' }] },
+    editables: { count: 1, samples: [{ selector: '#editor', kind: 'prosemirror' }] },
+    scrollContainers: { count: 1, samples: [{ selector: '#list', scrollTop: 0 }] },
+  });
+  assert.match(hint, /inspect_element\(\{op:"query"\}\)/);
+  assert.match(hint, /xhs-publish-btn/);
+  assert.match(hint, /type_text/);
+  assert.match(hint, /prosemirror/);
+  assert.match(hint, /scroll_page\(\{selector:"…", y:600\}\)/);
+  assert.match(hint, /不要为此调用 run_javascript/);
+});
+
+test('没有特殊能力时不给任何提示（避免每份快照都塞废话）', () => {
+  assert.equal(formatCapabilityHint(null), '');
+  assert.equal(formatCapabilityHint({}), '');
+  assert.equal(formatCapabilityHint({ customElements: { count: 0, samples: [] } }), '');
+});
 
 function mkDeps(overrides = {}) {
   const calls = [];

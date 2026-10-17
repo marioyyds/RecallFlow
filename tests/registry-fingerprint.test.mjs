@@ -181,7 +181,18 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   e02d8c26ddfdc419 —— **有意改动**：add_entry 增加可选 `id`。
   //                       目的：把“整理会话到知识库”重复执行时能更新同一篇文档，
   //                       而不是每次生成新 id、留下多份重复记录。权限类别不变。
-  const EXPECTED = 'e02d8c26ddfdc419';
+  //   a3ef45244f8a4e8a —— **有意改动**：`type_text` 描述补上输入契约 ——
+  //                       输入后回读；富文本/多行自动降级；不一致返回 ok:false（partial:true）。
+  //                       这改变了模型看到的工具语义（不能再把“已派发”当“已写入”），
+  //                       工具数仍 45，权限元数据不变。
+  //   491b38bf743499f6 —— **有意改动**：`inspect_element` 增加 `op:"query"`（结构化候选查询，
+  //                       返回 ref/rect/customElement/shadowDepth），并精简原描述以守住体积预算。
+  //                       这是新增只读查询入口，工具数仍 45，权限元数据不变。
+  //   ee47a65b601eab20 —— **有意改动**：`run_javascript` 的描述补上"找元素/rect 用
+  //                       inspect_element({op:"query"})"。改的是**工具选择点**的引导：
+  //                       模型准备写 querySelector 时看到的正是这段描述，而系统提示里的
+  //                       同类规则离这个决策更远。工具数仍 45，权限元数据不变。
+  const EXPECTED = 'ee47a65b601eab20';
   assert.equal(
     fp,
     EXPECTED,

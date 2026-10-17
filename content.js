@@ -747,7 +747,127 @@
     }
     return parts.join(" > ");
   }
-  function collectInteractiveInFrames(root, into = []) {
+  var CAPABILITY_SAMPLE_LIMIT = 4;
+  var SCROLL_CONTAINER_TAGS = /* @__PURE__ */ new Set([
+    // 刻意**不含 BODY / HTML**：窗口滚动已由 snapshot.scroll 表达，
+    // 把它们算成「内部滚动容器」会让模型对 body 调 scroll_page({selector:"body"})，
+    // 而正确做法是不带目标直接滚窗口。
+    "DIV",
+    "MAIN",
+    "SECTION",
+    "ARTICLE",
+    "ASIDE",
+    "NAV",
+    "FORM",
+    "DIALOG",
+    "TABLE",
+    "TBODY",
+    "UL",
+    "OL",
+    "PRE"
+  ]);
+  function createCapabilityBucket() {
+    return { count: 0, samples: [] };
+  }
+  function createPageCapabilities() {
+    return {
+      customElements: createCapabilityBucket(),
+      shadowHosts: createCapabilityBucket(),
+      editables: createCapabilityBucket(),
+      scrollContainers: createCapabilityBucket()
+    };
+  }
+  function pushCapabilitySample(bucket, sample) {
+    bucket.count += 1;
+    if (bucket.samples.length < CAPABILITY_SAMPLE_LIMIT) bucket.samples.push(sample);
+  }
+  function shortSelector(el) {
+    try {
+      return sliceSafe(elementSelector(el), 0, 120);
+    } catch (e) {
+      return "";
+    }
+  }
+  function editorKind(el) {
+    let cls = String(el.getAttribute("class") || "");
+    try {
+      if (el.parentElement) cls += " " + String(el.parentElement.getAttribute("class") || "");
+    } catch (e) {
+    }
+    if (/ProseMirror/.test(cls)) return "prosemirror";
+    if (/\bql-editor\b/.test(cls)) return "quill";
+    if (/\bcm-editor\b|CodeMirror/.test(cls)) return "codemirror";
+    if (/slate-editor|data-slate-editor/.test(cls) || el.hasAttribute("data-slate-editor")) return "slate";
+    return "contenteditable";
+  }
+  function scrollContainerInfo(el) {
+    if (!SCROLL_CONTAINER_TAGS.has(String(el.tagName || "").toUpperCase())) {
+      if (!String(el.tagName || "").toLowerCase().includes("-")) return null;
+    }
+    let scrollHeight = 0;
+    let clientHeight = 0;
+    let scrollWidth = 0;
+    let clientWidth = 0;
+    try {
+      scrollHeight = Number(el.scrollHeight) || 0;
+      clientHeight = Number(el.clientHeight) || 0;
+      scrollWidth = Number(el.scrollWidth) || 0;
+      clientWidth = Number(el.clientWidth) || 0;
+    } catch (e) {
+      return null;
+    }
+    const vertical = scrollHeight > clientHeight + 4;
+    const horizontal = scrollWidth > clientWidth + 4;
+    if (!vertical && !horizontal) return null;
+    let overflowY = "";
+    let overflowX = "";
+    try {
+      const cs = window.getComputedStyle(el);
+      overflowY = String(cs.overflowY || "");
+      overflowX = String(cs.overflowX || "");
+    } catch (e) {
+      return null;
+    }
+    const scrollableY = vertical && /^(auto|scroll|overlay)$/.test(overflowY);
+    const scrollableX = horizontal && /^(auto|scroll|overlay)$/.test(overflowX);
+    if (!scrollableY && !scrollableX) return null;
+    return {
+      selector: shortSelector(el),
+      tag: String(el.tagName || "").toLowerCase(),
+      vertical: scrollableY || void 0,
+      horizontal: scrollableX || void 0,
+      scrollTop: Math.round(Number(el.scrollTop) || 0),
+      scrollHeight: Math.round(scrollHeight),
+      clientHeight: Math.round(clientHeight)
+    };
+  }
+  function noteCapabilities(el, caps) {
+    if (!caps) return;
+    const tag = String(el.tagName || "").toLowerCase();
+    const isCustom = tag.includes("-");
+    const hasOpenShadow = Boolean(el.shadowRoot);
+    const ce = el.getAttribute("contenteditable");
+    const isEditable = ce === "" || ce === "true" || ce === "plaintext-only";
+    const scroll = scrollContainerInfo(el);
+    if (!isCustom && !hasOpenShadow && !isEditable && !scroll) return;
+    if (isElementCollectExcluded(el)) return;
+    if (isCustom) {
+      let inView = false;
+      try {
+        inView = inViewport(el.getBoundingClientRect());
+      } catch (e) {
+      }
+      pushCapabilitySample(caps.customElements, { tag, selector: shortSelector(el), inViewport: inView || void 0 });
+    }
+    if (hasOpenShadow) {
+      pushCapabilitySample(caps.shadowHosts, { tag, selector: shortSelector(el) });
+    }
+    if (isEditable) {
+      pushCapabilitySample(caps.editables, { selector: shortSelector(el), kind: editorKind(el) });
+    }
+    if (scroll) pushCapabilitySample(caps.scrollContainers, scroll);
+  }
+  function collectInteractiveInFrames(root, into = [], caps = null) {
     try {
       root.querySelectorAll(INTERACTIVE_SELECTOR).forEach((el) => {
         if (isVisibleElement(el)) into.push(el);
@@ -756,10 +876,12 @@
     }
     try {
       root.querySelectorAll("*").forEach((el) => {
-        if (el.shadowRoot) collectInteractiveInFrames(el.shadowRoot, into);
+        noteCapabilities(el, caps);
+        const shadowCaps = el.shadowRoot && !isElementCollectExcluded(el) ? caps : null;
+        if (el.shadowRoot) collectInteractiveInFrames(el.shadowRoot, into, shadowCaps);
         if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
           const doc = el.contentDocument;
-          if (doc && doc !== root) collectInteractiveInFrames(doc, into);
+          if (doc && doc !== root) collectInteractiveInFrames(doc, into, caps);
         }
       });
     } catch (e) {
@@ -1012,7 +1134,18 @@
       pruneRefs();
       const maxElements = Math.min(150, Math.max(1, Number(options.maxElements) || 60));
       const maxText = Math.min(8e3, Math.max(500, Number(options.maxText) || 4e3));
-      const nodes = collectInteractiveInFrames(document);
+      const capabilities = createPageCapabilities();
+      const nodes = collectInteractiveInFrames(document, [], capabilities);
+      const capabilitySummary = {};
+      for (const [kind, bucket] of Object.entries(capabilities)) {
+        if (bucket.count > 0) {
+          capabilitySummary[kind] = {
+            count: bucket.count,
+            samples: bucket.samples
+          };
+        }
+      }
+      const capabilityChars = Object.keys(capabilitySummary).length ? JSON.stringify(capabilitySummary).length : 0;
       const vw = window.innerWidth || document.documentElement.clientWidth;
       const vh = window.innerHeight || document.documentElement.clientHeight;
       const cx = vw / 2;
@@ -1028,7 +1161,7 @@
       }).sort((a, b) => a.sortKey - b.sortKey).slice(0, maxElements).map((x) => x.el);
       const describedAll = ranked.map((el, index) => describeElement(el, index));
       const text = extractPageText().slice(0, maxText);
-      const { elements, omittedBySize } = trimElementsToBudget(describedAll, text.length);
+      const { elements, omittedBySize } = trimElementsToBudget(describedAll, text.length + capabilityChars);
       const snapshot = {
         version: 2,
         url: location.href,
@@ -1036,6 +1169,7 @@
         text,
         elements,
         mainContent: findMainContent(),
+        capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : void 0,
         counts: {
           interactive: nodes.length,
           shown: elements.length,
@@ -1074,6 +1208,12 @@
     const el = holder && holder.deref ? holder.deref() : null;
     if (el && el.isConnected && refFingerprint.get(key) === fingerprintEl(el)) return el;
     return null;
+  }
+  function getRefFingerprint(ref) {
+    return refFingerprint.get(String(ref || "").trim()) || null;
+  }
+  function resolveElementRef(el) {
+    return el ? refFor(el) : null;
   }
 
   // lib/shared/table.js
@@ -1244,6 +1384,32 @@
         rafId2 = raf(tick);
       }
     });
+  }
+
+  // lib/shared/editable-text.js
+  function normalizeEditableText(value) {
+    return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
+  }
+  function firstEditableDifference(expected, actual) {
+    const a = normalizeEditableText(expected);
+    const b = normalizeEditableText(actual);
+    const n = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < n && a[i] === b[i]) i += 1;
+    return {
+      index: i >= a.length && i >= b.length ? -1 : i,
+      expected: a.slice(Math.max(0, i - 24), i + 48),
+      actual: b.slice(Math.max(0, i - 24), i + 48)
+    };
+  }
+  function editableTextSummary(expected, actual) {
+    const diff = firstEditableDifference(expected, actual);
+    return {
+      matchesIntent: diff.index === -1,
+      expectedLength: normalizeEditableText(expected).length,
+      actualLength: normalizeEditableText(actual).length,
+      firstDifference: diff
+    };
   }
 
   // lib/page/commands.js
@@ -1434,6 +1600,12 @@
     return parts.join(" ");
   }
   function targetMissError(params) {
+    if (params && params.ref) {
+      if (getRefFingerprint(params.ref)) {
+        return "ref\u300C" + params.ref + "\u300D\u5DF2\u5931\u6548\uFF1A\u9875\u9762\u7ED3\u6784\u5DF2\u53D8\u5316\uFF08\u5143\u7D20\u88AB\u66FF\u6362/\u79FB\u9664\uFF09\u3002\u8BF7\u91CD\u65B0 get_page_snapshot \u83B7\u53D6\u65B0 ref\uFF0C\u4E0D\u8981\u7EE7\u7EED\u7528\u65E7 ref\u3002";
+      }
+      return "ref\u300C" + params.ref + "\u300D\u4E0D\u5B58\u5728\u6216\u5DF2\u88AB\u6E05\u7406\u3002\u8BF7\u91CD\u65B0 get_page_snapshot \u83B7\u53D6 ref\u3002";
+    }
     const hint = describeLookupMiss(params || {});
     return hint ? "\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20\u3002" + hint : "\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20";
   }
@@ -1499,6 +1671,8 @@
         rect: absoluteRect(el),
         tag: el.tagName.toLowerCase(),
         role: el.getAttribute("role") || "",
+        contentEditable: Boolean(el.isContentEditable),
+        editable: Boolean(el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT"),
         label
       };
     } catch (e) {
@@ -1876,6 +2050,173 @@
       formatInvalidControls(invalid)
     };
   }
+  function cmdQueryElements(params) {
+    const p = params || {};
+    const limit = Math.min(50, Math.max(1, Number(p.limit) || 20));
+    const includeHidden = p.includeHidden === true;
+    const seen = /* @__PURE__ */ new Set();
+    const all = [];
+    let hiddenSkipped = 0;
+    const push = (el) => {
+      if (!el || seen.has(el)) return;
+      if (isElementCollectExcluded(el)) return;
+      if (!includeHidden && !isElementRendered(el)) {
+        hiddenSkipped += 1;
+        return;
+      }
+      seen.add(el);
+      all.push(el);
+    };
+    if (p.selector) {
+      try {
+        queryAllInFrames(document, p.selector).forEach(push);
+      } catch (e) {
+      }
+    } else if (p.role || p.name) {
+      findElementsByRoleName(p.role, p.name).forEach(push);
+      if (p.name) {
+        try {
+          queryAllInFrames(document, "*").forEach((el) => {
+            const tag = String(el.tagName || "").toLowerCase();
+            if (!tag.includes("-")) return;
+            if (normName(accessibleName(el)).indexOf(normName(p.name)) === -1) return;
+            push(el);
+          });
+        } catch (e) {
+        }
+      }
+    } else if (p.testid) {
+      findElementsByTestId(p.testid).forEach(push);
+    } else if (p.text) {
+      const q = normalizeCitationText(p.text);
+      if (q) {
+        const raw = [];
+        try {
+          queryAllInFrames(document, "*").forEach((el) => {
+            if (isElementCollectExcluded(el)) return;
+            const text = normalizeCitationText(el.textContent);
+            if (!text.includes(q)) return;
+            raw.push(el);
+          });
+        } catch (e) {
+        }
+        const hiddenRaw = [];
+        const visibleRaw = [];
+        for (const el of raw) {
+          (isElementRendered(el) ? visibleRaw : hiddenRaw).push(el);
+        }
+        const visibleTextHas = (el) => {
+          try {
+            return normalizeCitationText(el.innerText).includes(q);
+          } catch (e) {
+            return true;
+          }
+        };
+        const reclassifiedHidden = [];
+        const visibleMatches = [];
+        for (const el of visibleRaw) {
+          const hasHiddenInside = hiddenRaw.some((h) => h !== el && el.contains(h));
+          if (!hasHiddenInside || visibleTextHas(el)) visibleMatches.push(el);
+          else reclassifiedHidden.push(el);
+        }
+        if (includeHidden) {
+          visibleMatches.push(...hiddenRaw);
+        } else {
+          const hiddenAll = hiddenRaw.concat(reclassifiedHidden);
+          hiddenSkipped = hiddenAll.filter(
+            (el) => !hiddenAll.some((o) => o !== el && el.contains(o))
+          ).length;
+        }
+        const deepest = visibleMatches.filter((el) => {
+          if (String(el.tagName || "").toLowerCase().includes("-")) return true;
+          return !visibleMatches.some((other) => other !== el && el.contains(other));
+        });
+        all.length = 0;
+        seen.clear();
+        deepest.forEach(push);
+      }
+    } else {
+      return { ok: false, error: "query \u9700\u8981 selector\u3001role/name\u3001testid \u6216 text \u4E4B\u4E00\u4F5C\u4E3A\u67E5\u8BE2\u6761\u4EF6" };
+    }
+    const sorted = all.slice().sort((a, b) => {
+      const ra = a.getBoundingClientRect();
+      const rb = b.getBoundingClientRect();
+      const va = ra.width > 0 && ra.height > 0 ? 0 : 1;
+      const vb = rb.width > 0 && rb.height > 0 ? 0 : 1;
+      return va - vb || ra.top - rb.top || ra.left - rb.left;
+    });
+    const listed = sorted.slice(0, limit);
+    const items = listed.map((el) => {
+      const rect = el.getBoundingClientRect();
+      const tag = String(el.tagName || "").toLowerCase();
+      const text = String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+      const role = roleOf(el);
+      return {
+        ref: resolveElementRef(el),
+        tag,
+        role: role || void 0,
+        name: sliceSafe(accessibleName(el), 0, 120),
+        selector: elementSelector(el),
+        text: sliceSafe(text, 0, 180),
+        visible: isElementRendered(el),
+        customElement: tag.includes("-") || void 0,
+        shadowDepth: shadowDepth(el) || void 0,
+        editable: Boolean(el.isContentEditable || tag === "textarea" || tag === "input"),
+        disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true" || void 0,
+        rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+        center: { x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) },
+        path: ancestorPath(el)
+      };
+    });
+    const lines = items.map(
+      (it, i) => "[" + (i + 1) + "] ref=" + it.ref + " tag=" + it.tag + " selector=" + it.selector + (it.role ? " role=" + it.role : "") + (it.name ? " name=" + JSON.stringify(it.name) : "") + (it.customElement ? " custom=true" : "") + " " + it.rect.width + "\xD7" + it.rect.height + " center=(" + it.center.x + "," + it.center.y + ")" + (it.text ? " text=" + JSON.stringify(it.text.slice(0, 60)) : "")
+    );
+    if (!items.length) {
+      const reasons = [];
+      if (hiddenSkipped) {
+        reasons.push(
+          "\u6709 " + hiddenSkipped + " \u4E2A\u5143\u7D20\u547D\u4E2D\u4F46\u5F53\u524D\u4E0D\u53EF\u89C1\uFF08\u6298\u53E0\u83DC\u5355/\u61D2\u52A0\u8F7D/\u900F\u660E/\u96F6\u5C3A\u5BF8\uFF09\u3002\u4F20 includeHidden:true \u53EF\u5217\u51FA\u5B83\u4EEC\uFF0C\u6216\u5148\u70B9\u51FB\u5C55\u5F00\u518D\u67E5\u3002"
+        );
+      }
+      if (p.text) {
+        let bodyText = "";
+        try {
+          bodyText = normalizeCitationText(document.body ? document.body.innerText : "");
+        } catch (e) {
+        }
+        const q = normalizeCitationText(p.text);
+        reasons.push(
+          q && bodyText.includes(q) ? "\u8FD9\u6BB5\u6587\u5B57\u5728\u5F53\u524D\u53EF\u89C1\u6B63\u6587\u91CC\uFF0C\u4F46\u6CA1\u6709\u843D\u5230\u53EF\u5B9A\u4F4D\u7684\u5143\u7D20\u8FB9\u754C\uFF1B\u6539\u7528 selector / role+name\uFF0C\u6216\u7528 get_ax_snapshot \u53D6\u53EF\u8BBF\u95EE\u8282\u70B9\u3002" : "\u5F53\u524D\u53EF\u89C1\u6B63\u6587\u91CC\u6CA1\u6709\u8FD9\u6BB5\u6587\u5B57\uFF1A\u53EF\u80FD\u5C1A\u672A\u6E32\u67D3\uFF08\u7528 wait_for_element \u7B49\u5B83\u51FA\u73B0\uFF09\uFF0C\u6216\u5728\u8DE8\u57DF iframe\uFF08list_frames\uFF09/ canvas / closed shadow \u91CC\u3002"
+        );
+      } else if (p.selector) {
+        reasons.push(
+          '\u9009\u62E9\u5668\u5F53\u524D\u6CA1\u6709\u547D\u4E2D\uFF1A\u786E\u8BA4\u5B83\u662F\u5426\u5728\u5F00\u653E shadow root \u5185\uFF08\u672C\u5DE5\u5177\u4F1A\u7A7F\u900F\uFF09\uFF0C\u6216\u5148\u7528 wait_for_element({selector, state:"attached"}) \u7B49\u5B83\u6302\u8F7D\u3002'
+        );
+      } else {
+        reasons.push("\u53EF\u6362 role+name / testid / text \u518D\u67E5\uFF0C\u6216\u5148\u7528 get_page_snapshot \u770B\u9875\u9762\u4E0A\u6709\u54EA\u4E9B\u53EF\u4EA4\u4E92\u5143\u7D20\u3002");
+      }
+      if (!hiddenSkipped && (p.selector || p.role || p.name || p.testid)) {
+        reasons.push("\u82E5\u76EE\u6807\u5728\u8DE8\u57DF iframe\uFF0C\u7528 list_frames \u627E\u5230 frameId \u540E\u5148 get_page_snapshot({frameId}) \u518D\u64CD\u4F5C\u3002");
+      }
+      return {
+        ok: true,
+        count: 0,
+        listed: 0,
+        truncated: false,
+        hiddenSkipped,
+        elements: [],
+        result: "\u5143\u7D20\u67E5\u8BE2\u547D\u4E2D 0 \u4E2A\u3002\n\u8BCA\u65AD\uFF1A\n- " + reasons.join("\n- ")
+      };
+    }
+    return {
+      ok: true,
+      count: all.length,
+      listed: items.length,
+      truncated: all.length > items.length,
+      elements: items,
+      result: "\u5143\u7D20\u67E5\u8BE2\u547D\u4E2D " + all.length + " \u4E2A\uFF08\u5217\u51FA " + items.length + " \u4E2A\uFF09\uFF1A\n" + (lines.join("\n") || "\uFF08\u65E0\uFF09") + "\n\u63D0\u793A\uFF1A\u53EF\u76F4\u63A5\u628A ref \u4F20\u7ED9 click_element / type_text / get_attribute\uFF1Bcustom=true \u8868\u793A\u81EA\u5B9A\u4E49\u5143\u7D20\uFF0Ccenter \u53EF\u7528\u4E8E click_at \u964D\u7EA7\u3002"
+    };
+  }
   function cmdReadOptions(params) {
     const els = findElementsFor(params);
     if (!els.length) return { ok: false, error: targetMissError(params) };
@@ -2001,6 +2342,7 @@
     if (!els.length) return { ok: false, error: targetMissError(params) };
     const el = els[0];
     const tag = (el.tagName || "").toLowerCase();
+    const beforeHref = location.href;
     const ready = await ensureActionable(el);
     if (!ready) {
       if (el.disabled || el.getAttribute("aria-disabled") === "true") {
@@ -2010,7 +2352,8 @@
         if (typeof el.click === "function") {
           el.click();
           await nextPaint();
-          return { ok: true, forced: true, selector: elementSelector(el), result: "\u76EE\u6807\u5143\u7D20\u88AB\u906E\u6321\u6216\u6682\u4E0D\u53EF\u4EA4\u4E92\uFF0C\u5DF2\u6539\u7528\u7A0B\u5E8F\u5316\u70B9\u51FB" + stateSuffix(el) };
+          const navigated2 = location.href !== beforeHref ? "\uFF08\u9875\u9762\u5DF2\u5BFC\u822A\u5230 " + location.href + "\uFF09" : "";
+          return { ok: true, forced: true, selector: elementSelector(el), result: "\u76EE\u6807\u5143\u7D20\u88AB\u906E\u6321\u6216\u6682\u4E0D\u53EF\u4EA4\u4E92\uFF0C\u5DF2\u6539\u7528\u7A0B\u5E8F\u5316\u70B9\u51FB" + stateSuffix(el) + navigated2 };
         }
       } catch (e) {
       }
@@ -2024,6 +2367,7 @@
     }
     await nextPaint();
     const after = describeTargetState(el);
+    const navigated = location.href !== beforeHref ? "\uFF08\u9875\u9762\u5DF2\u5BFC\u822A\u5230 " + location.href + "\uFF09" : "";
     let changed = "";
     if (after && after !== before) changed = "\uFF08\u70B9\u51FB\u524D\uFF1A" + (before || "\u65E0\u72B6\u6001\u5C5E\u6027") + "\uFF09";
     return {
@@ -2031,7 +2375,7 @@
       selector: elementSelector(el),
       stateBefore: before,
       stateAfter: after,
-      result: "\u5DF2\u70B9\u51FB\u5143\u7D20 " + tag + stateSuffix(el) + changed
+      result: "\u5DF2\u70B9\u51FB\u5143\u7D20 " + tag + stateSuffix(el) + changed + navigated
     };
   }
   function nextPaint() {
@@ -2169,7 +2513,7 @@
   }
   function editableValue(el) {
     if (!el) return null;
-    if (el.isContentEditable) return String(el.textContent || "");
+    if (el.isContentEditable) return String(el.innerText !== void 0 ? el.innerText : el.textContent || "");
     if (typeof el.value === "string") return el.value;
     return null;
   }
@@ -2191,6 +2535,60 @@
     }
     el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
+  function selectEditableContents(el) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection2 = window.getSelection();
+      if (!selection2) return;
+      selection2.removeAllRanges();
+      selection2.addRange(range);
+    } catch (e) {
+    }
+  }
+  function placeCaretAtEnd(el) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const selection2 = window.getSelection();
+      if (!selection2) return;
+      selection2.removeAllRanges();
+      selection2.addRange(range);
+    } catch (e) {
+    }
+  }
+  function writeContentEditable(el, value, clearFirst) {
+    el.focus();
+    try {
+      if (clearFirst === true) {
+        selectEditableContents(el);
+        document.execCommand("delete", false, null);
+      } else {
+        placeCaretAtEnd(el);
+      }
+      const text = String(value);
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          const para = document.execCommand("insertParagraph", false, null);
+          if (!para) {
+            const br = document.execCommand("insertLineBreak", false, null);
+            if (!br) document.execCommand("insertText", false, "\n");
+          }
+        }
+        if (lines[i] || i === 0) {
+          const ok = document.execCommand("insertText", false, lines[i]);
+          if (!ok) throw new Error("insertText \u8FD4\u56DE false");
+        }
+      }
+      return "execCommand-insertText";
+    } catch (e) {
+      el.textContent = String(value);
+      dispatchInputChange(el, String(value));
+      return "textContent-fallback";
+    }
+  }
   async function cmdTypeText(params) {
     const el = firstTarget(params);
     if (!el) return { ok: false, error: "\u672A\u627E\u5230\u53EF\u8F93\u5165\u7684\u76EE\u6807\u5143\u7D20" };
@@ -2207,17 +2605,23 @@
     );
     const before = editableValue(el) || "";
     const next = params.clearFirst === true ? text : before + text;
+    let strategy = "native-value";
     try {
       el.focus();
-      setNativeValue(el, next);
-      dispatchInputChange(el, text);
+      if (el.isContentEditable) {
+        strategy = writeContentEditable(el, text, params.clearFirst === true);
+      } else {
+        setNativeValue(el, next);
+        dispatchInputChange(el, text);
+      }
     } catch (e) {
       return { ok: false, error: "\u8F93\u5165\u6587\u672C\u5931\u8D25\uFF1A" + e.message };
     }
     if (before !== next) {
       pushUndo(() => {
         try {
-          setNativeValue(el, before);
+          if (el.isContentEditable) writeContentEditable(el, before, true);
+          else setNativeValue(el, before);
           dispatchInputChange(el, before);
         } catch (e) {
         }
@@ -2225,19 +2629,26 @@
     }
     await nextPaint();
     const after = editableValue(el) || "";
-    const matched = after === next;
+    const summary = editableTextSummary(next, after);
+    const matched = summary.matchesIntent;
     const clip = (s) => JSON.stringify(String(s).slice(0, 80));
-    return {
-      ok: true,
+    const result = {
+      ok: matched,
       changed: before !== next,
       alreadySatisfied: before === next,
       valuePresent: Boolean(next),
       valueBefore: before,
       valueAfter: after,
       matchesIntent: matched,
+      partial: !matched,
+      strategy,
+      expectedLength: summary.expectedLength,
+      actualLength: summary.actualLength,
+      firstDifference: summary.firstDifference,
       selector: elementSelector(el),
-      result: (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u5B9E\u9645\u503C\uFF08" + after.length + " \u5B57\u7B26\uFF09\uFF1A" + clip(after) + (matched ? "" : " \u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26 \u2014\u2014 \u9884\u671F\u4E3A " + clip(next) + "\u3002\u8BF7\u4EE5\u5B9E\u9645\u503C\u4E3A\u51C6\uFF0C\u5E76\u68C0\u67E5\u662F\u5426\u6709\u5176\u5B83\u64CD\u4F5C\u6539\u5199\u4E86\u8FD9\u4E2A\u8F93\u5165\u6846\u3002")
+      result: matched ? (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u5B9E\u9645\u503C\uFF08" + summary.actualLength + " \u5B57\u7B26\uFF09\uFF1A" + clip(after) : "\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08strategy=" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + summary.actualLength + " \u5B57\u7B26\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index + "\u3002\u5B9E\u9645\u503C\uFF1A" + clip(after) + "\u3002\u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26 \u2014\u2014 \u9884\u671F\u4E3A " + clip(next) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u8BFB\u7F16\u8F91\u5668\u6216\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u3002"
     };
+    return result;
   }
   function keyCodeFor(key) {
     const codes = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35, Space: 32 };
@@ -2435,7 +2846,18 @@
           }
         }
         if (Date.now() - started >= timeoutMs) {
-          finish({ ok: false, matched: false, error: "\u7B49\u5F85\u5143\u7D20\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09" });
+          const current = firstTarget(params);
+          const currentText = current ? String(current.innerText || current.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160) : "";
+          const currentCount = findElementsFor(params).length;
+          const hint = currentText ? "\u5F53\u524D\u547D\u4E2D\u7684\u5143\u7D20\u6587\u672C\u662F\uFF1A" + JSON.stringify(currentText) + "\u3002\u8BF7\u6838\u5BF9 text \u6761\u4EF6\u6216\u6539\u7528 selector/ref\u3002" : describeLookupMiss(params, 3) || "\u5F53\u524D\u6CA1\u6709\u547D\u4E2D\u5143\u7D20\uFF1B\u82E5\u662F\u81EA\u5B9A\u4E49\u7EC4\u4EF6/\u5F02\u6B65\u6E32\u67D3\uFF0C\u8BF7\u91CD\u8BFB\u5FEB\u7167\u6216\u6539\u7528 selector\u3002";
+          finish({
+            ok: false,
+            matched: false,
+            timeout: true,
+            currentCount,
+            currentText,
+            error: "\u7B49\u5F85\u5143\u7D20\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09\u3002" + hint
+          });
         }
       };
       interval = setInterval(check, pollMs);
@@ -2493,6 +2915,8 @@
         return cmdReadOptions(params);
       case "extract_table":
         return cmdExtractTable(params);
+      case "query_elements":
+        return cmdQueryElements(params);
       default:
         return { ok: false, error: "\u672A\u77E5\u9875\u9762\u547D\u4EE4\uFF1A" + command };
     }
@@ -2633,7 +3057,7 @@
     let value;
     try {
       const { names, values, safeWindow } = buildSandboxArgs();
-      const fn = new Function(...names, code);
+      const fn = new Function(...names, "return (async () => {\n" + code + "\n})();");
       value = fn.call(safeWindow, ...values);
     } catch (e) {
       return { ok: false, error: "JS \u6267\u884C\u51FA\u9519\uFF1A" + (e && e.message ? e.message : String(e)) };

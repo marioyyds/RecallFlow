@@ -151,11 +151,19 @@ test('接线：点击成功后必须回报目标状态（否则三态开关无�
 test('接线：输入后必须回读实际值，并在不符预期时明说', () => {
   assert.match(SRC, /const after = editableValue\(el\) \|\| ''/, '要回读实际值');
   assert.match(SRC, /matchesIntent: matched/, '要带上「是否与预期一致」');
+  assert.match(SRC, /ok:\s*matched/, '不一致时必须以 ok:false 触发上层降级/重试');
+  assert.match(SRC, /partial:\s*!matched/, '不一致时必须标出 partial，不能伪装成完整成功');
   assert.match(SRC, /与预期不符/, '不一致时必须明说，否则残留字符无法归因');
 });
 
 test('接线：定位失败走 targetMissError（带近似候选），不再是光秃秃一句', () => {
   assert.match(SRC, /function targetMissError/);
+  assert.match(SRC, /ref「' \+ params\.ref \+ '」已失效：页面结构已变化/, '失效 ref 要明确要求重新快照');
   const bare = SRC.match(/error: '未找到目标元素'/g) || [];
   assert.equal(bare.length, 0, '不该再有直接返回光秃秃「未找到目标元素」的站点，实际 ' + bare.length + ' 处');
+});
+
+test('接线：点击后页面导航时必须在结果里报告新 URL', () => {
+  assert.match(SRC, /页面已导航到/);
+  assert.match(SRC, /location\.href !== beforeHref/);
 });

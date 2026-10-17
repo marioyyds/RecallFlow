@@ -32,4 +32,17 @@ test('系统提示说明滚动无效时该查内部滚动容器', () => {
   const p = buildSystemPrompt(INTENTS.BROWSER, '滚动页面', ['scroll_page', 'run_javascript'], []);
   assert.match(p, /位置未变化/, '要说明 scroll_page 报「位置未变化」意味着什么');
   assert.match(p, /scrollTop/, '要给出内部容器 scrollTop 的做法');
+  // scroll_page 自 7d87402 起就能滚元素自身（selector + y），提示里却仍指向
+  // run_javascript 设 scrollTop —— 那是**多一次高危审批**，且页面 CSP 严时还会失败。
+  assert.match(p, /scroll_page\(\{selector/, '内部容器要给出 scroll_page 的直接滚法');
+  assert.match(p, /不要为此调用 run_javascript/, '要明确禁止为滚容器去开高危 JS');
+});
+
+// 小红书实操里 70 次调用有 35 次 run_javascript，绝大多数只是找 custom element /
+// 读 rect / 查 shadow。这些都已由 inspect_element({op:"query"}) 覆盖。
+test('系统提示把候选探索指向 inspect_element 的 query 档', () => {
+  const p = buildSystemPrompt(INTENTS.BROWSER, '找到发布按钮', ['inspect_element', 'run_javascript', 'get_page_snapshot'], []);
+  assert.match(p, /inspect_element\(\{op:"query"\}\)/, '要给出 query 档的准确调用形状');
+  assert.match(p, /custom element/i, '要说清哪类目标走 query');
+  assert.match(p, /不要为普通 DOM 查询调用 run_javascript/, '要挡住探索性 run_javascript');
 });
