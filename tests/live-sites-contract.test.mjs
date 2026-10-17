@@ -52,3 +52,19 @@ test('真实站点：server.mjs 必须有对应的分派块（漏接线 = 静默
     []
   );
 });
+
+test('真实站点：指令不得混入 server.mjs 里硬编码的场景触发词（如「框架」）', () => {
+  // 夹具里除了 PLAYBOOKS 触发词，还有一批**硬编码**的场景触发词（场景 A-G 等），
+  // 它们也按 includes 顺序匹配、且排在 live 分派之前。实测 github-repo-read 的指令里
+  // 出现「Express 框架」就撞上了场景 A 的「框架」，静默跑成跨域 iframe 剧本。
+  const src = fs.readFileSync('tests/e2e/fixtures/server.mjs', 'utf8');
+  const literals = [...new Set([...src.matchAll(/userText\.includes\('([^']+)'\)/g)].map((m) => m[1]))];
+  assert.ok(literals.length > 0, '应能识别出硬编码触发词（为 0 说明正则失效）');
+  const problems = [];
+  for (const s of LIVE_SITES) {
+    for (const t of literals) {
+      if (String(s.instruction || '').includes(t)) problems.push('「' + s.id + '」的指令含硬编码触发词「' + t + '」');
+    }
+  }
+  assert.deepEqual(problems, []);
+});

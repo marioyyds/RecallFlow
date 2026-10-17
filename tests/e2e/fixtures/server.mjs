@@ -4507,6 +4507,19 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // GitHub 仓库 README 阅读（live site id = 'github-repo-read'，开发者场景）。
+    if (userText.includes(LIVE_SITES.find((s) => s.id === 'github-repo-read').trigger)) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 500 }); return; }
+      if (done === 1) { toolStep(res, 'inspect_element', { op: 'text', selector: 'article.markdown-body' }); return; }
+      if (done === 2) {
+        toolStep(res, 'add_entry', { type: 'note', title: 'Express 简介', note: 'expressjs/express：Fast, unopinionated, minimalist web framework for Node.js。' });
+        return;
+      }
+      finalText(res, '已读 expressjs/express 的 README，并把项目要点存入知识库。', 60);
+      return;
+    }
+
     // 有道词典查单词（live site id = 'youdao-dict'，学生场景）。
     if (userText.includes(LIVE_SITES.find((s) => s.id === 'youdao-dict').trigger)) {
       const done = toolResults.length;

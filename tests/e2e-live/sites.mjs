@@ -131,6 +131,19 @@ export const LIVE_SITES = Object.freeze([
     ],
   },
   {
+    id: 'github-repo-read',
+    name: 'GitHub 仓库 README 阅读（开发者）',
+    url: 'https://github.com/expressjs/express',
+    trigger: 'github 仓库',
+    instruction: '帮我读一下 github 仓库 expressjs/express 的 README，把项目是什么记成一条笔记（标题「Express 简介」）。',
+    tools: ['get_page_snapshot', 'inspect_element', 'add_entry'],
+    checks: [
+      { expr: "location.pathname === '/expressjs/express'", label: '确实落在目标仓库页' },
+      { expr: "(document.querySelector('article.markdown-body') || { innerText: '' }).innerText.length > 0", label: 'README 正文真的渲染出来' },
+    ],
+    knowledge: { title: 'Express 简介', noteIncludes: 'Node.js' },
+  },
+  {
     id: 'httpbin-form',
     name: 'httpbin 表单填写并提交（办公）',
     // 用 httpbin 而不是 w3schools：w3schools 的示例表单跑在**iframe**里，顶层 document 拿不到输入框；

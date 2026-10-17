@@ -56,12 +56,11 @@ node scripts/run-e2e-live.mjs
    `tests/e2e/golden.spec.mjs`（「SPA 导航移除宿主后自动重建」）。
    注：GitHub 点进仓库的场景仍暂时收敛为"读结果并沉淀"——点击后是否还会中断本轮任务
    （端口级而非 UI 级）待下一步复核。
-7. **GitHub 仓库页上任务停在第一次快照**：`github.com/<owner>/<repo>` 直接打开时，
-   run 只做了一次 get_page_snapshot 就停 —— 已确认**宿主还在、面板还开着、mock 也收到了
-   正确的指令**（reqs=2，两次 userText 都命中触发词），但第二次 agent 请求始终没发出。
-   同流程在 Wikipedia/arXiv/MDN 都能跑完，所以是 SW 侧在"快照结果回传 → 下一轮请求"之间
-   卡住，不是 UI/宿主问题。待深挖（怀疑与 GitHub 仓库页快照体量/内容触发某条路径有关）。
-   仓库 README 阅读场景暂不收录。
+7. **GitHub 仓库页"任务停在第一次快照"—— 已查明并修复（是夹具触发词碰撞，不是产品 bug）**：
+   真实站点指令里的「Express 框架」命中了 server.mjs 里硬编码的场景 A 触发词「框架」
+   （跨域 iframe 剧本，排在 live 分派之前），于是静默跑成夹具剧本、只做了一次快照就收尾。
+   已改指令避免「框架」，并在 `tests/live-sites-contract.test.mjs` 补一条门禁：
+   **真实站点指令不得混入 server.mjs 里硬编码的场景触发词**（动态解析 `userText.includes('…')`）。
 8. **全页跳转会中断本轮 run —— 已修复**：端口断开不再自动 abort（整页刷新也会断开端口），
    停止改为面板显式发 `{type:'stop'}`，标签页关闭由 `tabs.onRemoved` 兜底。
    于是必应搜索提交、httpbin 表单提交这类整页导航后，任务会继续经 tab 执行（
