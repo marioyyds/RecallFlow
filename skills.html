@@ -33,6 +33,22 @@
   <main class="skill-page">
     <p class="skill-intro">技能采用 SkillHub 标准的 <code>SKILL.md</code> 形态（frontmatter + Markdown 正文）。内置技能为只读；你可新建、编辑、删除自定义技能，或从社区导入 / 导出 SKILL.md。</p>
 
+    <section class="skill-toolbar" aria-label="技能筛选">
+      <label class="skill-search">
+        <span aria-hidden="true">⌕</span>
+        <input id="skill-search" type="search" placeholder="搜索名称、描述、标签或关键词…" aria-label="搜索技能">
+      </label>
+      <div class="skill-kind-filters" id="skill-kind-filters" role="group" aria-label="按来源筛选">
+        <button class="skill-filter-chip active" type="button" data-kind="all" aria-pressed="true">全部</button>
+        <button class="skill-filter-chip" type="button" data-kind="builtin" aria-pressed="false">内置</button>
+        <button class="skill-filter-chip" type="button" data-kind="custom" aria-pressed="false">自定义</button>
+      </div>
+      <select id="skill-category-filter" class="skill-category-filter" aria-label="按分类筛选">
+        <option value="all">全部分类</option>
+      </select>
+      <span id="skill-visible-count" class="skill-visible-count"></span>
+    </section>
+
     <section id="import-section" class="skill-import hidden">
       <h2 class="skill-import-title">导入 SKILL.md</h2>
       <p class="skill-import-hint">粘贴标准 SKILL.md 文本（含 <code>---</code> frontmatter），或选择本地文件。导入会按 <code>name</code> 覆盖同名自定义技能。</p>
@@ -52,6 +68,7 @@
     <div class="confirm-dialog skill-form-dialog">
       <h2 id="skill-form-title">新建技能</h2>
       <div class="skill-form-body">
+        <div class="skill-subtitle">基本信息</div>
         <label class="skill-field"><span>标识 name（kebab-case，唯一）</span><input id="f-name" type="text" placeholder="如 highlight-key-points"></label>
         <label class="skill-field"><span>显示名 displayName</span><input id="f-display" type="text" placeholder="如：划重点 / 高亮关键信息"></label>
         <label class="skill-field"><span>描述 description（何时使用）</span><textarea id="f-desc" rows="2" placeholder="一句话说明这个技能在什么情况下启用"></textarea></label>
@@ -68,7 +85,7 @@
             <option value="agent">agent（完整 Agent）</option>
           </select>
         </label>
-        <div class="skill-subtitle">RecallFlow 专用触发条件（写入 x-recallflow-* 扩展字段）</div>
+        <div class="skill-subtitle">触发规则</div>
         <div class="skill-field"><span>触发意图</span>
           <div class="skill-checks">
             <label><input type="checkbox" value="browser_task"> 浏览器操作</label>
@@ -79,8 +96,10 @@
         </div>
         <label class="skill-field"><span>触发关键词（每行一组，组内用 | 分隔）</span><textarea id="f-keywords" rows="2" placeholder="划出|划重点|标出&#10;关键信息|重点内容"></textarea></label>
         <label class="skill-field"><span>依赖工具（逗号分隔）</span><textarea id="f-tools" rows="2" placeholder="highlight_text, complete_task"></textarea></label>
+        <div class="skill-subtitle">高级配置</div>
         <label class="skill-field"><span>正文 content（Markdown 指令）</span><textarea id="f-content" rows="8" placeholder="用 Markdown 写清技能的做法、步骤、约束…"></textarea></label>
       </div>
+      <div id="skill-form-error" class="skill-form-error hidden" role="alert"></div>
       <div class="confirm-actions">
         <button class="mini" id="skill-form-cancel" type="button">取消</button>
         <button class="mini primary" id="skill-form-save" type="button">保存</button>
@@ -88,7 +107,7 @@
     </div>
   </div>
 
-  <div class="confirm-overlay hidden" id="skill-del-overlay" role="dialog" aria-modal="true">
+  <div class="confirm-overlay hidden" id="skill-del-overlay" role="dialog" aria-modal="true" aria-labelledby="skill-del-msg">
     <div class="confirm-dialog">
       <div class="confirm-msg" id="skill-del-msg"></div>
       <div class="confirm-actions">

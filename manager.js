@@ -198,6 +198,10 @@ function renderActiveFilters() {
   const q = $('search').value.trim();
   if (q) labels.push('搜索：' + q);
   el.innerHTML = labels.length ? labels.map((x) => `<span class="active-filter-chip">${esc(x)}</span>`).join('') : '<span class="filter-empty">全部内容</span>';
+  const summary = $('advanced-filter-summary');
+  if (summary) summary.textContent = labels.length ? labels.join(' · ') : '全部内容';
+  const details = $('advanced-filters');
+  if (details && labels.length) details.open = true;
 }
 
 function renderStats() {

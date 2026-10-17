@@ -4260,11 +4260,24 @@
     .p-head:active { cursor: grabbing; }
     .panel.dark .p-head { background: #2f3339; border-color: #3a3f46; }
     .p-head .logo { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
-    .p-head .title { font-size: 13px; font-weight: 600; color: #333; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .p-head .title { font-size: 14px; font-weight: 600; color: #333; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .panel.dark .p-head .title { color: #e3e5e8; }
-    .p-head .usage { font-size: 11px; color: #98a0aa; margin-left: auto; margin-right: 6px; white-space: nowrap; }
-    .p-head .close { border: none; background: none; color: #999; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; }
+    .p-head .usage { font-size: 12px; color: #66707d; white-space: nowrap; }
+    .p-head .close { border: none; background: none; color: #6b7280; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; min-width: 32px; min-height: 32px; }
     .p-head .close:hover { color: #e74c3c; background: rgba(0,0,0,.05); }
+    .p-head .more-btn { border: 1px solid #d5d9e0; background: #fff; color: #4d5968; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 18px; line-height: 1; padding: 0; flex-shrink: 0; }
+    .p-head .more-btn:hover { border-color: #4a90d9; color: #4a90d9; }
+    .panel.dark .p-head .more-btn { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
+    .p-more-menu { position: absolute; z-index: 31; top: 46px; right: 10px; width: min(270px, calc(100% - 20px)); padding: 8px; background: #fff; border: 1px solid #dfe3e9; border-radius: 11px; box-shadow: 0 12px 34px rgba(22,34,51,.22); }
+    .p-more-menu[hidden] { display: none; }
+    .panel.dark .p-more-menu { background: #2a2e34; border-color: #444a53; box-shadow: 0 14px 38px rgba(0,0,0,.45); }
+    .p-more-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 8px; border-radius: 7px; }
+    .p-more-row:hover { background: #f5f8fc; }
+    .panel.dark .p-more-row:hover { background: #323840; }
+    .p-more-label { color: #66707d; font-size: 12px; font-weight: 600; }
+    .panel.dark .p-more-label { color: #aab2bd; }
+    .p-more-menu .handoff { width: 100%; margin: 0 0 4px; text-align: left; padding: 8px 9px; border-radius: 7px; }
+    .p-more-menu .theme { margin-left: auto; }
 /* \u4EA4\u63A5\u6807\u8BC6\u82AF\u7247\uFF1A\u70B9\u4E00\u4E0B\u628A\u672C\u6B21\u4F1A\u8BDD\u6253\u5305\u5E76\u590D\u5236\u53EF\u76F4\u63A5\u7C98\u7ED9 AI \u7684\u6307\u4EE4 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
 .p-head .handoff:hover { border-color: #4a90d9; color: #4a90d9; }
@@ -4291,11 +4304,11 @@
     .session-main { flex: 1; min-width: 0; border: none; background: none; text-align: left; padding: 7px 6px 7px 9px; cursor: pointer; color: #374151; display: flex; flex-direction: column; gap: 2px; }
     .panel.dark .session-main { color: #e1e5eb; }
     .session-title { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 230px; }
-    .session-meta { font-size: 10px; color: #8a94a2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .session-meta { font-size: 11px; color: #66707d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .panel.dark .session-meta { color: #99a3af; }
     .session-actions { display: flex; align-items: center; gap: 1px; padding-right: 4px; opacity: .72; transition: opacity .12s; }
     .session-item:hover .session-actions, .session-item.active .session-actions, .session-item:focus-within .session-actions { opacity: 1; }
-    .session-actions button { border: none; background: none; color: #7e8996; cursor: pointer; width: 24px; height: 24px; border-radius: 5px; font-size: 12px; padding: 0; }
+    .session-actions button { border: none; background: none; color: #66707d; cursor: pointer; width: 30px; height: 30px; border-radius: 6px; font-size: 13px; padding: 0; }
     .session-actions button:hover { background: rgba(74,144,217,.12); color: #2f74b8; }
     .session-actions button[data-session-action="delete"]:hover { background: rgba(231,76,60,.12); color: #c0392b; }
     .panel.dark .session-actions button { color: #aab2bc; }
@@ -4466,7 +4479,7 @@
     .stopped-note { margin-top: 6px; font-size: 11.5px; color: #98a0aa; user-select: none; }
     .p-foot { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #e2e5ea; }
     .panel.dark .p-foot { border-color: #3a3f46; }
-    .p-foot button { border: 1px solid #e2e5ea; background: #fff; color: #555; border-radius: 8px; padding: 5px 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+    .p-foot button { border: 1px solid #e2e5ea; background: #fff; color: #555; border-radius: 8px; padding: 6px 12px; min-height: 32px; font-size: 12px; cursor: pointer; transition: all .15s; }
     .panel.dark .p-foot button { background: #26292e; border-color: #3a3f46; color: #ccc; }
     .p-foot button:hover { border-color: #4a90d9; color: #4a90d9; }
     .p-foot .spacer { flex: 1; }
@@ -4491,12 +4504,13 @@
     .cmd-send {
       border: 1px solid #4a90d9; background: #4a90d9; color: #fff;
       border-radius: 8px; padding: 0 14px; font-size: 13px; cursor: pointer; font-family: inherit;
-      transition: background .15s; flex-shrink: 0;
+      transition: background .15s; flex-shrink: 0; min-height: 36px;
     }
     .cmd-send:hover { background: #3a7cc4; }
     .cmd-send:disabled { opacity: .5; cursor: not-allowed; }
-    .quick-prompts { display: flex; gap: 5px; flex-wrap: wrap; margin: 0 0 7px; }
-    .quick-prompt { border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
+    .quick-prompts { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding: 0 0 3px; margin: 0 0 7px; }
+    .quick-prompts::-webkit-scrollbar { display: none; }
+    .quick-prompt { flex: 0 0 auto; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; cursor: pointer; white-space: nowrap; }
     .quick-prompt:hover { background: #e5f0fb; }
     .panel.dark .quick-prompt { background: #293746; border-color: #3d5570; color: #9bc5eb; }
     .pick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
@@ -4508,7 +4522,7 @@
     .pick-chip .pick-copy:hover { opacity: 1; }
     .pick-clear-all { border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-family: inherit; }
     .panel.dark .pick-clear-all { background: #293746; border-color: #3d5570; color: #9bc5eb; }
-    .cmd-pick { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 8px; padding: 0 7px; font-size: 12px; cursor: pointer; flex-shrink: 0; font-family: inherit; white-space: nowrap; }
+    .cmd-pick { display: inline-flex; align-items: center; justify-content: center; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 8px; padding: 0 9px; min-width: 36px; min-height: 36px; font-size: 12px; cursor: pointer; flex-shrink: 0; font-family: inherit; white-space: nowrap; }
     .cmd-pick:hover { background: #e5f0fb; }
     .cmd-pick.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }
     .panel.dark .cmd-pick { background: #293746; border-color: #3d5570; color: #9bc5eb; }
@@ -4548,7 +4562,9 @@
     .fab.thinking { animation: fab-pulse 1.2s ease-in-out infinite; }
     @keyframes fab-pulse { 0%,100% { box-shadow: 0 8px 22px rgba(45,105,165,.36), 0 0 0 0 rgba(82,211,138,.35); } 50% { box-shadow: 0 10px 26px rgba(45,105,165,.48), 0 0 0 7px rgba(82,211,138,0); } }
     @media (max-width: 600px) { .fab { right: 12px; width: 46px; height: 46px; font-size: 13px; } }
-    @media (prefers-reduced-motion: reduce) { .fab, .bubble { animation: none !important; transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+    }
     .cite-badge {
       display: inline-flex; align-items: center; gap: 3px;
       background: #eaf3fc; color: #4a90d9; border: 1px solid #b8d4f0;
@@ -4639,8 +4655,9 @@
     .p-progress .pp-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .p-progress .pp-time { font-variant-numeric: tabular-nums; opacity: .85; flex-shrink: 0; }
     /* \u4E3B\u9898\u5207\u6362 */
-    .p-head .theme { border: 1px solid transparent; background: none; color: #98a0aa; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 5px; border-radius: 6px; font-family: inherit; transition: all .15s; }
+    .p-head .theme { border: 1px solid #d5d9e0; background: #fff; color: #66707d; cursor: pointer; font-size: 13px; line-height: 1; padding: 5px 8px; min-width: 38px; min-height: 30px; border-radius: 7px; font-family: inherit; transition: all .15s; }
     .p-head .theme:hover { background: rgba(0,0,0,.06); color: #4a90d9; }
+    .panel.dark .p-head .theme { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
     .panel.dark .p-head .theme:hover { background: rgba(255,255,255,.08); color: #6aa5e0; }
     /* \u9AD8\u98CE\u9669\u5DE5\u5177\u5BA1\u6279\uFF1A\u7ED9\u5B8C\u6574\u4EE3\u7801\u800C\u4E0D\u662F\u622A\u65AD\u5230 400 \u5B57\u7B26 */
     .tool-approval-code { margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,.06); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
@@ -4668,7 +4685,7 @@
     .panel.dark .tool-reject { color:#c5cbd3; border-color:#59616d !important; }
     .approval-settings { position:relative; padding:8px 10px; border-bottom:1px solid var(--border,#d5d9e0); }
     .panel.approval-open { overflow:visible; }
-    .approval-settings-toggle { width:100%; text-align:left; color:#526079; background:transparent; border:0; font-size:12px; cursor:pointer; padding:4px 2px; }
+    .approval-settings-toggle { width:100%; min-height:36px; text-align:left; color:#526079; background:transparent; border:0; font-size:12px; cursor:pointer; padding:6px 2px; }
     .approval-settings-toggle span { float:right; font-size:22px; line-height:12px; }
     .approval-settings-popover { position:absolute; left:10px; right:10px; bottom:42px; z-index:20; padding:10px; border:1px solid var(--border,#d5d9e0); border-radius:9px; background:var(--panel-bg,#fff); box-shadow:0 8px 24px rgba(0,0,0,.16); max-height:56vh; overflow:auto; }
     .approval-settings-caption { color:#888; font-size:10px; margin:6px 0 4px; }
@@ -4686,6 +4703,15 @@
     .panel.dark .approval-settings-popover select { background:#26292e; border-color:#3a3f46; color:#e3e5e8; }
     .panel.dark .approval-settings-toggle { color:#b6c0cc; }
     .panel.dark .approval-settings-popover { background:#26292e; border-color:#3a3f46; }
+    @media (max-width: 480px) {
+      .p-head { gap: 6px; padding: 8px 10px; }
+      .p-head .logo { width: 18px; height: 18px; }
+      .p-head .session-btn { max-width: 86px; min-height: 32px; }
+      .p-foot { flex-wrap: wrap; }
+      .p-foot .copy-btn { margin-left: 0; }
+      .session-actions button { width: 36px; height: 36px; }
+      .quick-prompt { min-height: 32px; }
+    }
 `;
 
   // lib/assistant/run-hub.js
@@ -4943,6 +4969,7 @@
   var panelTextEl = null;
   var fab = null;
   var conversation = [];
+  var panelTitleEl = null;
   var panelSessionId = "";
   var panelSessionSeq = 0;
   var panelSessionList = [];
@@ -4950,6 +4977,9 @@
   var panelSessionMenuEl = null;
   var panelSessionBtnEl = null;
   var panelSessionMenuOpen = false;
+  var panelMoreMenuEl = null;
+  var panelMoreBtnEl = null;
+  var panelMoreMenuOpen = false;
   var panelSessionSaveChain = Promise.resolve();
   var panelSessionSwitchInFlight = false;
   var deferredRemoteSessionId = "";
@@ -5163,6 +5193,10 @@
     panel = null;
     panelBody = null;
     panelTextEl = null;
+    panelTitleEl = null;
+    panelMoreMenuEl = null;
+    panelMoreBtnEl = null;
+    panelMoreMenuOpen = false;
     planBar = null;
     stopBtn = null;
     sendBtn = null;
@@ -5275,6 +5309,10 @@
       panel = null;
       panelBody = null;
       panelTextEl = null;
+      panelTitleEl = null;
+      panelMoreMenuEl = null;
+      panelMoreBtnEl = null;
+      panelMoreMenuOpen = false;
       planBar = null;
       if (fab) fab.classList.remove("hidden");
     }
@@ -5970,6 +6008,11 @@
     const current = panelSessionList.find((s) => s.id === panelSessionId);
     const count = panelSessionList.length;
     panelSessionBtnEl.textContent = "\u{1F5C2} \u4F1A\u8BDD" + (count ? " " + count : "");
+    if (panelTitleEl) {
+      const titleText = current && current.title ? current.title : "RecallFlow";
+      panelTitleEl.textContent = titleText;
+      panelTitleEl.title = titleText;
+    }
     const label = current ? "\u5F53\u524D\u4F1A\u8BDD\uFF1A" + current.title + "\uFF08" + count + " \u4E2A\u4F1A\u8BDD\uFF0C\u70B9\u51FB\u5207\u6362 / \u65B0\u5EFA\uFF09" : "\u4F1A\u8BDD\u5217\u8868\uFF08" + count + " \u4E2A\uFF0C\u70B9\u51FB\u5207\u6362 / \u65B0\u5EFA\uFF09";
     panelSessionBtnEl.title = label;
     panelSessionBtnEl.setAttribute("aria-label", label);
@@ -5978,6 +6021,11 @@
     panelSessionMenuOpen = false;
     if (panelSessionMenuEl) panelSessionMenuEl.hidden = true;
     if (panelSessionBtnEl) panelSessionBtnEl.setAttribute("aria-expanded", "false");
+  }
+  function closePanelMoreMenu() {
+    panelMoreMenuOpen = false;
+    if (panelMoreMenuEl) panelMoreMenuEl.hidden = true;
+    if (panelMoreBtnEl) panelMoreBtnEl.setAttribute("aria-expanded", "false");
   }
   function renderSessionMenu() {
     if (!panelSessionMenuEl) return;
@@ -6157,14 +6205,19 @@
     const options = config || {};
     const old = panel.querySelector(".session-dialog-backdrop");
     if (old) old.remove();
+    const previousFocus = document.activeElement;
     const backdrop = document.createElement("div");
     backdrop.className = "session-dialog-backdrop";
     const box = document.createElement("div");
     box.className = "session-dialog";
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
+    const dialogId = "rf-panel-dialog-" + Date.now().toString(36);
+    box.id = dialogId;
+    box.setAttribute("aria-labelledby", dialogId + "-title");
     const title = document.createElement("div");
     title.className = "session-dialog-title";
+    title.id = dialogId + "-title";
     title.textContent = options.title || "\u4F1A\u8BDD";
     const message = document.createElement("div");
     message.className = "session-dialog-message";
@@ -6205,9 +6258,40 @@
     ok.className = options.danger ? "danger" : "primary";
     ok.textContent = options.confirmText || "\u786E\u5B9A";
     const close = () => {
+      document.removeEventListener("keydown", onDialogKey, true);
       try {
         backdrop.remove();
       } catch (e) {
+      }
+      if (previousFocus && previousFocus.isConnected) {
+        try {
+          previousFocus.focus();
+        } catch (e) {
+        }
+      }
+    };
+    const onDialogKey = (e) => {
+      if (!backdrop.isConnected) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = [...box.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((el) => el.getClientRects().length > 0);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!box.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     cancel.addEventListener("click", close);
@@ -6250,6 +6334,7 @@
       if (e.target === backdrop) close();
     });
     panel.appendChild(backdrop);
+    document.addEventListener("keydown", onDialogKey, true);
     setTimeout(() => {
       if (input) {
         input.focus();
@@ -6590,9 +6675,11 @@
     const title = document.createElement("span");
     title.className = "title";
     title.textContent = "RecallFlow";
+    panelTitleEl = title;
     const close = document.createElement("button");
     close.className = "close";
     close.textContent = "\u2715";
+    close.setAttribute("aria-label", "\u5173\u95ED RecallFlow");
     close.addEventListener("click", () => removePanel());
     const usageChip = document.createElement("span");
     usageChip.className = "usage";
@@ -6602,8 +6689,10 @@
     panelSessionBtnEl.className = "session-btn";
     panelSessionBtnEl.setAttribute("aria-haspopup", "true");
     panelSessionBtnEl.setAttribute("aria-expanded", "false");
+    panelSessionBtnEl.setAttribute("aria-controls", "rf-session-menu");
     renderSessionButton();
     panelSessionMenuEl = document.createElement("div");
+    panelSessionMenuEl.id = "rf-session-menu";
     panelSessionMenuEl.className = "session-menu";
     panelSessionMenuEl.hidden = true;
     panelSessionMenuEl.setAttribute("role", "menu");
@@ -6614,6 +6703,7 @@
       panelSessionMenuEl.hidden = !panelSessionMenuOpen;
       panelSessionBtnEl.setAttribute("aria-expanded", panelSessionMenuOpen ? "true" : "false");
       if (panelSessionMenuOpen) {
+        closePanelMoreMenu();
         renderSessionMenu();
         await refreshPanelSessionState();
         fitPanelHeight();
@@ -6634,8 +6724,33 @@
       });
     });
     panel.appendChild(panelSessionMenuEl);
+    panelMoreBtnEl = document.createElement("button");
+    panelMoreBtnEl.type = "button";
+    panelMoreBtnEl.className = "more-btn";
+    panelMoreBtnEl.textContent = "\u22EF";
+    panelMoreBtnEl.title = "\u66F4\u591A\u64CD\u4F5C";
+    panelMoreBtnEl.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
+    panelMoreBtnEl.setAttribute("aria-haspopup", "true");
+    panelMoreBtnEl.setAttribute("aria-expanded", "false");
+    panelMoreBtnEl.setAttribute("aria-controls", "rf-panel-more-menu");
+    panelMoreMenuEl = document.createElement("div");
+    panelMoreMenuEl.id = "rf-panel-more-menu";
+    panelMoreMenuEl.className = "p-more-menu";
+    panelMoreMenuEl.hidden = true;
+    panelMoreMenuEl.setAttribute("role", "menu");
+    panelMoreMenuEl.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
+    const usageRow = document.createElement("div");
+    usageRow.className = "p-more-row p-more-usage-row";
+    const usageLabel = document.createElement("span");
+    usageLabel.className = "p-more-label";
+    usageLabel.textContent = "\u672C\u6B21\u7528\u91CF";
+    usageRow.appendChild(usageLabel);
+    usageRow.appendChild(usageChip);
+    panelMoreMenuEl.appendChild(usageRow);
     const handoffBtn = document.createElement("button");
-    handoffBtn.className = "handoff";
+    handoffBtn.className = "handoff p-more-control";
+    handoffBtn.type = "button";
+    handoffBtn.setAttribute("role", "menuitem");
     handoffEl = handoffBtn;
     renderHandoffChip();
     handoffBtn.addEventListener("click", () => {
@@ -6655,22 +6770,53 @@
         }, 1800);
       });
     });
+    const handoffLabel = document.createElement("div");
+    handoffLabel.className = "p-more-label";
+    handoffLabel.textContent = "\u4F1A\u8BDD\u4EA4\u63A5";
+    panelMoreMenuEl.appendChild(handoffLabel);
+    panelMoreMenuEl.appendChild(handoffBtn);
     themeBtn = document.createElement("button");
     themeBtn.className = "theme";
+    themeBtn.setAttribute("role", "menuitem");
     themeBtn.addEventListener("click", cycleTheme);
     applyTheme();
+    const themeRow = document.createElement("div");
+    themeRow.className = "p-more-row";
+    const themeLabel = document.createElement("span");
+    themeLabel.className = "p-more-label";
+    themeLabel.textContent = "\u4E3B\u9898";
+    themeRow.appendChild(themeLabel);
+    themeRow.appendChild(themeBtn);
+    panelMoreMenuEl.appendChild(themeRow);
+    panelMoreBtnEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      panelMoreMenuOpen = !panelMoreMenuOpen;
+      panelMoreMenuEl.hidden = !panelMoreMenuOpen;
+      panelMoreBtnEl.setAttribute("aria-expanded", panelMoreMenuOpen ? "true" : "false");
+      if (panelMoreMenuOpen) {
+        closeSessionMenu();
+        fitPanelHeight();
+      }
+    });
+    panelMoreMenuEl.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      e.stopPropagation();
+    });
     head.appendChild(logo);
     head.appendChild(title);
-    head.appendChild(usageChip);
     head.appendChild(panelSessionBtnEl);
-    head.appendChild(handoffBtn);
-    head.appendChild(themeBtn);
+    head.appendChild(panelMoreBtnEl);
+    head.appendChild(panelMoreMenuEl);
     head.appendChild(close);
     panel.appendChild(head);
     shadow.addEventListener("mousedown", (e) => {
-      if (!panelSessionMenuOpen) return;
-      if (e.target.closest(".session-menu") || e.target.closest(".session-btn")) return;
-      closeSessionMenu();
+      if (panelSessionMenuOpen && !e.target.closest(".session-menu") && !e.target.closest(".session-btn")) {
+        closeSessionMenu();
+      }
+      if (panelMoreMenuOpen && !e.target.closest(".p-more-menu") && !e.target.closest(".more-btn")) {
+        closePanelMoreMenu();
+      }
     });
     progressEl = document.createElement("div");
     progressEl.className = "p-progress";
@@ -7823,6 +7969,7 @@
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
+        if (e.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         send();
       }
@@ -7834,6 +7981,19 @@
     panelKeyHandler = (e) => {
       if (e.key !== "Escape") return;
       if (picking) return;
+      if (panel && panel.querySelector(".session-dialog-backdrop")) return;
+      if (panelMoreMenuOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closePanelMoreMenu();
+        return;
+      }
+      if (panelSessionMenuOpen) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSessionMenu();
+        return;
+      }
       if (shotLightboxOpen) return;
       if (approvalArea && approvalArea.style.display !== "none") return;
       e.preventDefault();
@@ -7958,10 +8118,7 @@
       if (e.key === "Escape") {
         if (picking) return;
         removeBubble();
-        if (panel) {
-          removePanel();
-          return;
-        }
+        if (panel) return;
       }
     }, true);
     document.addEventListener("mousemove", (e) => {

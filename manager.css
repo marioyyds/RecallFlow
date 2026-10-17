@@ -61,6 +61,63 @@ header input[type="text"]:focus {
   margin-bottom: 12px;
 }
 
+.advanced-filters {
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.advanced-filters > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 0 12px;
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-filters > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-filters > summary::before {
+  content: '▸';
+  margin-right: 6px;
+  color: var(--primary);
+  font-size: 10px;
+  transition: transform .15s;
+}
+
+.advanced-filters[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.advanced-filter-summary {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.advanced-filter-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.advanced-filter-body .tag-filter:empty {
+  display: none;
+}
+
 .type-tab {
   --t: #4a90d9;
   border: 1px solid var(--border);

@@ -11,7 +11,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const src = fs.readFileSync(path.join(process.cwd(), 'README.md'), 'utf8');
+// Windows 工作区按 autocrlf 检出为 CRLF；先把行尾归一化，否则
+// ```mermaid\r\n 永远匹配不到下面的 ```mermaid\n 规则（测试会把图误报成不存在）。
+const src = fs.readFileSync(path.join(process.cwd(), 'README.md'), 'utf8').replace(/\r\n/g, '\n');
 const blocks = [...src.matchAll(/```mermaid\n([\s\S]*?)```/g)].map((m) => m[1]);
 
 const SUPPORTED_HEAD = /^(flowchart\s+(TB|TD|BT|LR|RL)|graph\s+(TB|TD|BT|LR|RL)|sequenceDiagram|stateDiagram-v2)$/;

@@ -15,6 +15,7 @@
     </div>
     <div class="header-actions">
       <span id="total-badge" class="badge">0 条</span>
+      <button id="open-assistant" class="header-assistant" type="button">助手</button>
       <button id="open-manager-top" class="header-icon" type="button" title="打开知识库" aria-label="打开知识库">↗</button>
     </div>
   </header>
@@ -41,7 +42,7 @@
   </section>
   <section id="page-unavailable" class="page-unavailable hidden" aria-live="polite"><span class="empty-ico">⊙</span><strong>当前页面无法收录</strong><span>请打开普通网页后再试</span></section>
 
-  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"><kbd>Ctrl K</kbd></label></div>
+  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"><kbd id="search-shortcut">Ctrl K</kbd></label></div>
 
   <div class="toolbar">
     <nav class="filters" id="filters">

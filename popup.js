@@ -32,6 +32,7 @@ let selectedStatus = STATUS.IMPORTANT;
 let currentFilter = 'all';
 let sortBy = 'updated';
 let listQuery = '';
+const ADD_COLLAPSED_KEY = 'recallflow-popup-add-collapsed';
 
 const $ = (id) => document.getElementById(id);
 
@@ -116,6 +117,11 @@ async function init() {
   await loadCache();
   renderList();
   renderScriptsBadge();
+  const shortcut = $('search-shortcut');
+  if (shortcut) {
+    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    shortcut.textContent = /mac/i.test(platform) ? '⌘ K' : 'Ctrl K';
+  }
 
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (t && t.url && isWebUrl(t.url)) {
@@ -148,6 +154,9 @@ async function init() {
   }
   renderTypePicker();
   syncStatusHighlight();
+  try {
+    setAddPanelCollapsed(localStorage.getItem(ADD_COLLAPSED_KEY) === '1', false);
+  } catch (e) {}
 }
 
 async function renderScriptsBadge() {
@@ -263,12 +272,19 @@ $('list-search').addEventListener('input', debounce(() => {
   renderList();
 }, 200));
 
-$('toggle-add-panel').addEventListener('click', () => {
+function setAddPanelCollapsed(collapsed, persist = true) {
   const addPanel = $('add-panel');
-  const collapsed = addPanel.classList.toggle('is-collapsed');
   const toggle = $('toggle-add-panel');
+  addPanel.classList.toggle('is-collapsed', collapsed);
   toggle.textContent = collapsed ? '展开' : '收起';
   toggle.setAttribute('aria-expanded', String(!collapsed));
+  if (persist) {
+    try { localStorage.setItem(ADD_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+  }
+}
+
+$('toggle-add-panel').addEventListener('click', () => {
+  setAddPanelCollapsed(!$('add-panel').classList.contains('is-collapsed'));
 });
 
 document.addEventListener('keydown', (e) => {
@@ -349,6 +365,29 @@ if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e) => {
 $('open-settings').addEventListener('click', (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
+});
+
+$('open-assistant').addEventListener('click', async () => {
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let tab = activeTab;
+    // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
+    // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
+    if (!tab || !tab.url || !isWebUrl(tab.url)) {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      tab = tabs.find((item) => item && item.url && isWebUrl(item.url));
+    }
+    if (!tab || !tab.url || !isWebUrl(tab.url)) {
+      toast('请先打开一个普通网页');
+      return;
+    }
+    chrome.runtime.sendMessage({ type: 'panel:open-active', tabId: tab.id }, () => {
+      if (chrome.runtime.lastError) toast('无法打开助手，请刷新页面后重试');
+      else setTimeout(() => window.close(), 80);
+    });
+  } catch (e) {
+    toast('无法打开助手，请刷新页面后重试');
+  }
 });
 
 init();

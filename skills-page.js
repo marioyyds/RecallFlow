@@ -20,6 +20,10 @@ const INTENT_LABEL = {
 let allSkills = []; // 运行结构列表（含 builtin 标记）
 let currentPage = 1;
 let editingName = null; // null=新建，否则为待编辑技能 name
+let skillQuery = '';
+let skillKind = 'all';
+let skillCategory = 'all';
+let modalPreviousFocus = null;
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -57,8 +61,10 @@ function renderSkill(skill) {
     : `<button class="skill-act" data-act="edit" data-id="${esc(skill.name)}">编辑</button>
        <button class="skill-act danger" data-act="delete" data-id="${esc(skill.name)}">删除</button>`;
   const exportBtn = `<button class="skill-act" data-act="export" data-id="${esc(skill.name)}">导出</button>`;
+  const intentText = describeIntents(skill.match && skill.match.intents);
+  const keywordText = describeKeywords(skill);
   return `
-    <article class="skill-card">
+    <article class="skill-card" data-skill-name="${esc(skill.name)}">
       <header class="skill-head">
         <div class="skill-title-wrap">
           <h2 class="skill-title">${esc(skill.title || skill.name)}</h2>
@@ -68,13 +74,55 @@ function renderSkill(skill) {
       </header>
       <p class="skill-desc">${esc(skill.description)}</p>
       ${meta ? `<div class="skill-meta-line">${esc(meta)}</div>` : ''}
-      ${tags}
-      <div class="skill-meta">
-        <span class="skill-meta-k">触发意图</span><span class="skill-meta-v">${describeIntents(skill.match && skill.match.intents)}</span>
-        <span class="skill-meta-k">触发关键词</span><span class="skill-meta-v">${esc(describeKeywords(skill))}</span>
+      <div class="skill-trigger-summary">
+        <span class="skill-trigger-pill"><b>意图</b>${esc(intentText)}</span>
+        <span class="skill-trigger-pill" title="${esc(keywordText)}"><b>关键词</b>${esc(keywordText)}</span>
       </div>
-      <div class="skill-content-preview">${esc(skill.content || '')}</div>
+      <details class="skill-details">
+        <summary>查看触发规则与正文</summary>
+        <div class="skill-details-body">
+          <div class="skill-meta">
+            <span class="skill-meta-k">触发意图</span><span class="skill-meta-v">${esc(intentText)}</span>
+            <span class="skill-meta-k">触发关键词</span><span class="skill-meta-v">${esc(keywordText)}</span>
+            <span class="skill-meta-k">依赖工具</span><span class="skill-meta-v">${esc((skill.tools || []).join(', ') || '无')}</span>
+          </div>
+          ${tags}
+          <div class="skill-block-title">正文</div>
+          <pre class="skill-content-preview">${esc(skill.content || '')}</pre>
+        </div>
+      </details>
     </article>`;
+}
+
+function filteredSkills() {
+  const q = skillQuery.trim().toLowerCase();
+  return allSkills.filter((skill) => {
+    if (skillKind === 'builtin' && !skill.builtin) return false;
+    if (skillKind === 'custom' && skill.builtin) return false;
+    if (skillCategory !== 'all' && (skill.category || '') !== skillCategory) return false;
+    if (!q) return true;
+    const haystack = [
+      skill.name,
+      skill.title,
+      skill.description,
+      skill.category,
+      ...(skill.tags || []),
+      describeIntents(skill.match && skill.match.intents),
+      describeKeywords(skill),
+      skill.content,
+    ].join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
+}
+
+function renderCategoryFilter() {
+  const select = document.getElementById('skill-category-filter');
+  if (!select) return;
+  const categories = [...new Set(allSkills.map((skill) => skill.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (skillCategory !== 'all' && !categories.includes(skillCategory)) skillCategory = 'all';
+  select.innerHTML = '<option value="all">全部分类</option>' +
+    categories.map((category) => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
+  select.value = skillCategory;
 }
 
 function renderPagination(totalPages) {
@@ -97,15 +145,21 @@ function render() {
   if (!wrap) return;
   const count = document.getElementById('skill-count');
   if (count) count.textContent = String(allSkills.length);
-  if (!allSkills.length) {
-    wrap.innerHTML = '<div class="empty"><span class="empty-ico">🛠</span><p>还没有技能</p></div>';
+  const skills = filteredSkills();
+  const visibleCount = document.getElementById('skill-visible-count');
+  if (visibleCount) visibleCount.textContent = '显示 ' + skills.length + ' / ' + allSkills.length;
+  if (!skills.length) {
+    const filtering = Boolean(skillQuery.trim()) || skillKind !== 'all' || skillCategory !== 'all';
+    wrap.innerHTML = filtering
+      ? '<div class="empty"><span class="empty-ico">⌕</span><p>没有匹配的技能</p><p class="empty-hint">试试更换关键词、来源或分类</p></div>'
+      : '<div class="empty"><span class="empty-ico">🛠</span><p>还没有技能</p></div>';
     renderPagination(1);
     return;
   }
-  const totalPages = Math.ceil(allSkills.length / PAGE_SIZE) || 1;
+  const totalPages = Math.ceil(skills.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
   const start = (currentPage - 1) * PAGE_SIZE;
-  wrap.innerHTML = allSkills.slice(start, start + PAGE_SIZE).map(renderSkill).join('');
+  wrap.innerHTML = skills.slice(start, start + PAGE_SIZE).map(renderSkill).join('');
   renderPagination(totalPages);
 }
 
@@ -133,6 +187,75 @@ function skillToForm(skill) {
   document.getElementById('f-content').value = skill.content || '';
 }
 
+function visibleOverlay() {
+  return [...document.querySelectorAll('.confirm-overlay')].find((overlay) => !overlay.classList.contains('hidden')) || null;
+}
+
+function openOverlay(overlay, focusSelector) {
+  if (!overlay) return;
+  modalPreviousFocus = document.activeElement;
+  overlay.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  const focusTarget = focusSelector ? overlay.querySelector(focusSelector) : overlay.querySelector('button:not([disabled])');
+  setTimeout(() => {
+    if (focusTarget && focusTarget.isConnected) focusTarget.focus();
+  }, 0);
+}
+
+function closeOverlay(overlay) {
+  if (!overlay) return;
+  overlay.classList.add('hidden');
+  if (!visibleOverlay()) {
+    document.body.classList.remove('modal-open');
+    if (modalPreviousFocus && modalPreviousFocus.isConnected) {
+      try { modalPreviousFocus.focus(); } catch (e) {}
+    }
+    modalPreviousFocus = null;
+  }
+}
+
+function showFormError(message) {
+  const error = document.getElementById('skill-form-error');
+  error.textContent = message;
+  error.classList.remove('hidden');
+}
+
+function clearFormError() {
+  const error = document.getElementById('skill-form-error');
+  error.textContent = '';
+  error.classList.add('hidden');
+}
+
+document.addEventListener('keydown', (e) => {
+  const overlay = visibleOverlay();
+  if (!overlay) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (overlay.id === 'skill-form-overlay') closeForm();
+    else closeOverlay(overlay);
+    return;
+  }
+  if (e.key !== 'Tab') return;
+  const dialog = overlay.querySelector('.confirm-dialog');
+  if (!dialog) return;
+  const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!dialog.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+  } else if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}, true);
+
 function openForm(skill) {
   editingName = skill ? skill.name : null;
   document.getElementById('skill-form-title').textContent = skill ? '编辑技能' : '新建技能';
@@ -142,22 +265,26 @@ function openForm(skill) {
       match: { intents: [], keywordStrings: [] }, tools: [], content: '',
     }
   );
-  document.getElementById('skill-form-overlay').classList.remove('hidden');
+  clearFormError();
+  openOverlay(document.getElementById('skill-form-overlay'), '#f-name');
 }
 
 function closeForm() {
-  document.getElementById('skill-form-overlay').classList.add('hidden');
+  closeOverlay(document.getElementById('skill-form-overlay'));
   editingName = null;
 }
 
 async function saveForm() {
+  clearFormError();
   const name = document.getElementById('f-name').value.trim();
   if (!name) {
-    alert('请填写标识 name（kebab-case）');
+    showFormError('请填写标识 name（kebab-case）。');
+    document.getElementById('f-name').focus();
     return;
   }
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
-    alert('name 需为 kebab-case（小写字母/数字，连字符分隔），如 highlight-key-points');
+    showFormError('name 需为 kebab-case（小写字母/数字，连字符分隔），如 highlight-key-points。');
+    document.getElementById('f-name').focus();
     return;
   }
   const tools = document.getElementById('f-tools').value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
@@ -185,13 +312,17 @@ async function saveForm() {
       tools,
     },
   };
-  if (editingName) {
-    await updateUserSkill(editingName, payload);
-  } else {
-    await addUserSkill(payload);
+  try {
+    if (editingName) {
+      await updateUserSkill(editingName, payload);
+    } else {
+      await addUserSkill(payload);
+    }
+    closeForm();
+    await reload();
+  } catch (err) {
+    showFormError('保存失败：' + (err && err.message ? err.message : '未知错误'));
   }
-  closeForm();
-  await reload();
 }
 
 function runtimeToStandard(skill) {
@@ -231,13 +362,13 @@ function askDelete(name) {
   pendingDeleteName = name;
   const skill = allSkills.find((s) => s.name === name);
   document.getElementById('skill-del-msg').textContent = '确定删除技能「' + (skill ? skill.title || skill.name : name) + '」？此操作不可撤销。';
-  document.getElementById('skill-del-overlay').classList.remove('hidden');
+  openOverlay(document.getElementById('skill-del-overlay'), '#skill-del-no');
 }
 
 async function confirmDelete() {
   if (pendingDeleteName) await removeUserSkill(pendingDeleteName);
   pendingDeleteName = null;
-  document.getElementById('skill-del-overlay').classList.add('hidden');
+  closeOverlay(document.getElementById('skill-del-overlay'));
   await reload();
 }
 
@@ -264,6 +395,7 @@ async function runImport(text) {
 
 async function reload() {
   allSkills = await getMergedSkills();
+  renderCategoryFilter();
   render();
 }
 
@@ -273,9 +405,40 @@ function init() {
   document.getElementById('skill-form-save').addEventListener('click', saveForm);
   document.getElementById('skill-del-no').addEventListener('click', () => {
     pendingDeleteName = null;
-    document.getElementById('skill-del-overlay').classList.add('hidden');
+    closeOverlay(document.getElementById('skill-del-overlay'));
   });
   document.getElementById('skill-del-yes').addEventListener('click', confirmDelete);
+  ['skill-form-overlay', 'skill-del-overlay'].forEach((id) => {
+    const overlay = document.getElementById(id);
+    overlay.addEventListener('click', (e) => {
+      if (e.target !== overlay) return;
+      if (id === 'skill-form-overlay') closeForm();
+      else closeOverlay(overlay);
+    });
+  });
+
+  document.getElementById('skill-search').addEventListener('input', (e) => {
+    skillQuery = e.target.value;
+    currentPage = 1;
+    render();
+  });
+  document.getElementById('skill-kind-filters').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-kind]');
+    if (!chip) return;
+    skillKind = chip.dataset.kind;
+    currentPage = 1;
+    document.querySelectorAll('#skill-kind-filters [data-kind]').forEach((button) => {
+      const active = button === chip;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    render();
+  });
+  document.getElementById('skill-category-filter').addEventListener('change', (e) => {
+    skillCategory = e.target.value;
+    currentPage = 1;
+    render();
+  });
 
   document.getElementById('import-toggle').addEventListener('click', () => {
     document.getElementById('import-section').classList.toggle('hidden');
