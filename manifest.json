@@ -19,6 +19,14 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "commands": {
+    "toggle-panel": {
+      "suggested_key": {
+        "default": "Alt+Shift+R"
+      },
+      "description": "打开或关闭 RecallFlow 对话面板"
+    }
+  },
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true

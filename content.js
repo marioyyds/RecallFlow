@@ -4979,6 +4979,7 @@
   var fab = null;
   var fabDragState = null;
   var fabSuppressClickUntil = 0;
+  var lastShortcutToggleAt = 0;
   var conversation = [];
   var panelTitleEl = null;
   var panelSessionId = "";
@@ -5227,6 +5228,12 @@
     fab.style.top = clampFabTop(currentFabTop() + delta) + "px";
     persistFabPosition();
   }
+  function togglePanelFromShortcut() {
+    const now = Date.now();
+    if (now - lastShortcutToggleAt < 250) return;
+    lastShortcutToggleAt = now;
+    togglePanel();
+  }
   function ensureHost() {
     if (host && !host.isConnected) resetDetachedHostState();
     if (host) return;
@@ -5251,8 +5258,8 @@
     fabIcon.src = extUrl("docs/assets/recallflow-mark.svg");
     fabIcon.alt = "";
     fab.appendChild(fabIcon);
-    fab.title = "RecallFlow\uFF08\u53EF\u4E0A\u4E0B\u62D6\u52A8\uFF09";
-    fab.setAttribute("aria-label", "\u6253\u5F00 RecallFlow");
+    fab.title = "RecallFlow\uFF08Alt+Shift+R \u6253\u5F00/\u5173\u95ED\uFF0C\u53EF\u4E0A\u4E0B\u62D6\u52A8\uFF09";
+    fab.setAttribute("aria-label", "\u6253\u5F00 RecallFlow\uFF0C\u5FEB\u6377\u952E Alt+Shift+R");
     fab.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -8201,6 +8208,12 @@
       if (fab) applySavedFabPosition();
     });
     document.addEventListener("keydown", (e) => {
+      if (e.altKey && e.shiftKey && e.code === "KeyR") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) togglePanelFromShortcut();
+        return;
+      }
       if (e.key === "Escape") {
         if (picking) return;
         removeBubble();
@@ -8337,6 +8350,8 @@
           if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
           showCitationHint("\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u5DF2\u63A5\u7BA1\u8BE5\u4F1A\u8BDD\uFF0C\u672C\u9875\u4EFB\u52A1\u5DF2\u505C\u6B62\u3002");
           if (activeInterruptFn) activeInterruptFn();
+        } else if (msg.type === "panel:toggle") {
+          togglePanelFromShortcut();
         }
       });
     } catch (e) {

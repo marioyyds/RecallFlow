@@ -337,6 +337,19 @@ async function handleAi(request) {
   return { ok: true, answer };
 }
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== 'toggle-panel') return;
+  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+    if (!tab || tab.id == null || !/^https?:/i.test(tab.url || '')) return;
+    chrome.tabs.sendMessage(
+      tab.id,
+      { type: 'panel:toggle' },
+      { frameId: 0 },
+      () => void chrome.runtime.lastError
+    );
+  });
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'getTabId') {
     sendResponse({ tabId: sender.tab ? sender.tab.id : null });
