@@ -18,12 +18,15 @@ import {
 import { getBook, setBook } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 import { renderMarkdown } from './lib/page/markdown.js';
+import { clampPage, pageSlice, pageTokens } from './lib/shared/pagination.js';
 
 let bookCache = {};
 let currentType = 'all';
 let currentTag = 'all';
 let currentStar = 'all';
 let sortBy = 'updated';
+const KB_PAGE_SIZE = 12;
+let currentPage = 1;
 let editingNoteId = null;
 let selectedIds = new Set();
 
@@ -176,10 +179,35 @@ function updateItemStar(itemEl, v) {
   if (lvl) lvl.outerHTML = levelNameHtml(v);
 }
 
+function renderPagination(total, pageCount) {
+  const nav = $('kb-pagination');
+  if (!nav) return;
+  const current = clampPage(currentPage, pageCount);
+  currentPage = current;
+  if (!total || pageCount <= 1) {
+    nav.innerHTML = '';
+    nav.hidden = true;
+    return;
+  }
+  nav.hidden = false;
+  const tokens = pageTokens(current, pageCount);
+  nav.innerHTML =
+    '<span class="kb-page-summary">第 ' + current + ' / ' + pageCount + ' 页 · ' + KB_PAGE_SIZE + ' 条/页</span>' +
+    '<button class="kb-page-btn" type="button" data-page="' + (current - 1) + '"' + (current === 1 ? ' disabled' : '') + '>上一页</button>' +
+    tokens.map((token) => {
+      if (token === 'ellipsis') return '<span class="kb-page-ellipsis" aria-hidden="true">…</span>';
+      return '<button class="kb-page-btn' + (token === current ? ' active' : '') + '" type="button" data-page="' + token + '"' +
+        (token === current ? ' aria-current="page"' : '') + '>' + token + '</button>';
+    }).join('') +
+    '<button class="kb-page-btn" type="button" data-page="' + (current + 1) + '"' + (current === pageCount ? ' disabled' : '') + '>下一页</button>';
+}
+
 function render() {
   const listEl = $('list');
   const prevTop = listEl.scrollTop; // 记录滚动位置，避免编辑/改星后跳回顶部
   const items = filtered();
+  const paged = pageSlice(items, currentPage, KB_PAGE_SIZE);
+  currentPage = paged.page;
   const emptyEl = $('empty');
   emptyEl.classList.toggle('hidden', items.length > 0);
   if (!items.length) {
@@ -188,13 +216,14 @@ function render() {
       ? '<span class="empty-ico">🔍</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>知识库还是空的</p><p class="empty-hint">点击「新建笔记」或收藏网页开始收录</p>';
   }
-  listEl.innerHTML = items.map(itemHtml).join('');
+  listEl.innerHTML = paged.items.map(itemHtml).join('');
   listEl.scrollTop = prevTop; // 恢复滚动位置
   renderTypeTabs();
   renderTagFilter();
   renderStats();
   renderBulkBar();
   renderActiveFilters();
+  renderPagination(paged.total, paged.pageCount);
 }
 
 function renderActiveFilters() {
@@ -247,6 +276,7 @@ async function createNote() {
   };
   await persist();
   editingNoteId = id;
+  currentPage = 1;
   render();
   const input = $('note-editor');
   if (input) input.focus();
@@ -403,6 +433,7 @@ $('type-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('.type-tab');
   if (!btn) return;
   currentType = btn.dataset.type;
+  currentPage = 1;
   render();
 });
 
@@ -410,31 +441,48 @@ $('tag-filter').addEventListener('click', (e) => {
   const chip = e.target.closest('.tag-filter-chip');
   if (!chip) return;
   currentTag = chip.dataset.tag;
+  currentPage = 1;
   render();
 });
 
 document.querySelectorAll('.stat-card').forEach((el) => {
   el.addEventListener('click', () => {
     currentStar = el.dataset.s;
+    currentPage = 1;
     render();
   });
 });
 
 // 搜索输入添加防抖，避免频繁渲染
-$('search').addEventListener('input', debounce(render, 200));
+$('search').addEventListener('input', debounce(() => {
+  currentPage = 1;
+  render();
+}, 200));
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('search').focus(); }
 });
 $('clear-filters').addEventListener('click', () => {
-  currentType = 'all'; currentTag = 'all'; currentStar = 'all'; $('search').value = ''; render();
+  currentType = 'all'; currentTag = 'all'; currentStar = 'all'; $('search').value = ''; currentPage = 1; render();
 });
 
 $('sort-select').addEventListener('change', (e) => {
   sortBy = e.target.value;
+  currentPage = 1;
   render();
 });
 
 $('add-note-btn').addEventListener('click', createNote);
+
+$('kb-pagination').addEventListener('click', (e) => {
+  const btn = e.target.closest('.kb-page-btn');
+  if (!btn || btn.disabled) return;
+  const page = Number(btn.dataset.page);
+  if (!Number.isFinite(page) || page < 1) return;
+  currentPage = page;
+  render();
+  const list = $('list');
+  if (list && list.scrollIntoView) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 
 $('doc-close').addEventListener('click', closeDocument);
 $('doc-close-bottom').addEventListener('click', closeDocument);
@@ -712,6 +760,8 @@ function focusItemFromHash() {
   currentStar = 'all';
   $('search').value = '';
   editingNoteId = null;
+  const targetIndex = filtered().findIndex((item) => item.id === id);
+  currentPage = targetIndex >= 0 ? Math.floor(targetIndex / KB_PAGE_SIZE) + 1 : 1;
   render();
 
   const el = document.querySelector('.item[data-id="' + CSS.escape(id) + '"]');

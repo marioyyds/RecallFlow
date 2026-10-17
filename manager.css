@@ -324,6 +324,62 @@ header input[type="text"]:focus {
 .list {
   display: grid;
   gap: 10px;
+  scroll-margin-top: 140px;
+}
+
+.kb-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 18px 0 8px;
+}
+
+.kb-pagination[hidden] {
+  display: none;
+}
+
+.kb-page-summary {
+  margin-right: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.kb-page-btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text-sub);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kb-page-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.kb-page-btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.kb-page-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.kb-page-ellipsis {
+  min-width: 20px;
+  color: var(--text-faint);
+  text-align: center;
 }
 
 .item {
@@ -1018,6 +1074,14 @@ body.modal-open {
 }
 
 @media (max-width: 620px) {
+  .kb-pagination {
+    justify-content: flex-start;
+  }
+  .kb-page-summary {
+    flex-basis: 100%;
+    margin-right: 0;
+    text-align: center;
+  }
   .doc-dialog {
     width: calc(100vw - 16px);
     max-height: 92vh;
