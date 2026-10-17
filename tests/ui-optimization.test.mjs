@@ -12,6 +12,7 @@ import { PANEL_CSS } from '../lib/page/panel-css.js';
 const chat = fs.readFileSync('lib/page/chat.js', 'utf8');
 const optionsHtml = fs.readFileSync('options.html', 'utf8');
 const optionsCss = fs.readFileSync('options.css', 'utf8');
+const managerCss = fs.readFileSync('manager.css', 'utf8');
 const skills = fs.readFileSync('skills-page.js', 'utf8');
 const skillsHtml = fs.readFileSync('skills.html', 'utf8');
 const popup = fs.readFileSync('popup.js', 'utf8');
@@ -85,4 +86,9 @@ test('Popup：助手入口使用显式网页 tabId，避免 popup 关闭时删�
 test('知识库：高级筛选默认收起，不抢占首屏内容', () => {
   assert.match(managerHtml, /<details class="advanced-filters"/);
   assert.ok(!/<details class="advanced-filters"[^>]*\sopen/.test(managerHtml), '高级筛选应默认收起');
+});
+
+test('知识库：类型标签的左右内边距与模块头部一致', () => {
+  assert.match(managerCss, /\.type-tabs\s*\{[^}]*padding-inline:\s*16px/s);
+  assert.match(managerCss, /@media \(max-width:620px\)\s*\{\s*\.type-tabs\s*\{\s*padding-inline:\s*12px/s);
 });

@@ -58,6 +58,7 @@ header input[type="text"]:focus {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  padding-inline: 16px;
   margin-bottom: 12px;
 }
 
@@ -755,3 +756,5 @@ footer {
 .link-button { border:0; background:transparent; color:var(--primary); cursor:pointer; }
 .item-select { min-width:18px; min-height:18px; }
 @media (max-width:620px) { .app-header { grid-template-columns:1fr auto; gap:12px; padding:12px 12px; } .module-nav { padding-inline:12px; } .kb-toolbar { padding-inline:10px; } .btn-primary { min-height:44px; } .mini { min-height:36px; } }
+
+@media (max-width:620px) { .type-tabs { padding-inline: 12px; } }
