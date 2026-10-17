@@ -16,6 +16,7 @@ import {
 } from './lib/shared/utils.js';
 import { getBook, setBook } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
+import { renderMarkdown } from './lib/page/markdown.js';
 
 let bookCache = {};
 let currentType = 'all';
@@ -26,6 +27,9 @@ let editingNoteId = null;
 let selectedIds = new Set();
 
 const $ = (id) => document.getElementById(id);
+let docItemId = '';
+let docPreviousFocus = null;
+let docKeyHandler = null;
 
 async function loadCache() {
   bookCache = await getBook();
@@ -121,9 +125,12 @@ function itemHtml(it) {
     ? `<input id="title-editor" class="note-editor title-editor" value="${esc(it.title)}" placeholder="标题">`
     : it.url
       ? `<span class="item-title" data-open>${esc(it.title)}</span>`
-      : `<span class="item-title">${esc(it.title)}</span>`;
+      : `<span class="item-title" data-doc-open title="打开 Markdown 文档">${esc(it.title)}</span>`;
   const noteHtml = editing
-    ? `<input id="note-editor" class="note-editor" value="${esc(it.note || '')}" placeholder="备注 / 摘要...">`
+    ? `<div class="doc-editor-wrap">
+        <div class="doc-editor-hint">支持 Markdown · Ctrl/⌘ + Enter 保存</div>
+        <textarea id="note-editor" class="note-editor doc-editor" rows="8" placeholder="写 Markdown 文档，支持标题、列表、表格、代码块和链接…">${esc(it.note || '')}</textarea>
+      </div>`
     : it.note
       ? `<div class="item-note" data-note>${esc(it.note)}</div>`
       : '';
@@ -148,7 +155,7 @@ function itemHtml(it) {
     <div class="item-actions">
       ${editing
         ? `<button class="mini primary" data-act="save">✓ 保存</button><button class="mini" data-act="cancel">✕ 取消</button>`
-        : `<button class="mini" data-act="edit">✎ 编辑</button><button class="mini danger" data-act="del">🗑 删除</button>`}
+        : `<button class="mini" data-act="read">📖 阅读</button><button class="mini" data-act="edit">✎ 编辑</button><button class="mini danger" data-act="del">🗑 删除</button>`}
     </div>
   </div>`;
 }
@@ -299,6 +306,74 @@ function showConfirm(msg) {
   });
 }
 
+function typeName(id) {
+  return (ITEM_TYPES.find((item) => item.id === id) || {}).name || id || '未分类';
+}
+
+function closeDocument() {
+  const overlay = $('doc-overlay');
+  if (!overlay || overlay.classList.contains('hidden')) return;
+  overlay.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  if (docKeyHandler) {
+    document.removeEventListener('keydown', docKeyHandler, true);
+    docKeyHandler = null;
+  }
+  $('doc-content').innerHTML = '';
+  if (docPreviousFocus && docPreviousFocus.isConnected) {
+    try { docPreviousFocus.focus(); } catch (e) {}
+  }
+  docPreviousFocus = null;
+  docItemId = '';
+}
+
+function openDocument(id) {
+  const item = bookCache[id];
+  if (!item) return;
+  docItemId = id;
+  docPreviousFocus = document.activeElement;
+  $('doc-title').textContent = item.title || '未命名文档';
+  const tags = Array.isArray(item.tags) && item.tags.length ? ' · ' + item.tags.join(' / ') : '';
+  $('doc-meta').textContent = typeName(item.type) + tags + ' · ' + fmtTime(item.updatedAt);
+  $('doc-content').innerHTML = item.note && String(item.note).trim()
+    ? renderMarkdown(String(item.note), null, false)
+    : '<p class="doc-empty">这篇内容还没有正文。点击“编辑”开始写 Markdown。</p>';
+  const openBtn = $('doc-open');
+  openBtn.disabled = !item.url;
+  openBtn.title = item.url ? item.url : '这条内容没有原文链接';
+  const overlay = $('doc-overlay');
+  overlay.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  $('doc-close').focus();
+  docKeyHandler = (e) => {
+    if (!overlay.isConnected || overlay.classList.contains('hidden')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeDocument();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const dialog = overlay.querySelector('.doc-dialog');
+    const focusable = [...dialog.querySelectorAll('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')]
+      .filter((el) => el.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!dialog.contains(document.activeElement)) {
+      e.preventDefault();
+      first.focus();
+    } else if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener('keydown', docKeyHandler, true);
+}
+
 async function bulkDelete() {
   if (selectedIds.size === 0) return;
   const count = selectedIds.size;
@@ -360,6 +435,36 @@ $('sort-select').addEventListener('change', (e) => {
 
 $('add-note-btn').addEventListener('click', createNote);
 
+$('doc-close').addEventListener('click', closeDocument);
+$('doc-close-bottom').addEventListener('click', closeDocument);
+$('doc-overlay').addEventListener('click', (e) => {
+  if (e.target === $('doc-overlay')) closeDocument();
+});
+$('doc-open').addEventListener('click', () => {
+  const item = bookCache[docItemId];
+  if (item && item.url) chrome.tabs.create({ url: item.url });
+});
+$('doc-edit').addEventListener('click', () => {
+  const id = docItemId;
+  if (!id || !bookCache[id]) return;
+  closeDocument();
+  editingNoteId = id;
+  render();
+  const input = $('title-editor') || $('note-editor');
+  if (input) input.focus();
+});
+$('doc-content').addEventListener('click', (e) => {
+  const btn = e.target.closest('.code-copy');
+  if (!btn) return;
+  const wrap = btn.closest('.code-wrap');
+  const codeEl = wrap && wrap.querySelector('code');
+  if (!codeEl) return;
+  navigator.clipboard.writeText(codeEl.textContent || '').then(() => {
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = '复制'; }, 1200);
+  }).catch(() => {});
+});
+
 $('list').addEventListener('click', async (e) => {
   const itemEl = e.target.closest('.item');
   if (!itemEl) return;
@@ -407,6 +512,8 @@ $('list').addEventListener('click', async (e) => {
         render();
         toast('已恢复');
       });
+    } else if (a === 'read') {
+      openDocument(id);
     } else if (a === 'edit') {
       editingNoteId = id;
       render();
@@ -430,8 +537,9 @@ $('list').addEventListener('click', async (e) => {
     return;
   }
 
-  if (e.target.closest('.item-title') && bookCache[id] && bookCache[id].url) {
-    chrome.tabs.create({ url: bookCache[id].url });
+  if (e.target.closest('.item-title') && bookCache[id]) {
+    if (bookCache[id].url) chrome.tabs.create({ url: bookCache[id].url });
+    else if (bookCache[id].note) openDocument(id);
   }
 });
 
@@ -451,6 +559,8 @@ bindStarKeyboard($('list'), (v, cell) => {
 
 $('list').addEventListener('keydown', async (e) => {
   if (e.key !== 'Enter') return;
+  // 文档编辑框允许用 Enter 正常换行；Ctrl/Cmd+Enter 才是保存。
+  if (e.target && e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
   if (!editingNoteId) return;
   const t = $('title-editor');
   const n = $('note-editor');

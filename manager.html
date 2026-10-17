@@ -86,7 +86,25 @@
     </div>
   </div>
 
-  <footer>点击标题打开原文，点击星星改星级，点击备注/标签可编辑。</footer>
+  <div class="confirm-overlay hidden" id="doc-overlay" role="dialog" aria-modal="true" aria-labelledby="doc-title">
+    <article class="doc-dialog">
+      <header class="doc-head">
+        <div class="doc-head-main">
+          <h2 id="doc-title">文档</h2>
+          <div id="doc-meta" class="doc-meta"></div>
+        </div>
+        <button id="doc-close" class="doc-close" type="button" aria-label="关闭文档">✕</button>
+      </header>
+      <div id="doc-content" class="markdown-body"></div>
+      <div class="doc-actions">
+        <button id="doc-open" class="mini" type="button">打开原文</button>
+        <button id="doc-edit" class="mini" type="button">编辑</button>
+        <button id="doc-close-bottom" class="mini primary" type="button">关闭</button>
+      </div>
+    </article>
+  </div>
+
+  <footer>点击标题打开原文，点击“阅读”查看 Markdown 文档，点击星星改星级。</footer>
 
   <script type="module" src="manager.js"></script>
 </body>

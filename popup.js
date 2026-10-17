@@ -209,6 +209,7 @@ $('add-btn').addEventListener('click', async () => {
 ['tags-input', 'note-input'].forEach((id) => {
   $(id).addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
+      if (id === 'note-input' && !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       $('add-btn').click();
     }

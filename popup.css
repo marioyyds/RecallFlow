@@ -194,6 +194,8 @@ header h1 {
   background: var(--note-bg);
   color: var(--text);
   transition: border-color 0.15s, box-shadow 0.15s;
+  resize: vertical;
+  line-height: 1.55;
 }
 
 .note-input::placeholder {
