@@ -4268,16 +4268,12 @@
     .p-head .more-btn { border: 1px solid #d5d9e0; background: #fff; color: #4d5968; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 18px; line-height: 1; padding: 0; flex-shrink: 0; }
     .p-head .more-btn:hover { border-color: #4a90d9; color: #4a90d9; }
     .panel.dark .p-head .more-btn { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
-    .p-more-menu { position: absolute; z-index: 31; top: 46px; right: 10px; width: min(270px, calc(100% - 20px)); padding: 8px; background: #fff; border: 1px solid #dfe3e9; border-radius: 11px; box-shadow: 0 12px 34px rgba(22,34,51,.22); }
+    .p-more-menu { position: absolute; z-index: 31; top: 46px; right: 10px; width: min(270px, calc(100% - 20px)); padding: 6px; background: #fff; border: 1px solid #dfe3e9; border-radius: 11px; box-shadow: 0 12px 34px rgba(22,34,51,.22); }
     .p-more-menu[hidden] { display: none; }
     .panel.dark .p-more-menu { background: #2a2e34; border-color: #444a53; box-shadow: 0 14px 38px rgba(0,0,0,.45); }
-    .p-more-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 8px; border-radius: 7px; }
-    .p-more-row:hover { background: #f5f8fc; }
-    .panel.dark .p-more-row:hover { background: #323840; }
-    .p-more-label { color: #66707d; font-size: 12px; font-weight: 600; }
-    .panel.dark .p-more-label { color: #aab2bd; }
-    .p-more-menu .handoff { width: 100%; margin: 0 0 4px; text-align: left; padding: 8px 9px; border-radius: 7px; }
-    .p-more-menu .theme { margin-left: auto; }
+    .p-more-menu .usage { display: block; margin: 5px 8px 7px; }
+    .p-more-menu .handoff { display: block; width: 100%; margin: 0 0 6px; text-align: center; }
+    .p-more-menu .theme { display: block; margin: 0 auto; }
 /* \u4EA4\u63A5\u6807\u8BC6\u82AF\u7247\uFF1A\u70B9\u4E00\u4E0B\u628A\u672C\u6B21\u4F1A\u8BDD\u6253\u5305\u5E76\u590D\u5236\u53EF\u76F4\u63A5\u7C98\u7ED9 AI \u7684\u6307\u4EE4 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
 .p-head .handoff:hover { border-color: #4a90d9; color: #4a90d9; }
@@ -6739,14 +6735,7 @@
     panelMoreMenuEl.hidden = true;
     panelMoreMenuEl.setAttribute("role", "menu");
     panelMoreMenuEl.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
-    const usageRow = document.createElement("div");
-    usageRow.className = "p-more-row p-more-usage-row";
-    const usageLabel = document.createElement("span");
-    usageLabel.className = "p-more-label";
-    usageLabel.textContent = "\u672C\u6B21\u7528\u91CF";
-    usageRow.appendChild(usageLabel);
-    usageRow.appendChild(usageChip);
-    panelMoreMenuEl.appendChild(usageRow);
+    panelMoreMenuEl.appendChild(usageChip);
     const handoffBtn = document.createElement("button");
     handoffBtn.className = "handoff p-more-control";
     handoffBtn.type = "button";
@@ -6770,24 +6759,13 @@
         }, 1800);
       });
     });
-    const handoffLabel = document.createElement("div");
-    handoffLabel.className = "p-more-label";
-    handoffLabel.textContent = "\u4F1A\u8BDD\u4EA4\u63A5";
-    panelMoreMenuEl.appendChild(handoffLabel);
     panelMoreMenuEl.appendChild(handoffBtn);
     themeBtn = document.createElement("button");
     themeBtn.className = "theme";
     themeBtn.setAttribute("role", "menuitem");
     themeBtn.addEventListener("click", cycleTheme);
     applyTheme();
-    const themeRow = document.createElement("div");
-    themeRow.className = "p-more-row";
-    const themeLabel = document.createElement("span");
-    themeLabel.className = "p-more-label";
-    themeLabel.textContent = "\u4E3B\u9898";
-    themeRow.appendChild(themeLabel);
-    themeRow.appendChild(themeBtn);
-    panelMoreMenuEl.appendChild(themeRow);
+    panelMoreMenuEl.appendChild(themeBtn);
     panelMoreBtnEl.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
