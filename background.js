@@ -290,16 +290,20 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     try { c.abort(); } catch (e) {}
     tabControllers.delete(tabId);
   }
+  tabRuns.delete(tabId);
   try {
     chrome.storage.session.remove('recallflow.conv.' + tabId);
   } catch (e) {}
 });
 
 // tabId -> AbortController：标签页关闭时中止其进行中的 run。
-// 端口断开**不再**自动 abort：整页刷新（表单提交 / location.reload）也会断开端口，
-// 但任务应当继续经 tab 执行（工具走 chrome.tabs.sendMessage，刷新后能到达新内容脚本）。
-// 停止由面板显式发 {type:'stop'}，标签页关闭由 tabs.onRemoved 兜底 —— 见 README 第 8 条。
+// 端口断开会 abort（整页刷新 / 停止 / 标签页关闭都会断开端口）：
+//   · 整页刷新 → abort 落盘为 interrupted，新面板 query-run 后自动续跑；
+//   · 停止 → 面板显式发 {type:'stop'}，先标记不可续跑再 abort；
+//   · 标签页关闭 → tabs.onRemoved 兜底 abort。
 const tabControllers = new Map();
+// tabId -> 最近一次 run { runId, resumable }：整页刷新后，新面板据此自动续跑（query-run）。
+const tabRuns = new Map();
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'ai-stream') return;
@@ -307,13 +311,44 @@ chrome.runtime.onConnect.addListener((port) => {
   const controller = new AbortController();
   const senderTabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
   if (senderTabId) tabControllers.set(senderTabId, controller);
-  port.onDisconnect.addListener(() => {});
+  port.onDisconnect.addListener(() => {
+    // 整页刷新会断开端口：abort 让 run 落盘为 interrupted（phase 标记），新面板随后
+    // 用 query-run 拿到 runId 后自动续跑。停止是显式 {type:'stop'}（先标记不可续跑再 abort），
+    // 标签页关闭由 tabs.onRemoved 兜底。
+    try { controller.abort(); } catch (e) {}
+  });
 
   port.onMessage.addListener(async (payload) => {
     try {
-      // 停止：面板显式请求中止 run（端口断开不再自动 abort，见 tabControllers 的注释）。
+      // 停止：面板显式请求中止 run，并标记为不可续跑。
       if (payload && payload.type === 'stop') {
+        if (senderTabId && tabRuns.has(senderTabId)) tabRuns.get(senderTabId).resumable = false;
         try { controller.abort(); } catch (e) {}
+        return;
+      }
+      // 整页刷新后的新面板：查询本 tab 是否有可续跑的 run。
+      if (payload && payload.type === 'query-run') {
+        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const reply = (m) => { try { port.postMessage(Object.assign({ type: 'run-state' }, m)); } catch (e) {} };
+        if (!tr || !tr.resumable || !tr.runId) {
+          reply({ runId: '', resumable: false, pending: false, instruction: '' });
+          return;
+        }
+        try {
+          const s = await loadAgentSession(tr.runId);
+          // abort 与落盘是异步的：会话还没写出来时告诉面板"稍后重试"，避免竞态误判"没有任务"。
+          if (!s) { reply({ runId: '', resumable: false, pending: true, instruction: '' }); return; }
+          const instruction = String(s.instruction || '');
+          const dead = ['completed', 'failed', 'cancelled', 'timeout'].includes(s.status);
+          reply({
+            runId: instruction && !dead ? tr.runId : '',
+            resumable: Boolean(instruction) && !dead,
+            pending: false,
+            instruction,
+          });
+        } catch (e) {
+          reply({ runId: '', resumable: false, pending: false, instruction: '' });
+        }
         return;
       }
       // 工具审批消息由 waitForToolApproval 的临时监听器处理，不能作为新的对话请求。
@@ -355,6 +390,7 @@ chrome.runtime.onConnect.addListener((port) => {
       if (payload.action === 'agent') {
         const tabId = port.sender && port.sender.tab && port.sender.tab.id;
         console.log('[RecallFlow] agent run start:', (payload.question || '').slice(0, 40), 'tabId=' + tabId);
+        if (tabId) tabRuns.set(tabId, { runId: payload.runId || '', resumable: true });
         try {
           await runAgentStream(port, payload, settings, book, controller.signal, tabId);
           console.log('[RecallFlow] agent run finished');

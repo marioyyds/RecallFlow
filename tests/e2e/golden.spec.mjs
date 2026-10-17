@@ -73,6 +73,8 @@ test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 ru
   // 修复后：run 跨过刷新继续，finalizedRunCount 归零后变 1，这条转为通过。
   await expect.poll(() => finalizedRunCount(), { timeout: 30_000 }).toBeGreaterThan(0);
   await expect(page.locator('#after-reload')).toHaveText('已刷新并继续');
+  // 新面板必须真的接管了显示（自动续跑会重开面板并恢复对话）。
+  await expect(page.locator(PANEL + ' .cmd-input')).toBeVisible({ timeout: 15_000 });
 
   await page.close();
 });

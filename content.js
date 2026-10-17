@@ -4765,6 +4765,7 @@
   var stopBtn = null;
   var sendBtn = null;
   var streaming = false;
+  var runAgent = null;
   var pendingAcc = "";
   var pendingAiMsg = null;
   var pendingContentEl = null;
@@ -6280,7 +6281,7 @@
     }
     function run(instruction, opts) {
       closePort();
-      activeRunId = "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      activeRunId = opts && opts.presetRunId || "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
       activeInstruction = String(instruction || "");
       lastRunOpts = opts || null;
       portRetries = 0;
@@ -6751,6 +6752,7 @@
     });
     fitPanelHeight();
     pinToBottom();
+    runAgent = run;
   }
   function refreshPanelForSelection() {
     if (!streaming) closePort();
@@ -6763,6 +6765,41 @@
     restoreStreamingUI();
   }
   var observerAutoScroll = true;
+  function maybeResumeRunAfterReload() {
+    let attempts = 0;
+    const MAX_ATTEMPTS = 12;
+    const tick = () => {
+      if (streaming) return;
+      attempts += 1;
+      if (attempts > MAX_ATTEMPTS) return;
+      let p = null;
+      let handled = false;
+      try {
+        p = chrome.runtime.connect({ name: "ai-stream" });
+        p.onMessage.addListener((resp) => {
+          if (handled || !resp || resp.type !== "run-state") return;
+          handled = true;
+          try {
+            p.disconnect();
+          } catch (e) {
+          }
+          if (resp.resumable && resp.runId && resp.instruction && !streaming) {
+            openPanel(0, 0, true);
+            if (runAgent) runAgent(String(resp.instruction), { continuation: true, presetRunId: String(resp.runId) });
+          } else if (resp.pending) {
+            setTimeout(tick, 300);
+          }
+        });
+        p.postMessage({ type: "query-run" });
+      } catch (e) {
+        try {
+          if (p) p.disconnect();
+        } catch (e2) {
+        }
+      }
+    };
+    tick();
+  }
   function initAssistant() {
     document.addEventListener("mousedown", (e) => {
       if (host && e.composedPath().includes(host)) return;
@@ -6889,6 +6926,7 @@
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
+    maybeResumeRunAfterReload();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {
       const snippet = decodeSnippet(kbSnippet);
