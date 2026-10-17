@@ -4533,10 +4533,10 @@
       width: 52px; height: 52px; border: 1px solid rgba(255,255,255,.45); border-radius: 50%;
       background: linear-gradient(145deg, #5ba0e5 0%, #3d7fc4 100%);
       color: #fff; display: flex; align-items: center; justify-content: center;
-      font-size: 14px; font-weight: 700; letter-spacing: .4px; cursor: pointer;
+      font-size: 14px; font-weight: 700; letter-spacing: .4px; cursor: grab;
       box-shadow: 0 8px 22px rgba(45,105,165,.36), inset 0 1px 1px rgba(255,255,255,.35);
       transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
-      user-select: none;
+      user-select: none; touch-action: none;
     }
     .user-turn { width: fit-content; max-width: 96%; margin: 0 0 14px auto; }
     .user-turn .msg { margin-bottom: 3px; }
@@ -4550,6 +4550,7 @@
     .fab::after { content: ''; position: absolute; right: -2px; bottom: 2px; width: 10px; height: 10px; border-radius: 50%; background: #52d38a; border: 2px solid #fff; }
     .fab:hover { transform: translateY(-2px) scale(1.06); filter: saturate(1.08); box-shadow: 0 11px 26px rgba(45,105,165,.46), inset 0 1px 1px rgba(255,255,255,.4); }
     .fab:active { transform: translateY(0) scale(.97); }
+    .fab.dragging { cursor: grabbing; transform: scale(.98); transition: none; }
     .fab:focus-visible { outline: 3px solid rgba(91,160,229,.45); outline-offset: 3px; }
     .fab img { width: 37px; height: 37px; object-fit: contain; position: relative; z-index: 1; }
     .fab.hidden { display: none; }
@@ -4976,6 +4977,8 @@
   var pageText = "";
   var panelTextEl = null;
   var fab = null;
+  var fabDragState = null;
+  var fabSuppressClickUntil = 0;
   var conversation = [];
   var panelTitleEl = null;
   var panelSessionId = "";
@@ -5145,6 +5148,56 @@
   var currentCitations = null;
   var pageContextEnabled = true;
   var citeHighlightEntered2 = false;
+  var FAB_POSITION_KEY = "recallflow-fab-position";
+  var FAB_EDGE_GAP = 8;
+  function fabHeight() {
+    const measured = fab ? fab.offsetHeight : 0;
+    return measured || (window.innerWidth <= 600 ? 46 : 52);
+  }
+  function currentFabTop() {
+    if (!fab) return FAB_EDGE_GAP;
+    const styled = parseFloat(fab.style.top);
+    return Number.isFinite(styled) ? styled : fab.getBoundingClientRect().top;
+  }
+  function clampFabTop(top) {
+    const height = fabHeight();
+    const maxTop = Math.max(FAB_EDGE_GAP, window.innerHeight - height - FAB_EDGE_GAP);
+    return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
+  }
+  function savedFabRatio() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAB_POSITION_KEY) || "null");
+      if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
+      const ratio = Number(saved.ratio);
+      return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function applySavedFabPosition() {
+    if (!fab) return;
+    const ratio = savedFabRatio();
+    const effective = ratio == null ? 0.38 : ratio;
+    const height = fabHeight();
+    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
+    fab.style.top = clampFabTop(FAB_EDGE_GAP + effective * available) + "px";
+  }
+  function persistFabPosition() {
+    if (!fab) return;
+    const height = fabHeight();
+    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
+    const top = clampFabTop(currentFabTop());
+    const ratio = (top - FAB_EDGE_GAP) / available;
+    try {
+      localStorage.setItem(FAB_POSITION_KEY, JSON.stringify({ ratio, updatedAt: Date.now() }));
+    } catch (e) {
+    }
+  }
+  function moveFabBy(delta) {
+    if (!fab) return;
+    fab.style.top = clampFabTop(currentFabTop() + delta) + "px";
+    persistFabPosition();
+  }
   function ensureHost() {
     if (host && !host.isConnected) resetDetachedHostState();
     if (host) return;
@@ -5169,18 +5222,62 @@
     fabIcon.src = extUrl("docs/assets/recallflow-mark.svg");
     fabIcon.alt = "";
     fab.appendChild(fabIcon);
-    fab.title = "RecallFlow";
+    fab.title = "RecallFlow\uFF08\u53EF\u4E0A\u4E0B\u62D6\u52A8\uFF09";
     fab.setAttribute("aria-label", "\u6253\u5F00 RecallFlow");
     fab.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (Date.now() < fabSuppressClickUntil) return;
       togglePanel();
     });
-    fab.addEventListener("mousedown", (e) => {
+    fab.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !e.isPrimary) return;
+      fabDragState = {
+        pointerId: e.pointerId,
+        startY: e.clientY,
+        origTop: currentFabTop(),
+        moved: false
+      };
+      fab.classList.add("dragging");
+      try {
+        fab.setPointerCapture(e.pointerId);
+      } catch (err) {
+      }
       e.preventDefault();
       e.stopPropagation();
     });
+    fab.addEventListener("pointermove", (e) => {
+      if (!fabDragState || fabDragState.pointerId !== e.pointerId) return;
+      const dy = e.clientY - fabDragState.startY;
+      if (Math.abs(dy) > 3) fabDragState.moved = true;
+      if (!fabDragState.moved) return;
+      fab.style.top = clampFabTop(fabDragState.origTop + dy) + "px";
+      e.preventDefault();
+    });
+    const finishFabDrag = (e) => {
+      if (!fabDragState || fabDragState.pointerId !== e.pointerId) return;
+      const moved = fabDragState.moved;
+      fabDragState = null;
+      fab.classList.remove("dragging");
+      try {
+        fab.releasePointerCapture(e.pointerId);
+      } catch (err) {
+      }
+      if (moved) {
+        fabSuppressClickUntil = Date.now() + 350;
+        persistFabPosition();
+      }
+    };
+    fab.addEventListener("pointerup", finishFabDrag);
+    fab.addEventListener("pointercancel", finishFabDrag);
+    fab.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      e.stopPropagation();
+      moveFabBy(e.key === "ArrowUp" ? -16 : 16);
+    });
     shadow.appendChild(fab);
+    applySavedFabPosition();
     document.documentElement.appendChild(host);
   }
   function resetDetachedHostState() {
@@ -5207,6 +5304,7 @@
     host = null;
     shadow = null;
     fab = null;
+    fabDragState = null;
   }
   function watchHostKeepalive() {
     setInterval(() => {
@@ -8069,6 +8167,9 @@
       removeBubble();
     });
     document.addEventListener("scroll", () => removeBubble(), true);
+    window.addEventListener("resize", () => {
+      if (fab) applySavedFabPosition();
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if (picking) return;
