@@ -4915,7 +4915,9 @@
       plan: Array.isArray(state.plan) ? state.plan.slice() : [],
       citations: bound.citations,
       live: true,
-      liveStatus: state.status
+      liveStatus: state.status,
+      // 与发起页一致：流式过程中正文可以出现引用徽章，但底部“参考来源”只在收尾后显示。
+      showCitations: state.status !== "running"
     };
   }
   function citeNumber(inner) {
@@ -5732,7 +5734,8 @@
       const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : renderAnswer(m.content || "", m.citations);
       const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
       const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
-      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + citeSourcesHtml(m.citations) + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
+      const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
+      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
     }).join("");
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);

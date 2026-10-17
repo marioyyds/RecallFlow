@@ -30,3 +30,11 @@ test('notice part 会随会话序列化保留，重开/跟随最终态仍可重�
   assert.equal(rec.parts[0].type, 'notice');
   assert.equal(rec.parts[0].text, '✓ 完成前校验通过：证据一致');
 });
+
+test('跟随 live 消息必须尊重 showCitations，运行中不提前渲染来源区', () => {
+  assert.match(
+    CHAT,
+    /const sourceHtml = !m\.live \|\| m\.showCitations \? citeSourcesHtml\(m\.citations\) : ''/,
+    'live 运行中必须跳过 citeSourcesHtml，与发起页的收尾时机一致'
+  );
+});
