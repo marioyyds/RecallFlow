@@ -71,6 +71,8 @@ const phases = [
   { name: '会话共享', spec: 'sessions.spec.mjs', hold: '', visionShot: '', chunkDelay: '1200' },
   // 关闭整个浏览器上下文再重启，专门验证 IndexedDB 跨会话持久化。
   { name: '持久化', spec: 'persistence.spec.mjs', hold: '', visionShot: '' },
+  // 知识库存储迁移：旧 chrome.storage 数据 → IndexedDB，并验证只迁移一次。
+  { name: '知识库迁移', spec: 'knowledge-indexeddb.spec.mjs', hold: '', visionShot: '' },
   { name: '断线恢复', spec: 'resume.spec.mjs', hold: '1', visionShot: '' },
   { name: '视觉两臂', spec: 'vision-switch.spec.mjs', hold: '', visionShot: '1' },
 ];

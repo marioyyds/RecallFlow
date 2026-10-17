@@ -20,7 +20,7 @@ import {
   platformColor,
   parseTags,
 } from './lib/shared/utils.js';
-import { getBook, setBook, upsertItem } from './lib/shared/store.js';
+import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 let bookCache = {};
@@ -406,6 +406,11 @@ $('open-assistant').addEventListener('click', async () => {
   } catch (e) {
     toast('无法打开助手，请刷新页面后重试');
   }
+});
+
+subscribeKnowledgeChanges(async () => {
+  await loadCache();
+  renderList();
 });
 
 init();

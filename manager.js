@@ -15,7 +15,7 @@ import {
   parseTags,
   bindStarKeyboard,
 } from './lib/shared/utils.js';
-import { getBook, setBook } from './lib/shared/store.js';
+import { getBook, setBook, subscribeKnowledgeChanges } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 import { renderMarkdown } from './lib/page/markdown.js';
 import { clampPage, pageSlice, pageTokens } from './lib/shared/pagination.js';
@@ -778,6 +778,11 @@ function focusItemFromHash() {
   renderUserscriptBadge();
   render();
   focusItemFromHash();
+  subscribeKnowledgeChanges(async () => {
+    if (editingNoteId) return;
+    await loadCache();
+    render();
+  });
 })();
 
 async function renderUserscriptBadge() {
