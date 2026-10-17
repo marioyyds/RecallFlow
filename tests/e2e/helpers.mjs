@@ -101,7 +101,7 @@ export async function readActivePanelSession(context) {
 }
 
 /**
- * 读扩展侧的**知识库存储**（`knowledgeBase`）。
+ * 读扩展侧的 **IndexedDB 知识库**（entries + documents）。
  *
  * 为什么必须有这个 helper：知识库场景的权威事实在**存储**里，不在页面上 ——
  * `add_entry` 传了 url 就用 url 当 id（同一 URL 视为同一条），
@@ -114,8 +114,38 @@ export async function readKnowledgeBase(context) {
   const [sw] = context.serviceWorkers();
   if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
   return await sw.evaluate(async () => {
-    const d = await chrome.storage.local.get('knowledgeBase');
-    return (d && d.knowledgeBase) || {};
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('recallflow-knowledge', 1);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains('entries')) {
+          const entries = d.createObjectStore('entries', { keyPath: 'id' });
+          entries.createIndex('updatedAt', 'updatedAt');
+          entries.createIndex('createdAt', 'createdAt');
+          entries.createIndex('type', 'type');
+          entries.createIndex('status', 'status');
+        }
+        if (!d.objectStoreNames.contains('documents')) d.createObjectStore('documents', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const tx = db.transaction(['entries', 'documents'], 'readonly');
+    const readAll = (name) => new Promise((resolve, reject) => {
+      const req = tx.objectStore(name).getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const entries = await readAll('entries');
+    const docs = await readAll('documents');
+    db.close();
+    const byId = new Map(docs.map((doc) => [String(doc.id), doc]));
+    const book = {};
+    for (const entry of entries) {
+      book[entry.id] = Object.assign({}, entry, { note: String((byId.get(String(entry.id)) || {}).markdown || '') });
+    }
+    return book;
   });
 }
 
@@ -132,7 +162,33 @@ export async function resetKnowledgeBase(context) {
   const [sw] = context.serviceWorkers();
   if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
   await sw.evaluate(async () => {
-    await chrome.storage.local.remove('knowledgeBase');
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('recallflow-knowledge', 1);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains('entries')) {
+          const entries = d.createObjectStore('entries', { keyPath: 'id' });
+          entries.createIndex('updatedAt', 'updatedAt');
+          entries.createIndex('createdAt', 'createdAt');
+          entries.createIndex('type', 'type');
+          entries.createIndex('status', 'status');
+        }
+        if (!d.objectStoreNames.contains('documents')) d.createObjectStore('documents', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(['entries', 'documents', 'meta'], 'readwrite');
+      tx.objectStore('entries').clear();
+      tx.objectStore('documents').clear();
+      tx.objectStore('meta').clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    await chrome.storage.local.remove(['knowledgeBase', 'knowledgeBasePreIndexedDB', 'wrongBook']);
   });
 }
 

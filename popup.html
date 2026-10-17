@@ -15,6 +15,7 @@
     </div>
     <div class="header-actions">
       <span id="total-badge" class="badge">0 条</span>
+      <button id="open-assistant" class="header-assistant" type="button">助手</button>
       <button id="open-manager-top" class="header-icon" type="button" title="打开知识库" aria-label="打开知识库">↗</button>
     </div>
   </header>
@@ -35,13 +36,13 @@
     </div>
     <label class="input-label" for="tags-input">标签 <span>可选</span></label>
     <input id="tags-input" class="note-input" type="text" placeholder="如：动态规划，面试" aria-label="标签，逗号分隔">
-    <label class="input-label" for="note-input">备注 <span>可选</span></label>
-    <input id="note-input" class="note-input" type="text" placeholder="写一句摘要，方便以后找回" aria-label="备注或摘要">
+    <label class="input-label" for="note-input">文档 / 备注 <span>可选</span></label>
+    <textarea id="note-input" class="note-input" rows="3" placeholder="写摘要或 Markdown 文档，支持标题、列表、代码块…" aria-label="备注或 Markdown 文档"></textarea>
     <button id="add-btn" class="btn btn-primary">添加到知识库</button>
   </section>
   <section id="page-unavailable" class="page-unavailable hidden" aria-live="polite"><span class="empty-ico">⊙</span><strong>当前页面无法收录</strong><span>请打开普通网页后再试</span></section>
 
-  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"><kbd>Ctrl K</kbd></label></div>
+  <div class="list-head"><div><strong>最近收录</strong><span id="visible-count" class="visible-count"></span></div><label class="list-search"><span aria-hidden="true">⌕</span><input id="list-search" type="search" placeholder="搜索标题、标签..." aria-label="搜索知识库"><kbd id="search-shortcut">Ctrl K</kbd></label></div>
 
   <div class="toolbar">
     <nav class="filters" id="filters">
@@ -60,6 +61,7 @@
   </div>
 
   <main id="list" class="list"></main>
+  <button id="open-manager-all" class="view-all-btn hidden" type="button"><span id="view-all-label">在知识库查看全部</span> <span id="all-items-count">0</span> 条 →</button>
   <div id="empty" class="empty hidden">
     <span class="empty-ico">📚</span>
     <p>还没有内容</p>

@@ -98,6 +98,20 @@ test('run state: live 引用按正文首次出现顺序过滤并重编号', () =
   assert.equal(runStateToAssistantMessage(s).showCitations, true, '收尾后才显示参考来源');
 });
 
+test('run state: 校验通过提示是最后一条，不插在 complete_task 工具结果后面', () => {
+  const s = state();
+  applyRunEvent(s, { type: 'tool-result', callId: 'c1', name: 'complete_task', status: 'completed', result: '完成' });
+  applyRunEvent(s, { type: 'verify', ok: true, reason: '证据一致' });
+  applyRunEvent(s, { type: 'chunk', text: '最终回答' });
+  applyRunEvent(s, { type: 'end' });
+  const msg = runStateToAssistantMessage(s);
+  const last = msg.parts[msg.parts.length - 1];
+  assert.equal(last.type, 'notice');
+  assert.equal(last.terminal, true);
+  assert.match(last.text, /完成前校验通过/);
+  assert.ok(msg.parts.findIndex((p) => p.type === 'narration') < msg.parts.length - 1);
+});
+
 test('run state: 待关闭辅助页会显示在跟随时间线里', () => {
   const s = state();
   applyRunEvent(s, { type: 'tabs-close-pending', tabIds: [42, 43] });

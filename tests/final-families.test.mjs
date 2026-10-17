@@ -74,6 +74,14 @@ test('add_entry：有 url 时用 url 当 id（同 URL 天然去重）', async ()
   assert.equal(deps.calls.find((c) => c.op === 'upsert').item.id, 'https://a.test/p');
 });
 
+test('add_entry：显式 id 可更新已有会话整理，不被自动 id 或空 url 覆盖', async () => {
+  const deps = mkKbDeps();
+  await addEntry(deps, { id: 'session-doc-1', title: '会话整理：缓存', type: 'note' });
+  const item = deps.calls.find((c) => c.op === 'upsert').item;
+  assert.equal(item.id, 'session-doc-1');
+  assert.equal(item.url, '');
+});
+
 test('add_entry：无 url 时生成临时 id（前缀 kb:）', async () => {
   const deps = mkKbDeps();
   await addEntry(deps, { title: 'T' });

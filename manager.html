@@ -37,27 +37,32 @@
 
   <nav class="type-tabs" id="type-tabs"></nav>
 
-  <div class="tag-filter" id="tag-filter"></div>
-  <section class="active-filters" aria-live="polite"><span class="filter-label">当前筛选</span><div id="active-filter-list"><span class="filter-empty">全部内容</span></div><button id="clear-filters" class="link-button" type="button">清除全部</button></section>
+  <details class="advanced-filters" id="advanced-filters">
+    <summary><span>更多筛选</span><span id="advanced-filter-summary" class="advanced-filter-summary">全部内容</span></summary>
+    <div class="advanced-filter-body">
+      <div class="tag-filter" id="tag-filter"></div>
+      <section class="active-filters" aria-live="polite"><span class="filter-label">当前筛选</span><div id="active-filter-list"><span class="filter-empty">全部内容</span></div><button id="clear-filters" class="link-button" type="button">清除全部</button></section>
 
-  <section class="stats" id="stats">
-    <div class="stat-card" data-s="all">
-      <span class="num" id="st-total">0</span>
-      <span class="lbl">全部</span>
+      <section class="stats" id="stats">
+        <div class="stat-card" data-s="all">
+          <span class="num" id="st-total">0</span>
+          <span class="lbl">全部</span>
+        </div>
+        <div class="stat-card" data-s="1">
+          <span class="num" id="st-1">0</span>
+          <span class="lbl stars-lbl" data-stars="1"></span>
+        </div>
+        <div class="stat-card" data-s="2">
+          <span class="num" id="st-2">0</span>
+          <span class="lbl stars-lbl" data-stars="2"></span>
+        </div>
+        <div class="stat-card" data-s="3">
+          <span class="num" id="st-3">0</span>
+          <span class="lbl stars-lbl" data-stars="3"></span>
+        </div>
+      </section>
     </div>
-    <div class="stat-card" data-s="1">
-      <span class="num" id="st-1">0</span>
-      <span class="lbl stars-lbl" data-stars="1"></span>
-    </div>
-    <div class="stat-card" data-s="2">
-      <span class="num" id="st-2">0</span>
-      <span class="lbl stars-lbl" data-stars="2"></span>
-    </div>
-    <div class="stat-card" data-s="3">
-      <span class="num" id="st-3">0</span>
-      <span class="lbl stars-lbl" data-stars="3"></span>
-    </div>
-  </section>
+  </details>
 
   <div class="toolbar">
     <select id="sort-select" class="sort-select" title="排序方式">
@@ -70,6 +75,7 @@
 
   <main id="list" class="list"></main>
   <div id="empty" class="empty hidden"></div>
+  <nav id="kb-pagination" class="kb-pagination" aria-label="知识库分页"></nav>
 
   <div class="confirm-overlay hidden" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-msg">
     <div class="confirm-dialog">
@@ -81,7 +87,25 @@
     </div>
   </div>
 
-  <footer>点击标题打开原文，点击星星改星级，点击备注/标签可编辑。</footer>
+  <div class="confirm-overlay hidden" id="doc-overlay" role="dialog" aria-modal="true" aria-labelledby="doc-title">
+    <article class="doc-dialog">
+      <header class="doc-head">
+        <div class="doc-head-main">
+          <h2 id="doc-title">文档</h2>
+          <div id="doc-meta" class="doc-meta"></div>
+        </div>
+        <button id="doc-close" class="doc-close" type="button" aria-label="关闭文档">✕</button>
+      </header>
+      <div id="doc-content" class="markdown-body"></div>
+      <div class="doc-actions">
+        <button id="doc-open" class="mini" type="button">打开原文</button>
+        <button id="doc-edit" class="mini" type="button">编辑</button>
+        <button id="doc-close-bottom" class="mini primary" type="button">关闭</button>
+      </div>
+    </article>
+  </div>
+
+  <footer>点击标题打开原文，点击“阅读”查看 Markdown 文档，点击星星改星级。</footer>
 
   <script type="module" src="manager.js"></script>
 </body>

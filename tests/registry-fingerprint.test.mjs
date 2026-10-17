@@ -178,7 +178,10 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       比单次 run_javascript 影响更长远）。理由与残余风险见 tool-metadata.js。
   //                       `alwaysAvailable: true` 是必需的：实测该请求被判成 knowledge_task，
   //                       而知识库意图只带 6 个工具 —— 不常驻就永远看不到这个能力。
-  const EXPECTED = '7ed104bf155648d3';
+  //   e02d8c26ddfdc419 —— **有意改动**：add_entry 增加可选 `id`。
+  //                       目的：把“整理会话到知识库”重复执行时能更新同一篇文档，
+  //                       而不是每次生成新 id、留下多份重复记录。权限类别不变。
+  const EXPECTED = 'e02d8c26ddfdc419';
   assert.equal(
     fp,
     EXPECTED,

@@ -428,7 +428,7 @@ export const PLAYBOOKS = Object.freeze({
       url: '/notes',
       instruction: '把这一页的三个要点存进知识库（标题用「检索性能优化」），每条加上 KB-1 / KB-2 / KB-3 的编号，然后从知识库读回来确认三条都在。',
       // ⚠ 这一类的状态**不在页面上**（知识库是扩展侧存储），所以没有页面判据 ——
-      // 权威的保真检查在 E2E 里直接读 chrome.storage 的 `knowledgeBase`。
+      // 权威的保真检查在 E2E 里直接读 IndexedDB 的 entries/documents。
       // 这里不塞凑数的页面断言：宁可显式留空，也不假装页面能证明什么。
       //
       // `outcome` 就是给这件事的**机器可读声明**：空 pageChecks 必须配一个理由，

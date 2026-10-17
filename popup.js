@@ -7,6 +7,7 @@ import {
   levelNameHtml,
   sortItems,
   esc,
+  markdownExcerpt,
   typeBadgeHtml,
   tagsHtml,
   fmtTime,
@@ -19,7 +20,7 @@ import {
   platformColor,
   parseTags,
 } from './lib/shared/utils.js';
-import { getBook, setBook, upsertItem } from './lib/shared/store.js';
+import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from './lib/shared/store.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 let bookCache = {};
@@ -32,6 +33,8 @@ let selectedStatus = STATUS.IMPORTANT;
 let currentFilter = 'all';
 let sortBy = 'updated';
 let listQuery = '';
+const ADD_COLLAPSED_KEY = 'recallflow-popup-add-collapsed';
+const POPUP_RECENT_LIMIT = 5;
 
 const $ = (id) => document.getElementById(id);
 
@@ -70,6 +73,7 @@ function renderList() {
     items = items.filter((i) => (i.type || 'wrong') === currentFilter);
   }
   const query = listQuery.trim().toLowerCase();
+  const hasFilters = currentFilter !== 'all' || Boolean(query);
   if (query) {
     items = items.filter((i) => `${i.title || ''} ${i.note || ''} ${(i.tags || []).join(' ')}`.toLowerCase().includes(query));
   }
@@ -77,16 +81,29 @@ function renderList() {
 
   emptyEl.classList.toggle('hidden', items.length > 0);
   if (!items.length) {
-    const hasFilters = currentFilter !== 'all' || query;
     emptyEl.innerHTML = hasFilters
       ? '<span class="empty-ico">⌕</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>还没有内容</p><p class="empty-hint">打开网页后点工具栏图标即可快速收录</p>';
   }
-  listEl.innerHTML = items.map(itemHtml).join('');
   const total = Object.keys(bookCache).length;
+  const shown = items.slice(0, POPUP_RECENT_LIMIT);
+  listEl.innerHTML = shown.map(itemHtml).join('');
   $('total-badge').textContent = total + ' 条';
   const visible = $('visible-count');
-  if (visible) visible.textContent = items.length === total ? '' : `· ${items.length}/${total}`;
+  if (visible) {
+    visible.textContent = items.length
+      ? hasFilters
+        ? `· 筛选 ${items.length} 条，显示前 ${shown.length} 条`
+        : `· 显示最近 ${shown.length} 条 / 共 ${total} 条`
+      : '';
+  }
+  const viewAll = $('open-manager-all');
+  if (viewAll) {
+    viewAll.classList.toggle('hidden', total === 0);
+    $('view-all-label').textContent = hasFilters ? '在知识库查看筛选结果' : '在知识库查看全部';
+    $('all-items-count').textContent = String(hasFilters ? items.length : total);
+    viewAll.title = hasFilters ? '打开知识库查看完整筛选结果' : '打开知识库查看全部内容';
+  }
 }
 
 function itemHtml(it) {
@@ -101,7 +118,7 @@ function itemHtml(it) {
       ${it.url ? '<button class="icon-btn open" title="打开原文" aria-label="打开原文">↗</button>' : ''}
       <button class="icon-btn del" title="删除" aria-label="删除条目">✕</button>
     </div>
-    ${it.note ? `<div class="item-note">${esc(it.note)}</div>` : ''}
+    ${it.note ? `<div class="item-note">${esc(markdownExcerpt(it.note, 120))}</div>` : ''}
     ${tagsHtml(it.tags)}
     <div class="item-meta">
       ${starBarHtml(it.status, true)}
@@ -116,6 +133,11 @@ async function init() {
   await loadCache();
   renderList();
   renderScriptsBadge();
+  const shortcut = $('search-shortcut');
+  if (shortcut) {
+    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    shortcut.textContent = /mac/i.test(platform) ? '⌘ K' : 'Ctrl K';
+  }
 
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (t && t.url && isWebUrl(t.url)) {
@@ -148,6 +170,9 @@ async function init() {
   }
   renderTypePicker();
   syncStatusHighlight();
+  try {
+    setAddPanelCollapsed(localStorage.getItem(ADD_COLLAPSED_KEY) === '1', false);
+  } catch (e) {}
 }
 
 async function renderScriptsBadge() {
@@ -200,6 +225,7 @@ $('add-btn').addEventListener('click', async () => {
 ['tags-input', 'note-input'].forEach((id) => {
   $(id).addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
+      if (id === 'note-input' && !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       $('add-btn').click();
     }
@@ -263,12 +289,19 @@ $('list-search').addEventListener('input', debounce(() => {
   renderList();
 }, 200));
 
-$('toggle-add-panel').addEventListener('click', () => {
+function setAddPanelCollapsed(collapsed, persist = true) {
   const addPanel = $('add-panel');
-  const collapsed = addPanel.classList.toggle('is-collapsed');
   const toggle = $('toggle-add-panel');
+  addPanel.classList.toggle('is-collapsed', collapsed);
   toggle.textContent = collapsed ? '展开' : '收起';
   toggle.setAttribute('aria-expanded', String(!collapsed));
+  if (persist) {
+    try { localStorage.setItem(ADD_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+  }
+}
+
+$('toggle-add-panel').addEventListener('click', () => {
+  setAddPanelCollapsed(!$('add-panel').classList.contains('is-collapsed'));
 });
 
 document.addEventListener('keydown', (e) => {
@@ -334,6 +367,7 @@ const openManager = (e) => {
 };
 $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);
+$('open-manager-all').addEventListener('click', openManager);
 
 $('open-scripts').addEventListener('click', (e) => {
   e.preventDefault();
@@ -349,6 +383,34 @@ if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e) => {
 $('open-settings').addEventListener('click', (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
+});
+
+$('open-assistant').addEventListener('click', async () => {
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    let tab = activeTab;
+    // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
+    // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
+    if (!tab || !tab.url || !isWebUrl(tab.url)) {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      tab = tabs.find((item) => item && item.url && isWebUrl(item.url));
+    }
+    if (!tab || !tab.url || !isWebUrl(tab.url)) {
+      toast('请先打开一个普通网页');
+      return;
+    }
+    chrome.runtime.sendMessage({ type: 'panel:open-active', tabId: tab.id }, () => {
+      if (chrome.runtime.lastError) toast('无法打开助手，请刷新页面后重试');
+      else setTimeout(() => window.close(), 80);
+    });
+  } catch (e) {
+    toast('无法打开助手，请刷新页面后重试');
+  }
+});
+
+subscribeKnowledgeChanges(async () => {
+  await loadCache();
+  renderList();
 });
 
 init();

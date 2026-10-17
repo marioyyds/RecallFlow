@@ -25,8 +25,19 @@
     </nav>
   </div>
 
-  <main>
-    <section class="card">
+  <main class="settings-layout">
+    <aside class="settings-sidebar" aria-label="设置导航">
+      <div class="settings-sidebar-inner">
+        <span class="settings-sidebar-title">设置</span>
+        <a href="#settings-connection">连接</a>
+        <a href="#settings-behavior">RecallFlow 行为</a>
+        <a href="#settings-scripts">用户脚本</a>
+        <a href="#settings-mcp">MCP 服务器</a>
+        <a href="#settings-prompts">快捷语句</a>
+      </div>
+    </aside>
+    <div class="settings-content">
+    <section class="card" id="settings-connection">
       <h2><span class="ico">🔑</span> DeepSeek API</h2>
       <label class="field">
         <span class="field-label">API Key</span>
@@ -36,6 +47,10 @@
         </div>
         <span class="hint">在 platform.deepseek.com 申请，仅保存在本地浏览器</span>
       </label>
+      <div class="connection-check">
+        <button id="test-connection" class="btn btn-secondary" type="button">测试连接</button>
+        <span id="connection-status" class="connection-status" role="status" aria-live="polite">尚未测试</span>
+      </div>
       <label class="field">
         <span class="field-label">模型</span>
         <div class="input-row">
@@ -45,7 +60,7 @@
             <option value="deepseek-reasoner">deepseek-reasoner</option>
           </datalist>
         </div>
-        <span class="hint">deepseek-chat 通用 / deepseek-reasoner 深度推理。**只有 deepseek-reasoner 会返回思维链** —— 选它时对话面板才会出现可折叠的「思考记录」；deepseek-chat 下只有等待动画。</span>
+        <span class="hint">deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；deepseek-chat 下只有等待动画。</span>
       </label>
       <label class="field">
         <span class="field-label">API 地址</span>
@@ -54,8 +69,9 @@
       </label>
     </section>
 
-    <section class="card">
+    <section class="card" id="settings-behavior">
       <h2><span class="ico">🤖</span> RecallFlow 行为</h2>
+      <div class="settings-subsection-title">上下文与记忆</div>
       <label class="field switch-field">
         <span class="field-label">RAG 知识库检索</span>
         <span class="hint">回答时自动把相关知识库条目作为上下文，让 AI 基于你的收藏回答</span>
@@ -71,6 +87,7 @@
         <span class="hint">用可信事件操作页面，支持 canvas / 虚拟列表 / 复杂组件与页面世界 JS；操作时会显示「正在调试」提示条，无需时可关闭</span>
         <input id="cdp-enabled" type="checkbox" class="switch">
       </label>
+      <div class="settings-subsection-title">审批与权限</div>
       <div class="field">
         <span class="field-label">CDP 权限</span>
         <span class="hint">「debugger」权限在安装扩展时授予（Chrome 不支持将其设为可选权限）。若未授予，上面的浏览器级输入不可用，可在浏览器扩展详情页重新授权后刷新。</span>
@@ -111,6 +128,7 @@
           注意它们共用这一个开关 —— 设为「自动批准」等于同时放开这三者。
         </span>
       </label>
+      <div class="settings-subsection-title">连接与开发</div>
       <label class="field">
         <span class="field-label">桥接 Token（本机 MCP 集成）</span>
         <input id="bridge-token" type="password" autocomplete="off" placeholder="留空 = 用内置默认 token（recallflow-local-bridge-v1）">
@@ -132,6 +150,7 @@
         <textarea id="trusted-sites" rows="3" placeholder="https://example.com"></textarea>
         <span class="hint">这些站点的写操作不再逐次确认（run_javascript 等高风险工具仍每次确认）。也可在对话中说「信任这个网站」由助手添加。</span>
       </label>
+      <div class="settings-subsection-title">成本上限</div>
       <div class="agent-budget">
         <div class="approval-head"><div><span class="field-label">Agent 预算</span><span class="hint">不限制单任务的工具调用次数与推理轮数 —— 只保留成本兜底。</span></div></div>
         <div class="budget-row">
@@ -144,7 +163,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="settings-scripts">
       <h2><span class="ico">🧩</span> 用户脚本</h2>
       <div class="us-summary">
         <div class="us-summary-main">
@@ -175,14 +194,14 @@
       </label>
     </section>
 
-    <section class="card">
+    <section class="card" id="settings-mcp">
       <h2><span class="ico">🔌</span> MCP 服务器（Agent 工具扩展）</h2>
       <span class="hint">配置远程 MCP 服务器（Streamable HTTP），Agent 会自动连接并加载其工具（工具名以 mcp__ 开头）。<b>需把各服务器域名加入 manifest.json 的 host_permissions</b>，否则无法跨域访问。</span>
       <div id="mcp-list" class="mcp-list"></div>
       <button id="mcp-add" class="btn btn-ghost" type="button">+ 添加服务器</button>
     </section>
 
-    <section class="card">
+    <section class="card" id="settings-prompts">
       <h2><span class="ico">⚡</span> 对话快捷语句</h2>
       <span class="hint">显示在 AI 对话框输入区上方，点击后直接发送。每行一条，最多 12 条。</span>
       <textarea id="quick-prompts" rows="5" placeholder="总结全文&#10;翻译成中文&#10;解释这段内容"></textarea>
@@ -190,7 +209,9 @@
 
     <div class="actions">
       <button id="save-btn" class="btn btn-primary">保存设置</button>
-      <span id="status" class="status"></span>
+      <span id="save-state" class="save-state">已保存</span>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
     </div>
   </main>
 

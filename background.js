@@ -394,6 +394,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   // ---- 面板开合状态（全浏览器同步）----
+  if (msg && msg.type === 'panel:open-active') {
+    // popup 作为独立标签页打开时，sender.tab 指向 popup 自己；显式传入的
+    // tabId 才是用户正在浏览的网页。优先使用显式值，避免 popup 关闭时
+    // 把唯一的面板成员一起删掉。
+    const requestedTabId = Number(msg.tabId);
+    const targetTabId = Number.isInteger(requestedTabId) && requestedTabId > 0
+      ? requestedTabId
+      : sender.tab && sender.tab.id;
+    if (!Number.isInteger(targetTabId) || targetTabId <= 0) {
+      sendResponse({ ok: false, error: '缺少目标标签页' });
+      return false;
+    }
+    (async () => {
+      await ensurePanelSessions();
+      const result = await panelSessions.setUi({ open: true, tabId: targetTabId, scope: 'global' });
+      broadcastPanelUi(result.ui, null);
+      sendResponse({ ok: true, ui: result.ui });
+    })().catch((e) => {
+      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+    });
+    return true;
+  }
   if (msg && (msg.type === 'panel:ui:get' || msg.type === 'panel:ui:set')) {
     const sourceTabId = sender.tab && sender.tab.id;
     (async () => {

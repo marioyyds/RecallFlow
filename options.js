@@ -5,6 +5,8 @@ import { getUserscriptSettings, saveUserscriptSettings } from './lib/userscript/
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
 
 const $ = (id) => document.getElementById(id);
+let settingsDirty = false;
+let settingsLoading = true;
 
 async function load() {
   const s = await getAISettings();
@@ -38,6 +40,9 @@ async function load() {
   $('us-auto-update').checked = !!us.autoCheckUpdates;
   $('us-run-at').value = us.defaultRunAt || 'document-idle';
   renderUserscriptSummary();
+  settingsLoading = false;
+  setDirty(false);
+  initSettingsNav();
 }
 
 async function renderUserscriptSummary() {
@@ -77,6 +82,7 @@ function renderMcp(list) {
     row.querySelector('.mcp-del').addEventListener('click', () => {
       list.splice(i, 1);
       renderMcp(list);
+      markDirty();
     });
     box.appendChild(row);
   });
@@ -93,8 +99,21 @@ function toast(msg, ok) {
   }, 1800);
 }
 
-$('save-btn').addEventListener('click', async () => {
-  const settings = {
+function setDirty(dirty) {
+  settingsDirty = Boolean(dirty);
+  const state = $('save-state');
+  if (!state) return;
+  state.textContent = settingsDirty ? '有未保存修改' : '已保存';
+  state.classList.toggle('dirty', settingsDirty);
+}
+
+function markDirty() {
+  if (settingsLoading) return;
+  setDirty(true);
+}
+
+function collectSettings() {
+  return {
     apiKey: $('api-key').value.trim(),
     model: $('model').value.trim() || AI_SETTINGS_DEFAULTS.model,
     baseUrl: $('base-url').value.trim().replace(/\/+$/, '') || AI_SETTINGS_DEFAULTS.baseUrl,
@@ -116,19 +135,46 @@ $('save-btn').addEventListener('click', async () => {
       ...(Number.isInteger(Number($('budget-tokens').value)) && Number($('budget-tokens').value) > 0 ? { maxTotalTokens: Math.floor(Number($('budget-tokens').value)) } : {}),
     },
   };
+}
+
+async function saveSettings() {
+  const settings = collectSettings();
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: settings });
   await saveUserscriptSettings({
     agentCanInstall: $('us-agent-install').checked,
     autoCheckUpdates: $('us-auto-update').checked,
     defaultRunAt: $('us-run-at').value || 'document-idle',
   });
+  setDirty(false);
   toast('✓ 已保存', true);
+}
+
+$('save-btn').addEventListener('click', () => {
+  saveSettings().catch((err) => toast('保存失败：' + (err && err.message ? err.message : '未知错误')));
+});
+
+document.querySelector('.settings-content').addEventListener('input', markDirty);
+document.querySelector('.settings-content').addEventListener('change', markDirty);
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    saveSettings().catch((err) => toast('保存失败：' + (err && err.message ? err.message : '未知错误')));
+  }
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (!settingsDirty) return;
+  e.preventDefault();
+  e.returnValue = '';
 });
 
 $('toggle-key').addEventListener('click', () => {
   const el = $('api-key');
   el.type = el.type === 'password' ? 'text' : 'password';
   $('toggle-key').textContent = el.type === 'password' ? '👁' : '🙈';
+  $('toggle-key').setAttribute('aria-label', el.type === 'password' ? '显示 API Key' : '隐藏 API Key');
+  $('toggle-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
 });
 
 function collectMcp() {
@@ -150,6 +196,7 @@ $('mcp-add').addEventListener('click', () => {
   const list = collectMcp();
   list.push({ id: '', url: '', headers: {} });
   renderMcp(list);
+  markDirty();
 });
 
 function syncApprovalPreset() {
@@ -164,5 +211,59 @@ $('approval-preset').addEventListener('change', (e) => {
   }
 });
 document.querySelectorAll('.approval-list input').forEach((el) => el.addEventListener('change', syncApprovalPreset));
+
+$('test-connection').addEventListener('click', async () => {
+  const status = $('connection-status');
+  const apiKey = $('api-key').value.trim();
+  const baseUrl = $('base-url').value.trim().replace(/\/+$/, '') || AI_SETTINGS_DEFAULTS.baseUrl;
+  status.className = 'connection-status';
+  if (!apiKey) {
+    status.textContent = '请先填写 API Key';
+    status.classList.add('error');
+    $('api-key').focus();
+    return;
+  }
+  status.textContent = '正在测试…';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(baseUrl + '/models', {
+      headers: { Authorization: 'Bearer ' + apiKey },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    status.textContent = '连接成功';
+    status.classList.add('ok');
+  } catch (err) {
+    status.textContent = err && err.name === 'AbortError'
+      ? '连接超时'
+      : '连接失败：' + (err && err.message ? err.message : '未知错误');
+    status.classList.add('error');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+function initSettingsNav() {
+  const links = [...document.querySelectorAll('.settings-sidebar a')];
+  const sections = links
+    .map((link) => ({ link, section: document.querySelector(link.getAttribute('href')) }))
+    .filter((item) => item.section);
+  if (!sections.length || typeof IntersectionObserver !== 'function') return;
+  if (links[0]) links[0].classList.add('active');
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (!visible.length) return;
+      const current = sections.find((item) => item.section === visible[0].target);
+      if (!current) return;
+      links.forEach((link) => link.classList.toggle('active', link === current.link));
+    },
+    { rootMargin: '-140px 0px -60% 0px', threshold: [0, 1] }
+  );
+  sections.forEach((item) => observer.observe(item.section));
+}
 
 load();
