@@ -15,6 +15,7 @@ const optionsCss = fs.readFileSync('options.css', 'utf8');
 const managerCss = fs.readFileSync('manager.css', 'utf8');
 const skills = fs.readFileSync('skills-page.js', 'utf8');
 const skillsHtml = fs.readFileSync('skills.html', 'utf8');
+const popupHtml = fs.readFileSync('popup.html', 'utf8');
 const popup = fs.readFileSync('popup.js', 'utf8');
 const background = fs.readFileSync('background.js', 'utf8');
 const managerHtml = fs.readFileSync('manager.html', 'utf8');
@@ -81,6 +82,14 @@ test('Popup：助手入口使用显式网页 tabId，避免 popup 关闭时删�
   assert.match(background, /msg\.type === 'panel:open-active'/);
   assert.match(background, /const requestedTabId = Number\(msg\.tabId\)/);
   assert.match(background, /broadcastPanelUi\(result\.ui, null\)/);
+});
+
+test('Popup：最近收录只展示固定条数，并引导到知识库查看全部', () => {
+  assert.match(popupHtml, /id="open-manager-all"/);
+  assert.match(popupHtml, /在知识库查看全部/);
+  assert.match(popup, /const POPUP_RECENT_LIMIT = 5/);
+  assert.match(popup, /items\.slice\(0, POPUP_RECENT_LIMIT\)/);
+  assert.match(popup, /在知识库查看筛选结果/);
 });
 
 test('知识库：高级筛选默认收起，不抢占首屏内容', () => {

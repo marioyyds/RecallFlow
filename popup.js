@@ -34,6 +34,7 @@ let currentFilter = 'all';
 let sortBy = 'updated';
 let listQuery = '';
 const ADD_COLLAPSED_KEY = 'recallflow-popup-add-collapsed';
+const POPUP_RECENT_LIMIT = 5;
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,6 +73,7 @@ function renderList() {
     items = items.filter((i) => (i.type || 'wrong') === currentFilter);
   }
   const query = listQuery.trim().toLowerCase();
+  const hasFilters = currentFilter !== 'all' || Boolean(query);
   if (query) {
     items = items.filter((i) => `${i.title || ''} ${i.note || ''} ${(i.tags || []).join(' ')}`.toLowerCase().includes(query));
   }
@@ -79,16 +81,29 @@ function renderList() {
 
   emptyEl.classList.toggle('hidden', items.length > 0);
   if (!items.length) {
-    const hasFilters = currentFilter !== 'all' || query;
     emptyEl.innerHTML = hasFilters
       ? '<span class="empty-ico">⌕</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>还没有内容</p><p class="empty-hint">打开网页后点工具栏图标即可快速收录</p>';
   }
-  listEl.innerHTML = items.map(itemHtml).join('');
   const total = Object.keys(bookCache).length;
+  const shown = items.slice(0, POPUP_RECENT_LIMIT);
+  listEl.innerHTML = shown.map(itemHtml).join('');
   $('total-badge').textContent = total + ' 条';
   const visible = $('visible-count');
-  if (visible) visible.textContent = items.length === total ? '' : `· ${items.length}/${total}`;
+  if (visible) {
+    visible.textContent = items.length
+      ? hasFilters
+        ? `· 筛选 ${items.length} 条，显示前 ${shown.length} 条`
+        : `· 显示最近 ${shown.length} 条 / 共 ${total} 条`
+      : '';
+  }
+  const viewAll = $('open-manager-all');
+  if (viewAll) {
+    viewAll.classList.toggle('hidden', total === 0);
+    $('view-all-label').textContent = hasFilters ? '在知识库查看筛选结果' : '在知识库查看全部';
+    $('all-items-count').textContent = String(hasFilters ? items.length : total);
+    viewAll.title = hasFilters ? '打开知识库查看完整筛选结果' : '打开知识库查看全部内容';
+  }
 }
 
 function itemHtml(it) {
@@ -352,6 +367,7 @@ const openManager = (e) => {
 };
 $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);
+$('open-manager-all').addEventListener('click', openManager);
 
 $('open-scripts').addEventListener('click', (e) => {
   e.preventDefault();
