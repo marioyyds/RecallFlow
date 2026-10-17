@@ -168,6 +168,86 @@ test('save: 同一标签页的连续队列写可以追平 seq；跨标签页仍�
   assert.equal(staleOtherTab.conflict, true);
 });
 
+test('save: 旧标签页回写更短的半截快照时拒绝覆盖完整会话', async () => {
+  const { store } = makeStore();
+  const boot = await store.bootstrap();
+  const id = boot.activeId;
+  const user = { role: 'user', content: '整理会话发一个 csdn 博客' };
+  const assistant = { role: 'assistant', content: '完整回复（发布成功）', parts: [{ type: 'text', text: '完整回复（发布成功）' }] };
+  const saved = await store.save({
+    id,
+    tabId: 11,
+    baseSeq: boot.seq,
+    messages: [user, assistant],
+  });
+  assert.equal(saved.ok, true);
+
+  // 关键：baseSeq 是“当前”版本，因此不能只靠 seq 冲突拦住它；
+  // 必须靠“incoming 是 current 的严格前缀”认出这是半截旧快照。
+  const stale = await store.save({
+    id,
+    tabId: 12,
+    baseSeq: saved.session.seq,
+    messages: [user],
+  });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.stale, true);
+  const got = await store.get(id);
+  assert.equal(got.session.messages.length, 2, '更完整的会话不能被半截快照覆盖');
+});
+
+test('save: 更完整的最终回复可以压过 seq 更新的旧快照', async () => {
+  const { store } = makeStore();
+  const boot = await store.bootstrap();
+  const id = boot.activeId;
+  const user = { role: 'user', content: '整理会话发一个 csdn 博客' };
+  const assistant = { role: 'assistant', content: '完整回复（发布成功）' };
+
+  // 另一个标签页先写入“只有用户消息”的旧快照，seq 因此更大。
+  const short = await store.save({
+    id,
+    tabId: 12,
+    baseSeq: boot.seq,
+    messages: [user],
+  });
+  assert.equal(short.ok, true);
+
+  // owner 的最终保存 baseSeq 更旧，但它包含完整最终回复，必须允许写入。
+  const full = await store.save({
+    id,
+    tabId: 11,
+    baseSeq: boot.seq,
+    messages: [user, assistant],
+  });
+  assert.equal(full.ok, true);
+  const got = await store.get(id);
+  assert.equal(got.session.messages.length, 2);
+  assert.equal(got.session.messages[1].content, '完整回复（发布成功）');
+});
+
+test('save: 用户主动撤销/重新生成时可以显式允许会话变短', async () => {
+  const { store } = makeStore();
+  const boot = await store.bootstrap();
+  const id = boot.activeId;
+  const user = { role: 'user', content: '第一轮' };
+  const assistant = { role: 'assistant', content: '回答' };
+  const saved = await store.save({
+    id,
+    tabId: 11,
+    baseSeq: boot.seq,
+    messages: [user, assistant],
+  });
+  const rewound = await store.save({
+    id,
+    tabId: 11,
+    baseSeq: saved.session.seq,
+    allowShrink: true,
+    messages: [],
+  });
+  assert.equal(rewound.ok, true);
+  assert.deepEqual((await store.get(id)).session.messages, []);
+});
+
 test('save: 自动标题跟随第一条用户消息，手动重命名后不再被覆盖', async () => {
   const { store } = makeStore();
   const boot = await store.bootstrap();

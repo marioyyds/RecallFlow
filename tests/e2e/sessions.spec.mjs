@@ -117,6 +117,56 @@ test('运行锁：跟随页在另一端运行时保持只读，不能重复发�
   await b.close();
 });
 
+test('停止：跟随页能停止另一标签页的 run，两边面板一起复位', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await startNewSession(a);
+  await send(a, '说说你的思考');
+  await expect(a.locator(PANEL + ' .stop-btn')).toBeVisible({ timeout: 10_000 });
+
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .user-turn', { hasText: '说说你的思考' })).toHaveCount(1, {
+    timeout: 15_000,
+  });
+
+  // 跟随页必须看到与 owner 一致的运行态：发送禁用、停止可用。
+  await expect(b.locator(PANEL + ' .cmd-send')).toBeDisabled();
+  const stopB = b.locator(PANEL + ' .stop-btn');
+  await expect(stopB).toBeVisible({ timeout: 15_000 });
+  await stopB.click();
+
+  // 停止不是只改 B：owner 也要立刻收尾，两边最终都回到可发送状态。
+  await expect(a.locator(PANEL + ' .stop-btn')).toBeHidden({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .stop-btn')).toBeHidden({ timeout: 15_000 });
+  await expect(a.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: 15_000 });
+
+  await a.close();
+  await b.close();
+});
+
+test('中途加入的跟随页被关闭，不得把发起页的最终回复回写成半截', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await startNewSession(a);
+  await send(a, '说说你的思考');
+  await expect(a.locator(PANEL + ' .think-block')).toHaveCount(1, { timeout: 10_000 });
+
+  // B 在 run 中途加入，只拿到半截会话；随后立刻关闭。
+  // 它的 pagehide 保存不能把 A 晚到的最终回复覆盖成“只有用户消息”的旧快照。
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .user-turn', { hasText: '说说你的思考' })).toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await b.close();
+
+  await expect(a.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: 20_000 });
+  await expect.poll(() => panelText(a, '.p-body'), { timeout: 20_000 }).toContain('我想好了');
+  await expect.poll(() => panelText(a, '.p-body'), { timeout: 20_000 }).toContain('补充一句');
+  await a.close();
+});
+
 test('面板开合：打开、关闭都会同步到其他标签页，新页面继承当前状态', async () => {
   await configureSettings(context);
   const a = await openFixturePage(context);

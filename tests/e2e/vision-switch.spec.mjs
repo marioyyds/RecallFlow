@@ -47,6 +47,7 @@ import {
   createFreshPanelSession,
   openFixturePage,
   sendInstruction,
+  PANEL,
 } from './helpers.mjs';
 import { getLlmRequests, resetLlmRequests, toolResultsText } from './fixtures/server.mjs';
 import { VISION_ENABLED } from '../../lib/shared/utils.js';
@@ -216,6 +217,36 @@ test('开启臂（VISION_ENABLED=true）：图像必须以「截图结果之后�
   expect(problems, '带图请求的形态不对：\n' + problems.join('\n')).toEqual([]);
 
   await page.close();
+});
+
+// ---------------- 截图的会话间同步 ----------------
+
+test('截图跨会话：另一标签页能实时看到，刷新后仍能从共享存储取回', async () => {
+  test.skip(!VISION_SHOT_ARM, '需要 E2E_LLM_VISION_SHOT=1 才会真的发起 take_screenshot');
+  await configureSettings(context, { cdpEnabled: true });
+  const a = await openFixturePage(context, '/article');
+  await sendInstruction(a, INSTRUCTION);
+
+  const shotA = a.locator(PANEL + ' .agent-shot img').first();
+  await expect(shotA).toBeVisible({ timeout: 45_000 });
+  const srcA = await shotA.getAttribute('src');
+  expect(srcA).toMatch(/^data:image\//);
+
+  // B 在 run 进行中加入：截图的元数据经 run-hub 同步，图片本体按 id 从共享存储取回。
+  const b = await openFixturePage(context, '/article');
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  const shotB = b.locator(PANEL + ' .agent-shot img').first();
+  await expect(shotB).toBeVisible({ timeout: 20_000 });
+  await expect(shotB).toHaveAttribute('src', /^data:image\//);
+
+  // 等本轮正式落盘后整页刷新 B；此时内存缓存已清空，仍必须从截图存储恢复。
+  await expect(a.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: 30_000 });
+  await b.reload();
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .agent-shot img').first()).toBeVisible({ timeout: 20_000 });
+
+  await a.close();
+  await b.close();
 });
 
 // ---------------- 门禁自己有牙齿（不需要浏览器）----------------

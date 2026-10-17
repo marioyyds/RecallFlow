@@ -242,11 +242,45 @@ test('**关键**：includeFrames 合并子框架后仍要过体积预算', async
   assert.match(r.result, /f<frameId>: 前缀/);
 });
 
+test('includeFrames：子框架读不到时如实报告，不把"未读"说成"已合并"', async () => {
+  const deps = mkDeps({
+    framesResult: [
+      { frameId: 0, result: { href: 'https://a.test/', title: '主站', isTop: true } },
+      { frameId: 3, result: { href: 'https://b.test/f', title: '子框架', isTop: false } },
+      { frameId: 4, result: { href: 'https://b.test/dyn', title: '动态框架', isTop: false } },
+    ],
+    getPageSnapshot: async (tabId, opts) => {
+      if (opts.frameId === 3) return { elements: [{ ref: 'b' }], text: '' };
+      if (opts.frameId === 4) throw new Error('Could not establish connection. Receiving end does not exist.');
+      return deps.snapshot;
+    },
+  });
+  const r = await getPageSnapshotTool(deps, { includeFrames: true });
+  assert.equal(r.ok, true);
+  assert.match(r.result, /已合并 1 个子框架/);
+  assert.match(r.result, /frameId=4/, '必须点名没读到的框架');
+  assert.match(r.result, /补注入也失败/);
+  assert.deepEqual(r.snapshot.frameRead, { read: [3], failed: [4], total: 2 });
+});
+
 test('get_page_snapshot：读快照抛错时返回可读失败', async () => {
   const deps = mkDeps({ getPageSnapshot: async () => { throw new Error('注入失败'); } });
   const r = await getPageSnapshotTool(deps, {});
   assert.equal(r.ok, false);
   assert.match(r.result, /读取 DOM 快照失败：注入失败/);
+});
+
+test('get_page_snapshot：内容脚本不可达时给出可操作的下一步', async () => {
+  const deps = mkDeps({
+    getPageSnapshot: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+  });
+  const r = await getPageSnapshotTool(deps, {});
+  assert.equal(r.ok, false);
+  assert.match(r.result, /没有可用的内容脚本/);
+  assert.match(r.result, /get_ax_snapshot/);
+  assert.match(r.result, /不要反复重试同一条路/);
 });
 
 // ---------------------------------------------------------------- list_frames

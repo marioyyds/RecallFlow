@@ -254,7 +254,7 @@ test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（
 //     而 endStream 会清空 pendingParts ⇒ 这一轮**从未入库**。
 
 test('chat.js：点「停止」也要把思考与步骤入库（interrupt 必须带 parts）', () => {
-  const at = chatSrc.indexOf('function interrupt()');
+  const at = chatSrc.indexOf('async function interrupt(source)');
   assert.ok(at >= 0);
   const body = chatSrc.slice(at, at + 2600);
   assert.match(body, /finishReasoning\(\);/, '停止前必须把**进行中**的那段思考定稿，否则它只活在 DOM 里');
@@ -294,7 +294,7 @@ test('chat.js：中断轮的"原因 + 已中断"说明必须可见（不能因�
 });
 
 test('chat.js：停止的那一轮也要把执行计划留下（否则重开后计划条回退到更早一轮）', () => {
-  const at = chatSrc.indexOf('function interrupt()');
+  const at = chatSrc.indexOf('async function interrupt(source)');
   const body = chatSrc.slice(at, at + 2600);
   assert.match(body, /plan: lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
 });
@@ -326,9 +326,14 @@ test('chat.js：流式重开面板时，flowEl 必须**先**指向新的 flow（
 test('chat.js：流式重开时「停止 / 发送」的初值必须跟着 streaming 走', () => {
   // 根因之二：新面板的停止按钮初值写死 display:none，而 restoreStreamingUI() 跑在
   // **按钮创建之前**（它碰到的只会是上一个面板遗留的按钮）⇒ 任务还在跑但按不到「■ 停止」。
-  // 判据：按钮初值必须由 `streaming` 决定，且恢复函数里**不许**去动它们。
-  assert.match(chatSrc, /stopBtn\.style\.display = streaming \? '' : 'none';/, '停止按钮初值要跟着 streaming');
-  assert.match(chatSrc, /sendBtn\.disabled = streaming === true;/, '"发送"的初值同样要跟着 streaming');
+  // 判据：owner 的 `streaming` 与跟随页的 `followedRunState` 必须走同一个状态入口，
+  // 且恢复函数里**不许**去动按钮。
+  const stateAt = chatSrc.indexOf('function updateRunControlState()');
+  assert.ok(stateAt >= 0, '应有统一的运行控件状态入口');
+  const stateBody = chatSrc.slice(stateAt, chatSrc.indexOf('\n}', stateAt) + 2);
+  assert.match(stateBody, /streaming \|\| followingRunning/, '运行态必须同时覆盖 owner 与跟随页');
+  assert.match(stateBody, /stopBtn\.style\.display = running \? '' : 'none';/, '停止按钮要由运行态决定');
+  assert.match(stateBody, /sendBtn\.disabled = running;/, '"发送"同样由运行态决定');
   const at = chatSrc.indexOf('function restoreStreamingUI(');
   const body = chatSrc.slice(at, chatSrc.indexOf('\nfunction ', at + 10));
   assert.ok(!/stopBtn\.style\.display/.test(body), '恢复函数不得去动停止按钮（它跑在按钮创建之前）');

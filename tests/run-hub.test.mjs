@@ -122,6 +122,18 @@ test('run state: 待关闭辅助页会显示在跟随时间线里', () => {
   );
 });
 
+test('run state: 停止请求会进入「停止中」，结束事件再清掉停止标记', () => {
+  const s = state();
+  applyRunEvent(s, { type: 'stop-requested', byTabId: 22 });
+  assert.equal(s.stopping, true);
+  assert.equal(s.progress.state, 'stopping');
+  assert.equal(s.status, 'running', '停止请求不是立即结束，run 还在收尾');
+
+  applyRunEvent(s, { type: 'end' });
+  assert.equal(s.stopping, false);
+  assert.equal(s.status, 'ended');
+});
+
 test('hub: 文本增量按 flushMs 合并广播，结构化事件先冲刷文本', () => {
   const deltas = [];
   const starts = [];

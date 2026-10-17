@@ -4791,7 +4791,20 @@
         if (state.approval && state.approval.callId === String(event.callId || "")) state.approval = null;
         break;
       case "screenshot":
-        pushStepNotice(state, "\u{1F4F7} \u5DF2\u751F\u6210\u622A\u56FE" + (event.label ? "\uFF1A" + event.label : ""), "#6b7280");
+        endReasoning(state);
+        flushNarration(state);
+        state.parts.push({
+          type: "screenshot",
+          id: String(event.id || ""),
+          label: String(event.label || ""),
+          width: Number(event.width) || 0,
+          height: Number(event.height) || 0,
+          bytes: Number(event.bytes) || 0
+        });
+        break;
+      case "stop-requested":
+        state.stopping = true;
+        state.progress.state = "stopping";
         break;
       case "agent-state":
         state.progress.state = String(event.state || event.status || "");
@@ -4859,10 +4872,12 @@
         endReasoning(state);
         state.status = "error";
         state.error = String(event.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
+        state.stopping = false;
         break;
       case "end":
         endReasoning(state);
         state.status = "ended";
+        state.stopping = false;
         break;
       default:
         break;
@@ -4941,6 +4956,32 @@
       return Object.assign({}, p, { text: replace(p.text) });
     });
     return { parts: nextParts, citations: cited };
+  }
+
+  // lib/shared/screenshot-store.js
+  var SHOT_KEY = "recallflow.shots.v1";
+  var SHOT_ITEM_PREFIX = "recallflow.shots.item.v1.";
+  function shotStorageKey(id) {
+    return SHOT_ITEM_PREFIX + String(id || "");
+  }
+  function localArea(chromeApi) {
+    return chromeApi && chromeApi.storage && chromeApi.storage.local ? chromeApi.storage.local : null;
+  }
+  var writeTail = Promise.resolve();
+  async function loadScreenshot(chromeApi, id) {
+    const area = localArea(chromeApi);
+    const wanted = String(id || "");
+    if (!area || !wanted) return null;
+    const key = shotStorageKey(wanted);
+    try {
+      const cur = await area.get([key, SHOT_KEY]);
+      const item = cur && cur[key];
+      if (item && item.dataUrl) return item;
+      const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
+      return archive.find((entry) => entry && String(entry.id) === wanted && entry.dataUrl) || null;
+    } catch (e) {
+      return null;
+    }
   }
 
   // lib/page/chat.js
@@ -5023,6 +5064,17 @@
   var sendBtn = null;
   var streaming = false;
   var runAgent = null;
+  function updateRunControlState() {
+    const followingRunning = Boolean(followedRunState && followedRunState.status === "running");
+    const running = Boolean(streaming || followingRunning);
+    const stopping = Boolean(followingRunning && followedRunState.stopping);
+    if (stopBtn) {
+      stopBtn.style.display = running ? "" : "none";
+      stopBtn.disabled = stopping;
+      stopBtn.textContent = stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62";
+    }
+    if (sendBtn) sendBtn.disabled = running;
+  }
   var pendingAcc = "";
   var pendingAiMsg = null;
   var pendingContentEl = null;
@@ -5114,6 +5166,7 @@
     waiting_approval: "\u7B49\u5F85\u4F60\u786E\u8BA4",
     executing: "\u6267\u884C\u52A8\u4F5C",
     observing: "\u67E5\u770B\u7ED3\u679C",
+    stopping: "\u505C\u6B62\u4E2D",
     paused: "\u5DF2\u6682\u505C",
     completed: "\u5DF2\u5B8C\u6210",
     failed: "\u6267\u884C\u5931\u8D25",
@@ -5599,6 +5652,8 @@
   }
   var SHOT_CACHE_MAX = 30;
   var shotCache = createLruCache(SHOT_CACHE_MAX);
+  var shotPending = /* @__PURE__ */ new Set();
+  var shotMissing = /* @__PURE__ */ new Set();
   var shotLightboxOpen = false;
   function shotCapText(meta) {
     const m = meta || {};
@@ -5608,11 +5663,33 @@
     if (m.bytes) parts.push(Math.round(Number(m.bytes) / 1024) + "KB");
     return parts.join(" \xB7 ");
   }
+  function hydrateScreenshot(id) {
+    const wanted = String(id || "");
+    if (!wanted || shotCache.get(wanted) || shotPending.has(wanted) || shotMissing.has(wanted)) return;
+    shotPending.add(wanted);
+    loadScreenshot(typeof chrome !== "undefined" ? chrome : null, wanted).then((shot) => {
+      if (shot && shot.dataUrl) shotCache.set(wanted, shot.dataUrl);
+      else shotMissing.add(wanted);
+    }).catch(() => shotMissing.add(wanted)).finally(() => {
+      shotPending.delete(wanted);
+      if (!streaming && panelBody) {
+        try {
+          renderConversation();
+          fitPanelHeight();
+          pinToBottom();
+        } catch (e) {
+        }
+      }
+    });
+  }
   function screenshotHtml(meta) {
     const m = meta || {};
-    const url = m.id ? shotCache.get(m.id) : "";
+    const id = String(m.id || "");
+    const url = id ? shotCache.get(id) : "";
     if (!url) {
-      return '<div class="agent-shot gone">\u{1F5BC} \u622A\u56FE' + (m.label ? "\uFF08" + escHtml(String(m.label)) + "\uFF09" : "") + "\uFF1A\u5DF2\u968F\u9875\u9762\u91CD\u8F7D\u5931\u6548\uFF08\u56FE\u7247\u4E0D\u5199\u5165\u5BF9\u8BDD\u5B58\u50A8\uFF0C\u907F\u514D\u6491\u7206\u914D\u989D\uFF09</div>";
+      const missing = id && shotMissing.has(id);
+      if (id && !missing) hydrateScreenshot(id);
+      return '<div class="agent-shot gone">\u{1F5BC} \u622A\u56FE' + (m.label ? "\uFF08" + escHtml(String(m.label)) + "\uFF09" : "") + "\uFF1A" + (!id ? "\u7F3A\u5C11\u622A\u56FE\u6807\u8BC6\uFF0C\u65E0\u6CD5\u4ECE\u5171\u4EAB\u5B58\u50A8\u6062\u590D" : missing ? "\u5171\u4EAB\u5B58\u6863\u5DF2\u8FC7\u671F\u6216\u5DF2\u88AB\u6E05\u7406" : "\u6B63\u5728\u4ECE\u5171\u4EAB\u4F1A\u8BDD\u52A0\u8F7D\u56FE\u7247\u2026") + "</div>";
     }
     return '<div class="agent-shot"><img src="' + escHtml(url) + '" alt="' + escHtml(String(m.label || "\u9875\u9762\u622A\u56FE")) + '" loading="lazy"><span class="agent-shot-cap">\u{1F5BC} ' + escHtml(shotCapText(m)) + " \xB7 \u70B9\u51FB\u653E\u5927</span></div>";
   }
@@ -5900,7 +5977,6 @@
     });
     if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
     if (followedRunState && followedRunState.status === "running") {
-      if (sendBtn) sendBtn.disabled = true;
       if (progressEl) {
         progressEl.classList.add("on");
         runStartedAt = Number(followedRunState.startedAt) || Date.now();
@@ -5911,6 +5987,7 @@
         renderProgress();
       }
     }
+    updateRunControlState();
     ensureFollowedRunWatch();
   }
   function ensureFollowedRunWatch() {
@@ -5952,8 +6029,8 @@
     followedMessages = [];
     if (!streaming) {
       stopProgress();
-      if (sendBtn) sendBtn.disabled = false;
     }
+    updateRunControlState();
     if (opts.render) {
       renderConversation();
       fitPanelHeight();
@@ -6292,7 +6369,8 @@
     });
     return true;
   }
-  function saveConversation() {
+  function saveConversation(options) {
+    const opts = options || {};
     const id = panelSessionId;
     if (!id) return Promise.resolve({ ok: false, skipped: true });
     const messages = serializeConversation();
@@ -6305,6 +6383,7 @@
         id,
         messages,
         baseSeq,
+        allowShrink: opts.allowShrink === true,
         handoffId: savedHandoffId,
         lastRunId: runId,
         origin: location.href
@@ -6315,10 +6394,12 @@
         if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
         renderSessionButton();
         renderSessionMenu();
-      } else if (res && res.conflict && res.session) {
+      } else if (res && (res.conflict || res.stale) && res.session) {
         if (id === panelSessionId && !streaming) {
           adoptPanelSession(res.session, { activeId: res.activeId });
-          showCitationHint("\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u5176\u4ED6\u6807\u7B7E\u9875\u66F4\u65B0\uFF0C\u5DF2\u4E3A\u4F60\u5237\u65B0\u5230\u6700\u65B0\u5185\u5BB9\u3002");
+          showCitationHint(
+            res.stale ? "\u68C0\u6D4B\u5230\u65E7\u6807\u7B7E\u9875\u7684\u56DE\u5199\uFF0C\u5DF2\u4FDD\u7559\u66F4\u5B8C\u6574\u7684\u4F1A\u8BDD\u5185\u5BB9\u3002" : "\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u5176\u4ED6\u6807\u7B7E\u9875\u66F4\u65B0\uFF0C\u5DF2\u4E3A\u4F60\u5237\u65B0\u5230\u6700\u65B0\u5185\u5BB9\u3002"
+          );
         }
       }
       return res;
@@ -6691,7 +6772,6 @@
   }
   async function handleRemotePanelSessions(state) {
     if (!state) return;
-    const oldActive = panelSessionActiveId;
     applyPanelSessionSummaries(state);
     const nextActive = String(state.activeId || "");
     if (!nextActive) return;
@@ -6704,7 +6784,7 @@
       return;
     }
     const current = panelSessionList.find((s) => s.id === panelSessionId);
-    if (current && Number(current.seq) > panelSessionSeq && oldActive === nextActive) {
+    if (current && Number(current.seq) > panelSessionSeq) {
       await switchPanelSession(panelSessionId, { activate: false, force: true });
     }
   }
@@ -6960,7 +7040,7 @@
         if (Number.isInteger(index) && conversation[index] && conversation[index].role === "user") {
           const undone = conversation[index];
           conversation = conversation.slice(0, index);
-          saveConversation();
+          saveConversation({ allowShrink: true });
           renderConversation();
           fitPanelHeight();
           pinToBottom();
@@ -7014,7 +7094,7 @@
         const instruction = String(conversation[lastUser].content || "");
         if (!instruction) return;
         conversation = conversation.slice(0, lastUser);
-        saveConversation();
+        saveConversation({ allowShrink: true });
         renderConversation();
         run(instruction);
         fitPanelHeight();
@@ -7304,7 +7384,7 @@
     stopBtn = document.createElement("button");
     stopBtn.className = "stop-btn";
     stopBtn.textContent = "\u25A0 \u505C\u6B62";
-    stopBtn.style.display = streaming ? "" : "none";
+    updateRunControlState();
     stopBtn.addEventListener("click", interrupt);
     foot.appendChild(clearBtn);
     foot.appendChild(copyBtn);
@@ -7371,8 +7451,7 @@
       const endedSessionId = panelSessionId;
       streaming = false;
       stopProgress();
-      if (stopBtn) stopBtn.style.display = "none";
-      if (sendBtn) sendBtn.disabled = false;
+      updateRunControlState();
       pendingAiMsg = null;
       pendingContentEl = null;
       pendingStarted = false;
@@ -7484,13 +7563,34 @@
       pendingParts.push(pendingVerifyPass);
       pendingVerifyPass = null;
     }
-    function interrupt() {
-      if (!streaming) return;
+    async function stopFollowedRun() {
+      if (!followedRunState || followedRunState.status !== "running" || followedRunState.stopping) return;
+      const runId = followedRunId;
+      followedRunState.stopping = true;
+      updateRunControlState();
+      const res = await sendPanelMessage("panel:run:stop", { sessionId: panelSessionId, runId });
+      if (res && (res.ok || res.code === "already-stopping")) return;
+      if (followedRunId === runId && followedRunState) {
+        followedRunState.stopping = false;
+        updateRunControlState();
+      }
+      showCitationHint(res && res.error || "\u505C\u6B62\u5931\u8D25\uFF1A\u4EFB\u52A1\u53EF\u80FD\u5DF2\u7ECF\u7ED3\u675F");
+      scheduleFollowedRunRefresh();
+    }
+    async function interrupt(source) {
+      if (!streaming) {
+        if (source === "remote") return;
+        await stopFollowedRun();
+        return;
+      }
+      const remote = source === "remote";
       finishReasoning();
       commitPendingVerifyPass();
-      try {
-        if (activeConn) activeConn.postMessage({ type: "stop" });
-      } catch (e) {
+      if (!remote) {
+        try {
+          if (activeConn) activeConn.postMessage({ type: "stop" });
+        } catch (e) {
+        }
       }
       const acc = pendingAcc;
       closePort();
@@ -7698,8 +7798,7 @@
       pendingStarted = false;
       streaming = true;
       startProgress();
-      if (stopBtn) stopBtn.style.display = "";
-      if (sendBtn) sendBtn.disabled = true;
+      updateRunControlState();
       if (!isExtContextAlive()) {
         showCitationHint("\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u5F53\u524D\u9875\u9762\u7684\u52A9\u624B\u5DF2\u5931\u6548\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
         endStream();
@@ -8205,6 +8304,7 @@
   function initAssistant() {
     try {
       window.addEventListener("pagehide", () => {
+        if (followedRunState || followedMessages.length) return;
         try {
           saveConversation();
         } catch (e) {
@@ -8359,6 +8459,10 @@
           handleRunDelta(msg);
         } else if (msg.type === "run:ended") {
           if (String(msg.sessionId || "") === panelSessionId) scheduleFollowedRunRefresh();
+        } else if (msg.type === "run:stopped") {
+          if (String(msg.sessionId || "") === panelSessionId && String(msg.runId || "") === String(activeRunId || "")) {
+            if (activeInterruptFn) activeInterruptFn("remote");
+          }
         } else if (msg.type === "panel:lock-lost") {
           if (String(msg.id || "") !== panelSessionId) return;
           if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;

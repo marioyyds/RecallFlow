@@ -256,11 +256,13 @@ test('回归：saveScreenshot 必须收到 chrome（漏传会静默不落盘）'
   const seen = [];
   const chrome = { storage: { local: { get: async () => ({}), set: async () => {} } } };
   await takeScreenshot(mkShotDeps({
+    ctx: { tabId: 9, sessionId: 'S-1' },
     chrome,
-    saveScreenshot: async (chromeApi, shot) => { seen.push({ chromeApi, shot }); return true; },
+    saveScreenshot: async (chromeApi, shot, sessionId) => { seen.push({ chromeApi, shot, sessionId }); return true; },
   }));
   assert.equal(seen.length, 1, '归档函数应被调用一次');
   assert.equal(seen[0].chromeApi, chrome, '必须把 chrome 传下去，否则 storage 不可用 → 静默不落盘');
+  assert.equal(seen[0].sessionId, 'S-1', '截图必须带上所属会话，才能跨会话取回');
   assert.match(seen[0].shot.dataUrl, /^data:image\//);
 });
 

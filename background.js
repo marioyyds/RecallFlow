@@ -18,6 +18,7 @@ import {
 } from './lib/shared/panel-sessions.js';
 import { RunStreamHub } from './lib/assistant/run-hub.js';
 import { createIndexedDbKeyValueStore } from './lib/shared/idb-kv.js';
+import { removeSessionScreenshots } from './lib/shared/screenshot-store.js';
 import {
   listScripts,
   installFromUrl,
@@ -380,6 +381,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   // ---- 运行流订阅（跨标签页实时跟随）----
+  // 任意跟随页都可以请求停止同一个 run；由 SW 找到 owner tab 的 AbortController。
+  if (msg && msg.type === 'panel:run:stop') {
+    sendResponse(
+      requestRunStop(
+        { runId: msg.runId, sessionId: msg.sessionId },
+        sender.tab && sender.tab.id
+      )
+    );
+    return false;
+  }
   if (msg && (msg.type === 'panel:run:subscribe' || msg.type === 'panel:run:unsubscribe')) {
     const tabId = sender.tab && sender.tab.id;
     if (tabId == null) {
@@ -490,6 +501,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           id: msg.id,
           messages: msg.messages,
           baseSeq: msg.baseSeq,
+          allowShrink: msg.allowShrink === true,
           title: msg.title,
           handoffId: msg.handoffId,
           lastRunId: msg.lastRunId,
@@ -502,6 +514,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         result = await panelSessions.rename(msg.id, msg.title);
       } else if (msg.type === 'panel:delete') {
         result = await panelSessions.remove(msg.id);
+        if (result && result.ok) await removeSessionScreenshots(chrome, msg.id).catch(() => {});
       } else if (msg.type === 'panel:lock') {
         result = await panelSessions.lock({
           id: msg.id,
@@ -789,6 +802,68 @@ const tabControllers = new Map();
 // tabId -> 最近一次 run { runId, resumable }：整页刷新后，新面板据此自动续跑（query-run）。
 const tabRuns = new Map();
 
+/**
+ * 请求停止一个正在运行的 run（owner 页自己点停止，或跟随页远程点停止）。
+ * 返回失败时调用方应刷新会话，而不是继续显示「运行中」。
+ */
+function requestRunStop(params, requesterTabId) {
+  const p = params || {};
+  const wantedRunId = String(p.runId || '');
+  const wantedSessionId = String(p.sessionId || '');
+  let owner = null;
+  for (const [tabId, rec] of tabRuns) {
+    if (!rec) continue;
+    if (wantedRunId && String(rec.runId || '') !== wantedRunId) continue;
+    if (!wantedRunId && wantedSessionId && String(rec.sessionId || '') !== wantedSessionId) continue;
+    owner = { tabId: Number(tabId), rec };
+    break;
+  }
+  if (!owner && wantedSessionId) {
+    const snap = runHub.findBySession(wantedSessionId);
+    if (snap && snap.ownerTabId != null) {
+      const tabId = Number(snap.ownerTabId);
+      owner = { tabId, rec: tabRuns.get(tabId) || {} };
+    }
+  }
+  const runId = String((owner && owner.rec && owner.rec.runId) || wantedRunId);
+  const snapshot = runId ? runHub.snapshot(runId) : null;
+  if (!snapshot || snapshot.status !== 'running') {
+    return { ok: false, code: 'not-running', error: '该任务已结束，无需停止' };
+  }
+  if (!owner) return { ok: false, code: 'owner-missing', error: '找不到任务所属标签页' };
+  const controller = tabControllers.get(owner.tabId);
+  if (!controller || controller.signal.aborted) {
+    return { ok: false, code: 'already-stopping', error: '该任务已在停止中' };
+  }
+
+  if (owner.rec && typeof owner.rec === 'object') {
+    tabRuns.set(owner.tabId, Object.assign({}, owner.rec, { resumable: false }));
+  }
+  // 先广播「停止中」，再 abort：abort 后的收尾可能很快，不能让跟随页错过中间状态。
+  runHub.push(runId, {
+    type: 'stop-requested',
+    byTabId: requesterTabId == null ? null : Number(requesterTabId),
+  });
+  try { controller.abort(); } catch (e) {}
+
+  // runHub 的 delta 本来就不发给 owner（owner 有自己的 port）。跟随页发起停止时，
+  // 必须显式通知 owner 收尾，否则 owner 的停止按钮会一直停在「运行中」。
+  if (requesterTabId != null && Number(requesterTabId) !== owner.tabId) {
+    chrome.tabs.sendMessage(
+      owner.tabId,
+      {
+        type: 'run:stopped',
+        runId,
+        sessionId: snapshot.sessionId || wantedSessionId,
+        remote: true,
+      },
+      { frameId: 0 },
+      () => void chrome.runtime.lastError
+    );
+  }
+  return { ok: true, runId, sessionId: snapshot.sessionId || wantedSessionId, ownerTabId: owner.tabId };
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'ai-stream') return;
 
@@ -806,8 +881,12 @@ chrome.runtime.onConnect.addListener((port) => {
     try {
       // 停止：面板显式请求中止 run，并标记为不可续跑。
       if (payload && payload.type === 'stop') {
-        if (senderTabId && tabRuns.has(senderTabId)) tabRuns.get(senderTabId).resumable = false;
-        try { controller.abort(); } catch (e) {}
+        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const stopped = requestRunStop({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
+        // 已经处于收尾/停止中的 run 仍要 abort 一次兜底，保证端口断开前的意图不丢。
+        if (!stopped.ok) {
+          try { controller.abort(); } catch (e) {}
+        }
         return;
       }
       // 整页刷新后的新面板：查询本 tab 是否有可续跑的 run。
@@ -900,7 +979,8 @@ chrome.runtime.onConnect.addListener((port) => {
             }
           );
           console.log('[RecallFlow] agent run finished');
-          if (sessionId) runHub.finish(runId, 'completed');
+          // abort 既可能是用户停止，也可能是页面刷新/端口断开；不能一律报 completed。
+          if (sessionId) runHub.finish(runId, controller.signal.aborted ? 'cancelled' : 'completed');
         } catch (e) {
           const detail = e && e.stack ? e.stack : String(e);
           console.error('[RecallFlow] agent run error:', detail);
