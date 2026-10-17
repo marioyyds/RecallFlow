@@ -7291,6 +7291,16 @@
       pendingContentEl = null;
       if (flowEl) flowEl.appendChild(step);
     }
+    function appendNoticePart(text, color, className) {
+      const value = String(text || "").trim();
+      if (!value) return;
+      const step = document.createElement("div");
+      step.className = "agent-step" + (className ? " " + className : "");
+      if (color) step.style.color = color;
+      step.textContent = value;
+      appendStep(step);
+      pendingParts.push({ type: "notice", text: value, color: color || "" });
+    }
     function interrupt() {
       if (!streaming) return;
       finishReasoning();
@@ -7580,74 +7590,47 @@
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "stuck-warning") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.style.color = "#b45309";
-          step.textContent = "\u26A0 " + (resp.message || "\u52A8\u4F5C\u6682\u672A\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55");
-          appendStep(step);
+          appendNoticePart("\u26A0 " + (resp.message || "\u52A8\u4F5C\u6682\u672A\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55"), "#b45309");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "tool-disabled") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.style.color = "#6b7280";
-          step.textContent = "\u26D4 \u5DF2\u505C\u6B62\u4F7F\u7528\u5DE5\u5177\u300C" + (resp.name || "") + "\u300D\uFF1A" + (resp.reason || "");
-          appendStep(step);
+          appendNoticePart("\u26D4 \u5DF2\u505C\u6B62\u4F7F\u7528\u5DE5\u5177\u300C" + (resp.name || "") + "\u300D\uFF1A" + (resp.reason || ""), "#6b7280");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "budget-exceeded") {
           budgetStopped = true;
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.style.color = "#b91c1c";
-          step.textContent = "\u23F9 " + (resp.message || "Agent \u5DF2\u8FBE\u5230\u5B89\u5168\u4E0A\u9650\u5E76\u505C\u6B62");
-          appendStep(step);
+          appendNoticePart("\u23F9 " + (resp.message || "Agent \u5DF2\u8FBE\u5230\u5B89\u5168\u4E0A\u9650\u5E76\u505C\u6B62"), "#b91c1c");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "tab-switched") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.textContent = "\u2197 \u5DF2\u5207\u6362\u6807\u7B7E\u9875\uFF1A" + (resp.title || resp.url || "tabId=" + resp.tabId);
-          appendStep(step);
+          appendNoticePart("\u2197 \u5DF2\u5207\u6362\u6807\u7B7E\u9875\uFF1A" + (resp.title || resp.url || "tabId=" + resp.tabId));
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "tabs-closed") {
           const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
           if (count) {
-            const step = document.createElement("div");
-            step.className = "agent-step";
-            step.style.color = "#6b7280";
-            step.textContent = "\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + count + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875";
-            appendStep(step);
+            appendNoticePart("\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + count + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875", "#6b7280");
             fitPanelHeight();
             pinToBottom();
           }
         } else if (resp.type === "intent") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.textContent = "\u{1F9ED} \u610F\u56FE\u8BC6\u522B\uFF1A" + (resp.label || resp.intent || "\u666E\u901A\u5BF9\u8BDD");
-          appendStep(step);
+          appendNoticePart("\u{1F9ED} \u610F\u56FE\u8BC6\u522B\uFF1A" + (resp.label || resp.intent || "\u666E\u901A\u5BF9\u8BDD"));
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "intent-upgraded") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.textContent = "\u{1F504} \u5DF2\u5207\u6362\u4E3A" + (resp.label || "\u8D44\u6599\u7814\u7A76") + "\u6A21\u5F0F\uFF0C\u53EF\u7528\u6D4F\u89C8\u5668/\u7F51\u7EDC\u5DE5\u5177\u7EE7\u7EED";
-          appendStep(step);
+          appendNoticePart("\u{1F504} \u5DF2\u5207\u6362\u4E3A" + (resp.label || "\u8D44\u6599\u7814\u7A76") + "\u6A21\u5F0F\uFF0C\u53EF\u7528\u6D4F\u89C8\u5668/\u7F51\u7EDC\u5DE5\u5177\u7EE7\u7EED");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "verify") {
-          const step = document.createElement("div");
-          step.className = "agent-step";
-          step.style.color = resp.ok ? "#16a34a" : "#b45309";
+          let text = "";
           if (resp.ok) {
-            step.textContent = "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (resp.reason ? "\uFF1A" + resp.reason : "");
+            text = "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (resp.reason ? "\uFF1A" + resp.reason : "");
           } else if (resp.deterministic) {
-            step.textContent = "\u26A0 \u5B8C\u6210\u524D\u68C0\u67E5\u672A\u901A\u8FC7\uFF08\u786E\u5B9A\u6027\u89C4\u5219\uFF0C\u672A\u6D88\u8017\u6A21\u578B\u8C03\u7528\uFF09\uFF1A" + (resp.reason || "\u58F0\u79F0\u4E0E\u5B9E\u9645\u52A8\u4F5C\u4E0D\u7B26");
+            text = "\u26A0 \u5B8C\u6210\u524D\u68C0\u67E5\u672A\u901A\u8FC7\uFF08\u786E\u5B9A\u6027\u89C4\u5219\uFF0C\u672A\u6D88\u8017\u6A21\u578B\u8C03\u7528\uFF09\uFF1A" + (resp.reason || "\u58F0\u79F0\u4E0E\u5B9E\u9645\u52A8\u4F5C\u4E0D\u7B26");
           } else {
-            step.textContent = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (resp.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (resp.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + resp.missing + "\uFF09" : "");
+            text = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (resp.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (resp.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + resp.missing + "\uFF09" : "");
           }
-          appendStep(step);
+          appendNoticePart(text, resp.ok ? "#16a34a" : "#b45309");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "usage") {
@@ -7657,10 +7640,7 @@
         } else if (resp.type === "skill") {
           const skills = Array.isArray(resp.skills) ? resp.skills : [];
           if (skills.length) {
-            const step = document.createElement("div");
-            step.className = "agent-step agent-skill";
-            step.textContent = "\u{1F6E0} \u542F\u7528\u6280\u80FD\uFF1A" + skills.map((s) => s.title || s.name).join("\u3001");
-            appendStep(step);
+            appendNoticePart("\u{1F6E0} \u542F\u7528\u6280\u80FD\uFF1A" + skills.map((s) => s.title || s.name).join("\u3001"), "", "agent-skill");
             fitPanelHeight();
             pinToBottom();
           }
