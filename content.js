@@ -4262,22 +4262,9 @@
     .p-head .logo { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
     .p-head .title { font-size: 14px; font-weight: 600; color: #333; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .panel.dark .p-head .title { color: #e3e5e8; }
-    .p-head .usage { font-size: 12px; color: #66707d; white-space: nowrap; }
+    .p-head .usage { font-size: 11px; color: #98a0aa; margin-left: auto; margin-right: 6px; white-space: nowrap; }
     .p-head .close { border: none; background: none; color: #6b7280; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; min-width: 32px; min-height: 32px; }
     .p-head .close:hover { color: #e74c3c; background: rgba(0,0,0,.05); }
-    .p-head .more-btn { border: 1px solid #d5d9e0; background: #fff; color: #4d5968; width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 18px; line-height: 1; padding: 0; flex-shrink: 0; }
-    .p-head .more-btn:hover { border-color: #4a90d9; color: #4a90d9; }
-    .panel.dark .p-head .more-btn { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
-    .p-more-menu { position: absolute; z-index: 31; top: 46px; right: 10px; width: min(270px, calc(100% - 20px)); padding: 8px; background: #fff; border: 1px solid #dfe3e9; border-radius: 11px; box-shadow: 0 12px 34px rgba(22,34,51,.22); }
-    .p-more-menu[hidden] { display: none; }
-    .panel.dark .p-more-menu { background: #2a2e34; border-color: #444a53; box-shadow: 0 14px 38px rgba(0,0,0,.45); }
-    .p-more-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 8px; border-radius: 7px; }
-    .p-more-row:hover { background: #f5f8fc; }
-    .panel.dark .p-more-row:hover { background: #323840; }
-    .p-more-label { color: #66707d; font-size: 12px; font-weight: 600; }
-    .panel.dark .p-more-label { color: #aab2bd; }
-    .p-more-menu .handoff { width: 100%; margin: 0 0 4px; text-align: left; padding: 8px 9px; border-radius: 7px; }
-    .p-more-menu .theme { margin-left: auto; }
 /* \u4EA4\u63A5\u6807\u8BC6\u82AF\u7247\uFF1A\u70B9\u4E00\u4E0B\u628A\u672C\u6B21\u4F1A\u8BDD\u6253\u5305\u5E76\u590D\u5236\u53EF\u76F4\u63A5\u7C98\u7ED9 AI \u7684\u6307\u4EE4 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
 .p-head .handoff:hover { border-color: #4a90d9; color: #4a90d9; }
@@ -4655,9 +4642,8 @@
     .p-progress .pp-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .p-progress .pp-time { font-variant-numeric: tabular-nums; opacity: .85; flex-shrink: 0; }
     /* \u4E3B\u9898\u5207\u6362 */
-    .p-head .theme { border: 1px solid #d5d9e0; background: #fff; color: #66707d; cursor: pointer; font-size: 13px; line-height: 1; padding: 5px 8px; min-width: 38px; min-height: 30px; border-radius: 7px; font-family: inherit; transition: all .15s; }
+    .p-head .theme { border: 1px solid transparent; background: none; color: #98a0aa; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 5px; border-radius: 6px; font-family: inherit; transition: all .15s; }
     .p-head .theme:hover { background: rgba(0,0,0,.06); color: #4a90d9; }
-    .panel.dark .p-head .theme { background: #262a30; border-color: #3a3f46; color: #c4cad3; }
     .panel.dark .p-head .theme:hover { background: rgba(255,255,255,.08); color: #6aa5e0; }
     /* \u9AD8\u98CE\u9669\u5DE5\u5177\u5BA1\u6279\uFF1A\u7ED9\u5B8C\u6574\u4EE3\u7801\u800C\u4E0D\u662F\u622A\u65AD\u5230 400 \u5B57\u7B26 */
     .tool-approval-code { margin: 4px 0 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,.06); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
@@ -4977,9 +4963,6 @@
   var panelSessionMenuEl = null;
   var panelSessionBtnEl = null;
   var panelSessionMenuOpen = false;
-  var panelMoreMenuEl = null;
-  var panelMoreBtnEl = null;
-  var panelMoreMenuOpen = false;
   var panelSessionSaveChain = Promise.resolve();
   var panelSessionSwitchInFlight = false;
   var deferredRemoteSessionId = "";
@@ -5194,9 +5177,6 @@
     panelBody = null;
     panelTextEl = null;
     panelTitleEl = null;
-    panelMoreMenuEl = null;
-    panelMoreBtnEl = null;
-    panelMoreMenuOpen = false;
     planBar = null;
     stopBtn = null;
     sendBtn = null;
@@ -5310,9 +5290,6 @@
       panelBody = null;
       panelTextEl = null;
       panelTitleEl = null;
-      panelMoreMenuEl = null;
-      panelMoreBtnEl = null;
-      panelMoreMenuOpen = false;
       planBar = null;
       if (fab) fab.classList.remove("hidden");
     }
@@ -6022,11 +5999,6 @@
     if (panelSessionMenuEl) panelSessionMenuEl.hidden = true;
     if (panelSessionBtnEl) panelSessionBtnEl.setAttribute("aria-expanded", "false");
   }
-  function closePanelMoreMenu() {
-    panelMoreMenuOpen = false;
-    if (panelMoreMenuEl) panelMoreMenuEl.hidden = true;
-    if (panelMoreBtnEl) panelMoreBtnEl.setAttribute("aria-expanded", "false");
-  }
   function renderSessionMenu() {
     if (!panelSessionMenuEl) return;
     panelSessionMenuEl.innerHTML = "";
@@ -6703,7 +6675,6 @@
       panelSessionMenuEl.hidden = !panelSessionMenuOpen;
       panelSessionBtnEl.setAttribute("aria-expanded", panelSessionMenuOpen ? "true" : "false");
       if (panelSessionMenuOpen) {
-        closePanelMoreMenu();
         renderSessionMenu();
         await refreshPanelSessionState();
         fitPanelHeight();
@@ -6724,33 +6695,8 @@
       });
     });
     panel.appendChild(panelSessionMenuEl);
-    panelMoreBtnEl = document.createElement("button");
-    panelMoreBtnEl.type = "button";
-    panelMoreBtnEl.className = "more-btn";
-    panelMoreBtnEl.textContent = "\u22EF";
-    panelMoreBtnEl.title = "\u66F4\u591A\u64CD\u4F5C";
-    panelMoreBtnEl.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
-    panelMoreBtnEl.setAttribute("aria-haspopup", "true");
-    panelMoreBtnEl.setAttribute("aria-expanded", "false");
-    panelMoreBtnEl.setAttribute("aria-controls", "rf-panel-more-menu");
-    panelMoreMenuEl = document.createElement("div");
-    panelMoreMenuEl.id = "rf-panel-more-menu";
-    panelMoreMenuEl.className = "p-more-menu";
-    panelMoreMenuEl.hidden = true;
-    panelMoreMenuEl.setAttribute("role", "menu");
-    panelMoreMenuEl.setAttribute("aria-label", "\u66F4\u591A\u64CD\u4F5C");
-    const usageRow = document.createElement("div");
-    usageRow.className = "p-more-row p-more-usage-row";
-    const usageLabel = document.createElement("span");
-    usageLabel.className = "p-more-label";
-    usageLabel.textContent = "\u672C\u6B21\u7528\u91CF";
-    usageRow.appendChild(usageLabel);
-    usageRow.appendChild(usageChip);
-    panelMoreMenuEl.appendChild(usageRow);
     const handoffBtn = document.createElement("button");
-    handoffBtn.className = "handoff p-more-control";
-    handoffBtn.type = "button";
-    handoffBtn.setAttribute("role", "menuitem");
+    handoffBtn.className = "handoff";
     handoffEl = handoffBtn;
     renderHandoffChip();
     handoffBtn.addEventListener("click", () => {
@@ -6770,52 +6716,21 @@
         }, 1800);
       });
     });
-    const handoffLabel = document.createElement("div");
-    handoffLabel.className = "p-more-label";
-    handoffLabel.textContent = "\u4F1A\u8BDD\u4EA4\u63A5";
-    panelMoreMenuEl.appendChild(handoffLabel);
-    panelMoreMenuEl.appendChild(handoffBtn);
     themeBtn = document.createElement("button");
     themeBtn.className = "theme";
-    themeBtn.setAttribute("role", "menuitem");
     themeBtn.addEventListener("click", cycleTheme);
     applyTheme();
-    const themeRow = document.createElement("div");
-    themeRow.className = "p-more-row";
-    const themeLabel = document.createElement("span");
-    themeLabel.className = "p-more-label";
-    themeLabel.textContent = "\u4E3B\u9898";
-    themeRow.appendChild(themeLabel);
-    themeRow.appendChild(themeBtn);
-    panelMoreMenuEl.appendChild(themeRow);
-    panelMoreBtnEl.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      panelMoreMenuOpen = !panelMoreMenuOpen;
-      panelMoreMenuEl.hidden = !panelMoreMenuOpen;
-      panelMoreBtnEl.setAttribute("aria-expanded", panelMoreMenuOpen ? "true" : "false");
-      if (panelMoreMenuOpen) {
-        closeSessionMenu();
-        fitPanelHeight();
-      }
-    });
-    panelMoreMenuEl.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
-      e.stopPropagation();
-    });
     head.appendChild(logo);
     head.appendChild(title);
+    head.appendChild(usageChip);
     head.appendChild(panelSessionBtnEl);
-    head.appendChild(panelMoreBtnEl);
-    head.appendChild(panelMoreMenuEl);
+    head.appendChild(handoffBtn);
+    head.appendChild(themeBtn);
     head.appendChild(close);
     panel.appendChild(head);
     shadow.addEventListener("mousedown", (e) => {
       if (panelSessionMenuOpen && !e.target.closest(".session-menu") && !e.target.closest(".session-btn")) {
         closeSessionMenu();
-      }
-      if (panelMoreMenuOpen && !e.target.closest(".p-more-menu") && !e.target.closest(".more-btn")) {
-        closePanelMoreMenu();
       }
     });
     progressEl = document.createElement("div");
@@ -7982,12 +7897,6 @@
       if (e.key !== "Escape") return;
       if (picking) return;
       if (panel && panel.querySelector(".session-dialog-backdrop")) return;
-      if (panelMoreMenuOpen) {
-        e.preventDefault();
-        e.stopPropagation();
-        closePanelMoreMenu();
-        return;
-      }
       if (panelSessionMenuOpen) {
         e.preventDefault();
         e.stopPropagation();
