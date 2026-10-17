@@ -6300,15 +6300,20 @@
       };
       lastResponse = "";
       const pickedForMessage = summarizePickedForMessage(pickedElements);
-      conversation.push(
-        Object.assign(
-          { role: "user", content: instruction },
-          pickedForMessage.length ? { pickedElements: pickedForMessage } : {}
-        )
-      );
-      const userMsg = document.createElement("div");
-      userMsg.className = "user-turn";
-      userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
+      const skipUserTurn = Boolean(opts && opts.skipUserTurn);
+      if (!skipUserTurn) {
+        conversation.push(
+          Object.assign(
+            { role: "user", content: instruction },
+            pickedForMessage.length ? { pickedElements: pickedForMessage } : {}
+          )
+        );
+        saveConversation();
+        const userMsg = document.createElement("div");
+        userMsg.className = "user-turn";
+        userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
+        panelBody.appendChild(userMsg);
+      }
       const aiMsg = document.createElement("div");
       aiMsg.className = "msg ai";
       flowEl = document.createElement("div");
@@ -6318,7 +6323,6 @@
       contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
       flowEl.appendChild(contentEl);
       aiMsg.appendChild(flowEl);
-      panelBody.appendChild(userMsg);
       panelBody.appendChild(aiMsg);
       fitPanelHeight();
       pinToBottom();
@@ -6785,7 +6789,15 @@
           }
           if (resp.resumable && resp.runId && resp.instruction && !streaming) {
             openPanel(0, 0, true);
-            if (runAgent) runAgent(String(resp.instruction), { continuation: true, presetRunId: String(resp.runId) });
+            const last = conversation.length ? conversation[conversation.length - 1] : null;
+            const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
+            if (runAgent) {
+              runAgent(String(resp.instruction), {
+                continuation: true,
+                presetRunId: String(resp.runId),
+                skipUserTurn: Boolean(alreadyHas)
+              });
+            }
           } else if (resp.pending) {
             setTimeout(tick, 300);
           }
@@ -6801,6 +6813,15 @@
     tick();
   }
   function initAssistant() {
+    try {
+      window.addEventListener("pagehide", () => {
+        try {
+          saveConversation();
+        } catch (e) {
+        }
+      });
+    } catch (e) {
+    }
     document.addEventListener("mousedown", (e) => {
       if (host && e.composedPath().includes(host)) return;
       removeBubble();

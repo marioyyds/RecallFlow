@@ -2958,6 +2958,29 @@ function reloadPage() {
 </body></html>`;
 }
 
+// 跳转搜索页：模拟 GitHub 搜索 —— 提交后**整页跳转**到带 ?q= 的结果页。
+// 用于复现「页面跳转后对话消失」：对话必须随用户消息进对话即落盘，跳转后恢复且不重复。
+function navSearchPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具跳转搜索</title></head>
+<body>
+  <h1>跳转搜索</h1>
+  <input id="q" name="q" placeholder="搜索">
+  <button id="go">搜索</button>
+  <div id="results"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const q = params.get('q');
+    if (q) document.getElementById('results').textContent = '结果：' + q;
+    const submit = () => {
+      const v = document.getElementById('q').value.trim();
+      if (v) location.href = location.pathname + '?q=' + encodeURIComponent(v);
+    };
+    document.getElementById('go').addEventListener('click', submit);
+    document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  </script>
+</body></html>`;
+}
+
 function sse(res, chunks) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   // 可选的「慢速流」模式：分片之间加延迟，从而**真实存在一个生成中的窗口**。
@@ -4578,6 +4601,18 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 夹具场景：跳转搜索（模拟 GitHub 搜索）——提交后整页跳转，验证对话在跳转后不丢、不重复。
+    if (userText.includes('跳转搜索')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'type_text', { selector: '#q', value: 'jev', clearFirst: true }); return; }
+      if (done === 2) { toolStep(res, 'click_element', { selector: '#go' }); return; }
+      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#results', state: 'visible' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      finalText(res, '已搜索 jev，结果页显示「结果：jev」。', 60);
+      return;
+    }
+
     // 场景 B：主站按钮（role+name 定位）
     if (!toolResults.length) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
@@ -4697,7 +4732,8 @@ const main = http.createServer((req, res) => {
                                                                     : req.url && req.url.startsWith('/rsearch') ? researchPage()
                                                                       : req.url && req.url.startsWith('/assistant') ? siteAssistantPage()
                                                                         : req.url && req.url.startsWith('/reload') ? reloadPage()
-                                                                          : mainPage()
+                                                                          : req.url && req.url.startsWith('/nav-search') ? navSearchPage()
+                                                                            : mainPage()
   );
 });
 const frame = http.createServer((req, res) => {

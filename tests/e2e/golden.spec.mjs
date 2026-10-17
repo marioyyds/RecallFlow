@@ -2690,4 +2690,33 @@ test('golden: HTML5 拖放 —— 「看起来拖过去了」不等于页面收�
 });
 
 
+// 回归：GitHub 搜索式「整页跳转」后，对话必须不丢、且不重复（用户消息只出现一次）。
+// 这是用户实测反馈的缺陷：跳转后对话窗清空、返回旧页也没有对话。
+test('golden: 跳转搜索 —— 整页跳转后对话不丢、不重复', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context, '/nav-search');
+
+  resetLlmRequests();
+  await sendInstruction(page, '跳转搜索');
+
+  // ① run 正常跑完（含跳转后的自动续跑）
+  await expect.poll(() => finalizedRunCount(), { timeout: 40_000 }).toBeGreaterThan(0);
+
+  // ② 页面真的跳到了结果页
+  await expect(page).toHaveURL(/\/nav-search\?q=jev/);
+  await expect(page.locator('#results')).toHaveText('结果：jev');
+
+  // ③ 对话随跳转被恢复，且用户消息恰好一条（不重复）
+  const [sw] = context.serviceWorkers();
+  const userTurns = await sw.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tabs[0] && tabs[0].id;
+    const d = await chrome.storage.session.get('recallflow.conv.' + tabId);
+    const conv = ((d && d['recallflow.conv.' + tabId]) || {}).conversation || [];
+    return conv.filter((m) => m.role === 'user' && String(m.content || '').includes('跳转搜索')).length;
+  });
+  expect(userTurns, '跳转搜索这条用户消息必须恰好出现一次（不丢、不重复）').toBe(1);
+
+  await page.close();
+});
 
