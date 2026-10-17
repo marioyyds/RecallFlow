@@ -4609,6 +4609,7 @@
       background: rgba(74,144,217,.08); border-left: 2px solid #4a90d9;
       padding: 4px 8px; border-radius: 0 6px 6px 0; word-break: break-word;
     }
+    .agent-step.verify-final { margin-top: 8px; }
     .panel.dark .agent-step { background: rgba(110,168,254,.12); color: #9aa6b3; }
     .agent-tool { font-weight: 600; color: #4a90d9; }
     .panel.dark .agent-tool { color: #7db4e8; }
@@ -4812,8 +4813,19 @@
         pushStepNotice(state, "\u{1F504} \u5DF2\u5207\u6362\u4E3A" + (event.label || "\u8D44\u6599\u7814\u7A76") + "\u6A21\u5F0F\uFF0C\u53EF\u7528\u6D4F\u89C8\u5668/\u7F51\u7EDC\u5DE5\u5177\u7EE7\u7EED", "");
         break;
       case "verify": {
-        const text = event.ok ? "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (event.reason ? "\uFF1A" + event.reason : "") : "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (event.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (event.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + event.missing + "\uFF09" : "");
-        pushStepNotice(state, text, event.ok ? "#16a34a" : "#b45309");
+        if (event.ok) {
+          state.terminalNotice = {
+            type: "notice",
+            text: "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (event.reason ? "\uFF1A" + event.reason : ""),
+            color: "#16a34a"
+          };
+        } else {
+          pushStepNotice(
+            state,
+            "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (event.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (event.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + event.missing + "\uFF09" : ""),
+            "#b45309"
+          );
+        }
         break;
       }
       case "skill":
@@ -4847,6 +4859,9 @@
         text: "\u7B49\u5F85\u53D1\u8D77\u6807\u7B7E\u9875\u786E\u8BA4\u5DE5\u5177\u300C" + state.approval.name + "\u300D",
         color: "#b45309"
       });
+    }
+    if (state.terminalNotice) {
+      parts.push(Object.assign({}, state.terminalNotice, { terminal: true }));
     }
     const bound = bindCitationsToText(parts, state.citations);
     return {
@@ -4988,6 +5003,7 @@
   var pendingContentEl = null;
   var pendingStarted = false;
   var pendingParts = [];
+  var pendingVerifyPass = null;
   var budgetStopped = false;
   var flowEl = null;
   var pendingNarration = "";
@@ -5643,7 +5659,8 @@
         return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
       }
       const parts = Array.isArray(m.parts) ? m.parts : [];
-      const flowHtml = parts.map((p) => {
+      const terminalNotices = parts.filter((p) => p && p.type === "notice" && p.terminal === true && p.text);
+      const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => {
         if (p.type === "tool-call") {
           return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
         }
@@ -5679,7 +5696,8 @@
       const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
       const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
       const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
-      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
+      const terminalHtml = terminalNotices.map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || "#16a34a") + '">' + escHtml(p.text) + "</div>").join("");
+      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
     }).join("");
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);
@@ -7204,6 +7222,7 @@
       pendingStarted = false;
       pendingAcc = "";
       pendingParts = [];
+      pendingVerifyPass = null;
       budgetStopped = false;
       flowEl = null;
       pendingNarration = "";
@@ -7304,9 +7323,15 @@
       appendStep(step);
       pendingParts.push({ type: "notice", text: value, color: color || "" });
     }
+    function commitPendingVerifyPass() {
+      if (!pendingVerifyPass) return;
+      pendingParts.push(pendingVerifyPass);
+      pendingVerifyPass = null;
+    }
     function interrupt() {
       if (!streaming) return;
       finishReasoning();
+      commitPendingVerifyPass();
       try {
         if (activeConn) activeConn.postMessage({ type: "stop" });
       } catch (e) {
@@ -7350,6 +7375,7 @@
     function commitInterruptedTurn(reasonText) {
       const last = conversation.length ? conversation[conversation.length - 1] : null;
       if (last && last.role === "assistant" && last.interrupted) return;
+      commitPendingVerifyPass();
       const turn = buildInterruptedTurn(pendingParts, pendingNarration || pendingAcc, reasonText);
       if (!turn.parts.length && !String(pendingNarration || pendingAcc || "").trim()) return;
       conversation.push(turn);
@@ -7505,6 +7531,7 @@
       fitPanelHeight();
       pinToBottom();
       pendingAcc = "";
+      pendingVerifyPass = null;
       renderPlan([]);
       lastPlan = [];
       if (usageEl) usageEl.textContent = "";
@@ -7640,9 +7667,13 @@
           } else {
             text = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (resp.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (resp.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + resp.missing + "\uFF09" : "");
           }
-          appendNoticePart(text, resp.ok ? "#16a34a" : "#b45309");
-          fitPanelHeight();
-          pinToBottom();
+          if (resp.ok === true) {
+            pendingVerifyPass = { type: "notice", text, color: "#16a34a", terminal: true };
+          } else {
+            appendNoticePart(text, "#b45309");
+            fitPanelHeight();
+            pinToBottom();
+          }
         } else if (resp.type === "usage") {
           if (usageEl) usageEl.textContent = "tokens " + (resp.totalTokens || 0);
         } else if (resp.type === "plan") {
@@ -7709,10 +7740,18 @@
             }).join("");
             pendingAiMsg.appendChild(srcWrap);
           }
+          if (pendingVerifyPass) {
+            const verifyEl = document.createElement("div");
+            verifyEl.className = "agent-step verify-final";
+            verifyEl.style.color = pendingVerifyPass.color || "#16a34a";
+            verifyEl.textContent = pendingVerifyPass.text;
+            pendingAiMsg.appendChild(verifyEl);
+          }
           if (lastResponse) pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
           if (finalText && !alreadyCommittedAsText(pendingParts, finalText)) {
             pendingParts.push({ type: "text", text: finalText });
           }
+          commitPendingVerifyPass();
           const finalParts = pendingParts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
               return p.text ? Object.assign({}, p, { text: renumbered.apply(p.text) }) : p;
