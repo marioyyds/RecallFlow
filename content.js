@@ -5148,8 +5148,10 @@
   var currentCitations = null;
   var pageContextEnabled = true;
   var citeHighlightEntered2 = false;
-  var FAB_POSITION_KEY = "recallflow-fab-position";
+  var FAB_POSITION_KEY = "recallflow.fab-position.v1";
+  var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
   var FAB_EDGE_GAP = 8;
+  var fabPositionRatio = 0.38;
   function fabHeight() {
     const measured = fab ? fab.offsetHeight : 0;
     return measured || (window.innerWidth <= 600 ? 46 : 52);
@@ -5164,34 +5166,61 @@
     const maxTop = Math.max(FAB_EDGE_GAP, window.innerHeight - height - FAB_EDGE_GAP);
     return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
   }
-  function savedFabRatio() {
+  function normalizeFabRatio(value) {
+    const ratio = Number(value);
+    return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
+  }
+  function legacyFabRatio() {
     try {
-      const saved = JSON.parse(localStorage.getItem(FAB_POSITION_KEY) || "null");
+      const saved = JSON.parse(localStorage.getItem(LEGACY_FAB_POSITION_KEY) || "null");
       if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
-      const ratio = Number(saved.ratio);
-      return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
+      return normalizeFabRatio(saved.ratio);
     } catch (e) {
       return null;
     }
   }
   function applySavedFabPosition() {
     if (!fab) return;
-    const ratio = savedFabRatio();
-    const effective = ratio == null ? 0.38 : ratio;
     const height = fabHeight();
     const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
-    fab.style.top = clampFabTop(FAB_EDGE_GAP + effective * available) + "px";
+    fab.style.top = clampFabTop(FAB_EDGE_GAP + fabPositionRatio * available) + "px";
   }
   function persistFabPosition() {
     if (!fab) return;
     const height = fabHeight();
     const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
     const top = clampFabTop(currentFabTop());
-    const ratio = (top - FAB_EDGE_GAP) / available;
+    fabPositionRatio = normalizeFabRatio((top - FAB_EDGE_GAP) / available);
+    if (fabPositionRatio == null) fabPositionRatio = 0.38;
     try {
-      localStorage.setItem(FAB_POSITION_KEY, JSON.stringify({ ratio, updatedAt: Date.now() }));
+      const pending = chrome.storage.local.set({
+        [FAB_POSITION_KEY]: { ratio: fabPositionRatio, updatedAt: Date.now() }
+      });
+      if (pending && pending.catch) pending.catch(() => {
+      });
+      localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
     } catch (e) {
     }
+  }
+  async function loadFabPosition() {
+    try {
+      const stored = await chrome.storage.local.get(FAB_POSITION_KEY);
+      let ratio = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
+      if (ratio == null) {
+        const legacy = legacyFabRatio();
+        if (legacy != null) {
+          ratio = legacy;
+          await chrome.storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: Date.now() } });
+        }
+      }
+      if (ratio != null) fabPositionRatio = ratio;
+      try {
+        localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
+      } catch (e) {
+      }
+    } catch (e) {
+    }
+    applySavedFabPosition();
   }
   function moveFabBy(delta) {
     if (!fab) return;
@@ -5278,6 +5307,7 @@
     });
     shadow.appendChild(fab);
     applySavedFabPosition();
+    loadFabPosition();
     document.documentElement.appendChild(host);
   }
   function resetDetachedHostState() {
@@ -8266,6 +8296,17 @@
       pageContextEnabled = s.pageContext !== false;
     }).catch(() => {
     });
+    try {
+      chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== "local" || !changes || !changes[FAB_POSITION_KEY]) return;
+        const next = changes[FAB_POSITION_KEY].newValue;
+        const ratio = normalizeFabRatio(next && next.ratio);
+        if (ratio == null) return;
+        fabPositionRatio = ratio;
+        applySavedFabPosition();
+      });
+    } catch (e) {
+    }
     try {
       chrome.runtime.onMessage.addListener((msg) => {
         if (!msg) return;
