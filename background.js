@@ -11,6 +11,7 @@ import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-stor
 import { sanitizeMessages } from './lib/shared/surrogates.js';
 import { loadAgentSession } from './lib/assistant/session-store.js';
 import { PanelSessionStore } from './lib/shared/panel-sessions.js';
+import { RunStreamHub } from './lib/assistant/run-hub.js';
 import {
   listScripts,
   installFromUrl,
@@ -117,6 +118,66 @@ function broadcastPanelUi(ui, sourceTabId) {
   });
 }
 
+// tabId -> 当前订阅的 sessionId。跟随页只在面板打开/会话切换时登记一次，
+// SW 按 session 定向广播，避免把每个 token 发给所有网页。
+const runSubscriptions = new Map();
+
+function sendToRunSubscribers(sessionId, payload, excludeTabId) {
+  const wanted = String(sessionId || '');
+  if (!wanted) return;
+  for (const [tabId, subscribed] of [...runSubscriptions]) {
+    if (subscribed !== wanted) continue;
+    if (tabId === excludeTabId) continue;
+    chrome.tabs.sendMessage(tabId, payload, { frameId: 0 }, () => {
+      if (chrome.runtime.lastError) runSubscriptions.delete(tabId);
+    });
+  }
+}
+
+const runHub = new RunStreamHub({
+  onStart: (snapshot) => {
+    if (!snapshot) return;
+    sendToRunSubscribers(
+      snapshot.sessionId,
+      {
+        type: 'run:started',
+        runId: snapshot.runId,
+        sessionId: snapshot.sessionId,
+        ownerTabId: snapshot.ownerTabId,
+        cursor: snapshot.cursor,
+      },
+      snapshot.ownerTabId
+    );
+  },
+  onDelta: (delta) => {
+    sendToRunSubscribers(
+      delta.sessionId,
+      {
+        type: 'run:delta',
+        runId: delta.runId,
+        sessionId: delta.sessionId,
+        ownerTabId: delta.ownerTabId,
+        cursor: delta.cursor,
+        event: delta.event,
+      },
+      delta.ownerTabId
+    );
+  },
+  onEnd: (snapshot) => {
+    if (!snapshot) return;
+    sendToRunSubscribers(
+      snapshot.sessionId,
+      {
+        type: 'run:ended',
+        runId: snapshot.runId,
+        sessionId: snapshot.sessionId,
+        cursor: snapshot.cursor,
+      },
+      snapshot.ownerTabId
+    );
+  },
+});
+
 // 兜底日志：service worker 内未捕获的异常 / Promise 拒绝也打到 console，便于排障。
 try {
   self.addEventListener('unhandledrejection', (e) => {
@@ -168,6 +229,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const focusId = msg.focusId || '';
     chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
     sendResponse({ ok: true });
+    return false;
+  }
+  // ---- 运行流订阅（跨标签页实时跟随）----
+  if (msg && (msg.type === 'panel:run:subscribe' || msg.type === 'panel:run:unsubscribe')) {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId == null) {
+      sendResponse({ ok: false, error: '缺少标签页上下文' });
+      return false;
+    }
+    if (msg.type === 'panel:run:unsubscribe') {
+      runSubscriptions.delete(tabId);
+      sendResponse({ ok: true });
+      return false;
+    }
+    const sessionId = String(msg.sessionId || '');
+    if (!sessionId) {
+      sendResponse({ ok: true, snapshot: null });
+      return false;
+    }
+    const snapshot = runHub.findBySession(sessionId);
+    runSubscriptions.set(tabId, sessionId);
+    const selfOwned = Boolean(snapshot && Number(snapshot.ownerTabId) === Number(tabId));
+    sendResponse({
+      ok: true,
+      selfOwned,
+      snapshot: selfOwned ? null : snapshot,
+    });
     return false;
   }
   // ---- 面板开合状态（全浏览器同步）----
@@ -487,6 +575,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // 标签页关闭时清理其对话持久化数据。
 chrome.tabs.onRemoved.addListener((tabId) => {
+  runSubscriptions.delete(tabId);
   const c = tabControllers.get(tabId);
   if (c) {
     try { c.abort(); } catch (e) {}
@@ -606,17 +695,42 @@ chrome.runtime.onConnect.addListener((port) => {
       const book = await getBook();
       if (payload.action === 'agent') {
         const tabId = port.sender && port.sender.tab && port.sender.tab.id;
-        console.log('[RecallFlow] agent run start:', (payload.question || '').slice(0, 40), 'tabId=' + tabId);
-        if (tabId) tabRuns.set(tabId, { runId: payload.runId || '', resumable: true });
+        const runId = payload.runId || 'run-' + Date.now().toString(36);
+        payload.runId = runId;
+        const sessionId = String(payload.sessionId || '');
+        console.log('[RecallFlow] agent run start:', (payload.question || '').slice(0, 40), 'tabId=' + tabId, 'session=' + sessionId);
+        if (tabId) tabRuns.set(tabId, { runId, resumable: true, sessionId });
+        if (sessionId) {
+          runHub.begin({
+            runId,
+            sessionId,
+            ownerTabId: tabId,
+            instruction: payload.question || payload.text || '',
+          });
+        }
         try {
-          await runAgentStream(port, payload, settings, book, controller.signal, tabId);
+          await runAgentStream(
+            port,
+            payload,
+            settings,
+            book,
+            controller.signal,
+            tabId,
+            sessionId ? (event) => runHub.push(runId, event) : null
+          );
           console.log('[RecallFlow] agent run finished');
+          if (sessionId) runHub.finish(runId, 'completed');
         } catch (e) {
           const detail = e && e.stack ? e.stack : String(e);
           console.error('[RecallFlow] agent run error:', detail);
           // 把真实错误回传前端，避免只看到「转圈」或笼统报错。
           try { port.postMessage({ type: 'error', error: 'Agent 运行出错：' + (e && e.message ? e.message : String(e)) }); } catch (err) {}
           try { port.postMessage({ type: 'end' }); } catch (err) {}
+          if (sessionId) {
+            runHub.push(runId, { type: 'error', error: 'Agent 运行出错：' + (e && e.message ? e.message : String(e)) });
+            runHub.push(runId, { type: 'end' });
+            runHub.finish(runId, controller.signal.aborted ? 'cancelled' : 'failed');
+          }
         }
         return;
       }

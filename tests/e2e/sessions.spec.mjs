@@ -7,6 +7,7 @@ import {
   openFixturePage,
   openPanel,
   readActivePanelSession,
+  panelText,
   PANEL,
 } from './helpers.mjs';
 
@@ -96,7 +97,7 @@ test('跨标签页：同一 active 会话自动加载；新建会话会同步到
   await b.close();
 });
 
-test('运行锁：第二标签页提示冲突，可改在新会话里运行', async () => {
+test('运行锁：跟随页在另一端运行时保持只读，不能重复发起', async () => {
   await configureSettings(context);
   const a = await openFixturePage(context);
   await startNewSession(a);
@@ -108,16 +109,9 @@ test('运行锁：第二标签页提示冲突，可改在新会话里运行', as
   await expect(b.locator(PANEL + ' .user-turn', { hasText: '点击提交按钮' })).toHaveCount(1, {
     timeout: 15_000,
   });
-  await send(b, '点击提交按钮');
-  const dialog = b.locator(PANEL + ' .session-dialog');
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await expect(dialog).toContainText('另一个标签页运行');
-  await expect(dialog.locator('.primary')).toHaveText('接管并运行');
-  await expect(dialog.locator('.session-dialog-extra')).toHaveText('新建会话');
-
-  await dialog.locator('.session-dialog-extra').click();
-  await expect(b.locator(PANEL + ' .user-turn', { hasText: '点击提交按钮' })).toHaveCount(1);
+  // 跟随页实时显示同一流，但不允许在 owner 运行期间重复发起。
   await expect(b.locator(PANEL + ' .cmd-send')).toBeDisabled({ timeout: 10_000 });
+  await expect(b.locator(PANEL + ' .p-body')).toContainText('点击提交按钮');
 
   await a.close();
   await b.close();
@@ -147,6 +141,61 @@ test('面板开合：打开、关闭都会同步到其他标签页，新页面�
   await b.locator(PANEL + ' .close').click();
   await expect(a.locator(PANEL + ' .panel')).toHaveCount(0, { timeout: 15_000 });
 
+  await a.close();
+  await b.close();
+});
+
+test('流式跟随：另一标签页中途加入也能看到思考与正文逐步出现', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await startNewSession(a);
+  await send(a, '说说你的思考');
+  await expect(a.locator(PANEL + ' .think-block')).toHaveCount(1, { timeout: 10_000 });
+
+  // 新页会自动继承已打开的面板，并订阅当前 active run。
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .user-turn', { hasText: '说说你的思考' })).toHaveCount(1, {
+    timeout: 10_000,
+  });
+  await expect(b.locator(PANEL + ' .think-block')).toContainText('先确认页面结构', {
+    timeout: 4_000,
+  });
+  // 4 秒的流中间窗口内，正文还没到：证明 B 跟随的是增量，而不是任务结束后的一次性快照。
+  expect(await panelText(b, '.p-body')).not.toContain('我想好了');
+
+  // 跟随页整页刷新后重新订阅，靠 snapshot 接回当前 run（而不是等最终落盘）。
+  await b.reload();
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .user-turn', { hasText: '说说你的思考' })).toHaveCount(1, {
+    timeout: 10_000,
+  });
+
+  // 后续正文也继续同步，而不是停在加入时的快照。
+  await expect.poll(() => panelText(b, '.p-body'), { timeout: 15_000 }).toContain('我想好了');
+  await expect.poll(() => panelText(b, '.p-body'), { timeout: 10_000 }).toContain('补充一句');
+  // 结束后跟随页恢复为可输入，并收到正式落盘后的消息。
+  await expect(b.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: 10_000 });
+
+  await a.close();
+  await b.close();
+});
+
+test('流式跟随：后加入页面能看到已经发生的工具步骤与后续结果', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await startNewSession(a);
+  await send(a, '点击提交按钮');
+  await expect(a.locator(PANEL + ' .agent-step')).not.toHaveCount(0, { timeout: 10_000 });
+
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .agent-step', { hasText: 'click_element' }).first()).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect
+    .poll(() => panelText(b, '.p-body'), { timeout: 15_000 })
+    .toMatch(/已点击|完成|提交/);
   await a.close();
   await b.close();
 });

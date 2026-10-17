@@ -4766,6 +4766,158 @@
     .panel.dark .approval-settings-popover { background:#26292e; border-color:#3a3f46; }
 `;
 
+  // lib/assistant/run-hub.js
+  function endReasoning(state) {
+    if (!state.reasoning) return;
+    state.parts.push({ type: "thinking", text: state.reasoning });
+    state.reasoning = "";
+  }
+  function flushNarration(state) {
+    if (!state.narration) return;
+    state.parts.push({ type: "narration", text: state.narration });
+    state.narration = "";
+  }
+  function pushNotice(state, text, color) {
+    const value = String(text || "").trim();
+    if (!value) return;
+    state.parts.push({ type: "notice", text: value, color: color || "" });
+  }
+  function pushStepNotice(state, text, color) {
+    endReasoning(state);
+    flushNarration(state);
+    pushNotice(state, text, color);
+  }
+  function applyRunEvent(state, event) {
+    if (!state || !event || typeof event !== "object") return state;
+    switch (event.type) {
+      case "citations":
+        state.citations = Array.isArray(event.citations) ? event.citations.slice() : [];
+        break;
+      case "reasoning":
+        if (event.text) state.reasoning += String(event.text);
+        break;
+      case "chunk":
+        endReasoning(state);
+        if (event.text) {
+          const text = String(event.text);
+          state.content += text;
+          state.narration += text;
+        }
+        break;
+      case "tool-call":
+        endReasoning(state);
+        flushNarration(state);
+        state.parts.push({
+          type: "tool-call",
+          callId: String(event.callId || ""),
+          name: String(event.name || ""),
+          args: event.args && typeof event.args === "object" ? event.args : {},
+          risk: String(event.risk || "unknown")
+        });
+        if (event.requiresApproval) {
+          state.approval = {
+            callId: String(event.callId || ""),
+            name: String(event.name || "")
+          };
+        }
+        break;
+      case "tool-result":
+        endReasoning(state);
+        flushNarration(state);
+        state.parts.push({
+          type: "tool-result",
+          callId: String(event.callId || ""),
+          name: String(event.name || ""),
+          status: String(event.status || ""),
+          result: String(event.result || "")
+        });
+        if (state.approval && state.approval.callId === String(event.callId || "")) state.approval = null;
+        break;
+      case "screenshot":
+        pushStepNotice(state, "\u{1F4F7} \u5DF2\u751F\u6210\u622A\u56FE" + (event.label ? "\uFF1A" + event.label : ""), "#6b7280");
+        break;
+      case "agent-state":
+        state.progress.state = String(event.state || event.status || "");
+        if (Number.isFinite(Number(event.step)) && Number(event.step) > 0) state.progress.step = Number(event.step);
+        if (Number.isFinite(Number(event.maxSteps)) && Number(event.maxSteps) > 0) state.progress.max = Number(event.maxSteps);
+        break;
+      case "usage":
+        state.tokens = Number(event.totalTokens) || 0;
+        break;
+      case "plan":
+        state.plan = Array.isArray(event.plan) ? event.plan.slice() : [];
+        break;
+      case "stuck-warning":
+        pushStepNotice(state, "\u26A0 " + (event.message || "\u52A8\u4F5C\u6682\u672A\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55"), "#b45309");
+        break;
+      case "tool-disabled":
+        pushStepNotice(state, "\u26D4 \u5DF2\u505C\u6B62\u4F7F\u7528\u5DE5\u5177\u300C" + (event.name || "") + "\u300D\uFF1A" + (event.reason || ""), "#6b7280");
+        break;
+      case "budget-exceeded":
+        pushStepNotice(state, "\u23F9 " + (event.message || "Agent \u5DF2\u8FBE\u5230\u5B89\u5168\u4E0A\u9650\u5E76\u505C\u6B62"), "#b91c1c");
+        break;
+      case "tab-switched":
+        pushStepNotice(state, "\u2197 \u5DF2\u5207\u6362\u6807\u7B7E\u9875\uFF1A" + (event.title || event.url || "tabId=" + event.tabId), "");
+        break;
+      case "tabs-closed":
+        if (Array.isArray(event.tabIds) && event.tabIds.length) {
+          pushStepNotice(state, "\u{1F5D1} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5DF2\u81EA\u52A8\u5173\u95ED " + event.tabIds.length + " \u4E2A\u672C\u6B21\u6253\u5F00\u7684\u6807\u7B7E\u9875", "#6b7280");
+        }
+        break;
+      case "intent":
+        pushStepNotice(state, "\u{1F9ED} \u610F\u56FE\u8BC6\u522B\uFF1A" + (event.label || event.intent || "\u666E\u901A\u5BF9\u8BDD"), "");
+        break;
+      case "intent-upgraded":
+        pushStepNotice(state, "\u{1F504} \u5DF2\u5207\u6362\u4E3A" + (event.label || "\u8D44\u6599\u7814\u7A76") + "\u6A21\u5F0F\uFF0C\u53EF\u7528\u6D4F\u89C8\u5668/\u7F51\u7EDC\u5DE5\u5177\u7EE7\u7EED", "");
+        break;
+      case "verify": {
+        const text = event.ok ? "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (event.reason ? "\uFF1A" + event.reason : "") : "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (event.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (event.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + event.missing + "\uFF09" : "");
+        pushStepNotice(state, text, event.ok ? "#16a34a" : "#b45309");
+        break;
+      }
+      case "skill":
+        if (Array.isArray(event.skills) && event.skills.length) {
+          pushStepNotice(state, "\u{1F6E0} \u542F\u7528\u6280\u80FD\uFF1A" + event.skills.map((s) => s.title || s.name).join("\u3001"), "");
+        }
+        break;
+      case "error":
+        endReasoning(state);
+        state.status = "error";
+        state.error = String(event.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
+        break;
+      case "end":
+        endReasoning(state);
+        state.status = "ended";
+        break;
+      default:
+        break;
+    }
+    return state;
+  }
+  function runStateToAssistantMessage(state) {
+    if (!state) return null;
+    const parts = (state.parts || []).map((p) => Object.assign({}, p));
+    if (state.reasoning) parts.push({ type: "thinking", text: state.reasoning, live: true });
+    if (state.narration) parts.push({ type: "narration", text: state.narration });
+    if (state.error) parts.push({ type: "notice", text: state.error, color: "#e74c3c" });
+    if (state.approval) {
+      parts.push({
+        type: "notice",
+        text: "\u7B49\u5F85\u53D1\u8D77\u6807\u7B7E\u9875\u786E\u8BA4\u5DE5\u5177\u300C" + state.approval.name + "\u300D",
+        color: "#b45309"
+      });
+    }
+    return {
+      role: "assistant",
+      content: "",
+      parts,
+      plan: Array.isArray(state.plan) ? state.plan.slice() : [],
+      citations: Array.isArray(state.citations) ? state.citations.slice() : [],
+      live: true,
+      liveStatus: state.status
+    };
+  }
+
   // lib/page/chat.js
   function isExtContextAlive() {
     try {
@@ -4832,6 +4984,12 @@
   var panelUiOpen = false;
   var suppressPanelUiPublish = false;
   var panelUiReadyPromise = null;
+  var followedRunState = null;
+  var followedRunId = "";
+  var followedCursor = 0;
+  var followedMessages = [];
+  var followRefreshTimer = null;
+  var followStatusTimer = null;
   var stopBtn = null;
   var sendBtn = null;
   var streaming = false;
@@ -5145,6 +5303,11 @@
       if (fab) fab.classList.remove("hidden");
     }
     if (hadPanel && !(options && options.publish === false)) publishPanelUi(false, "global");
+    if (hadPanel && !(options && options.publish === false)) {
+      resetFollowedRun();
+      sendPanelMessage("panel:run:unsubscribe").catch(() => {
+      });
+    }
   }
   function closePort() {
     if (port) {
@@ -5469,7 +5632,8 @@
   }
   function renderConversation() {
     if (!panelBody) return;
-    if (!conversation.length) {
+    const view = followedMessages.length ? conversation.concat(followedMessages) : conversation;
+    if (!view.length) {
       panelBody.className = "p-body";
       panelBody.innerHTML = '<div class="msg ai">' + (lastText ? "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u57FA\u4E8E\u9009\u4E2D\u6587\u672C\u6267\u884C\u3002" : "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u76F4\u63A5\u6267\u884C\uFF08\u53EF\u57FA\u4E8E\u77E5\u8BC6\u5E93\uFF09\u3002") + "</div>";
       renderPlan([]);
@@ -5483,9 +5647,9 @@
     };
     const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     panelBody.className = "p-body";
-    panelBody.innerHTML = conversation.map((m, index) => {
+    panelBody.innerHTML = view.map((m, index) => {
       if (m.role === "user") {
-        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + userActionsHtml(index) + "</div>";
+        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
       }
       const parts = Array.isArray(m.parts) ? m.parts : [];
       const flowHtml = parts.map((p) => {
@@ -5505,6 +5669,7 @@
           return screenshotHtml(p);
         }
         if (p.type === "thinking" && p.text) {
+          if (p.live) return thinkBlockHtml(p.text, { done: false, truncated: p.textTruncated === true });
           return thinkBlockHtml(p.text, { done: true, truncated: p.textTruncated === true });
         }
         if (p.type === "narration" && p.text) {
@@ -5513,21 +5678,206 @@
         if (p.type === "text" && p.text) {
           return '<div class="agent-content">' + renderAnswer(p.text, m.citations, false) + "</div>";
         }
+        if (p.type === "notice" && p.text) {
+          return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
+        }
         return "";
       }).join("");
       const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
       const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : renderAnswer(m.content || "", m.citations);
       const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
-      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + citeSourcesHtml(m.citations) + (m.content ? msgActionsHtml(index === conversation.length - 1) : "") + "</div>";
+      const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
+      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + citeSourcesHtml(m.citations) + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
     }).join("");
-    const withPlan = [...conversation].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
+    const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);
     const aiEls = panelBody.querySelectorAll(".msg.ai");
     let aiIdx = 0;
-    for (const m of conversation) {
+    for (const m of view) {
       if (m.role === "user") continue;
       if (aiEls[aiIdx]) aiEls[aiIdx]._raw = m.content || "";
       aiIdx++;
+    }
+  }
+  function rebuildFollowedMessages() {
+    followedMessages = [];
+    if (!followedRunState) return;
+    const instruction = String(followedRunState.instruction || "").trim();
+    const last = conversation.length ? conversation[conversation.length - 1] : null;
+    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
+    if (instruction && !alreadyHasUser) {
+      followedMessages.push({ role: "user", content: instruction, live: true });
+    }
+    const assistant = runStateToAssistantMessage(followedRunState);
+    if (assistant) followedMessages.push(assistant);
+  }
+  function followedRunCommitted() {
+    if (!followedRunState) return false;
+    const instruction = String(followedRunState.instruction || "").trim();
+    if (!instruction) return false;
+    let userIndex = -1;
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      if (conversation[i] && conversation[i].role === "user" && String(conversation[i].content || "").trim() === instruction) {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex < 0) return false;
+    return conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
+  }
+  function renderFollowedRun() {
+    if (!panelBody) return;
+    streamRender.schedule("follow-live", () => {
+      renderConversation();
+      fitPanelHeight();
+      pinToBottom();
+    });
+    if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
+    if (followedRunState && followedRunState.status === "running") {
+      if (sendBtn) sendBtn.disabled = true;
+      if (progressEl) {
+        progressEl.classList.add("on");
+        runStartedAt = Number(followedRunState.startedAt) || Date.now();
+        progressState = stateLabel(followedRunState.progress && followedRunState.progress.state) || "\u8DDF\u968F\u8FD0\u884C";
+        progressStep = Number(followedRunState.progress && followedRunState.progress.step) || 0;
+        progressMax = Number(followedRunState.progress && followedRunState.progress.max) || 0;
+        if (!progressTimer) progressTimer = setInterval(renderProgress, 1e3);
+        renderProgress();
+      }
+    }
+    ensureFollowedRunWatch();
+  }
+  function ensureFollowedRunWatch() {
+    if (followStatusTimer) return;
+    followStatusTimer = setInterval(async () => {
+      if (!followedRunState) {
+        clearInterval(followStatusTimer);
+        followStatusTimer = null;
+        return;
+      }
+      if (followRefreshTimer) return;
+      const sessionId = panelSessionId;
+      const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
+      if (sessionId !== panelSessionId) return;
+      if (res && res.ok && res.snapshot && res.snapshot.status === "running") {
+        followedRunState = res.snapshot;
+        followedRunId = res.snapshot.runId;
+        followedCursor = Number(res.snapshot.cursor) || 0;
+        rebuildFollowedMessages();
+        renderFollowedRun();
+        return;
+      }
+      scheduleFollowedRunRefresh();
+    }, 1200);
+  }
+  function resetFollowedRun(options) {
+    const opts = options || {};
+    if (followRefreshTimer) {
+      clearTimeout(followRefreshTimer);
+      followRefreshTimer = null;
+    }
+    if (followStatusTimer) {
+      clearInterval(followStatusTimer);
+      followStatusTimer = null;
+    }
+    followedRunState = null;
+    followedRunId = "";
+    followedCursor = 0;
+    followedMessages = [];
+    if (!streaming) {
+      stopProgress();
+      if (sendBtn) sendBtn.disabled = false;
+    }
+    if (opts.render) {
+      renderConversation();
+      fitPanelHeight();
+    }
+  }
+  function applyFollowedSnapshot(snapshot) {
+    if (!snapshot || !snapshot.runId) {
+      resetFollowedRun({ render: true });
+      return;
+    }
+    if (snapshot.status !== "running") {
+      scheduleFollowedRunRefresh();
+      return;
+    }
+    followedRunState = snapshot;
+    followedRunId = snapshot.runId;
+    followedCursor = Number(snapshot.cursor) || 0;
+    rebuildFollowedMessages();
+    renderFollowedRun();
+  }
+  async function subscribePanelRun() {
+    if (!panelSessionId) return;
+    const sessionId = panelSessionId;
+    const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
+    if (sessionId !== panelSessionId) return;
+    if (!res || !res.ok || res.selfOwned) {
+      resetFollowedRun({ render: Boolean(followedRunState) });
+      return;
+    }
+    if (res.snapshot && res.snapshot.status === "running") applyFollowedSnapshot(res.snapshot);
+    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRunState) });
+    else if (followedRunState) resetFollowedRun({ render: true });
+  }
+  function scheduleFollowedRunRefresh() {
+    if (followRefreshTimer) clearTimeout(followRefreshTimer);
+    let attempts = 0;
+    const tick = async () => {
+      attempts += 1;
+      const sessionId = panelSessionId;
+      const got = await sendPanelMessage("panel:get", { id: sessionId });
+      if (sessionId !== panelSessionId) return;
+      const instruction = String(followedRunState && followedRunState.instruction ? followedRunState.instruction : "").trim();
+      const messages = got && got.ok && got.session ? got.session.messages || [] : [];
+      let userIndex = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i] && messages[i].role === "user" && String(messages[i].content || "").trim() === instruction) {
+          userIndex = i;
+          break;
+        }
+      }
+      const hasCommittedTurn = userIndex >= 0 && messages.slice(userIndex + 1).some((m) => m && m.role === "assistant");
+      if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionSeq || hasCommittedTurn)) {
+        resetFollowedRun();
+        adoptPanelSession(got.session, { activeId: got.activeId || sessionId });
+        subscribePanelRun().catch(() => {
+        });
+        return;
+      }
+      if (attempts < 6) {
+        followRefreshTimer = setTimeout(tick, 300);
+      } else {
+        resetFollowedRun({ render: true });
+      }
+    };
+    followRefreshTimer = setTimeout(tick, 250);
+  }
+  function handleRunStarted(msg) {
+    if (!msg || String(msg.sessionId || "") !== panelSessionId) return;
+    subscribePanelRun().catch(() => {
+    });
+  }
+  function handleRunDelta(msg) {
+    if (!msg || String(msg.sessionId || "") !== panelSessionId) return;
+    if (!followedRunState || String(msg.runId || "") !== followedRunId) {
+      subscribePanelRun().catch(() => {
+      });
+      return;
+    }
+    const cursor = Number(msg.cursor) || 0;
+    if (cursor !== followedCursor + 1) {
+      subscribePanelRun().catch(() => {
+      });
+      return;
+    }
+    followedCursor = cursor;
+    applyRunEvent(followedRunState, msg.event);
+    rebuildFollowedMessages();
+    renderFollowedRun();
+    if (msg.event && (msg.event.type === "end" || msg.event.type === "error")) {
+      scheduleFollowedRunRefresh();
     }
   }
   function renderPlan(plan) {
@@ -5756,6 +6106,10 @@
     } catch (e) {
     }
     mergePanelSessionSummary(Object.assign({}, session, { messageCount: conversation.length, handoffId }));
+    if (followedRunState) {
+      if (followedRunCommitted()) resetFollowedRun();
+      else rebuildFollowedMessages();
+    }
     if (panelBody && !streaming) {
       renderConversation();
       renderHandoffChip();
@@ -5763,6 +6117,8 @@
       pinToBottom();
     }
     renderSessionButton();
+    if (panel && !streaming) subscribePanelRun().catch(() => {
+    });
     return true;
   }
   function saveConversation() {
@@ -6261,9 +6617,9 @@
     close.className = "close";
     close.textContent = "\u2715";
     close.addEventListener("click", () => removePanel());
-    const usage = document.createElement("span");
-    usage.className = "usage";
-    usageEl = usage;
+    const usageChip = document.createElement("span");
+    usageChip.className = "usage";
+    usageEl = usageChip;
     panelSessionBtnEl = document.createElement("button");
     panelSessionBtnEl.type = "button";
     panelSessionBtnEl.className = "session-btn";
@@ -6328,7 +6684,7 @@
     applyTheme();
     head.appendChild(logo);
     head.appendChild(title);
-    head.appendChild(usage);
+    head.appendChild(usageChip);
     head.appendChild(panelSessionBtnEl);
     head.appendChild(handoffBtn);
     head.appendChild(themeBtn);
@@ -6978,6 +7334,7 @@
         activeConn.postMessage({
           action: "agent",
           runId: activeRunId,
+          sessionId: panelSessionId,
           question: activeInstruction,
           text: lastText,
           page: pageText,
@@ -7424,6 +7781,7 @@
       conn.postMessage({
         action: "agent",
         runId: activeRunId,
+        sessionId: panelSessionId,
         question: instruction,
         text: lastText,
         page: pageText,
@@ -7530,6 +7888,8 @@
     runAgent = run;
     activeInterruptFn = interrupt;
     if (!suppressPanelUiPublish) publishPanelUi(true, "global");
+    subscribePanelRun().catch(() => {
+    });
   }
   function refreshPanelForSelection() {
     if (!streaming) closePort();
@@ -7738,6 +8098,12 @@
         } else if (msg.type === "panel:ui-changed") {
           applyPanelUiState(msg).catch(() => {
           });
+        } else if (msg.type === "run:started") {
+          handleRunStarted(msg);
+        } else if (msg.type === "run:delta") {
+          handleRunDelta(msg);
+        } else if (msg.type === "run:ended") {
+          if (String(msg.sessionId || "") === panelSessionId) scheduleFollowedRunRefresh();
         } else if (msg.type === "panel:lock-lost") {
           if (String(msg.id || "") !== panelSessionId) return;
           if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;

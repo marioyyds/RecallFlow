@@ -240,7 +240,20 @@ export async function openPanel(page) {
   // helper 必须幂等，否则测试再点一次 FAB 反而会把面板关掉。
   const panel = page.locator(PANEL + ' .panel');
   if ((await panel.count()) > 0 && (await panel.first().isVisible())) return;
-  await page.locator(PANEL + ' .fab').click();
+  const fab = page.locator(PANEL + ' .fab');
+  // 两种竞态都要兼容：① 内容脚本还没注入，FAB 暂时不可见；
+  // ② reload 后自动打开已把 FAB 隐藏，但面板尚未完成布局。
+  // 因此不能只看一次，而要轮询到“可点 FAB”或“面板已可见”其中一种。
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if ((await panel.count()) > 0 && (await panel.first().isVisible().catch(() => false))) return;
+    if (await fab.isVisible().catch(() => false)) {
+      await fab.click();
+      return;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error('RecallFlow 面板或 FAB 在 15 秒内都不可见');
 }
 
 /**
