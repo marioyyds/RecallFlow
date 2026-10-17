@@ -60,6 +60,9 @@ test('设置页：头部品牌、模块导航和内容区共用同一个 gutter'
   assert.match(optionsCss, /\.app-topbar \.app-header\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
   assert.match(optionsCss, /\.app-topbar \.module-nav\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
   assert.match(optionsCss, /\.settings-layout\s*\{[^}]*padding-inline:\s*var\(--settings-gutter\)/s);
+  assert.match(optionsCss, /body\s*\{[^}]*max-width:\s*860px/s);
+  assert.match(optionsCss, /\.app-topbar \.app-header\s*\{[^}]*max-width:\s*860px/s);
+  assert.match(optionsCss, /\.app-topbar \.module-nav\s*\{[^}]*max-width:\s*860px/s);
 });
 
 test('技能页：有搜索、来源/分类筛选，卡片正文按需展开', () => {

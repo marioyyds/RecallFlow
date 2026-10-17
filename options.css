@@ -5,17 +5,17 @@ body {
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
-  max-width: 1040px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 0 16px 40px;
 }
 
 .settings-layout {
   display: grid;
-  grid-template-columns: 170px minmax(0, 760px);
-  gap: 24px;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
-  max-width: 980px;
+  max-width: 860px;
   margin: 18px auto 0;
   padding-inline: var(--settings-gutter);
 }
@@ -65,13 +65,13 @@ body {
 }
 
 .app-topbar .app-header {
-  max-width: 980px;
+  max-width: 860px;
   margin: 0 auto;
   padding-inline: var(--settings-gutter);
 }
 
 .app-topbar .module-nav {
-  max-width: 980px;
+  max-width: 860px;
   padding-inline: var(--settings-gutter);
 }
 
