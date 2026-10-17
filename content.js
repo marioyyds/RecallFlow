@@ -3356,95 +3356,17 @@
     }
     return false;
   }
-  var MAX_PARTS = 200;
-  var MAX_PART_RESULT_CHARS = 2e3;
-  var MAX_PART_ARGS_CHARS = 400;
-  var MAX_PART_TEXT_CHARS = 2e3;
-  var MAX_MESSAGE_CONTENT_CHARS = 2e4;
-  function clipPart(p) {
-    const out = Object.assign({}, p);
-    if (typeof out.result === "string" && out.result.length > MAX_PART_RESULT_CHARS) {
-      out.result = sliceSafe(out.result, 0, MAX_PART_RESULT_CHARS);
-      out.resultTruncated = true;
+  function serializeCompleteConversationMessages(conversation2) {
+    const src = Array.isArray(conversation2) ? conversation2 : [];
+    try {
+      if (typeof structuredClone === "function") return structuredClone(src);
+    } catch (e) {
     }
-    if (typeof out.text === "string" && out.text.length > MAX_PART_TEXT_CHARS) {
-      out.text = sliceSafe(out.text, 0, MAX_PART_TEXT_CHARS);
-      out.textTruncated = true;
+    try {
+      return JSON.parse(JSON.stringify(src));
+    } catch (e) {
+      return src.slice();
     }
-    if (out.args && typeof out.args === "object") {
-      let s = "";
-      try {
-        s = JSON.stringify(out.args);
-      } catch (e) {
-        s = "";
-      }
-      if (s.length > MAX_PART_ARGS_CHARS) {
-        out.args = {};
-        out.args[OMIT_ARGS_KEY] = "\u53C2\u6570\u8FC7\u957F\uFF08" + s.length + " \u5B57\u7B26\uFF09\uFF0C\u5DF2\u7701\u7565\uFF08\u539F\u6587\u672A\u7559\u5B58\uFF0C\u53D6\u4E0D\u56DE\uFF09";
-      }
-    }
-    return out;
-  }
-  var MAX_MESSAGES = 20;
-  var MAX_TOOL_SUMMARY_CHARS = 600;
-  var MAX_CITATIONS = 20;
-  var MAX_CITATION_SNIPPET_CHARS = 300;
-  function serializeConversationMessages(conversation2) {
-    const all = Array.isArray(conversation2) ? conversation2 : [];
-    const kept = all.slice(-MAX_MESSAGES);
-    return kept.map((m, i) => {
-      const copy = { role: m.role };
-      if (i === 0 && all.length > kept.length) {
-        copy.earlierMessagesOmitted = all.length - kept.length;
-        copy.messagesTotal = all.length;
-      }
-      if (typeof m.content === "string") {
-        copy.content = sliceSafe(m.content, 0, MAX_MESSAGE_CONTENT_CHARS);
-        if (m.content.length > MAX_MESSAGE_CONTENT_CHARS) copy.contentTruncated = true;
-      }
-      if (typeof m.toolSummary === "string" && m.toolSummary) {
-        copy.toolSummary = sliceSafe(m.toolSummary, 0, MAX_TOOL_SUMMARY_CHARS);
-        if (m.toolSummary.length > MAX_TOOL_SUMMARY_CHARS) copy.toolSummaryTruncated = true;
-      }
-      if (Array.isArray(m.pickedElements) && m.pickedElements.length) {
-        copy.pickedElements = m.pickedElements.slice(0, 8);
-        if (m.pickedElements.length > copy.pickedElements.length) {
-          copy.pickedElementsTotal = m.pickedElements.length;
-          copy.pickedElementsOmitted = m.pickedElements.length - copy.pickedElements.length;
-        }
-      }
-      if (Array.isArray(m.parts)) {
-        const partsAll = m.parts;
-        const partsKept = partsAll.slice(-MAX_PARTS);
-        copy.parts = partsKept.map(clipPart);
-        if (partsAll.length > partsKept.length) {
-          copy.partsTotal = partsAll.length;
-          copy.partsOmitted = partsAll.length - partsKept.length;
-        }
-      }
-      if (Array.isArray(m.citations)) {
-        const keptCites = m.citations.slice(0, MAX_CITATIONS);
-        copy.citations = keptCites.map((c) => {
-          const snippet = String(c.snippet || "");
-          const out = {
-            index: c.index,
-            source: c.source,
-            id: c.id,
-            title: c.title,
-            url: c.url,
-            snippet: sliceSafe(snippet, 0, MAX_CITATION_SNIPPET_CHARS)
-          };
-          if (snippet.length > MAX_CITATION_SNIPPET_CHARS) out.snippetTruncated = true;
-          return out;
-        });
-        if (m.citations.length > keptCites.length) {
-          copy.citationsTotal = m.citations.length;
-          copy.citationsOmitted = m.citations.length - keptCites.length;
-        }
-      }
-      if (Array.isArray(m.plan)) copy.plan = m.plan;
-      return copy;
-    });
   }
   function clipInline(text, max) {
     const t = norm(text);
@@ -3728,7 +3650,7 @@
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
   var ID_LENGTH = 6;
   var ID_RE = /^RF-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
-  var MAX_MESSAGES2 = 20;
+  var MAX_MESSAGES = 20;
   var MAX_MESSAGE_CHARS = 4e3;
   var MAX_PICKED = 10;
   var MAX_CONSOLE = 30;
@@ -3761,7 +3683,7 @@
     const s = String(v === void 0 || v === null ? "" : v);
     return s.length > max ? s.slice(0, max) + "\u2026\uFF08\u5DF2\u622A\u65AD\uFF09" : s;
   }
-  function trimMessages(messages, limit = MAX_MESSAGES2, maxChars = MAX_MESSAGE_CHARS) {
+  function trimMessages(messages, limit = MAX_MESSAGES, maxChars = MAX_MESSAGE_CHARS) {
     const list = Array.isArray(messages) ? messages : [];
     return list.filter((m) => m && typeof m === "object" && (m.role === "user" || m.role === "assistant")).slice(-limit).map((m) => ({ role: m.role, content: clampText(m.content, maxChars) }));
   }
@@ -5987,7 +5909,7 @@
     });
   }
   function serializeConversation() {
-    return serializeConversationMessages(conversation);
+    return serializeCompleteConversationMessages(conversation);
   }
   function sendPanelMessage(type, payload) {
     return new Promise((resolve) => {
@@ -6093,13 +6015,13 @@
       main.className = "session-main";
       main.setAttribute("data-session-action", "switch");
       main.setAttribute("data-session-id", session.id);
-      main.title = session.title + "\n" + (session.origin || "") + "\n" + session.messageCount + " \u6761\u6D88\u606F";
+      main.title = session.title + "\n" + (session.origin || "") + "\n" + session.messageCount + " \u6761\u6D88\u606F \xB7 \u7EA6 " + (Number(session.tokenEstimate) || 0).toLocaleString() + " tokens";
       const title = document.createElement("span");
       title.className = "session-title";
       title.textContent = (session.locked ? "\u25CF " : "") + (session.title || "\u65B0\u4F1A\u8BDD");
       const meta = document.createElement("span");
       meta.className = "session-meta";
-      meta.textContent = sessionTimeText(session.updatedAt) + " \xB7 " + (Number(session.messageCount) || 0) + " \u6761" + (session.id === panelSessionActiveId ? " \xB7 \u6D4F\u89C8\u5668\u5F53\u524D" : "");
+      meta.textContent = sessionTimeText(session.updatedAt) + " \xB7 " + (Number(session.messageCount) || 0) + " \u6761" + (session.id === panelSessionActiveId ? " \xB7 \u6D4F\u89C8\u5668\u5F53\u524D" : "") + (session.storageWarning ? " \xB7 \u8D85 1M tokens" : "");
       main.appendChild(title);
       main.appendChild(meta);
       item.appendChild(main);

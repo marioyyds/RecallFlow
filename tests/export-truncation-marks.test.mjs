@@ -7,7 +7,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { serializeConversationMessages } from '../lib/page/transcript.js';
+import {
+  serializeConversationMessages,
+  serializeCompleteConversationMessages,
+} from '../lib/page/transcript.js';
 
 test('导出序列化：消息条数被截断时**必须留痕**（否则下游计数看起来像整个会话）', () => {
   const conv = [];
@@ -53,4 +56,23 @@ test('导出序列化：toolSummary / pickedElements / citations / snippet 被�
   assert.equal(clean.pickedElementsOmitted, undefined);
   assert.equal(clean.citationsOmitted, undefined);
   assert.equal(clean.citations[0].snippetTruncated, undefined);
+});
+
+test('IndexedDB 完整存档：不裁剪消息条数、正文、parts 与工具结果', () => {
+  const long = 'R'.repeat(50000);
+  const conv = [];
+  for (let i = 0; i < 30; i++) {
+    conv.push({
+      role: i % 2 ? 'assistant' : 'user',
+      content: '正文 ' + i + ' ' + 'X'.repeat(25000),
+      parts: [{ type: 'tool-result', name: 'read', status: 'completed', result: long }],
+    });
+  }
+  const full = serializeCompleteConversationMessages(conv);
+  assert.equal(full.length, 30);
+  assert.equal(full[0].content.length, conv[0].content.length);
+  assert.equal(full[0].parts[0].result.length, long.length);
+  assert.equal(full[0].earlierMessagesOmitted, undefined);
+  assert.equal(full[0].contentTruncated, undefined);
+  assert.equal(full[0].partsOmitted, undefined);
 });

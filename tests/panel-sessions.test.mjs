@@ -8,6 +8,7 @@ import {
   panelSessionKey,
   panelSessionLockKey,
   deriveSessionTitle,
+  estimateConversationStats,
 } from '../lib/shared/panel-sessions.js';
 
 function memoryStorage(initial) {
@@ -64,6 +65,17 @@ test('deriveSessionTitle: 长标题截断不切裂 emoji 代理对', () => {
   const title = deriveSessionTitle([{ role: 'user', content: '😀'.repeat(60) }]);
   assert.ok(title.endsWith('…'));
   assert.doesNotThrow(() => encodeURIComponent(title));
+});
+
+test('存储统计：给出字符、字节与保守 token 估算', () => {
+  const stats = estimateConversationStats([
+    { role: 'user', content: '你好' },
+    { role: 'assistant', content: 'hello world' },
+  ]);
+  assert.ok(stats.charCount > 20);
+  assert.ok(stats.byteLength >= stats.charCount, 'UTF-8 字节数不少于字符数');
+  assert.ok(stats.tokenEstimate > 0);
+  assert.ok(stats.tokenEstimate < stats.charCount, 'token 估算不应简单等于 JSON 字符数');
 });
 
 test('bootstrap: 无旧数据时创建一个空会话并设为当前', async () => {

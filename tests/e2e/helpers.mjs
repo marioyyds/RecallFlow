@@ -62,7 +62,32 @@ export async function readActivePanelSession(context) {
   const [sw] = context.serviceWorkers();
   if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
   return await sw.evaluate(async () => {
-    const all = await chrome.storage.session.get(null);
+    const sessionFallback = await chrome.storage.session.get(null);
+    let all = {};
+    try {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open('recallflow-history', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('panel-kv')) req.result.createObjectStore('panel-kv');
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      all = await new Promise((resolve, reject) => {
+        const tx = db.transaction('panel-kv', 'readonly');
+        const store = tx.objectStore('panel-kv');
+        const keyReq = store.getAllKeys();
+        const valReq = store.getAll();
+        tx.oncomplete = () => {
+          const out = {};
+          keyReq.result.forEach((key, i) => (out[String(key)] = valReq.result[i]));
+          resolve(out);
+        };
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (e) {}
+    all = Object.assign({}, sessionFallback, all);
     const index = all['recallflow.psess.index.v1'] || { sessions: {}, seq: 0 };
     const active = all['recallflow.psess.active.v1'] || { id: '' };
     const key = 'recallflow.psess.v1.' + String(active.id || '');
@@ -145,9 +170,9 @@ export const PANEL = '#__kb-ai-host';
  * service worker 根本不注册（`context.serviceWorkers()` 为空），扩展起不来。
  * CI 上要虚拟显示（`xvfb-run`），不是把这个改成 true。
  */
-export async function launchExtension() {
-  await startServers();
-  const context = await chromium.launchPersistentContext('', {
+export async function launchExtension(options = {}) {
+  if (options.startServers !== false) await startServers();
+  const context = await chromium.launchPersistentContext(options.userDataDir || '', {
     headless: false,
     args: [
       `--disable-extensions-except=${EXT_PATH}`,
@@ -173,9 +198,9 @@ export async function launchExtension() {
   return context;
 }
 
-export async function closeExtension(context) {
+export async function closeExtension(context, options = {}) {
   await context?.close();
-  stopServers();
+  if (options.stopServers !== false) stopServers();
 }
 
 /** E2E 用的设置基线。`baseUrl` 指向夹具的模拟 LLM，并**关闭 CDP**（个别用例再打开）。 */

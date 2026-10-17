@@ -10,8 +10,14 @@ import { logError } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
 import { sanitizeMessages } from './lib/shared/surrogates.js';
 import { loadAgentSession } from './lib/assistant/session-store.js';
-import { PanelSessionStore } from './lib/shared/panel-sessions.js';
+import {
+  PanelSessionStore,
+  PSESS_INDEX_KEY,
+  PSESS_ACTIVE_KEY,
+  PSESS_SESSION_PREFIX,
+} from './lib/shared/panel-sessions.js';
 import { RunStreamHub } from './lib/assistant/run-hub.js';
+import { createIndexedDbKeyValueStore } from './lib/shared/idb-kv.js';
 import {
   listScripts,
   installFromUrl,
@@ -28,12 +34,78 @@ import {
   syncUserscriptRegistrations,
 } from './lib/userscript/manager.js';
 
-const panelSessions = new PanelSessionStore({
-  storage: {
-    get: (keys) => chrome.storage.session.get(keys),
-    set: (items) => chrome.storage.session.set(items),
-    remove: (keys) => chrome.storage.session.remove(keys),
+const persistentPanelStorage = createIndexedDbKeyValueStore({
+  dbName: 'recallflow-history',
+  storeName: 'panel-kv',
+  version: 1,
+});
+
+function isPersistentPanelKey(key) {
+  const k = String(key || '');
+  return k === PSESS_INDEX_KEY || k === PSESS_ACTIVE_KEY || k.startsWith(PSESS_SESSION_PREFIX);
+}
+
+function splitPanelKeys(keys) {
+  const list = keys == null ? [] : Array.isArray(keys) ? keys : [keys];
+  return {
+    persistent: list.filter(isPersistentPanelKey),
+    session: list.filter((k) => !isPersistentPanelKey(k)),
+  };
+}
+
+// 会话正文/索引/当前会话写 IndexedDB；面板开合与运行锁仍留在 storage.session，
+// 因为它们是浏览器会话级、重启后必须失效的临时状态。
+const panelStorage = {
+  async get(keys) {
+    if (keys == null) {
+      const [sessionData, persistentData] = await Promise.all([
+        chrome.storage.session.get(null),
+        persistentPanelStorage.get(null).catch(() => ({})),
+      ]);
+      return Object.assign({}, sessionData || {}, persistentData || {});
+    }
+    const parts = splitPanelKeys(keys);
+    const out = {};
+    if (parts.persistent.length) {
+      try {
+        Object.assign(out, await persistentPanelStorage.get(parts.persistent));
+      } catch (e) {
+        Object.assign(out, await chrome.storage.session.get(parts.persistent));
+      }
+    }
+    if (parts.session.length) Object.assign(out, await chrome.storage.session.get(parts.session));
+    return out;
   },
+  async set(items) {
+    const persistent = {};
+    const session = {};
+    for (const [key, value] of Object.entries(items || {})) {
+      if (isPersistentPanelKey(key)) persistent[key] = value;
+      else session[key] = value;
+    }
+    const jobs = [];
+    if (Object.keys(persistent).length) {
+      jobs.push(
+        persistentPanelStorage.set(persistent).catch(async () => {
+          // IDB 暂时不可用时至少不要让当前会话丢失；下一次启动会重新尝试迁移。
+          await chrome.storage.session.set(persistent);
+        })
+      );
+    }
+    if (Object.keys(session).length) jobs.push(chrome.storage.session.set(session));
+    await Promise.all(jobs);
+  },
+  async remove(keys) {
+    const parts = splitPanelKeys(keys);
+    const jobs = [];
+    if (parts.persistent.length) jobs.push(persistentPanelStorage.remove(parts.persistent).catch(() => {}));
+    if (parts.session.length) jobs.push(chrome.storage.session.remove(parts.session));
+    await Promise.all(jobs);
+  },
+};
+
+const panelSessions = new PanelSessionStore({
+  storage: panelStorage,
   isTabAlive: (tabId) =>
     new Promise((resolve) => {
       try {
@@ -46,6 +118,23 @@ const panelSessions = new PanelSessionStore({
     }),
 });
 
+async function migratePanelStorageToIdb() {
+  try {
+    const existing = await persistentPanelStorage.get(PSESS_INDEX_KEY);
+    if (existing && existing[PSESS_INDEX_KEY]) return;
+    const all = await chrome.storage.session.get(null);
+    const persistentKeys = Object.keys(all || {}).filter(isPersistentPanelKey);
+    if (!persistentKeys.length) return;
+    const items = {};
+    for (const key of persistentKeys) items[key] = all[key];
+    await persistentPanelStorage.set(items);
+    await chrome.storage.session.remove(persistentKeys);
+  } catch (e) {
+    // IndexedDB 暂不可用：保留 storage.session 数据作为降级，不阻断面板启动。
+    console.warn('[RecallFlow] IndexedDB 会话迁移失败，暂用 session storage:', e && e.message);
+  }
+}
+
 // Service Worker 可能被回收后重新启动；bootstrap 本身是幂等的，但同一生命周期内
 // 多个标签页同时打开面板时只应扫描一次旧数据。
 let panelBootstrapPromise = null;
@@ -53,6 +142,7 @@ let panelBootstrapPromise = null;
 async function ensurePanelSessions() {
   if (!panelBootstrapPromise) {
     panelBootstrapPromise = (async () => {
+      await migratePanelStorageToIdb();
       const all = await chrome.storage.session.get(null);
       const legacyEntries = Object.keys(all || {})
         .filter((key) => /^recallflow\.conv\.\d+$/.test(key))
@@ -610,11 +700,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+async function requestPersistentHistoryStorage() {
+  try {
+    if (navigator.storage && navigator.storage.persist) await navigator.storage.persist();
+  } catch (e) {}
+}
+
 // 浏览器启动 / 扩展安装后，重新对齐脚本注册状态。
 chrome.runtime.onStartup.addListener(() => {
+  requestPersistentHistoryStorage().catch(() => {});
   syncUserscriptRegistrations().catch(() => {});
 });
 chrome.runtime.onInstalled.addListener(() => {
+  requestPersistentHistoryStorage().catch(() => {});
   syncUserscriptRegistrations().catch(() => {});
 });
 

@@ -1,11 +1,12 @@
 # 面板会话：全浏览器共享、历史与运行锁
 
-面板对话不再按标签页隔离，而是保存在整个浏览器共享的 `chrome.storage.session` 中。
-打开任意网页，面板默认进入同一个“当前会话”；也可以新建会话并在历史里切回。
+面板对话不再按标签页隔离：会话正文与索引持久化在浏览器共享的 IndexedDB
+`recallflow-history` 中，面板开合/运行锁等临时状态保存在 `chrome.storage.session`。
+打开任意网页，面板默认进入同一个“当前会话”；浏览器重启后历史仍然保留。
 
 ## 用户可见行为
 
-- 标题栏「会话」按钮列出最近 20 个会话，显示标题、更新时间、消息数和是否正在运行。
+- 标题栏「会话」按钮列出历史会话，显示标题、更新时间、消息数、token 估算和是否正在运行。
 - 「新建会话」保留旧会话；旧的「清空对话」不再删除历史。
 - 切换会话会恢复该会话的消息、工具步骤、计划条与交接标识。
 - 每个会话可重命名、删除或单独导出为 Markdown。
@@ -18,16 +19,17 @@
 
 所有写入都由 Service Worker 串行完成，内容脚本只发消息和渲染。
 
-| key | 内容 |
+| 存储位置 / key | 内容 |
 | --- | --- |
-| `recallflow.psess.index.v1` | `{ version, seq, sessions }`，只存列表摘要 |
-| `recallflow.psess.v1.<id>` | 单个会话的完整消息、标题、交接标识、最后 runId |
-| `recallflow.psess.active.v1` | 全浏览器当前会话 `{ id, seq, updatedAt }` |
-| `recallflow.psess.ui.v1` | 面板开合状态 `{ open, seq, openTabs, updatedAt }` |
-| `recallflow.psess.lock.v1.<id>` | 运行锁 `{ runId, tabId, at }`，TTL 120 秒 |
+| IndexedDB `panel-kv` / `recallflow.psess.index.v1` | `{ version, seq, sessions }`，列表摘要、字符/字节/token 统计 |
+| IndexedDB `panel-kv` / `recallflow.psess.v1.<id>` | 单个会话的**完整消息**、标题、交接标识、最后 runId |
+| IndexedDB `panel-kv` / `recallflow.psess.active.v1` | 全浏览器当前会话 `{ id, seq, updatedAt }` |
+| session storage / `recallflow.psess.ui.v1` | 面板开合状态 `{ open, seq, openTabs, updatedAt }` |
+| session storage / `recallflow.psess.lock.v1.<id>` | 运行锁 `{ runId, tabId, at }`，TTL 120 秒 |
 
-保存只重写当前会话与索引，不会把所有历史会话反复写一遍。消息裁剪仍复用
-`serializeConversationMessages`，最多保留 20 个会话。
+保存只重写当前会话与索引，不会把所有历史会话反复写一遍。会话正文使用完整副本，
+不再套用导出侧的“最近 20 条消息 / 2KB 工具结果”裁剪。默认保留最多 1000 个会话；
+单个会话超过 **1,000,000 estimated tokens** 时只显示预算警告，不自动删除。
 
 ## 并发规则
 
@@ -41,8 +43,11 @@
 
 ## 迁移
 
-首次打开面板时，旧的 `recallflow.conv.<tabId>` 会迁成历史会话，最近更新的一条成为当前会话；
-迁移完成后删除旧 key。索引已存在时不会重复迁移。
+首次打开面板时：
+
+1. 旧 `chrome.storage.session` 中的 `recallflow.psess.*` 会复制到 IndexedDB；
+2. 更早的 `recallflow.conv.<tabId>` 会迁成历史会话；
+3. 迁移完成后删除旧 key，索引已存在时不会重复迁移。
 
 ## 运行流同步
 
@@ -51,7 +56,7 @@ Agent 事件先进入 Service Worker 的 `RunStreamHub`，再由它定向广播�
 - `chunk` / `reasoning` 按约 40ms 合并，避免逐 token 跨进程发送；工具、计划、审批状态等结构化事件立即广播。
 - 每个 run 维护单调递增的 `cursor` 和完整 live 状态。中途打开、刷新或漏收消息的标签页先取 snapshot，再从下一个 cursor 跟增量。
 - SW 与跟随页共用 `applyRunEvent` 纯函数，思考、叙述、工具步骤的顺序不会出现两套实现漂移。
-- 跟随页不写 `storage.session`，只渲染临时 live 消息；发起页在结束时落盘正式消息，随后跟随页自动刷新并恢复输入。
+- 跟随页不写持久化层，只渲染临时 live 消息；发起页在结束时把正式消息写入 IndexedDB，随后跟随页自动刷新并恢复输入。
 - 跟随页的“参考来源”只列正文实际写到的 `[n]`，并按首次出现顺序重编号；仅登记但未被引用的页面不会凭空出现在来源区。来源区与发起页一样只在 run 收尾后显示，流式过程中不提前出现。
 - 完成前校验、意图识别、预算停止等过程提示会写入 assistant `parts`，任务收尾或重新打开面板后仍保留。
 - Agent 打开的辅助标签页采用两阶段清理：先登记待关闭页，发起页确认最终回复已写入共享会话后才真正关闭；发起页异常时由后台 15 秒兜底清理。
@@ -62,3 +67,4 @@ Agent 事件先进入 Service Worker 的 `RunStreamHub`，再由它定向广播�
 - `tests/panel-sessions.test.mjs`：迁移、过期写入、同 tab 连写、锁冲突 / TTL / 关页释放、裁剪、并发创建。
 - `tests/run-hub.test.mjs`：事件归约、40ms 合并、快照隔离与结束冲刷。
 - `tests/e2e/sessions.spec.mjs`：新建并切回历史、跨 tab 加载与 active 同步、面板开合双向同步，以及中途加入后继续看到思考/正文增量。
+- `tests/e2e/persistence.spec.mjs`：关闭整个浏览器上下文，再用同一用户数据目录重启，验证 IndexedDB 历史仍存在。

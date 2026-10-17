@@ -69,6 +69,8 @@ const phases = [
   // 会话共享/运行锁：需要真实的“生成中”窗口，否则两个标签页的请求会瞬间结束，
   // 根本撞不上同一把锁。这里单独把分片间隔拉长。
   { name: '会话共享', spec: 'sessions.spec.mjs', hold: '', visionShot: '', chunkDelay: '1200' },
+  // 关闭整个浏览器上下文再重启，专门验证 IndexedDB 跨会话持久化。
+  { name: '持久化', spec: 'persistence.spec.mjs', hold: '', visionShot: '' },
   { name: '断线恢复', spec: 'resume.spec.mjs', hold: '1', visionShot: '' },
   { name: '视觉两臂', spec: 'vision-switch.spec.mjs', hold: '', visionShot: '1' },
 ];
