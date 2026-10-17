@@ -24,11 +24,15 @@ test('对话输入框：输入法组词阶段的 Enter 不得发送消息', () =
   assert.match(chat, /e\.isComposing \|\| e\.keyCode === 229/, '缺少 IME 组词保护');
 });
 
-test('快捷语句常驻且横向滚动，不被隐藏或改成空状态专用', () => {
+test('快捷语句常驻，并随窗口变窄自动换行', () => {
   const block = /\.quick-prompts\s*\{([^}]*)\}/.exec(PANEL_CSS);
   assert.ok(block, '缺少 .quick-prompts 样式');
-  assert.match(block[1], /flex-wrap:\s*nowrap/, '快捷语句应保持单行常驻');
-  assert.match(block[1], /overflow-x:\s*auto/, '快捷语句应在空间不足时横向滚动');
+  assert.match(block[1], /flex-wrap:\s*wrap/, '快捷语句应在空间不足时自动换行');
+  assert.doesNotMatch(block[1], /overflow-x:\s*auto/, '不应再用横向滚动代替换行');
+  const item = /\.quick-prompt\s*\{([^}]*)\}/.exec(PANEL_CSS);
+  assert.ok(item);
+  assert.match(item[1], /white-space:\s*normal/, '按钮文字也应允许折行');
+  assert.match(item[1], /max-width:\s*100%/, '单个指令不得溢出面板');
   assert.ok(!/quickWrap\.style\.display\s*=\s*'none'/.test(chat), '快捷语句不应按状态隐藏');
 });
 

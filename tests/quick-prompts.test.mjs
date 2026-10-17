@@ -9,8 +9,24 @@ import {
   expandQuickPrompt,
 } from '../lib/shared/settings.js';
 
-test('默认快捷语句包含“整理会话到知识库”', () => {
-  assert.equal(AI_SETTINGS_DEFAULTS.quickPrompts[0], SESSION_TO_KB_QUICK_PROMPT);
+test('默认快捷语句顺序符合产品配置', () => {
+  assert.deepEqual(AI_SETTINGS_DEFAULTS.quickPrompts, [
+    SESSION_TO_KB_QUICK_PROMPT,
+    '划出页面关键信息',
+    '检索一些好用的技能',
+    '分析这个网页/项目',
+  ]);
+});
+
+test('旧默认快捷语句升级后直接切换为新默认列表', () => {
+  const oldDefaults = [
+    '整理会话到知识库',
+    '提炼关键要点',
+    '解释这段内容',
+    '划出页面关键信息',
+    '检索一些好用的技能',
+  ];
+  assert.deepEqual(mergeQuickPrompts(oldDefaults), AI_SETTINGS_DEFAULTS.quickPrompts);
 });
 
 test('已有用户即使在 12 条满额时也会补上新增默认项', () => {

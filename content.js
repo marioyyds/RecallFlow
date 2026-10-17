@@ -3243,7 +3243,12 @@
     toolApproval: true,
     // Cline 风格：按能力类别配置自动批准，而不是只有一个总开关。
     toolApprovalPolicy: { read: true, edit: false, commands: false, browser: false, mcp: false },
-    quickPrompts: [SESSION_TO_KB_QUICK_PROMPT, "\u63D0\u70BC\u5173\u952E\u8981\u70B9", "\u89E3\u91CA\u8FD9\u6BB5\u5185\u5BB9", "\u5212\u51FA\u9875\u9762\u5173\u952E\u4FE1\u606F", "\u68C0\u7D22\u4E00\u4E9B\u597D\u7528\u7684\u6280\u80FD"],
+    quickPrompts: [
+      SESSION_TO_KB_QUICK_PROMPT,
+      "\u5212\u51FA\u9875\u9762\u5173\u952E\u4FE1\u606F",
+      "\u68C0\u7D22\u4E00\u4E9B\u597D\u7528\u7684\u6280\u80FD",
+      "\u5206\u6790\u8FD9\u4E2A\u7F51\u9875/\u9879\u76EE"
+    ],
     mcpServers: [],
     // Agent 预算：**没有工具调用次数与推理轮数上限**（对齐 DSH）；
     // 这里只放成本兜底 maxTotalTokens（留空 = 用默认值），留空/0 表示不限制。
@@ -3276,6 +3281,16 @@
   };
   function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
     const list = Array.isArray(saved) ? saved.map((item) => String(item || "").trim()).filter(Boolean) : [];
+    const legacyDefaults = /* @__PURE__ */ new Set([
+      "\u6574\u7406\u4F1A\u8BDD\u5230\u77E5\u8BC6\u5E93",
+      "\u63D0\u70BC\u5173\u952E\u8981\u70B9",
+      "\u89E3\u91CA\u8FD9\u6BB5\u5185\u5BB9",
+      "\u5212\u51FA\u9875\u9762\u5173\u952E\u4FE1\u606F",
+      "\u68C0\u7D22\u4E00\u4E9B\u597D\u7528\u7684\u6280\u80FD"
+    ]);
+    if (list.length && list.every((item) => legacyDefaults.has(item))) {
+      return defaults.slice(0, limit);
+    }
     const missing = defaults.filter((item) => !list.includes(item));
     return [.../* @__PURE__ */ new Set([...missing, ...list])].slice(0, limit);
   }
@@ -4502,9 +4517,8 @@
     }
     .cmd-send:hover { background: #3a7cc4; }
     .cmd-send:disabled { opacity: .5; cursor: not-allowed; }
-    .quick-prompts { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; padding: 0 0 3px; margin: 0 0 7px; }
-    .quick-prompts::-webkit-scrollbar { display: none; }
-    .quick-prompt { flex: 0 0 auto; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .quick-prompts { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; padding: 0 0 3px; margin: 0 0 7px; }
+    .quick-prompt { flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; line-height: 1.35; cursor: pointer; white-space: normal; overflow-wrap: anywhere; text-align: left; }
     .quick-prompt:hover { background: #e5f0fb; }
     .panel.dark .quick-prompt { background: #293746; border-color: #3d5570; color: #9bc5eb; }
     .pick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
