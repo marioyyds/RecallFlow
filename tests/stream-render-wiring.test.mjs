@@ -59,13 +59,13 @@ test('chunk 分支里只有一处布局调用，且必须在 schedule 回调内'
 });
 
 test('chunk 分支里只有一处正文重绘，且必须在 schedule 回调内', () => {
-  const calls = chunkBranch.match(/innerHTML = renderAnswer\(/g) || [];
+  const calls = chunkBranch.match(/showStreamingAnswer\(/g) || [];
   assert.equal(calls.length, 1, 'chunk 分支应恰好有一处正文重绘（实测 ' + calls.length + ' 处）');
 
   const schedAt = chunkBranch.indexOf("streamRender.schedule('answer'");
   assert.notEqual(schedAt, -1, 'answer 必须通过 streamRender.schedule 合并');
   assert.ok(
-    chunkBranch.indexOf('innerHTML = renderAnswer(') > schedAt,
+    chunkBranch.indexOf('showStreamingAnswer(') > schedAt,
     '正文重绘出现在 schedule 之前 —— 说明它是直接执行的，逐 token 全量重解析又回来了'
   );
 });
@@ -83,8 +83,16 @@ test('chunk 分支里只有一处自动滚动，且必须在 layout 回调内', 
 });
 
 test('解析入口只出现在 schedule 回调里（不经合并的解析一律视为退化）', () => {
-  const all = chunkBranch.match(/renderAnswer\(|renderMarkdown\(/g) || [];
+  const all = chunkBranch.match(/showStreamingAnswer\(|renderAnswer\(|renderMarkdown\(/g) || [];
   assert.equal(all.length, 1, '解析入口应只有一处，实测 ' + all.length + ' 处');
+});
+
+test('流式正文不得把游标拼进会被 innerHTML 重建的 Markdown HTML', () => {
+  assert.ok(!/renderAnswer\([^\n]*,\s*true\)/.test(src), 'UI 流式重绘不得再使用 renderAnswer(..., true)');
+  const helper = sliceFunction('function showStreamingAnswer(', '');
+  assert.match(helper, /renderAnswer\(text, citations, false\)/, '正文按非流式 HTML 渲染');
+  assert.match(helper, /streamingCursors\.get\(host\)/, '游标必须从 WeakMap 复用');
+  assert.match(helper, /parent\.insertBefore\(cursor, host\.nextSibling\)/, '游标应是正文的兄弟节点');
 });
 
 // ---------------------------------------------------------------- end 分支

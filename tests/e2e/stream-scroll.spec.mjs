@@ -92,6 +92,46 @@ test('跟随页在 owner 流式期间必须持续增长（不是只出终稿）'
   await b.close();
 });
 
+test('同步面板的流式游标在连续增量之间保持同一个 DOM 节点', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await sendInstruction(a, '验证流式上滚');
+  await a.waitForTimeout(600);
+
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  const cursor = b.locator(PANEL + ' .stream-cursor');
+  await expect(cursor).toHaveCount(1, { timeout: 5_000 });
+  await cursor.evaluate((el) => {
+    el.__rfStableCursorProbe = 'same-node';
+  });
+  const textBefore = String(await panelText(b, '.p-body') || '').length;
+  const cursorBefore = await cursor.evaluate((el) => ({
+    left: el.style.left,
+    top: el.style.top,
+    animations: el.getAnimations().length,
+  }));
+
+  await b.waitForTimeout(900);
+  const textAfter = String(await panelText(b, '.p-body') || '').length;
+  expect(textAfter, '标记之后必须仍收到新的正文增量').toBeGreaterThan(textBefore);
+  const probes = await b.locator(PANEL + ' .stream-cursor').evaluateAll((els) =>
+    els.map((el) => ({
+      marker: el.__rfStableCursorProbe || '',
+      left: el.style.left,
+      top: el.style.top,
+      animations: el.getAnimations().length,
+    }))
+  );
+  expect(probes.length, '同步面板同一时刻只能有一个流式游标').toBe(1);
+  expect(probes[0].marker, '正文重绘不得销毁并重建游标节点').toBe('same-node');
+  expect(probes[0].animations, '游标动画应持续存在，而不是每批增量重新创建').toBeGreaterThan(0);
+  expect(cursorBefore.animations).toBeGreaterThan(0);
+
+  await a.close();
+  await b.close();
+});
+
 test('同步窗口刚连上、还没有正文时不显示「（无内容）」', async () => {
   await configureSettings(context);
   const a = await openFixturePage(context);

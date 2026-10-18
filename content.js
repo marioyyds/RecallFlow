@@ -4894,7 +4894,7 @@
     .panel.dark .p-body th { background: #2a2e34; }
     .panel.dark .p-body th, .panel.dark .p-body td { border-color: #3a3f46; }
     .panel.dark .p-body tbody tr:nth-child(even) { background: rgba(255,255,255,.03); }
-    .stream-cursor { display: inline-block; width: 7px; height: 13px; margin-left: 3px; vertical-align: -2px; border-radius: 1.5px; background: #4a90d9; animation: kb-cursor .9s steps(2, start) infinite; }
+    .stream-cursor { position: absolute; z-index: 1; width: 7px; height: 13px; margin-left: 3px; border-radius: 1.5px; background: #4a90d9; pointer-events: none; animation: kb-cursor .9s steps(2, start) infinite; }
     @keyframes kb-cursor { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
     .msg-actions { display: flex; gap: 2px; margin-top: 6px; opacity: 0; transition: opacity .15s; }
     .msg.ai:hover .msg-actions, .msg-actions:hover { opacity: 1; }
@@ -5014,7 +5014,7 @@
     .panel.dark .cite-sources { border-color: #3a3f46; }
     .panel.dark .cite-sources .cite-label { color: #8b949e; }
     .agent-steps { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px; }
-    .agent-flow { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px; }
+    .agent-flow { position: relative; display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px; }
     .agent-plan { margin: 2px 0 8px; padding: 8px 10px; border: 1px solid #dbe6f3; border-radius: 10px; background: #f7faff; }
     .panel.dark .agent-plan { background: #232a33; border-color: #3a4654; }
     .agent-plan-title { font-size: 11px; font-weight: 700; color: #4a90d9; margin-bottom: 5px; }
@@ -6308,11 +6308,12 @@
     const contentEl = document.createElement("div");
     contentEl.className = "agent-content";
     if (pendingNarration) {
-      contentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, true);
+      contentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
     } else {
       contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
     }
     flow.appendChild(contentEl);
+    if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
     panelBody.appendChild(aiMsg);
     pendingAiMsg = aiMsg;
     pendingContentEl = contentEl;
@@ -6426,8 +6427,7 @@
   }
   var ANSWER_HTML_CACHE_MAX = 240;
   var answerHtmlCache = createLruCache(ANSWER_HTML_CACHE_MAX);
-  function cachedAnswerHtml(text, citations, streaming2) {
-    if (streaming2) return renderAnswer(text, citations, true);
+  function cachedAnswerHtml(text, citations) {
     const list = Array.isArray(citations) ? citations : [];
     const sig = list.map((c) => String(c.index) + "|" + String(c.title || "") + "|" + String(c.url || "")).join(",");
     const key = String(text) + "\0" + sig;
@@ -6436,6 +6436,67 @@
     const html = renderAnswer(text, citations, false);
     answerHtmlCache.set(key, html);
     return html;
+  }
+  var streamingCursors = /* @__PURE__ */ new WeakMap();
+  function removeStreamCursor(host2) {
+    const rec = host2 && streamingCursors.get(host2);
+    if (!rec) return;
+    if (rec.cursor && rec.cursor.parentNode) rec.cursor.parentNode.removeChild(rec.cursor);
+    streamingCursors.delete(host2);
+  }
+  function positionStreamCursor(host2, cursor) {
+    let flow = host2 && host2.parentElement;
+    while (flow && getComputedStyle(flow).position === "static") flow = flow.parentElement;
+    if (!flow || !cursor) return;
+    let rect = null;
+    try {
+      const walker = document.createTreeWalker(host2, NodeFilter.SHOW_TEXT);
+      let lastText2 = null;
+      let node = walker.nextNode();
+      while (node) {
+        if (node.nodeValue && node.nodeValue.trim()) lastText2 = node;
+        node = walker.nextNode();
+      }
+      if (lastText2) {
+        let end = lastText2.nodeValue.length;
+        while (end > 0 && /\s/.test(lastText2.nodeValue.charAt(end - 1))) end -= 1;
+        if (end > 0) {
+          const range = document.createRange();
+          range.setStart(lastText2, end - 1);
+          range.setEnd(lastText2, end);
+          rect = range.getBoundingClientRect();
+        }
+      }
+    } catch (e) {
+      rect = null;
+    }
+    const flowRect = flow.getBoundingClientRect();
+    if (rect && (rect.width || rect.height)) {
+      cursor.style.left = Math.max(0, rect.right - flowRect.left) + "px";
+      cursor.style.top = Math.max(0, rect.top - flowRect.top) + "px";
+    } else {
+      const hostRect = host2.getBoundingClientRect();
+      cursor.style.left = Math.max(0, hostRect.left - flowRect.left) + "px";
+      cursor.style.top = Math.max(0, hostRect.bottom - flowRect.top - 13) + "px";
+    }
+  }
+  function showStreamingAnswer(host2, text, citations) {
+    if (!host2) return;
+    host2.innerHTML = renderAnswer(text, citations, false);
+    let rec = streamingCursors.get(host2);
+    if (!rec || !rec.cursor || !rec.cursor.isConnected) {
+      const cursor = document.createElement("span");
+      cursor.className = "stream-cursor";
+      cursor.setAttribute("aria-hidden", "true");
+      cursor.dataset.streamCursor = "stable";
+      const parent = host2.parentNode;
+      if (!parent) return;
+      parent.insertBefore(cursor, host2.nextSibling);
+      rec = { cursor };
+      streamingCursors.set(host2, rec);
+    }
+    rec.cursor.hidden = false;
+    positionStreamCursor(host2, rec.cursor);
   }
   function partHtml(p, citations) {
     if (p.type === "tool-call") {
@@ -6456,7 +6517,7 @@
       return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
     }
     if ((p.type === "narration" || p.type === "text") && p.text) {
-      return '<div class="agent-content">' + cachedAnswerHtml(p.text, citations, p.live === true) + "</div>";
+      return '<div class="agent-content">' + cachedAnswerHtml(p.text, citations) + "</div>";
     }
     if (p.type === "notice" && p.text) {
       return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
@@ -6469,7 +6530,7 @@
     const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => partHtml(p, m.citations)).join("");
     const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
     const rawContent = String(m.content || "");
-    const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : m.live && !rawContent ? "" : cachedAnswerHtml(rawContent, m.citations, false);
+    const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : m.live && !rawContent ? "" : cachedAnswerHtml(rawContent, m.citations);
     const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
     const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
     const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
@@ -6606,6 +6667,7 @@
         dom.liveThink = null;
       } else if ((part.type === "narration" || part.type === "text") && dom.liveTextEl && part.text === dom.liveText) {
         el = dom.liveTextEl;
+        removeStreamCursor(el);
         dom.liveTextEl = null;
         dom.liveText = "";
       } else {
@@ -6641,10 +6703,11 @@
         dom.liveEl.appendChild(dom.liveTextEl);
       }
       if (dom.liveText !== liveNarration.text) {
-        dom.liveTextEl.innerHTML = cachedAnswerHtml(liveNarration.text, assistant.citations, true);
+        showStreamingAnswer(dom.liveTextEl, liveNarration.text, assistant.citations);
         dom.liveText = liveNarration.text;
       }
     } else if (dom.liveTextEl) {
+      removeStreamCursor(dom.liveTextEl);
       dom.liveTextEl.remove();
       dom.liveTextEl = null;
       dom.liveText = "";
@@ -8278,6 +8341,7 @@
         lastNarration = pendingNarration;
         pendingParts.push({ type: "narration", text: pendingNarration });
         if (pendingContentEl) {
+          removeStreamCursor(pendingContentEl);
           pendingContentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
         }
         pendingNarration = "";
@@ -8334,10 +8398,14 @@
       if (pendingAiMsg && pendingAiMsg.parentNode) {
         lastResponse = pendingNarration || lastNarration || acc;
         if (acc) {
-          if (pendingContentEl) pendingContentEl.innerHTML = renderAnswer(pendingNarration || lastResponse, currentCitations, false);
+          if (pendingContentEl) {
+            removeStreamCursor(pendingContentEl);
+            pendingContentEl.innerHTML = renderAnswer(pendingNarration || lastResponse, currentCitations, false);
+          }
           pendingAiMsg._raw = acc;
         } else if (!pendingParts.length) {
           if (pendingContentEl) {
+            removeStreamCursor(pendingContentEl);
             pendingContentEl.textContent = "\uFF08\u5DF2\u505C\u6B62\uFF09";
             pendingContentEl.style.color = "#999";
           }
@@ -8542,8 +8610,9 @@
           thinkSeg = { id: ++thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
           mountThinkSegment(thinkSeg);
         }
-        contentEl.innerHTML = pendingNarration ? renderAnswer(pendingNarration, currentCitations, true) : '<span class="typing"><span></span><span></span><span></span></span>';
+        contentEl.innerHTML = pendingNarration ? renderAnswer(pendingNarration, currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
         flowEl.appendChild(contentEl);
+        if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
         typingEl = pendingNarration ? null : contentEl;
         pendingStarted = true;
         pendingAiMsg = aiMsg;
@@ -8752,7 +8821,7 @@
             if (pendingContentEl) pendingContentEl.innerHTML = "";
           }
           streamRender.schedule("answer", () => {
-            if (pendingContentEl) pendingContentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, true);
+            if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
             pendingAiMsg._raw = pendingAcc;
           });
           streamRender.schedule("layout", () => {
@@ -8775,6 +8844,7 @@
             const el = ensureTextEl();
             if (el) el.textContent = budgetStopped ? "\uFF08\u4EFB\u52A1\u5DF2\u505C\u6B62\uFF0C\u672A\u751F\u6210\u6700\u7EC8\u56DE\u590D\uFF09" : "\uFF08\u65E0\u8FD4\u56DE\u5185\u5BB9\uFF09";
           } else if (pendingContentEl) {
+            removeStreamCursor(pendingContentEl);
             pendingContentEl.innerHTML = renderAnswer(lastResponse, currentCitations, false);
             pendingAiMsg._raw = pendingAcc;
           }
@@ -8833,6 +8903,7 @@
           const errText = String(resp.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
           const errEl = pendingContentEl || ensureTextEl();
           if (errEl) {
+            removeStreamCursor(errEl);
             errEl.textContent = errText;
             errEl.style.color = "#e74c3c";
           }
@@ -8951,6 +9022,7 @@
         if (!streaming) return;
         const el = pendingContentEl || ensureTextEl();
         if (el) {
+          removeStreamCursor(el);
           el.textContent = "\u672A\u6536\u5230\u6A21\u578B\u54CD\u5E94\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u6216 API \u914D\u7F6E\u540E\u91CD\u8BD5\u3002";
           el.style.color = "#e74c3c";
         }
