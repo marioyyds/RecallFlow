@@ -100,27 +100,19 @@ test('toolNeedsApproval: 只读工具直接放行，不看分类策略', () => {
   assert.equal(toolNeedsApproval('get_page_snapshot', { toolApprovalPolicy: {} }), false);
 });
 
-test('toolNeedsApproval: run_javascript 由 runJavascriptApproval 控制', () => {
-  assert.equal(toolNeedsApproval('run_javascript', { runJavascriptApproval: 'auto' }), false);
-  assert.equal(toolNeedsApproval('run_javascript', { runJavascriptApproval: 'session' }), true);
-  assert.equal(toolNeedsApproval('run_javascript', { runJavascriptApproval: 'each' }), true);
-  // 未配置时默认 session → 仍需确认一次
-  assert.equal(toolNeedsApproval('run_javascript', {}), true);
+test('toolNeedsApproval: run_javascript 归入页面命令类别', () => {
+  const policy = (commands) => ({ toolApprovalPolicy: { commands } });
+  assert.equal(toolNeedsApproval('run_javascript', policy(true)), false);
+  assert.equal(toolNeedsApproval('run_javascript', policy(false)), true);
+  // 与 click_element 同类别：不再单独受 codeExecutionApproval 控制
+  assert.equal(toolNeedsApproval('run_javascript', { codeExecutionApproval: 'auto', toolApprovalPolicy: { commands: false } }), true);
 });
 
-test('toolNeedsApproval: run_javascript 不参与分类自动批准', () => {
-  const allOpen = { toolApprovalPolicy: { read: true, edit: true, commands: true, browser: true, mcp: true } };
-  assert.equal(toolNeedsApproval('run_javascript', allOpen), true, '高危工具不应被分类自动批准放行');
-  // 对照：普通页面写操作在同类策略下会被放行
-  assert.equal(toolNeedsApproval('click_element', allOpen), false);
-});
-
-test('toolNeedsApproval: 站点信任放行普通写操作，但不放行高危工具', () => {
+test('toolNeedsApproval: 站点信任放行普通写操作，也覆盖页面命令里的 run_javascript', () => {
   const trusted = { trustedSites: ['https://example.com'], toolApprovalPolicy: {} };
   assert.equal(toolNeedsApproval('click_element', trusted, 'https://example.com/page'), false);
   assert.equal(toolNeedsApproval('add_entry', trusted, 'https://example.com/page'), false);
-  // 站点信任的判定在 alwaysRequireApproval 之后，故对 run_javascript 无效
-  assert.equal(toolNeedsApproval('run_javascript', trusted, 'https://example.com/page'), true);
+  assert.equal(toolNeedsApproval('run_javascript', trusted, 'https://example.com/page'), false);
 });
 
 test('toolNeedsApproval: 未信任站点的写操作仍需审批', () => {

@@ -53,7 +53,9 @@ test('run_javascript 的选择点必须指向 query（而不是让模型自己�
   const desc = byName.run_javascript.description;
   assert.match(desc, /inspect_element\(\{op:"query"\}\)/, '要给出 query 档的准确调用形状');
   assert.match(desc, /找元素\/rect/, '要说清它替代的是哪类查询');
-  assert.equal(byName.run_javascript.alwaysRequireApproval, true, '逃生舱的审批不能被顺手放松');
+  assert.equal(byName.run_javascript.risk, 'page', 'run_javascript 已归入页面命令');
+  assert.equal(byName.run_javascript.requiresApproval, true, '页面命令仍需要审批');
+  assert.ok(!byName.run_javascript.alwaysRequireApproval, '不再单独占用逐次审批档');
 });
 
 test('跨框架查询/等待的 frameId 必须在 schema 里声明（技能文案已经这么用）', () => {

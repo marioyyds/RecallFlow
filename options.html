@@ -54,13 +54,14 @@
       <label class="field">
         <span class="field-label">模型</span>
         <div class="input-row">
-          <input id="model" type="text" placeholder="deepseek-chat" list="model-list">
+          <input id="model" type="text" placeholder="deepseek-flash" list="model-list">
           <datalist id="model-list">
+            <option value="deepseek-flash">deepseek-flash</option>
             <option value="deepseek-chat">deepseek-chat</option>
             <option value="deepseek-reasoner">deepseek-reasoner</option>
           </datalist>
         </div>
-        <span class="hint">deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；deepseek-chat 下只有等待动画。</span>
+        <span class="hint">deepseek-flash 快速通用（默认）/ deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；其余模型下只有等待动画。</span>
       </label>
       <label class="field">
         <span class="field-label">API 地址</span>

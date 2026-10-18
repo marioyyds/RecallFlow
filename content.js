@@ -3657,7 +3657,7 @@
   var SESSION_TO_KB_INSTRUCTION = '\u8BF7\u628A\u5F53\u524D\u4F1A\u8BDD\u6574\u7406\u6210\u4E00\u7BC7\u7ED3\u6784\u6E05\u6670\u3001\u6392\u7248\u7F8E\u89C2\u7684 Markdown \u6587\u6863\uFF0C\u5E76\u4FDD\u5B58\u5230\u77E5\u8BC6\u5E93\u3002\n\n\u8981\u6C42\uFF1A\n1. \u5148\u901A\u8BFB\u6574\u6BB5\u4F1A\u8BDD\uFF0C\u63D0\u70BC\u4E3B\u7EBF\u3001\u7ED3\u8BBA\u3001\u6B65\u9AA4\u3001\u4EE3\u7801\u548C\u6CE8\u610F\u4E8B\u9879\uFF1B\u5408\u5E76\u91CD\u590D\u5185\u5BB9\uFF0C\u4E0D\u8981\u628A\u804A\u5929\u8BB0\u5F55\u9010\u53E5\u7167\u6284\u3002\n2. \u5148\u7528 knowledge_read({op:"search",query:"<\u4F1A\u8BDD\u4E3B\u9898>"}) \u68C0\u67E5\u662F\u5426\u5DF2\u6709\u540C\u4E3B\u9898\u7684\u201C\u4F1A\u8BDD\u6574\u7406\u201D\uFF1B\u82E5\u5DF2\u6709\uFF0C\u6CBF\u7528\u8BE5\u6761\u76EE id \u66F4\u65B0\uFF0C\u907F\u514D\u91CD\u590D\u65B0\u5EFA\u3002\n3. \u6587\u6863\u6807\u9898\u4F7F\u7528\u300C\u4F1A\u8BDD\u6574\u7406\uFF1A<\u7B80\u660E\u4E3B\u9898>\u300D\uFF0C\u6807\u7B7E\u7ED9\u51FA 3-6 \u4E2A\u5177\u4F53\u4E3B\u9898\u8BCD\uFF0Cstatus \u8BBE\u4E3A 2\u3002\n4. note \u5FC5\u987B\u662F\u5B8C\u6574\u3001\u53EF\u76F4\u63A5\u9605\u8BFB\u7684 Markdown\u3002\u5EFA\u8BAE\u7ED3\u6784\uFF1A\n# \u4F1A\u8BDD\u6574\u7406\uFF1A<\u4E3B\u9898>\n\n> \u7528 2-3 \u53E5\u8BDD\u6982\u62EC\u80CC\u666F\u3001\u76EE\u6807\u548C\u6700\u7EC8\u7ED3\u679C\u3002\n\n## \u80CC\u666F\u4E0E\u76EE\u6807\n\n## \u5173\u952E\u7ED3\u8BBA\n\n## \u5B9E\u65BD\u6B65\u9AA4 / \u65B9\u6848\n\n## \u4EE3\u7801\u4E0E\u914D\u7F6E\n\n## \u6CE8\u610F\u4E8B\u9879\u4E0E\u5751\n\n## \u5F85\u529E\u4E0E\u540E\u7EED\n\n## \u76F8\u5173\u94FE\u63A5\n\n5. \u6309\u5185\u5BB9\u5B9E\u9645\u9009\u62E9\u7AE0\u8282\uFF1B\u65E0\u5185\u5BB9\u7684\u7AE0\u8282\u53EF\u4EE5\u7701\u7565\uFF0C\u4E0D\u8981\u7F16\u9020\u3002\u6B65\u9AA4\u7528\u6709\u5E8F\u5217\u8868\uFF0C\u5BF9\u6BD4\u4FE1\u606F\u7528 Markdown \u8868\u683C\uFF0C\u547D\u4EE4\u548C\u914D\u7F6E\u7528 fenced code block\uFF0C\u884C\u5185\u6807\u8BC6\u7528 inline code\u3002\n6. \u4FDD\u7559\u4F1A\u8BDD\u4E2D\u51FA\u73B0\u7684\u5177\u4F53\u547D\u4EE4\u3001\u53C2\u6570\u3001\u6587\u4EF6\u8DEF\u5F84\u3001\u6570\u5B57\u548C\u7ED3\u8BBA\uFF0C\u5220\u9664\u5BD2\u6684\u3001\u91CD\u590D\u89E3\u91CA\u4E0E\u8FC7\u7A0B\u6027\u566A\u58F0\u3002\u6B63\u6587\u4E0D\u8981\u51FA\u73B0\u201C\u7528\u6237\u8BF4 / \u52A9\u624B\u8BF4\u201D\u3002\n7. \u8C03\u7528 add_entry({id?,type:"note",title,note,tags,status:2}) \u4FDD\u5B58\u3002\u66F4\u65B0\u5DF2\u6709\u6761\u76EE\u65F6\u4F20 id\uFF1B\u65B0\u5EFA\u65F6\u4E0D\u8981\u4F20 id\u3002\n8. \u4FDD\u5B58\u540E\u8C03\u7528 knowledge_read({op:"get",id}) \u8BFB\u56DE\uFF0C\u786E\u8BA4\u6807\u9898\u3001Markdown \u7ED3\u6784\u548C\u5173\u952E\u5185\u5BB9\u90FD\u5728\uFF0C\u518D\u5411\u7528\u6237\u62A5\u544A\u4FDD\u5B58\u7684\u6807\u9898\u548C id\u3002';
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
-    model: "deepseek-chat",
+    model: "deepseek-flash",
     baseUrl: "https://api.deepseek.com",
     requestTimeoutMs: 6e4,
     ragEnabled: true,
@@ -3682,7 +3682,7 @@
     cdpEnabled: true,
     // 站点记忆：按域名记住可用的元素选择器与成功动作，减少重复探索。
     siteMemoryEnabled: true,
-    // 站点信任：这些 origin 上的写操作不再逐次确认（run_javascript 等高风险工具仍逐次确认）。
+    // 站点信任：这些 origin 上的写操作不再逐次确认（用户脚本/技能写入等高风险工具仍逐次确认）。
     trustedSites: [],
     // 完成前独立校验：声称完成时用一次轻量 LLM 调用核对是否真的达成，未达成则反思重试。
     verifierEnabled: true,
@@ -3690,10 +3690,10 @@
     // 系统提示本来就要求模型「一轮可以发出多个工具调用，不要一次一个地串行调用」，
     // 这里让执行层真正兑现它。设为 false 退回严格串行（出问题时的一键回退开关）。
     parallelToolCalls: true,
-    // 「任意代码执行」类工具的审批策略：
+    // 仍有独立"任意代码执行/持久化写入"审批档的工具策略：
     //   'each' 每次都要 / 'session' 本任务内允许一次（默认） / 'auto' 自动批准。
-    // 适用范围**不止 run_javascript**：用户脚本（run_userscript / install_userscript）执行的是
-    // 第三方代码，且会从远程自动更新，与 run_javascript 同属 high + alwaysRequireApproval。
+    // 适用范围：用户脚本（run_userscript / install_userscript）与 save_skill。
+    // run_javascript 已归入「页面命令」，由 toolApprovalPolicy.commands 控制。
     // 原先这个键叫 runJavascriptApproval，UI 标签也只写「运行 JavaScript」——
     // 于是把它设为 'auto' 会在用户以为只放开 JavaScript 的情况下，一并放开第三方脚本。
     codeExecutionApproval: "session",
@@ -5518,6 +5518,7 @@
   var thinkExpandedManual = null;
   var activeRunId = null;
   var planBar = null;
+  var apiKeyBanner = null;
   var lastPlan = [];
   var planExpanded = null;
   var planWasAllDone = false;
@@ -6285,6 +6286,16 @@
     setTimeout(() => {
       if (hint.parentNode) hint.parentNode.removeChild(hint);
     }, 5e3);
+  }
+  function refreshApiKeyBanner() {
+    if (!apiKeyBanner) return;
+    getAISettings().then((s) => {
+      if (!apiKeyBanner) return;
+      const missing = !String(s && s.apiKey || "").trim();
+      apiKeyBanner.style.display = missing ? "flex" : "none";
+      fitPanelHeight();
+    }).catch(() => {
+    });
   }
   function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
     if (!box || !conn) return false;
@@ -7634,7 +7645,7 @@
     });
     const approvalSettings = document.createElement("div");
     approvalSettings.className = "approval-settings";
-    approvalSettings.innerHTML = '<button class="approval-settings-toggle" type="button">\u81EA\u52A8\u6279\u51C6\uFF1A\u8BFB\u53D6 <span>\u203A</span></button><div class="approval-settings-popover" hidden><label class="approval-autopilot"><input data-autopilot type="checkbox"> <b>\u81EA\u52A8\u9A7E\u9A76\uFF08\u5168\u90E8\u81EA\u52A8\u6279\u51C6\uFF09</b></label><div class="approval-settings-caption">\u672A\u5F00\u542F\u65F6\uFF0C\u6309\u4E0B\u5217\u7C7B\u522B\u9010\u9879\u63A7\u5236\u662F\u5426\u514D\u786E\u8BA4\uFF1A</div><div class="approval-group"><div class="approval-group-title">\u8BFB\u53D6</div><label class="approval-item"><input data-policy="read" type="checkbox"> \u8BFB\u53D6\u5185\u5BB9 <small>\u641C\u7D22\u3001\u8BFB\u53D6\u9875\u9762\u3001\u5217\u51FA\u6807\u7B7E\u9875</small></label></div><div class="approval-group"><div class="approval-group-title">\u5199\u5165</div><label class="approval-item"><input data-policy="edit" type="checkbox"> \u7F16\u8F91\u77E5\u8BC6\u5E93 <small>\u65B0\u589E / \u4FEE\u6539 / \u5220\u9664\u6536\u85CF</small></label><label class="approval-item"><input data-policy="commands" type="checkbox"> \u9875\u9762\u547D\u4EE4 <small>\u70B9\u51FB\u3001\u8F93\u5165\u3001\u6EDA\u52A8\u3001\u9AD8\u4EAE\u7B49</small></label></div><div class="approval-group"><div class="approval-group-title">\u5916\u90E8</div><label class="approval-item"><input data-policy="browser" type="checkbox"> \u6D4F\u89C8\u5668\u4E0E\u7F51\u7EDC <small>\u6253\u5F00\u6807\u7B7E\u9875\u3001\u6293\u53D6\u7F51\u9875</small></label><label class="approval-item"><input data-policy="mcp" type="checkbox"> MCP \u670D\u52A1\u5668 <small>\u8C03\u7528\u5916\u90E8\u5DE5\u5177</small></label></div><div class="approval-group"><div class="approval-group-title">\u9AD8\u98CE\u9669</div><label class="approval-item approval-runjs">\u4EE3\u7801\u6267\u884C\u5BA1\u6279\uFF1A<select data-runjs><option value="each">\u6BCF\u6B21\u786E\u8BA4</option><option value="session">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u4E00\u6B21</option><option value="auto">\u81EA\u52A8\u6279\u51C6</option></select></label></div></div>';
+    approvalSettings.innerHTML = '<button class="approval-settings-toggle" type="button">\u81EA\u52A8\u6279\u51C6\uFF1A\u8BFB\u53D6 <span>\u203A</span></button><div class="approval-settings-popover" hidden><label class="approval-autopilot"><input data-autopilot type="checkbox"> <b>\u81EA\u52A8\u9A7E\u9A76\uFF08\u5168\u90E8\u81EA\u52A8\u6279\u51C6\uFF09</b></label><div class="approval-settings-caption">\u672A\u5F00\u542F\u65F6\uFF0C\u6309\u4E0B\u5217\u7C7B\u522B\u9010\u9879\u63A7\u5236\u662F\u5426\u514D\u786E\u8BA4\uFF1A</div><div class="approval-group"><div class="approval-group-title">\u8BFB\u53D6</div><label class="approval-item"><input data-policy="read" type="checkbox"> \u8BFB\u53D6\u5185\u5BB9 <small>\u641C\u7D22\u3001\u8BFB\u53D6\u9875\u9762\u3001\u5217\u51FA\u6807\u7B7E\u9875</small></label></div><div class="approval-group"><div class="approval-group-title">\u5199\u5165</div><label class="approval-item"><input data-policy="edit" type="checkbox"> \u7F16\u8F91\u77E5\u8BC6\u5E93 <small>\u65B0\u589E / \u4FEE\u6539 / \u5220\u9664\u6536\u85CF</small></label><label class="approval-item"><input data-policy="commands" type="checkbox"> \u9875\u9762\u547D\u4EE4 <small>\u70B9\u51FB\u3001\u8F93\u5165\u3001\u6EDA\u52A8\u3001\u9AD8\u4EAE\u3001\u8FD0\u884C JavaScript \u7B49</small></label></div><div class="approval-group"><div class="approval-group-title">\u5916\u90E8</div><label class="approval-item"><input data-policy="browser" type="checkbox"> \u6D4F\u89C8\u5668\u4E0E\u7F51\u7EDC <small>\u6253\u5F00\u6807\u7B7E\u9875\u3001\u6293\u53D6\u7F51\u9875</small></label><label class="approval-item"><input data-policy="mcp" type="checkbox"> MCP \u670D\u52A1\u5668 <small>\u8C03\u7528\u5916\u90E8\u5DE5\u5177</small></label></div><div class="approval-group"><div class="approval-group-title">\u9AD8\u98CE\u9669</div><label class="approval-item approval-runjs">\u7528\u6237\u811A\u672C / \u6280\u80FD\u5199\u5165\u5BA1\u6279\uFF1A<select data-runjs><option value="each">\u6BCF\u6B21\u786E\u8BA4</option><option value="session">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u4E00\u6B21</option><option value="auto">\u81EA\u52A8\u6279\u51C6</option></select></label></div></div>';
     const runjsEl = approvalSettings.querySelector("[data-runjs]");
     const autopilotEl = approvalSettings.querySelector("[data-autopilot]");
     autopilotEl.addEventListener("change", () => {
@@ -7683,6 +7694,24 @@
       refreshApprovalLabel();
     }).catch(() => {
     });
+    apiKeyBanner = document.createElement("div");
+    apiKeyBanner.className = "api-key-banner";
+    apiKeyBanner.style.cssText = "display:none;margin:4px 0;padding:6px 8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px;color:#8a5a00;font-size:12px;align-items:center;gap:8px;justify-content:space-between;";
+    const apiKeyText = document.createElement("span");
+    apiKeyText.textContent = "\u5C1A\u672A\u914D\u7F6E API Key\uFF0C\u914D\u7F6E\u540E\u624D\u80FD\u5F00\u59CB\u5BF9\u8BDD\u3002";
+    const apiKeySettingsBtn = document.createElement("button");
+    apiKeySettingsBtn.type = "button";
+    apiKeySettingsBtn.className = "api-key-settings";
+    apiKeySettingsBtn.textContent = "\u6253\u5F00\u8BBE\u7F6E";
+    apiKeySettingsBtn.style.cssText = "border:1px solid #c98a00;color:#8a5a00;background:#fff;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:12px;";
+    apiKeySettingsBtn.addEventListener("click", () => {
+      try {
+        chrome.runtime.sendMessage({ type: "openOptions" });
+      } catch (e) {
+      }
+    });
+    apiKeyBanner.appendChild(apiKeyText);
+    apiKeyBanner.appendChild(apiKeySettingsBtn);
     planBar = document.createElement("div");
     planBar.className = "agent-plan agent-plan-bar";
     planBar.style.display = "none";
@@ -7704,7 +7733,9 @@
     const quickWrap = document.createElement("div");
     quickWrap.className = "quick-prompts";
     cmdArea.appendChild(quickWrap);
+    cmdArea.appendChild(apiKeyBanner);
     cmdArea.appendChild(approvalSettings);
+    refreshApiKeyBanner();
     const pickBar = document.createElement("div");
     pickBar.className = "pick-bar";
     pickBar.style.display = "none";
@@ -8576,6 +8607,7 @@
             errEl.style.color = "#e74c3c";
           }
           if (resp.needSetup) {
+            refreshApiKeyBanner();
             const go = document.createElement("button");
             go.textContent = "\u6253\u5F00\u8BBE\u7F6E";
             go.style.cssText = "margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;";
@@ -9011,7 +9043,9 @@
     });
     try {
       chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName !== "local" || !changes || !changes[FAB_POSITION_KEY]) return;
+        if (areaName !== "local" || !changes) return;
+        if (changes.aiSettings) refreshApiKeyBanner();
+        if (!changes[FAB_POSITION_KEY]) return;
         const next = changes[FAB_POSITION_KEY].newValue;
         const ratio = normalizeFabRatio(next && next.ratio);
         if (ratio == null) return;

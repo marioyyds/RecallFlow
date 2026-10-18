@@ -196,7 +196,12 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       `frameId`。执行层一直支持（frameIdFromArgs），技能正文也一直
   //                       这么写，但 schema 没声明 —— 模型只能猜。工具数仍 45，
   //                       权限元数据不变；体积仍在预算内（35269 / 35900）。
-  const EXPECTED = '4bb18dc10068e1fd';
+  //   0fe0af8aed91bfb9 —— **有意改动**：`run_javascript` 从 high + alwaysRequireApproval
+  //                       移到 risk:'page'，由「页面命令」类别统一审批，不再单独设置。
+  //                       工具数仍 45；这是用户明确要求的权限归类变化。
+  //   b403f817a09653ac —— **有意改动**：`run_javascript` 的工具描述同步为「页面命令审批」，
+  //                       不再声称"每次执行都需用户批准"（模型可见文案必须与新元数据一致）。
+  const EXPECTED = 'b403f817a09653ac';
   assert.equal(
     fp,
     EXPECTED,

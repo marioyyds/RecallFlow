@@ -142,10 +142,10 @@ test('宏回放：嵌套回放被白名单挡住（macro 自身不可回放）',
 
 // ---------------- 权限分级：执行第三方代码 / 外传本地文件 ----------------
 
-test('执行第三方代码的工具必须与 run_javascript 同级（逐次审批 + high）', () => {
-  // 这三个都会执行「不是用户本次书写」的代码：用户脚本来自远程（且会远程自动更新），
-  // run_javascript 来自模型。任何基于类别的自动批准都不该覆盖它们。
-  for (const name of ['run_javascript', 'run_userscript', 'install_userscript']) {
+test('执行第三方代码的用户脚本必须保持逐次审批 + high', () => {
+  // 用户脚本来自远程且会远程自动更新，任何基于类别的自动批准都不该覆盖它们。
+  // run_javascript 已按用户要求归入「页面命令」，由 commands 类别统一控制。
+  for (const name of ['run_userscript', 'install_userscript']) {
     const md = getToolMetadata(name);
     assert.equal(md.risk, 'high', name + ' 应为 high');
     assert.equal(md.requiresApproval, true, name + ' 应需审批');
@@ -182,11 +182,11 @@ test('代码执行审批：新键 codeExecutionApproval 是权威，旧键 runJa
   assert.equal(resolveCodeExecutionApproval({ codeExecutionApproval: '' }), 'session');
 });
 
-test('代码执行审批：同一个开关同时约束用户脚本（不能再「只放开 JS」却连带放开第三方脚本）', () => {
-  // 这正是把键名从 runJavascriptApproval 泛化掉的原因：它控制的是**一类**工具。
-  assert.equal(toolNeedsApproval('run_javascript', { codeExecutionApproval: 'auto' }), false);
+test('代码执行审批：同一个开关约束用户脚本；run_javascript 已归入页面命令', () => {
+  // run_javascript 不再受 codeExecutionApproval 控制，改由 toolApprovalPolicy.commands 决定。
+  assert.equal(toolNeedsApproval('run_javascript', { codeExecutionApproval: 'auto' }), true);
   assert.equal(toolNeedsApproval('run_userscript', { codeExecutionApproval: 'auto' }), false);
-  for (const name of ['run_javascript', 'run_userscript', 'install_userscript']) {
+  for (const name of ['run_userscript', 'install_userscript']) {
     assert.equal(toolNeedsApproval(name, { codeExecutionApproval: 'session' }), true, name + ' 在 session 下需确认一次');
     assert.equal(toolNeedsApproval(name, { codeExecutionApproval: 'each' }), true, name + ' 在 each 下需确认');
   }

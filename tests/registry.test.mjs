@@ -17,9 +17,11 @@ test('every tool has a name, object schema and risk', () => {
   assert.equal(BUILTIN_TOOLS.length, TOOL_REGISTRY.length);
 });
 
-test('run_javascript always requires per-call approval', () => {
-  assert.equal(getToolMetadata('run_javascript').alwaysRequireApproval, true);
-  assert.equal(getToolMetadata('run_javascript').requiresApproval, true);
+test('run_javascript 归入页面命令审批', () => {
+  const md = getToolMetadata('run_javascript');
+  assert.equal(md.risk, 'page');
+  assert.equal(md.requiresApproval, true);
+  assert.ok(!md.alwaysRequireApproval, '不再单独占用逐次审批档');
 });
 
 test('load_skill is always available across intents', () => {

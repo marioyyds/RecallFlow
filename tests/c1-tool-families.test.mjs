@@ -132,7 +132,7 @@ test('trust_site：把 origin 写进 trustedSites 并落盘', async () => {
   assert.deepEqual(ctx.settings.trustedSites, ['https://b.test', 'https://a.test'], '应追加而不是覆盖');
   assert.deepEqual(saved.aiSettings.trustedSites, ['https://b.test', 'https://a.test']);
   // 文案里必须保留"高风险工具仍每次确认"的承诺
-  assert.match(r.result, /run_javascript 等高风险工具仍每次确认/);
+  assert.match(r.result, /用户脚本 \/ 技能写入等高风险工具仍每次确认/);
 });
 
 test('trust_site：同一站点重复信任不产生重复项', async () => {
