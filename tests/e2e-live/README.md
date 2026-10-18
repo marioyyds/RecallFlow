@@ -66,9 +66,11 @@ node scripts/run-e2e-live.mjs
    于是必应搜索提交、httpbin 表单提交这类整页导航后，任务会继续经 tab 执行（
    工具走 `chrome.tabs.sendMessage`，刷新后到达新内容脚本）。
    回归用例：`tests/e2e/golden.spec.mjs`「整页刷新后任务应继续跑完」。
-   **已知限制（未做）**：刷新后继续跑的这一轮在**新面板里不可见**（旧文档销毁、输出写到
-   死端口被吞掉）—— 任务能跑完、但 UI 不回显。要让新面板接管显示，需再补"本 tab 进行中
-   run 的发现 + 同 runId 重连重定向"（复用 `session-ready` 握手）。
+   **新面板接管显示 —— 已修复**：`query-run` 现在会带上 SW 侧已归约的 run 快照；新面板用
+   同一个 `runId` 续跑前，先把刷新前的工具步骤/叙述/思考画回来，再从新端口继续接增量。
+   同时 `RunStreamHub.begin` 对同 `runId` 的再次调用会把状态切回 `running`、保留已有 parts，
+   不再停在 `cancelled`。回归断言已加强为：刷新前步骤（`get_page_snapshot` / `click_element`）
+   与本轮最终回复都出现在新面板里，且用户消息与最终回复**各只出现一次**。
 
 ## 下一步
 

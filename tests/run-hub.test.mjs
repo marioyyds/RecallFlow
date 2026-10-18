@@ -78,6 +78,24 @@ test('run state: 只登记来源但正文没写 [n] 时不生成“参考来源�
   assert.deepEqual(msg.citations, [], '未被正文引用的来源不得进入参考来源区');
 });
 
+test('run hub: 同 runId 续跑保留刷新前的步骤，并把状态切回 running', () => {
+  // 整页刷新会让旧端口断开，SW 先把 run finish('cancelled') 落盘；
+  // 新面板随后用同一个 runId 续跑。若 begin 直接返回旧快照，状态会永远停在
+  // cancelled，跟随页不再接收 delta，新面板也拿不到刷新前的工具步骤。
+  const starts = [];
+  const hub = new RunStreamHub({ flushMs: 0, onStart: (s) => starts.push(s) });
+  hub.begin({ runId: 'run-r', sessionId: 'S-r', ownerTabId: 7, instruction: '整页刷新' });
+  hub.push('run-r', { type: 'tool-call', callId: 'c1', name: 'get_page_snapshot', args: {} });
+  hub.push('run-r', { type: 'tool-result', callId: 'c1', name: 'get_page_snapshot', status: 'completed', result: '快照' });
+  hub.finish('run-r', 'cancelled');
+
+  const resumed = hub.begin({ runId: 'run-r', sessionId: 'S-r', ownerTabId: 7, instruction: '整页刷新' });
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.parts.length, 2, '刷新前的工具调用与结果必须还在');
+  assert.equal(resumed.parts[0].name, 'get_page_snapshot');
+  assert.equal(starts.length, 2, '续跑要重新广播 started，订阅者才知道 run 又活了');
+});
+
 test('run state: live 引用按正文首次出现顺序过滤并重编号', () => {
   const s = state();
   applyRunEvent(s, {

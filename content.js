@@ -6196,14 +6196,7 @@
     flowEl.appendChild(block);
     return block;
   }
-  function restoreStreamingUI() {
-    if (!panelBody || !streaming) return;
-    if (pendingContentEl && pendingContentEl.isConnected) return;
-    const aiMsg = document.createElement("div");
-    aiMsg.className = "msg ai";
-    const flow = document.createElement("div");
-    flow.className = "agent-flow";
-    aiMsg.appendChild(flow);
+  function renderCommittedParts(flow) {
     flowEl = flow;
     for (const p of pendingParts) {
       if (p.type === "thinking" && p.text) {
@@ -6229,6 +6222,16 @@
         );
       }
     }
+  }
+  function restoreStreamingUI() {
+    if (!panelBody || !streaming) return;
+    if (pendingContentEl && pendingContentEl.isConnected) return;
+    const aiMsg = document.createElement("div");
+    aiMsg.className = "msg ai";
+    const flow = document.createElement("div");
+    flow.className = "agent-flow";
+    aiMsg.appendChild(flow);
+    renderCommittedParts(flow);
     const contentEl = document.createElement("div");
     contentEl.className = "agent-content";
     if (pendingNarration) {
@@ -8210,18 +8213,55 @@
       panelBody.appendChild(aiMsg);
       fitPanelHeight();
       pinToBottom();
-      pendingAcc = "";
+      const resumeSnapshot = runOptions.resumeSnapshot && typeof runOptions.resumeSnapshot === "object" ? runOptions.resumeSnapshot : null;
+      pendingAcc = resumeSnapshot ? String(resumeSnapshot.content || "") : "";
       pendingVerifyPass = null;
-      renderPlan([]);
-      lastPlan = [];
+      pendingParts = [];
+      pendingNarration = "";
       if (usageEl) usageEl.textContent = "";
-      pendingAiMsg = aiMsg;
-      pendingContentEl = contentEl;
-      typingEl = contentEl;
-      resetReasoning();
-      pendingStarted = false;
+      if (resumeSnapshot) {
+        currentCitations = Array.isArray(resumeSnapshot.citations) ? resumeSnapshot.citations.slice() : null;
+        if (Array.isArray(resumeSnapshot.parts)) {
+          pendingParts = resumeSnapshot.parts.map((p) => Object.assign({}, p));
+        }
+        pendingNarration = String(resumeSnapshot.narration || "");
+        const plan = Array.isArray(resumeSnapshot.plan) ? resumeSnapshot.plan.slice() : [];
+        renderPlan(plan);
+        lastPlan = plan;
+        if (usageEl && resumeSnapshot.tokens) usageEl.textContent = "tokens " + resumeSnapshot.tokens;
+        flowEl.innerHTML = "";
+        renderCommittedParts(flowEl);
+        resetReasoning();
+        if (resumeSnapshot.reasoning) {
+          thinkSeg = { id: ++thinkSegSeq, text: String(resumeSnapshot.reasoning), done: false, block: null, body: null };
+          mountThinkSegment(thinkSeg);
+        }
+        contentEl.innerHTML = pendingNarration ? renderAnswer(pendingNarration, currentCitations, true) : '<span class="typing"><span></span><span></span><span></span></span>';
+        flowEl.appendChild(contentEl);
+        typingEl = pendingNarration ? null : contentEl;
+        pendingStarted = true;
+        pendingAiMsg = aiMsg;
+        pendingContentEl = contentEl;
+        pendingAiMsg._raw = pendingAcc;
+      } else {
+        renderPlan([]);
+        lastPlan = [];
+        pendingAiMsg = aiMsg;
+        pendingContentEl = contentEl;
+        typingEl = contentEl;
+        resetReasoning();
+        pendingStarted = false;
+      }
       streaming = true;
       startProgress();
+      if (resumeSnapshot) {
+        runStartedAt = Number(resumeSnapshot.startedAt) || runStartedAt;
+        const p = resumeSnapshot.progress || {};
+        progressState = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
+        progressStep = Number(p.step) || 0;
+        progressMax = Number(p.max) || 0;
+        renderProgress();
+      }
       updateRunControlState();
       if (!isExtContextAlive()) {
         showCitationHint("\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u5F53\u524D\u9875\u9762\u7684\u52A9\u624B\u5DF2\u5931\u6548\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
@@ -8702,7 +8742,10 @@
               runPromise = runAgent(String(resp.instruction), {
                 continuation: true,
                 presetRunId: String(resp.runId),
-                skipUserTurn: Boolean(alreadyHas)
+                skipUserTurn: Boolean(alreadyHas),
+                // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
+                // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
+                resumeSnapshot: resp.snapshot || null
               });
             }
             if (keepClosed && runPromise && typeof runPromise.finally === "function") {

@@ -81,6 +81,20 @@ test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 ru
   await expect(page.locator('#after-reload')).toHaveText('已刷新并继续');
   // 新面板必须真的接管了显示（自动续跑会重开面板并恢复对话）。
   await expect(page.locator(PANEL + ' .cmd-input')).toBeVisible({ timeout: 15_000 });
+  // 接管不能只停在"输入框回来了"：本轮最终回复与工具步骤都必须出现在新面板里，
+  // 否则用户看到的就是"任务跑完了，但页面上什么也没有"。
+  const panelTextAfterReload = await page.locator(PANEL + ' .p-body').innerText();
+  expect(panelTextAfterReload, '刷新后的新面板必须显示本轮最终回复').toContain('页面已整页刷新');
+  expect(panelTextAfterReload, '刷新后的新面板必须显示工具步骤').toContain('wait_for_element');
+  // 刷新【前】已经发生的步骤也必须恢复 —— 只显示"续跑之后"的步骤等于前半轮凭空消失。
+  expect(panelTextAfterReload, '刷新前的快照步骤要恢复').toContain('get_page_snapshot');
+  expect(panelTextAfterReload, '刷新前的点击步骤要恢复').toContain('click_element');
+  // 用户消息与最终回复都不能因为"续跑 + 恢复快照"各画一遍。
+  await expect(page.locator(PANEL + ' .msg.user')).toHaveCount(1);
+  await expect(page.locator(PANEL + ' .msg.user').first()).toHaveText('整页刷新');
+  await expect(
+    page.locator(PANEL + ' .agent-content').filter({ hasText: '页面已整页刷新' })
+  ).toHaveCount(1);
 
   await page.close();
 });
@@ -2673,7 +2687,9 @@ test('golden: 结构化查询能定位 custom element 并返回可用 ref / rect
   resetLlmRequests();
   await sendInstruction(page, '验证结构化元素查询契约');
 
-  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('元素查询命中');
+  // 等最后一步（零命中诊断）真的回来再断言。只等第一句「元素查询命中」会在
+  // 第 2 步就满足，后面的隐藏诊断还没到 —— 单跑靠时序侥幸通过，全套跑就假红。
+  await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('命中但当前不可见');
   const text = toolResultsText();
   expect(text, '按文本查询应找到自定义元素').toContain('xhs-publish-btn');
   expect(text, '必须标出这是 custom element，后续才知道要走坐标/组件语义').toContain('custom=true');

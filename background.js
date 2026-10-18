@@ -903,11 +903,16 @@ chrome.runtime.onConnect.addListener((port) => {
           if (!s) { reply({ runId: '', resumable: false, pending: true, instruction: '' }); return; }
           const instruction = String(s.instruction || '');
           const dead = ['completed', 'failed', 'cancelled', 'timeout'].includes(s.status);
+          // 把 SW 侧已归约的运行快照一并交给新面板：刷新前已经发生的工具步骤、
+          // 叙述与思考都还在这里面。只回 runId 的话，新面板只能从"续跑之后"
+          // 开始显示，用户会看到前半轮凭空消失。
+          const snapshot = runHub.snapshot(tr.runId);
           reply({
             runId: instruction && !dead ? tr.runId : '',
             resumable: Boolean(instruction) && !dead,
             pending: false,
             instruction,
+            snapshot: instruction && !dead ? snapshot : null,
           });
         } catch (e) {
           reply({ runId: '', resumable: false, pending: false, instruction: '' });

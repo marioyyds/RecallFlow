@@ -81,9 +81,11 @@ test('chat.js：定稿的思考记录进 pendingParts（面板重建时按原位
   const finishBody = finish.slice(0, finish.indexOf('\n  }'));
   assert.match(finishBody, /pendingParts\.push\(\{\s*type:\s*'thinking'/, '定稿时应记入 flow 记录');
   // 恢复路径要认得这个类型，否则重开面板后思考全挤到最前（或直接消失）
-  const restore = chatSrc.slice(chatSrc.indexOf('function restoreStreamingUI('));
-  const restoreBody = restore.slice(0, 3600);
+  const restore = chatSrc.slice(chatSrc.indexOf('function renderCommittedParts('));
+  const restoreBody = restore.slice(0, 1800);
   assert.match(restoreBody, /p\.type === 'thinking'/, '重建循环应处理 thinking 部件');
+  const streaming = chatSrc.slice(chatSrc.indexOf('function restoreStreamingUI('));
+  assert.match(streaming.slice(0, 800), /renderCommittedParts\(flow\)/, '流式重开必须复用同一个重建循环');
 });
 
 test('chat.js：正文/结束/进入工具步骤时都要给思考记录定稿', () => {
@@ -311,7 +313,8 @@ test('chat.js：流式重开面板时，flowEl 必须**先**指向新的 flow（
   // ⚠ 先剥掉注释行再判位置：注释里提到 `mountThinkSegment()` 会让 `indexOf` 命中注释而不是调用
   //（第一版就是这么把自己判红的 ✗）
   const live = chatSrc.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  const liveAt = live.indexOf('function restoreStreamingUI(');
+  // 循环已抽到 renderCommittedParts（流式重开与刷新恢复共用），判据跟着**实际挂载点**走。
+  const liveAt = live.indexOf('function renderCommittedParts(');
   const body = live.slice(liveAt, live.indexOf('\nfunction ', liveAt + 10));
   const flowAssign = body.indexOf('flowEl = flow;');
   const mountCall = body.indexOf('mountThinkSegment(');
