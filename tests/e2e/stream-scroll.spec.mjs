@@ -91,3 +91,21 @@ test('跟随页在 owner 流式期间必须持续增长（不是只出终稿）'
   await a.close();
   await b.close();
 });
+
+test('同步窗口刚连上、还没有正文时不显示「（无内容）」', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await sendInstruction(a, '验证同步初始空态');
+  await a.waitForTimeout(300);
+
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect(b.locator(PANEL + ' .msg.user')).toBeVisible({ timeout: 5_000 });
+  // 夹具刻意让第一段正文晚 2.5s 到达；此时同步窗口显示的应是等待态，
+  // 而不是把空字符串交给 Markdown 渲染成「（无内容）」。
+  expect(await panelText(b, '.p-body')).not.toContain('（无内容）');
+  await expect.poll(() => panelText(b, '.p-body'), { timeout: 10_000 }).toContain('初始空态之后的第一段正文');
+
+  await a.close();
+  await b.close();
+});

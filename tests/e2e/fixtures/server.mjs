@@ -3057,20 +3057,31 @@ function sse(res, chunks) {
 }
 
 /** 固定节奏的慢速流（不依赖环境变量），用于构造"用户正在上滚时仍有新内容到达"的窗口。 */
-function sseSlow(res, chunks, delayMs) {
+function sseSlow(res, chunks, delayMs, firstDelayMs = 0) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
   let i = 0;
-  const timer = setInterval(() => {
-    if (i < chunks.length) {
-      res.write('data: ' + JSON.stringify(chunks[i]) + '\n\n');
-      i += 1;
-      return;
-    }
-    clearInterval(timer);
-    res.write('data: [DONE]\n\n');
-    res.end();
-  }, Math.max(10, Number(delayMs) || 80));
-  res.on('close', () => clearInterval(timer));
+  let timer = null;
+  let startTimer = null;
+  const start = () => {
+    startTimer = null;
+    timer = setInterval(() => {
+      if (i < chunks.length) {
+        res.write('data: ' + JSON.stringify(chunks[i]) + '\n\n');
+        i += 1;
+        return;
+      }
+      clearInterval(timer);
+      timer = null;
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }, Math.max(10, Number(delayMs) || 80));
+  };
+  if (Number(firstDelayMs) > 0) startTimer = setTimeout(start, Number(firstDelayMs));
+  else start();
+  res.on('close', () => {
+    if (timer) clearInterval(timer);
+    if (startTimer) clearTimeout(startTimer);
+  });
 }
 
 function textDelta(content) {
@@ -4696,6 +4707,21 @@ const llm = http.createServer((req, res) => {
       chunks.push({ choices: [{ delta: {}, finish_reason: 'stop' }] });
       chunks.push({ usage: { total_tokens: 260 } });
       sseSlow(res, chunks, 80);
+      return;
+    }
+
+    // 场景：流式开始后先沉默 2.5s，用于检查同步窗口的“初始空态”不能显示（无内容）。
+    if (userText.includes('验证同步初始空态')) {
+      sseSlow(
+        res,
+        [
+          textDelta('初始空态之后的第一段正文。'),
+          { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          { usage: { total_tokens: 60 } },
+        ],
+        80,
+        2500
+      );
       return;
     }
 

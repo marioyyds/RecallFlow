@@ -6413,7 +6413,8 @@
       return "";
     }).join("");
     const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
-    const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : cachedAnswerHtml(m.content || "", m.citations, false);
+    const rawContent = String(m.content || "");
+    const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : m.live && !rawContent ? "" : cachedAnswerHtml(rawContent, m.citations, false);
     const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
     const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
     const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
