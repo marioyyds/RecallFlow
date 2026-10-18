@@ -236,3 +236,20 @@ test('hub: finish 冲刷尾量并广播结束快照', () => {
   assert.equal(done.status, 'completed');
   assert.equal(ends.length, 1);
 });
+
+test('hub: 定时器不能以 hub 作为 this 调用（浏览器里是 Illegal invocation）', () => {
+  // 原生 window.setTimeout 要求 this=window；`this.setTimer(...)` 会把 this 绑到 hub。
+  // 一旦抛错，第一次文本 flush 就停了，跟随页只能靠轮询快照 → 看起来“不流式”。
+  let called = 0;
+  const hub = new RunStreamHub({
+    flushMs: 1,
+    setTimer(cb, ms) {
+      called += 1;
+      assert.equal(this, undefined, 'setTimer 必须以普通函数调用，而不是 hub 的方法调用');
+      return setTimeout(cb, ms);
+    },
+  });
+  hub.begin({ runId: 'run-timer', sessionId: 'S-timer', ownerTabId: 1 });
+  hub.push('run-timer', { type: 'chunk', text: 'x' });
+  assert.equal(called, 1);
+});

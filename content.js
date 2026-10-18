@@ -9155,6 +9155,7 @@
         } else if (msg.type === "panel:toggle") {
           togglePanelFromShortcut();
         }
+        return false;
       });
     } catch (e) {
       warnExtDead();

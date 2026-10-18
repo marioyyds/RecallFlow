@@ -258,8 +258,19 @@ function sendToRunSubscribers(sessionId, payload, excludeTabId) {
   for (const [tabId, subscribed] of [...runSubscriptions]) {
     if (subscribed !== wanted) continue;
     if (tabId === excludeTabId) continue;
+    runStats.sent += 1;
     chrome.tabs.sendMessage(tabId, payload, { frameId: 0 }, () => {
-      if (chrome.runtime.lastError) runSubscriptions.delete(tabId);
+      if (chrome.runtime.lastError) {
+        runStats.sendErrors += 1;
+        runStats.lastSendError = String(chrome.runtime.lastError.message || '');
+        // 只有"内容脚本已经不存在"才删除订阅。
+        // "message port closed before a response was received" 说明消息**已经送达**，
+        // 只是某个监听器没有返回响应；把订阅删掉会让跟随页只收到第一条 delta，
+        // 后续只能靠 1.2s 轮询快照 → 看起来像"根本不流式"。
+        if (/Receiving end does not exist|Could not establish connection/i.test(runStats.lastSendError)) {
+          runSubscriptions.delete(tabId);
+        }
+      }
     });
   }
 }
@@ -280,6 +291,7 @@ const runHub = new RunStreamHub({
     );
   },
   onDelta: (delta) => {
+    runStats.hubDeltas += 1;
     sendToRunSubscribers(
       delta.sessionId,
       {
@@ -816,7 +828,7 @@ const runChannels = new Map();
 const runAbortTimers = new Map();
 const REATTACH_GRACE_MS = 8000;
 // 运行生命周期计数（只读诊断；E2E 用它证明刷新走的是 reattach，而不是 abort+续跑）。
-const runStats = { starts: 0, reattaches: 0, aborts: 0 };
+const runStats = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0, sent: 0, sendErrors: 0 };
 try {
   globalThis.__rfRunStats = runStats;
 } catch (e) {}
@@ -1146,7 +1158,14 @@ chrome.runtime.onConnect.addListener((port) => {
             tabId,
             (event) => {
               if (event && event.type === 'tabs-close-pending') registerRunCleanup(runId, event);
-              if (sessionId) runHub.push(runId, event);
+              if (sessionId) {
+                try {
+                  runHub.push(runId, event);
+                } catch (e) {
+                  runStats.hubErrors = (runStats.hubErrors || 0) + 1;
+                  runStats.lastHubError = String((e && e.message) || e);
+                }
+              }
             }
           );
           console.log('[RecallFlow] agent run finished');

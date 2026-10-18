@@ -15,6 +15,7 @@ import {
   openFixturePage,
   sendInstruction,
   createFreshPanelSession,
+  panelText,
   PANEL,
 } from './helpers.mjs';
 
@@ -64,4 +65,29 @@ test('流式输出中用户上滚：不被后续增量拉回底部', async () =>
   expect(await gap(page), '持续流式期间也必须保持用户选择的滚动位置').toBeGreaterThan(80);
 
   await page.close();
+});
+
+test('跟随页在 owner 流式期间必须持续增长（不是只出终稿）', async () => {
+  await configureSettings(context);
+  const a = await openFixturePage(context);
+  await sendInstruction(a, '验证流式上滚');
+  await a.waitForTimeout(600);
+
+  const b = await openFixturePage(context);
+  await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(async () => String(await panelText(b, '.p-body') || '').length, { timeout: 5_000 })
+    .toBeGreaterThan(20);
+  const len1 = String(await panelText(b, '.p-body') || '').length;
+  const samples = [len1];
+  for (let i = 0; i < 5; i++) {
+    await b.waitForTimeout(250);
+    samples.push(String(await panelText(b, '.p-body') || '').length);
+  }
+  const len2 = String(await panelText(b, '.p-body') || '').length;
+  expect(len2, '跟随页正文应在流式期间继续增长').toBeGreaterThan(len1 + 20);
+  expect(new Set(samples).size, '跟随页应在多个时间点持续更新，而不是一次性刷出').toBeGreaterThan(2);
+
+  await a.close();
+  await b.close();
 });
