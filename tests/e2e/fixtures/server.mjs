@@ -4699,6 +4699,26 @@ const llm = http.createServer((req, res) => {
       return;
     }
 
+    // 场景：后台工具执行中整页刷新（工具跑在 SW，不依赖页面 port）。
+    if (userText.includes('验证工具执行中刷新')) {
+      const done = toolResults.length;
+      if (done === 0) {
+        toolStep(res, 'fetch_webpage', { url: 'http://127.0.0.1:' + MAIN_PORT + '/slow-page' });
+        return;
+      }
+      finalText(res, '慢响应完成，任务继续。', 40);
+      return;
+    }
+
+    // 场景：run 恰好在刷新窗口内结束（新页面还没加载完，旧页面已经没了）。
+    if (userText.includes('验证刷新窗口完成')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { selector: '#reload' }); return; }
+      finalText(res, '刷新窗口完成，最终回复已恢复。', 40);
+      return;
+    }
+
     // 夹具场景：整页刷新后任务应能继续（产品缺口：当前在刷新处中断）。见 golden.spec 的 fixme 用例。
     if (userText.includes('整页刷新')) {
       const done = toolResults.length;
@@ -4815,12 +4835,47 @@ const main = http.createServer((req, res) => {
         }));
     return;
   }
+  // 慢响应：fetch_webpage 在 SW 里执行，整页刷新不会打断它。
+  if (url.startsWith('/slow-page')) {
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end('<!doctype html><meta charset="utf-8"><p>慢响应完成</p>');
+    }, 1500);
+    return;
+  }
+  // 1x1 GIF，延迟返回；用来拖慢整页 reload 的 load 事件。
+  if (url.startsWith('/slow-image')) {
+    const m = /[?&]ms=(\d+)/.exec(url);
+    const delay = m ? Math.min(8000, Math.max(100, Number(m[1]))) : 1500;
+    setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'image/gif', 'Cache-Control': 'no-store' });
+      res.end(Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64'));
+    }, delay);
+    return;
+  }
   // ⚠ CSP 夹具需要**不同的响应头**：`script-src 'self' 'unsafe-inline'` 放行页面自己的内联脚本
   // （否则连夹具页的脚本都跑不起来，难点就不是"eval 被拒"了），但**不放行 `unsafe-eval`** ——
   // 这正是 run_javascript 默认沙箱（`new Function`）会撞上的东西。其余夹具页仍用宽松的头。
   const cspHeaders = url.startsWith('/csp')
     ? { 'Content-Security-Policy': "script-src 'self' 'unsafe-inline'; object-src 'none'" }
     : {};
+  if (url.startsWith('/slow-reload')) {
+    const slow = /[?&]slow=1/.test(url);
+    const send = () => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(
+        '<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>慢刷新夹具</title></head>' +
+          '<body><h1>慢刷新夹具</h1><button id="reload">刷新</button>' +
+          '<script>document.getElementById("reload").addEventListener("click", function(){ location.href = "/slow-reload?slow=1"; });</script>' +
+          '</body></html>'
+      );
+    };
+    // 初始页面立即返回；点击后导航到 ?slow=1，故意把**新文档响应**拖到 6s，
+    // 制造"旧页面已提交导航、新面板还没起来"的窗口。
+    if (slow) setTimeout(send, 6000);
+    else send();
+    return;
+  }
   res.writeHead(200, Object.assign({ 'Content-Type': 'text/html; charset=utf-8' }, cspHeaders));
   res.end(
     req.url && req.url.startsWith('/custom') ? customElementsPage()

@@ -844,7 +844,7 @@ function scheduleAbortIfNoReattach(runId, tabId) {
     const channel = runChannels.get(id);
     if (channel && channel.isAttached()) return;
     try {
-      if (rec.controller) {
+      if (rec.controller && !rec.controller.__rfFinished) {
         runStats.aborts += 1;
         rec.controller.abort();
       }
@@ -947,7 +947,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
     // 没有绑定 run 的 port（query-run 等）断开不产生副作用；
     // 真正 abort 只留给显式停止、标签页关闭和宽限超时。
-    if (controller) {
+    if (controller && !controller.__rfFinished) {
       try {
         runStats.aborts += 1;
         controller.abort();
@@ -962,7 +962,7 @@ chrome.runtime.onConnect.addListener((port) => {
         const tr = senderTabId ? tabRuns.get(senderTabId) : null;
         const stopped = requestRunStop({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
         // 已经处于收尾/停止中的 run 仍要 abort 一次兜底，保证端口断开前的意图不丢。
-        if (!stopped.ok && controller) {
+        if (!stopped.ok && controller && !controller.__rfFinished) {
           try {
             runStats.aborts += 1;
             controller.abort();
@@ -1152,6 +1152,7 @@ chrome.runtime.onConnect.addListener((port) => {
           console.log('[RecallFlow] agent run finished');
           // abort 既可能是用户停止，也可能是页面刷新/端口断开；不能一律报 completed。
           if (sessionId) runHub.finish(runId, runController.signal.aborted ? 'cancelled' : 'completed');
+          runController.__rfFinished = true;
           clearRunAbortTimer(runId);
           runChannels.delete(String(runId));
           attachedRunId = '';
@@ -1166,6 +1167,7 @@ chrome.runtime.onConnect.addListener((port) => {
             runHub.push(runId, { type: 'end' });
             runHub.finish(runId, runController.signal.aborted ? 'cancelled' : 'failed');
           }
+          runController.__rfFinished = true;
           clearRunAbortTimer(runId);
           runChannels.delete(String(runId));
           attachedRunId = '';
