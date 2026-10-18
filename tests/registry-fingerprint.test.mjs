@@ -192,7 +192,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       inspect_element({op:"query"})"。改的是**工具选择点**的引导：
   //                       模型准备写 querySelector 时看到的正是这段描述，而系统提示里的
   //                       同类规则离这个决策更远。工具数仍 45，权限元数据不变。
-  const EXPECTED = 'ee47a65b601eab20';
+  //   4bb18dc10068e1fd —— **有意改动**：`inspect_element` / `wait_for_element` 声明
+  //                       `frameId`。执行层一直支持（frameIdFromArgs），技能正文也一直
+  //                       这么写，但 schema 没声明 —— 模型只能猜。工具数仍 45，
+  //                       权限元数据不变；体积仍在预算内（35269 / 35900）。
+  const EXPECTED = '4bb18dc10068e1fd';
   assert.equal(
     fp,
     EXPECTED,

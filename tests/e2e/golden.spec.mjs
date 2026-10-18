@@ -206,6 +206,7 @@ test('golden: 站点助手 —— 只改目标工单，状态读回模型上下�
 test('golden: 跨域 iframe 内点击（frame 路由 + f<frameId>: 前缀 ref）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);
+  resetLlmRequests();
 
   await sendInstruction(page, '点击框架里的按钮');
 
@@ -220,6 +221,13 @@ test('golden: 跨域 iframe 内点击（frame 路由 + f<frameId>: 前缀 ref）
       { timeout: 40_000 }
     )
     .toBe(true);
+
+  // 首屏合并快照还要把**子框架的能力**带出来：否则模型看得到按钮，
+  // 却不知道框架里还有自定义组件与内部滚动容器。
+  const text = toolResultsText();
+  expect(text, '合并快照应列出子框架内的自定义元素').toContain('xhs-frame-action');
+  expect(text, '子框架能力样本必须带 frameId').toMatch(/"frameId":\d+/);
+  expect(text, '能力提示要给出该框架的下一步').toContain('get_page_snapshot({frameId:N})');
 
   await page.close();
 });

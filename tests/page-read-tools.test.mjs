@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import {
   listFramesRaw,
   prefixFrameRefs,
+  isCrossOriginFrame,
+  mergeFrameCapabilities,
   formatCapabilityHint,
   readCurrentPage,
   getPageSnapshotTool,
@@ -37,6 +39,72 @@ test('没有特殊能力时不给任何提示（避免每份快照都塞废话�
   assert.equal(formatCapabilityHint(null), '');
   assert.equal(formatCapabilityHint({}), '');
   assert.equal(formatCapabilityHint({ customElements: { count: 0, samples: [] } }), '');
+});
+
+test('合并子框架能力：计数相加，样本带 frameId，且给子框架留位置', () => {
+  const merged = mergeFrameCapabilities(
+    {
+      customElements: {
+        count: 8,
+        samples: [
+          { tag: 'top-a', selector: 'top-a' },
+          { tag: 'top-b', selector: 'top-b' },
+          { tag: 'top-c', selector: 'top-c' },
+          { tag: 'top-d', selector: 'top-d' },
+        ],
+      },
+    },
+    [
+      { frameId: 3, capabilities: { customElements: { count: 2, samples: [{ tag: 'frame-btn', selector: '#fb' }] } } },
+      { frameId: 5, capabilities: { customElements: { count: 1, samples: [{ tag: 'frame-editor', selector: '#ed' }] } } },
+    ]
+  );
+  assert.equal(merged.customElements.count, 11, '顶层 + 两个子框架的计数都要算进去');
+  assert.deepEqual(
+    merged.customElements.samples.map((s) => s.tag),
+    ['top-a', 'top-b', 'frame-btn', 'frame-editor'],
+    '顶层最多留 2 条，其余名额给各子框架'
+  );
+  assert.equal(merged.customElements.samples[2].frameId, 3);
+  assert.equal(merged.customElements.samples[3].frameId, 5);
+});
+
+test('同源 iframe 不重复合并能力（顶层扫描已穿透），跨源才合并', () => {
+  assert.equal(isCrossOriginFrame('https://a.test/p', 'https://a.test/frame'), false);
+  assert.equal(isCrossOriginFrame('http://127.0.0.1:7802/', 'http://127.0.0.1:7803/frame'), true);
+  assert.equal(isCrossOriginFrame('https://a.test/', 'not a url'), true, '解析失败按跨源处理');
+});
+
+test('子框架能力提示必须给出 frameId 的下一步，而不是只报个总数', () => {
+  const hint = formatCapabilityHint({
+    scrollContainers: {
+      count: 2,
+      samples: [
+        { selector: '#top', frameId: undefined },
+        { selector: '#inner', frameId: 7 },
+      ],
+    },
+  });
+  assert.match(hint, /frame 7/);
+  assert.match(hint, /get_page_snapshot\(\{frameId:N\}\)/);
+  assert.match(hint, /自动路由/);
+});
+
+test('顶层与子框架都有自定义元素时，提示里两者都要出现', () => {
+  // 只取前两条样本时，若前两条都是顶层的，子框架条目就会被藏起来 ——
+  // 合计 count 里有它、提示里却没有，模型不会去读那个框架。
+  const hint = formatCapabilityHint({
+    customElements: {
+      count: 3,
+      samples: [
+        { tag: 'top-a', selector: 'top-a' },
+        { tag: 'top-b', selector: 'top-b' },
+        { tag: 'frame-btn', selector: '#fb', frameId: 7 },
+      ],
+    },
+  });
+  assert.match(hint, /top-a/);
+  assert.match(hint, /frame 7 · frame-btn/);
 });
 
 function mkDeps(overrides = {}) {

@@ -56,6 +56,19 @@ test('run_javascript 的选择点必须指向 query（而不是让模型自己�
   assert.equal(byName.run_javascript.alwaysRequireApproval, true, '逃生舱的审批不能被顺手放松');
 });
 
+test('跨框架查询/等待的 frameId 必须在 schema 里声明（技能文案已经这么用）', () => {
+  // 技能正文写着 inspect_element({ op:"text", frameId: 5, ... }) 与
+  // wait_for_element "同样支持 frameId"。执行层确实支持（frameIdFromArgs），
+  // 但 schema 不声明时模型只能靠猜 —— 技能与工具契约就分叉了。
+  for (const name of ['inspect_element', 'wait_for_element']) {
+    const prop = byName[name].inputSchema.properties.frameId;
+    assert.ok(prop, name + ' 必须声明 frameId');
+    assert.equal(prop.type, 'integer');
+    assert.match(prop.description, /iframe/, name + ' 的 frameId 说明要提到 iframe');
+    assert.match(prop.description, /list_frames/, '要说明 frameId 的来源');
+  }
+});
+
 test('被合并的两个工具名不得再出现在注册表里（否则模型会看到已失效的签名）', () => {
   assert.ok(!byName.get_element_text, 'get_element_text 应已并入 inspect_element');
   assert.ok(!byName.extract_table, 'extract_table 应已并入 inspect_element');

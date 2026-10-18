@@ -2842,6 +2842,8 @@ function datePickerPage() {
 function framePage() {
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具框架</title></head>
 <body><button id="fb" role="button">框架按钮</button>
+<xhs-frame-action>框架内组件</xhs-frame-action>
+<div id="frame-scroller" style="height:40px;overflow:auto"><div style="height:150px">框架滚动内容</div></div>
 <script>window.__frameClicked = false; document.getElementById('fb').addEventListener('click', () => { window.__frameClicked = true; });</script>
 </body></html>`;
 }
