@@ -140,6 +140,34 @@ test('run state: 待关闭辅助页会显示在跟随时间线里', () => {
   );
 });
 
+test('run state: 登录拦截提示随 tool-result 进入快照与跟随页', () => {
+  const s = state();
+  applyRunEvent(s, {
+    type: 'tool-result',
+    callId: 'c-login',
+    name: 'click_element',
+    status: 'completed',
+    result: '点击已派发',
+    needsLogin: true,
+    loginUrl: 'https://site.test/login?return=%2Fwork',
+    authMessage: '操作被登录拦截：当前页面需要先登录后才能继续。',
+    authChallenge: {
+      required: true,
+      reason: 'login-required',
+      summary: '操作被登录拦截',
+      message: '操作被登录拦截：当前页面需要先登录后才能继续。',
+      loginUrl: 'https://site.test/login?return=%2Fwork',
+    },
+  });
+  const part = s.parts.find((p) => p.type === 'tool-result');
+  assert.equal(part.needsLogin, true);
+  assert.equal(part.authChallenge.loginUrl, 'https://site.test/login?return=%2Fwork');
+  const msg = runStateToAssistantMessage(s);
+  const followed = msg.parts.find((p) => p.type === 'tool-result');
+  assert.equal(followed.needsLogin, true, '跟随页必须拿到同一份登录提示状态');
+  assert.equal(followed.authChallenge.reason, 'login-required');
+});
+
 test('run state: 停止请求会进入「停止中」，结束事件再清掉停止标记', () => {
   const s = state();
   applyRunEvent(s, { type: 'stop-requested', byTabId: 22 });

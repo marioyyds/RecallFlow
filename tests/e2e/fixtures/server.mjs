@@ -2953,6 +2953,37 @@ function siteAssistantPage() {
 </body></html>`;
 }
 
+// 登录墙页：点击业务按钮后不走整页导航，而是在原页弹出登录提示。
+// 这样既能验证「动作被登录拦截」不依赖刷新恢复，也能确认面板拿到的是页面里
+// 真实存在的登录 href，而不是模型猜出来的地址。
+function authGatePage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>夹具受保护工作台</title></head>
+<body>
+  <h1>受保护工作台</h1>
+  <button id="open" type="button" role="button" aria-label="打开受保护内容">打开受保护内容</button>
+  <div id="gate" role="dialog" aria-label="需要登录" hidden>
+    <h2>请先登录后继续</h2>
+    <p>这部分内容属于你的私有工作区。</p>
+    <a id="login-link" href="/login?return=/auth-gate" role="link" aria-label="立即登录">立即登录</a>
+  </div>
+  <script>
+    window.__gateOpened = 0;
+    document.getElementById('open').addEventListener('click', function () {
+      window.__gateOpened += 1;
+      document.getElementById('gate').hidden = false;
+    });
+  </script>
+</body></html>`;
+}
+
+function loginPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>账号登录</title></head>
+<body>
+  <h1>账号登录</h1>
+  <p>这是登录页。登录成功后会回到受保护页面。</p>
+</body></html>`;
+}
+
 // 整页刷新页：点按钮 → location.reload()，刷新后靠 sessionStorage 显示「已刷新并继续」。
 // 用于复现产品缺口「同一 tab 的整页刷新会中断进行中的任务」（见 golden.spec 的 fixme 用例）。
 function reloadPage() {
@@ -3370,6 +3401,23 @@ const llm = http.createServer((req, res) => {
     const userText = instructionOf(userMsg && typeof userMsg.content === 'string' ? userMsg.content : '');
     const toolResults = messages.filter((m) => m.role === 'tool');
     const clicked = toolResults.some((m) => typeof m.content === 'string' && m.content.includes('已点击'));
+
+    // 登录拦截场景：快照 → 点击业务按钮 → 页面出现登录墙。
+    // 面板应从快照里的真实 href 生成可点击入口，并在模型收到的 tool 结果里
+    // 明确写出“先让用户登录，不要继续尝试”。
+    if (userText.includes('验证登录拦截')) {
+      const done = toolResults.length;
+      if (done === 0) {
+        toolStep(res, 'get_page_snapshot', { maxElements: 30, maxText: 800 });
+        return;
+      }
+      if (done === 1) {
+        toolStep(res, 'click_element', { role: 'button', name: '打开受保护内容' });
+        return;
+      }
+      finalText(res, '该操作被登录拦截，请先通过面板里的登录入口完成登录后重试。', 60);
+      return;
+    }
 
     // 场景 A：跨域 iframe —— 先合并读快照，再按 f<frameId>: 前缀 ref 点击框架内按钮。
     if (userText.includes('框架')) {
@@ -4907,6 +4955,8 @@ const main = http.createServer((req, res) => {
     req.url && req.url.startsWith('/custom') ? customElementsPage()
       : req.url && req.url.startsWith('/coord') ? coordPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
+        : req.url && req.url.startsWith('/auth-gate') ? authGatePage()
+          : req.url && req.url.startsWith('/login') ? loginPage()
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
           : req.url && req.url.startsWith('/article') ? articlePage()
             : req.url && req.url.startsWith('/debug') ? debugPage()

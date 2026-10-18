@@ -5068,6 +5068,24 @@
     .agent-step-label { font-size: 10.5px; font-weight: 700; opacity: .75; margin: 3px 0 2px; }
     .agent-step-pre { margin: 0; padding: 5px 7px; border-radius: 6px; background: rgba(0,0,0,.05); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; }
     .panel.dark .agent-step-pre { background: rgba(0,0,0,.28); }
+    .auth-challenge {
+      margin: 5px 0 8px; padding: 8px 10px; border: 1px solid #f0c36d;
+      border-left: 4px solid #d97706; border-radius: 7px; background: #fff8e6; color: #7c4a03;
+      font-size: 12px; line-height: 1.55;
+    }
+    .auth-challenge-title { font-weight: 700; margin-bottom: 2px; }
+    .auth-challenge-summary { word-break: break-word; }
+    .auth-challenge-link {
+      display: inline-flex; align-items: center; margin-top: 6px; padding: 3px 9px;
+      border: 1px solid #c98a00; border-radius: 6px; background: #fff;
+      color: #8a5a00; font-weight: 600; text-decoration: none;
+    }
+    .auth-challenge-link:hover { border-color: #a86f00; color: #6f4600; background: #fffdf7; }
+    .auth-challenge-link:focus-visible { outline: 2px solid #4a90d9; outline-offset: 2px; }
+    .panel.dark .auth-challenge {
+      border-color: #7c5a18; border-left-color: #d97706; background: #3b321d; color: #f3d28b;
+    }
+    .panel.dark .auth-challenge-link { background: #262218; border-color: #9b731f; color: #f3cd75; }
     /* \u622A\u56FE\uFF1A\u7ED9\u7528\u6237\u7684\u53EF\u89C6\u8BC1\u636E\uFF08\u6A21\u578B\u770B\u4E0D\u5230\u56FE\uFF0C\u6240\u4EE5\u53EA\u4F5C\u5C55\u793A\uFF09 */
     .agent-shot { margin: 6px 0; }
     .agent-shot img { display: block; max-width: 100%; max-height: 190px; border: 1px solid #d7dde5; border-radius: 8px; cursor: zoom-in; background: #fff; }
@@ -5208,7 +5226,19 @@
           callId: String(event.callId || ""),
           name: String(event.name || ""),
           status: String(event.status || ""),
-          result: String(event.result || "")
+          result: String(event.result || ""),
+          // 登录 / 权限提示必须跟着 tool-result 走：跟随页、刷新接管与历史回放
+          // 都从同一个 parts 数组重建，不再各猜一份页面状态。
+          ...event.needsLogin === true && event.authChallenge ? { needsLogin: true, authChallenge: event.authChallenge } : event.needsLogin === true ? {
+            needsLogin: true,
+            authChallenge: {
+              required: true,
+              reason: "login-required",
+              summary: String(event.authMessage || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\u3002"),
+              message: String(event.authMessage || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\u3002"),
+              loginUrl: String(event.loginUrl || "")
+            }
+          } : {}
         });
         if (state.approval && state.approval.callId === String(event.callId || "")) state.approval = null;
         break;
@@ -6090,6 +6120,31 @@
     wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
     return wrap.firstElementChild;
   }
+  function safeAuthLink(value) {
+    try {
+      const u = new URL(String(value || ""));
+      if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+      u.username = "";
+      u.password = "";
+      return u.href;
+    } catch (e) {
+      return "";
+    }
+  }
+  function authChallengeHtml(auth) {
+    if (!auth || auth.required !== true) return "";
+    const loginUrl = safeAuthLink(auth.loginUrl);
+    const summary = String(auth.summary || auth.message || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\uFF0C\u8BF7\u767B\u5F55\u540E\u91CD\u8BD5\u3002");
+    const reason = auth.reason === "permission-denied" ? "\u6743\u9650\u9650\u5236" : "\u767B\u5F55\u62E6\u622A";
+    return '<div class="auth-challenge" role="alert" data-auth-reason="' + escAttr(auth.reason || "login-required") + '"><div class="auth-challenge-title">\u26A0 \u64CD\u4F5C\u88AB' + escHtml(reason) + '</div><div class="auth-challenge-summary">' + escHtml(summary) + "</div>" + (loginUrl ? '<a class="auth-challenge-link" href="' + escAttr(loginUrl) + '" target="_blank" rel="noopener noreferrer">\u6253\u5F00\u767B\u5F55\u9875</a>' : "") + "</div>";
+  }
+  function authChallengeElement(auth) {
+    const html = authChallengeHtml(auth);
+    if (!html) return null;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    return wrap.firstElementChild;
+  }
   var SHOT_CACHE_MAX = 30;
   var shotCache = createLruCache(SHOT_CACHE_MAX);
   var shotPending = /* @__PURE__ */ new Set();
@@ -6236,6 +6291,8 @@
             clipDetail(p.result, 4e3)
           )
         );
+        const authEl = authChallengeElement(p.authChallenge);
+        if (authEl) flow.appendChild(authEl);
       }
     }
   }
@@ -6385,13 +6442,14 @@
       return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
     }
     if (p.type === "tool-result") {
-      return toolStepHtml(
+      const html = toolStepHtml(
         p.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : p.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
         p.name,
         "",
         p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
         clipDetail(p.result, 4e3)
       );
+      return html + authChallengeHtml(p.authChallenge);
     }
     if (p.type === "screenshot") return screenshotHtml(p);
     if (p.type === "thinking" && p.text) {
@@ -8569,7 +8627,23 @@
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "tool-result") {
-          pendingParts.push({ type: "tool-result", callId: resp.callId, name: resp.name, status: resp.status, result: resp.result || "" });
+          const resultPart = {
+            type: "tool-result",
+            callId: resp.callId,
+            name: resp.name,
+            status: resp.status,
+            result: resp.result || ""
+          };
+          if (resp.needsLogin === true) {
+            resultPart.needsLogin = true;
+            resultPart.authChallenge = resp.authChallenge && resp.authChallenge.required === true ? resp.authChallenge : {
+              required: true,
+              reason: "login-required",
+              summary: String(resp.authMessage || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\uFF0C\u8BF7\u767B\u5F55\u540E\u91CD\u8BD5\u3002"),
+              loginUrl: String(resp.loginUrl || "")
+            };
+          }
+          pendingParts.push(resultPart);
           appendStep(
             toolStepElement(
               resp.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : resp.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
@@ -8579,6 +8653,8 @@
               clipDetail(resp.result, 4e3)
             )
           );
+          const authEl = authChallengeElement(resultPart.authChallenge);
+          if (authEl) appendStep(authEl);
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "agent-state") {

@@ -70,6 +70,7 @@ const phases = [
   { name: '流式上滚', spec: 'stream-scroll.spec.mjs', hold: '', visionShot: '' },
   { name: '刷新时序边界', spec: 'reattach-edge.spec.mjs', hold: '', visionShot: '' },
   { name: '设置提示', spec: 'settings-ui.spec.mjs', hold: '', visionShot: '' },
+  { name: '登录拦截提示', spec: 'auth-challenge.spec.mjs', hold: '', visionShot: '' },
   // 会话共享/运行锁：需要真实的“生成中”窗口，否则两个标签页的请求会瞬间结束，
   // 根本撞不上同一把锁。这里单独把分片间隔拉长。
   { name: '会话共享', spec: 'sessions.spec.mjs', hold: '', visionShot: '', chunkDelay: '1200' },

@@ -100,16 +100,18 @@ test('switch_tab：拒绝非法 tabId，且不发起任何浏览器调用', asyn
 
 test('switch_tab：激活目标页、等就绪、绑定会话，并回传 targetTabId', async () => {
   const deps = mkDeps();
-  const t = await deps.chrome.tabs.create({ url: 'https://a.test/' });
+  const t = await deps.chrome.tabs.create({ url: 'https://a.test/', active: false });
   deps.calls.length = 0;
   const r = await switchTab(deps, { tabId: t.id });
   assert.equal(r.ok, true);
+  assert.equal(r.activated, true);
   assert.equal(r.targetTabId, t.id);
   assert.equal(r.targetTab.ready, true);
   const ops = deps.calls.map((c) => c.op);
   assert.ok(ops.includes('update'), '应把目标页设为 active');
   assert.ok(ops.includes('wait'), '应等待页面就绪');
   assert.ok(ops.includes('bind'), '应同步绑定会话标签页');
+  assert.equal(deps.ctx.tabSwitchCount, 1, '真实切换应计入标签页切换预算');
 });
 
 test('switch_tab：目标不存在时返回可读失败（不抛）', async () => {
@@ -188,4 +190,55 @@ test('open_tab：同 URL 复用也会绑定会话（否则后续动作会打到�
   const binds = deps.calls.filter((c) => c.op === 'bind');
   assert.equal(binds.length, 1);
   assert.equal(binds[0].id, existing.id);
+});
+
+test('switch_tab：目标就是当前绑定页时是 no-op，不碰浏览器', async () => {
+  const deps = mkDeps();
+  const t = await deps.chrome.tabs.create({ url: 'https://a.test/', active: true });
+  deps.ctx.tabId = t.id;
+  deps.calls.length = 0;
+  const r = await switchTab(deps, { tabId: t.id });
+  assert.equal(r.ok, true);
+  assert.equal(r.noop, true);
+  assert.equal(r.activated, false);
+  assert.deepEqual(deps.calls, [], '同一页不应再 get/update/wait，避免无意义闪动');
+});
+
+test('switch_tab：达到上限后拒绝继续切换，且不调用 update', async () => {
+  const deps = mkDeps();
+  const current = await deps.chrome.tabs.create({ url: 'https://a.test/', active: true });
+  const target = await deps.chrome.tabs.create({ url: 'https://b.test/', active: false });
+  deps.ctx.tabId = current.id;
+  deps.ctx.tabSwitchCount = 6;
+  deps.ctx.maxTabSwitches = 6;
+  deps.calls.length = 0;
+  const r = await switchTab(deps, { tabId: target.id });
+  assert.equal(r.ok, false);
+  assert.equal(r.blocked, true);
+  assert.match(r.result, /不再继续切换/);
+  assert.equal(deps.calls.filter((c) => c.op === 'update').length, 0);
+  assert.equal(deps.calls.filter((c) => c.op === 'bind').length, 0);
+});
+
+test('switch_tab：目标已在浏览器前台时只绑定上下文，不重复激活', async () => {
+  const deps = mkDeps();
+  const target = await deps.chrome.tabs.create({ url: 'https://b.test/', active: true });
+  deps.calls.length = 0;
+  const r = await switchTab(deps, { tabId: target.id });
+  assert.equal(r.ok, true);
+  assert.equal(deps.calls.filter((c) => c.op === 'update').length, 0);
+  assert.equal(deps.ctx.tabSwitchCount || 0, 0);
+});
+
+test('open_tab：复用当前前台页时不再 update(active:true)', async () => {
+  const deps = mkDeps();
+  const existing = await deps.chrome.tabs.create({ url: 'https://a.test/', active: true });
+  deps.ctx.tabId = existing.id;
+  deps.calls.length = 0;
+  const r = await openTab(deps, { url: 'https://a.test/' });
+  assert.equal(r.ok, true);
+  assert.equal(r.reused, true);
+  assert.equal(r.activated, false);
+  assert.equal(deps.calls.filter((c) => c.op === 'update').length, 0);
+  assert.match(r.result, /无需再切换/);
 });

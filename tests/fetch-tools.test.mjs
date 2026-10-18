@@ -75,6 +75,31 @@ test('fetch_webpage：HTTP 状态码失败 → 记入永久拉黑', async () => 
   assert.deepEqual(deps.ctx.failedUrls, ['https://a.test/missing'], '确定性失败应拉黑');
 });
 
+test('fetch_webpage：401 返回登录提示，且不把 URL 永久拉黑', async () => {
+  const deps = mkDeps({ fetchImpl: async () => mkResp({ ok: false, status: 401 }) });
+  const r = await fetchWebpage(deps, { url: 'https://a.test/private' });
+  assert.equal(r.ok, false);
+  assert.equal(r.needsLogin, true);
+  assert.equal(r.authChallenge.reason, 'login-required');
+  assert.match(r.result, /登录 \/ 授权入口：https:\/\/a\.test\/login/);
+  assert.deepEqual(deps.ctx.failedUrls, [], '登录后同一 URL 仍可用，不能永久拉黑');
+});
+
+test('fetch_webpage：200 的登录重定向按登录墙处理', async () => {
+  const deps = mkDeps({
+    fetchImpl: async () =>
+      mkResp({
+        body: '<html><head><title>账号登录</title></head><body>请先登录后继续</body></html>',
+        url: 'https://a.test/login?return=%2Fprivate',
+      }),
+  });
+  const r = await fetchWebpage(deps, { url: 'https://a.test/private' });
+  assert.equal(r.ok, false);
+  assert.equal(r.needsLogin, true);
+  assert.equal(r.authChallenge.loginUrl, 'https://a.test/login?return=%2Fprivate');
+  assert.deepEqual(deps.ctx.failedUrls, [], '用户登录后可以重试同一目标 URL');
+});
+
 test('fetch_webpage：非文本内容类型 → 记入永久拉黑', async () => {
   const deps = mkDeps({ fetchImpl: async () => mkResp({ ct: 'application/pdf' }) });
   const r = await fetchWebpage(deps, { url: 'https://a.test/a.pdf' });
