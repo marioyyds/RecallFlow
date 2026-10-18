@@ -241,7 +241,10 @@ export function findScriptedStepProblems(source) {
   return problems;
 }
 
-const REAL_SOURCE = fs.readFileSync(SCRIPTED_SOURCE, 'utf8');
+// 统一成 LF 再比对：Windows 检出时 Git 会把工作区写成 CRLF，而下面几条"带牙齿"
+// 用例用 `\n` 做字面替换。不归一化的话，同一份代码在分支间切换后就会假红
+//（实测：合并到 master 后 `git switch` 触发 CRLF 转换，替换全部失效）。
+const REAL_SOURCE = fs.readFileSync(SCRIPTED_SOURCE, 'utf8').replace(/\r\n/g, '\n');
 
 // ------------------------------------------------------------------ 用例
 
