@@ -77,3 +77,5 @@ node scripts/run-e2e-live.mjs
 
 电商详情页（shadow DOM / SKU 规格）、小红书草稿（`storageState` 登录态 + 草稿模式）——
 沿同一条路径往 `sites.mjs` 加数据、往 `server.mjs` 加 per-site 分派即可。
+具体的登录态步骤、检查顺序与失败归因格式见
+[`docs/live-site-test-checklist.md`](../../docs/live-site-test-checklist.md)。

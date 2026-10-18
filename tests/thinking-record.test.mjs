@@ -139,7 +139,7 @@ test('chat.js：思考块标记**只有一处来源**（两条路共用，重复
   assert.equal(markup.length, 1, '思考块标记只能出现一次，实际 ' + markup.length + ' 处');
   const mount = chatSrc.slice(chatSrc.indexOf('function mountThinkSegment('));
   assert.match(mount.slice(0, 900), /createContextualFragment\(\s*thinkBlockHtml\(/, '流式挂载必须用 thinkBlockHtml 解析出节点');
-  const restore = chatSrc.slice(chatSrc.indexOf('function assistantMessageHtml('));
+  const restore = chatSrc.slice(chatSrc.indexOf('function partHtml('));
   assert.match(restore.slice(0, 6000), /return thinkBlockHtml\(/, '历史重建必须用 thinkBlockHtml');
 });
 
@@ -149,13 +149,13 @@ test('chat.js：重开面板时必须重建思考记录（renderConversation 要
   // 少的是**重建分支** —— renderConversation 只认 narration / text / tool-* / screenshot，
   // 思考块整块掉进 `return ''`。为什么以往 E2E 没抓到：它们只验过"流式进行中重开"
   //（那条路 restoreStreamingUI 早就有 thinking 分支），从没在**一轮结束之后**关过面板。
-  const at = chatSrc.indexOf('function assistantMessageHtml(');
+  const at = chatSrc.indexOf('function partHtml(');
   assert.ok(at >= 0);
   const body = chatSrc.slice(at, at + 6000);
   assert.match(body, /p\.type === 'thinking'/, '重建循环必须处理 thinking 部件');
   assert.match(
     body,
-    /thinkBlockHtml\(p\.text, \{ done: true/,
+    /thinkBlockHtml\(p\.text, \{ done: p\.live !== true/,
     '历史段必须按**定稿**态重建 —— 静止的历史不该继续跑"思考中"的动画'
   );
 });
@@ -177,7 +177,7 @@ test('chat.js：被持久化截断的思考必须标明（丢东西要说明）'
   // 用户会以为模型只想到这儿 —— 那正是本仓库最忌的"静默丢失"。
   assert.match(chatSrc, /function thinkLabelText\(done, len, truncated\)/, '文案要有唯一来源');
   assert.match(chatSrc, /保存时已截断/, '截断必须有一句可读的标注');
-  const restore = chatSrc.slice(chatSrc.indexOf('function assistantMessageHtml('));
+  const restore = chatSrc.slice(chatSrc.indexOf('function partHtml('));
   assert.match(restore.slice(0, 6000), /truncated: p\.textTruncated === true/, '重建时要把 parts 上的截断标记传进去');
 });
 

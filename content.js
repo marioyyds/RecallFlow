@@ -4774,6 +4774,7 @@
     /* margin-right \u662F --rf-edge\uFF1A\u628A\u6EDA\u52A8\u6761\u63A8\u5230\u53F3\u4FA7 resize \u624B\u67C4\u7684\u5DE6\u8FB9\u3002
        \u5C11\u4E86\u8FD9\u4E00\u53E5\uFF0C\u624B\u67C4\uFF08\u7EDD\u5BF9\u5B9A\u4F4D + z-index:5\uFF09\u4F1A\u538B\u4F4F\u6EDA\u52A8\u6761\uFF0C\u6EDA\u52A8\u6761\u5C31\u70B9\u4E0D\u52A8\u3001\u62D6\u4E0D\u52A8\u3002 */
     .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
+    .p-body:focus { outline: none; }
     .p-body::-webkit-scrollbar { width: 8px; }
     .p-body::-webkit-scrollbar-thumb { background: #d5d9e0; border-radius: 999px; }
     .p-body::-webkit-scrollbar-thumb:hover { background: #b8bec6; }
@@ -5481,6 +5482,7 @@
   var followedCursor = 0;
   var followedMessages = [];
   var followedLiveReady = false;
+  var followedDom = null;
   var followRefreshTimer = null;
   var followStatusTimer = null;
   var stopBtn = null;
@@ -6378,40 +6380,35 @@
     answerHtmlCache.set(key, html);
     return html;
   }
+  function partHtml(p, citations) {
+    if (p.type === "tool-call") {
+      return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
+    }
+    if (p.type === "tool-result") {
+      return toolStepHtml(
+        p.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : p.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
+        p.name,
+        "",
+        p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
+        clipDetail(p.result, 4e3)
+      );
+    }
+    if (p.type === "screenshot") return screenshotHtml(p);
+    if (p.type === "thinking" && p.text) {
+      return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
+    }
+    if ((p.type === "narration" || p.type === "text") && p.text) {
+      return '<div class="agent-content">' + cachedAnswerHtml(p.text, citations, p.live === true) + "</div>";
+    }
+    if (p.type === "notice" && p.text) {
+      return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
+    }
+    return "";
+  }
   function assistantMessageHtml(m, index, viewLength) {
     const parts = Array.isArray(m.parts) ? m.parts : [];
     const terminalNotices = parts.filter((p) => p && p.type === "notice" && p.terminal === true && p.text);
-    const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => {
-      if (p.type === "tool-call") {
-        return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
-      }
-      if (p.type === "tool-result") {
-        return toolStepHtml(
-          p.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : p.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
-          p.name,
-          "",
-          p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
-          clipDetail(p.result, 4e3)
-        );
-      }
-      if (p.type === "screenshot") {
-        return screenshotHtml(p);
-      }
-      if (p.type === "thinking" && p.text) {
-        if (p.live) return thinkBlockHtml(p.text, { done: false, truncated: p.textTruncated === true });
-        return thinkBlockHtml(p.text, { done: true, truncated: p.textTruncated === true });
-      }
-      if (p.type === "narration" && p.text) {
-        return '<div class="agent-content">' + cachedAnswerHtml(p.text, m.citations, p.live === true) + "</div>";
-      }
-      if (p.type === "text" && p.text) {
-        return '<div class="agent-content">' + cachedAnswerHtml(p.text, m.citations, p.live === true) + "</div>";
-      }
-      if (p.type === "notice" && p.text) {
-        return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
-      }
-      return "";
-    }).join("");
+    const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => partHtml(p, m.citations)).join("");
     const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
     const rawContent = String(m.content || "");
     const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : m.live && !rawContent ? "" : cachedAnswerHtml(rawContent, m.citations, false);
@@ -6424,6 +6421,7 @@
   function renderConversation() {
     if (!panelBody) return;
     followedLiveReady = false;
+    followedDom = null;
     const view = followedMessages.length ? conversation.concat(followedMessages) : conversation;
     if (!view.length) {
       panelBody.className = "p-body";
@@ -6474,36 +6472,137 @@
     if (userIndex < 0) return false;
     return conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
   }
+  function followedPartElement(part, citations) {
+    if (!part) return null;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = partHtml(part, citations);
+    return wrap.firstElementChild;
+  }
+  function ensureFollowedDom() {
+    if (followedDom && followedDom.aiEl && followedDom.aiEl.isConnected && followedDom.aiEl.parentNode === panelBody) {
+      return followedDom;
+    }
+    const instruction = String(followedRunState.instruction || "").trim();
+    const last = conversation.length ? conversation[conversation.length - 1] : null;
+    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
+    if (!conversation.length) panelBody.innerHTML = "";
+    panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
+    let userEl = null;
+    if (instruction && !alreadyHasUser) {
+      userEl = document.createElement("div");
+      userEl.className = "user-turn follow-live-user";
+      userEl.innerHTML = '<div class="msg user">' + escHtml(instruction) + "</div>";
+      panelBody.appendChild(userEl);
+    }
+    const aiEl = document.createElement("div");
+    aiEl.className = "msg ai follow-live-ai";
+    const flowEl2 = document.createElement("div");
+    flowEl2.className = "agent-flow";
+    const committedEl = document.createElement("div");
+    committedEl.className = "follow-committed";
+    const liveEl = document.createElement("div");
+    liveEl.className = "follow-live-tail";
+    flowEl2.appendChild(committedEl);
+    flowEl2.appendChild(liveEl);
+    aiEl.appendChild(flowEl2);
+    panelBody.appendChild(aiEl);
+    followedDom = {
+      userEl,
+      aiEl,
+      flowEl: flowEl2,
+      committedEl,
+      liveEl,
+      renderedParts: 0,
+      liveThink: null,
+      liveTextEl: null,
+      liveText: "",
+      typingEl: null
+    };
+    return followedDom;
+  }
   function renderFollowedLive() {
     if (!panelBody || !followedRunState) return;
     if (!followedLiveReady) {
       followedMessages = [];
       renderConversation();
       followedLiveReady = true;
-      if (!conversation.length) panelBody.innerHTML = "";
+      followedDom = null;
     }
-    panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
-    const instruction = String(followedRunState.instruction || "").trim();
-    const last = conversation.length ? conversation[conversation.length - 1] : null;
-    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
-    if (instruction && !alreadyHasUser) {
-      const wrap = document.createElement("div");
-      wrap.className = "user-turn follow-live-user";
-      wrap.innerHTML = '<div class="msg user">' + escHtml(instruction) + "</div>";
-      panelBody.appendChild(wrap);
-    }
+    const dom = ensureFollowedDom();
     const assistant = runStateToAssistantMessage(followedRunState);
-    if (assistant) {
-      const wrap = document.createElement("div");
-      wrap.innerHTML = assistantMessageHtml(assistant, conversation.length, conversation.length + 1);
-      const el = wrap.firstElementChild;
-      if (el) {
-        el.classList.add("follow-live-ai");
-        el._raw = assistant.content || "";
-        panelBody.appendChild(el);
+    if (!assistant) return;
+    const parts = Array.isArray(assistant.parts) ? assistant.parts : [];
+    const committedParts = parts.filter(
+      (p) => !(p && p.type === "thinking" && p.live) && !(p && p.type === "narration" && p.live)
+    );
+    const liveThinking = parts.find((p) => p && p.type === "thinking" && p.live);
+    const liveNarration = parts.find((p) => p && p.type === "narration" && p.live);
+    for (let i = dom.renderedParts; i < committedParts.length; i++) {
+      const part = committedParts[i];
+      let el = null;
+      if (part.type === "thinking" && dom.liveThink && part.text === dom.liveThink.text) {
+        el = dom.liveThink.el;
+        el.dataset.state = "done";
+        const label = el.querySelector(".think-label");
+        if (label) label.textContent = thinkLabelText(true, String(part.text || "").length, part.textTruncated === true);
+        dom.liveThink = null;
+      } else if ((part.type === "narration" || part.type === "text") && dom.liveTextEl && part.text === dom.liveText) {
+        el = dom.liveTextEl;
+        dom.liveTextEl = null;
+        dom.liveText = "";
+      } else {
+        el = followedPartElement(part, assistant.citations);
       }
-      renderPlan(Array.isArray(assistant.plan) ? assistant.plan : []);
+      if (el) dom.committedEl.appendChild(el);
     }
+    dom.renderedParts = committedParts.length;
+    if (liveThinking && liveThinking.text) {
+      if (!dom.liveThink) {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = thinkBlockHtml(liveThinking.text, { done: false });
+        const el = wrap.firstElementChild;
+        if (el) {
+          dom.liveEl.appendChild(el);
+          dom.liveThink = { el, text: liveThinking.text };
+        }
+      } else {
+        dom.liveThink.text = liveThinking.text;
+        const body = dom.liveThink.el.querySelector(".think-body");
+        if (body) body.textContent = liveThinking.text;
+        const label = dom.liveThink.el.querySelector(".think-label");
+        if (label) label.textContent = thinkLabelText(false, liveThinking.text.length, false);
+      }
+    } else if (dom.liveThink) {
+      dom.liveThink.el.remove();
+      dom.liveThink = null;
+    }
+    if (liveNarration && liveNarration.text) {
+      if (!dom.liveTextEl) {
+        dom.liveTextEl = document.createElement("div");
+        dom.liveTextEl.className = "agent-content";
+        dom.liveEl.appendChild(dom.liveTextEl);
+      }
+      if (dom.liveText !== liveNarration.text) {
+        dom.liveTextEl.innerHTML = cachedAnswerHtml(liveNarration.text, assistant.citations, true);
+        dom.liveText = liveNarration.text;
+      }
+    } else if (dom.liveTextEl) {
+      dom.liveTextEl.remove();
+      dom.liveTextEl = null;
+      dom.liveText = "";
+    }
+    const hasLiveContent = Boolean(dom.liveThink || dom.liveTextEl);
+    if (!hasLiveContent && !dom.typingEl) {
+      dom.typingEl = document.createElement("div");
+      dom.typingEl.className = "agent-content";
+      dom.typingEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+      dom.liveEl.appendChild(dom.typingEl);
+    } else if (hasLiveContent && dom.typingEl) {
+      dom.typingEl.remove();
+      dom.typingEl = null;
+    }
+    dom.aiEl._raw = assistant.content || "";
+    renderPlan(Array.isArray(assistant.plan) ? assistant.plan : []);
     if (usageEl) usageEl.textContent = followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
     fitPanelHeight();
     pinToBottom();
@@ -6566,6 +6665,7 @@
     followedCursor = 0;
     followedMessages = [];
     followedLiveReady = false;
+    followedDom = null;
     if (!streaming) {
       stopProgress();
     }
@@ -7551,6 +7651,7 @@
     panelBody.setAttribute("aria-live", "polite");
     panelBody.setAttribute("aria-atomic", "false");
     panelBody.setAttribute("aria-label", "\u5BF9\u8BDD\u5185\u5BB9");
+    panelBody.setAttribute("tabindex", "0");
     observerAutoScroll = true;
     const pbEl = panelBody;
     pbEl.addEventListener("scroll", () => {
@@ -8930,6 +9031,9 @@
             return;
           }
           if (resp.resumable && resp.runId && resp.instruction && !streaming) {
+            if (resp.live !== true) {
+              showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
+            }
             try {
               if (conversationLoadPromise) await conversationLoadPromise;
             } catch (e) {

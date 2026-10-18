@@ -117,16 +117,16 @@
         <input id="tool-approval" type="checkbox" hidden checked>
       </div>
       <label class="field">
-        <span class="field-label">代码执行审批</span>
+        <span class="field-label">用户脚本 / 技能写入审批</span>
         <select id="code-exec-approval" class="us-select">
           <option value="each">每次都要确认</option>
           <option value="session">本任务内允许一次（推荐）</option>
           <option value="auto">自动批准（不再询问）</option>
         </select>
         <span class="hint">
-          约束<b>所有执行任意/第三方代码</b>的工具：run_javascript（页面 JS 逃生舱）、
-          run_userscript / install_userscript（用户脚本，会从远程自动更新）。
-          注意它们共用这一个开关 —— 设为「自动批准」等于同时放开这三者。
+          只约束 <b>run_userscript / install_userscript</b>（会从远程自动更新的第三方脚本）
+          与 <b>save_skill</b>（会进入今后系统提示的技能正文）。
+          <b>run_javascript 已归入「执行页面命令」</b>，由上面的页面命令自动批准开关控制。
         </span>
       </label>
       <div class="settings-subsection-title">连接与开发</div>

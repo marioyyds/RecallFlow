@@ -46,3 +46,15 @@ test('系统提示把候选探索指向 inspect_element 的 query 档', () => {
   assert.match(p, /custom element/i, '要说清哪类目标走 query');
   assert.match(p, /不要为普通 DOM 查询调用 run_javascript/, '要挡住探索性 run_javascript');
 });
+
+test('关键词同分时不能冒充高置信度（否则会跳过 LLM 而误判）', () => {
+  const d = detectIntent('搜索知识库里的笔记');
+  // 搜索=browser 3，知识库/笔记=knowledge 3；同分时只靠优先级判成 browser
+  // 会误导后续工具集，因此必须降为 medium 交给 LLM。
+  assert.equal(d.confidence, 'medium');
+});
+
+test('关键词明显领先时仍保留高置信度快路径', () => {
+  const d = detectIntent('打开百度搜索今天的热搜');
+  assert.equal(d.confidence, 'high');
+});

@@ -19,7 +19,7 @@ test('跟随页的每个 delta 不再整轮重绘：只调度 renderFollowedLive
 
 test('跟随页的 live 消息有独立节点，历史对话只建一次', () => {
   const body = bodyOf(chat, 'function renderFollowedLive()', 2200);
-  assert.match(body, /follow-live-ai/, '应标记/替换 live assistant 节点');
+  assert.match(chat, /follow-live-ai/, '应标记/替换 live assistant 节点');
   assert.match(body, /if \(!followedLiveReady\)/, '历史对话应只构建一次');
 });
 

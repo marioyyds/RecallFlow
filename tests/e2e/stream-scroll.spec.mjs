@@ -109,3 +109,19 @@ test('同步窗口刚连上、还没有正文时不显示「（无内容）」',
   await a.close();
   await b.close();
 });
+
+test('对话区可聚焦：PageUp 能滚动正在流式输出的内容', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await sendInstruction(page, '验证流式上滚');
+  const body = page.locator(PANEL + ' .p-body');
+  await expect
+    .poll(() => body.evaluate((el) => el.scrollHeight - el.clientHeight), { timeout: 20_000 })
+    .toBeGreaterThan(160);
+  await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  const before = await body.evaluate((el) => el.scrollTop);
+  await body.focus();
+  await page.keyboard.press('PageUp');
+  await expect.poll(() => body.evaluate((el) => el.scrollTop), { timeout: 3_000 }).toBeLessThan(before);
+  await page.close();
+});

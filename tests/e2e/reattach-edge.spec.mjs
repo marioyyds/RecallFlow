@@ -34,6 +34,7 @@ test.afterAll(async () => {
 async function resetStats() {
   const sw = context.serviceWorkers()[0];
   await sw.evaluate(() => {
+    globalThis.__rfDebugStats = true;
     if (globalThis.__rfRunStats) Object.assign(globalThis.__rfRunStats, { starts: 0, reattaches: 0, aborts: 0 });
   });
   return sw;

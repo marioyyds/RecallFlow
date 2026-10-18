@@ -73,6 +73,7 @@ test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 ru
   const page = await openFixturePage(context, '/reload');
   const sw = context.serviceWorkers()[0];
   await sw.evaluate(() => {
+    globalThis.__rfDebugStats = true;
     if (globalThis.__rfRunStats) Object.assign(globalThis.__rfRunStats, { starts: 0, reattaches: 0, aborts: 0 });
   });
 
@@ -118,6 +119,7 @@ test('golden: 刷新时正在等审批 —— 新面板接管并恢复审批条'
   const page = await openFixturePage(context, '/reload');
   const sw = context.serviceWorkers()[0];
   await sw.evaluate(() => {
+    globalThis.__rfDebugStats = true;
     if (globalThis.__rfRunStats) Object.assign(globalThis.__rfRunStats, { starts: 0, reattaches: 0, aborts: 0 });
   });
   resetLlmRequests();

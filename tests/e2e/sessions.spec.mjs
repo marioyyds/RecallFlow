@@ -211,6 +211,12 @@ test('流式跟随：另一标签页中途加入也能看到思考与正文逐�
   await expect(b.locator(PANEL + ' .think-block')).toContainText('先确认页面结构', {
     timeout: 4_000,
   });
+  // 流式增量不能重置用户手动展开的思考块。
+  const liveThink = b.locator(PANEL + ' .think-block').first();
+  await liveThink.locator('.think-head').click();
+  await expect(liveThink).toHaveAttribute('data-open', 'true');
+  await b.waitForTimeout(800);
+  await expect(liveThink, '后续 delta 不得把用户展开的思考块收回').toHaveAttribute('data-open', 'true');
   // 4 秒的流中间窗口内，正文还没到：证明 B 跟随的是增量，而不是任务结束后的一次性快照。
   expect(await panelText(b, '.p-body')).not.toContain('我想好了');
 

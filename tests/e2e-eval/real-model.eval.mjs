@@ -22,6 +22,7 @@ import {
   openFixturePage,
   sendInstruction,
   resolveInstruction,
+  panelText,
   PANEL,
 } from '../e2e/helpers.mjs';
 import { evalPlaybooks } from '../e2e/fixtures/playbooks.mjs';
@@ -123,6 +124,21 @@ function printToolResults(limit = 240) {
   tools.forEach((m, i) => {
     console.log('  [' + (i + 1) + '] ' + String(m.content || '').replace(/\s+/g, ' ').slice(0, limit));
   });
+}
+
+function toolNamesInOrder() {
+  const seen = new Set();
+  const out = [];
+  for (const req of getLlmRequests()) {
+    for (const message of req.messages || []) {
+      for (const tc of message.tool_calls || []) {
+        if (!tc || !tc.function || seen.has(tc.id)) continue;
+        seen.add(tc.id);
+        out.push(tc.function.name);
+      }
+    }
+  }
+  return out;
 }
 
 for (const pb of evalPlaybooks()) {
@@ -236,3 +252,21 @@ for (const pb of evalPlaybooks()) {
     await page.close();
   });
 }
+
+test('eval(真模型): 自定义元素优先用结构化查询，不借道 run_javascript', async () => {
+  const model = process.env.RECALLFLOW_EVAL_MODEL || 'deepseek-chat';
+  await configureSettings(context, { model });
+  const page = await openFixturePage(context, '/custom');
+  resetLlmRequests();
+  await sendInstruction(
+    page,
+    '找到页面上的“发布笔记”按钮，告诉我它的中心坐标，并确认它是不是自定义元素。不要写 JavaScript。'
+  );
+  await waitForRunToFinish(page);
+  printTrace('custom-query');
+  const names = toolNamesInOrder();
+  expect(names).toContain('inspect_element');
+  expect(names, '普通 DOM 查询不应借道 run_javascript').not.toContain('run_javascript');
+  await expect.poll(() => panelText(page, '.p-body'), { timeout: 10_000 }).toMatch(/坐标|自定义/);
+  await page.close();
+});
