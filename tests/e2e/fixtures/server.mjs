@@ -2964,6 +2964,14 @@ function reloadPage() {
   <script>
     if (sessionStorage.getItem('recallflow-reload-clicked') === '1') {
       document.getElementById('after-reload').textContent = '已刷新并继续';
+      // 刻意延迟 1.2s：给新面板 reattach 留出真实窗口，
+      // 否则 run 可能在刷新后立刻结束，测到的只是"完成快照兜底"而不是"接管仍在跑的 run"。
+      setTimeout(() => {
+        const d = document.createElement('div');
+        d.id = 'slow-marker';
+        d.textContent = '慢标记已出现';
+        document.body.appendChild(d);
+      }, 1200);
     }
     document.getElementById('do-reload').addEventListener('click', () => {
       sessionStorage.setItem('recallflow-reload-clicked', '1');
@@ -4667,9 +4675,21 @@ const llm = http.createServer((req, res) => {
       const done = toolResults.length;
       if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
       if (done === 1) { toolStep(res, 'click_element', { selector: '#do-reload' }); return; }
-      if (done === 2) { toolStep(res, 'wait_for_element', { selector: '#after-reload', state: 'visible' }); return; }
+      // 刷新后先等一个**延迟出现**的标记：保证新面板有时间 reattach 到仍在跑的 run。
+      if (done === 2) { toolStep(res, 'wait_for_element', { selector: '#slow-marker', state: 'visible' }); return; }
       if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#after-reload' }); return; }
+      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#slow-marker' }); return; }
       finalText(res, '页面已整页刷新，并读到「已刷新并继续」。', 60);
+      return;
+    }
+
+    // 场景：审批等待期间整页刷新 —— 新面板必须接管仍在跑的 run 并恢复审批条。
+    if (userText.includes('验证刷新接管审批')) {
+      const done = toolResults.length;
+      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 20, maxText: 300 }); return; }
+      if (done === 1) { toolStep(res, 'click_element', { selector: 'h1' }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#after-reload' }); return; }
+      finalText(res, '审批后任务继续完成。', 40);
       return;
     }
 

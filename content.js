@@ -5198,7 +5198,10 @@
         if (event.requiresApproval) {
           state.approval = {
             callId: String(event.callId || ""),
-            name: String(event.name || "")
+            name: String(event.name || ""),
+            args: event.args && typeof event.args === "object" ? event.args : {},
+            risk: String(event.risk || "unknown"),
+            allowSession: event.allowSession !== false
           };
         }
         break;
@@ -6270,6 +6273,35 @@
     setTimeout(() => {
       if (hint.parentNode) hint.parentNode.removeChild(hint);
     }, 5e3);
+  }
+  function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
+    if (!box || !conn) return false;
+    const toolArgs = args && typeof args === "object" ? args : {};
+    const LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
+    const longField = LONG_TEXT_FIELD[name];
+    const longText = longField ? String(toolArgs[longField] || "") : "";
+    const approvalArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
+    const detail = approvalArgs && Object.keys(approvalArgs).length ? " \u53C2\u6570\uFF1A" + JSON.stringify(approvalArgs) : "";
+    const codeBlock = longText ? '<div class="tool-approval-label">' + (name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801") + '</div><pre class="tool-approval-code">' + escHtml(longText) + "</pre>" : "";
+    const riskLabel = risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C";
+    const sessionBtn = allowSession === false ? "" : '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>';
+    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + riskLabel + "</span></div>" + (detail ? '<div class="tool-approval-detail">' + escHtml(detail.replace(/^ 参数：/, "")) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
+    box.style.display = "";
+    const decide = (decision) => {
+      try {
+        conn.postMessage({ type: "tool-approval", callId, decision });
+      } catch (e) {
+      }
+      box.style.display = "none";
+      box.innerHTML = "";
+    };
+    box.querySelector(".tool-approve").addEventListener("click", () => decide("once"));
+    const sessionEl = box.querySelector(".tool-approve-session");
+    if (sessionEl) sessionEl.addEventListener("click", () => decide("session"));
+    box.querySelector(".tool-reject").addEventListener("click", () => decide("reject"));
+    fitPanelHeight();
+    pinToBottom();
+    return true;
   }
   var activeSendFn = null;
   function renderSuggestionButtons(container, text, sendFn) {
@@ -8214,26 +8246,22 @@
       fitPanelHeight();
       pinToBottom();
       const resumeSnapshot = runOptions.resumeSnapshot && typeof runOptions.resumeSnapshot === "object" ? runOptions.resumeSnapshot : null;
-      pendingAcc = resumeSnapshot ? String(resumeSnapshot.content || "") : "";
-      pendingVerifyPass = null;
-      pendingParts = [];
-      pendingNarration = "";
-      if (usageEl) usageEl.textContent = "";
-      if (resumeSnapshot) {
-        currentCitations = Array.isArray(resumeSnapshot.citations) ? resumeSnapshot.citations.slice() : null;
-        if (Array.isArray(resumeSnapshot.parts)) {
-          pendingParts = resumeSnapshot.parts.map((p) => Object.assign({}, p));
-        }
-        pendingNarration = String(resumeSnapshot.narration || "");
-        const plan = Array.isArray(resumeSnapshot.plan) ? resumeSnapshot.plan.slice() : [];
+      const applyResumeSnapshot = (snapshot, approvalConn) => {
+        if (!snapshot || typeof snapshot !== "object") return;
+        pendingAcc = String(snapshot.content || "");
+        pendingVerifyPass = null;
+        pendingParts = Array.isArray(snapshot.parts) ? snapshot.parts.map((p2) => Object.assign({}, p2)) : [];
+        pendingNarration = String(snapshot.narration || "");
+        currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
+        const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
         renderPlan(plan);
         lastPlan = plan;
-        if (usageEl && resumeSnapshot.tokens) usageEl.textContent = "tokens " + resumeSnapshot.tokens;
+        if (usageEl) usageEl.textContent = snapshot.tokens ? "tokens " + snapshot.tokens : "";
         flowEl.innerHTML = "";
         renderCommittedParts(flowEl);
         resetReasoning();
-        if (resumeSnapshot.reasoning) {
-          thinkSeg = { id: ++thinkSegSeq, text: String(resumeSnapshot.reasoning), done: false, block: null, body: null };
+        if (snapshot.reasoning) {
+          thinkSeg = { id: ++thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
           mountThinkSegment(thinkSeg);
         }
         contentEl.innerHTML = pendingNarration ? renderAnswer(pendingNarration, currentCitations, true) : '<span class="typing"><span></span><span></span><span></span></span>';
@@ -8243,7 +8271,33 @@
         pendingAiMsg = aiMsg;
         pendingContentEl = contentEl;
         pendingAiMsg._raw = pendingAcc;
-      } else {
+        runStartedAt = Number(snapshot.startedAt) || runStartedAt || Date.now();
+        const p = snapshot.progress || {};
+        progressState = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
+        progressStep = Number(p.step) || 0;
+        progressMax = Number(p.max) || 0;
+        if (progressEl) progressEl.classList.add("on");
+        renderProgress();
+        updateRunControlState();
+        if (snapshot.approval && approvalConn) {
+          const approval = snapshot.approval;
+          renderApprovalPrompt(
+            approvalArea,
+            approvalConn,
+            approval.callId,
+            approval.name,
+            approval.args,
+            approval.risk,
+            approval.allowSession
+          );
+        }
+      };
+      if (!resumeSnapshot) {
+        pendingAcc = "";
+        pendingVerifyPass = null;
+        pendingParts = [];
+        pendingNarration = "";
+        if (usageEl) usageEl.textContent = "";
         renderPlan([]);
         lastPlan = [];
         pendingAiMsg = aiMsg;
@@ -8254,14 +8308,7 @@
       }
       streaming = true;
       startProgress();
-      if (resumeSnapshot) {
-        runStartedAt = Number(resumeSnapshot.startedAt) || runStartedAt;
-        const p = resumeSnapshot.progress || {};
-        progressState = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
-        progressStep = Number(p.step) || 0;
-        progressMax = Number(p.max) || 0;
-        renderProgress();
-      }
+      if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
       updateRunControlState();
       if (!isExtContextAlive()) {
         showCitationHint("\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u5F53\u524D\u9875\u9762\u7684\u52A9\u624B\u5DF2\u5931\u6548\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
@@ -8280,7 +8327,16 @@
       conn.onMessage.addListener((resp) => {
         if (resp.runId && resp.runId !== activeRunId) return;
         clearRespTimers();
-        if (resp.type === "citations") {
+        if (resp.type === "reattached") {
+          applyResumeSnapshot(resp.snapshot, conn);
+          return;
+        } else if (resp.type === "reattach-failed") {
+          showCitationHint(resp.reason || "\u4EFB\u52A1\u5DF2\u7ED3\u675F\uFF0C\u6B63\u5728\u5237\u65B0\u4F1A\u8BDD\u3002");
+          endStream();
+          if (!adoptFinishedRunSnapshot(resp.snapshot)) loadConversation().catch(() => {
+          });
+          return;
+        } else if (resp.type === "citations") {
           currentCitations = resp.citations || null;
         } else if (resp.type === "tool-call") {
           pendingParts.push({ type: "tool-call", callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || "unknown" });
@@ -8288,25 +8344,7 @@
             toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3))
           );
           if (resp.requiresApproval) {
-            const LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
-            const longField = LONG_TEXT_FIELD[resp.name];
-            const longText = longField && resp.args ? String(resp.args[longField] || "") : "";
-            const approvalArgs = resp.name === "type_text" && resp.args ? { ...resp.args, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...resp.args, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : resp.args;
-            const detail = approvalArgs && Object.keys(approvalArgs).length ? " \u53C2\u6570\uFF1A" + JSON.stringify(approvalArgs) : "";
-            const codeBlock = longText ? '<div class="tool-approval-label">' + (resp.name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801") + '</div><pre class="tool-approval-code">' + escHtml(longText) + "</pre>" : "";
-            const riskLabel = resp.risk === "high" ? "\u9AD8\u98CE\u9669" : resp.risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C";
-            const sessionBtn = resp.allowSession === false ? "" : '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>';
-            approvalArea.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(resp.name) + '</span><span class="tool-approval-risk">' + riskLabel + "</span></div>" + (detail ? '<div class="tool-approval-detail">' + escHtml(detail.replace(/^ 参数：/, "")) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
-            approvalArea.style.display = "";
-            const decide = (decision) => {
-              conn.postMessage({ type: "tool-approval", callId: resp.callId, decision });
-              approvalArea.style.display = "none";
-              approvalArea.innerHTML = "";
-            };
-            approvalArea.querySelector(".tool-approve").addEventListener("click", () => decide("once"));
-            const sessionEl = approvalArea.querySelector(".tool-approve-session");
-            if (sessionEl) sessionEl.addEventListener("click", () => decide("session"));
-            approvalArea.querySelector(".tool-reject").addEventListener("click", () => decide("reject"));
+            renderApprovalPrompt(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
           }
           fitPanelHeight();
           pinToBottom();
@@ -8571,19 +8609,23 @@
         }
         renewPanelSessionLock();
       }, 2e4);
-      conn.postMessage({
-        action: "agent",
-        runId: activeRunId,
-        sessionId: panelSessionId,
-        question: instruction,
-        text: lastText,
-        page: pageText,
-        pageUrl: location.href,
-        pageTitle: document.title,
-        history: conversation.slice(),
-        ...runOptions.continuation ? { continuation: true } : {},
-        ...pickedElements.length ? { pickedElements } : {}
-      });
+      if (runOptions.reattach) {
+        conn.postMessage({ type: "reattach", runId: activeRunId, sessionId: panelSessionId });
+      } else {
+        conn.postMessage({
+          action: "agent",
+          runId: activeRunId,
+          sessionId: panelSessionId,
+          question: instruction,
+          text: lastText,
+          page: pageText,
+          pageUrl: location.href,
+          pageTitle: document.title,
+          history: conversation.slice(),
+          ...runOptions.continuation ? { continuation: true } : {},
+          ...pickedElements.length ? { pickedElements } : {}
+        });
+      }
       if (pickedElements.length) {
         pickedElements = [];
         try {
@@ -8703,6 +8745,34 @@
     restoreStreamingUI();
   }
   var observerAutoScroll = true;
+  function adoptFinishedRunSnapshot(snapshot) {
+    if (!snapshot || snapshot.status === "running" || !Array.isArray(snapshot.parts)) return false;
+    const instruction = String(snapshot.instruction || "").trim();
+    if (!instruction) return false;
+    let userIndex = -1;
+    for (let i = conversation.length - 1; i >= 0; i--) {
+      if (conversation[i] && conversation[i].role === "user" && String(conversation[i].content || "").trim() === instruction) {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex >= 0 && conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live)) {
+      return false;
+    }
+    const msg = runStateToAssistantMessage(snapshot);
+    if (!msg) return false;
+    msg.live = false;
+    msg.liveStatus = "completed";
+    msg.showCitations = true;
+    conversation.push(msg);
+    saveConversation();
+    if (panelBody && !streaming) {
+      renderConversation();
+      fitPanelHeight();
+      pinToBottom();
+    }
+    return true;
+  }
   function maybeResumeRunAfterReload() {
     let attempts = 0;
     const MAX_ATTEMPTS = 12;
@@ -8720,6 +8790,18 @@
           try {
             p.disconnect();
           } catch (e) {
+          }
+          if (!resp.resumable && resp.finished && resp.snapshot && !streaming) {
+            try {
+              if (conversationLoadPromise) await conversationLoadPromise;
+            } catch (e) {
+            }
+            try {
+              if (panelUiReadyPromise) await panelUiReadyPromise;
+            } catch (e) {
+            }
+            if (!streaming) adoptFinishedRunSnapshot(resp.snapshot);
+            return;
           }
           if (resp.resumable && resp.runId && resp.instruction && !streaming) {
             try {
@@ -8740,7 +8822,9 @@
             let runPromise = null;
             if (runAgent) {
               runPromise = runAgent(String(resp.instruction), {
-                continuation: true,
+                // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
+                continuation: resp.live !== true,
+                reattach: resp.live === true,
                 presetRunId: String(resp.runId),
                 skipUserTurn: Boolean(alreadyHas),
                 // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，

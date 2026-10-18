@@ -71,6 +71,10 @@ test('golden: 用 role+name 定位并点击页面按钮', async () => {
 test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 run）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context, '/reload');
+  const sw = context.serviceWorkers()[0];
+  await sw.evaluate(() => {
+    if (globalThis.__rfRunStats) Object.assign(globalThis.__rfRunStats, { starts: 0, reattaches: 0, aborts: 0 });
+  });
 
   resetLlmRequests();
   await sendInstruction(page, '整页刷新');
@@ -95,7 +99,45 @@ test('golden: 整页刷新后任务应继续跑完（端口断开不再中断 ru
   await expect(
     page.locator(PANEL + ' .agent-content').filter({ hasText: '页面已整页刷新' })
   ).toHaveCount(1);
+  // 证明走的是"直接接管"而不是"abort 后续跑"：同一个 run 只启动一次，
+  // 刷新期间没有 abort，且 reattach 至少发生一次。
+  const stats = await sw.evaluate(() => Object.assign({}, globalThis.__rfRunStats));
+  expect(stats.starts, '刷新不应启动第二个 run').toBe(1);
+  expect(stats.reattaches, '刷新后必须 reattach 到原来的 run').toBeGreaterThanOrEqual(1);
+  expect(stats.aborts, '刷新接管路径不得 abort run').toBe(0);
 
+  await page.close();
+});
+
+// 审批等待是最容易在刷新里丢状态的一步：旧面板的审批监听绑在旧 port 上。
+// 刷新后新面板必须同时恢复「审批条」和「仍在等待的 run」，批准后继续执行。
+test('golden: 刷新时正在等审批 —— 新面板接管并恢复审批条', async () => {
+  await configureSettings(context, {
+    toolApprovalPolicy: { read: true, edit: true, commands: false, browser: true, mcp: true },
+  });
+  const page = await openFixturePage(context, '/reload');
+  const sw = context.serviceWorkers()[0];
+  await sw.evaluate(() => {
+    if (globalThis.__rfRunStats) Object.assign(globalThis.__rfRunStats, { starts: 0, reattaches: 0, aborts: 0 });
+  });
+  resetLlmRequests();
+  await sendInstruction(page, '验证刷新接管审批');
+
+  // 先等到第一份审批条出现，再在等待期间刷新。
+  await expect(page.locator(PANEL + ' .tool-approve')).toBeVisible({ timeout: 15_000 });
+  await page.reload();
+
+  // 新面板必须接住同一个 run，并把审批条恢复出来。
+  await expect(page.locator(PANEL + ' .tool-approve')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => panelText(page, '.p-body'), { timeout: 10_000 }).toContain('get_page_snapshot');
+  await clickApproval(page, 'approve');
+  await expect.poll(() => finalizedRunCount(), { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect.poll(() => panelText(page, '.p-body'), { timeout: 15_000 }).toContain('审批后任务继续完成');
+
+  const stats = await sw.evaluate(() => Object.assign({}, globalThis.__rfRunStats));
+  expect(stats.starts, '审批刷新不应启动第二个 run').toBe(1);
+  expect(stats.reattaches, '审批刷新必须 reattach').toBeGreaterThanOrEqual(1);
+  expect(stats.aborts, '审批刷新不得 abort run').toBe(0);
   await page.close();
 });
 // 回归：SPA 客户端导航会整体替换 DOM 树，面板宿主被移除后要能自动重建。

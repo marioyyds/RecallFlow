@@ -66,11 +66,12 @@ node scripts/run-e2e-live.mjs
    于是必应搜索提交、httpbin 表单提交这类整页导航后，任务会继续经 tab 执行（
    工具走 `chrome.tabs.sendMessage`，刷新后到达新内容脚本）。
    回归用例：`tests/e2e/golden.spec.mjs`「整页刷新后任务应继续跑完」。
-   **新面板接管显示 —— 已修复**：`query-run` 现在会带上 SW 侧已归约的 run 快照；新面板用
-   同一个 `runId` 续跑前，先把刷新前的工具步骤/叙述/思考画回来，再从新端口继续接增量。
-   同时 `RunStreamHub.begin` 对同 `runId` 的再次调用会把状态切回 `running`、保留已有 parts，
-   不再停在 `cancelled`。回归断言已加强为：刷新前步骤（`get_page_snapshot` / `click_element`）
-   与本轮最终回复都出现在新面板里，且用户消息与最终回复**各只出现一次**。
+   **新面板接管仍在跑的 run —— 已升级为不 abort**：新增 `RunChannel` 作为 run 的稳定输出口；
+   旧页面 port 断开只 `detach`，新页面用 `reattach` 挂回同一个 run，先补发快照再继续实时事件。
+   审批监听也走同一个 channel，刷新时正在等待的工具审批会在新面板恢复并继续。
+   8 秒内没有 reattach 才回退到 abort + 同 `runId` 续跑（扩展更新/worker 回收）。
+   回归断言用 `starts=1 / reattaches≥1 / aborts=0` 证明走的是接管而不是续跑，并覆盖
+   “刷新前步骤 + 最终回复 + 用户消息不重复”和“审批等待中刷新后仍能批准”。
 
 ## 下一步
 
