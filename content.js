@@ -3721,11 +3721,6 @@
   function expandQuickPrompt(text) {
     return String(text || "").trim() === SESSION_TO_KB_QUICK_PROMPT ? SESSION_TO_KB_INSTRUCTION : String(text || "");
   }
-  function resolveCodeExecutionApproval(settings) {
-    const s = settings || {};
-    const v = s.codeExecutionApproval !== void 0 && s.codeExecutionApproval !== null && s.codeExecutionApproval !== "" ? s.codeExecutionApproval : s.runJavascriptApproval;
-    return v === "each" || v === "auto" || v === "session" ? v : "session";
-  }
   async function updateAISettings(patch) {
     const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
     const saved = d[AI_SETTINGS_KEY] || {};
@@ -5130,7 +5125,6 @@
     .panel.dark .approval-group-title { color:#9aa0a8; }
     .approval-settings-popover label.approval-item { display:block; padding:4px 2px; font-size:12px; cursor:pointer; }
     .approval-settings-popover label.approval-item small { color:#9aa0a8; font-size:10.5px; margin-left:3px; }
-    .approval-runjs select { margin-left:4px; }
     .approval-settings-popover input { accent-color:#4a90d9; margin-right:6px; }
     .approval-settings-popover select { margin-left:4px; font-size:12px; padding:2px 4px; border-radius:6px; border:1px solid #d5d9e0; background:#fff; color:inherit; font-family:inherit; }
     .panel.dark .approval-settings-popover select { background:#26292e; border-color:#3a3f46; color:#e3e5e8; }
@@ -5519,6 +5513,8 @@
   var activeRunId = null;
   var planBar = null;
   var apiKeyBanner = null;
+  var approvalSettingsEl = null;
+  var approvalPopoverEl = null;
   var lastPlan = [];
   var planExpanded = null;
   var planWasAllDone = false;
@@ -6296,6 +6292,12 @@
       fitPanelHeight();
     }).catch(() => {
     });
+  }
+  function closeApprovalPopover() {
+    if (!approvalPopoverEl || approvalPopoverEl.hidden) return;
+    approvalPopoverEl.hidden = true;
+    if (panel) panel.classList.remove("approval-open");
+    fitPanelHeight();
   }
   function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
     if (!box || !conn) return false;
@@ -7645,8 +7647,8 @@
     });
     const approvalSettings = document.createElement("div");
     approvalSettings.className = "approval-settings";
-    approvalSettings.innerHTML = '<button class="approval-settings-toggle" type="button">\u81EA\u52A8\u6279\u51C6\uFF1A\u8BFB\u53D6 <span>\u203A</span></button><div class="approval-settings-popover" hidden><label class="approval-autopilot"><input data-autopilot type="checkbox"> <b>\u81EA\u52A8\u9A7E\u9A76\uFF08\u5168\u90E8\u81EA\u52A8\u6279\u51C6\uFF09</b></label><div class="approval-settings-caption">\u672A\u5F00\u542F\u65F6\uFF0C\u6309\u4E0B\u5217\u7C7B\u522B\u9010\u9879\u63A7\u5236\u662F\u5426\u514D\u786E\u8BA4\uFF1A</div><div class="approval-group"><div class="approval-group-title">\u8BFB\u53D6</div><label class="approval-item"><input data-policy="read" type="checkbox"> \u8BFB\u53D6\u5185\u5BB9 <small>\u641C\u7D22\u3001\u8BFB\u53D6\u9875\u9762\u3001\u5217\u51FA\u6807\u7B7E\u9875</small></label></div><div class="approval-group"><div class="approval-group-title">\u5199\u5165</div><label class="approval-item"><input data-policy="edit" type="checkbox"> \u7F16\u8F91\u77E5\u8BC6\u5E93 <small>\u65B0\u589E / \u4FEE\u6539 / \u5220\u9664\u6536\u85CF</small></label><label class="approval-item"><input data-policy="commands" type="checkbox"> \u9875\u9762\u547D\u4EE4 <small>\u70B9\u51FB\u3001\u8F93\u5165\u3001\u6EDA\u52A8\u3001\u9AD8\u4EAE\u3001\u8FD0\u884C JavaScript \u7B49</small></label></div><div class="approval-group"><div class="approval-group-title">\u5916\u90E8</div><label class="approval-item"><input data-policy="browser" type="checkbox"> \u6D4F\u89C8\u5668\u4E0E\u7F51\u7EDC <small>\u6253\u5F00\u6807\u7B7E\u9875\u3001\u6293\u53D6\u7F51\u9875</small></label><label class="approval-item"><input data-policy="mcp" type="checkbox"> MCP \u670D\u52A1\u5668 <small>\u8C03\u7528\u5916\u90E8\u5DE5\u5177</small></label></div><div class="approval-group"><div class="approval-group-title">\u9AD8\u98CE\u9669</div><label class="approval-item approval-runjs">\u7528\u6237\u811A\u672C / \u6280\u80FD\u5199\u5165\u5BA1\u6279\uFF1A<select data-runjs><option value="each">\u6BCF\u6B21\u786E\u8BA4</option><option value="session">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u4E00\u6B21</option><option value="auto">\u81EA\u52A8\u6279\u51C6</option></select></label></div></div>';
-    const runjsEl = approvalSettings.querySelector("[data-runjs]");
+    approvalSettings.innerHTML = '<button class="approval-settings-toggle" type="button">\u81EA\u52A8\u6279\u51C6\uFF1A\u8BFB\u53D6 <span>\u203A</span></button><div class="approval-settings-popover" hidden><label class="approval-autopilot"><input data-autopilot type="checkbox"> <b>\u81EA\u52A8\u9A7E\u9A76\uFF08\u5168\u90E8\u81EA\u52A8\u6279\u51C6\uFF09</b></label><div class="approval-settings-caption">\u672A\u5F00\u542F\u65F6\uFF0C\u6309\u4E0B\u5217\u7C7B\u522B\u9010\u9879\u63A7\u5236\u662F\u5426\u514D\u786E\u8BA4\uFF1A</div><div class="approval-group"><div class="approval-group-title">\u8BFB\u53D6</div><label class="approval-item"><input data-policy="read" type="checkbox"> \u8BFB\u53D6\u5185\u5BB9 <small>\u641C\u7D22\u3001\u8BFB\u53D6\u9875\u9762\u3001\u5217\u51FA\u6807\u7B7E\u9875</small></label></div><div class="approval-group"><div class="approval-group-title">\u5199\u5165</div><label class="approval-item"><input data-policy="edit" type="checkbox"> \u7F16\u8F91\u77E5\u8BC6\u5E93 <small>\u65B0\u589E / \u4FEE\u6539 / \u5220\u9664\u6536\u85CF</small></label><label class="approval-item"><input data-policy="commands" type="checkbox"> \u9875\u9762\u547D\u4EE4 <small>\u70B9\u51FB\u3001\u8F93\u5165\u3001\u6EDA\u52A8\u3001\u9AD8\u4EAE\u3001\u8FD0\u884C JavaScript \u7B49</small></label></div><div class="approval-group"><div class="approval-group-title">\u5916\u90E8</div><label class="approval-item"><input data-policy="browser" type="checkbox"> \u6D4F\u89C8\u5668\u4E0E\u7F51\u7EDC <small>\u6253\u5F00\u6807\u7B7E\u9875\u3001\u6293\u53D6\u7F51\u9875</small></label><label class="approval-item"><input data-policy="mcp" type="checkbox"> MCP \u670D\u52A1\u5668 <small>\u8C03\u7528\u5916\u90E8\u5DE5\u5177</small></label></div></div>';
+    approvalSettingsEl = approvalSettings;
     const autopilotEl = approvalSettings.querySelector("[data-autopilot]");
     autopilotEl.addEventListener("change", () => {
       const on = autopilotEl.checked;
@@ -7657,14 +7659,19 @@
     });
     const approvalToggle = approvalSettings.querySelector(".approval-settings-toggle");
     const approvalPopover = approvalSettings.querySelector(".approval-settings-popover");
+    approvalPopoverEl = approvalPopover;
+    panel.addEventListener("click", (e) => {
+      if (!approvalSettings.contains(e.target)) closeApprovalPopover();
+    });
     const refreshApprovalLabel = () => {
       const names = { read: "\u8BFB\u53D6", edit: "\u7F16\u8F91", commands: "\u547D\u4EE4", browser: "\u6D4F\u89C8\u5668", mcp: "MCP" };
       const on = [...approvalSettings.querySelectorAll("[data-policy]:checked")].map((x2) => names[x2.dataset.policy]);
       approvalToggle.innerHTML = "\u81EA\u52A8\u6279\u51C6\uFF1A" + (on.length ? on.join("\u3001") : "\u65E0") + " <span>\u203A</span>";
     };
     approvalToggle.addEventListener("click", () => {
-      approvalPopover.hidden = !approvalPopover.hidden;
-      panel.classList.toggle("approval-open", !approvalPopover.hidden);
+      const opening = approvalPopover.hidden;
+      approvalPopover.hidden = !opening;
+      panel.classList.toggle("approval-open", opening);
       fitPanelHeight();
     });
     getAISettings().then((s) => {
@@ -7683,14 +7690,6 @@
         });
       });
       autopilotEl.checked = ["read", "edit", "commands", "browser", "mcp"].every((k) => p[k] === true);
-      runjsEl.value = resolveCodeExecutionApproval(s);
-      runjsEl.addEventListener("change", async () => {
-        try {
-          await updateAISettings({ codeExecutionApproval: runjsEl.value });
-        } catch (e) {
-          warnExtDead();
-        }
-      });
       refreshApprovalLabel();
     }).catch(() => {
     });
@@ -8770,6 +8769,12 @@
         closeSessionMenu();
         return;
       }
+      if (approvalPopoverEl && !approvalPopoverEl.hidden) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeApprovalPopover();
+        return;
+      }
       if (shotLightboxOpen) return;
       if (approvalArea && approvalArea.style.display !== "none") return;
       e.preventDefault();
@@ -8935,6 +8940,12 @@
       closeSessionMenu();
       removeBubble();
     });
+    document.addEventListener("pointerdown", (e) => {
+      if (!approvalPopoverEl || approvalPopoverEl.hidden) return;
+      const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+      if (path.includes(approvalSettingsEl)) return;
+      closeApprovalPopover();
+    }, true);
     document.addEventListener("scroll", () => removeBubble(), true);
     window.addEventListener("resize", () => {
       if (fab) applySavedFabPosition();
