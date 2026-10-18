@@ -355,10 +355,10 @@ test('chat.js：展开/折叠思考块之后要重新贴底（否则视图停在
   const end = live.indexOf("e.target.closest('.act-rewind')");
   const body = live.slice(at, end > at ? end : at + 1400);
   assert.match(body, /wasPinned/, '开合前必须先记住"是否本来贴底"');
-  assert.match(body, /observerAutoScroll/, '判定要复用既有的跟随标记');
+  assert.match(body, /isPinnedForFollow|observerAutoScroll/, '判定要复用既有的跟随标记');
   // 反向样张：**没有**任何守卫的置底必须被判为不合格（那会把正在翻历史的用户拽回底部）
-  const unguarded = body.split('\n').filter((l) => /scrollTop\s*=/.test(l) && !/wasPinned|observerAutoScroll/.test(l));
-  assert.deepEqual(unguarded, [], '开合后的置底必须受守卫（wasPinned / observerAutoScroll）');
+  const unguarded = body.split('\n').filter((l) => /scrollTop\s*=/.test(l) && !/wasPinned|isPinnedForFollow|observerAutoScroll/.test(l));
+  assert.deepEqual(unguarded, [], '开合后的置底必须受守卫（wasPinned / isPinnedForFollow）');
 });
 
 // ---------------------------------------------------------------- 样式

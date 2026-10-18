@@ -66,6 +66,8 @@ const phases = [
   // 面板滚动跟随（关掉会话再打开 / 回到标签页时贴底）。
   // 与黄金任务同档：**不需要**挂起流，也不需要截图，用默认夹具即可。
   { name: '滚动跟随', spec: 'scroll-follow.spec.mjs', hold: '', visionShot: '' },
+  // 流式输出中用户上滚：必须尊重用户的滚动意图，不能被后续增量拉回底部。
+  { name: '流式上滚', spec: 'stream-scroll.spec.mjs', hold: '', visionShot: '' },
   // 会话共享/运行锁：需要真实的“生成中”窗口，否则两个标签页的请求会瞬间结束，
   // 根本撞不上同一把锁。这里单独把分片间隔拉长。
   { name: '会话共享', spec: 'sessions.spec.mjs', hold: '', visionShot: '', chunkDelay: '1200' },

@@ -5996,7 +5996,7 @@
   }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
-    const wasPinned = !!observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
+    const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
     const dockGap = getDockGap();
     const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
@@ -6041,6 +6041,18 @@
   var selfScrollMuteUntil = 0;
   function markSelfScroll() {
     selfScrollMuteUntil = Date.now() + SELF_SCROLL_MUTE_MS;
+  }
+  var USER_SCROLL_INTENT_MS = 900;
+  var userScrollIntentUntil = 0;
+  function markUserScrollIntent(up) {
+    const now = Date.now();
+    userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
+    if (up === true) observerAutoScroll = false;
+  }
+  function isPinnedForFollow() {
+    if (Date.now() < userScrollIntentUntil && observerAutoScroll === false) return false;
+    if (!panelBody) return false;
+    return !!observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
   }
   function msgActionsHtml(isLast) {
     return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>";
@@ -7476,15 +7488,38 @@
     const pbEl = panelBody;
     pbEl.addEventListener("scroll", () => {
       if (!pbEl) return;
-      if (Date.now() < selfScrollMuteUntil) return;
+      const now = Date.now();
+      const userDriven = now < userScrollIntentUntil;
+      if (!userDriven && now < selfScrollMuteUntil) return;
+      if (userDriven) userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
       observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
+    });
+    pbEl.addEventListener("wheel", (e) => {
+      markUserScrollIntent(Number(e.deltaY) < 0);
+    }, { passive: true });
+    let touchStartY = null;
+    pbEl.addEventListener("touchstart", (e) => {
+      const t = e.touches && e.touches[0];
+      touchStartY = t ? t.clientY : null;
+      markUserScrollIntent(false);
+    }, { passive: true });
+    pbEl.addEventListener("touchmove", (e) => {
+      const t = e.touches && e.touches[0];
+      if (t && touchStartY != null) markUserScrollIntent(t.clientY > touchStartY);
+    }, { passive: true });
+    pbEl.addEventListener("mousedown", (e) => {
+      if (e.target === pbEl) markUserScrollIntent(false);
+    });
+    pbEl.addEventListener("keydown", (e) => {
+      if (["PageUp", "ArrowUp", "Home"].includes(e.key)) markUserScrollIntent(true);
+      else if (["PageDown", "ArrowDown", "End", " "].includes(e.key)) markUserScrollIntent(false);
     });
     panelBody.addEventListener("click", (e) => {
       const thinkHead = e.target.closest(".think-head");
       if (thinkHead) {
         const block = thinkHead.closest(".think-block");
         if (block) {
-          const wasPinned = !!observerAutoScroll || panelBody && panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
+          const wasPinned = isPinnedForFollow();
           const opening = block.dataset.open !== "true";
           block.dataset.open = opening ? "true" : "false";
           if (thinkSeg && thinkSeg.block === block) thinkExpandedManual = opening;
