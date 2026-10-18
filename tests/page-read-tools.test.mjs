@@ -88,6 +88,10 @@ test('子框架能力提示必须给出 frameId 的下一步，而不是只报�
   assert.match(hint, /frame 7/);
   assert.match(hint, /get_page_snapshot\(\{frameId:N\}\)/);
   assert.match(hint, /自动路由/);
+  // 框架内的选择器是局部作用域，顶层 scroll_page({selector}) 找不到它 ——
+  // 提示必须改成"先取该框架的 ref，再按 ref 滚"。
+  assert.match(hint, /scroll_page\(\{ref, y:600\}\)/);
+  assert.doesNotMatch(hint, /用 scroll_page\(\{selector:"…", y:600\}\) 直接滚它/);
 });
 
 test('顶层与子框架都有自定义元素时，提示里两者都要出现', () => {
