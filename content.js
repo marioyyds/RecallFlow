@@ -4369,7 +4369,7 @@
     let listType = null;
     let tableBuf = null;
     const escInline = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    const escAttr2 = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     const inline = (s) => {
       let r = escInline(s);
       r = r.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -4387,7 +4387,7 @@
           const c = citations[idx - 1];
           if (!c) return match;
           const short = c.title.length > 16 ? c.title.slice(0, 16) + "\u2026" : c.title;
-          return '<button class="cite-badge" data-cite-id="' + escAttr(c.id || "") + '" data-cite-source="' + escAttr(c.source || "kb") + '" data-cite-url="' + escAttr(c.url || "") + '" data-cite-snippet="' + escAttr(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr(short) + "</button>";
+          return '<button class="cite-badge" data-cite-id="' + escAttr2(c.id || "") + '" data-cite-source="' + escAttr2(c.source || "kb") + '" data-cite-url="' + escAttr2(c.url || "") + '" data-cite-snippet="' + escAttr2(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr2(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr2(short) + "</button>";
         });
       }
       return r;
@@ -4416,7 +4416,7 @@
       const line = lines[i].replace(/\r$/, "");
       if (line.trim().startsWith("```")) {
         if (inCode) {
-          html += '<div class="code-wrap"><div class="code-head"><span class="code-lang">' + (codeLang ? escAttr(codeLang) : "code") + '</span><button class="code-copy">\u590D\u5236</button></div><pre><code>' + highlightCode(codeBuf.join("\n")) + "</code></pre></div>";
+          html += '<div class="code-wrap"><div class="code-head"><span class="code-lang">' + (codeLang ? escAttr2(codeLang) : "code") + '</span><button class="code-copy">\u590D\u5236</button></div><pre><code>' + highlightCode(codeBuf.join("\n")) + "</code></pre></div>";
           codeBuf = [];
           inCode = false;
           codeLang = "";
@@ -5309,7 +5309,7 @@
     if (!state) return null;
     let parts = (state.parts || []).map((p) => Object.assign({}, p));
     if (state.reasoning) parts.push({ type: "thinking", text: state.reasoning, live: true });
-    if (state.narration) parts.push({ type: "narration", text: state.narration });
+    if (state.narration) parts.push({ type: "narration", text: state.narration, live: true });
     if (state.error) parts.push({ type: "notice", text: state.error, color: "#e74c3c" });
     if (state.approval) {
       parts.push({
@@ -5340,6 +5340,7 @@
   }
   function bindCitationsToText(parts, citations) {
     const list = Array.isArray(citations) ? citations : [];
+    if (!list.length) return { parts, citations: [] };
     const collect2 = /[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g;
     const order = [];
     const seen = /* @__PURE__ */ new Set();
@@ -5479,6 +5480,7 @@
   var followedRunId = "";
   var followedCursor = 0;
   var followedMessages = [];
+  var followedLiveReady = false;
   var followRefreshTimer = null;
   var followStatusTimer = null;
   var stopBtn = null;
@@ -6354,8 +6356,73 @@
     });
     container.appendChild(wrap);
   }
+  function citeSourcesHtml(cites) {
+    if (!cites || !cites.length) return "";
+    return '<div class="cite-sources"><span class="cite-label">\u53C2\u8003\u6765\u6E90\uFF1A</span>' + cites.map(
+      (c) => '<button class="cite-badge" data-cite-id="' + escAttr(c.id || "") + '" data-cite-source="' + escAttr(c.source || "kb") + '" data-cite-url="' + escAttr(c.url || "") + '" data-cite-snippet="' + escAttr(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr(c.title) + '"><span class="cite-idx">[' + c.index + "]</span>" + escAttr(c.title.length > 18 ? c.title.slice(0, 18) + "\u2026" : c.title) + "</button>"
+    ).join("") + "</div>";
+  }
+  function escAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+  var ANSWER_HTML_CACHE_MAX = 240;
+  var answerHtmlCache = createLruCache(ANSWER_HTML_CACHE_MAX);
+  function cachedAnswerHtml(text, citations, streaming2) {
+    if (streaming2) return renderAnswer(text, citations, true);
+    const list = Array.isArray(citations) ? citations : [];
+    const sig = list.map((c) => String(c.index) + "|" + String(c.title || "") + "|" + String(c.url || "")).join(",");
+    const key = String(text) + "\0" + sig;
+    const cached = answerHtmlCache.get(key);
+    if (cached !== void 0) return cached;
+    const html = renderAnswer(text, citations, false);
+    answerHtmlCache.set(key, html);
+    return html;
+  }
+  function assistantMessageHtml(m, index, viewLength) {
+    const parts = Array.isArray(m.parts) ? m.parts : [];
+    const terminalNotices = parts.filter((p) => p && p.type === "notice" && p.terminal === true && p.text);
+    const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => {
+      if (p.type === "tool-call") {
+        return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
+      }
+      if (p.type === "tool-result") {
+        return toolStepHtml(
+          p.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : p.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
+          p.name,
+          "",
+          p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
+          clipDetail(p.result, 4e3)
+        );
+      }
+      if (p.type === "screenshot") {
+        return screenshotHtml(p);
+      }
+      if (p.type === "thinking" && p.text) {
+        if (p.live) return thinkBlockHtml(p.text, { done: false, truncated: p.textTruncated === true });
+        return thinkBlockHtml(p.text, { done: true, truncated: p.textTruncated === true });
+      }
+      if (p.type === "narration" && p.text) {
+        return '<div class="agent-content">' + cachedAnswerHtml(p.text, m.citations, p.live === true) + "</div>";
+      }
+      if (p.type === "text" && p.text) {
+        return '<div class="agent-content">' + cachedAnswerHtml(p.text, m.citations, p.live === true) + "</div>";
+      }
+      if (p.type === "notice" && p.text) {
+        return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
+      }
+      return "";
+    }).join("");
+    const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
+    const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : cachedAnswerHtml(m.content || "", m.citations, false);
+    const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
+    const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
+    const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
+    const terminalHtml = terminalNotices.map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || "#16a34a") + '">' + escHtml(p.text) + "</div>").join("");
+    return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === viewLength - 1) : "") + "</div>";
+  }
   function renderConversation() {
     if (!panelBody) return;
+    followedLiveReady = false;
     const view = followedMessages.length ? conversation.concat(followedMessages) : conversation;
     if (!view.length) {
       panelBody.className = "p-body";
@@ -6363,58 +6430,12 @@
       renderPlan([]);
       return;
     }
-    const citeSourcesHtml = (cites) => {
-      if (!cites || !cites.length) return "";
-      return '<div class="cite-sources"><span class="cite-label">\u53C2\u8003\u6765\u6E90\uFF1A</span>' + cites.map(
-        (c) => '<button class="cite-badge" data-cite-id="' + escAttr(c.id || "") + '" data-cite-source="' + escAttr(c.source || "kb") + '" data-cite-url="' + escAttr(c.url || "") + '" data-cite-snippet="' + escAttr(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr(c.title) + '"><span class="cite-idx">[' + c.index + "]</span>" + escAttr(c.title.length > 18 ? c.title.slice(0, 18) + "\u2026" : c.title) + "</button>"
-      ).join("") + "</div>";
-    };
-    const escAttr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     panelBody.className = "p-body";
     panelBody.innerHTML = view.map((m, index) => {
       if (m.role === "user") {
         return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
       }
-      const parts = Array.isArray(m.parts) ? m.parts : [];
-      const terminalNotices = parts.filter((p) => p && p.type === "notice" && p.terminal === true && p.text);
-      const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => {
-        if (p.type === "tool-call") {
-          return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
-        }
-        if (p.type === "tool-result") {
-          return toolStepHtml(
-            p.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : p.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
-            p.name,
-            "",
-            p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
-            clipDetail(p.result, 4e3)
-          );
-        }
-        if (p.type === "screenshot") {
-          return screenshotHtml(p);
-        }
-        if (p.type === "thinking" && p.text) {
-          if (p.live) return thinkBlockHtml(p.text, { done: false, truncated: p.textTruncated === true });
-          return thinkBlockHtml(p.text, { done: true, truncated: p.textTruncated === true });
-        }
-        if (p.type === "narration" && p.text) {
-          return '<div class="agent-content">' + renderAnswer(p.text, m.citations, false) + "</div>";
-        }
-        if (p.type === "text" && p.text) {
-          return '<div class="agent-content">' + renderAnswer(p.text, m.citations, false) + "</div>";
-        }
-        if (p.type === "notice" && p.text) {
-          return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
-        }
-        return "";
-      }).join("");
-      const hasInlineText = parts.some((p) => p.type === "narration" || p.type === "text" && p.text);
-      const contentHtml = hasInlineText && !m.failed && !m.interrupted ? "" : renderAnswer(m.content || "", m.citations);
-      const failedStyle = m.failed ? ' style="color:#e74c3c"' : m.interrupted ? ' style="color:#b45309"' : "";
-      const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
-      const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
-      const terminalHtml = terminalNotices.map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || "#16a34a") + '">' + escHtml(p.text) + "</div>").join("");
-      return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === view.length - 1) : "") + "</div>";
+      return assistantMessageHtml(m, index, view.length);
     }).join("");
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);
@@ -6452,12 +6473,44 @@
     if (userIndex < 0) return false;
     return conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
   }
+  function renderFollowedLive() {
+    if (!panelBody || !followedRunState) return;
+    if (!followedLiveReady) {
+      followedMessages = [];
+      renderConversation();
+      followedLiveReady = true;
+      if (!conversation.length) panelBody.innerHTML = "";
+    }
+    panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
+    const instruction = String(followedRunState.instruction || "").trim();
+    const last = conversation.length ? conversation[conversation.length - 1] : null;
+    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
+    if (instruction && !alreadyHasUser) {
+      const wrap = document.createElement("div");
+      wrap.className = "user-turn follow-live-user";
+      wrap.innerHTML = '<div class="msg user">' + escHtml(instruction) + "</div>";
+      panelBody.appendChild(wrap);
+    }
+    const assistant = runStateToAssistantMessage(followedRunState);
+    if (assistant) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = assistantMessageHtml(assistant, conversation.length, conversation.length + 1);
+      const el = wrap.firstElementChild;
+      if (el) {
+        el.classList.add("follow-live-ai");
+        el._raw = assistant.content || "";
+        panelBody.appendChild(el);
+      }
+      renderPlan(Array.isArray(assistant.plan) ? assistant.plan : []);
+    }
+    if (usageEl) usageEl.textContent = followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
+    fitPanelHeight();
+    pinToBottom();
+  }
   function renderFollowedRun() {
     if (!panelBody) return;
     streamRender.schedule("follow-live", () => {
-      renderConversation();
-      fitPanelHeight();
-      pinToBottom();
+      renderFollowedLive();
     });
     if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
     if (followedRunState && followedRunState.status === "running") {
@@ -6511,6 +6564,7 @@
     followedRunId = "";
     followedCursor = 0;
     followedMessages = [];
+    followedLiveReady = false;
     if (!streaming) {
       stopProgress();
     }
@@ -6601,7 +6655,6 @@
     }
     followedCursor = cursor;
     applyRunEvent(followedRunState, msg.event);
-    rebuildFollowedMessages();
     renderFollowedRun();
     if (msg.event && (msg.event.type === "end" || msg.event.type === "error")) {
       scheduleFollowedRunRefresh();
