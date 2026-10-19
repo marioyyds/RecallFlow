@@ -248,7 +248,8 @@ test('entries/content.js 用静态 import（否则打不出自包含产物）', 
   const codeOnly = src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n')
-    .map((l) => l.replace(/\/\/.*$/, ''))
+    // Windows 工作区是 CRLF：先去掉行尾 \r，否则 `.` 不匹配 \r，`//.*$` 会整行保留。
+    .map((l) => l.replace(/\r$/, '').replace(/\/\/.*$/, ''))
     .join('\n');
   assert.ok(
     !/import\s*\(\s*chrome\.runtime\.getURL/.test(codeOnly),
