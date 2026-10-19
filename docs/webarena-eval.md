@@ -77,12 +77,30 @@ RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/run-webarena.mjs \
 官方 `webarena-verified` 是 Python 包，用 Docker 跑即可（会写 `<out>/<task_id>/eval_result.json`）：
 
 ```bash
-docker run --rm -v "<out>:/out" python:3.12-slim sh -c \
-  "pip install -q webarena-verified && webarena-verified eval-tasks --output-dir /out --task-ids 21,22"
+docker run --rm -v "<out>:/out" -v "<repo>/integrations/webarena:/cfg" python:3.12-slim sh -c \
+  "pip install -q webarena-verified && webarena-verified eval-tasks \
+     --output-dir /out --config /cfg/site-config.example.json --task-ids 21,22"
 ```
+
+**一定要给 `--config`**（`integrations/webarena/site-config.example.json` 是模板）：不给时
+evaluator 会"best-effort 从 HAR 猜站点地址"，实测它猜到的可能是本地桥接地址
+（`http://127.0.0.1:7801`），并明确告警"This is not recommended"。config 的 `environments`
+里每个站点给 `urls`（`active_url_idx` 选哪个），admin 站另加 `use_header_login` 与 `credentials`。
 
 注意：**我们的 `summary.json` 只数 `status=SUCCESS`，与官方分不是一个口径**——
 例如 agent 交 `NOT_FOUND_ERROR` 而"正确答案就是查不到"时，官方判**对**。以官方分为准。
+
+### 实测基线（2026-10，deepseek-chat，shopping 站 retrieve 6 条）
+
+官方评分为 **5/6**（`success=[22,23,24,25,26]`，`failed=[21]`）。两个值得注意的现象：
+
+- **"否"答对也算对**：22/24 我们这边记 `NOT_FOUND_ERROR`（空数组），官方判 SUCCESS
+  —— 那两条的正确答案本来就是"没有这样的评论者"。
+- **长表单任务是当前短板**：`shopping_admin` 的 task 0 能跑通全流程（自动登录成功、
+  进到 Bestsellers 报表的日期表单），但**卡在原生 `<select>` / 日期输入**：
+  `run_javascript` 属 high 风险拿不到授权，随后触发无进展守卫而结束。
+  这是 **agent 能力边界**，不是 harness 故障（详见任务答复原文 `recallflow.json`）。
+
 
 ## 已知边界（诚实记录）
 

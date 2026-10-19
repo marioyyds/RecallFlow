@@ -10,6 +10,7 @@ RecallFlow × WebArena-Verified 的评测适配层。完整说明见
 | `mcp-client.mjs` | 7801 桥接的最小 HTTP JSON-RPC 客户端（init / tools-call / 轮询 job） |
 | `config.mjs` | 纯参数解析 / 任务选择 / allowRisk 校验 / `__SITE__` 占位符替换（可单测） |
 | `sample-tasks.json` | 三条示例任务，供 `--dry-run` 演示 |
+| `site-config.example.json` | 官方 evaluator / `agent-input-get` 用的站点地址配置（含 admin 自动登录） |
 
 ```bash
 node scripts/run-webarena.mjs --tasks integrations/webarena/sample-tasks.json --dry-run
