@@ -15,6 +15,7 @@ export function parseArgs(argv) {
     taskIds: [],
     limit: 0,
     allowRisk: ['read', 'page', 'write', 'browser', 'network'],
+    siteUrls: {},
     pollMs: 3000,
     timeoutMs: 300000,
     dryRun: false,
@@ -42,6 +43,12 @@ export function parseArgs(argv) {
     else if (a === '--poll-ms') out.pollMs = Number(next());
     else if (a === '--timeout-ms') out.timeoutMs = Number(next());
     else if (a === '--allow-risk') out.allowRisk = next().split(',').map((x) => x.trim()).filter(Boolean);
+    else if (a === '--site-url') {
+      const raw = next();
+      const eq = raw.indexOf('=');
+      if (eq <= 0) throw new Error('--site-url 需要 NAME=URL 形式，收到：' + raw);
+      out.siteUrls[raw.slice(0, eq).trim().toUpperCase()] = raw.slice(eq + 1).trim();
+    }
     else throw new Error('未知参数：' + a + '（用 --help 看用法）');
   }
   if (!Number.isFinite(out.limit) || out.limit < 0) out.limit = 0;
@@ -86,4 +93,41 @@ export function selectTasks(tasks, { taskIds = [], limit = 0 } = {}) {
   }
   if (limit > 0) picked = picked.slice(0, limit);
   return picked;
+}
+
+/**
+ * 把任务 start_urls 里的 `__SITE__` 占位符替换成本地站点地址（WebArena 官方任务用的就是这套占位符）。
+ *
+ * 返回**新对象**，不改原任务：任务文件是从外部下载的，就地改写会让"同一份数据"
+ * 在不同运行间互相污染（尤其是批量跑时）。
+ *
+ * 未被映射的占位符会被**保留**（并在 run.mjs 里被 detectUnresolvedSites 点出来）——
+ * 静默把它们清空会得到一堆空 URL，症状是"任务全在 about:blank 上跑"，很难归因。
+ */
+export function applySiteUrls(task, map = {}) {
+  const t = Object.assign({}, task || {});
+  const keys = Object.keys(map || {});
+  const raw = task && (task.start_urls !== undefined ? task.start_urls : task.startUrls);
+  const urls = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+  const replaced = urls.map((u) => {
+    let s = String(u);
+    for (const k of keys) s = s.split('__' + k + '__').join(map[k]);
+    return s;
+  });
+  t.start_urls = replaced;
+  delete t.startUrls;
+  return t;
+}
+
+/** 找出替换后仍残留 `__XXX__` 的站点名（供编排器提示"你漏配了哪个站点"）。 */
+export function detectUnresolvedSites(tasks) {
+  const found = new Set();
+  for (const t of Array.isArray(tasks) ? tasks : []) {
+    const raw = t && (t.start_urls !== undefined ? t.start_urls : t.startUrls);
+    const urls = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    for (const u of urls) {
+      for (const m of String(u).matchAll(/__([A-Z0-9_]+)__/g)) found.add(m[1]);
+    }
+  }
+  return [...found];
 }

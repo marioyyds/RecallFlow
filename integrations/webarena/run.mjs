@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks } from './config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites } from './config.mjs';
 import { normalizeTask, buildInstruction, toAgentResponse, validateAgentResponse } from '../../lib/eval/webarena-adapter.mjs';
 import { McpBridgeClient } from './mcp-client.mjs';
 
@@ -33,6 +33,7 @@ const HELP = `RecallFlow × WebArena-Verified 评测编排器
   --task-id <a,b>       只跑指定 task_id（可重复，逗号分隔）
   --limit <n>           只跑前 n 条（在 --task-id 过滤之后）
   --allow-risk <csv>    开工前声明的风险预算（默认 read,page,write,browser,network；不含 high）
+  --site-url N=URL      把任务里的 __N__ 占位符映射到本地站点地址（可重复，如 --site-url SHOPPING=http://localhost:7770）
   --poll-ms <n>         轮询间隔（默认 3000）
   --timeout-ms <n>      单任务墙钟上限（默认 300000）
   --profile-dir <dir>   浏览器用户数据目录（默认每条任务用临时目录 = 隔离）
@@ -128,6 +129,9 @@ async function runOne({ raw, opts, client, settings, outDir }) {
     response_errors: check.errors,
     job_state: job && job.state,
     job_error: (job && job.error) || null,
+    // 原样保留 agent 最终答复：解析失败时，唯一能归因的依据就是它
+    //（"模型没按契约回答"与"契约没送到模型"是两回事，没有原文就分不清）。
+    answer: job && typeof job.result === 'string' ? job.result : null,
     duration_ms: Date.now() - startedAt,
     har: path.basename(harPath),
   };
@@ -159,7 +163,15 @@ async function main() {
     console.error(String((e && e.message) || e));
     process.exit(2);
   }
-  const tasks = selectTasks(rawTasks, { taskIds: opts.taskIds, limit: opts.limit });
+  const mapped = rawTasks.map((t) => applySiteUrls(t, opts.siteUrls));
+  const tasks = selectTasks(mapped, { taskIds: opts.taskIds, limit: opts.limit });
+  const unresolved = detectUnresolvedSites(tasks);
+  if (unresolved.length) {
+    console.error(
+      '警告：选中的任务里还有未解析的站点占位符 ' + unresolved.map((s) => '__' + s + '__').join(', ') +
+        '，用 --site-url ' + unresolved[0] + '=http://... 指定（否则任务会落在无效地址上）。'
+    );
+  }
   if (!tasks.length) {
     console.error('没有选中任何任务（检查 --task-id / 任务文件）。');
     process.exit(2);

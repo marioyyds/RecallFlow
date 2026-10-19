@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks } from '../integrations/webarena/config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites } from '../integrations/webarena/config.mjs';
 
 test('parseArgs：默认值合理（allowRisk 不含 destructive/external）', () => {
   const o = parseArgs(['--tasks', 't.json']);
@@ -51,4 +51,35 @@ test('selectTasks：按 id 过滤并保持原顺序，limit 在过滤之后', ()
   assert.deepEqual(selectTasks(tasks, { taskIds: [4, 2] }).map((t) => t.task_id), [2, 4]);
   assert.deepEqual(selectTasks(tasks, { limit: 2 }).map((t) => t.task_id), [1, 2]);
   assert.deepEqual(selectTasks(tasks, { taskIds: [2, 3, 4], limit: 2 }).map((t) => t.task_id), [2, 3]);
+});
+
+test('parseArgs：--site-url 可重复累积，站点名统一大写', () => {
+  const o = parseArgs(['--tasks', 't.json', '--site-url', 'shopping=http://localhost:7770', '--site-url', 'GITLAB=http://localhost:8012']);
+  assert.deepEqual(o.siteUrls, { SHOPPING: 'http://localhost:7770', GITLAB: 'http://localhost:8012' });
+  assert.throws(() => parseArgs(['--site-url', 'nope']), /NAME=URL/);
+});
+
+test('applySiteUrls：替换 __SITE__ 且不改原任务对象', () => {
+  const task = { task_id: 7, start_urls: ['__SHOPPING__/product/1', '__GITLAB__'] };
+  const out = applySiteUrls(task, { SHOPPING: 'http://localhost:7770', GITLAB: 'http://localhost:8012' });
+  assert.deepEqual(out.start_urls, ['http://localhost:7770/product/1', 'http://localhost:8012']);
+  assert.deepEqual(task.start_urls, ['__SHOPPING__/product/1', '__GITLAB__']);
+  assert.equal(out.task_id, 7);
+});
+
+test('applySiteUrls：未映射的占位符原样保留，不静默清空', () => {
+  const out = applySiteUrls({ start_urls: ['__WIKIPEDIA__'] }, { SHOPPING: 'http://x' });
+  assert.deepEqual(out.start_urls, ['__WIKIPEDIA__']);
+});
+
+test('applySiteUrls：兼容驼峰 startUrls，并兼容字符串形式的 start_url', () => {
+  const out = applySiteUrls({ startUrls: '__MAP__' }, { MAP: 'http://localhost:9000' });
+  assert.deepEqual(out.start_urls, ['http://localhost:9000']);
+  assert.equal(out.startUrls, undefined);
+});
+
+test('detectUnresolvedSites：点出漏配的站点名', () => {
+  const tasks = [{ start_urls: ['http://ok/'] }, { start_urls: ['__WIKIPEDIA__', '__SHOPPING__'] }];
+  assert.deepEqual(detectUnresolvedSites(tasks).sort(), ['SHOPPING', 'WIKIPEDIA']);
+  assert.deepEqual(detectUnresolvedSites([{ start_urls: ['http://ok/'] }]), []);
 });
