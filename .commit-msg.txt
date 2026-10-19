@@ -1,14 +1,14 @@
-test: commands.js 定位逻辑 + agent 失败文案契约（又修一个真 bug）
+feat(agent)+test: 反思按成因分派 + 测试数分类计数
 
-- tests/commands-lookup.test.mjs（11 条）：commands.js 此前零 import、覆盖 21%。
-  用鸭子类型假元素测 roleOf / accessibleName / nameSimilarity / describeLookupMiss，
-  不引入 jsdom（仓库 devDeps 只有 playwright+esbuild，为纯函数引入不划算）。
-  记录一处如实断言：value 分支只 trim 不压空白，与其它分支不一致，
-  但匹配发生在 normName 之后（空白已统一），故不改产品代码。
-- tests/agent-failure-contract.test.mjs（5 条）：describeToolFailure 此前零覆盖，
-  而它的超时文案里「超时不代表动作没有发生」是一条安全网
-  （防止模型把已经生效的写操作原样重试一遍）。
-- 修 bug：describeToolFailure 遇到「没有 message 的错误对象」时落到 String(e)，
-  产出 [object Object] 喂给模型。已分三种情况显式处理，保留抛字符串的情形。
+- verifier.js: buildStuckReflection 原先一个模板走天下。现在按 decision.reason
+  分派三种建议（重复调用→区分幂等轮询并改 wait_for_element；连续失败→查前置条件并
+  升级 CDP；无进展→先重读状态且提醒"超时≠没生效"），并在第 3 次提醒时给出
+  "如实收尾"这个出口 —— 没有出口的催促只会让模型耗尽预算。
+  agent.js 新增跨轮累计的 stuckAttempts（放在主循环外，按轮重置的话永远到不了第 3 档）。
+  tests/verifier.test.mjs 补 6 条：三种成因互不串台、第 3 档出口、无 opts 向后兼容。
+
+- scripts/test-count.mjs: 把测试文件分成「行为」与「静态门禁」两类并写入快照。
+  一个总数会把读源码的正则断言与真跑代码的集成断言等权相加，实测 121 行为 / 27 静态。
+  加了门禁断言"行为必须多于静态"，让这个比例可见。
 
 全绿。

@@ -309,6 +309,23 @@ test('README 不手写测试数，改为链接到生成物（手写数字必然�
   assert.match(readme, /tests\/\.test-count\.json/, 'README 应链接到测试数快照 tests/.test-count.json');
 });
 
+test('测试数快照必须区分「行为测试」与「静态门禁」，且行为测试占多数', () => {
+  // 为什么加这条：一个总数会把两种**不等权**的东西等权相加 ——
+  // 一条读源码的正则断言和一条真把并发跑起来的集成断言，在"1727 项"里是一样的。
+  // 实测静态门禁 27 / 行为 121，占 18%；这个比例本身没有对错，
+  // 但它必须**可见**：只有看得见，"我们又补了一堆正则"才会被发现。
+  const snap = readSnapshot();
+  assert.ok(snap && snap.files, '快照缺少 files 分类，请重新运行 node scripts/test-count.mjs --write');
+  const { behavior, static: statik, total } = snap.files;
+  assert.ok(Number.isInteger(behavior) && Number.isInteger(statik), 'files 分类应含 behavior / static');
+  assert.equal(behavior + statik, total, '两类之和应等于文件总数');
+  assert.ok(
+    behavior > statik,
+    '行为测试应多于静态门禁（行为 ' + behavior + ' / 静态 ' + statik + '）—— ' +
+      '若静态反超，说明新增的多是读源码的正则，而不是真跑代码的断言'
+  );
+});
+
 test('文档里不得再把已证伪的测试数当作当前事实', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.ok(!/562 项单元测试与 Playwright/.test(readme), 'README 仍把 562 当作当前事实');
