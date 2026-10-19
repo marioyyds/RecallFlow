@@ -17,7 +17,7 @@ export const EXT_PATH = path.resolve(__dirname, '..', '..');
  * ⚠ `headless: false` 是**技术约束不是偏好**：实测 headless 下 MV3 扩展的 service worker
  * 不注册（`context.serviceWorkers()` 为空），扩展起不来。无头环境用 xvfb-run。
  */
-export async function launchBrowser({ userDataDir = '', harPath = '', extPath = EXT_PATH } = {}) {
+export async function launchBrowser({ userDataDir = '', harPath = '', extPath = EXT_PATH, extraHTTPHeaders = null } = {}) {
   const { chromium } = await import('@playwright/test');
   const options = {
     headless: false,
@@ -27,6 +27,10 @@ export async function launchBrowser({ userDataDir = '', harPath = '', extPath = 
       '--no-first-run',
     ],
   };
+  // WebArena-Verified 的站点用「请求头自动登录」代替 UI 登录（shopping_admin 的
+  // `X-M2-Admin-Auto-Login: admin:admin1234` 等）。这类头必须挂在整个 context 上，
+  // 只给某个 page 设会让子请求/重定向丢头，登录态就断了。
+  if (extraHTTPHeaders && Object.keys(extraHTTPHeaders).length) options.extraHTTPHeaders = extraHTTPHeaders;
   if (harPath) options.recordHar = { path: harPath, content: 'embed' };
   const context = await chromium.launchPersistentContext(userDataDir, options);
   let [sw] = context.serviceWorkers();

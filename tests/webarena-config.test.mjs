@@ -83,3 +83,9 @@ test('detectUnresolvedSites：点出漏配的站点名', () => {
   assert.deepEqual(detectUnresolvedSites(tasks).sort(), ['SHOPPING', 'WIKIPEDIA']);
   assert.deepEqual(detectUnresolvedSites([{ start_urls: ['http://ok/'] }]), []);
 });
+
+test('parseArgs：--header 可重复，按冒号切分（值里的冒号保留）', () => {
+  const o = parseArgs(['--tasks', 't.json', '--header', 'X-M2-Admin-Auto-Login: admin:admin1234']);
+  assert.deepEqual(o.headers, { 'X-M2-Admin-Auto-Login': 'admin:admin1234' });
+  assert.throws(() => parseArgs(['--header', 'nocolon']), /Name: value/);
+});

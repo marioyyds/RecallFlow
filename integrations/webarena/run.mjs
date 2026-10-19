@@ -34,6 +34,7 @@ const HELP = `RecallFlow × WebArena-Verified 评测编排器
   --limit <n>           只跑前 n 条（在 --task-id 过滤之后）
   --allow-risk <csv>    开工前声明的风险预算（默认 read,page,write,browser,network；不含 high）
   --site-url N=URL      把任务里的 __N__ 占位符映射到本地站点地址（可重复，如 --site-url SHOPPING=http://localhost:7770）
+  --header "N: v"       给浏览器上下文加请求头（可重复；WebArena 站点用头自动登录，如 --header "X-M2-Admin-Auto-Login: admin:admin1234"）
   --poll-ms <n>         轮询间隔（默认 3000）
   --timeout-ms <n>      单任务墙钟上限（默认 300000）
   --profile-dir <dir>   浏览器用户数据目录（默认每条任务用临时目录 = 隔离）
@@ -101,7 +102,7 @@ async function runOne({ raw, opts, client, settings, outDir }) {
   let response;
   let job = null;
   try {
-    context = await launchBrowser({ userDataDir: opts.profileDir || '', harPath, extPath: opts.extPath || undefined });
+    context = await launchBrowser({ userDataDir: opts.profileDir || '', harPath, extPath: opts.extPath || undefined, extraHTTPHeaders: opts.headers });
     await configureExtension(context, settings);
     await client.waitForExtension(60000);
     const opened = await client.openTab(task.startUrls[0]);
@@ -111,7 +112,12 @@ async function runOne({ raw, opts, client, settings, outDir }) {
     job = await client.waitForJob(started.jobId, {
       pollMs: opts.pollMs,
       timeoutMs: opts.timeoutMs,
-      onProgress: (p) => process.stdout.write('    · seq=' + p.seq + ' state=' + p.state + ' omitted=' + (p.omitted || 0) + '\n'),
+      onProgress: (p) => {
+        process.stdout.write('    · seq=' + p.seq + ' state=' + p.state + ' omitted=' + (p.omitted || 0) + '\n');
+        if (process.env.RECALLFLOW_EVAL_DEBUG) {
+          process.stdout.write('      raw=' + JSON.stringify(p.raw).slice(0, 600) + '\n');
+        }
+      },
     });
     response = toAgentResponse(job.result, { state: job.state, error: job.error, expectedAction: task.expectedAction });
   } catch (e) {

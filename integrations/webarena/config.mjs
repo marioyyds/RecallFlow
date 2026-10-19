@@ -16,6 +16,7 @@ export function parseArgs(argv) {
     limit: 0,
     allowRisk: ['read', 'page', 'write', 'browser', 'network'],
     siteUrls: {},
+    headers: {},
     pollMs: 3000,
     timeoutMs: 300000,
     dryRun: false,
@@ -48,6 +49,12 @@ export function parseArgs(argv) {
       const eq = raw.indexOf('=');
       if (eq <= 0) throw new Error('--site-url 需要 NAME=URL 形式，收到：' + raw);
       out.siteUrls[raw.slice(0, eq).trim().toUpperCase()] = raw.slice(eq + 1).trim();
+    }
+    else if (a === '--header') {
+      const raw = next();
+      const i = raw.indexOf(':');
+      if (i <= 0) throw new Error('--header 需要 "Name: value" 形式，收到：' + raw);
+      out.headers[raw.slice(0, i).trim()] = raw.slice(i + 1).trim();
     }
     else throw new Error('未知参数：' + a + '（用 --help 看用法）');
   }

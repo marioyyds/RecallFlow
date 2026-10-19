@@ -161,7 +161,7 @@ export class McpBridgeClient {
       const s = await this.agentTaskStatus({ jobId, sinceSeq: seq });
       if (s && s.seq !== undefined) seq = Number(s.seq) || seq;
       last = s;
-      if (onProgress) onProgress({ seq, state: s.state, omitted: s.omitted, events: (s.events || []).length });
+      if (onProgress) onProgress({ seq, state: s.state, omitted: s.omitted, events: (s.events || []).length, raw: s });
       if (s.running === false) return s;
       await new Promise((r) => setTimeout(r, pollMs));
     }
