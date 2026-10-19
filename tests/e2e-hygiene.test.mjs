@@ -307,3 +307,50 @@ test('这条分派门禁本身有牙齿：旧的"整条消息"写法必须被判
   assert.ok(re.test(bad), '旧写法应被检出');
   assert.ok(!re.test(good), '新写法不应被误报');
 });
+// 注：本文件原有的三条门禁（base-test fixture / 快速反馈入口 / 失败诊断采集）
+// 依赖 tests/e2e/base-test.mjs 与 test:e2e:smoke 脚本。master 回退安全提交时
+// 这两者一起被移除，故此处一并去掉 —— 门禁只能钉住真实存在的东西。
+
+test('硬等待 waitForTimeout 只许减少，不许增加（棘轮门禁）', () => {
+  // 起因：评审实测 E2E 里有 20 处 waitForTimeout。它是 flaky 的头号来源 ——
+  // 等少了在慢机器上红，等多了在快机器上白耗；而仓库里早已有 134 处
+  // `expect.poll`（轮询到条件成立）的正确范式可照抄。
+  //
+  // 这里不要求一次清零（那会让这条门禁长期红着、然后被人删掉），
+  // 而是**钉住当前值**：改 spec 时顺手把碰到的那一处换成 poll，然后把下面的数字减一。
+  // 棘轮（ratchet）比"禁止"更容易真的往下走 —— 它每次只需要前进一格。
+  const CEILING = 20;
+  const perFile = specFiles.map((f) => ({
+    file: f,
+    n: (stripComments(read(path.join(E2E_DIR, f))).match(/waitForTimeout/g) || []).length,
+  }));
+  const total = perFile.reduce((n, x) => n + x.n, 0);
+  assert.ok(
+    total <= CEILING,
+    'E2E 硬等待数量不得超过 ' + CEILING + '（实测 ' + total + '）。\n' +
+      '  修掉一处就把 CEILING 减一 —— 棘轮只进不退。\n' +
+      perFile.filter((x) => x.n > 0).map((x) => '    ' + x.file + ': ' + x.n).join('\n')
+  );
+});
+
+test('重试策略：CI 上要重试、本地不重试、eval 永不重试（行为级校验配置）', async () => {
+  // 为什么不用字符串匹配：配置里写 `retries: process.env.CI ? 2 : 0` 这种表达式，
+  // 字符串门禁只能证明"这行字在"，不能证明它真的按环境生效。
+  // 这里直接把配置当模块加载（带 cache-buster 以便同一进程里读两次不同 env）。
+  const load = async (rel, envCi) => {
+    const saved = process.env.CI;
+    if (envCi) process.env.CI = '1';
+    else delete process.env.CI;
+    try {
+      const m = await import(rel + '?ci=' + String(envCi));
+      return m.default.retries;
+    } finally {
+      if (saved === undefined) delete process.env.CI;
+      else process.env.CI = saved;
+    }
+  };
+
+  assert.equal(await load('../tests/e2e/playwright.config.mjs', true), 2, 'CI 上 E2E 应重试（真实浏览器偶发抖动）');
+  assert.equal(await load('../tests/e2e/playwright.config.mjs', false), 0, '本地不重试 —— 第一次失败必须可见');
+  assert.equal(await load('../tests/e2e-eval/playwright.config.mjs', true), 0, 'eval 永不重试：重试会把分数变成挑过的好样本');
+});

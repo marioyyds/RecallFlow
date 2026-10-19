@@ -25,5 +25,8 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   fullyParallel: false,
   workers: 1,
+  // eval 不重试：它的产出是"模型这次的表现"，重试会让分数变成一个被挑过的好样本，
+  // 那样"分数下降即回归"就永远判断不了。偶发失败应当如实记录，而不是抹掉。
+  retries: 0,
   reporter: [['list']],
 });

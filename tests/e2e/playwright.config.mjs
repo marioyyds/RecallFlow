@@ -15,5 +15,18 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
+  // 重试只在 CI 上开：真实浏览器 + 真实扩展 + 模拟 LLM 的组合里，偶发的
+  // 时序抖动（service worker 首次唤醒、CDP 附加竞态）是**已知且可接受**的，
+  // 让 CI 红一次再绿一次比让人去猜 flaky 便宜。
+  // 本地**刻意不重试**：本地跑就是要看见第一次失败，重试会把真 bug 藏起来 ——
+  // 这正是"门禁只在被强制运行时才存在"之外的另一条纪律：失败必须可见。
+  retries: process.env.CI ? 2 : 0,
+  // 失败时保留 trace 与截图：定位流式/时序问题时比复跑猜状态快得多。
+  // 不默认录屏，避免每个用例都增加 I/O 和体积。
+  use: {
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'off',
+  },
   reporter: [['list']],
 });
