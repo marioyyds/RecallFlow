@@ -1,5 +1,18 @@
 // 覆盖率基线：把 node --test 的覆盖率表解析成**机器可读**的 JSON。
 //
+// ⚠⚠ 一个必须先说清楚的测量陷阱（实测确认，不要拿这份数字当并集看）：
+//   node --test --experimental-test-coverage 在**多个测试文件加载同一模块**时，
+//   合并结果不是并集，而是**最后一个跑完的文件覆盖前面那个**（last-writer-wins）。
+//   实测：cdp-behavior 单跑 58.41%、cdp-timeout 单跑 44.09%；
+//   `--test-concurrency=1 behavior timeout` ⇒ 44.09%；反序 ⇒ 58.41%。
+//   而且并发跑时顺序不定，同一个命令两次能跑出两个数。
+//   ⇒ 默认模式下这份报告是**下界采样**（按 glob 字母序，最后一个加载该模块的文件说了算）。
+//
+// 因此：
+//   · 要判断"某个模块到底覆盖多少"，用 `--focus <file>` —— 它会逐个跑引用该模块的
+//     测试文件，取**最大值**，这才接近真实的并集；
+//   · 默认全量报告只看两件事：哪些模块**完全没被加载**（null），以及整体的粗略水位。
+//
 // 为什么需要它：仓库此前完全没有覆盖率采集，于是"哪些代码没人测"只能靠 grep 猜。
 // 有了这份 JSON，"这轮补测到底提升没有"才是一个可以回答的问题，而不是一句感觉。
 //
@@ -8,7 +21,7 @@
 //   node scripts/coverage-baseline.mjs --focus lib/backend/cdp.js
 //   node scripts/coverage-baseline.mjs --print           # 只打印高风险模块，不写文件
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,41 +38,67 @@ const focus = focusIdx >= 0 ? argv[focusIdx + 1] : null;
 // 目录行形如：        #  assistant
 const ROW = /^\s*#\s+([A-Za-z0-9_.-]+\.js)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|?/;
 
-function run() {
+function run(files) {
   const r = spawnSync(
     process.execPath,
     // ⚠ 不能加 --test-reporter=dot：实测 dot reporter 下 node **不打印覆盖率表**
     // （覆盖率表只在默认 reporter 下输出）。曾因此解析出 0 个文件还"成功"写了基线 JSON ——
     // 所以下面对空结果显式报错，不允许静默产出一份空基线。
-    ['--test', '--experimental-test-coverage', 'tests/*.test.mjs'],
+    ['--test', '--experimental-test-coverage', ...(files || ['tests/*.test.mjs'])],
     { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
   );
   return (r.stdout || '') + (r.stderr || '');
 }
 
+/** 找出引用了某个模块（按路径片段匹配）的测试文件。 */
+export function testFilesReferencing(fragment) {
+  const dir = path.join(ROOT, 'tests');
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.test.mjs'))
+    .filter((f) => readFileSync(path.join(dir, f), 'utf8').includes(fragment))
+    .map((f) => 'tests/' + f);
+}
+
+/**
+ * 逐文件跑、按模块取**最大值**，逼近真实并集。
+ * 见文件头的陷阱说明：一次性跑全部文件时，同一模块的覆盖率会被最后跑完的那个文件覆盖。
+ */
+export function collectFocused(files) {
+  const best = new Map();
+  for (const f of files) {
+    for (const row of parseRows(run([f]))) {
+      const prev = best.get(row.file);
+      if (!prev || row.lines > prev.lines) best.set(row.file, row);
+    }
+  }
+  return [...best.values()].sort((a, b) => a.lines - b.lines);
+}
+
 const rows = [];
 let currentDir = '';
-for (const line of run().split('\n')) {
-  // 目录行有两种形态：`#  assistant`（无管道）与 `#  assistant  |   |   |  `（带空管道）。
-  // 必须两种都认 —— 只认第一种时目录名永远解析不出来，于是所有文件都被记成裸文件名，
-  // 高风险模块匹配（assistant/agent.js）全部落空，报告会**假装**它们不存在。
-  const dirMatch = line.match(/^\s*#\s+([A-Za-z0-9_.-]+)\s*(?:\|\s*(?:\|\s*)*)?$/);
-  if (dirMatch && !dirMatch[1].endsWith('.js')) {
-    currentDir = dirMatch[1] === 'tests' ? '' : dirMatch[1];
-    continue;
+function parseRows(output) {
+  const out = [];
+  let dir = '';
+  for (const line of output.split('\n')) {
+    const dirMatch = line.match(/^\s*#\s+([A-Za-z0-9_.-]+)\s*(?:\|\s*(?:\|\s*)*)?$/);
+    if (dirMatch && !dirMatch[1].endsWith('.js')) {
+      dir = dirMatch[1] === 'tests' ? '' : dirMatch[1];
+      continue;
+    }
+    const m = line.match(ROW);
+    if (!m) continue;
+    const [, file, lines, branch, funcs] = m;
+    if (dir === 'tests') continue;
+    out.push({
+      file: dir ? dir + '/' + file : file,
+      lines: Number(lines),
+      branch: Number(branch),
+      funcs: Number(funcs),
+    });
   }
-  const m = line.match(ROW);
-  if (!m) continue;
-  const [, file, lines, branch, funcs] = m;
-  // 跳过测试自身与第三方
-  if (currentDir === 'tests') continue;
-  rows.push({
-    file: currentDir ? currentDir + '/' + file : file,
-    lines: Number(lines),
-    branch: Number(branch),
-    funcs: Number(funcs),
-  });
+  return out;
 }
+rows.push(...parseRows(run()));
 
 if (!rows.length) {
   // 空基线比没有基线更危险：它会让"覆盖率在涨"变成一个永远无法证伪的错觉。
@@ -97,7 +136,9 @@ const report = {
 };
 
 if (printOnly) {
-  console.log('平均行覆盖率: ' + report.averageLines + '%  （' + report.total + ' 个文件）\n');
+  console.log('平均行覆盖率: ' + report.averageLines + '%  （' + report.total + ' 个文件）');
+  console.log('⚠ 这是**下界采样**（node 在同一模块被多个测试文件加载时不是取并集，见文件头）；');
+  console.log('  要看某个模块的真实覆盖，用 --focus <file>。\n');
   console.log('高风险模块:');
   for (const h of report.highRisk) {
     console.log('  ' + (h.lines === null ? '未出现在覆盖率报告中（意味着零覆盖）' : h.lines + '%').padEnd(28) + h.file);
@@ -110,8 +151,18 @@ if (printOnly) {
   console.log('已写入 ' + path.relative(ROOT, OUT_FILE));
   console.log('平均行覆盖率 ' + report.averageLines + '% / ' + report.total + ' 个文件');
   if (focus) {
-    const hit = libRows.find((r) => r.file.endsWith(focus));
-    console.log(focus + ': ' + (hit ? hit.lines + '% 行 / ' + hit.branch + '% 分支' : '零覆盖（未出现在报告中）'));
+    // 逐文件跑并取最大值：一次性跑全部时同一模块会被最后跑完的文件覆盖（见文件头）。
+    const files = testFilesReferencing(focus);
+    console.log('\n--focus ' + focus + '：引用它的测试文件 ' + files.length + ' 个');
+    if (!files.length) {
+      console.log('零覆盖：没有任何测试文件引用它');
+    } else {
+      const best = collectFocused(files);
+      const hit = best.find((r) => r.file.endsWith(focus));
+      console.log(
+        focus + ': ' + (hit ? hit.lines + '% 行 / ' + hit.branch + '% 分支（逐个文件取最大值）' : '零覆盖（未出现在报告中）')
+      );
+    }
   }
   console.log('高风险模块:');
   for (const h of report.highRisk) console.log('  ' + String(h.lines ?? 'null').padStart(6) + '%  ' + h.file);

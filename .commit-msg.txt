@@ -1,14 +1,13 @@
-feat(agent)+test: 反思按成因分派 + 测试数分类计数
+chore: 覆盖率口径修正 + npm 入口 + mock_server 归属说明
 
-- verifier.js: buildStuckReflection 原先一个模板走天下。现在按 decision.reason
-  分派三种建议（重复调用→区分幂等轮询并改 wait_for_element；连续失败→查前置条件并
-  升级 CDP；无进展→先重读状态且提醒"超时≠没生效"），并在第 3 次提醒时给出
-  "如实收尾"这个出口 —— 没有出口的催促只会让模型耗尽预算。
-  agent.js 新增跨轮累计的 stuckAttempts（放在主循环外，按轮重置的话永远到不了第 3 档）。
-  tests/verifier.test.mjs 补 6 条：三种成因互不串台、第 3 档出口、无 opts 向后兼容。
-
-- scripts/test-count.mjs: 把测试文件分成「行为」与「静态门禁」两类并写入快照。
-  一个总数会把读源码的正则断言与真跑代码的集成断言等权相加，实测 121 行为 / 27 静态。
-  加了门禁断言"行为必须多于静态"，让这个比例可见。
+- scripts/coverage-baseline.mjs：实测确认 node --test 的覆盖率在"同一模块被多个
+  测试文件加载"时**不是取并集，而是最后跑完的文件覆盖前面那个**
+  （串行验证：behavior 先 → 44.09%，timeout 先 → 58.41%；并发时同一命令两次结果不同）。
+  因此默认报告是下界采样，已在文件头与输出里写明；新增 --focus <file>：
+  逐个跑引用该模块的测试文件并取最大值，得到接近真实并集的数字
+  （backend/cdp.js 的真值是 58.41%，而非全量报告里的 44.09%）。
+- package.json：加 test:cov / test:cov:write。
+- mock_server.py：补归属说明 —— 它是手动演示"登录失败"场景用的，
+  不进 CI 是正常的，避免被当成死代码删掉。
 
 全绿。
