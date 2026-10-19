@@ -65,7 +65,20 @@ test('重复链只在**精确达到**阈值时提醒（3 / 5 / 8）', () => {
     const d = call();
     if (d.level === 'reflect') warnedAt.push(i);
   }
-  assert.deepEqual(warnedAt, REPEAT_THRESHOLDS.slice(), '提醒次数点应为 ' + REPEAT_THRESHOLDS.join('/'));
+  // ⚠ 这里**不能**写成 `assert.deepEqual(warnedAt, REPEAT_THRESHOLDS.slice())`。
+  // 那样期望值与实际值都来自同一个常量，常量被改时两边一起变 —— 断言恒真。
+  // 实测正是这样：把 REPEAT_THRESHOLDS 从 [3,5,8] 改成 [4,6,9] 时这条用例**照样通过**，
+  // 变异测试因此报"断言形同虚设"。期望值必须是**字面量**，否则等于没写断言。
+  assert.deepEqual(warnedAt, [3, 5, 8], '提醒次数点应为 3 / 5 / 8（与 DSH 默认值一致）');
+});
+
+test('导出的默认阈值必须被字面量钉住（否则改了常量没人会发现）', () => {
+  // 同上：这三条是"什么时候打扰模型"的设计决策，不是可以随手调的实现细节。
+  // 用字面量钉住，才能让"悄悄放宽提醒时机"这类改动在门禁上现形。
+  assert.deepEqual([...REPEAT_THRESHOLDS], [3, 5, 8]);
+  assert.deepEqual([...FAIL_THRESHOLDS], [2, 3, 5]);
+  assert.deepEqual([...NO_PROGRESS_THRESHOLDS], [3, 5, 8]);
+  assert.deepEqual([...DEFAULT_EXCLUDED_TOOLS], ['update_plan']);
 });
 
 test('超过最高阈值后不再打扰（DSH 的已知限制，照做）', () => {
