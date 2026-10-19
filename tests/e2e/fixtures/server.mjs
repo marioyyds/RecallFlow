@@ -2984,6 +2984,48 @@ function loginPage() {
 </body></html>`;
 }
 
+function securePaymentPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>安全支付夹具</title></head>
+<body>
+  <h1>订单确认</h1>
+  <p>金额：￥99.00</p>
+  <button id="pay" type="button" role="button" aria-label="立即支付">立即支付</button>
+  <div id="paid" role="status"></div>
+  <script>
+    window.__payClicks = 0;
+    document.getElementById('pay').addEventListener('click', function () {
+      window.__payClicks += 1;
+      document.getElementById('paid').textContent = '支付已发生';
+    });
+  </script>
+</body></html>`;
+}
+
+function secureAccountPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>账号安全夹具</title></head>
+<body>
+  <h1>账号安全</h1>
+  <label for="password">新密码</label>
+  <input id="password" name="password" type="password" autocomplete="new-password" role="textbox" aria-label="新密码">
+  <button id="save" type="button" role="button" aria-label="修改密码">修改密码</button>
+  <div id="status" role="status">未修改</div>
+</body></html>`;
+}
+
+function privacyLeakPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>隐私脱敏夹具</title></head>
+<body>
+  <h1>隐私脱敏夹具</h1>
+  <p>页面里的示例密钥是 token: RF_TEXT_TOKEN_9876，密码是 password: RF_PAGE_PASSWORD_42。</p>
+  <a id="callback" href="/callback?token=RF_QUERY_TOKEN_777" role="link">回调地址</a>
+  <label for="password">登录密码</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" value="RF_INPUT_PASSWORD_314">
+  <script>
+    console.log('console secret Authorization: Bearer RF_CONSOLE_BEARER_555');
+  </script>
+</body></html>`;
+}
+
 // 整页刷新页：点按钮 → location.reload()，刷新后靠 sessionStorage 显示「已刷新并继续」。
 // 用于复现产品缺口「同一 tab 的整页刷新会中断进行中的任务」（见 golden.spec 的 fixme 用例）。
 function reloadPage() {
@@ -3416,6 +3458,56 @@ const llm = http.createServer((req, res) => {
         return;
       }
       finalText(res, '该操作被登录拦截，请先通过面板里的登录入口完成登录后重试。', 60);
+      return;
+    }
+
+    if (userText.includes('验证安全支付拦截')) {
+      const done = toolResults.length;
+      if (done === 0) {
+        toolStep(res, 'get_page_snapshot', { maxElements: 30, maxText: 800 });
+        return;
+      }
+      if (done === 1) {
+        toolStep(res, 'click_element', { role: 'button', name: '立即支付' });
+        return;
+      }
+      finalText(res, '如果仍能继续执行，说明支付安全拦截失效。', 80);
+      return;
+    }
+
+    if (userText.includes('验证密码输入拦截')) {
+      const done = toolResults.length;
+      if (done === 0) {
+        toolStep(res, 'get_page_snapshot', { maxElements: 30, maxText: 800 });
+        return;
+      }
+      if (done === 1) {
+        toolStep(res, 'type_text', { selector: '#password', value: 'RF_SECRET_PASSWORD_888', clearFirst: true });
+        return;
+      }
+      finalText(res, '如果密码框被写入，说明账号安全拦截失效。', 80);
+      return;
+    }
+
+    if (userText.includes('验证敏感数据脱敏')) {
+      const done = toolResults.length;
+      if (done === 0) {
+        toolStep(res, 'get_page_snapshot', { maxElements: 30, maxText: 1200 });
+        return;
+      }
+      if (done === 1) {
+        toolStep(res, 'read_current_page', {});
+        return;
+      }
+      if (done === 2) {
+        toolStep(res, 'get_attribute', { selector: '#password', attribute: 'value' });
+        return;
+      }
+      if (done === 3) {
+        toolStep(res, 'read_diagnostics', { kind: 'console', limit: 20 });
+        return;
+      }
+      finalText(res, '敏感内容已按安全策略隐藏。', 80);
       return;
     }
 
@@ -4957,6 +5049,9 @@ const main = http.createServer((req, res) => {
       : req.url && req.url.startsWith('/search') ? searchPage()
         : req.url && req.url.startsWith('/auth-gate') ? authGatePage()
           : req.url && req.url.startsWith('/login') ? loginPage()
+            : req.url && req.url.startsWith('/secure-payment') ? securePaymentPage()
+              : req.url && req.url.startsWith('/secure-account') ? secureAccountPage()
+                : req.url && req.url.startsWith('/privacy-leak') ? privacyLeakPage()
         : req.url && req.url.startsWith('/checkout') ? checkoutPage()
           : req.url && req.url.startsWith('/article') ? articlePage()
             : req.url && req.url.startsWith('/debug') ? debugPage()

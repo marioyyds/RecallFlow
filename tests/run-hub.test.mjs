@@ -168,6 +168,26 @@ test('run state: 登录拦截提示随 tool-result 进入快照与跟随页', ()
   assert.equal(followed.authChallenge.reason, 'login-required');
 });
 
+test('run state: 支付/账号安全拦截随 tool-result 同步到跟随页', () => {
+  const s = state();
+  applyRunEvent(s, {
+    type: 'tool-result',
+    callId: 'c-pay',
+    name: 'click_element',
+    status: 'failed',
+    result: '已阻止自动执行',
+    needsUserAction: true,
+    sensitiveAction: {
+      blocked: true,
+      category: 'payment-commit',
+      userPrompt: '该操作会确认支付，请用户本人完成。',
+    },
+  });
+  const part = runStateToAssistantMessage(s).parts.find((p) => p.type === 'tool-result');
+  assert.equal(part.needsUserAction, true);
+  assert.equal(part.sensitiveAction.category, 'payment-commit');
+});
+
 test('run state: 停止请求会进入「停止中」，结束事件再清掉停止标记', () => {
   const s = state();
   applyRunEvent(s, { type: 'stop-requested', byTabId: 22 });

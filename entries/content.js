@@ -15,6 +15,7 @@ import * as commands from '../lib/page/commands.js';
 import * as picker from '../lib/page/picker.js';
 import * as debugCapture from '../lib/page/debug-capture.js';
 import * as chat from '../lib/page/chat.js';
+import { redactSensitiveText, redactSensitiveData, redactPageSnapshot, redactUrl } from '../lib/shared/sensitive-data.js';
 
 // 是否顶层文档。注意 `window.top === window` 在跨域 iframe 里会**抛异常**，
 // 而原先它没有任何保护 —— 异常会让整段初始化被跳过，表现为"某些页面下面板不出现"。
@@ -54,19 +55,23 @@ export function initContentScript() {
         payload = { text: pageText.extractPageText(), visibility: null };
       }
       sendResponse({
-        text: payload.text,
+        text: redactSensitiveText(payload.text),
         visibility: payload.visibility,
-        title: document.title || '',
-        url: location.href,
+        title: redactSensitiveText(document.title || ''),
+        url: redactUrl(location.href),
       });
       return true;
     }
     if (msg && msg.type === 'kbGetConsole') {
-      debugCapture.getDebugBuffer('console').then((entries) => sendResponse({ entries: entries || [] }));
+      debugCapture.getDebugBuffer('console').then((entries) => sendResponse({
+        entries: redactSensitiveData(entries || []),
+      }));
       return true;
     }
     if (msg && msg.type === 'kbGetNetwork') {
-      debugCapture.getDebugBuffer('network').then((entries) => sendResponse({ entries: entries || [] }));
+      debugCapture.getDebugBuffer('network').then((entries) => sendResponse({
+        entries: redactSensitiveData(entries || []),
+      }));
       return true;
     }
     if (msg && msg.type === 'kbGetElementSource') {
@@ -86,11 +91,19 @@ export function initContentScript() {
       return true;
     }
     if (msg && msg.type === 'kbGetPageSnapshot') {
-      sendResponse(pageText.extractPageSnapshot(msg.options || {}));
+      sendResponse(redactPageSnapshot(pageText.extractPageSnapshot(msg.options || {})));
       return true;
     }
     if (msg && msg.type === 'kbResolveTarget') {
       sendResponse(commands.resolveTargetInfo(msg.params || {}));
+      return true;
+    }
+    if (msg && msg.type === 'kbResolvePoint') {
+      sendResponse(commands.resolvePointInfo(msg.params || {}));
+      return true;
+    }
+    if (msg && msg.type === 'kbResolveActiveTarget') {
+      sendResponse(commands.resolveActiveTargetInfo());
       return true;
     }
     if (msg && msg.type === 'kbUndo') {

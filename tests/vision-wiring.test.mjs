@@ -24,7 +24,9 @@ test('图片消息必须是**追加到 messages**（而不是塞进 tool 消息�
   // 取调用点附近的一小段，断言它 push 的是 vision 消息、且与 tool 消息是**分开的两条**
   const at = AGENT.indexOf('visionMessagesFor([res.screenshot]');
   assert.ok(at > 0, '找不到接线点');
-  const near = AGENT.slice(Math.max(0, at - 900), at + 200);
+  // 安全层会在 tool 消息与视觉装配之间插入“敏感页面不送图”的分支；
+  // 这里用结构化邻近窗口，而不是让新增的安全代码把原有两条消息挤出门禁视野。
+  const near = AGENT.slice(Math.max(0, at - 1500), at + 260);
   assert.match(near, /messages\.push\(\{ role: 'tool', tool_call_id: tc\.id, content: res\.result \}\)/, 'tool 消息仍只放文本');
   assert.match(near, /messages\.push\(vm\)/, '视觉消息是另起一条 push');
   assert.ok(!/content:\s*\[\s*\{\s*type: 'image_url'/.test(near), '不许把图片数组塞进 tool 消息 ✗');

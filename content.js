@@ -1412,6 +1412,124 @@
     };
   }
 
+  // lib/shared/sensitive-data.js
+  var SECRET_KEY_RE = /^(?:password|passwd|pwd|passcode|secret|client[_-]?secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|authorization|cookie|set[_-]?cookie|session|sessionid|card[_-]?number|pan|cvv|cvc|security[_-]?code|otp|one[_-]?time[_-]?code)$/i;
+  var SENSITIVE_URL_PARAM_RE = /(^|[?&#])((?:password|passwd|pwd|token|access_token|refresh_token|id_token|api_key|apikey|secret|session|sessionid|code|authorization|signature|sig))=([^&#\s]*)/gi;
+  var SENSITIVE_FIELD_TEXT_RE = /(密码|口令|验证码|动态码|安全码|银行卡|卡号|身份证|护照|私钥|密钥|令牌|授权码|password|passwd|passcode|one[-\s]?time|otp|mfa|2fa|cvv|cvc|security code|card number|credit card|debit card|api key|access token|private key|secret)/i;
+  var SENSITIVE_AUTOCOMPLETE_RE = /(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp|cc-exp-month|cc-exp-year|cc-name)/i;
+  function normalizedKey(key) {
+    return String(key || "").replace(/[\s-]+/g, "_");
+  }
+  function isLikelyCardNumber(raw) {
+    const digits = String(raw || "").replace(/\D/g, "");
+    if (digits.length < 13 || digits.length > 19) return false;
+    let sum = 0;
+    let double = false;
+    for (let i = digits.length - 1; i >= 0; i--) {
+      let n = Number(digits.charAt(i));
+      if (double) {
+        n *= 2;
+        if (n > 9) n -= 9;
+      }
+      sum += n;
+      double = !double;
+    }
+    return sum % 10 === 0;
+  }
+  function maskDigits(raw) {
+    const s = String(raw || "");
+    const digits = s.replace(/\D/g, "");
+    if (digits.length < 4) return "[\u5DF2\u9690\u85CF:\u5361\u53F7]";
+    return "**** **** **** " + digits.slice(-4);
+  }
+  function classifySensitiveField(field) {
+    const f = field && typeof field === "object" ? field : {};
+    const inputType = String(f.inputType || f.type || "").toLowerCase();
+    const autocomplete = String(f.autocomplete || "").toLowerCase();
+    const descriptor = [
+      f.name,
+      f.id,
+      f.testid,
+      f.placeholder,
+      f.label,
+      f.ariaLabel,
+      f.title
+    ].filter(Boolean).join(" ");
+    if (inputType === "password") {
+      return { sensitive: true, category: "credentials", label: String(f.label || f.name || "\u5BC6\u7801\u8F93\u5165\u6846") };
+    }
+    if (SENSITIVE_AUTOCOMPLETE_RE.test(autocomplete)) {
+      const category = /^cc-/.test(autocomplete) ? "payment-card" : "credentials";
+      return { sensitive: true, category, label: String(f.label || f.name || autocomplete) };
+    }
+    if (SENSITIVE_FIELD_TEXT_RE.test(descriptor)) {
+      const category = /(银行卡|卡号|cvv|cvc|security code|card number|credit card|debit card)/i.test(descriptor) ? "payment-card" : /(密码|口令|验证码|动态码|otp|mfa|2fa|password|passwd|passcode|one[-\s]?time)/i.test(descriptor) ? "credentials" : "secret";
+      return { sensitive: true, category, label: String(f.label || f.name || f.placeholder || "\u654F\u611F\u8F93\u5165\u6846") };
+    }
+    return { sensitive: false, category: "", label: "" };
+  }
+  function redactUrl(rawUrl) {
+    const text = String(rawUrl || "");
+    if (!text) return "";
+    return text.replace(SENSITIVE_URL_PARAM_RE, (whole, prefix, key) => prefix + key + "=[\u5DF2\u9690\u85CF]");
+  }
+  function redactSensitiveText(value, options = {}) {
+    let text = String(value == null ? "" : value);
+    if (!text) return "";
+    text = text.replace(
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi,
+      "[\u5DF2\u9690\u85CF:\u79C1\u94A5]"
+    );
+    text = text.replace(SENSITIVE_URL_PARAM_RE, (whole, prefix, key) => prefix + key + "=[\u5DF2\u9690\u85CF]");
+    text = text.replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{8,}\b/g, "[\u5DF2\u9690\u85CF:API Key]");
+    text = text.replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[\u5DF2\u9690\u85CF:\u4EE4\u724C]");
+    text = text.replace(/\bAKIA[0-9A-Z]{16}\b/g, "[\u5DF2\u9690\u85CF:\u8BBF\u95EE\u5BC6\u94A5]");
+    text = text.replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[\u5DF2\u9690\u85CF:JWT]");
+    text = text.replace(/\bBearer\s+[A-Za-z0-9._~+/-]{12,}=*/gi, "Bearer [\u5DF2\u9690\u85CF:\u4EE4\u724C]");
+    text = text.replace(
+      /((?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*)([^\r\n]{1,500})/gi,
+      (whole, lead) => lead + "[\u5DF2\u9690\u85CF]"
+    );
+    text = text.replace(
+      /((?:password|passwd|pwd|passcode|secret|token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|id[_-]?token|session(?:id)?|cvv|cvc|security code|otp|one[-\s]?time code|密码|口令|验证码|动态码|安全码)\s*[:=：]\s*)([^\s,;，；]{1,240})/gi,
+      (whole, lead) => lead + "[\u5DF2\u9690\u85CF]"
+    );
+    text = text.replace(/\b(?:\d[ -]?){13,19}\b/g, (m) => isLikelyCardNumber(m) ? maskDigits(m) : m);
+    if (options.maskPersonal === true) {
+      text = text.replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[\u5DF2\u9690\u85CF:\u90AE\u7BB1]");
+      text = text.replace(/(?<!\d)(?:\+?86[- ]?)?1[3-9]\d{9}(?!\d)/g, "[\u5DF2\u9690\u85CF:\u624B\u673A\u53F7]");
+      text = text.replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, "[\u5DF2\u9690\u85CF:\u8BC1\u4EF6\u53F7]");
+    }
+    return text;
+  }
+  function redactSensitiveData(value, options = {}, depth = 0, seen = /* @__PURE__ */ new WeakSet()) {
+    if (value === null || value === void 0) return value;
+    if (typeof value === "string") return redactSensitiveText(value, options);
+    if (typeof value !== "object") return value;
+    if (depth > 12) return "[\u5DF2\u7701\u7565:\u5D4C\u5957\u8FC7\u6DF1]";
+    if (typeof WeakSet !== "undefined") {
+      if (seen.has(value)) return "[\u5DF2\u7701\u7565:\u5FAA\u73AF\u5F15\u7528]";
+      seen.add(value);
+    }
+    if (Array.isArray(value)) return value.map((item) => redactSensitiveData(item, options, depth + 1, seen));
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (SECRET_KEY_RE.test(normalizedKey(key))) {
+        out[key] = item === void 0 || item === null || item === "" ? item : typeof item === "boolean" ? item : "[\u5DF2\u9690\u85CF]";
+        continue;
+      }
+      if (/^(?:href|url|src|action|formAction)$/i.test(key) && typeof item === "string") {
+        out[key] = redactUrl(item);
+        continue;
+      }
+      out[key] = redactSensitiveData(item, options, depth + 1, seen);
+    }
+    return out;
+  }
+  function redactPageSnapshot(snapshot) {
+    return redactSensitiveData(snapshot, { maskPersonal: false });
+  }
+
   // lib/page/commands.js
   var cmdStyleReverters = [];
   var cmdTimers = [];
@@ -1653,6 +1771,34 @@
       return null;
     }
   }
+  function targetSecurityMetadata(el, label) {
+    const field = classifySensitiveField({
+      inputType: el.tagName === "INPUT" ? el.getAttribute("type") || "text" : "",
+      autocomplete: el.getAttribute("autocomplete") || "",
+      name: el.getAttribute("name") || "",
+      id: el.id || "",
+      testid: el.getAttribute("data-testid") || el.getAttribute("data-test-id") || "",
+      placeholder: el.getAttribute("placeholder") || "",
+      label: (label || "") + " " + (el.getAttribute("aria-label") || "") + " " + (el.getAttribute("title") || "")
+    });
+    const form = el.closest ? el.closest("form") : null;
+    return {
+      name: el.getAttribute("name") || "",
+      id: el.id || "",
+      testid: el.getAttribute("data-testid") || el.getAttribute("data-test-id") || "",
+      placeholder: el.getAttribute("placeholder") || "",
+      inputType: el.tagName === "INPUT" ? String(el.getAttribute("type") || "text").toLowerCase() : "",
+      autocomplete: el.getAttribute("autocomplete") || "",
+      formAction: form ? String(form.getAttribute("action") || "") : "",
+      formMethod: form ? String(form.getAttribute("method") || "") : "",
+      formId: form ? String(form.id || "") : "",
+      formName: form ? String(form.getAttribute("name") || "") : "",
+      href: el.tagName === "A" ? String(el.getAttribute("href") || "") : "",
+      fieldSensitive: field.sensitive,
+      fieldCategory: field.category,
+      fieldLabel: field.label
+    };
+  }
   function resolveTargetInfo(params) {
     try {
       const els = findElementsFor(params || {});
@@ -1665,7 +1811,7 @@
         0,
         60
       );
-      return {
+      return Object.assign({
         found: true,
         selector: elementSelector(el),
         rect: absoluteRect(el),
@@ -1674,7 +1820,59 @@
         contentEditable: Boolean(el.isContentEditable),
         editable: Boolean(el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT"),
         label
-      };
+      }, targetSecurityMetadata(el, label));
+    } catch (e) {
+      return { found: false, reason: e.message };
+    }
+  }
+  function resolvePointInfo(params) {
+    try {
+      const x = Number(params && params.x);
+      const y = Number(params && params.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return { found: false, reason: "\u5750\u6807\u65E0\u6548" };
+      let el = deepestElementAt(x, y);
+      if (!el) return { found: false, reason: "\u8BE5\u5750\u6807\u6CA1\u6709\u53EF\u547D\u4E2D\u7684\u5143\u7D20" };
+      const interactive = el.closest ? el.closest('button,a,input,select,textarea,label,[role="button"],[role="link"],[role="checkbox"],[role="switch"],[tabindex]') : null;
+      if (interactive) el = interactive;
+      const label = sliceSafe(
+        String(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.innerText || el.textContent || el.getAttribute("name") || ""
+        ).replace(/\s+/g, " ").trim(),
+        0,
+        120
+      );
+      return Object.assign({
+        found: true,
+        tag: el.tagName.toLowerCase(),
+        role: el.getAttribute("role") || "",
+        label,
+        selector: elementSelector(el),
+        rect: absoluteRect(el)
+      }, targetSecurityMetadata(el, label));
+    } catch (e) {
+      return { found: false, reason: e.message };
+    }
+  }
+  function resolveActiveTargetInfo() {
+    try {
+      const el = document.activeElement;
+      if (!el || el === document.body || el === document.documentElement) {
+        return { found: false, reason: "\u5F53\u524D\u6CA1\u6709\u805A\u7126\u7684\u8F93\u5165\u5143\u7D20" };
+      }
+      const label = sliceSafe(
+        String(
+          el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.innerText || el.textContent || el.getAttribute("name") || ""
+        ).replace(/\s+/g, " ").trim(),
+        0,
+        120
+      );
+      return Object.assign({
+        found: true,
+        tag: el.tagName.toLowerCase(),
+        role: el.getAttribute("role") || "",
+        label,
+        selector: elementSelector(el)
+      }, targetSecurityMetadata(el, label));
     } catch (e) {
       return { found: false, reason: e.message };
     }
@@ -1703,7 +1901,17 @@
       text: normalizeInnerText(el),
       box: { x: Math.round(rect.left), y: Math.round(rect.top), w: Math.round(rect.width), h: Math.round(rect.height) }
     };
-    if (typeof el.value === "string") state.value = sliceSafe(el.value, 0, 300);
+    if (typeof el.value === "string") {
+      const field = classifySensitiveField({
+        inputType: el.tagName === "INPUT" ? el.getAttribute("type") || "text" : "",
+        autocomplete: el.getAttribute("autocomplete") || "",
+        name: el.getAttribute("name") || "",
+        id: el.id || "",
+        label: el.getAttribute("aria-label") || el.getAttribute("title") || ""
+      });
+      state.value = field.sensitive ? "[\u5DF2\u9690\u85CF]" : sliceSafe(el.value, 0, 300);
+      if (field.sensitive) state.valueRedacted = true;
+    }
     if (Array.isArray(styles) && styles.length) {
       const out = {};
       for (const p of styles.slice(0, 12)) {
@@ -2600,6 +2808,23 @@
     }
     const ready = await ensureActionable(el);
     if (!ready) return { ok: false, error: "\u76EE\u6807\u8F93\u5165\u5143\u7D20\u4E0D\u53EF\u64CD\u4F5C\uFF08\u4E0D\u53EF\u89C1\u3001\u88AB\u906E\u6321\u6216\u5C1A\u672A\u5C31\u7EEA\uFF09" };
+    const field = classifySensitiveField({
+      inputType: el.tagName === "INPUT" ? el.getAttribute("type") || "text" : "",
+      autocomplete: el.getAttribute("autocomplete") || "",
+      name: el.getAttribute("name") || "",
+      id: el.id || "",
+      testid: el.getAttribute("data-testid") || el.getAttribute("data-test-id") || "",
+      placeholder: el.getAttribute("placeholder") || "",
+      label: el.getAttribute("aria-label") || el.getAttribute("title") || ""
+    });
+    if (field.sensitive) {
+      return {
+        ok: false,
+        blocked: true,
+        needsUserAction: true,
+        error: "\u654F\u611F\u8F93\u5165\u5B57\u6BB5\uFF08" + (field.label || field.category) + "\uFF09\u7981\u6B62\u7531 Agent \u81EA\u52A8\u586B\u5199\uFF0C\u8BF7\u7528\u6237\u624B\u52A8\u64CD\u4F5C\u3002"
+      };
+    }
     const text = String(
       params.value !== void 0 && params.value !== null ? params.value : params.text === void 0 || params.text === null ? "" : params.text
     );
@@ -2631,14 +2856,11 @@
     const after = editableValue(el) || "";
     const summary = editableTextSummary(next, after);
     const matched = summary.matchesIntent;
-    const clip = (s) => JSON.stringify(String(s).slice(0, 80));
     const result = {
       ok: matched,
       changed: before !== next,
       alreadySatisfied: before === next,
       valuePresent: Boolean(next),
-      valueBefore: before,
-      valueAfter: after,
       matchesIntent: matched,
       partial: !matched,
       strategy,
@@ -2646,7 +2868,7 @@
       actualLength: summary.actualLength,
       firstDifference: summary.firstDifference,
       selector: elementSelector(el),
-      result: matched ? (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u5B9E\u9645\u503C\uFF08" + summary.actualLength + " \u5B57\u7B26\uFF09\uFF1A" + clip(after) : "\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08strategy=" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + summary.actualLength + " \u5B57\u7B26\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index + "\u3002\u5B9E\u9645\u503C\uFF1A" + clip(after) + "\u3002\u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26 \u2014\u2014 \u9884\u671F\u4E3A " + clip(next) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u8BFB\u7F16\u8F91\u5668\u6216\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u3002"
+      result: matched ? (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u56DE\u8BFB\u786E\u8BA4\u957F\u5EA6\u4E3A " + summary.actualLength + " \u4E2A\u5B57\u7B26\uFF08\u8F93\u5165\u5185\u5BB9\u4E0D\u56DE\u663E\uFF09" : "\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08strategy=" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + summary.actualLength + " \u5B57\u7B26\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index + "\u3002\u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26\uFF1B\u8F93\u5165\u5185\u5BB9\u4E0E\u9884\u671F\u5185\u5BB9\u5747\u4E0D\u56DE\u663E\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u8BFB\u7F16\u8F91\u5668\u6216\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u3002"
     };
     return result;
   }
@@ -2875,8 +3097,16 @@
     const attribute = String(params.attribute || "").trim().toLowerCase();
     if (!/^[a-zA-Z_:][a-zA-Z0-9:._-]*$/.test(attribute)) return { ok: false, error: "\u5C5E\u6027\u540D\u65E0\u6548" };
     const raw = el.getAttribute(attribute);
-    const inputType = String(el.type || "").toLowerCase();
-    const sensitive = attribute === "value" && (inputType === "password" || /cc-number|cc-csc|one-time-code/i.test(el.getAttribute("autocomplete") || ""));
+    const field = classifySensitiveField({
+      inputType: el.tagName === "INPUT" ? el.getAttribute("type") || "text" : "",
+      autocomplete: el.getAttribute("autocomplete") || "",
+      name: el.getAttribute("name") || "",
+      id: el.id || "",
+      testid: el.getAttribute("data-testid") || el.getAttribute("data-test-id") || "",
+      placeholder: el.getAttribute("placeholder") || "",
+      label: el.getAttribute("aria-label") || el.getAttribute("title") || ""
+    });
+    const sensitive = attribute === "value" && field.sensitive || field.sensitive && /^(?:value|defaultvalue|checked|selected)$/i.test(attribute);
     const value = sensitive ? null : raw === null ? null : String(raw).slice(0, 2e3);
     return {
       ok: true,
@@ -5086,6 +5316,14 @@
       border-color: #7c5a18; border-left-color: #d97706; background: #3b321d; color: #f3d28b;
     }
     .panel.dark .auth-challenge-link { background: #262218; border-color: #9b731f; color: #f3cd75; }
+    .sensitive-action {
+      margin: 5px 0 8px; padding: 8px 10px; border: 1px solid #f3b4ae;
+      border-left: 4px solid #dc2626; border-radius: 7px; background: #fff3f2; color: #8f1d18;
+      font-size: 12px; line-height: 1.55;
+    }
+    .sensitive-action-title { font-weight: 700; margin-bottom: 2px; }
+    .sensitive-action-summary { word-break: break-word; }
+    .panel.dark .sensitive-action { background: #3b2221; border-color: #7f3b37; color: #ffc5c0; }
     /* \u622A\u56FE\uFF1A\u7ED9\u7528\u6237\u7684\u53EF\u89C6\u8BC1\u636E\uFF08\u6A21\u578B\u770B\u4E0D\u5230\u56FE\uFF0C\u6240\u4EE5\u53EA\u4F5C\u5C55\u793A\uFF09 */
     .agent-shot { margin: 6px 0; }
     .agent-shot img { display: block; max-width: 100%; max-height: 190px; border: 1px solid #d7dde5; border-radius: 8px; cursor: zoom-in; background: #fff; }
@@ -5238,7 +5476,8 @@
               message: String(event.authMessage || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\u3002"),
               loginUrl: String(event.loginUrl || "")
             }
-          } : {}
+          } : {},
+          ...event.needsUserAction === true && event.sensitiveAction ? { needsUserAction: true, sensitiveAction: event.sensitiveAction } : {}
         });
         if (state.approval && state.approval.callId === String(event.callId || "")) state.approval = null;
         break;
@@ -5622,6 +5861,7 @@
     created: "\u51C6\u5907\u4E2D",
     planning: "\u89C4\u5212\u6B65\u9AA4",
     waiting_approval: "\u7B49\u5F85\u4F60\u786E\u8BA4",
+    waiting_user_action: "\u7B49\u5F85\u4F60\u624B\u52A8\u64CD\u4F5C",
     executing: "\u6267\u884C\u52A8\u4F5C",
     observing: "\u67E5\u770B\u7ED3\u679C",
     stopping: "\u505C\u6B62\u4E2D",
@@ -6145,6 +6385,19 @@
     wrap.innerHTML = html;
     return wrap.firstElementChild;
   }
+  function sensitiveActionHtml(action) {
+    if (!action || !action.blocked) return "";
+    const prompt = String(action.userPrompt || "\u8BE5\u64CD\u4F5C\u4E3A\u4E86\u5B89\u5168\u9700\u8981\u4F60\u672C\u4EBA\u624B\u52A8\u5B8C\u6210\u3002");
+    const category = String(action.category || "sensitive-action");
+    return '<div class="sensitive-action" role="alert" data-sensitive-category="' + escAttr(category) + '"><div class="sensitive-action-title">\u{1F512} \u5B89\u5168\u64CD\u4F5C\u5DF2\u963B\u6B62\u81EA\u52A8\u6267\u884C</div><div class="sensitive-action-summary">' + escHtml(prompt) + "</div></div>";
+  }
+  function sensitiveActionElement(action) {
+    const html = sensitiveActionHtml(action);
+    if (!html) return null;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    return wrap.firstElementChild;
+  }
   var SHOT_CACHE_MAX = 30;
   var shotCache = createLruCache(SHOT_CACHE_MAX);
   var shotPending = /* @__PURE__ */ new Set();
@@ -6293,6 +6546,8 @@
         );
         const authEl = authChallengeElement(p.authChallenge);
         if (authEl) flow.appendChild(authEl);
+        const safetyEl = sensitiveActionElement(p.sensitiveAction);
+        if (safetyEl) flow.appendChild(safetyEl);
       }
     }
   }
@@ -6510,7 +6765,7 @@
         p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
         clipDetail(p.result, 4e3)
       );
-      return html + authChallengeHtml(p.authChallenge);
+      return html + authChallengeHtml(p.authChallenge) + sensitiveActionHtml(p.sensitiveAction);
     }
     if (p.type === "screenshot") return screenshotHtml(p);
     if (p.type === "thinking" && p.text) {
@@ -8712,6 +8967,10 @@
               loginUrl: String(resp.loginUrl || "")
             };
           }
+          if (resp.needsUserAction === true && resp.sensitiveAction) {
+            resultPart.needsUserAction = true;
+            resultPart.sensitiveAction = resp.sensitiveAction;
+          }
           pendingParts.push(resultPart);
           appendStep(
             toolStepElement(
@@ -8724,6 +8983,8 @@
           );
           const authEl = authChallengeElement(resultPart.authChallenge);
           if (authEl) appendStep(authEl);
+          const safetyEl = sensitiveActionElement(resultPart.sensitiveAction);
+          if (safetyEl) appendStep(safetyEl);
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "agent-state") {
@@ -9455,19 +9716,23 @@
           payload = { text: extractPageText(), visibility: null };
         }
         sendResponse({
-          text: payload.text,
+          text: redactSensitiveText(payload.text),
           visibility: payload.visibility,
-          title: document.title || "",
-          url: location.href
+          title: redactSensitiveText(document.title || ""),
+          url: redactUrl(location.href)
         });
         return true;
       }
       if (msg && msg.type === "kbGetConsole") {
-        getDebugBuffer("console").then((entries) => sendResponse({ entries: entries || [] }));
+        getDebugBuffer("console").then((entries) => sendResponse({
+          entries: redactSensitiveData(entries || [])
+        }));
         return true;
       }
       if (msg && msg.type === "kbGetNetwork") {
-        getDebugBuffer("network").then((entries) => sendResponse({ entries: entries || [] }));
+        getDebugBuffer("network").then((entries) => sendResponse({
+          entries: redactSensitiveData(entries || [])
+        }));
         return true;
       }
       if (msg && msg.type === "kbGetElementSource") {
@@ -9487,11 +9752,19 @@
         return true;
       }
       if (msg && msg.type === "kbGetPageSnapshot") {
-        sendResponse(extractPageSnapshot(msg.options || {}));
+        sendResponse(redactPageSnapshot(extractPageSnapshot(msg.options || {})));
         return true;
       }
       if (msg && msg.type === "kbResolveTarget") {
         sendResponse(resolveTargetInfo(msg.params || {}));
+        return true;
+      }
+      if (msg && msg.type === "kbResolvePoint") {
+        sendResponse(resolvePointInfo(msg.params || {}));
+        return true;
+      }
+      if (msg && msg.type === "kbResolveActiveTarget") {
+        sendResponse(resolveActiveTargetInfo());
         return true;
       }
       if (msg && msg.type === "kbUndo") {
