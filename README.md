@@ -83,6 +83,7 @@ flowchart TD
 | 面板会话如何共享、切换与加运行锁 | [docs/panel-sessions.md](docs/panel-sessions.md) |
 | 真浏览器 E2E 怎么写 | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md)（速查：[tests/e2e/README.md](tests/e2e/README.md)） |
 | 真模型 eval 怎么跑、历次结果 | [docs/real-model-eval-log.md](docs/real-model-eval-log.md) |
+| WebArena 任务级基准怎么跑、评分与实测 | [docs/webarena-eval.md](docs/webarena-eval.md)（实测报告：[docs/webarena-eval-report.md](docs/webarena-eval-report.md)） |
 | 集成路线到底实现了哪些（唯一事实来源） | [docs/integration-status.md](docs/integration-status.md) |
 | 新增 / 重构工具时必须遵守的规范 | [docs/tool-design.md](docs/tool-design.md) |
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |

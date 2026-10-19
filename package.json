@@ -15,6 +15,7 @@
     "build:content": "node scripts/build-content.mjs",
     "test": "node scripts/run-all-checks.mjs",
     "test:e2e": "node scripts/run-e2e.mjs",
+    "eval:webarena": "node scripts/run-webarena.mjs",
     "render:icons": "node scripts/render-icons.mjs"
   },
   "devDependencies": {
