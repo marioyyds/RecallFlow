@@ -7,7 +7,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTranscript, previewArgsJson, alreadyCommittedAsText, buildPartialTurn, buildFailedTurn, buildInterruptedTurn, stripTrailingSources, serializeConversationMessages, MAX_PARTS, MAX_PART_RESULT_CHARS, MAX_MESSAGE_CONTENT_CHARS, PARTIAL_TURN_NOTE } from '../lib/page/transcript.js';
+import {
+  buildTranscript,
+  previewArgsJson,
+  alreadyCommittedAsText,
+  citationNeutralTextKey,
+  collapseImmediateRepeatedText,
+  dedupeAdjacentTextParts,
+  normalizeConversationDuplicates,
+  buildPartialTurn,
+  buildFailedTurn,
+  buildInterruptedTurn,
+  stripTrailingSources,
+  serializeConversationMessages,
+  MAX_PARTS,
+  MAX_PART_RESULT_CHARS,
+  MAX_MESSAGE_CONTENT_CHARS,
+  PARTIAL_TURN_NOTE,
+} from '../lib/page/transcript.js';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });
@@ -250,6 +267,90 @@ test('complete_task 的完成语不会重复出现（面板把它同时作为叙
   ]);
   const occurrences = text.split('证据：highlight_text 返回').length - 1;
   assert.equal(occurrences, 1, '完成语应只出现一次，实际 ' + occurrences + ' 次：\n' + text);
+});
+
+test('同一正文在引文重编号前后各存一份时，导出只能出现一次', () => {
+  const body =
+    '## 已筛出候选商品\n\n' +
+    '筛选过程如下：苏宁商品详情页实际显示已下架，无法下单[6]；京东要求登录后查看[1][2]。' +
+    '因此转到可匿名浏览的渠道，并逐个读取价格、规格和库存参数。\n\n' +
+    '### 建议\n\n' +
+    '- 候选 A：价格 899.90 元，适合长款保暖。\n' +
+    '- 候选 B：价格 1099.90 元，适合轻便通勤。';
+  const beforeRenumber = body.replace('无法下单[6]', '无法下单[4]');
+  const text = wrap([
+    {
+      role: 'assistant',
+      content: body,
+      parts: [
+        { type: 'narration', text: body },
+        { type: 'text', text: beforeRenumber },
+      ],
+    },
+  ]);
+  assert.equal((text.match(/## 已筛出候选商品/g) || []).length, 1, text);
+  assert.ok(!text.includes('### 结论'), '正文已在 parts 中完整展示，不应再追加结论副本：\n' + text);
+  assert.equal(
+    (text.match(/因此转到可匿名浏览的渠道/g) || []).length,
+    1,
+    '相同正文（即使引文号不同）只能出现一次：\n' + text
+  );
+});
+
+test('alreadyCommittedAsText 比较时忽略引文编号，但保留引文标签', () => {
+  const parts = [{ type: 'narration', text: '结论见来源 [6]，并且还有 [5][4]。' }];
+  assert.equal(alreadyCommittedAsText(parts, '结论见来源 [4]，并且还有 [5][6]。'), true);
+  assert.equal(alreadyCommittedAsText(parts, '结论见来源 [来源6]。'), false);
+  assert.equal(citationNeutralTextKey('甲 [6] 乙 [来源4]'), '甲 [] 乙 [来源]');
+});
+
+test('单个 text part 内连续重复的整篇正文也会折叠（保留后一份）', () => {
+  const body =
+    '## 候选结果\n\n' +
+    ('第一段：价格、充绒量和适用温度均已从详情页读回。'.repeat(6)) + '\n\n' +
+    ('第二段：登录和付款需要用户本人完成。'.repeat(6)) + '\n\n' +
+    ('第三段：给出两到三个可比较的候选。'.repeat(6));
+  const first = body.replace('付款', '付款[6]');
+  const second = body.replace('付款', '付款[4]');
+  const collapsed = collapseImmediateRepeatedText(first + '\n\n' + second);
+  assert.equal(collapsed, second, '应删掉第一份，保留引文号较新的后一份');
+});
+
+test('相邻正文去重保留最新副本；被工具步骤隔开的相同正文不合并', () => {
+  const body = '这是一段足够长的正文。'.repeat(10);
+  const deduped = dedupeAdjacentTextParts([
+    { type: 'narration', text: body + '[6]' },
+    { type: 'text', text: body + '[4]' },
+  ]);
+  assert.equal(deduped.length, 1);
+  assert.match(deduped[0].text, /\[4\]$/);
+
+  const separated = dedupeAdjacentTextParts([
+    { type: 'narration', text: body },
+    { type: 'tool-call', callId: 'c', name: 'wait_for_element', args: {} },
+    { type: 'tool-result', callId: 'c', name: 'wait_for_element', status: 'completed', result: 'ok' },
+    { type: 'narration', text: body },
+  ]);
+  assert.equal(separated.length, 4, '真实时间线边界不能被吞掉');
+});
+
+test('打开旧会话时自动清理已落盘的重复正文', () => {
+  const body = '## 旧会话重复正文\n\n' + '这是一段足够长的历史回答。'.repeat(20);
+  const legacy = [
+    { role: 'user', content: '问题' },
+    {
+      role: 'assistant',
+      content: body + '[6]',
+      parts: [
+        { type: 'narration', text: body + '[6]' },
+        { type: 'text', text: body + '[4]' },
+      ],
+    },
+  ];
+  const cleaned = normalizeConversationDuplicates(legacy);
+  assert.equal(cleaned[1].parts.length, 1, '旧 parts 中的相邻重复应在加载时清掉');
+  assert.match(cleaned[1].parts[0].text, /\[4\]$/, '保留引文号较新的后一份');
+  assert.equal(legacy[1].parts.length, 2, '不应原地修改传入的旧数据');
 });
 
 test('叙述与工具结果只是碰巧相似时不会被误删', () => {

@@ -4015,7 +4015,7 @@
     return head || s;
   }
   function alreadyCommittedAsText(parts, text) {
-    const want = norm(text);
+    const want = citationNeutralTextKey(collapseImmediateRepeatedText(text));
     if (!want) return false;
     const list = Array.isArray(parts) ? parts : [];
     for (let i = list.length - 1; i >= 0; i--) {
@@ -4023,9 +4023,87 @@
       if (!p) continue;
       if (p.type === "tool-call" || p.type === "tool-result" || p.type === "screenshot") continue;
       if (p.type !== "narration" && p.type !== "text") continue;
-      return norm(p.text) === want;
+      return citationNeutralTextKey(collapseImmediateRepeatedText(p.text)) === want;
     }
     return false;
+  }
+  function citationNeutralTextKey(text) {
+    return norm(text).replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (whole, inner) => {
+      const label = String(inner).replace(/\s*\d+\s*$/, "").trim();
+      return label ? "[" + label + "]" : "[]";
+    });
+  }
+  function collapseImmediateRepeatedText(text) {
+    const s = String(text == null ? "" : text);
+    if (s.length < 400) return s;
+    const candidates = [];
+    const headingRe = /^#{1,6}\s/gm;
+    let hm;
+    while (hm = headingRe.exec(s)) {
+      if (hm.index > 0) candidates.push(hm.index);
+    }
+    const blocks = s.split(/\n{2,}/);
+    if (blocks.length >= 2 && blocks.length <= 120) {
+      let pos = 0;
+      for (let i = 1; i < blocks.length; i++) {
+        const before = blocks.slice(0, i).join("\n\n");
+        const after = blocks.slice(i).join("\n\n");
+        if (after.trim()) {
+          const delta = s.indexOf(after.trim(), pos);
+          if (delta > 0) candidates.push(delta);
+        }
+        pos += blocks[i - 1].length + 2;
+      }
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const at of candidates) {
+      const idx = Number(at);
+      if (!Number.isInteger(idx) || idx <= 0 || idx >= s.length || seen.has(idx)) continue;
+      seen.add(idx);
+      const left = s.slice(0, idx).trim();
+      const right = s.slice(idx).trim();
+      if (left.length < 200 || right.length < 200) continue;
+      const ratio = left.length / right.length;
+      if (ratio < 0.7 || ratio > 1.3) continue;
+      const leftKey = citationNeutralTextKey(left);
+      if (leftKey.length >= 200 && leftKey === citationNeutralTextKey(right)) return right;
+    }
+    return s;
+  }
+  function dedupeAdjacentTextParts(parts) {
+    const src = Array.isArray(parts) ? parts : [];
+    const out = [];
+    let lastTextKey = "";
+    let lastTextIndex = -1;
+    for (const part of src) {
+      if (!part) continue;
+      if ((part.type === "narration" || part.type === "text") && part.text) {
+        const collapsedText = collapseImmediateRepeatedText(part.text);
+        const normalizedPart = collapsedText === part.text ? part : Object.assign({}, part, { text: collapsedText });
+        const key = citationNeutralTextKey(collapsedText);
+        if (key.length >= 80 && key === lastTextKey) {
+          out[lastTextIndex] = normalizedPart;
+          continue;
+        }
+        out.push(normalizedPart);
+        lastTextKey = key;
+        lastTextIndex = out.length - 1;
+        continue;
+      }
+      out.push(part);
+      lastTextKey = "";
+      lastTextIndex = -1;
+    }
+    return out;
+  }
+  function normalizeConversationDuplicates(messages) {
+    return (Array.isArray(messages) ? messages : []).map((m) => {
+      if (!m || m.role !== "assistant") return m;
+      const content = collapseImmediateRepeatedText(m.content || "");
+      const parts = Array.isArray(m.parts) ? dedupeAdjacentTextParts(m.parts) : m.parts;
+      if (content === m.content && parts === m.parts) return m;
+      return Object.assign({}, m, { content, parts });
+    });
   }
   function serializeCompleteConversationMessages(conversation2) {
     const src = Array.isArray(conversation2) ? conversation2 : [];
@@ -4133,7 +4211,7 @@
         out.push("> \u26A0 \u672C\u8F6E\u6B63\u6587\u8D85\u8FC7\u5B58\u50A8\u4E0A\u9650\uFF0C\u5DF2\u622A\u65AD\uFF1B\u5B8C\u6574\u539F\u6587\u53EA\u5B58\u5728\u4E8E\u5F53\u6B21\u9875\u9762\u4F1A\u8BDD\u4E2D\u3002");
         out.push("");
       }
-      const parts = Array.isArray(m.parts) ? m.parts : [];
+      const parts = dedupeAdjacentTextParts(Array.isArray(m.parts) ? m.parts : []);
       const results = /* @__PURE__ */ new Map();
       const callIds = /* @__PURE__ */ new Set();
       for (const p of parts) {
@@ -4188,7 +4266,8 @@
       flushTools();
       out.push("");
       const content = String(m.content || "").trim();
-      const alreadyShownFull = Boolean(content) && (content === lastText2 || fullyInline(lastToolText) && norm(content) === lastToolText);
+      const contentKey = citationNeutralTextKey(content);
+      const alreadyShownFull = Boolean(content) && (contentKey === citationNeutralTextKey(lastText2) || fullyInline(lastToolText) && contentKey === citationNeutralTextKey(lastToolText));
       if (content && !alreadyShownFull) {
         out.push(m.failed ? "### \u5931\u8D25" : m.partial ? "### \u8FDB\u884C\u4E2D" : m.interrupted ? "### \u4E2D\u65AD" : "### \u7ED3\u8BBA");
         out.push("");
@@ -7361,7 +7440,7 @@
     panelSessionId = session.id;
     panelSessionSeq = Number(session.seq) || 0;
     if (opts.activeId) panelSessionActiveId = String(opts.activeId);
-    conversation = Array.isArray(session.messages) ? session.messages : [];
+    conversation = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
     handoffId = normalizeHandoffId(session.handoffId || "") || loadHandoffId() || newHandoffId();
     try {
       localStorage.setItem(HANDOFF_ID_KEY, handoffId);
@@ -9093,7 +9172,10 @@
           removeTypingEl();
           finishReasoning();
           streamRender.flush();
-          lastResponse = pendingNarration || lastNarration || "";
+          lastResponse = collapseImmediateRepeatedText(pendingNarration || lastNarration || "");
+          if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) {
+            pendingParts.push({ type: "text", text: lastResponse });
+          }
           const textParts = pendingParts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
           const renumbered = renumberCitationsAcross(
             textParts.map((p) => p.text).concat([lastResponse]),
@@ -9132,19 +9214,16 @@
             pendingAiMsg.appendChild(verifyEl);
           }
           if (lastResponse) pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
-          if (finalText && !alreadyCommittedAsText(pendingParts, finalText)) {
-            pendingParts.push({ type: "text", text: finalText });
-          }
           commitPendingVerifyPass();
-          const finalParts = pendingParts.map((p) => {
+          const finalParts = dedupeAdjacentTextParts(pendingParts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
-              return p.text ? Object.assign({}, p, { text: renumbered.apply(p.text) }) : p;
+              return p.text ? Object.assign({}, p, { text: renumbered.apply(collapseImmediateRepeatedText(p.text)) }) : p;
             }
             if (p.type === "tool-result" && typeof p.result === "string") {
               return Object.assign({}, p, { result: renumbered.apply(p.result) });
             }
             return p;
-          });
+          }));
           conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
           saveConversation();
           if (!pendingAiMsg || !pendingAiMsg.isConnected) {
