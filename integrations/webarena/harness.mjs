@@ -79,3 +79,28 @@ export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, agentBud
 export async function closeBrowser(context) {
   if (context) await context.close();
 }
+
+/**
+ * 让 Playwright 接管「扩展自己开的那个 tab」并重新导航到 startUrl。
+ *
+ * 为什么必须这么做（实测）：`browser.newContext({ extraHTTPHeaders })` 只对 **Playwright 创建的**
+ * 页面生效；扩展用 `chrome.tabs.create` 开的 tab 不带这些头。WebArena 的站点靠请求头自动登录
+ * （如 shopping_admin 的 `X-M2-Admin-Auto-Login`），于是扩展开的 tab 会停在登录页 —— 现象是
+ * "agent 说它看到了登录框"，而不是报错。Playwright 导航过一次之后，这个 target 就被接管，
+ * 后续（agent 的点击/请求）才带上头。
+ *
+ * 找不到对应页面时返回 false（例如站点改了 origin），由调用方决定是否告警。
+ */
+export async function navigateTabWithHeaders(context, url) {
+  let origin;
+  try { origin = new URL(url).origin; } catch (e) { return false; }
+  const page = context.pages().slice().reverse().find((p) => p.url().startsWith(origin));
+  if (!page) return false;
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  } catch (e) {
+    // 站点自己 302 到目标页时 goto 可能抛；只要最终停在同 origin 就算接管成功。
+    if (!page.url().startsWith(origin)) return false;
+  }
+  return true;
+}

@@ -18,13 +18,15 @@
 
 ## 产物与评分口径
 
-每条任务产生一个目录（`--out`）：
+每条任务产生一个目录（`--out/<task_id>/`）。**这个布局是刻意对齐 evaluator 的**：
+WebArena-Verified 按 `<out>/<task_id>/agent_response.json` 与 `<out>/<task_id>/network.har`
+找产物（默认文件名见其 `types/config.py`）；换成别的名字/层级，它只会告诉你"0 条可评测任务"。
 
 ```
-agent_response_<id>.json   FinalAgentResponse（规范键 task_type/status/retrieved_data/error_details）
-har_<id>.har               网络 trace（WebArena-Verified 的 NetworkEventEvaluator 读它）
-recallflow_<id>.json       RecallFlow 原始 job 终态（state/答复/事件），用于归因
-summary.json               本轮汇总
+<out>/<task_id>/agent_response.json   FinalAgentResponse（规范键 task_type/status/retrieved_data/error_details）
+<out>/<task_id>/network.har           网络 trace（WebArena-Verified 的 NetworkEventEvaluator 读它）
+<out>/<task_id>/recallflow.json       RecallFlow 原始 job 终态（state/答复/事件），用于归因
+<out>/summary.json                    本轮汇总（注意：这里的 success 只数 SUCCESS，与官方分不同口径）
 ```
 
 RecallFlow 交回的是**自然语言答复**，WebArena-Verified 要的是**结构化终态**。
@@ -48,7 +50,39 @@ RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/run-webarena.mjs \
 ```
 
 任务文件格式即 WebArena-Verified 的任务 JSON（裸数组或 `{ "tasks": [...] }`）。
-`start_urls` 里的 `__SHOPPING__` / `__GITLAB__` 等占位符需替换成你本地站点的真实地址。
+`start_urls` 里的 `__SHOPPING__` / `__GITLAB__` 等占位符需替换成本地站点真实地址——
+用 `--site-url SHOPPING=http://localhost:7770`（可重复）即可，不必预改文件。
+
+### 站点地址与自动登录头（WebArena 约定）
+
+| 站点 | 地址 | 自动登录请求头 |
+| --- | --- | --- |
+| shopping | `http://localhost:7770` | —（游客） |
+| shopping_admin | `http://localhost:7780/admin` | `X-M2-Admin-Auto-Login: admin:admin1234` |
+| reddit | `http://localhost:9999` | — |
+| gitlab | `http://localhost:8023` | — |
+| wikipedia | `http://localhost:8888` | — |
+| map | `http://localhost:3030` | — |
+
+站点由官方 Docker 镜像提供，容器名 `webarena-verified-<site>`，网页端口见上表
+（`am1n3e/webarena-verified-<site>`；起好后 `docker exec <name> env-ctrl status` 应回 `[OK]`）。
+
+⚠ **请求头自动登录的坑（实测）**：`context({ extraHTTPHeaders })` 只对 **Playwright 创建的页面**生效；
+扩展用 `chrome.tabs.create` 开的 tab **不带这些头**，站点会把 agent 停在登录页（现象是
+"agent 说它看到了登录框"，而不是报错）。因此 `run.mjs` 在 `open_tab` 之后会让 Playwright
+**接管该 tab 再导航一次**（见 `harness.navigateTabWithHeaders`），头才跟得上。
+
+### 评分（官方 evaluator，本机无需 Python）
+
+官方 `webarena-verified` 是 Python 包，用 Docker 跑即可（会写 `<out>/<task_id>/eval_result.json`）：
+
+```bash
+docker run --rm -v "<out>:/out" python:3.12-slim sh -c \
+  "pip install -q webarena-verified && webarena-verified eval-tasks --output-dir /out --task-ids 21,22"
+```
+
+注意：**我们的 `summary.json` 只数 `status=SUCCESS`，与官方分不是一个口径**——
+例如 agent 交 `NOT_FOUND_ERROR` 而"正确答案就是查不到"时，官方判**对**。以官方分为准。
 
 ## 已知边界（诚实记录）
 

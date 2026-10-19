@@ -5,7 +5,7 @@ RecallFlow × WebArena-Verified 的评测适配层。完整说明见
 
 | 文件 | 作用 |
 | --- | --- |
-| `run.mjs` | 编排器：任务 → 指令 → 真浏览器跑 → 落盘 `agent_response_*` + `*.har` |
+| `run.mjs` | 编排器：任务 → 指令 → 真浏览器跑 → 落盘 `<out>/<id>/{agent_response.json,network.har}`（对齐官方 evaluator 的目录约定） |
 | `harness.mjs` | 浏览器原语：起真 Chromium、装扩展、**清存储做隔离**、抓 HAR |
 | `mcp-client.mjs` | 7801 桥接的最小 HTTP JSON-RPC 客户端（init / tools-call / 轮询 job） |
 | `config.mjs` | 纯参数解析 / 任务选择 / allowRisk 校验 / `__SITE__` 占位符替换（可单测） |

@@ -93,10 +93,15 @@ async function ensureBridgeServer(client) {
 }
 
 async function runOne({ raw, opts, client, settings, outDir }) {
-  const { launchBrowser, configureExtension, closeBrowser } = await import('./harness.mjs');
+  const { launchBrowser, configureExtension, closeBrowser, navigateTabWithHeaders: syncTab } = await import('./harness.mjs');
   const task = normalizeTask(raw);
   const instruction = buildInstruction(task);
-  const harPath = path.join(outDir, 'har_' + task.taskId + '.har');
+  // 目录布局对齐 WebArena-Verified 的 evaluator：它按 `<out>/<task_id>/agent_response.json`
+  // 和 `<out>/<task_id>/network.har` 找产物（文件名来自 types/config.py 的默认值）。
+  // 用别的布局会得到"0 条可评测任务"，而且那个报错不会告诉你是文件名不对。
+  const taskDir = path.join(outDir, String(task.taskId));
+  fs.mkdirSync(taskDir, { recursive: true });
+  const harPath = path.join(taskDir, 'network.har');
   const startedAt = Date.now();
   let context = null;
   let response;
@@ -107,6 +112,12 @@ async function runOne({ raw, opts, client, settings, outDir }) {
     await client.waitForExtension(60000);
     const opened = await client.openTab(task.startUrls[0]);
     if (!opened || opened.ok === false) throw new Error('open_tab 失败：' + JSON.stringify(opened));
+    // 扩展开的 tab 不带 context 级请求头：靠头自动登录的站点会让 agent 停在登录页。
+    // 先让 Playwright 接管这个 tab 并重新导航，头才会跟上（详见 harness.navigateTabWithHeaders）。
+    if (Object.keys(opts.headers || {}).length) {
+      const ok = await syncTab(context, task.startUrls[0]);
+      if (!ok) process.stdout.write('    ! 未能让 Playwright 接管起始 tab，请求头可能不生效\n');
+    }
     const started = await client.startAgentTask({ instruction, allowRisk: opts.allowRisk, tabId: opened.tabId });
     if (!started || started.ok === false) throw new Error('agent_task 启动失败：' + JSON.stringify(started));
     job = await client.waitForJob(started.jobId, {
@@ -141,8 +152,8 @@ async function runOne({ raw, opts, client, settings, outDir }) {
     duration_ms: Date.now() - startedAt,
     har: path.basename(harPath),
   };
-  fs.writeFileSync(path.join(outDir, 'agent_response_' + task.taskId + '.json'), JSON.stringify(response, null, 2) + '\n');
-  fs.writeFileSync(path.join(outDir, 'recallflow_' + task.taskId + '.json'), JSON.stringify(record, null, 2) + '\n');
+  fs.writeFileSync(path.join(taskDir, 'agent_response.json'), JSON.stringify(response, null, 2) + '\n');
+  fs.writeFileSync(path.join(taskDir, 'recallflow.json'), JSON.stringify(record, null, 2) + '\n');
   const flag = response.status === 'SUCCESS' ? 'OK ' : 'FAIL';
   console.log('  [' + flag + '] task ' + task.taskId + ' → ' + response.status + (check.ok ? '' : '（schema: ' + check.errors.join('；') + '）'));
   return record;
