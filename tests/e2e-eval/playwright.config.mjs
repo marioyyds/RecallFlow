@@ -28,5 +28,17 @@ export default defineConfig({
   // eval 不重试：它的产出是"模型这次的表现"，重试会让分数变成一个被挑过的好样本，
   // 那样"分数下降即回归"就永远判断不了。偶发失败应当如实记录，而不是抹掉。
   retries: 0,
-  reporter: [['list']],
+  // 结果**必须落成机器可读**：eval 的唯一长期价值是"这一轮比上一轮差没差"，
+  // 而此前唯一记录是人工维护的 docs/real-model-eval-log.md —— 没法自动比，
+  // 于是"技能文案改坏了"只能靠人翻 markdown 发现。
+  // 落盘后可用 node scripts/eval-compare.mjs 做基线对比。
+  reporter: [
+    ['list'],
+    [
+      'json',
+      {
+        outputFile: process.env.EVAL_RESULT_JSON || 'test-results/eval-results.json',
+      },
+    ],
+  ],
 });
