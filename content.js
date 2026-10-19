@@ -5516,6 +5516,139 @@
     }
   }
 
+  // lib/page/fab-position.js
+  var FAB_POSITION_KEY = "recallflow.fab-position.v1";
+  var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
+  var FAB_EDGE_GAP = 8;
+  var DEFAULT_FAB_RATIO = 0.38;
+  var FAB_FALLBACK_HEIGHT_NARROW = 46;
+  var FAB_FALLBACK_HEIGHT = 52;
+  var NARROW_WIDTH = 600;
+  function normalizeFabRatio(value) {
+    const ratio = Number(value);
+    return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
+  }
+  function createFabController(deps = {}) {
+    const getFab = typeof deps.getFab === "function" ? deps.getFab : () => null;
+    const win = deps.win || { innerWidth: 1280, innerHeight: 800 };
+    const storage = deps.storage || null;
+    const localStore = deps.localStore || null;
+    const now = typeof deps.now === "function" ? deps.now : () => Date.now();
+    let ratio = DEFAULT_FAB_RATIO;
+    function fabHeight() {
+      const fab2 = getFab();
+      const measured = fab2 ? fab2.offsetHeight : 0;
+      return measured || (win.innerWidth <= NARROW_WIDTH ? FAB_FALLBACK_HEIGHT_NARROW : FAB_FALLBACK_HEIGHT);
+    }
+    function currentFabTop2() {
+      const fab2 = getFab();
+      if (!fab2) return FAB_EDGE_GAP;
+      const styled = parseFloat(fab2.style.top);
+      return Number.isFinite(styled) ? styled : fab2.getBoundingClientRect().top;
+    }
+    function clampFabTop2(top) {
+      const height = fabHeight();
+      const maxTop = Math.max(FAB_EDGE_GAP, win.innerHeight - height - FAB_EDGE_GAP);
+      return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
+    }
+    function available() {
+      const height = fabHeight();
+      return Math.max(1, win.innerHeight - height - FAB_EDGE_GAP * 2);
+    }
+    function topFromRatio(r) {
+      return clampFabTop2(FAB_EDGE_GAP + r * available());
+    }
+    function ratioFromTop(top) {
+      return normalizeFabRatio((clampFabTop2(top) - FAB_EDGE_GAP) / available());
+    }
+    function applySaved() {
+      const fab2 = getFab();
+      if (!fab2) return;
+      fab2.style.top = topFromRatio(ratio) + "px";
+    }
+    function legacyRatio() {
+      if (!localStore) return null;
+      try {
+        const saved = JSON.parse(localStore.getItem(LEGACY_FAB_POSITION_KEY) || "null");
+        if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
+        return normalizeFabRatio(saved.ratio);
+      } catch (e) {
+        return null;
+      }
+    }
+    function clearLegacy() {
+      if (!localStore) return;
+      try {
+        localStore.removeItem(LEGACY_FAB_POSITION_KEY);
+      } catch (e) {
+      }
+    }
+    function persist() {
+      const fab2 = getFab();
+      if (!fab2) return;
+      const next = ratioFromTop(currentFabTop2());
+      ratio = next == null ? DEFAULT_FAB_RATIO : next;
+      if (!storage || !storage.local) return;
+      try {
+        const pending = storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: now() } });
+        if (pending && pending.catch) pending.catch(() => {
+        });
+      } catch (e) {
+      }
+      clearLegacy();
+    }
+    async function load() {
+      if (storage && storage.local) {
+        try {
+          const stored = await storage.local.get(FAB_POSITION_KEY);
+          let r = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
+          if (r == null) {
+            const legacy = legacyRatio();
+            if (legacy != null) {
+              r = legacy;
+              try {
+                await storage.local.set({ [FAB_POSITION_KEY]: { ratio: r, updatedAt: now() } });
+              } catch (e) {
+              }
+            }
+          }
+          if (r != null) ratio = r;
+        } catch (e) {
+        }
+      } else {
+        const legacy = legacyRatio();
+        if (legacy != null) ratio = legacy;
+      }
+      clearLegacy();
+      applySaved();
+    }
+    function moveBy(delta) {
+      const fab2 = getFab();
+      if (!fab2) return;
+      fab2.style.top = clampFabTop2(currentFabTop2() + delta) + "px";
+      persist();
+    }
+    return {
+      fabHeight,
+      currentFabTop: currentFabTop2,
+      clampFabTop: clampFabTop2,
+      available,
+      topFromRatio,
+      ratioFromTop,
+      applySaved,
+      persist,
+      load,
+      moveBy,
+      legacyRatio,
+      getRatio: () => ratio,
+      setRatio: (r) => {
+        const v = normalizeFabRatio(r);
+        if (v != null) ratio = v;
+        return ratio;
+      }
+    };
+  }
+
   // lib/page/chat.js
   function isExtContextAlive() {
     try {
@@ -5753,84 +5886,38 @@
   var currentCitations = null;
   var pageContextEnabled = true;
   var citeHighlightEntered2 = false;
-  var FAB_POSITION_KEY = "recallflow.fab-position.v1";
-  var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
-  var FAB_EDGE_GAP = 8;
-  var fabPositionRatio = 0.38;
-  function fabHeight() {
-    const measured = fab ? fab.offsetHeight : 0;
-    return measured || (window.innerWidth <= 600 ? 46 : 52);
-  }
+  var fabCtl = createFabController({
+    getFab: () => fab,
+    win: window,
+    storage: typeof chrome !== "undefined" ? chrome.storage : null,
+    localStore: (() => {
+      try {
+        return localStorage;
+      } catch (e) {
+        return null;
+      }
+    })()
+  });
   function currentFabTop() {
-    if (!fab) return FAB_EDGE_GAP;
-    const styled = parseFloat(fab.style.top);
-    return Number.isFinite(styled) ? styled : fab.getBoundingClientRect().top;
+    return fabCtl.currentFabTop();
   }
   function clampFabTop(top) {
-    const height = fabHeight();
-    const maxTop = Math.max(FAB_EDGE_GAP, window.innerHeight - height - FAB_EDGE_GAP);
-    return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
+    return fabCtl.clampFabTop(top);
   }
-  function normalizeFabRatio(value) {
-    const ratio = Number(value);
-    return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
-  }
-  function legacyFabRatio() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(LEGACY_FAB_POSITION_KEY) || "null");
-      if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
-      return normalizeFabRatio(saved.ratio);
-    } catch (e) {
-      return null;
-    }
+  function normalizeFabRatio2(value) {
+    return normalizeFabRatio(value);
   }
   function applySavedFabPosition() {
-    if (!fab) return;
-    const height = fabHeight();
-    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
-    fab.style.top = clampFabTop(FAB_EDGE_GAP + fabPositionRatio * available) + "px";
+    fabCtl.applySaved();
   }
   function persistFabPosition() {
-    if (!fab) return;
-    const height = fabHeight();
-    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
-    const top = clampFabTop(currentFabTop());
-    fabPositionRatio = normalizeFabRatio((top - FAB_EDGE_GAP) / available);
-    if (fabPositionRatio == null) fabPositionRatio = 0.38;
-    try {
-      const pending = chrome.storage.local.set({
-        [FAB_POSITION_KEY]: { ratio: fabPositionRatio, updatedAt: Date.now() }
-      });
-      if (pending && pending.catch) pending.catch(() => {
-      });
-      localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
-    } catch (e) {
-    }
+    fabCtl.persist();
   }
   async function loadFabPosition() {
-    try {
-      const stored = await chrome.storage.local.get(FAB_POSITION_KEY);
-      let ratio = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
-      if (ratio == null) {
-        const legacy = legacyFabRatio();
-        if (legacy != null) {
-          ratio = legacy;
-          await chrome.storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: Date.now() } });
-        }
-      }
-      if (ratio != null) fabPositionRatio = ratio;
-      try {
-        localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
-      } catch (e) {
-      }
-    } catch (e) {
-    }
-    applySavedFabPosition();
+    await fabCtl.load();
   }
   function moveFabBy(delta) {
-    if (!fab) return;
-    fab.style.top = clampFabTop(currentFabTop() + delta) + "px";
-    persistFabPosition();
+    fabCtl.moveBy(delta);
   }
   function togglePanelFromShortcut() {
     const now = Date.now();
@@ -9443,9 +9530,9 @@
         if (changes.aiSettings) refreshApiKeyBanner();
         if (!changes[FAB_POSITION_KEY]) return;
         const next = changes[FAB_POSITION_KEY].newValue;
-        const ratio = normalizeFabRatio(next && next.ratio);
+        const ratio = normalizeFabRatio2(next && next.ratio);
         if (ratio == null) return;
-        fabPositionRatio = ratio;
+        fabCtl.setRatio(ratio);
         applySavedFabPosition();
       });
     } catch (e) {

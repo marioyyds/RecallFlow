@@ -7,14 +7,18 @@ import { PANEL_CSS } from '../lib/page/panel-css.js';
 const chat = fs.readFileSync('lib/page/chat.js', 'utf8');
 
 test('RecallFlow 气泡支持纵向拖动，并保存归一化位置', () => {
-  assert.match(chat, /recallflow\.fab-position\.v1/);
+  // ⚠ 这里只钉**接线**（事件是否还挂着、是否还走夹取与持久化）。
+  // 真正的**行为**（夹取边界、比例归一化、旧位置迁移）已搬到
+  // tests/fab-position.test.mjs 去**真跑** —— 那段逻辑抽成独立模块后才测得动，
+  // 此前只能靠下面这种正则，它改一行格式就红、改坏行为却不红。
   assert.match(chat, /fab\.addEventListener\('pointerdown'/);
   assert.match(chat, /fab\.addEventListener\('pointermove'/);
   assert.match(chat, /fab\.addEventListener\('pointerup'/);
   assert.match(chat, /clampFabTop\(fabDragState\.origTop \+ dy\)/);
-  assert.match(chat, /chrome\.storage\.local\.set\(\{[\s\S]{0,80}FAB_POSITION_KEY/);
   assert.match(chat, /chrome\.storage\.onChanged\.addListener/);
-  assert.match(chat, /legacyFabRatio\(\)/, '旧网页级 localStorage 位置要迁移一次');
+  // 持久化与迁移的实现已随模块搬走，这里改为钉住"聊天面板确实委托给了它"。
+  assert.match(chat, /from '\.\/fab-position\.js'/, 'chat.js 应委托给 fab-position.js');
+  assert.match(chat, /createFabController\(\{/, '应创建带依赖注入的控制器');
 });
 
 test('拖动不会误触打开面板，并支持方向键微调', () => {
