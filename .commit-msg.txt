@@ -1,0 +1,14 @@
+test: commands.js 定位逻辑 + agent 失败文案契约（又修一个真 bug）
+
+- tests/commands-lookup.test.mjs（11 条）：commands.js 此前零 import、覆盖 21%。
+  用鸭子类型假元素测 roleOf / accessibleName / nameSimilarity / describeLookupMiss，
+  不引入 jsdom（仓库 devDeps 只有 playwright+esbuild，为纯函数引入不划算）。
+  记录一处如实断言：value 分支只 trim 不压空白，与其它分支不一致，
+  但匹配发生在 normName 之后（空白已统一），故不改产品代码。
+- tests/agent-failure-contract.test.mjs（5 条）：describeToolFailure 此前零覆盖，
+  而它的超时文案里「超时不代表动作没有发生」是一条安全网
+  （防止模型把已经生效的写操作原样重试一遍）。
+- 修 bug：describeToolFailure 遇到「没有 message 的错误对象」时落到 String(e)，
+  产出 [object Object] 喂给模型。已分三种情况显式处理，保留抛字符串的情形。
+
+全绿。
