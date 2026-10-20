@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { acquireLock, releaseLock, writeBackup, restoreBackup, recoverLeftovers, BACKUP_SUFFIX } from './lib/mutation-fs.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 
@@ -274,6 +275,50 @@ const TARGETS = [
     ],
   },
   {
+    // LLM 调用的中断语义：这三条错任何一条，用户按停止都会变成「再等 1.5 秒、再花钱」，
+    // 甚至变成「记录里写着任务已完成」（见 tests/llm-abort-retry.test.mjs 的说明）。
+    file: 'lib/assistant/llm.js',
+    mode: 'inplace',
+    test: 'tests/llm-abort-retry.test.mjs',
+    mutations: [
+      {
+        name: '把用户中断当成可重试的故障（停止变慢 1.5 秒，且重复发请求）',
+        from: "  if (e && e.name === 'AbortError') return false;",
+        to: "  if (e && e.name === 'AbortError') return true;",
+        expectFail: '不可重试',
+      },
+      {
+        name: '已中断的 signal 仍然发请求（在用户放弃的任务上继续计费）',
+        from: "  if (signal && signal.aborted) throw makeAbortError();",
+        to: "  if (false) throw makeAbortError();",
+        expectFail: '一个请求都不发',
+      },
+      {
+        name: 'fetch 抛错时不清理（定时器与 abort 监听留在原地）',
+        from: "    if (signal) signal.removeEventListener('abort', abort);",
+        to: "    if (false) signal.removeEventListener('abort', abort);",
+        expectFail: '解绑',
+      },
+    ],
+  },
+  {
+    // 完成校验的结局分派（classifyVerifyOutcome）：把「中断」误读成「校验器故障」的后果是
+    // 用户按了停止、记录里却写着任务已完成（详见 tests/llm-abort-retry.test.mjs）。
+    // 单独一个 target 是因为它属于另一个测试文件（变异脚本一次只跑一个目标测试）。
+    file: 'lib/assistant/agent.js',
+    mode: 'inplace',
+    test: 'tests/llm-abort-retry.test.mjs',
+    mutations: [
+      {
+        name: '中断被当成校验器故障（「停止」会以「任务已完成」落盘）',
+        from: "    if (error.name === 'AbortError') return { kind: 'interrupt' };",
+        to: "    if (error.name === 'AbortError') return { kind: 'fail-open' };",
+        // 关键词必须出现在**用例名**里（不是断言消息里）—— 否则真红了也会被判成没抓住。
+        expectFail: '结局分派',
+      },
+    ],
+  },
+  {
     // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
     // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
     file: 'lib/assistant/agent.js',
@@ -315,6 +360,40 @@ function toEol(text, eol) {
   return eol === '\n' ? text : text.replace(/\n/g, eol);
 }
 
+// ---------------------------------------------------------------- 互斥与自愈
+
+// ⚠ **必须互斥**。这个脚本会就地改写源文件，两个进程并发时：
+//   A 备份原始版本 → 写变异；B 读到的是**变异版本**，把它当「原始」备份下来；
+//   A 还原后 B 再还原 ⇒ 变异版本被写回磁盘，而两个进程各自的收尾核对都「通过」了。
+//   本会话真实发生过（`npm test` 里的门禁 + 手动跑的一次撞在一起），
+//   那次留在盘上的是 context.js 的 `idx.slice(0)`（keepFull 失效的变异）。
+const LOCK_FILE = path.join(ROOT, '.mutation-lock.json');
+const lock = acquireLock(LOCK_FILE);
+if (!lock.ok) {
+  console.error(
+    '已有变异测试在跑（pid=' + lock.holder.pid + '，自 ' + lock.holder.at + '）。\n' +
+      '它会就地改写源文件，两个进程并发会互相覆盖（甚至把变异版本留在盘上）—— 请等它结束再跑。'
+  );
+  process.exit(3);
+}
+process.on('exit', () => releaseLock(LOCK_FILE));
+
+const targetFiles = [...new Set(TARGETS.map((t) => path.resolve(ROOT, t.file)))];
+const healed = recoverLeftovers(targetFiles);
+if (healed.restored.length) {
+  console.log(
+    '（自愈）发现上次被中断时留下的变异版本，已按备份还原：\n  ' +
+      healed.restored.map((f) => path.relative(ROOT, f)).join('\n  ')
+  );
+}
+if (healed.skipped.length) {
+  console.log(
+    '（自愈）这些文件也留下了备份，但源文件已不含那次变异的文本（崩溃后被改过），' +
+      '因此**没有覆盖**，只清掉了备份 —— 若担心，请 git diff 一下：\n  ' +
+      healed.skipped.map((f) => path.relative(ROOT, f)).join('\n  ')
+  );
+}
+
 for (const target of TARGETS) {
   const abs = path.resolve(ROOT, target.file);
   // raw 是磁盘上的真实字节（含行尾），原始性核对必须用它 —— 用归一化文本比较
@@ -340,15 +419,13 @@ for (const target of TARGETS) {
       fs.writeFileSync(tmp, original.replace(m.from, m.to), 'utf8');
       env = { [target.envVar]: tmp };
     } else {
-      const backup = abs + '.mutation-backup';
-      // 备份写**原始字节**，这样 finally 里的 copyFileSync 能把行尾也一起还原。
-      fs.writeFileSync(backup, raw, 'utf8');
-      fs.writeFileSync(abs, toEol(original.replace(m.from, m.to), eol), 'utf8');
+      // 备份写**原始字节**（finally 里原样拷回，行尾也一起还原），
+      // 同时把 `to` 记进 meta —— 崩溃自愈要靠它判断这份备份还算不算数。
+      const mutated = toEol(original.replace(m.from, m.to), eol);
+      writeBackup(abs, raw, m.to);
+      fs.writeFileSync(abs, mutated, 'utf8');
       cleanup = () => {
-        try {
-          fs.copyFileSync(backup, abs);
-          fs.unlinkSync(backup);
-        } catch (e) {}
+        restoreBackup(abs);
       };
     }
 

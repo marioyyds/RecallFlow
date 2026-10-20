@@ -15,6 +15,11 @@ playwright-report/
 .e2e-out/
 .e2e-*.log
 
+# 变异测试的互斥锁与就地备份（正常跑完会自动删除；崩溃后残留说明需要人看一眼）
+.mutation-lock.json
+*.mutation-backup
+*.mutation-backup.meta.json
+
 # 录屏源文件：体积大，只提交转换后的 GIF（如 docs/assets/recallflow-xhs-publish.gif）。
 docs/*.webm
 

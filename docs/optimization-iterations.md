@@ -343,3 +343,113 @@ FAB 会被加上 `hidden`，而 `click()` **不会回头检查"面板是不是�
 （import 图分析）不该被「少读源码」的棘轮罚分 —— 但没有理由不许加。
 
 全量：1753 项 / 150 文件全绿。
+
+## 轮 93：中断不是「故障」—— 三层被吞掉的中断，以及变异脚本把源码改坏的那次回写
+
+### 一、点「停止」之后，代码还在跑
+
+`AbortError` 是**我们自己造的**信号，但 `llm.js` 把它当成了一次网络抖动：
+
+```js
+function isRetryableError(e) { /* 只按 message 抓 429 / 5xx / fetch failed */ }
+```
+
+`makeAbortError` 的 message 是「任务已取消」，匹配不上任何一条，于是……它恰好落在
+`return false` 上，被当成**不可重试**。**但这不是设计，是巧合** —— 只要哪天有人往
+可重试名单里加一条通配（`/失败|错误/`），中断就会立刻变成「重试 3 次」，每次 60 秒。
+所以第一件事是把巧合变成不变量：`isRetryableError` 首行 `if (e.name === 'AbortError') return false;`。
+
+第二层是「已经中断了还在发请求」。`callDeepSeekOnce` 里 signal 的 abort 监听是 fetch
+**之后**才挂上的，如果 signal 在调用前就已经 aborted，监听永远等不到事件，请求照发，
+然后等满 60 秒超时 —— 用户按了停止，还要再等一分钟。修法是在函数入口就检查
+`signal.aborted`，直接抛中断。
+
+第三层最隐蔽：失败路径不解绑。原来的写法是
+
+```js
+const timer = setTimeout(...);
+signal.addEventListener('abort', abort);
+const res = await fetch(...);   // ← 这里一抛，后面两行永远不执行
+clearTimeout(timer);
+signal.removeEventListener('abort', abort);
+```
+
+成功路径没事，**每次失败都漏一个监听器和一个计时器**。反复失败的长任务会攒下一串
+挂在同一个 signal 上的闭包。改成 `try/finally` 包住 fetch。
+
+### 二、`verifyCompletion` 把中断吞成了「没意见」
+
+这是本轮最严重的一个，因为它**让状态说谎**：
+
+```js
+try { ... } catch (e) { return null; }   // null = fail-open = 「校验器不可用，按通过处理」
+```
+
+用户按停止 → 校验那次 LLM 调用被中断 → catch 吞掉 → 返回 `null` → agent 认为
+「校验没意见」→ 继续收尾、`persist({ status: 'done' })`。**用户明明点了停止，任务被记成已完成。**
+下次打开历史会话，看到的是一个绿勾，没有任何地方能追到「这次是被中断的」。
+
+fail-open 的语义是对的：校验器挂了不该拦成任务失败。但它只该覆盖**故障**，
+不该覆盖**用户意图**。所以 `verifyCompletion` 现在区分两者：`AbortError`（或 signal
+已 aborted）原样抛出，其余异常仍然 `return null`。
+
+在 `agent.js` 的调用点，把这段判断抽成纯函数，好让它可以被单测钉住：
+
+```js
+export function classifyVerifyOutcome(verdict, error) {
+  if (error) {
+    if (error.name === 'AbortError') return { kind: 'interrupt' };
+    return { kind: 'fail-open' };
+  }
+  if (!verdict) return { kind: 'fail-open' };
+  return { kind: 'verdict', verdict };
+}
+```
+
+中断分支走 `persist({ status: run.status, phase: 'interrupted', reason: 'aborted-during-verify' })`
+再 `return`。三个结局各有各的出口，不再共用一个 `null`。
+
+`tests/llm-abort-retry.test.mjs` 8 条钉住这些：中断不可重试 / 已中断的 signal 不发请求 /
+请求中被中断只发一次 / 真故障仍重试 / 校验中断必须抛出 / 真故障仍 fail-open /
+失败路径必须解绑 signal / `classifyVerifyOutcome` 三态分派。
+
+> 为什么「请求中被中断只发一次」要单独一条：它同时验证了「不重试」和「不发第二次」，
+> 而这两件事由两处不同的代码保证。任何一处回归，这条都会红。
+
+### 三、变异测试把源码改成了变异版本（真实事故）
+
+跑 `mutation-check` 的 inplace 模式时，同时开了两个进程。时序是：
+
+```
+A: 备份 context.js → 写入变异版 → 跑测试
+B: 备份 context.js（此时已是变异版！）→ 写入自己的变异版 → 跑测试
+A: 还原（写回原始字节）→ 删除备份
+B: 还原（写回**自己备份的变异版**）→ 删除备份
+```
+
+结果 `context.js` 和 `llm.js` 被永久留成了变异态。第二次是靠 `git checkout --` 救回来的，
+但如果当时工作区有未提交的改动，那就是**直接丢工作**。
+
+这类 bug 的可怕之处是它**只在并发时出现**，而变异测试恰恰是最容易被并行触发的东西
+（本地开两个终端、CI 上矩阵展开）。两个独立修复：
+
+1. **进程锁** `.mutation-lock.json`，记 pid 与启动时间；`acquireLock` 前先 `pidAlive(pid)`
+   探测，占用则 `process.exit(3)`（退出码要和「有变异没被抓住」的 1 区分开，
+   否则 CI 会把它误判成测试失败）。`process.on('exit')` 里释放，且**只删自己的锁**
+   —— 否则 A 退出时会把 B 的锁删掉，锁就白加了。
+2. **崩溃自愈** `recoverLeftovers`：上次进程被 kill -9 时备份还留在盘上。三种情况：
+   - 源文件**仍含**变异文本 → 是残留的变异态，还原；
+   - 源文件**已被改过**（不含变异文本）→ 有人手工动过，**不覆盖**，只清备份；
+   - **没有 meta** → 不知道原来是什么，**不猜**，报警后跳过。
+
+   「不覆盖人工改动」和「不猜」这两条是刻意的：自愈脚本最怕的就是把人的工作当成垃圾清掉。
+
+`tests/mutation-guard.test.mjs` 8 条钉住锁与还原：干净时能拿到 / 同一 pid 可重入 /
+被活进程占有时拒绝 / 陈旧锁（pid 已死）可抢 / 只删自己的锁 / 还原逐字节（含 CRLF）/
+自愈三态各一条。
+
+顺带把 `lib/assistant/llm.js`（3 条）与 `agent.js` 的 `classifyVerifyOutcome`（1 条）
+加进变异目标。后者第一版写 `expectFail: '中断必须走中断收尾'` 抓不住 —— 变异测试
+匹配的是**用例名**，不是断言消息里的关键词。改成 `'结局分派'` 才命中。
+
+全量：**1769 项 / 152 文件全绿**（行为 123 + 静态门禁 29），变异 7 个文件全过。
