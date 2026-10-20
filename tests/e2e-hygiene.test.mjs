@@ -319,7 +319,7 @@ test('硬等待 waitForTimeout 只许减少，不许增加（棘轮门禁）', (
   // 这里不要求一次清零（那会让这条门禁长期红着、然后被人删掉），
   // 而是**钉住当前值**：改 spec 时顺手把碰到的那一处换成 poll，然后把下面的数字减一。
   // 棘轮（ratchet）比"禁止"更容易真的往下走 —— 它每次只需要前进一格。
-  const CEILING = 20;
+  const CEILING = 10;
   const perFile = specFiles.map((f) => ({
     file: f,
     n: (stripComments(read(path.join(E2E_DIR, f))).match(/waitForTimeout/g) || []).length,
