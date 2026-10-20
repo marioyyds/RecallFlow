@@ -143,9 +143,12 @@ test('agent_task：合法声明会真的启动任务，并给出 approvedTools�
   assert.ok(r.jobId, '应返回 jobId');
   assert.equal(r.state, 'running');
   assert.ok(Array.isArray(r.approvedTools), 'approvedTools 应是数组');
-  // 预放行的只能是 click/type 这类页面动作；高风险绝不出现
-  assert.ok(!r.approvedTools.includes('run_javascript'), 'run_javascript 绝不能被预放行');
-  assert.ok(!r.approvedTools.includes('upload_file'), 'upload_file 绝不能被预放行');
+  // 新 master 把 run_javascript 归为 page：声明 page 后它会被预放行（bridge 跟随产品风险模型）。
+  assert.ok(r.approvedTools.includes('run_javascript'), 'run_javascript 属 page，声明 page 后应预放行');
+  // 真正 high / 未声明类别的工具仍然绝不能预放行。
+  assert.ok(!r.approvedTools.includes('run_userscript'), 'run_userscript 是 high，绝不能预放行');
+  assert.ok(!r.approvedTools.includes('install_userscript'), 'install_userscript 是 high，绝不能预放行');
+  assert.ok(!r.approvedTools.includes('upload_file'), 'upload_file 是 destructive，未声明时不该预放行');
   // 只读工具不需要审批，不该出现在清单里
   assert.ok(!r.approvedTools.includes('get_page_snapshot'), '只读工具不该进预放行清单');
   // 声明了 page，就该把页面动作预放行（否则会卡在等审批上）
@@ -166,6 +169,8 @@ test('agent_task：把 allowRisk 归一化后的授权面交给运行入口（�
   assert.equal(verdict.allowed, false, 'upload_file 未声明，守卫必须拒绝');
   const allowed = lastRun.settings.agentBudgetGuard('click_element');
   assert.equal(allowed.allowed, true, 'click_element 属 page，已声明，应放行');
+  const jsAllowed = lastRun.settings.agentBudgetGuard('run_javascript');
+  assert.equal(jsAllowed.allowed, true, '新 master 把 run_javascript 归 page，已声明 page 应放行');
   await clearJobs();
   lastRun = null;
 });
