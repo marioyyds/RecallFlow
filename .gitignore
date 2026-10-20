@@ -10,6 +10,10 @@ tests/e2e/playwright-report/
 # E2E 每次运行都会生成 .last-run.json —— 属本地验证产物，不应入库。
 test-results/
 playwright-report/
+# 单条 E2E 重跑用的独立输出目录与日志（沙箱会拦 Playwright 清理 test-results 的批量删除，
+# 所以重跑某一条时用 `--output .e2e-out/<name>` 另开一处）。
+.e2e-out/
+.e2e-*.log
 
 # 录屏源文件：体积大，只提交转换后的 GIF（如 docs/assets/recallflow-xhs-publish.gif）。
 docs/*.webm

@@ -6,7 +6,7 @@
 // 见 ./README.md（本目录的经验与坑）与 ../../docs/e2e-testing-guide.md（完整指南）。
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { startServers, stopServers } from './fixtures/server.mjs';
 import { PLAYBOOKS } from './fixtures/playbooks.mjs';
 
@@ -322,19 +322,43 @@ export async function openPanel(page) {
   const panel = page.locator(PANEL + ' .panel');
   if ((await panel.count()) > 0 && (await panel.first().isVisible())) return;
   const fab = page.locator(PANEL + ' .fab');
-  // 两种竞态都要兼容：① 内容脚本还没注入，FAB 暂时不可见；
-  // ② reload 后自动打开已把 FAB 隐藏，但面板尚未完成布局。
+  // 三种竞态都要兼容：① 内容脚本还没注入，FAB 暂时不可见；
+  // ② reload 后自动打开已把 FAB 隐藏，但面板尚未完成布局；
+  // ③ **点 FAB 与"自动打开"撞车** —— 见下面那条注释。
   // 因此不能只看一次，而要轮询到“可点 FAB”或“面板已可见”其中一种。
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if ((await panel.count()) > 0 && (await panel.first().isVisible().catch(() => false))) return;
     if (await fab.isVisible().catch(() => false)) {
-      await fab.click();
-      return;
+      // ⚠ 这里**必须**给一个短超时并忽略失败，然后回到循环顶部重新判断。
+      //   原因（实测踩到，一次 90s 的假死）：reload 后 `syncPanelUiOnInit()` 会异步
+      //   自动打开面板。若它正好落在"isVisible() 返回 true"与"click 真正执行"之间，
+      //   FAB 会被加上 hidden，而 `locator.click()` **不会重新检查面板是否已经出现** ——
+      //   它就对着一个永远不会再可见的 FAB 重试到动作超时（约 86 秒），
+      //   整条用例被判超时。而实际上那一刻面板已经开好了（错误截图里面板好好的）。
+      //   短超时 + continue 让每一轮都重新判断"面板好了没"，这才是幂等。
+      await fab.click({ timeout: 2000 }).catch(() => {});
+      continue;
     }
     await page.waitForTimeout(100);
   }
-  throw new Error('RecallFlow 面板或 FAB 在 15 秒内都不可见');
+  // 超时信息要能直接指向病因：这两种状态各自的形状完全不同。
+  const diag = await page
+    .evaluate((sel) => {
+      const host = document.querySelector(sel);
+      const root = host && host.shadowRoot ? host.shadowRoot : null;
+      const kids = root ? Array.from(root.children).map((el) => el.tagName.toLowerCase() + '.' + el.className) : [];
+      const p = root ? root.querySelector('.panel') : null;
+      const f = root ? root.querySelector('.fab') : null;
+      return {
+        host: Boolean(host),
+        children: kids,
+        panel: p ? { cls: p.className, w: p.offsetWidth, h: p.offsetHeight, display: getComputedStyle(p).display } : null,
+        fab: f ? { cls: f.className, w: f.offsetWidth, h: f.offsetHeight, display: getComputedStyle(f).display } : null,
+      };
+    }, PANEL)
+    .catch((e) => ({ error: String(e && e.message) }));
+  throw new Error('RecallFlow 面板或 FAB 在 15 秒内都不可见：' + JSON.stringify(diag));
 }
 
 /**
@@ -580,4 +604,42 @@ export function panelStyle(page, selector, props) {
     },
     { hostSel: PANEL, sel: selector, keys: props }
   );
+}
+
+/**
+ * 给「负例断言」一个**确定性**的观察点：等浏览器把刚才那次交互处理完（两帧）。
+ *
+ * 负例断言（"什么都没发生"）天然是"立刻成立"的 —— `expect.poll` 在它面前没有意义
+ * （第一次轮询就已经满足）。能做的是先给系统一个可信的观察边界。
+ * 固定 sleep 的毛病在于它把"等到"和"等够"混为一谈：快了白耗，慢了就**假通过**
+ * （副作用还没来得及发生，就断言"没有副作用"）。
+ *
+ * 为什么是两帧：scroll / click 的事件派发在「更新渲染」阶段里**先于**动画帧回调
+ * （scroll steps 先跑），只等一帧可能正好卡在事件派发之前。两帧是"这次交互已派发、
+ * 已布局"的最小可信边界。
+ *
+ * ⚠ 只适用于**同步或帧内**完成的处理。若被观察的副作用本身是延迟的（夹具里
+ * `SETTLE_MS` 防抖 + `LOAD_MS` 加载那种），用它就是自欺 —— 那要等"那个延迟真的过去"
+ * 的可观察信号（计数器涨了 / 定时器跑过了），而不是两帧。
+ */
+export async function settle(page) {
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))));
+}
+
+/**
+ * 等这一轮 run **真的结束**（判据：发送按钮从禁用恢复可用）。
+ *
+ * chat.js 的 updateRunControlState() 用 `running` 驱动 `sendBtn.disabled`，
+ * 它天然就是"run 还在不在跑"的唯一渲染出口 —— 不必猜 DOM 结构。
+ * sessions.spec 早就在用这条判据，这里收成一处。
+ *
+ * 为什么必须有它：审批用例的判据是负例（"拒绝之后页面**没有**被改"），原先用
+ * `waitForTimeout(2500)` 等"拒绝处理完"。慢机器上这一轮可能超过 2.5s，
+ * 于是副作用还没来得及发生就断言"没发生" —— **假通过**，而且只在真有 bug 时才看得出来
+ * （真的放行了，却因为还没点下去而绿）。
+ *
+ * 调用前提：run 已经在跑（例如审批条已经出现过）。若 run 已结束，本函数立即返回。
+ */
+export async function waitForRunEnd(page, timeoutMs = 60_000) {
+  await expect(page.locator(PANEL + ' .cmd-send')).toBeEnabled({ timeout: timeoutMs });
 }

@@ -215,7 +215,25 @@ test('流式跟随：另一标签页中途加入也能看到思考与正文逐�
   const liveThink = b.locator(PANEL + ' .think-block').first();
   await liveThink.locator('.think-head').click();
   await expect(liveThink).toHaveAttribute('data-open', 'true');
-  await b.waitForTimeout(800);
+  // 等到**真的又来了一段增量、且思考仍在进行**，再断言展开态。
+  // 原先睡 800ms：睡过头时这段流可能已经结束，于是"展开态没被收回"就成了对空条件的断言
+  // （什么都没发生，当然没被收回）。
+  // ⚠ 屏障必须带 `data-state === 'running'`：思考**结束**时块会被自动收回（data-state=done），
+  //   那是**正确**行为。只等"文本变了"会正好等来这一次收起，然后把正常行为判成 bug
+  //   （本会话实测：改成纯文本轮询后，这条稳定失败在 data-state=done / data-open=false）。
+  const thinkBefore = await liveThink.innerText();
+  await expect
+    .poll(
+      async () => {
+        const snap = await liveThink.evaluate((el) => ({
+          state: el.getAttribute('data-state'),
+          text: el.textContent,
+        }));
+        return snap.state === 'running' && snap.text !== thinkBefore;
+      },
+      { timeout: 15_000 }
+    )
+    .toBe(true);
   await expect(liveThink, '后续 delta 不得把用户展开的思考块收回').toHaveAttribute('data-open', 'true');
   // 4 秒的流中间窗口内，正文还没到：证明 B 跟随的是增量，而不是任务结束后的一次性快照。
   expect(await panelText(b, '.p-body')).not.toContain('我想好了');
