@@ -192,6 +192,33 @@ const TARGETS = [
     ],
   },
   {
+    // 面板 UI：这是 4900 行、长期零 import 的那个文件。目标是证明
+    // tests/chat-panel-smoke.test.mjs 里那几条"真建 DOM"的断言不是摆样子。
+    file: 'lib/page/chat.js',
+    mode: 'inplace',
+    test: 'tests/chat-panel-smoke.test.mjs',
+    mutations: [
+      {
+        name: '快捷键换成 KeyX（用户按 Alt+Shift+R 没反应）',
+        from: "e.code === 'KeyR'",
+        to: "e.code === 'KeyX'",
+        expectFail: 'Alt+Shift+R 打开面板',
+      },
+      {
+        name: '去掉 250ms 去抖（连按两下手抖就把面板开了又关）',
+        from: '  if (now - lastShortcutToggleAt < 250) return;',
+        to: '  if (false) return;',
+        expectFail: '快捷键去抖',
+      },
+      {
+        name: '审批面板漏写一个类别（data-policy 拼错 ⇒ 该类工具永远无法自动批准）',
+        from: 'data-policy="browser"',
+        to: 'data-policy="browsers"',
+        expectFail: '5 个类别',
+      },
+    ],
+  },
+  {
     // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
     // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
     file: 'lib/assistant/agent.js',

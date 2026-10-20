@@ -14,6 +14,11 @@ playwright-report/
 # 录屏源文件：体积大，只提交转换后的 GIF（如 docs/assets/recallflow-xhs-publish.gif）。
 docs/*.webm
 
+# 本地临时探针与提交信息草稿（诊断时随手写的 .probe.mjs / .commit-msg.txt）
+# 教训：`.commit-msg.txt` 曾被 `git add -A` 一起提交进仓库。
+.probe*.mjs
+.commit-msg.txt
+
 # 操作系统 / 编辑器杂项
 .DS_Store
 Thumbs.db

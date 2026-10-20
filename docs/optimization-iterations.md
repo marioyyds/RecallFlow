@@ -167,3 +167,65 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 - **`golden` 富文本用例的 flaky 根因未查**：54 条连跑失败、单跑通过，疑似用例间状态泄漏。
   CI 上 retries=2 能吸收，但根因值得查（这条最容易在"改了个无关的东西"之后红）。
 - 变异测试只覆盖 3 个文件；`context.js`（折叠）、`run-hub.js`（多 run 状态机）仍是 0 算子。
+
+---
+
+# 轮 88–89：审批判定归位 + `chat.js` 第一次被真 import
+
+## 轮 88：`toolNeedsApproval` 搬出 `agent.js`
+
+它是"用户点了同意才写页面"的唯一闸门，却住在 2200 行、顶层直接摸 chrome API 的 `agent.js` 里。
+想测它得先起一整套 chrome 桩 —— 结果它长期只有 5 条断言，最关键的一档（任意代码执行）曾经零测试。
+
+搬到 `lib/assistant/approval-policy.js` 后（零 chrome 依赖），顺手做了一件**语义收紧**：
+
+| 情况 | 原行为 | 现行为 |
+| --- | --- | --- |
+| `risk` 在映射表里 | 按类别自动批准 | 不变 |
+| `risk` **不在**映射表里（含 `'unknown'`、未来新增等级） | 兜底到 `'commands'` ⇒ 用户勾了"页面命令自动批准"就**放行** | **fail-closed**：一律要审批 |
+
+这一条不是洁癖：`risk:'high'` 就不在映射表里，原先只靠 `alwaysRequireApproval` 分支挡着；
+哪天有人写了 `high` 却忘了那个字段，工具会**静默落进最宽的类别**。现在两个门槛都失效也仍然是"要审批"。
+
+- 14 条直接单测（`tests/approval-policy.test.mjs`），含两条棘轮：
+  「元数据里出现的每个 `risk` 都必须被显式决策（映射 或 登记为无类别）」、
+  「声明无类别的风险，其工具必须真的 `alwaysRequireApproval`」。
+- 变异算子 5 条（从 `agent.js` 移过来 3 条 + 新增 2 条：fail-closed 退化、`auto` 被忽略），全部被抓住。
+
+## 轮 89：`lib/page/chat.js` 从"零 import"到"真跑起来"
+
+这是评审里标出的最大风险敞口：4900 行，12 个测试文件提到它，**没有一个真的 import 过**。
+
+做了两件基础设施：
+
+1. `tests/helpers/dom-stub.mjs` —— 最小 DOM。**innerHTML 是真的解析**（自带一个小解析器），
+   而不是吞掉字符串：chat.js 大量 `el.innerHTML = '<input data-policy="browser">'` 之后
+   `el.querySelector('[data-policy]')`；桩如果让 querySelector 随便造节点，
+   "标记里属性名拼错"这类真 bug 就永远测不出来。
+   刻意**不用 Proxy 兜底** —— 那会让 `if (el.someNewApi)` 恒真，被测代码走进不存在的分支。
+2. `tests/helpers/chrome-stub.mjs` 补两个缺口（都是"用真代码一跑就暴露"的类型）：
+   - `runtime.getManifest()`：`isExtContextAlive()` 会**真的调一次**它。缺了它，
+     任何用本桩加载页面代码的测试都会走进"扩展已失效"分支 ⇒ `ensureHost()` 直接 return、
+     一个节点都不建，而测试看不出原因。
+   - `runtime.onMessage` 改成**真的记住监听器**，并提供 `_emitMessage()`：
+     内容脚本大半功能（`panel:toggle` / `run:*` / `kbPickResult`）是消息驱动的。
+
+`tests/chat-panel-smoke.test.mjs`（9 条，全部行为断言）：初始化建宿主与 FAB、上下文失效时提示刷新、
+快捷键开面板、250ms 去抖、点 FAB 关面板、审批 UI 覆盖 5 个类别、勾选/取消自动驾驶 →
+5 类全部落盘且标签同步更新、后台 `panel:toggle` 也能开面板。
+
+**踩到的坑**：8 条全过，但进程 30s 后被 kill —— `watchHostKeepalive()` 开的
+`setInterval(…, 1000)` 在浏览器里正确，在 node 里是一根永久持有事件循环的把手。
+桩现在记录 `setTimeout`/`setInterval` 的 id，`restore()` 时统一清掉（**不用 unref**：
+那会让"用例 await 一个短定时器"变得不可靠）。
+
+### 顺带修好的门禁误报
+
+`tests/assertion-quality.test.mjs` 的棘轮按"源码里出现 `readFileSync` 的次数"计数，
+而我在新测试的头注释里写了「此前全是 `readFileSync` + 正则」—— 于是棘轮从 70 涨到 71，
+逼着人去查"我明明没写读取"。**门禁该统计调用，不是字符串出现次数**，这正是它自己批评的毛病。
+现在先剥注释再统计，并补了一条牙测试（含 CRLF 用例：`$` 对不上会让注释逃过剥离且毫无提示）。
+
+同时把 `tests/panel-shortcut.test.mjs` 里读 `chat.js` 的那条静态断言退役 ——
+断言源码里有 `togglePanelFromShortcut()` 这句话，无法证明它真的被调用过。
+棘轮因此**真的往前走了一格**：`readFileSync` 上限 167 → 166。

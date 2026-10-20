@@ -20,8 +20,20 @@ const TEST_DIR = 'tests';
 const SELF = 'assertion-quality.test.mjs';
 
 // 2026-10-20 实测：70 个文件 / 167 次调用。
+//      同日第二轮：口径改为剥掉注释后统计（注释里提到 readFileSync 不算读取），
+//      并把 panel-shortcut 里读 chat.js 的那条断言退役（改由 tests/chat-panel-smoke.test.mjs
+//      真 import 断言）⇒ 调用数 167 → 166。文件数没降：panel-shortcut 仍在读 manifest。
 const MAX_SOURCE_READING_FILES = 70;
-const MAX_READFILE_CALLS = 167;
+const MAX_READFILE_CALLS = 166;
+
+/** 剥掉注释再统计 —— 否则"在注释里说明为什么不要读源码"会被自己判成读源码。
+ *
+ *  这不是理论问题：本轮加了一个真 import 的测试文件，头注释里写了
+ *  「此前全是 readFileSync + 正则」，于是棘轮立刻从 70 涨到 71，
+ *  逼着人去看"我没写读取啊"。门禁统计的应该是**调用**，不是字符串出现次数。
+ *  ⚠ 收尾用 `[^\n]*` 而不是 `.*$`：本仓库不少文件是 CRLF，`\r` 会让 `$` 对不上，
+ *  注释根本没被剥掉却毫无提示（tests/e2e-hygiene.test.mjs 里有同款注释与牙测试）。 */
+const stripComments = (s) => String(s).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
 /** 统计"会读文件"的测试文件。（只看是否 readFileSync，不区分读 lib 还是读 package.json ——
  *  后者如 ci-workflow 是合法读取；这个指标因此是**上界**，宁严勿松。） */
@@ -29,7 +41,7 @@ function scan(dir = TEST_DIR) {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs') && f !== SELF);
   const rows = [];
   for (const file of files) {
-    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const src = stripComments(fs.readFileSync(path.join(dir, file), 'utf8'));
     const calls = (src.match(/readFileSync/g) || []).length;
     if (calls > 0) rows.push({ file, calls });
   }
@@ -69,6 +81,16 @@ test('行为测试必须是多数（否则这个仓库的门禁正在退化成"�
       '  这不是风格问题：当多数门禁只在检查源码文本时，绿色只代表"文字没被删"，' +
       '  不代表行为没坏。请把新测试写成 import + 断言返回值/副作用。'
   );
+});
+
+test('注释里提到 readFileSync 不算"读源码"（本轮踩到的误报）', () => {
+  const withComment = '// 以前这里是 fs.readFileSync(...) 读源码' + String.fromCharCode(10) + 'const x = 1;';
+  assert.equal((stripComments(withComment).match(/readFileSync/g) || []).length, 0, '注释必须被剥掉');
+  const real = 'const s = fs.readFileSync(p, "utf8");';
+  assert.equal((stripComments(real).match(/readFileSync/g) || []).length, 1, '真实调用必须仍被计入');
+  // CRLF：`$` 对不上会让注释逃过剥离，而这件事没有任何报错
+  const crlf = '// fs.readFileSync(p)' + String.fromCharCode(13, 10) + 'const y = 2;';
+  assert.equal((stripComments(crlf).match(/readFileSync/g) || []).length, 0, 'CRLF 注释也必须被剥掉');
 });
 
 test('这条棘轮本身有牙齿：构造一个更多读源码的样本必须被判超标', () => {

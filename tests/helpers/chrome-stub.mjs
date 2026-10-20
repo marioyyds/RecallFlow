@@ -91,8 +91,22 @@ export function createChromeStub(opts = {}) {
       lastError: null,
       id: 'test-extension-id',
       getURL: (p) => 'chrome-extension://test-extension-id/' + String(p || '').replace(/^\//, ''),
+      // ⚠ 必须有 getManifest：页面侧 chat.js 的 isExtContextAlive() 除了看 runtime.id，
+      // 还会**真的调一次** getManifest() 确认扩展上下文活着（旧内容脚本失效时这一步会抛）。
+      // 缺了它，用本桩加载页面代码的测试会一路走进"扩展已失效"分支：
+      // ensureHost() 直接 return，整套 UI 一个节点都不建，而测试看不出原因。
+      getManifest: () => ({ manifest_version: 3, name: 'RecallFlow', version: '0.0.0-test' }),
       sendMessage: async () => undefined,
-      onMessage: { addListener() {}, removeListener() {} },
+      // onMessage 要真的记住监听器：内容脚本的功能大半从这条通道进来
+      //（panel:toggle / run:* / kbPickResult）。写成空壳的话，任何消息驱动的行为都没法测。
+      onMessage: {
+        _listeners: [],
+        addListener(fn) { if (typeof fn === 'function') this._listeners.push(fn); },
+        removeListener(fn) {
+          const i = this._listeners.indexOf(fn);
+          if (i >= 0) this._listeners.splice(i, 1);
+        },
+      },
       onInstalled: { addListener() {}, removeListener() {} },
     },
     storage: {
@@ -170,6 +184,13 @@ export function createChromeStub(opts = {}) {
     contextMenus: { async create() {}, async removeAll() {} },
   };
 
+  /** 测试用：把一条消息投给所有 onMessage 监听器（模拟后台 → 内容脚本）。 */
+  chrome._emitMessage = (msg, sender) => {
+    const out = [];
+    for (const fn of chrome.runtime.onMessage._listeners.slice()) out.push(fn(msg, sender || {}));
+    return out;
+  };
+
   return Object.assign(chrome, opts.overrides || {});
 }
 
