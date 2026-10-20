@@ -51,16 +51,84 @@
 | 56 | **修覆盖率口径**：node 合并覆盖率是 last-writer-wins 不是并集；新增 `--focus` 逐文件取最大值 | 实跑 | ✅ cdp 真值 58.41% |
 | 57 | `test:cov` / `test:cov:write` npm 入口 | 实跑 | ✅ |
 | 58 | `mock_server.py` 补归属说明（是手动演示工具，不删） | 审读 | ✅ |
+| 59 | `page/chat.js` 零 import 的根因确认：只导出 `initAssistant`，其余重度依赖 DOM ⇒ 结构上不可测 | 审读 | ✅ |
+| 60–62 | 抽出 `lib/page/fab-position.js`（依赖显式注入，同 C-1 套路），chat.js 改为委托 | 语法 + 重建产物 | ✅ 语义原样搬运 |
+| 63–68 | `tests/fab-position.test.mjs` 15 条**真行为**断言（替换原 16 条 `assert.match(chat, /regex/)`） | 单测 | ✅ 15/15（首跑 2 红：`normalizeFabRatio(null)` 返回 0 而非 null，会让气泡跳顶——已修） |
+| 69 | 旧正则用例改成"接线仍在"的最小断言 | 单测 | ✅ |
+| 70–71 | 新增 `lib/assistant/context-tuning.js`，把 5 组上下文阈值集中（各自取值理由一并搬入） | 全量 | ✅ 数值一字未改 |
+| 72 | `tests/context-tuning.test.mjs` 用字面量钉住每个阈值 | 单测 | ✅ 4/4 |
+| 73–80 | E2E `waitForTimeout` **20 → 10**（`stream-scroll` 7 处全换 `expect.poll`） | 实跑 E2E | ✅ 5/5 绿，24s → 18s |
+| 81 | **rebase 到 master**（`--onto 87cd66b`，只搬自己的 12 个提交——master 刻意回退了两个安全提交） | 全量 + E2E | ✅ 见下节 |
+| 82 | `tests/assertion-quality.test.mjs`：读源码的测试文件数 / `readFileSync` 次数 / 行为测试占比，三条棘轮 | 单测 | ✅ 4/4，且已验证加一个假测试会红 |
+| 83 | 变异测试扩到 `agent.js` 决策函数（审批 3 条 + 看门狗 2 条） | 实跑 | **挖出 1 个零测试的安全档** |
+| 84 | **补测**：任意代码执行档（`run_userscript`/`install_userscript`/`save_skill`）必须独立审批 | 单测 + 变异 | ✅ 22/22，变异 12/12 |
+| 85 | **修变异脚本自身**：就地变异把 CRLF 源文件永久改成 LF，且收尾核对用归一化比较所以永远看不见 | 实跑 | ✅ 改为按原 eol 写回 + 字节级核对 |
+| 86 | 修 `expectFail` 关键词（写 `stalled` 而用例名是中文 ⇒ 红了被判成"没抓住"，误报 2 条） | 实跑 | ✅ |
+| 87 | E2E 两个 spec 在缺阶段专属 env 时 **fail fast** 并说清原因（用 `expect` 不用 `skip`，CI 漏设必须红） | 实跑 | ✅ 带 env：resume 1/1、vision 3/3 |
 
 ## 结果
 
 | 指标 | 起点 | 现在 |
 | --- | --- | --- |
-| 单元测试 | 1670 项 / 141 文件 | **1727 项 / 148 文件**（行为 121 + 静态 27） |
-| 变异测试 | 1 文件 / 5 算子 | **2 文件 / 10 算子**，10/10 被抓住 |
+| 单元测试 | 1670 项 / 141 文件 | **1725 项 / 147 文件**（行为 119 + 静态 28） |
+| 变异测试 | 1 文件 / 5 算子 | **3 文件 / 12 算子**，12/12 被抓住 |
 | 覆盖率采集 | 无 | 有（见下方**口径警告**） |
 | E2E 重试 | 三份配置均无 | CI 2 次 / 本地 0 / eval 0 |
-| CI | 2 job | 3 job（+ 夜间全量 E2E）+ 依赖缓存 + 结构门禁 |
+| E2E 硬等待 | 20 处 | **10 处**（棘轮门禁钉住） |
+| 读源码的测试 | 70 / 141 文件（无门禁） | 70 / 147（**棘轮钉住，只许减**） |
+| CI | 2 job | 2 job（+ 夜间全量 E2E）+ 依赖缓存 + 因果门禁 |
+
+> 数字变化说明：rebase 到 master 时移除了两个随安全提交一起消失的测试文件
+> （`sensitive-policy-registry` 等），所以总数不是单调上升，这是正确结果。
+
+## rebase 到 master（轮 81）—— 一次必须问清楚的取舍
+
+`git rebase master` 会把分支上**不属于 master 独有**的提交全部重放。实测第一步就暴露出问题：
+
+```
+error: could not apply d7e5144... feat(security): block sensitive actions and redact model data
+```
+
+`d7e5144`（以及 `f27051b fix(security): guard screenshots`）在本地 master 上**被刻意移除了**：
+
+- 存在备份分支 `backup/master-before-remove-d7e5144`；
+- master 上 `sensitive-action-policy.js` / `sensitive-data.js` / `security-guard.spec.mjs` 全部不存在（不是改掉，是干净移除）；
+- 本地 master 是 `c9cc088`，与 `origin/master` 的 `16a8acb` 同 message 不同 hash —— 说明是 rebase 重写。
+
+分支是从**移除前**的基线长出来的，所以默认 rebase 等于把别人刚删掉的东西装回去。这里改为
+`git rebase --onto master 87cd66b`：**只搬自己的 12 个提交**，并连带处理耦合：
+
+| 冲突/缺口 | 处理 |
+| --- | --- |
+| `sensitive-action-policy.js` 被删、但我的提交改了它 | 一并删除该模块与它的门禁测试（门禁不能钉不存在的东西） |
+| CI 有 `e2e-smoke` job 跑 `npm run test:e2e:smoke` | **删掉该 job** —— master 的 package.json 没这个脚本，`run-e2e.mjs` 也不支持过滤，留着只会稳定红在 "Missing script" |
+| `e2e-hygiene` 3 条用例依赖 `base-test.mjs` | 删除（master 上该文件不存在、0 个 spec import 它） |
+| `playwright.config` 引用 `outputDir`/`htmlReportDir` | 这两个变量随被删提交消失，改为保留 `retries` + `use(trace/screenshot)`，不引用未定义变量 |
+| `tests/.test-count.json` | 派生产物，取正在应用的一侧，最后统一重新生成 |
+
+**rebase 后必须重建 `content.js`**（`lib/page/**` 变了），并确认两处改动共存：
+master 的 dedupe 逻辑（3 处）与 fab 抽取接线同时存在，15 条 fab 测试全绿。
+
+## E2E 验证（rebase 后）—— 以及一次我自己的误判
+
+E2E 的 11 个阶段**全部**跑不起来，报的是 `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]`：
+Playwright 每次启动要清空 `test-results/`，而那里累积了 8000+ 历史产物。
+这是当前沙箱的批量删除保护，不是测试失败 —— 用独立 `--output` 目录绕过。
+
+逐 spec 跑完 11 个阶段，最初报了 4 条失败，逐条查证后结论是：
+
+| 用例 | 我最初的判断 | 实际结论 |
+| --- | --- | --- |
+| `vision-switch` 开启臂 | "可能是并行改动打乱了时序" | **我的跑法错了**：漏了 `E2E_LLM_VISION_SHOT=1`，夹具没发截图。带 env 后 3/3 通过 |
+| `resume` 断线恢复 | "master 上也失败 ⇒ 既有问题" | **同样是跑法错**：漏了 `E2E_LLM_HOLD_OPEN=1`。带 env 后 1/1 通过 |
+| `sessions` 运行锁 | "我引入的" | **flaky**：复跑 8/8 通过 |
+| `golden` 富文本 | "我引入的" | **flaky 且是用例间干扰**：54 条连跑失败、单跑通过 |
+
+为此专门去 master 的干净 worktree 做了对照（`git worktree add` + node_modules junction），
+才把"我的改动"和"跑法/环境"分开。**这一步不能省** —— 否则会把两次跑法错误写成"master 既有失败"。
+该误判已顺手修成门禁：缺 env 时 fail fast 并直说原因（轮 87）。
+
+## 期间修掉的真 bug（都不是靠读代码发现的，是靠"补断言"逼出来的）
 
 ### ⚠ 覆盖率数字的口径警告（重要，别拿它写"提升了多少"）
 
@@ -82,11 +150,20 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 2. **画像提升后完成校验永久失效**（`intent` 是运行期常量）。
 3. **`describeToolFailure` 产出 `[object Object]`** 喂给模型。
 4. **恒真断言** `deepEqual(warnedAt, REPEAT_THRESHOLDS.slice())`。
+5. **变异脚本把 CRLF 源文件永久改成 LF**，且收尾核对用归一化比较所以永远看不见。
+   实证：`lib/assistant/tool-guard.js` 工作区行尾是 LF，而同目录 `agent.js`/`chat.js` 是 CRLF。
+6. **`normalizeFabRatio(null)` 返回 0 而不是 null** —— 存的值里 ratio 为 null 时气泡会跳到顶部。
+7. **任意代码执行档零测试**（`run_userscript`/`install_userscript`/`save_skill`）：
+   把那一档的审批分支改成恒 false，1720 条测试没有一条变红。而 `risk:'high'` 不在类别映射里
+   ⇒ 分支一失效就落到 `commands` 类，用户勾了"页面命令自动批准"等于给任意代码执行开闸。
 
 ## 没做完的（按优先级）
 
-- `lib/page/chat.js`（4975 行）仍是**零加载** —— 需要 DOM 桩，是本轮没啃下来的最大空洞。
-- 上下文折叠的「只跑一次 + 无重要性打分」（P1，需改生产逻辑，风险较高）。
-- 阈值散落 → 集中到 `agent-budget.js`（P1，纯重构）。
-- `toolNeedsApproval` 从 `agent.js` 归位到 `tool-metadata.js`（P1，名字与职责错配）。
-- E2E 里 20 处 `waitForTimeout` 逐个换成 `expect.poll`（棘轮已就位，逐个减）。
+- `lib/page/chat.js` 主体仍是零 import（4975 行里只抽出了 fab 位置逻辑）。仍需要 DOM 桩，
+  这是最大的风险敞口。
+- 上下文折叠「只跑一次 + 无重要性打分」（P1，需改生产逻辑）。
+- `toolNeedsApproval` 从 `agent.js`（2129 行）归位到独立模块（P1，纯搬家）。
+- 剩余 10 处 `waitForTimeout`（`golden.spec.mjs` 7 处）逐个换 `expect.poll`（棘轮已就位）。
+- **`golden` 富文本用例的 flaky 根因未查**：54 条连跑失败、单跑通过，疑似用例间状态泄漏。
+  CI 上 retries=2 能吸收，但根因值得查（这条最容易在"改了个无关的东西"之后红）。
+- 变异测试只覆盖 3 个文件；`context.js`（折叠）、`run-hub.js`（多 run 状态机）仍是 0 算子。
