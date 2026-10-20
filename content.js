@@ -5525,6 +5525,7 @@
   var FAB_FALLBACK_HEIGHT = 52;
   var NARROW_WIDTH = 600;
   function normalizeFabRatio(value) {
+    if (value === null || value === void 0 || value === "") return null;
     const ratio = Number(value);
     return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
   }
