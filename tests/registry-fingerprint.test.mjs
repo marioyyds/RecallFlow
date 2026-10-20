@@ -29,6 +29,9 @@ function computeRegistryFingerprint(registry) {
       risk: t.risk,
       requiresApproval: t.requiresApproval,
       readOnly: t.readOnly,
+      // 「会不会改动状态」的独立声明（readOnly 之外还有 mutatesState:false 这一路）——
+      // 不进指纹的话，把 fetch_webpage 的 mutatesState 删掉也不会有任何红灯。
+      mutatesState: t.mutatesState,
       alwaysAvailable: t.alwaysAvailable,
       alwaysRequireApproval: t.alwaysRequireApproval,
       route: t.route,
@@ -206,7 +209,16 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       现在 schema 直接告诉模型：优先当前页、同一 tab 是 no-op、
   //                       达到上限会被拒绝、已在前台的复用页不会再次激活。
   //                       工具数与权限元数据均未变化。
-  const EXPECTED = '0a725fcc26c129f9';
+  //   b24e444910f87bfc —— **有意改动**：新增元数据字段 `mutatesState`，并给 `fetch_webpage` 标上 false。
+  //                       要解决的问题：完成校验要按任务性质选判据（agent.js 的 classifyTaskKind），
+  //                       而它原先只看 `readOnly`。`fetch_webpage` 不改任何状态，所以在研究类任务里
+  //                       整个 run 被当成「页面写操作」，去问「页面按要求变了吗」—— 研究类任务在长页面上
+  //                       永远答不出这个问题，于是被判未达成、白烧几轮校验。
+  //                       为什么不直接给 `fetch_webpage` 标 readOnly：本仓库的 readOnly 是**复合承诺**
+  //                       （不改状态 **且** 不需要审批），registry.test.mjs 明确守住了它；
+  //                       而联网抓取必须保留审批。于是把两件事拆成两个字段，readOnly 语义不变。
+  //                       工具数与审批行为均未变化；`mutatesState` 已纳入本指纹的覆盖范围。
+  const EXPECTED = 'b24e444910f87bfc';
   assert.equal(
     fp,
     EXPECTED,

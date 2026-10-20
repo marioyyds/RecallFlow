@@ -357,8 +357,8 @@ const TARGETS = [
       },
       {
         name: '规则 1 去掉「调用过工具」的前提（空跑任务也报谎）',
-        from: 'if (claimsWrite && mutating.length === 0 && ran.length > 0) {',
-        to: 'if (claimsWrite && mutating.length === 0) {',
+        from: 'if (claimsMutation && mutating.length === 0 && ran.length > 0) {',
+        to: 'if (claimsMutation && mutating.length === 0) {',
         expectFail: '规则 1 只在',
       },
       {
@@ -366,6 +366,45 @@ const TARGETS = [
         from: '  return before.test(claim) || after.test(claim);',
         to: '  return true;',
         expectFail: '描述性措辞',
+      },
+      {
+        name: '把导航类声明放回写动词里（研究类任务的「已打开原文」全被判成撒谎）',
+        from: '  if (!claimsMutation && claimsNav && mutating.length === 0 && ran.length > 0 && !ran.some((n) => NAV_CAPABLE_TOOLS.has(n))) {',
+        to: '  if (false) {',
+        expectFail: '导航类声明',
+      },
+      {
+        name: '把「看过内容」的工具也算成「打开过页面」（幻觉声明被放行）',
+        from: "const NAV_CAPABLE_TOOLS = new Set(['open_tab', 'switch_tab', 'fetch_webpage']);",
+        to: "const NAV_CAPABLE_TOOLS = new Set(['open_tab', 'switch_tab', 'fetch_webpage', 'web_search', 'read_current_page']);",
+        expectFail: '只搜过摘要',
+      },
+    ],
+  },
+  {
+    // 任务性质分派（classifyTaskKind）：它决定完成校验问哪一种问题。
+    // 判成 mutation 而实际是纯读取，研究类任务会在长页面上被反复判未达成。
+    file: 'lib/assistant/agent.js',
+    mode: 'inplace',
+    test: 'tests/completion-evidence.test.mjs',
+    mutations: [
+      {
+        name: '一律按「改过页面」处理（纯读任务永远掉进严格问法）',
+        from: "  return allReadOnly ? 'read' : 'mutation';",
+        to: "  return 'mutation';",
+        expectFail: '纯读取',
+      },
+      {
+        name: '只看 readOnly、忽略 mutatesState（fetch_webpage 这类「联网读」重新被当成写操作）',
+        from: '  return md.readOnly !== true && md.mutatesState !== false;',
+        to: '  return md.readOnly !== true;',
+        expectFail: '纯读取',
+      },
+      {
+        name: '未知工具（MCP）当成只读（不知道会改什么就敢放行）',
+        from: '  return md.readOnly !== true && md.mutatesState !== false;',
+        to: '  return false;',
+        expectFail: '未知工具',
       },
     ],
   },

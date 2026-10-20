@@ -546,3 +546,104 @@ export function writeFileRetry(file, data, opts = {}) { /* 瞬态码退避重试
 （上一轮修掉的三条 flaky 都在 `golden` 与 `sessions` 里，那两个已经单独压过。）
 
 全量：**1775 项 / 152 文件全绿**，变异 8 个文件 / 32 个算子全过。
+
+## 轮 95：`readOnly` 被当成两个问题的答案
+
+### 一、「查资料并总结」被问成了「页面按要求变了吗」
+
+完成校验（`verifyCompletion`）有两套判据：mutation 问「页面是否真的按要求变了」，
+read 问「结论与页面是否矛盾、是否有据」。选错判据的代价，注释里早就写过：
+
+> 纯阅读/提炼类任务没有状态变化可验证，若仍套用「证据能否证明达成」的问法，
+> 长页面上必然被判未达成（证据永远是片段）。
+
+而选哪一套，取决于 `readOnlyRun = ranToolNames.every(名字 => 元数据.readOnly === true)`。
+问题在 `fetch_webpage` —— 研究类任务的主力工具 —— **没有 `readOnly: true`**。
+于是一次 `web_search → fetch_webpage → complete_task` 的典型研究任务：
+
+```
+web_search     readOnly: true
+fetch_webpage  readOnly: 未标 → 算「写类工具」
+complete_task  readOnly: true
+```
+
+`every()` 里出现一个 false，整个 run 就被判成 mutation，然后拿「页面按要求变了吗」
+去问一次纯资料任务。答案几乎必然是「未达成」，于是注入反思、再跑一轮，直到
+`maxVerifications` 烧完。
+
+### 二、直接补 `readOnly: true` 是错的 —— 这个字段是复合承诺
+
+第一版我直接给 `fetch_webpage` 标了 `readOnly: true`，然后被一条既有门禁挡住：
+
+```
+not ok — 只读工具不得要求审批（否则用户被无意义弹窗打断）：fetch_webpage
+```
+
+翻回去看才发现，本仓库的 `readOnly` 不只是「不改状态」，它是**两件事的合取**：
+不改状态 **且** 不需要审批。`registry.test.mjs` 明确守着这条不变量，而它的理由很实在 ——
+只读却要审批，就是让用户为「看一眼」点弹窗。
+
+而 `fetch_webpage` **必须**保留审批：它要联网、要花用户的钱。
+所以「不改状态」和「不需要审批」在这个工具上**恰好分开了**，而 `readOnly` 一个布尔装不下。
+
+修法：把两件事拆成两个字段。
+
+```js
+fetch_webpage: { risk: 'network', mutatesState: false, requiresApproval: true, ... }
+```
+
+* `readOnly: true` ⇒ 不改状态 **且** 不审批（语义不变，既有不变量继续成立）；
+* `mutatesState: false` ⇒ 只声明「不改状态」，审批另说。
+
+判据收拢到一个纯函数里，两处消费共用：
+
+```js
+function changesState(md) {
+  if (!md) return true;                       // 查不到元数据 ⇒ 当成会改（安全方向）
+  return md.readOnly !== true && md.mutatesState !== false;
+}
+```
+
+`classifyTaskKind`（选判据）与 `mutatingRun`（deterministic 预检的「写类工具」名单）
+都改成用它，于是两个消费点不会再各自漂移。
+
+### 三、连带的一处：证据采集会把它整个吞掉
+
+`evidenceAfter` 里有一句「只读动作不改变页面，不能当作『做了事』的证据」——
+它是为截图这类动作写的（回执里除了一句「截了图」什么都没有）。
+`fetch_webpage` 一旦被标成只读，它抓到的**正文**也会被这句吞掉，
+而研究类任务的结论全建立在那份正文上。
+
+所以 `fetch_webpage` 被加进 `EVIDENCE_READ_TOOLS`：**先按内容取证据，再按 readOnly 决定要不要回执**。
+顺序很关键，两段代码的相对位置本身就是这条修复的一部分。
+
+### 四、`打开` 不是写操作动词
+
+`claim-check` 的规则 1 是「声称改了东西，却没调用过任何写类工具」。
+它的动词表里混着 `打开`。以前这不是问题 —— `open_tab`、`fetch_webpage` 都算写类工具，
+run 里总有一个，规则 1 根本不会走到判断。但 `fetch_webpage` 不再是写类工具之后，
+一句「已打开原文并总结出 3 条要点」就会被判成撒谎。
+
+而且这个判断本身也是错的：**导航不是修改**。把动词表拆开：
+
+* `MUTATION_VERBS`：隐藏 / 删除 / 修改 / 点击 / 提交 …（只有写类工具能满足）
+* `NAV_VERBS`：打开 / 跳转 / 前往 / 进入 / 访问（`open_tab` / `switch_tab` / `fetch_webpage` 都能满足）
+
+规则 1 于是变成 1a + 1b：改页面的部分照旧抓；导航类声明改判「有没有**能完成导航**的工具跑过」。
+`NAV_CAPABLE_TOOLS` **刻意不含** `read_current_page` / `get_page_snapshot` / `web_search` ——
+它们能证明「看过内容」，不能证明「打开过那个页面」。「只搜过摘要却说已打开原文」
+仍然是最常见的幻觉形态，必须留着抓。
+
+三条用例互相约束：只读过页面却说「已打开淘宝」→ 抓到；跑过抓取类工具 → 不误判；
+只搜过摘要 → 抓到；「已打开设置页并把主题改成深色」→ 仍按写操作抓（导航例外不是后门）。
+
+### 五、顺手把两个判定变成可测的
+
+`classifyTaskKind(ranToolNames)` 从 2000 行的循环里抽出来成为纯函数 ——
+它全部价值都在边界上（哪种工具算读、MCP 这类未知工具算哪边），而原先只能靠跑完一整个 run 才看得到。
+
+变异算子 5 条，覆盖这次新增的全部分支：一律判 mutation / 忽略 mutatesState / 未知工具当只读 /
+去掉导航例外 / 把「看过内容」当成「打开过」。5 条都被抓住。
+注册表指纹也同步更新（`mutatesState` 已纳入指纹覆盖范围，否则把字段删掉不会有任何红灯）。
+
+全量：**1786 项 / 152 文件全绿**，变异 9 个文件 / 37 个算子全过。

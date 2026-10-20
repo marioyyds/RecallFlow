@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evidenceAfter } from '../lib/assistant/agent.js';
+import { evidenceAfter, classifyTaskKind } from '../lib/assistant/agent.js';
 
 const args = (a) => JSON.stringify(a || {});
 
@@ -64,4 +64,40 @@ test('超长结果被截断，不会把证据撑爆', () => {
 
 test('未知工具名不抛错（getToolMetadata 对未登记工具会降级）', () => {
   assert.doesNotThrow(() => evidenceAfter('', { name: '不存在的工具', args: {} }, { ok: true, result: 'r' }, args));
+});
+
+test('fetch_webpage：内容进证据 —— 即便它已经是只读工具', () => {
+  // 这条盯的是一个**组合失效**：抓网页本身不改页面，所以它被标了 readOnly；
+  // 而「只读动作不记回执」的早返回会因此把它的内容整个丢掉。
+  // 研究类任务的结论全建立在这份内容上，丢了就等于让校验器凭空判断。
+  const out = evidenceAfter('', { name: 'fetch_webpage', args: { url: 'https://example.com' } }, { ok: true, result: '正文：今天有 3 条公告' }, args);
+  assert.match(out, /今天有 3 条公告/, '抓到的正文必须是证据，而不是被 readOnly 那次早返回吞掉');
+});
+
+test('classifyTaskKind：纯读取的任务判 read（研究类任务的关键分叉）', () => {
+  // web_search + fetch_webpage + complete_task —— 这就是一次典型的「查资料并总结」。
+  // 只要其中任何一个漏标 readOnly，整个 run 就会被问成「页面按要求变了吗」。
+  assert.equal(classifyTaskKind(['web_search', 'fetch_webpage', 'complete_task']), 'read');
+  assert.equal(classifyTaskKind(['read_current_page', 'get_page_snapshot']), 'read');
+});
+
+test('classifyTaskKind：只要有一步改了页面就判 mutation', () => {
+  assert.equal(classifyTaskKind(['read_current_page', 'click_element']), 'mutation');
+  assert.equal(classifyTaskKind(['fetch_webpage', 'annotate']), 'mutation');
+});
+
+test('classifyTaskKind：未知工具（MCP）按 mutation 处理 —— 不知道它会改什么就不能当成只读', () => {
+  assert.equal(classifyTaskKind(['mcp__notion__create_page']), 'mutation');
+  // 混在只读工具里也一样：一个不确定的成员就足以让「纯读取」不成立
+  assert.equal(classifyTaskKind(['read_current_page', 'mcp__foo__bar']), 'mutation');
+});
+
+test('classifyTaskKind：没调过工具时退回 mutation（宁可多要一次证据）', () => {
+  assert.equal(classifyTaskKind([]), 'mutation');
+  assert.equal(classifyTaskKind(null), 'mutation');
+});
+
+test('classifyTaskKind：重复的工具名不影响判定（真实调用链里同名会出现很多次）', () => {
+  assert.equal(classifyTaskKind(['fetch_webpage', 'fetch_webpage', 'web_search']), 'read');
+  assert.equal(classifyTaskKind(['click_element', 'click_element']), 'mutation');
 });

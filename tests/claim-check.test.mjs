@@ -228,3 +228,60 @@ test('buildDeterministicReflection: 含每条原因与下一步指引', () => {
   assert.equal(typeof buildDeterministicReflection(null), 'string');
   assert.ok(buildDeterministicReflection({}).length > 0);
 });
+
+test('导航类声明：只读过页面却说「已打开淘宝」→ 仍然抓到（这是最典型的幻觉）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开淘宝首页，列出了推荐商品。',
+    ranTools: ['read_current_page'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['read_current_page'],
+    evidenceText: '页面文本…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-navigation');
+});
+
+test('导航类声明：跑过抓取类工具时不再误判（研究类任务的高频句式）', () => {
+  // `打开` 不需要写类工具也能成立 —— fetch_webpage 抓到网页、switch_tab 切过去，
+  // 模型说「已打开原文并总结」完全属实。原先 `打开` 混在写动词里，
+  // 而 fetch_webpage 现在又是只读工具，于是这种总结会被判成「声称写但没做」。
+  for (const ran of [['fetch_webpage'], ['open_tab'], ['switch_tab', 'read_current_page']]) {
+    const r = checkCompletionClaim({
+      claim: '已打开原文并总结出 3 条要点。',
+      ranTools: ran,
+      // open_tab 是写类工具，fetch_webpage / switch_tab 现在是只读
+      mutatingRanTools: ran.filter((n) => n === 'open_tab'),
+      failedTools: [],
+      succeededTools: ran,
+      evidenceText: '正文片段…',
+    });
+    assert.equal(r.verdict, 'unknown', '不应误判：' + ran.join('+') + ' → ' + JSON.stringify(r.reasons));
+  }
+});
+
+test('导航类声明：只搜过摘要却说「已打开原文」→ 仍要抓到（看过内容 ≠ 打开过页面）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开原文并总结出 3 条要点。',
+    ranTools: ['web_search'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['web_search'],
+    evidenceText: '搜索结果摘要…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-navigation');
+});
+
+test('「打开了」和「改了页面」同时声称时，仍按写操作抓（导航例外不能变成后门）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开设置页，并把主题改成了深色。',
+    ranTools: ['fetch_webpage'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['fetch_webpage'],
+    evidenceText: '页面文本…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-mutation', '改页面的部分必须照常抓');
+});
