@@ -5,6 +5,8 @@
 
 > 定位：这是 harness 级的外部基准，**不是** `docs/capability-inventory.md` 那套能力 E2E 的替代。
 > 后者证明"能力存在"，WebArena 证明"任务能端到端做成"。两者互补。
+>
+> 实测结果、案例复盘与已知风险见 [`docs/webarena-eval-report.md`](./webarena-eval-report.md)。
 
 ## 为什么用 WebArena-Verified（而不是原版 / 其它）
 
