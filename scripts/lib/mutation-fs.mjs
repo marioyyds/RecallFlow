@@ -13,6 +13,52 @@ import fs from 'node:fs';
 export const BACKUP_SUFFIX = '.mutation-backup';
 export const META_SUFFIX = '.mutation-backup.meta.json';
 
+// Windows 上「文件明明存在、刚刚还读过，写入却失败」是常态而不是异常：
+// 杀毒软件/索引服务会在文件被读之后短暂持有句柄，云盘同步也会。这些错误**重试即消失**。
+// 本次就是被这个打中的：写变异版本时 `open` 抛 `errno: -4094, code: 'UNKNOWN'`，
+// 整个门禁带着一段栈崩掉，还在盘上留下了一份备份（靠下一次运行的自愈才收干净）。
+const TRANSIENT_WRITE_CODES = new Set(['EPERM', 'EACCES', 'EBUSY', 'UNKNOWN', 'EBADF', 'EMFILE', 'EAGAIN']);
+
+/** 极简同步 sleep（Node 主线程里 Atomics.wait 是唯一不阻塞事件循环以外东西的同步等待）。 */
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * 写文件，对**瞬态**错误退避重试；非瞬态错误原样抛出（重试没有意义，只会拖慢报错）。
+ *
+ * 返回实际尝试次数，便于调用方在日志里说明"这次是重试后才成功的"。
+ * @param {string|Buffer} data
+ * @param {{retries?:number, baseWaitMs?:number, write?:Function, sleep?:Function}} [opts]
+ *        `write` / `sleep` 只是测试接缝 —— 生产路径不传。
+ */
+export function writeFileRetry(file, data, opts = {}) {
+  const retries = Number.isInteger(opts.retries) && opts.retries > 0 ? opts.retries : 4;
+  const baseWaitMs = Number.isFinite(opts.baseWaitMs) ? opts.baseWaitMs : 25;
+  const write = opts.write || ((f, d) => fs.writeFileSync(f, d));
+  const wait = opts.sleep || sleepSync;
+  let lastError = null;
+  let tried = 0;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    tried = attempt;
+    try {
+      write(file, data);
+      return { ok: true, attempts: attempt };
+    } catch (e) {
+      lastError = e;
+      const code = e && e.code;
+      // 非瞬态（比如 ENOSPC / ENOENT）重试没有意义，直接把真实原因抛出去。
+      if (!TRANSIENT_WRITE_CODES.has(code)) break;
+      if (attempt < retries) wait(baseWaitMs * attempt); // 线性退避：25/50/75ms，够躲开一次扫描
+    }
+  }
+  const err = new Error('写文件失败（已尝试 ' + tried + ' 次）：' + file + ' —— ' + (lastError && lastError.message));
+  err.code = lastError && lastError.code;
+  err.cause = lastError;
+  throw err;
+}
+
 /** pid 是否还活着。EPERM 表示进程存在但无权探测 ⇒ 也算活着（宁可不抢锁）。 */
 export function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -69,19 +115,26 @@ export function releaseLock(lockFile, opts = {}) {
  * 没有这个判断，一次崩溃之后如果你手工改过这个文件，自愈会把你的改动覆盖掉。
  */
 export function writeBackup(absFile, rawText, toText, at = new Date().toISOString()) {
-  fs.writeFileSync(absFile + BACKUP_SUFFIX, rawText, 'utf8');
-  fs.writeFileSync(
+  writeFileRetry(absFile + BACKUP_SUFFIX, rawText);
+  writeFileRetry(
     absFile + META_SUFFIX,
-    JSON.stringify({ file: absFile, at, to: toText }), // 不含原文：原文就在 backup 里
-    'utf8'
+    JSON.stringify({ file: absFile, at, to: toText }) // 不含原文：原文就在 backup 里
   );
 }
 
 /** 还原并清掉备份。用于正常路径的 finally。 */
 export function restoreBackup(absFile) {
   const backup = absFile + BACKUP_SUFFIX;
+  let raw = null;
   try {
-    fs.copyFileSync(backup, absFile);
+    raw = fs.readFileSync(backup); // Buffer：逐字节还原，不经过任何编码转换
+  } catch (e) {
+    return false;
+  }
+  // 这里是整个脚本**最不能失败**的写入：它失败就意味着源码带着变异版本留在盘上。
+  // 所以用带退避重试的写入，而不是一次 copyFileSync 定生死。
+  try {
+    writeFileRetry(absFile, raw);
   } catch (e) {
     return false;
   }

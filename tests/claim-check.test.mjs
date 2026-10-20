@@ -27,16 +27,35 @@ test('声称隐藏广告但没有任何写类工具 → fail（本轮最核心�
   assert.ok(r.reasons[0].message.includes('没有调用过任何页面修改类工具'), r.reasons[0].message);
 });
 
-test('声称修改但写类工具全失败 → fail', () => {
+test('声称修改但写类工具一次都没成功过 → fail', () => {
   const r = checkCompletionClaim({
     claim: '已把表头居中对齐。',
     ranTools: ['set_element_style'],
     mutatingRanTools: ['set_element_style'],
     failedTools: ['set_element_style'],
+    succeededTools: [],
     evidenceText: '',
   });
   assert.equal(r.verdict, 'fail');
   assert.equal(r.reasons[0].code, 'all-mutations-failed');
+  assert.ok(r.reasons[0].message.includes('一次都没成功过'), r.reasons[0].message);
+});
+
+test('**同名工具失败后又重试成功** → 不得误判（两个名单都是按工具名去重的）', () => {
+  // 这条是本模块最容易写反的地方：failedTools / succeededTools 都只记**名字**，
+  // 不记次数。于是「点偏一次、第二次点中」在名单上表现为
+  // 同名工具同时出现在两个名单里。若规则 2 只看 failedTools，
+  // 就会把一次完全正确的任务判成撒谎 —— 白烧一次校验配额，
+  // 还灌给模型一条错误的反思（「全部失败」），它据此可能重复已成功的动作。
+  const r = checkCompletionClaim({
+    claim: '已点击「下载」并开始下载。',
+    ranTools: ['click_element', 'click_element'],
+    mutatingRanTools: ['click_element'],
+    failedTools: ['click_element'],
+    succeededTools: ['click_element'],
+    evidenceText: '',
+  });
+  assert.equal(r.verdict, 'unknown', JSON.stringify(r.reasons));
 });
 
 test('写类工具部分失败时不误判（可能另一部分成功了）', () => {
@@ -45,9 +64,24 @@ test('写类工具部分失败时不误判（可能另一部分成功了）', ()
     ranTools: ['set_element_style', 'set_element_style'],
     mutatingRanTools: ['set_element_style', 'click_element'],
     failedTools: ['set_element_style'],
+    succeededTools: ['click_element'],
     evidenceText: '',
   });
   assert.equal(r.verdict, 'unknown', JSON.stringify(r.reasons));
+});
+
+test('**同名工具全部调用都失败**时仍要抓到（别把规则 2 改瘫）', () => {
+  const r = checkCompletionClaim({
+    claim: '已把表头居中对齐。',
+    ranTools: ['set_element_style', 'set_element_style'],
+    mutatingRanTools: ['set_element_style'],
+    failedTools: ['set_element_style'],
+    // 只成功过**别的**工具，不代表这个写类工具成功了。
+    succeededTools: ['get_page_snapshot'],
+    evidenceText: '',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'all-mutations-failed');
 });
 
 test('声称「可见 0 次」但没有可见性核查证据 → fail', () => {

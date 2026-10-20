@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { acquireLock, releaseLock, writeBackup, restoreBackup, recoverLeftovers, BACKUP_SUFFIX } from './lib/mutation-fs.mjs';
+import { acquireLock, releaseLock, writeBackup, restoreBackup, recoverLeftovers, writeFileRetry, BACKUP_SUFFIX } from './lib/mutation-fs.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 
@@ -341,6 +341,34 @@ const TARGETS = [
       },
     ],
   },
+  {
+    // 完成前确定性断言（claim-check）：它是"省掉一次 LLM 校验"的零成本预检，
+    // 但判错的方向比漏判更贵 —— 误判 fail 会灌给模型一条**内容错误**的反思，
+    // 它据此可能重复已经成功的动作，或把总结改口成"没做成"。
+    file: 'lib/assistant/claim-check.js',
+    mode: 'inplace',
+    test: 'tests/claim-check.test.mjs',
+    mutations: [
+      {
+        name: '规则 2 退回「只看失败名单」（失败后重试成功的任务被判成撒谎）',
+        from: 'mutating.every((t) => failed.includes(t) && !succeeded.includes(t))',
+        to: 'mutating.every((t) => failed.includes(t))',
+        expectFail: '同名工具失败后又重试成功',
+      },
+      {
+        name: '规则 1 去掉「调用过工具」的前提（空跑任务也报谎）',
+        from: 'if (claimsWrite && mutating.length === 0 && ran.length > 0) {',
+        to: 'if (claimsWrite && mutating.length === 0) {',
+        expectFail: '规则 1 只在',
+      },
+      {
+        name: '去掉「描述性措辞」的完成态线索要求（凡是含动词就当成声称做了）',
+        from: '  return before.test(claim) || after.test(claim);',
+        to: '  return true;',
+        expectFail: '描述性措辞',
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------- 执行
@@ -423,7 +451,11 @@ for (const target of TARGETS) {
       // 同时把 `to` 记进 meta —— 崩溃自愈要靠它判断这份备份还算不算数。
       const mutated = toEol(original.replace(m.from, m.to), eol);
       writeBackup(abs, raw, m.to);
-      fs.writeFileSync(abs, mutated, 'utf8');
+      // 写变异版本同样走退避重试：这一步被 Windows 的扫描/同步短暂挡住过一次，
+      // 表现是 errno -4094 / code UNKNOWN，整个门禁带着栈崩掉并留下备份。
+      // 重试之后仍失败就说明是真问题（只读、磁盘满），此时抛出比继续跑更安全 ——
+      // 继续跑只会得到一个「测试没抓住」的假红，把人引去查断言。
+      writeFileRetry(abs, mutated);
       cleanup = () => {
         restoreBackup(abs);
       };

@@ -23,6 +23,7 @@ import {
   writeBackup,
   restoreBackup,
   recoverLeftovers,
+  writeFileRetry,
   BACKUP_SUFFIX,
   META_SUFFIX,
 } from '../scripts/lib/mutation-fs.mjs';
@@ -134,4 +135,99 @@ test('自愈：没有备份的文件完全不受影响（幂等）', () => {
   fs.writeFileSync(a, 'x\n', 'utf8');
   assert.deepEqual(recoverLeftovers([a, path.join(dir, 'missing.js')]), { restored: [], skipped: [] });
   assert.equal(fs.readFileSync(a, 'utf8'), 'x\n');
+});
+
+// ---------------------------------------------------------------- 写入重试
+//
+// 这一组来自一次真实发生的事故：写变异版本时 `open` 抛了
+// `errno: -4094, code: 'UNKNOWN'`（Windows 上杀毒/索引服务短暂持有句柄的典型表现），
+// 整个门禁带着一段栈崩掉，还在盘上留了一份备份，靠下一次运行的自愈才收干净。
+//
+// 所以写入必须分两类对待：**瞬态**错误（重试即消失）和**真**错误（重试只会拖慢报错）。
+
+/** 造一个"前 n 次抛瞬态错误、之后成功"的假写入。 */
+function flakyWrite(realWrite, failTimes, code = 'UNKNOWN') {
+  let n = 0;
+  return (file, data) => {
+    n += 1;
+    if (n <= failTimes) {
+      const e = new Error('模拟瞬态写入失败');
+      e.code = code;
+      throw e;
+    }
+    realWrite(file, data);
+  };
+}
+
+test('写入重试：瞬态错误重试成功（Windows 的 UNKNOWN 不该让门禁崩）', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  const sleeps = [];
+  const r = writeFileRetry(file, 'const a = 1;', {
+    write: flakyWrite((f, d) => fs.writeFileSync(f, d, 'utf8'), 2),
+    sleep: (ms) => sleeps.push(ms),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.attempts, 3, '第 3 次才成功');
+  assert.deepEqual(sleeps, [25, 50], '线性退避，不是死循环猛冲');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'const a = 1;');
+});
+
+test('写入重试：**非瞬态**错误立即抛出，一次都不多试', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  let calls = 0;
+  assert.throws(
+    () =>
+      writeFileRetry(file, 'x', {
+        write: () => {
+          calls += 1;
+          const e = new Error('磁盘满');
+          e.code = 'ENOSPC';
+          throw e;
+        },
+        sleep: () => {},
+      }),
+    /写文件失败（已尝试 1 次）/
+  );
+  assert.equal(calls, 1, '重试对 ENOSPC 毫无意义，只会拖慢报错');
+});
+
+test('写入重试：一直瞬态失败 → 用尽次数后抛出，并带上路径与真实原因', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  let calls = 0;
+  assert.throws(
+    () =>
+      writeFileRetry(file, 'x', {
+        retries: 3,
+        write: () => {
+          calls += 1;
+          const e = new Error('还是被占着');
+          e.code = 'EBUSY';
+          throw e;
+        },
+        sleep: () => {},
+      }),
+    (e) => {
+      assert.match(e.message, /已尝试 3 次/);
+      assert.ok(e.message.includes(file), '报错必须指名道姓');
+      assert.ok(e.message.includes('还是被占着'), '真实原因不能被吞掉');
+      assert.equal(e.code, 'EBUSY');
+      return true;
+    }
+  );
+  assert.equal(calls, 3);
+});
+
+test('还原走重试：备份逐字节写回（Buffer 直通，不经编码转换）', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  // 故意放一段非 ASCII + CRLF：一旦中间经历一次 utf8 往返，这里就会变样
+  const original = '// 中文注释\r\nconst s = "「」";\r\n';
+  fs.writeFileSync(file, 'const mutated = 1;\r\n', 'utf8');
+  writeBackup(file, original, 'const mutated = 1;');
+  assert.equal(restoreBackup(file), true);
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
+  assert.equal(fs.existsSync(file + BACKUP_SUFFIX), false);
 });
