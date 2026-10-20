@@ -159,14 +159,23 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 
 ## 没做完的（按优先级）
 
-- `lib/page/chat.js` 主体仍是零 import（4975 行里只抽出了 fab 位置逻辑）。仍需要 DOM 桩，
-  这是最大的风险敞口。
-- 上下文折叠「只跑一次 + 无重要性打分」（P1，需改生产逻辑）。
-- `toolNeedsApproval` 从 `agent.js`（2129 行）归位到独立模块（P1，纯搬家）。
-- 剩余 10 处 `waitForTimeout`（`golden.spec.mjs` 7 处）逐个换 `expect.poll`（棘轮已就位）。
-- **`golden` 富文本用例的 flaky 根因未查**：54 条连跑失败、单跑通过，疑似用例间状态泄漏。
-  CI 上 retries=2 能吸收，但根因值得查（这条最容易在"改了个无关的东西"之后红）。
-- 变异测试只覆盖 3 个文件；`context.js`（折叠）、`run-hub.js`（多 run 状态机）仍是 0 算子。
+> 本节在**轮 95 后重写**。原先那 6 条里 4 条已经做完（`toolNeedsApproval` 归位、富文本 flaky 根因、
+> 硬等待降到 2 处、`context.js` / `run-hub.js` 补上变异算子），留着会误导下一个人。
+
+- **`lib/page/chat.js` 主体仍靠 E2E**：4911 行，目前只有 fab 位置抽出来了 + 9 条 DOM 桩行为断言（轮 89）。
+  面板交互（审批弹窗 / 停止 / 错误态 / 快捷键）仍只能靠 Playwright 验，是最大的回归风险敞口。
+- **上下文折叠没有重要性打分**：`collapseOldToolResults` 只按「最后 N 条」切。
+  ⚠ 动手前先读 `context.js` 里那段注释 —— 「一次折干净以摊销前缀抖动」是**刻意设计**；
+  改成「按需折叠到预算以内」会让请求前缀几乎每轮都变，把前缀缓存命中率换掉。
+- **同型误判的排查还没做完**：轮 94 修的是「按工具名去重的名单被当成次数用」
+  （`claim-check` 规则 2）。同类名单还有 `failStreak`（语义上按名字是**对的**，别再改）、
+  `ranToolNames.slice(-60)` 的截断边界（超长 run 时先丢的是最早的记账）。
+- **E2E 只剩 2 处 `waitForTimeout`**（`golden.spec.mjs`，都是「观察窗口」，已写明时间量级出处），
+  棘轮 `CEILING = 2`。继续降要先换掉那两处观察窗口本身，收益递减。
+- **变异覆盖 9 / 93 个 lib 文件**。缺的是 `verifier.js`（判据分派）、`intent-router.js`
+  （画像提升）、`session-store.js`（落盘形状）—— 都是「改错了不会红、只会在真机上表现怪」的地方。
+- **`mutatesState` 目前是单例**（只有 `fetch_webpage` 用）。出现第二个「只读但要审批」的工具时，
+  它才算被真正验证过；在那之前，别急着把它推广成通用机制。
 
 ---
 
