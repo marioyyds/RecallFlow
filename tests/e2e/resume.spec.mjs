@@ -37,6 +37,16 @@ test.afterAll(async () => {
 });
 
 test('golden: 端口断开后自动重连并接着跑完', async () => {
+  // 本用例的前提是夹具「把流挂住不结束」（E2E_LLM_HOLD_OPEN=1），这样才能模拟
+  // "跑到一半端口断了"。漏设这个变量时流会正常结束，失败会落在
+  // "重连后没有续跑"上 —— 看起来像重连逻辑坏了，实际是夹具没被要求挂住。
+  // 因此先 fail fast，把原因说在前面（同 vision-switch 开启臂的处理）。
+  expect(
+    String(process.env.E2E_LLM_HOLD_OPEN || ''),
+    '本用例需要夹具把流挂住：请带上 E2E_LLM_HOLD_OPEN=1，\n' +
+      '或直接跑 node scripts/run-e2e.mjs 的「断线恢复」阶段。'
+  ).toMatch(/^(1|true|yes)$/i);
+
   await configureSettings(context);
   const sw = context.serviceWorkers()[0];
   const logs = [];

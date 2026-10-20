@@ -108,6 +108,44 @@ test('toolNeedsApproval: run_javascript 归入页面命令类别', () => {
   assert.equal(toolNeedsApproval('run_javascript', { codeExecutionApproval: 'auto', toolApprovalPolicy: { commands: false } }), true);
 });
 
+test('toolNeedsApproval: 任意代码执行档必须独立审批（不受类别自动批准 / 站点信任影响）', () => {
+  // 为什么单独一条：这三个工具（risk:'high' + alwaysRequireApproval）此前**零测试**，
+  // 是变异测试把它们挖出来的 —— 把 `alwaysRequireApproval` 那个分支改成恒 false，
+  // 全套测试**没有任何一条变红**。
+  //
+  // 后果为什么严重：risk:'high' 并不在 risk→category 映射里，所以这个分支一旦失效，
+  // 它们会落到默认的 'commands' 类别 —— 用户勾了「页面命令自动批准」，
+  // 就等于给"在页面里执行任意代码"开了闸，而这个关联在设置界面上完全看不出来。
+  const ALL_CATEGORIES_AUTO = { toolApprovalPolicy: { commands: true, edit: true, browser: true, mcp: true } };
+  const GATED = ['run_userscript', 'install_userscript', 'save_skill'];
+
+  for (const name of GATED) {
+    assert.equal(toolNeedsApproval(name, ALL_CATEGORIES_AUTO), true, name + '：所有类别自动批准也必须逐个审批');
+    assert.equal(
+      toolNeedsApproval(name, { ...ALL_CATEGORIES_AUTO, codeExecutionApproval: 'auto' }),
+      false,
+      name + '：只有用户**显式**选择 auto 才放行'
+    );
+  }
+
+  // 'session' 仍需弹一次（之后由会话级放行负责），'each' 每次都要问
+  assert.equal(toolNeedsApproval('run_userscript', { codeExecutionApproval: 'session' }), true);
+  assert.equal(toolNeedsApproval('run_userscript', { codeExecutionApproval: 'each' }), true);
+  // 非法值回落到 session（settings.js 的约定），仍然要审批
+  assert.equal(toolNeedsApproval('run_userscript', { codeExecutionApproval: 'whatever' }), true);
+
+  // 站点信任是"这个站点的写操作不用反复确认"，不等于"同意在我机器上跑任意代码"
+  assert.equal(
+    toolNeedsApproval(
+      'run_userscript',
+      { ...ALL_CATEGORIES_AUTO, trustedSites: ['https://a.example'] },
+      'https://a.example/page'
+    ),
+    true,
+    '信任站点不得绕过代码执行审批'
+  );
+});
+
 test('toolNeedsApproval: 站点信任放行普通写操作，也覆盖页面命令里的 run_javascript', () => {
   const trusted = { trustedSites: ['https://example.com'], toolApprovalPolicy: {} };
   assert.equal(toolNeedsApproval('click_element', trusted, 'https://example.com/page'), false);

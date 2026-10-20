@@ -151,6 +151,56 @@ const TARGETS = [
       },
     ],
   },
+  {
+    // 审批判定：这是"用户点了同意才写页面"的唯一闸门，判错的后果是**静默放行**。
+    // 它此前只有 3 条测试，且从来没有被变异测过 —— 所以先看看这些测试到底有没有牙齿。
+    file: 'lib/assistant/agent.js',
+    mode: 'inplace',
+    test: 'tests/agent-prompt.test.mjs',
+    mutations: [
+      {
+        name: '反转类别自动批准（用户在设置里"关掉自动批准"变成"必须自动批准"）',
+        from: '  return p[category] !== true;',
+        to: '  return p[category] === true;',
+        expectFail: 'toolNeedsApproval',
+      },
+      {
+        name: '把 risk:page 错配到 edit 类别（16 个页面写操作全部走错审批档）',
+        from: "  else if (meta.risk === 'page') category = 'commands';",
+        to: "  else if (meta.risk === 'page') category = 'edit';",
+        expectFail: 'toolNeedsApproval',
+      },
+      {
+        name: '任意代码执行档不再单独审批（run_userscript 直接放行）',
+        from: "    return resolveCodeExecutionApproval(settings) !== 'auto';",
+        to: '    return false;',
+        expectFail: 'toolNeedsApproval',
+      },
+    ],
+  },
+  {
+    // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
+    // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
+    file: 'lib/assistant/agent.js',
+    mode: 'inplace',
+    test: 'tests/silent-failure-regressions.test.mjs',
+    mutations: [
+      {
+        name: '无进展阈值差一格（>= 改成 >），卡死任务会多跑一轮',
+        from: '  if (noProgressRounds >= cap) return { stalled: true, reason:',
+        to: '  if (noProgressRounds > cap) return { stalled: true, reason:',
+        // 关键词必须与**用例名**匹配，而不是与代码里的标识符匹配 ——
+        // 用例名是中文时写 'stalled' 会让"确实红了"被判成"没抓住"（本次就这么误报过两条）。
+        expectFail: '连续无进展达到上限',
+      },
+      {
+        name: '无进展阈值判成"永远不卡死"（看门狗彻底失效）',
+        from: "  if (!Number.isFinite(cap) || cap <= 0) return { stalled: false, reason: '', noProgressRounds };",
+        to: "  return { stalled: false, reason: '', noProgressRounds };",
+        expectFail: '连续无进展达到上限',
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------- 执行
@@ -158,10 +208,26 @@ const TARGETS = [
 let allGood = true;
 const tmpFiles = [];
 
+/** 把 LF 归一化文本按目标文件的**原始行尾**写回。
+ *
+ *  为什么必须这么做（这是一个已经发生过的静默副作用）：
+ *  锚点匹配要求统一成 LF（否则 `\n` 匹配不到 `...;\r\n`），但**写回时如果也用 LF**，
+ *  CRLF 源文件就被永久改成了 LF。而 `git diff` 因为 autocrlf 看不到行尾差异，
+ *  于是这个副作用长期无人发现 —— 只是每次跑完变异测试，`git status` 会多出一个
+ *  "改了但又没 diff" 的文件，直到某次 `git add -A` 把整个文件的行尾变更一起提交。
+ */
+function toEol(text, eol) {
+  return eol === '\n' ? text : text.replace(/\n/g, eol);
+}
+
 for (const target of TARGETS) {
   const abs = path.resolve(ROOT, target.file);
-  const original = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
-  console.log('\n=== ' + target.file + '（' + target.mode + '）===');
+  // raw 是磁盘上的真实字节（含行尾），原始性核对必须用它 —— 用归一化文本比较
+  // 等于把"行尾被改"这件事从检查里排除掉。
+  const raw = fs.readFileSync(abs, 'utf8');
+  const eol = raw.includes('\r\n') ? '\r\n' : '\n';
+  const original = raw.replace(/\r\n/g, '\n');
+  console.log('\n=== ' + target.file + '（' + target.mode + '，' + (eol === '\r\n' ? 'CRLF' : 'LF') + '）===');
 
   for (const m of target.mutations) {
     if (!original.includes(m.from)) {
@@ -180,8 +246,9 @@ for (const target of TARGETS) {
       env = { [target.envVar]: tmp };
     } else {
       const backup = abs + '.mutation-backup';
-      fs.writeFileSync(backup, original, 'utf8');
-      fs.writeFileSync(abs, original.replace(m.from, m.to), 'utf8');
+      // 备份写**原始字节**，这样 finally 里的 copyFileSync 能把行尾也一起还原。
+      fs.writeFileSync(backup, raw, 'utf8');
+      fs.writeFileSync(abs, toEol(original.replace(m.from, m.to), eol), 'utf8');
       cleanup = () => {
         try {
           fs.copyFileSync(backup, abs);
@@ -206,10 +273,15 @@ for (const target of TARGETS) {
     }
   }
 
-  // 收尾核对：源文件必须与进入时完全一致。
-  const after = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
-  if (after !== original) {
-    console.log('  ✗ ' + target.file + ' 未被正确还原！');
+  // 收尾核对：源文件必须与进入时**字节级**一致（含行尾）。
+  // 用归一化文本比较会让"行尾被改成 LF"这类副作用永远通过 —— 而这正是本脚本
+  // 曾经真实留下的副作用，所以这里必须比 raw。
+  const after = fs.readFileSync(abs, 'utf8');
+  if (after !== raw) {
+    console.log(
+      '  ✗ ' + target.file + ' 未被正确还原！' +
+        (after.replace(/\r\n/g, '\n') === original ? '（内容相同但行尾变了）' : '')
+    );
     allGood = false;
   } else {
     console.log('  源文件未被改动 ✓');
