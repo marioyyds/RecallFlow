@@ -95,7 +95,7 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 
 ## 9. 风险分级与审批
 
-`TOOL_METADATA` 的 `risk` 枚举与审批映射（`agent.js` `toolNeedsApproval` 已实现，新增工具须对号入座）：
+`TOOL_METADATA` 的 `risk` 枚举与审批映射（`approval-policy.js` `toolNeedsApproval` 已实现，新增工具须对号入座）：
 
 | risk | 含义 | `toolApprovalPolicy` 键 | 审批 |
 | --- | --- | --- | --- |

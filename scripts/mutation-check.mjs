@@ -153,28 +153,41 @@ const TARGETS = [
   },
   {
     // 审批判定：这是"用户点了同意才写页面"的唯一闸门，判错的后果是**静默放行**。
-    // 它此前只有 3 条测试，且从来没有被变异测过 —— 所以先看看这些测试到底有没有牙齿。
-    file: 'lib/assistant/agent.js',
+    // 它原先住在 agent.js 里（为了测它得先起一整套 chrome 桩），所以只有 3 条断言；
+    // 搬到 lib/assistant/approval-policy.js 后可以直接单测，那 14 条到底有没有牙齿由这里验证。
+    file: 'lib/assistant/approval-policy.js',
     mode: 'inplace',
-    test: 'tests/agent-prompt.test.mjs',
+    test: 'tests/approval-policy.test.mjs',
     mutations: [
       {
         name: '反转类别自动批准（用户在设置里"关掉自动批准"变成"必须自动批准"）',
         from: '  return p[category] !== true;',
         to: '  return p[category] === true;',
-        expectFail: 'toolNeedsApproval',
+        expectFail: '页面命令类',
       },
       {
-        name: '把 risk:page 错配到 edit 类别（16 个页面写操作全部走错审批档）',
-        from: "  else if (meta.risk === 'page') category = 'commands';",
-        to: "  else if (meta.risk === 'page') category = 'edit';",
-        expectFail: 'toolNeedsApproval',
+        name: "把 risk:page 错配到 edit 类别（16 个页面写操作全部走错审批档）",
+        from: "  page: 'commands',",
+        to: "  page: 'edit',",
+        expectFail: 'risk → 审批类别',
       },
       {
         name: '任意代码执行档不再单独审批（run_userscript 直接放行）',
         from: "    return resolveCodeExecutionApproval(settings) !== 'auto';",
         to: '    return false;',
-        expectFail: 'toolNeedsApproval',
+        expectFail: '任意代码执行档',
+      },
+      {
+        name: '未映射的风险等级兜底到 commands（fail-closed 退化成"跟着用户勾选走"）',
+        from: "  const hit = APPROVAL_CATEGORY_BY_RISK[risk];\n  return typeof hit === 'string' ? hit : null;",
+        to: "  const hit = APPROVAL_CATEGORY_BY_RISK[risk];\n  return typeof hit === 'string' ? hit : 'commands';",
+        expectFail: '高风险档没有类别',
+      },
+      {
+        name: '任意代码执行档的"自动批准"选择被忽略（用户选了 auto 仍然每次弹窗）',
+        from: "  if (meta.alwaysRequireApproval === true) {",
+        to: "  if (false) {",
+        expectFail: '任意代码执行档',
       },
     ],
   },
