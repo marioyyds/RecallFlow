@@ -220,6 +220,77 @@ const TARGETS = [
     ],
   },
   {
+    // 工具审批条：它是用户唯一能看到「Agent 要动你的页面了」的地方，而且三条性质
+    // 错了都**不会报错**（静默泄露 / 静默放行 / 用户点了拒绝却当成放行）。
+    file: 'lib/page/chat.js',
+    mode: 'inplace',
+    test: 'tests/chat-approval-prompt.test.mjs',
+    mutations: [
+      {
+        name: '审批条不再遮蔽 type_text 的输入内容（口令明文印在屏幕上）',
+        from: "    ? { ...toolArgs, value: '[输入内容已隐藏]' }",
+        to: '    ? toolArgs',
+        expectFail: '遮蔽',
+      },
+      {
+        name: '永远给出「本任务内允许」（该逐次批准的工具被一键放行整轮）',
+        from: '    showSession: allowSession !== false,',
+        to: '    showSession: true,',
+        expectFail: '批量放行',
+      },
+      {
+        name: '「本任务内允许」按成 once（用户以为放行了整轮，实际只批了一次）',
+        from: "  if (sessionEl) sessionEl.addEventListener('click', () => decide('session'));",
+        to: "  if (sessionEl) sessionEl.addEventListener('click', () => decide('once'));",
+        expectFail: '本任务内允许',
+      },
+      {
+        name: '「拒绝」按成 once（用户点了拒绝，Agent 继续执行）',
+        from: "  box.querySelector('.tool-reject').addEventListener('click', () => decide('reject'));",
+        to: "  box.querySelector('.tool-reject').addEventListener('click', () => decide('once'));",
+        expectFail: '点「拒绝」',
+      },
+      {
+        name: '代码块不做 HTML 转义（innerHTML 拼接 ⇒ 页面内 XSS）',
+        from: "'</div><pre class=\"tool-approval-code\">' + escHtml(view.longText) + '</pre>'",
+        to: "'</div><pre class=\"tool-approval-code\">' + view.longText + '</pre>'",
+        expectFail: '尖括号',
+      },
+    ],
+  },
+  {
+    // 发送/停止按钮的状态派生：四种组合里三种写错都不报错，只会「用起来怪」。
+    file: 'lib/page/chat.js',
+    mode: 'inplace',
+    test: 'tests/chat-run-controls.test.mjs',
+    mutations: [
+      {
+        name: '只看本页 streaming（跟随别人的 run 时没有停止按钮 = 状态分裂）',
+        from: '  const running = Boolean(src.streaming || followingRunning);',
+        to: '  const running = Boolean(src.streaming);',
+        expectFail: '跟随别的标签页',
+      },
+      {
+        name: '运行中不禁用发送（同一会话里能塞第二条指令）',
+        from: '    sendDisabled: running,',
+        to: '    sendDisabled: false,',
+        expectFail: '发送禁用',
+      },
+      {
+        name: '停止中不禁点（连点几次就把同一个中断请求发很多遍）',
+        from: '    stopDisabled: stopping,',
+        to: '    stopDisabled: false,',
+        expectFail: '禁点',
+      },
+      {
+        name: '停止中文案不变（用户不知道点了有没有生效，会继续点）',
+        from: "    stopText: stopping ? '停止中…' : '■ 停止',",
+        to: "    stopText: '■ 停止',",
+        expectFail: '停止中：按钮禁点',
+      },
+    ],
+  },
+  {
     // 上下文折叠：它是"长任务不会把上下文撑爆"的唯一手段，同时也是**唯一会改写历史中部**的
     // 操作（每次改写都会让服务端前缀缓存失效）。三条算子分别对应它的三个性质：
     // 只折叠靠前的、折叠过的绝不再动、折叠后一定更短。

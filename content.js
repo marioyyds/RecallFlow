@@ -5732,16 +5732,27 @@
   var sendBtn = null;
   var streaming = false;
   var runAgent = null;
+  function computeRunControls(input) {
+    const src = input || {};
+    const followingRunning = Boolean(src.followed && src.followed.status === "running");
+    const running = Boolean(src.streaming || followingRunning);
+    const stopping = Boolean(followingRunning && src.followed.stopping);
+    return {
+      showStop: running,
+      // 停止中必须**禁点**：否则用户连点几次，会把同一个中断请求反复发出去。
+      stopDisabled: stopping,
+      stopText: stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62",
+      sendDisabled: running
+    };
+  }
   function updateRunControlState() {
-    const followingRunning = Boolean(followedRunState && followedRunState.status === "running");
-    const running = Boolean(streaming || followingRunning);
-    const stopping = Boolean(followingRunning && followedRunState.stopping);
+    const control = computeRunControls({ streaming, followed: followedRunState });
     if (stopBtn) {
-      stopBtn.style.display = running ? "" : "none";
-      stopBtn.disabled = stopping;
-      stopBtn.textContent = stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62";
+      stopBtn.style.display = control.showStop ? "" : "none";
+      stopBtn.disabled = control.stopDisabled;
+      stopBtn.textContent = control.stopText;
     }
-    if (sendBtn) sendBtn.disabled = running;
+    if (sendBtn) sendBtn.disabled = control.sendDisabled;
   }
   var pendingAcc = "";
   var pendingAiMsg = null;
@@ -6528,18 +6539,28 @@
     if (panel) panel.classList.remove("approval-open");
     fitPanelHeight();
   }
+  var APPROVAL_LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
+  function describeApprovalRequest(name, args, risk, allowSession) {
+    const toolArgs = args && typeof args === "object" ? args : {};
+    const longField = APPROVAL_LONG_TEXT_FIELD[name];
+    const longText = longField ? String(toolArgs[longField] || "") : "";
+    const shownArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
+    return {
+      riskLabel: risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C",
+      // 没有参数时给空串：渲染层据此决定要不要出那一行（空 JSON `{}` 对用户毫无信息）。
+      argsJson: Object.keys(shownArgs).length ? JSON.stringify(shownArgs) : "",
+      longText,
+      longLabel: !longText ? "" : name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801",
+      // allowSession === false 表示「只能一次一次批准」，不给批量放行的按钮。
+      showSession: allowSession !== false
+    };
+  }
   function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
     if (!box || !conn) return false;
-    const toolArgs = args && typeof args === "object" ? args : {};
-    const LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
-    const longField = LONG_TEXT_FIELD[name];
-    const longText = longField ? String(toolArgs[longField] || "") : "";
-    const approvalArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
-    const detail = approvalArgs && Object.keys(approvalArgs).length ? " \u53C2\u6570\uFF1A" + JSON.stringify(approvalArgs) : "";
-    const codeBlock = longText ? '<div class="tool-approval-label">' + (name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801") + '</div><pre class="tool-approval-code">' + escHtml(longText) + "</pre>" : "";
-    const riskLabel = risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C";
-    const sessionBtn = allowSession === false ? "" : '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>';
-    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + riskLabel + "</span></div>" + (detail ? '<div class="tool-approval-detail">' + escHtml(detail.replace(/^ 参数：/, "")) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
+    const view = describeApprovalRequest(name, args, risk, allowSession);
+    const codeBlock = view.longLabel ? '<div class="tool-approval-label">' + escHtml(view.longLabel) + '</div><pre class="tool-approval-code">' + escHtml(view.longText) + "</pre>" : "";
+    const sessionBtn = view.showSession ? '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>' : "";
+    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + escHtml(view.riskLabel) + "</span></div>" + (view.argsJson ? '<div class="tool-approval-detail">' + escHtml(view.argsJson) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
     box.style.display = "";
     const decide = (decision) => {
       try {
