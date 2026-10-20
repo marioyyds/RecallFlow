@@ -60,6 +60,17 @@ test('折叠后不再变长（保住「折叠」这个性质）', () => {
   assert.ok(msgs[0].content.length < before, '折叠应让内容变短：' + before + ' → ' + msgs[0].content.length);
 });
 
+test('临界长度：折叠反而会变长时必须原样不动（否则等于凭空制造一次前缀失效）', () => {
+  // 头 300 + 尾 150 + 通知文案（约 110 字）≈ 560。也就是说 490～560 字这段区间里，
+  // "折叠"的结果比原文**更长** —— 这条路径一旦失守，每轮都会白白改写一次历史中部，
+  // 服务端前缀缓存从头失效，而上下文一点没变小。
+  const content = 'x'.repeat(520);
+  const msgs = [{ role: 'tool', content }];
+  for (let i = 0; i < 6; i++) msgs.push({ role: 'tool', content: 'keep' });
+  assert.equal(collapseOldToolResults(msgs, 6, 300), 0, '临界长度不应被折叠');
+  assert.equal(msgs[0].content, content, '内容必须逐字节不变');
+});
+
 // 折叠会改写历史中部 → 从改写点起的前缀缓存全部失效。
 // 因此「折叠过一次就不再变」是硬要求：否则同一批消息每轮都被重新拼接，前缀持续抖动。
 test('collapseOldToolResults: 已折叠的消息不会被二次改写（前缀只失效一次）', () => {

@@ -219,6 +219,61 @@ const TARGETS = [
     ],
   },
   {
+    // 上下文折叠：它是"长任务不会把上下文撑爆"的唯一手段，同时也是**唯一会改写历史中部**的
+    // 操作（每次改写都会让服务端前缀缓存失效）。三条算子分别对应它的三个性质：
+    // 只折叠靠前的、折叠过的绝不再动、折叠后一定更短。
+    file: 'lib/assistant/context.js',
+    mode: 'inplace',
+    test: 'tests/context.test.mjs',
+    mutations: [
+      {
+        name: '连最近的结果一起折叠（keepFull 失效）',
+        from: '  const old = idx.slice(0, Math.max(0, idx.length - keepFull));',
+        to: '  const old = idx.slice(0);',
+        expectFail: 'keeps the last N full',
+      },
+      {
+        name: '已折叠的再折叠一次（前缀每轮抖动一次）',
+        from: '    if (m.content.indexOf(COLLAPSE_MARK) !== -1) continue;',
+        to: '    if (false) continue;',
+        expectFail: '已折叠的消息不会被二次改写',
+      },
+      {
+        name: '允许"折叠"后反而变长（丢掉"一定更短"这个性质）',
+        from: '    if (next === m.content || next.length >= m.content.length) continue;',
+        to: '    if (!next) continue;',
+        expectFail: '变长',
+      },
+    ],
+  },
+  {
+    // 多 run 状态机：跟随页与 SW 共用同一份归约。这里错一步，表现是
+    // "思考被混进正文""停止按钮永远灰着"这类只有真跑长任务才看得见的问题。
+    file: 'lib/assistant/run-hub.js',
+    mode: 'inplace',
+    test: 'tests/run-hub.test.mjs',
+    mutations: [
+      {
+        name: '正文开始不定稿思考段（思考与正文混在一条时间线上）',
+        from: "    case 'chunk':\n      endReasoning(state);",
+        to: "    case 'chunk':",
+        expectFail: '思考先于正文',
+      },
+      {
+        name: '任意工具结果都清掉审批（别的工具的返回把待批弹窗关掉）',
+        from: "      if (state.approval && state.approval.callId === String(event.callId || '')) state.approval = null;",
+        to: '      state.approval = null;',
+        expectFail: '审批',
+      },
+      {
+        name: 'end 之后不清停止标记（跟随页的停止按钮永远灰着）',
+        from: "      state.status = 'ended';\n      state.stopping = false;",
+        to: "      state.status = 'ended';",
+        expectFail: '停止中',
+      },
+    ],
+  },
+  {
     // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
     // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
     file: 'lib/assistant/agent.js',
