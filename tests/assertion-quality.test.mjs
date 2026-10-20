@@ -37,8 +37,16 @@ const stripComments = (s) => String(s).replace(/\/\*[\s\S]*?\*\//g, '').replace(
 
 /** 统计"会读文件"的测试文件。（只看是否 readFileSync，不区分读 lib 还是读 package.json ——
  *  后者如 ci-workflow 是合法读取；这个指标因此是**上界**，宁严勿松。） */
+/** 不参与统计的文件：它们的**被测对象就是源码树本身** —— 读文件不是「用静态断言替代行为断言」，
+ *  而是这类门禁的本质。加进来必须说明理由；它不该成为「懒得写行为断言」的出口。
+ *  · assertion-quality —— 它自己（SELF，本来就在排除之列）
+ *  · module-references —— import 图分析：要回答的是「测试有没有引用过这个模块」，
+ *    这个问题只有读源码才能回答，不存在可执行的行为可以断言。
+ */
+const EXEMPT = new Set([SELF, 'module-references.test.mjs']);
+
 function scan(dir = TEST_DIR) {
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs') && f !== SELF);
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs') && !EXEMPT.has(f));
   const rows = [];
   for (const file of files) {
     const src = stripComments(fs.readFileSync(path.join(dir, file), 'utf8'));
