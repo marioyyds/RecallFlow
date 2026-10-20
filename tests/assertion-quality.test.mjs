@@ -43,8 +43,13 @@ const stripComments = (s) => String(s).replace(/\/\*[\s\S]*?\*\//g, '').replace(
  *  · mutation-guard —— 测的就是「锁 / 备份 / 还原」本身，读写文件是它的被测对象。
  *  · module-references —— import 图分析：要回答的是「测试有没有引用过这个模块」，
  *    这个问题只有读源码才能回答，不存在可执行的行为可以断言。
+ *  · content-bundle-freshness —— 被测对象就是**仓库根那个 content.js 文件本身**
+ *    （E2E 加载的是它，不是源码）。要回答「盘上这份和源码打出来的是不是同一份」，
+ *    除了把它读进来逐字节比，没有别的判据 —— 它不是「用静态断言替代行为断言」，
+ *    而是「这个文件就是被测对象」。注意它**同时**有 compareBundle / checkBundle 的
+ *    合成数据用例（那些是真行为断言），读盘只占其中一条。
  */
-const EXEMPT = new Set([SELF, 'module-references.test.mjs', 'mutation-guard.test.mjs']);
+const EXEMPT = new Set([SELF, 'module-references.test.mjs', 'mutation-guard.test.mjs', 'content-bundle-freshness.test.mjs']);
 
 function scan(dir = TEST_DIR) {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs') && !EXEMPT.has(f));
