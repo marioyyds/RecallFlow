@@ -42,6 +42,9 @@ RecallFlow 不是把 HTML 塞给模型，而是**在你的真实浏览器里动�
 1. **安装**：Edge 打开 `edge://extensions/`，启用「开发人员模式」→「加载解压缩的扩展」→ 指向本目录。
 2. **配置**：点击扩展图标 → 设置，填入 DeepSeek API Key（未配置时知识库仍可正常使用）。
 3. **使用**：打开一个页面 → 点右侧「RecallFlow」气泡 → 输入指令，或直接选用快捷语句。
+4. **本地网页（可选）**：要让它也能操作你双击打开的本地 HTML，需在 `edge://extensions/` → 本扩展 → 详情 → 打开
+   **「允许访问文件网址」**。开启后本地页与普通网页一致（打开就有悬浮球），且保存/打印时不会把扩展图标写进你的文件
+   （细节与验收见 [docs/local-page-support.md](docs/local-page-support.md)）。
 
 ## Agent 设计
 
@@ -87,6 +90,7 @@ flowchart TD
 | 新增 / 重构工具时必须遵守的规范 | [docs/tool-design.md](docs/tool-design.md) |
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
+| 本地网页（file://）支持到哪、为什么导出不留痕 | [docs/local-page-support.md](docs/local-page-support.md) |
 
 > 规模数字（能力剧本 / 技能 / 判据 / 测试数与文件数）一律由脚本生成，见上述清单与
 > [`tests/.test-count.json`](tests/.test-count.json)；README 不手写数字 —— 手写的必然腐烂。

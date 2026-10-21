@@ -12,7 +12,8 @@ import {
   tagsHtml,
   fmtTime,
   bindStarKeyboard,
-  isWebUrl,
+  isFileUrl,
+  isOperableUrl,
   normalizeUrl,
   cleanTitle,
   detectPlatform,
@@ -129,6 +130,28 @@ function itemHtml(it) {
   </div>`;
 }
 
+/**
+ * 扩展有没有「允许访问文件网址」。
+ *
+ * 这是**用户级开关**（chrome://extensions → 本扩展 → 详情）。manifest 里写 `file:///*`
+ * 只是"申请"：用户不打开这个开关，内容脚本根本不会注入到本地页，而且是**静默**不注入 ——
+ * 面板不出现、快捷键没反应、收藏也存不了，用户看到的只是"它坏了"。
+ * 所以先问一句，把原因直说出去，别让他猜。
+ */
+function isAllowedFileSchemeAccess() {
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.extension || typeof chrome.extension.isAllowedFileSchemeAccess !== 'function') {
+        resolve(true);
+        return;
+      }
+      chrome.extension.isAllowedFileSchemeAccess((allowed) => resolve(allowed === true));
+    } catch (e) {
+      resolve(true);
+    }
+  });
+}
+
 async function init() {
   await loadCache();
   renderList();
@@ -140,7 +163,10 @@ async function init() {
   }
 
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (t && t.url && isWebUrl(t.url)) {
+  // 本地页（file://）只要用户开了「允许访问文件网址」，就和普通网页一样可收录、可开助手；
+  // 没开时把"为什么不行"直接写在页面上，而不是笼统说"页面不支持"。
+  const localFileBlocked = Boolean(t && t.url && isFileUrl(t.url) && !(await isAllowedFileSchemeAccess()));
+  if (t && t.url && isOperableUrl(t.url) && !localFileBlocked) {
     currentTab = t;
     currentUrl = normalizeUrl(t.url);
     currentTitle = cleanTitle(t.title) || t.url;
@@ -167,6 +193,12 @@ async function init() {
   } else {
     $('add-panel').classList.add('hidden');
     $('page-unavailable').classList.remove('hidden');
+    const hint = $('unavailable-hint');
+    if (hint) {
+      hint.textContent = localFileBlocked
+        ? '本地网页：请在扩展详情里打开「允许访问文件网址」'
+        : '请打开普通网页后再试';
+    }
   }
   renderTypePicker();
   syncStatusHighlight();
@@ -391,12 +423,12 @@ $('open-assistant').addEventListener('click', async () => {
     let tab = activeTab;
     // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
     // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
-    if (!tab || !tab.url || !isWebUrl(tab.url)) {
+    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
       const tabs = await chrome.tabs.query({ currentWindow: true });
-      tab = tabs.find((item) => item && item.url && isWebUrl(item.url));
+      tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
     }
-    if (!tab || !tab.url || !isWebUrl(tab.url)) {
-      toast('请先打开一个普通网页');
+    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
+      toast('请先打开一个网页');
       return;
     }
     chrome.runtime.sendMessage({ type: 'panel:open-active', tabId: tab.id }, () => {

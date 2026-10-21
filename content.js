@@ -4166,6 +4166,141 @@
     };
   }
 
+  // lib/page/save-clean.js
+  var HOST_ID = "__kb-ai-host";
+  var SUSPEND_ATTR = "data-rf-export-hidden";
+  var SAFETY_RESTORE_MS = 6e4;
+  var INTERACTION_GRACE_MS = 800;
+  function createExportGuard(options = {}) {
+    const doc = options.doc || document;
+    const win = options.win || window;
+    const getHost = options.getHost || (() => doc.getElementById(HOST_ID));
+    const onSuspend = options.onSuspend || (() => {
+    });
+    const onResume = options.onResume || (() => {
+    });
+    const now = options.now || (() => Date.now());
+    let suspended = false;
+    let parked = null;
+    let safetyTimer = null;
+    let graceUntil = 0;
+    let lastReason = "";
+    let installed = false;
+    function clearSafetyTimer() {
+      if (safetyTimer) {
+        const cancel = win.clearTimeout || clearTimeout;
+        cancel(safetyTimer);
+        safetyTimer = null;
+      }
+    }
+    function armSafetyTimer() {
+      clearSafetyTimer();
+      const schedule = win.setTimeout || setTimeout;
+      safetyTimer = schedule(() => {
+        safetyTimer = null;
+        restore("safety");
+      }, SAFETY_RESTORE_MS);
+    }
+    function suspend(reason) {
+      if (suspended) return false;
+      suspended = true;
+      lastReason = String(reason || "export");
+      onSuspend(lastReason);
+      const host2 = getHost();
+      let detached = false;
+      if (host2 && host2.parentNode) {
+        const parent = host2.parentNode;
+        const next = host2.nextSibling;
+        host2.setAttribute(SUSPEND_ATTR, "1");
+        const holder = doc.createDocumentFragment();
+        holder.appendChild(host2);
+        parked = { node: host2, holder, parent, next };
+        detached = true;
+      }
+      graceUntil = now() + INTERACTION_GRACE_MS;
+      armSafetyTimer();
+      return detached;
+    }
+    function restore(reason) {
+      if (!suspended) return false;
+      clearSafetyTimer();
+      const p = parked;
+      parked = null;
+      if (p && p.node) {
+        try {
+          p.node.removeAttribute(SUSPEND_ATTR);
+          const parent = p.parent && p.parent.isConnected ? p.parent : doc.documentElement || doc.body;
+          if (parent) {
+            if (p.next && p.next.parentNode === parent) parent.insertBefore(p.node, p.next);
+            else parent.appendChild(p.node);
+          }
+        } catch (e) {
+        }
+      }
+      suspended = false;
+      lastReason = "";
+      onResume(String(reason || "export"));
+      return true;
+    }
+    function isSuspended() {
+      return suspended;
+    }
+    function onKeyDown(e) {
+      if (!e || e.altKey) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = String(e.key || "").toLowerCase();
+      if (key !== "s") return;
+      suspend("save-shortcut");
+    }
+    function onBeforePrint() {
+      suspend("print");
+    }
+    function onAfterPrint() {
+      restore("print");
+    }
+    function onVisibilityChange() {
+      if (doc.visibilityState === "hidden") return;
+      restore("visibility");
+    }
+    function onFocus() {
+      restore("focus");
+    }
+    function onInteract() {
+      if (!suspended) return;
+      if (now() < graceUntil) return;
+      restore("interaction");
+    }
+    function install() {
+      if (installed) return () => {
+      };
+      installed = true;
+      doc.addEventListener("keydown", onKeyDown, true);
+      win.addEventListener("beforeprint", onBeforePrint);
+      win.addEventListener("afterprint", onAfterPrint);
+      win.addEventListener("focus", onFocus);
+      doc.addEventListener("visibilitychange", onVisibilityChange);
+      doc.addEventListener("pointerdown", onInteract, true);
+      doc.addEventListener("keydown", onInteract, true);
+      return uninstall;
+    }
+    function uninstall() {
+      if (!installed) return;
+      installed = false;
+      try {
+        doc.removeEventListener("keydown", onKeyDown, true);
+        win.removeEventListener("beforeprint", onBeforePrint);
+        win.removeEventListener("afterprint", onAfterPrint);
+        win.removeEventListener("focus", onFocus);
+        doc.removeEventListener("visibilitychange", onVisibilityChange);
+        doc.removeEventListener("pointerdown", onInteract, true);
+        doc.removeEventListener("keydown", onInteract, true);
+      } catch (e) {
+      }
+      restore("uninstall");
+    }
+    return { suspend, restore, isSuspended, install, uninstall };
+  }
+
   // lib/shared/handoff.js
   var ID_PREFIX = "RF-";
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -4724,6 +4859,15 @@
   // lib/page/panel-css.js
   var PANEL_CSS = `
     :host { all: initial; }
+    /* \u5B58\u6863\u81EA\u6BC1\u95F8 \u2014\u2014 \u522B\u5220\u8FD9\u6761\u3002
+       Edge/Chromium \u7684\u300C\u53E6\u5B58\u4E3A\u300D\u4F1A\u628A open shadow root \u4E00\u8D77\u5E8F\u5217\u5316\u6210\u58F0\u660E\u5F0F shadow DOM
+       \uFF08\u5DF2\u5B9E\u6D4B\uFF1A\u4FDD\u5B58\u51FA\u6765\u7684\u526F\u672C\u91CC\u80FD\u770B\u5230 .fab \u4E0E\u56FE\u6807\u5F15\u7528\uFF09\uFF0C\u6240\u4EE5"\u53EA\u8981\u56FE\u6807\u5728 shadow \u91CC\u5C31\u5B89\u5168"\u662F\u9519\u7684\u3002
+       \u5BBF\u4E3B\u6539\u7528\u81EA\u5B9A\u4E49\u5143\u7D20 rf-ai-host\uFF1A\u526F\u672C\u91CC\u6CA1\u6709\u6211\u4EEC\u7684\u811A\u672C\uFF0C\u5143\u7D20\u4E0D\u4F1A\u88AB\u5347\u7EA7\uFF0C
+       \u4E8E\u662F\u8FD9\u6761 :not(:defined) \u547D\u4E2D\uFF0C\u6574\u5757 UI \u5728\u5B58\u6863\u91CC\u662F display:none \u2014\u2014 \u4E0D\u4F9D\u8D56
+       "\u80FD\u4E0D\u80FD\u62E6\u4F4F\u4FDD\u5B58\u52A8\u4F5C"\uFF0C\u4E5F\u4E0D\u9700\u8981\u5077\u5077\u628A DOM \u6458\u6389\u3002
+       \u5B9E\u6D4B\u4E09\u7EC4\u5BF9\u7167\uFF1Adiv + \u8BE5\u89C4\u5219 \u2192 \u4ECD\u7136\u663E\u793A\uFF1Brf-ai-host \u672A\u5B9A\u4E49 \u2192 0\xD70 \u9690\u85CF\uFF1B
+       rf-ai-host \u5DF2\u5B9A\u4E49 \u2192 52\xD752 \u6B63\u5E38\u663E\u793A\u3002 */
+    :host(:not(:defined)) { display: none !important; }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
     .bubble {
       position: fixed; z-index: 2147483647;
@@ -5238,6 +5382,13 @@
       .session-actions button { width: 36px; height: 36px; }
       .quick-prompt { min-height: 32px; }
     }
+    /* \u6253\u5370 / \u5BFC\u51FA PDF\uFF1A\u6253\u5370\u8D70\u7684\u662F**\u6E32\u67D3**\uFF0Cshadow \u91CC\u7684\u60AC\u6D6E\u7403\u4E0E\u9762\u677F\u4F1A\u5B9E\u6253\u5B9E\u5370\u51FA\u6765\u3002
+       \u8FD9\u6761\u89C4\u5219\u5199\u5728 shadow \u5185\u90E8\uFF0C\u56E0\u6B64\u4E0D\u9700\u8981\u5F80\u9875\u9762 light DOM \u91CC\u63D2\u4EFB\u4F55 <style> \u2014\u2014
+       \u5BFC\u51FA\u4EA7\u7269\u91CC\u4E5F\u5C31\u4E0D\u4F1A\u591A\u51FA\u4E00\u4E2A"\u6269\u5C55\u7559\u4E0B\u7684\u6837\u5F0F\u6807\u7B7E"\u3002
+       \u4E0E lib/page/save-clean.js \u7684 beforeprint \u6458\u9664\u4E92\u4E3A\u4FDD\u9669\uFF1A\u4EFB\u4E00\u6761\u751F\u6548\uFF0C\u7EB8\u9762\u4E0A\u90FD\u5E72\u51C0\u3002 */
+    @media print {
+      :host { display: none !important; visibility: hidden !important; }
+    }
 `;
 
   // lib/assistant/run-hub.js
@@ -5686,6 +5837,17 @@
     } catch (e) {
     }
   }
+  var HOST_TAG = "rf-ai-host";
+  function createHostElement() {
+    try {
+      const el = document.createElement(HOST_TAG);
+      if (el && typeof el.matches === "function" && el.matches(":defined")) return el;
+    } catch (e) {
+    }
+    return document.createElement("div");
+  }
+  var uiSuspended = false;
+  var exportGuard = null;
   var host = null;
   var shadow = null;
   var bubble = null;
@@ -5939,14 +6101,20 @@
     togglePanel();
   }
   function ensureHost() {
+    if (uiSuspended) return;
     if (host && !host.isConnected) resetDetachedHostState();
     if (host) return;
     if (!isExtContextAlive()) {
       warnExtDead();
       return;
     }
-    host = document.createElement("div");
-    host.id = "__kb-ai-host";
+    try {
+      const stale = document.getElementById(HOST_ID);
+      if (stale) stale.remove();
+    } catch (e) {
+    }
+    host = createHostElement();
+    host.id = HOST_ID;
     host.style.all = "initial";
     host.style.position = "fixed";
     host.style.zIndex = "2147483647";
@@ -6050,6 +6218,7 @@
   function watchHostKeepalive() {
     setInterval(() => {
       try {
+        if (uiSuspended) return;
         if (host && !host.isConnected) {
           ensureHost();
           if (panelUiOpen) {
@@ -6060,6 +6229,20 @@
       } catch (e) {
       }
     }, 1e3);
+  }
+  function installExportGuard() {
+    if (exportGuard) return exportGuard;
+    exportGuard = createExportGuard({
+      getHost: () => host,
+      onSuspend: () => {
+        uiSuspended = true;
+      },
+      onResume: () => {
+        uiSuspended = false;
+      }
+    });
+    exportGuard.install();
+    return exportGuard;
   }
   function removeBubble() {
     if (bubble) {
@@ -6206,6 +6389,7 @@
   }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
+    if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
     const dockGap = getDockGap();
@@ -9615,6 +9799,7 @@
     } catch (e) {
       warnExtDead();
     }
+    installExportGuard();
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
