@@ -5,6 +5,7 @@
 // RecallFlow 的记忆（知识库 / 站点记忆 / 技能 / 会话）都落 chrome.storage，
 // 不隔离就会跨任务污染，分数不可复现。
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,7 @@ export const EXT_PATH = path.resolve(__dirname, '..', '..');
  * ⚠ `headless: false` 是**技术约束不是偏好**：实测 headless 下 MV3 扩展的 service worker
  * 不注册（`context.serviceWorkers()` 为空），扩展起不来。无头环境用 xvfb-run。
  */
-export async function launchBrowser({ userDataDir = '', harPath = '', extPath = EXT_PATH, extraHTTPHeaders = null } = {}) {
+export async function launchBrowser({ userDataDir = '', harPath = '', extPath = EXT_PATH, extraHTTPHeaders = null, storageState = null } = {}) {
   const { chromium } = await import('@playwright/test');
   const options = {
     headless: false,
@@ -33,6 +34,17 @@ export async function launchBrowser({ userDataDir = '', harPath = '', extPath = 
   if (extraHTTPHeaders && Object.keys(extraHTTPHeaders).length) options.extraHTTPHeaders = extraHTTPHeaders;
   if (harPath) options.recordHar = { path: harPath, content: 'embed' };
   const context = await chromium.launchPersistentContext(userDataDir, options);
+  // 公开数据集不再带原版 storage_state；用登录一次后保存的 Playwright state 复用 cookie。
+  // 注意 launchPersistentContext 的 storageState 选项实测不生效，必须手动 addCookies。
+  const stateFiles = Array.isArray(storageState) ? storageState : storageState ? [storageState] : [];
+  for (const file of stateFiles) {
+    try {
+      const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (Array.isArray(state.cookies) && state.cookies.length) await context.addCookies(state.cookies);
+    } catch (e) {
+      console.warn('[auth] 读取登录状态失败（继续）：' + file + ' ' + String((e && e.message) || e));
+    }
+  }
   let [sw] = context.serviceWorkers();
   if (!sw) sw = await context.waitForEvent('serviceworker');
   return context;
@@ -80,7 +92,11 @@ export async function prepareSiteLogin(context, sites, logins = {}) {
         await page.fill('#email', email);
         await page.fill('#pass', password);
         await page.click('button.action.login');
-        await page.waitForURL(/customer\/account\//, { timeout: 15000 }).catch(() => {});
+        // 注意不能等 /customer/account/：登录页自身的 URL 也匹配它。
+        // 等的是"离开登录页"，否则会在点击后立刻误判成功（随后又被下面的检查纠正成失败）。
+        await page
+          .waitForURL((u) => !/\/customer\/account\/login/.test(u.pathname), { timeout: 20000 })
+          .catch(() => {});
         if (/customer\/account\/login/.test(page.url())) {
           console.warn('[login] shopping 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
         }
