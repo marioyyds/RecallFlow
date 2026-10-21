@@ -194,6 +194,19 @@ test('关闭臂（VISION_ENABLED=false）：Agent 发往 LLM 的请求里不得�
 test('开启臂（VISION_ENABLED=true）：图像必须以「截图结果之后追加的 user 消息」出现', async () => {
   test.skip(VISION_ENABLED !== true, '开关还是关的 ⇒ 本臂不可能成立（这正是要跳过的原因）');
 
+  // 夹具开关缺失时**立刻**给出准确原因。
+  // 为什么需要这一行：不加它时，漏掉 E2E_LLM_VISION_SHOT 的后果是下面那句
+  // `poll(toolResultsText).toContain('已截图')` 干等 45 秒后超时，报出来的却是
+  // "图像必须以…出现"这种**形态错误** —— 看起来像传输管道坏了，实际只是夹具没被
+  // 要求截图。（本次迭代就真的这么误判过一轮，还去 master 上做了对照才排除。）
+  // 这里刻意用 expect 而不是 test.skip：CI 里漏设变量必须**红**，skip 会让它静默变绿。
+  expect(
+    String(process.env.E2E_LLM_VISION_SHOT || ''),
+    '本臂需要夹具真的发起 take_screenshot：请带上 E2E_LLM_VISION_SHOT=1，\n' +
+      '或直接跑 node scripts/run-e2e.mjs 的「视觉两臂」阶段。\n' +
+      '这不是管道坏了 —— 是夹具没被要求截图。'
+  ).toMatch(/^(1|true|yes)$/i);
+
   await configureSettings(context, { cdpEnabled: true });
   const page = await openFixturePage(context, '/article');
   resetLlmRequests();

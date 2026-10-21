@@ -176,8 +176,10 @@ test('技能合并不可做：toolNeedsApproval 拿不到 args，无法按 op �
   // 合并后只能二选一：每次加载技能都要批准（高频安全操作变烦），
   // 或移除安装闸门（外部下载+写本地不再确认）。两者都比"省 1 个工具"更糟。
   // 这条断言把"为什么不做"钉住，避免将来有人照着表格直接合并。
-  const agentSrc = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
-  const sig = agentSrc.match(/export function toolNeedsApproval\(([^)]*)\)/);
+  // 实现已搬到 lib/assistant/approval-policy.js —— 断言跟着实现走
+  //（否则一次纯搬运就让门禁失效，而它守的是"审批函数拿不到 args"这个架构事实）。
+  const policySrc = fs.readFileSync(new URL('../lib/assistant/approval-policy.js', import.meta.url), 'utf8');
+  const sig = policySrc.match(/export function toolNeedsApproval\(([^)]*)\)/);
   assert.ok(sig, 'toolNeedsApproval 应存在');
   assert.ok(
     !/\bargs\b/.test(sig[1]),

@@ -1,0 +1,902 @@
+# 优化迭代台账
+
+> 分支：`opt/agent-and-test-iteration`（基点 `87cd66b`）
+> 上游分析：[optimization-review-2026-10-19.md](./optimization-review-2026-10-19.md)
+> 基线：1670 项 / 141 文件，全绿（全量门禁 26s）
+
+## 规则（本轮迭代自己也要遵守）
+
+1. 每一轮 = **一处可独立回滚的改动 + 一次可复核的验证**。
+2. 每轮要么证明「改动前是绿的」，要么证明「改动前会红」。
+3. 数字由脚本产出，不手写。
+4. 每若干轮跑一次全量 `node scripts/run-all-checks.mjs`，收尾必跑。
+
+## 台账
+
+| 轮 | 改动 | 验证 | 结果 |
+| --- | --- | --- | --- |
+| 1 | 修 `agent.js:1095` 并行死代码（删掉恒为 0 的 `remaining` 闸门） | 代码审读 + grep 全仓 | ✅ |
+| 2 | 导出 `runParallelBatch`，写 `tests/parallel-batch.test.mjs`（含 in-flight 并发证明） | 单测 | ✅ 5/5（首跑 2 红） |
+| 3 | **发现第二个叠加 bug**：`TOOL_REGISTRY` 与 `getToolMetadata` 漏掉 `parallelSafe`，14 个工具全被判不可并发 | 实测 probe + 全仓 grep | ✅ 修完 5/5 |
+| 4 | 修完成校验意图门：新增 `resolveVerifyIntent(intent, promoted)` | 全量 | ✅ |
+| 5 | 补 2 条断言（提升后必须校验 / 这条断言有牙齿） | 单测 | ✅ 6/6 |
+| 6 | README「失败软着陆」文案改为与实现一致 | 审读 | ✅ |
+| 7 | `tool-guard` 导出 `GUARD_CAN_DISABLE_TOOLS`，README 门禁锚定真实语义 | 单测 | ✅ 5/5（首版误判"不摘除"为违规，改正向锚定） |
+| 8 | 导出敏感工具名单，新建 `tests/sensitive-policy-registry.test.mjs` | 单测 | ✅ 5/5 |
+| 9 | `scripts/coverage-baseline.mjs` 覆盖率采集 | 实跑 | ✅ 分支覆盖仅 6.54% |
+| 10 | 修覆盖率脚本：`--test-reporter=dot` 下不打印覆盖率表（曾写出空基线） | 实跑 | ✅ 加空结果报错 |
+| 11 | 修目录行解析（带空管道符的形态未识别 ⇒ 高风险模块全落空） | 实跑 | ✅ |
+| 12 | `tests/helpers/chrome-stub.mjs` 统一桩 | 审读 | ✅ |
+| 13–25 | `tests/cdp-behavior.test.mjs` 13 条（cdp.js 此前零行为测试） | 单测 | ✅ 13/13（桩写成 async 未调回调，挂到 8s 超时） |
+| 26 | 三份 playwright 配置补 `retries`（CI 重试 / 本地不重试 / eval 永不重试） | 加载配置验证 | ✅ |
+| 27 | 硬等待 `waitForTimeout` 棘轮门禁（当前 20，只许减） | 单测 | ✅ |
+| 28 | 重试策略改为按环境**加载配置**做行为级校验（字符串门禁证明不了表达式生效） | 单测 | ✅ 22/22 |
+| 29 | CI：MCP 子包依赖缓存 | 审读 | ✅ |
+| 30 | CI：新增 `e2e-nightly`（schedule 02:00 UTC + 手动）跑完整 87 条 | 审读 | ✅ |
+| 31 | `tests/ci-workflow.test.mjs`：钉住夜间 job 必须有事件守卫 | 单测 | ✅ 5/5 |
+| 32 | 变异脚本重写为多目标 + `inplace` 注入（备份 / finally / 崩溃自愈 / 收尾比对） | 实跑 | ✅ |
+| 33 | tool-guard 加 5 条变异 | 实跑 | 4/5 |
+| 34 | **揪出恒真断言**：`deepEqual(warnedAt, REPEAT_THRESHOLDS.slice())` 两边同源于一个常量 | 变异测试 | ✅ |
+| 35 | 改为字面量 + 补「默认阈值必须被字面量钉住」 | 单测 + 变异 | ✅ 10/10 |
+| 36 | eval 配置加 json reporter（结果可落盘） | 审读 | ✅ |
+| 37 | `scripts/eval-compare.mjs` 存基线 / `--check` 对比（口径：只算"上轮过这轮挂"） | 单测 | ✅ 6/6（flatten 前缀 bug 已修） |
+| 38 | 钉住 json reporter 与 `retries=0` 不被删 | 单测 | ✅ |
+| 39–49 | `tests/commands-lookup.test.mjs` 11 条（commands.js 此前零 import），鸭子类型假元素、不引入 jsdom | 单测 | ✅ 11/11 |
+| 50 | `tests/agent-failure-contract.test.mjs` 5 条（`describeToolFailure` 此前零覆盖） | 单测 | 4/5 |
+| 51 | **修 bug**：错误对象无 message 时产出 `[object Object]` 喂给模型 | 单测 | ✅ 5/5 |
+| 52 | `verifier.js` 反思按成因分派三套建议 + 第 3 次给收尾出口 | 单测 | ✅ |
+| 53 | `agent.js` 跨轮累计 `stuckAttempts`（按轮重置永远到不了第 3 档） | 全量 | ✅ |
+| 54 | 补 6 条反思断言（三种成因不串台、出口、向后兼容） | 单测 | ✅ 8/8（否定断言写宽已修） |
+| 55 | 测试数快照区分「行为 / 静态门禁」+ 行为占多数的健康度门禁 | 全量 | ✅ 121 行为 / 27 静态 |
+| 56 | **修覆盖率口径**：node 合并覆盖率是 last-writer-wins 不是并集；新增 `--focus` 逐文件取最大值 | 实跑 | ✅ cdp 真值 58.41% |
+| 57 | `test:cov` / `test:cov:write` npm 入口 | 实跑 | ✅ |
+| 58 | `mock_server.py` 补归属说明（是手动演示工具，不删） | 审读 | ✅ |
+| 59 | `page/chat.js` 零 import 的根因确认：只导出 `initAssistant`，其余重度依赖 DOM ⇒ 结构上不可测 | 审读 | ✅ |
+| 60–62 | 抽出 `lib/page/fab-position.js`（依赖显式注入，同 C-1 套路），chat.js 改为委托 | 语法 + 重建产物 | ✅ 语义原样搬运 |
+| 63–68 | `tests/fab-position.test.mjs` 15 条**真行为**断言（替换原 16 条 `assert.match(chat, /regex/)`） | 单测 | ✅ 15/15（首跑 2 红：`normalizeFabRatio(null)` 返回 0 而非 null，会让气泡跳顶——已修） |
+| 69 | 旧正则用例改成"接线仍在"的最小断言 | 单测 | ✅ |
+| 70–71 | 新增 `lib/assistant/context-tuning.js`，把 5 组上下文阈值集中（各自取值理由一并搬入） | 全量 | ✅ 数值一字未改 |
+| 72 | `tests/context-tuning.test.mjs` 用字面量钉住每个阈值 | 单测 | ✅ 4/4 |
+| 73–80 | E2E `waitForTimeout` **20 → 10**（`stream-scroll` 7 处全换 `expect.poll`） | 实跑 E2E | ✅ 5/5 绿，24s → 18s |
+| 81 | **rebase 到 master**（`--onto 87cd66b`，只搬自己的 12 个提交——master 刻意回退了两个安全提交） | 全量 + E2E | ✅ 见下节 |
+| 82 | `tests/assertion-quality.test.mjs`：读源码的测试文件数 / `readFileSync` 次数 / 行为测试占比，三条棘轮 | 单测 | ✅ 4/4，且已验证加一个假测试会红 |
+| 83 | 变异测试扩到 `agent.js` 决策函数（审批 3 条 + 看门狗 2 条） | 实跑 | **挖出 1 个零测试的安全档** |
+| 84 | **补测**：任意代码执行档（`run_userscript`/`install_userscript`/`save_skill`）必须独立审批 | 单测 + 变异 | ✅ 22/22，变异 12/12 |
+| 85 | **修变异脚本自身**：就地变异把 CRLF 源文件永久改成 LF，且收尾核对用归一化比较所以永远看不见 | 实跑 | ✅ 改为按原 eol 写回 + 字节级核对 |
+| 86 | 修 `expectFail` 关键词（写 `stalled` 而用例名是中文 ⇒ 红了被判成"没抓住"，误报 2 条） | 实跑 | ✅ |
+| 87 | E2E 两个 spec 在缺阶段专属 env 时 **fail fast** 并说清原因（用 `expect` 不用 `skip`，CI 漏设必须红） | 实跑 | ✅ 带 env：resume 1/1、vision 3/3 |
+
+## 结果
+
+| 指标 | 起点 | 现在 |
+| --- | --- | --- |
+| 单元测试 | 1670 项 / 141 文件 | **1725 项 / 147 文件**（行为 119 + 静态 28） |
+| 变异测试 | 1 文件 / 5 算子 | **3 文件 / 12 算子**，12/12 被抓住 |
+| 覆盖率采集 | 无 | 有（见下方**口径警告**） |
+| E2E 重试 | 三份配置均无 | CI 2 次 / 本地 0 / eval 0 |
+| E2E 硬等待 | 20 处 | **10 处**（棘轮门禁钉住） |
+| 读源码的测试 | 70 / 141 文件（无门禁） | 70 / 147（**棘轮钉住，只许减**） |
+| CI | 2 job | 2 job（+ 夜间全量 E2E）+ 依赖缓存 + 因果门禁 |
+
+> 数字变化说明：rebase 到 master 时移除了两个随安全提交一起消失的测试文件
+> （`sensitive-policy-registry` 等），所以总数不是单调上升，这是正确结果。
+
+## rebase 到 master（轮 81）—— 一次必须问清楚的取舍
+
+`git rebase master` 会把分支上**不属于 master 独有**的提交全部重放。实测第一步就暴露出问题：
+
+```
+error: could not apply d7e5144... feat(security): block sensitive actions and redact model data
+```
+
+`d7e5144`（以及 `f27051b fix(security): guard screenshots`）在本地 master 上**被刻意移除了**：
+
+- 存在备份分支 `backup/master-before-remove-d7e5144`；
+- master 上 `sensitive-action-policy.js` / `sensitive-data.js` / `security-guard.spec.mjs` 全部不存在（不是改掉，是干净移除）；
+- 本地 master 是 `c9cc088`，与 `origin/master` 的 `16a8acb` 同 message 不同 hash —— 说明是 rebase 重写。
+
+分支是从**移除前**的基线长出来的，所以默认 rebase 等于把别人刚删掉的东西装回去。这里改为
+`git rebase --onto master 87cd66b`：**只搬自己的 12 个提交**，并连带处理耦合：
+
+| 冲突/缺口 | 处理 |
+| --- | --- |
+| `sensitive-action-policy.js` 被删、但我的提交改了它 | 一并删除该模块与它的门禁测试（门禁不能钉不存在的东西） |
+| CI 有 `e2e-smoke` job 跑 `npm run test:e2e:smoke` | **删掉该 job** —— master 的 package.json 没这个脚本，`run-e2e.mjs` 也不支持过滤，留着只会稳定红在 "Missing script" |
+| `e2e-hygiene` 3 条用例依赖 `base-test.mjs` | 删除（master 上该文件不存在、0 个 spec import 它） |
+| `playwright.config` 引用 `outputDir`/`htmlReportDir` | 这两个变量随被删提交消失，改为保留 `retries` + `use(trace/screenshot)`，不引用未定义变量 |
+| `tests/.test-count.json` | 派生产物，取正在应用的一侧，最后统一重新生成 |
+
+**rebase 后必须重建 `content.js`**（`lib/page/**` 变了），并确认两处改动共存：
+master 的 dedupe 逻辑（3 处）与 fab 抽取接线同时存在，15 条 fab 测试全绿。
+
+## E2E 验证（rebase 后）—— 以及一次我自己的误判
+
+E2E 的 11 个阶段**全部**跑不起来，报的是 `[safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED]`：
+Playwright 每次启动要清空 `test-results/`，而那里累积了 8000+ 历史产物。
+这是当前沙箱的批量删除保护，不是测试失败 —— 用独立 `--output` 目录绕过。
+
+逐 spec 跑完 11 个阶段，最初报了 4 条失败，逐条查证后结论是：
+
+| 用例 | 我最初的判断 | 实际结论 |
+| --- | --- | --- |
+| `vision-switch` 开启臂 | "可能是并行改动打乱了时序" | **我的跑法错了**：漏了 `E2E_LLM_VISION_SHOT=1`，夹具没发截图。带 env 后 3/3 通过 |
+| `resume` 断线恢复 | "master 上也失败 ⇒ 既有问题" | **同样是跑法错**：漏了 `E2E_LLM_HOLD_OPEN=1`。带 env 后 1/1 通过 |
+| `sessions` 运行锁 | "我引入的" | **flaky**：复跑 8/8 通过 |
+| `golden` 富文本 | "我引入的" | **flaky 且是用例间干扰**：54 条连跑失败、单跑通过 |
+
+为此专门去 master 的干净 worktree 做了对照（`git worktree add` + node_modules junction），
+才把"我的改动"和"跑法/环境"分开。**这一步不能省** —— 否则会把两次跑法错误写成"master 既有失败"。
+该误判已顺手修成门禁：缺 env 时 fail fast 并直说原因（轮 87）。
+
+## 期间修掉的真 bug（都不是靠读代码发现的，是靠"补断言"逼出来的）
+
+### ⚠ 覆盖率数字的口径警告（重要，别拿它写"提升了多少"）
+
+node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试文件加载"时，
+**跨进程合并行为不可靠**，实测现象互相矛盾：
+
+- 两文件串行表现为 **last-writer-wins**（cdp：behavior 先 → 44.09%，timeout 先 → 58.41%）；
+- 全量并发时同一条命令两次跑出两个数；
+- 但 `assistant/agent.js` 全量报 41.76%，逐文件取最大值却只有 27.26%（不符合 last-wins）。
+
+所以这三个数字没有一个是可信真值。**唯一可靠的信号是"完全没被加载"**：
+`page/chat.js` 有 12 个测试文件提到它、但**零覆盖**（全是读源码做正则，没有一个真 import）——
+这是不受合并行为影响的真零，也是本轮没啃下来的最大空洞。
+
+## 期间修掉的真 bug（都不是靠读代码发现的，是靠"补断言"逼出来的）
+
+1. **并行工具调用从未执行**（两个叠加 bug：`remaining` 恒 0、`parallelSafe` 被注册表丢掉）——
+   而系统提示已向模型承诺并发。
+2. **画像提升后完成校验永久失效**（`intent` 是运行期常量）。
+3. **`describeToolFailure` 产出 `[object Object]`** 喂给模型。
+4. **恒真断言** `deepEqual(warnedAt, REPEAT_THRESHOLDS.slice())`。
+5. **变异脚本把 CRLF 源文件永久改成 LF**，且收尾核对用归一化比较所以永远看不见。
+   实证：`lib/assistant/tool-guard.js` 工作区行尾是 LF，而同目录 `agent.js`/`chat.js` 是 CRLF。
+6. **`normalizeFabRatio(null)` 返回 0 而不是 null** —— 存的值里 ratio 为 null 时气泡会跳到顶部。
+7. **任意代码执行档零测试**（`run_userscript`/`install_userscript`/`save_skill`）：
+   把那一档的审批分支改成恒 false，1720 条测试没有一条变红。而 `risk:'high'` 不在类别映射里
+   ⇒ 分支一失效就落到 `commands` 类，用户勾了"页面命令自动批准"等于给任意代码执行开闸。
+
+## 没做完的（按优先级）
+
+> 本节在**轮 95 后重写**。原先那 6 条里 4 条已经做完（`toolNeedsApproval` 归位、富文本 flaky 根因、
+> 硬等待降到 2 处、`context.js` / `run-hub.js` 补上变异算子），留着会误导下一个人。
+
+- **`lib/page/chat.js` 主体仍靠 E2E**：4911 行。已经有单测的部分：fab 位置（抽出）、
+  开合/去抖/审批设置面板（轮 89，DOM 桩）、**审批条**与**发送·停止状态**（轮 96，纯函数 + DOM 桩）、
+  **失败态渲染与失败轮次入库**（轮 98）。
+  仍然只能靠 Playwright 验的：断线重连的中断收尾文案、输入路径（回车发送、Esc 关闭浮层）、
+  以及整个消息流的分段渲染。
+- **上下文折叠没有重要性打分**：`collapseOldToolResults` 只按「最后 N 条」切。
+  ⚠ 动手前先读 `context.js` 里那段注释 —— 「一次折干净以摊销前缀抖动」是**刻意设计**；
+  改成「按需折叠到预算以内」会让请求前缀几乎每轮都变，把前缀缓存命中率换掉。
+- **同型误判的排查还没做完**：轮 94 修的是「按工具名去重的名单被当成次数用」
+  （`claim-check` 规则 2）。同类名单还有 `failStreak`（语义上按名字是**对的**，别再改）、
+  `ranToolNames.slice(-60)` 的截断边界（超长 run 时先丢的是最早的记账）。
+- **`content.js` 的体积棘轮只剩 1KB 余量**：预算 416KB / 实际 415KB。下一次往内容脚本里加
+  真东西就会红 —— 那是刻意的（红了就得确认是不是误引入），但别顺手把预算调大来变绿。
+- **E2E 只剩 2 处 `waitForTimeout`**（`golden.spec.mjs`，都是「观察窗口」，已写明时间量级出处），
+  棘轮 `CEILING = 2`。继续降要先换掉那两处观察窗口本身，收益递减。
+- **变异覆盖 9 / 93 个 lib 文件**。缺的是 `verifier.js`（判据分派）、`intent-router.js`
+  （画像提升）、`session-store.js`（落盘形状）—— 都是「改错了不会红、只会在真机上表现怪」的地方。
+- **`mutatesState` 目前是单例**（只有 `fetch_webpage` 用）。出现第二个「只读但要审批」的工具时，
+  它才算被真正验证过；在那之前，别急着把它推广成通用机制。
+
+---
+
+# 轮 88–89：审批判定归位 + `chat.js` 第一次被真 import
+
+## 轮 88：`toolNeedsApproval` 搬出 `agent.js`
+
+它是"用户点了同意才写页面"的唯一闸门，却住在 2200 行、顶层直接摸 chrome API 的 `agent.js` 里。
+想测它得先起一整套 chrome 桩 —— 结果它长期只有 5 条断言，最关键的一档（任意代码执行）曾经零测试。
+
+搬到 `lib/assistant/approval-policy.js` 后（零 chrome 依赖），顺手做了一件**语义收紧**：
+
+| 情况 | 原行为 | 现行为 |
+| --- | --- | --- |
+| `risk` 在映射表里 | 按类别自动批准 | 不变 |
+| `risk` **不在**映射表里（含 `'unknown'`、未来新增等级） | 兜底到 `'commands'` ⇒ 用户勾了"页面命令自动批准"就**放行** | **fail-closed**：一律要审批 |
+
+这一条不是洁癖：`risk:'high'` 就不在映射表里，原先只靠 `alwaysRequireApproval` 分支挡着；
+哪天有人写了 `high` 却忘了那个字段，工具会**静默落进最宽的类别**。现在两个门槛都失效也仍然是"要审批"。
+
+- 14 条直接单测（`tests/approval-policy.test.mjs`），含两条棘轮：
+  「元数据里出现的每个 `risk` 都必须被显式决策（映射 或 登记为无类别）」、
+  「声明无类别的风险，其工具必须真的 `alwaysRequireApproval`」。
+- 变异算子 5 条（从 `agent.js` 移过来 3 条 + 新增 2 条：fail-closed 退化、`auto` 被忽略），全部被抓住。
+
+## 轮 89：`lib/page/chat.js` 从"零 import"到"真跑起来"
+
+这是评审里标出的最大风险敞口：4900 行，12 个测试文件提到它，**没有一个真的 import 过**。
+
+做了两件基础设施：
+
+1. `tests/helpers/dom-stub.mjs` —— 最小 DOM。**innerHTML 是真的解析**（自带一个小解析器），
+   而不是吞掉字符串：chat.js 大量 `el.innerHTML = '<input data-policy="browser">'` 之后
+   `el.querySelector('[data-policy]')`；桩如果让 querySelector 随便造节点，
+   "标记里属性名拼错"这类真 bug 就永远测不出来。
+   刻意**不用 Proxy 兜底** —— 那会让 `if (el.someNewApi)` 恒真，被测代码走进不存在的分支。
+2. `tests/helpers/chrome-stub.mjs` 补两个缺口（都是"用真代码一跑就暴露"的类型）：
+   - `runtime.getManifest()`：`isExtContextAlive()` 会**真的调一次**它。缺了它，
+     任何用本桩加载页面代码的测试都会走进"扩展已失效"分支 ⇒ `ensureHost()` 直接 return、
+     一个节点都不建，而测试看不出原因。
+   - `runtime.onMessage` 改成**真的记住监听器**，并提供 `_emitMessage()`：
+     内容脚本大半功能（`panel:toggle` / `run:*` / `kbPickResult`）是消息驱动的。
+
+`tests/chat-panel-smoke.test.mjs`（9 条，全部行为断言）：初始化建宿主与 FAB、上下文失效时提示刷新、
+快捷键开面板、250ms 去抖、点 FAB 关面板、审批 UI 覆盖 5 个类别、勾选/取消自动驾驶 →
+5 类全部落盘且标签同步更新、后台 `panel:toggle` 也能开面板。
+
+**踩到的坑**：8 条全过，但进程 30s 后被 kill —— `watchHostKeepalive()` 开的
+`setInterval(…, 1000)` 在浏览器里正确，在 node 里是一根永久持有事件循环的把手。
+桩现在记录 `setTimeout`/`setInterval` 的 id，`restore()` 时统一清掉（**不用 unref**：
+那会让"用例 await 一个短定时器"变得不可靠）。
+
+### 顺带修好的门禁误报
+
+`tests/assertion-quality.test.mjs` 的棘轮按"源码里出现 `readFileSync` 的次数"计数，
+而我在新测试的头注释里写了「此前全是 `readFileSync` + 正则」—— 于是棘轮从 70 涨到 71，
+逼着人去查"我明明没写读取"。**门禁该统计调用，不是字符串出现次数**，这正是它自己批评的毛病。
+现在先剥注释再统计，并补了一条牙测试（含 CRLF 用例：`$` 对不上会让注释逃过剥离且毫无提示）。
+
+同时把 `tests/panel-shortcut.test.mjs` 里读 `chat.js` 的那条静态断言退役 ——
+断言源码里有 `togglePanelFromShortcut()` 这句话，无法证明它真的被调用过。
+棘轮因此**真的往前走了一格**：`readFileSync` 上限 167 → 166。
+
+## 轮 90：变异覆盖从 3 个文件扩到 6 个 —— 并因此挖出两条真缺口
+
+`context.js`（折叠）与 `run-hub.js`（多 run 状态机）此前是 **0 算子**，而它们是
+"长任务不炸上下文"与"跟随页能看到同一份时间线"的唯一实现。加了 6 条算子后，
+**其中 2 条一开始抓不住** —— 这就是补断言的价值，不是"顺手多写几条测试"：
+
+| 算子 | 结果 | 说明 |
+| --- | --- | --- |
+| 正文开始不定稿思考段 | 抓住 | 已有用例有效 |
+| `end` 后不清停止标记 | 抓住 | 已有用例有效 |
+| **任意 tool-result 都清掉审批** | **抓不住** | 见下 |
+| **折叠反而变长时照样折叠** | **抓不住** | 见下 |
+
+### 缺口 1：审批弹窗会被无关的工具返回关掉
+
+`run-hub.js` 里清审批的判据是 `state.approval.callId === event.callId`，
+改成无条件 `state.approval = null` 之后，`run-hub.test.mjs` 的 16 条断言**无一变红**（变异脚本只跑目标测试文件，所以这里说的是那 16 条、不是全量 —— 全量没跑过，不写成那个数）。
+而真实运行里乱序返回很常见：c1 在等审批、c2 的结果先回来 ——
+用户会看到弹窗自己消失，那次写操作**静默没执行**，且没有任何提示。
+已补用例（`tests/run-hub.test.mjs`）：无关的 tool-result 不得清掉待批的那一条。
+
+### 缺口 2：临界长度上"折叠"会让内容变长
+
+`buildCollapsed` 的文案约 110 字，头 300 + 尾 150 + 通知 ≈ 560。
+也就是说 **490～560 字**这段区间里，折叠的结果比原文更长。
+`collapseOldToolResults` 里 `next.length >= m.content.length` 这条守卫原本没有用例覆盖，
+删掉它测试全绿 —— 后果是每轮白白改写一次历史中部（前缀缓存从头失效），上下文一点没变小。
+已补用例（`tests/context.test.mjs`，520 字临界样本）。
+
+顺带记一个操作教训：变异脚本的 `expectFail` 是**按用例名做关键词匹配**的。
+新补的用例名里如果没有那个关键词，即使它真的变红了，脚本也会判成"没抓住"。
+这次就是先看到"✗ 允许折叠后反而变长"，查下去才发现是我给的用例名不含 `折叠后不再变长`。
+
+---
+
+# 轮 91：E2E 硬等待 9 → 2，并找出「54 条里总挂一条」的真正原因
+
+## 先把两类"等待"分开
+
+评审里说 E2E 的 `waitForTimeout` 是 flaky 头号来源，这话只对一半。必须分开看：
+
+- **等某事发生** —— 有可轮询的信号，用 sleep 就是纯浪费 + 抖动；
+- **等某事`不`发生**（负例断言）—— 天然"立刻成立"，`expect.poll` 在它面前没有意义，
+  只能给一个观察窗口。
+
+原先 9 处里 7 处属于前者，2 处属于后者。后者留着（并写明时间量级的出处），前者全部换掉：
+
+| 原先在等什么 | 换成 | 为什么非换不可 |
+| --- | --- | --- |
+| "拒绝处理完"（2500ms） | `waitForRunEnd`：等 `.cmd-send` 恢复可用 | **假通过**：慢机器上副作用还没发生就断言"没发生" |
+| 点了/滚了之后"什么都没发生"（200~400ms，4 处） | `settle`：双 rAF | 处理器在帧内同步跑完，两帧是"已派发/已布局"的最小可信边界 |
+| "又来了一段增量"（500/800ms） | 轮询到下一段增量**真的出现** | 睡过头时流已结束，断言退化成"对空条件成立" |
+
+棘轮 `CEILING` 10 → **2**。
+
+## 那条"54 条里总有一条红"的 flaky：断言早于 run 结束
+
+`golden: 富文本` 的判据里，`__rt.strong > 0` 在第 5 步成立，而 `list` / 装饰键计数 /
+`selectAlls` 要到第 6/7/4 步才落地。原写法是 poll 到 `strong` 后**立刻**断言后面几条 ——
+等于在 run 跑到一半时检查最终状态。失败信息是"装饰键没被点过"，而装饰键那一步明明在后面。
+
+修法：先等这一轮**跑完**，再逐条断言。`-g` 重复跑 3 遍，3/3 绿。
+
+**教训**：一个 `expect.poll` 成立 ≠ 这一次 run 做完了。分步推进的剧本里，
+第一个成立的判据往往只是**中途**的证据。
+
+## 同一个坑的反向形态：屏障等错了那次变化
+
+`sessions` 那条"后续 delta 不得把用户展开的思考块收回"，我把 800ms 换成"等文本又变长"，
+结果**稳定失败**：拿到的是 `data-state="done" / data-open="false"`。
+因为**思考结束时块会被自动收回**，那一次文本变化正好就是"结束"。屏障于是变成
+"等一个正确行为发生，然后把它判成 bug"。正确写法是"文本变了 **且** 仍在 running"。
+
+这两条合起来是同一件事：**负例/不变量的屏障，必须精确描述"我要观察的那一段时间窗"**，
+而不是"随便等一个变化"。
+
+## 顺手挖出 `openPanel` 的一个 90 秒假死
+
+第二次全量跑，红的是另一条（拾取元素）。日志里 FAB 是 `<button class="fab hidden">`
+且 `click` 重试了 86 秒 —— 但错误截图里面板**开得好好的**。
+
+原因是 helper 自己的竞态：reload 后 `syncPanelUiOnInit()` 会**异步**自动开面板。
+若它正好落在 helper 的 `fab.isVisible() === true` 与 `locator.click()` 真正执行之间，
+FAB 会被加上 `hidden`，而 `click()` **不会回头检查"面板是不是已经开了"**，
+就对着一个永远不会再可见的按钮重试到动作超时。
+
+修法：点击给 2s 短超时、失败也忽略，然后 `continue` 回循环顶部重新判断；
+超时抛错时带上 shadow 内的真实结构（host/panel/fab 的 className 与尺寸），
+让下一次红能直接看出是"面板开得慢"还是"根本没建"。
+
+三次全量结果（都不是小事，按时间顺序）：
+① 54 条 → 53 绿 + 富文本红；② 53 绿 + 拾取元素红；③ 修复后 **54/54 全绿**（单跑拾取元素 3/3 绿，
+说明它是**顺序/状态相关**的，不是这条用例本身写错）。
+
+## 轮 92：把「测试有没有引用过这个模块」变成可计算的事实
+
+评审的头号发现是 `chat.js` 有 4900 行、12 个测试文件「提到」它却无人 import。
+本轮把它变成一条**双向**门禁（`tests/module-references.test.mjs`）：
+
+1. 从 `tests/**` 出发做静态 import 图 BFS（含 `import('…?case=N')` 的 query 剥离）；
+2. 每个 `lib/**` 模块要么可达，要么在 `ALLOWED` 里**写明为什么不可能被测到**；
+3. `ALLOWED` 里的条目一旦变得可达，必须删掉（清单只进不出就会腐烂）；
+4. 被豁免的模块还必须在**生产代码**里找到引用 —— 「没有单测」可以接受，
+   「产品都不 import 它」就是死代码，该删而不该进清单。
+
+当前 93 个 lib 文件里 5 个豁免，理由都是结构性的（MAIN world 裸脚本、executeScript
+按路径注入、只经 `background.js` 进入的 SW 依赖）。牙测试：临时塞一个
+`lib/shared/__probe_orphan.js`，门禁立刻点名它。
+
+顺带在 `assertion-quality` 里加了 `EXEMPT`：**被测对象是源码树本身**的门禁
+（import 图分析）不该被「少读源码」的棘轮罚分 —— 但没有理由不许加。
+
+全量：1753 项 / 150 文件全绿。
+
+## 轮 93：中断不是「故障」—— 三层被吞掉的中断，以及变异脚本把源码改坏的那次回写
+
+### 一、点「停止」之后，代码还在跑
+
+`AbortError` 是**我们自己造的**信号，但 `llm.js` 把它当成了一次网络抖动：
+
+```js
+function isRetryableError(e) { /* 只按 message 抓 429 / 5xx / fetch failed */ }
+```
+
+`makeAbortError` 的 message 是「任务已取消」，匹配不上任何一条，于是……它恰好落在
+`return false` 上，被当成**不可重试**。**但这不是设计，是巧合** —— 只要哪天有人往
+可重试名单里加一条通配（`/失败|错误/`），中断就会立刻变成「重试 3 次」，每次 60 秒。
+所以第一件事是把巧合变成不变量：`isRetryableError` 首行 `if (e.name === 'AbortError') return false;`。
+
+第二层是「已经中断了还在发请求」。`callDeepSeekOnce` 里 signal 的 abort 监听是 fetch
+**之后**才挂上的，如果 signal 在调用前就已经 aborted，监听永远等不到事件，请求照发，
+然后等满 60 秒超时 —— 用户按了停止，还要再等一分钟。修法是在函数入口就检查
+`signal.aborted`，直接抛中断。
+
+第三层最隐蔽：失败路径不解绑。原来的写法是
+
+```js
+const timer = setTimeout(...);
+signal.addEventListener('abort', abort);
+const res = await fetch(...);   // ← 这里一抛，后面两行永远不执行
+clearTimeout(timer);
+signal.removeEventListener('abort', abort);
+```
+
+成功路径没事，**每次失败都漏一个监听器和一个计时器**。反复失败的长任务会攒下一串
+挂在同一个 signal 上的闭包。改成 `try/finally` 包住 fetch。
+
+### 二、`verifyCompletion` 把中断吞成了「没意见」
+
+这是本轮最严重的一个，因为它**让状态说谎**：
+
+```js
+try { ... } catch (e) { return null; }   // null = fail-open = 「校验器不可用，按通过处理」
+```
+
+用户按停止 → 校验那次 LLM 调用被中断 → catch 吞掉 → 返回 `null` → agent 认为
+「校验没意见」→ 继续收尾、`persist({ status: 'done' })`。**用户明明点了停止，任务被记成已完成。**
+下次打开历史会话，看到的是一个绿勾，没有任何地方能追到「这次是被中断的」。
+
+fail-open 的语义是对的：校验器挂了不该拦成任务失败。但它只该覆盖**故障**，
+不该覆盖**用户意图**。所以 `verifyCompletion` 现在区分两者：`AbortError`（或 signal
+已 aborted）原样抛出，其余异常仍然 `return null`。
+
+在 `agent.js` 的调用点，把这段判断抽成纯函数，好让它可以被单测钉住：
+
+```js
+export function classifyVerifyOutcome(verdict, error) {
+  if (error) {
+    if (error.name === 'AbortError') return { kind: 'interrupt' };
+    return { kind: 'fail-open' };
+  }
+  if (!verdict) return { kind: 'fail-open' };
+  return { kind: 'verdict', verdict };
+}
+```
+
+中断分支走 `persist({ status: run.status, phase: 'interrupted', reason: 'aborted-during-verify' })`
+再 `return`。三个结局各有各的出口，不再共用一个 `null`。
+
+`tests/llm-abort-retry.test.mjs` 8 条钉住这些：中断不可重试 / 已中断的 signal 不发请求 /
+请求中被中断只发一次 / 真故障仍重试 / 校验中断必须抛出 / 真故障仍 fail-open /
+失败路径必须解绑 signal / `classifyVerifyOutcome` 三态分派。
+
+> 为什么「请求中被中断只发一次」要单独一条：它同时验证了「不重试」和「不发第二次」，
+> 而这两件事由两处不同的代码保证。任何一处回归，这条都会红。
+
+### 三、变异测试把源码改成了变异版本（真实事故）
+
+跑 `mutation-check` 的 inplace 模式时，同时开了两个进程。时序是：
+
+```
+A: 备份 context.js → 写入变异版 → 跑测试
+B: 备份 context.js（此时已是变异版！）→ 写入自己的变异版 → 跑测试
+A: 还原（写回原始字节）→ 删除备份
+B: 还原（写回**自己备份的变异版**）→ 删除备份
+```
+
+结果 `context.js` 和 `llm.js` 被永久留成了变异态。第二次是靠 `git checkout --` 救回来的，
+但如果当时工作区有未提交的改动，那就是**直接丢工作**。
+
+这类 bug 的可怕之处是它**只在并发时出现**，而变异测试恰恰是最容易被并行触发的东西
+（本地开两个终端、CI 上矩阵展开）。两个独立修复：
+
+1. **进程锁** `.mutation-lock.json`，记 pid 与启动时间；`acquireLock` 前先 `pidAlive(pid)`
+   探测，占用则 `process.exit(3)`（退出码要和「有变异没被抓住」的 1 区分开，
+   否则 CI 会把它误判成测试失败）。`process.on('exit')` 里释放，且**只删自己的锁**
+   —— 否则 A 退出时会把 B 的锁删掉，锁就白加了。
+2. **崩溃自愈** `recoverLeftovers`：上次进程被 kill -9 时备份还留在盘上。三种情况：
+   - 源文件**仍含**变异文本 → 是残留的变异态，还原；
+   - 源文件**已被改过**（不含变异文本）→ 有人手工动过，**不覆盖**，只清备份；
+   - **没有 meta** → 不知道原来是什么，**不猜**，报警后跳过。
+
+   「不覆盖人工改动」和「不猜」这两条是刻意的：自愈脚本最怕的就是把人的工作当成垃圾清掉。
+
+`tests/mutation-guard.test.mjs` 8 条钉住锁与还原：干净时能拿到 / 同一 pid 可重入 /
+被活进程占有时拒绝 / 陈旧锁（pid 已死）可抢 / 只删自己的锁 / 还原逐字节（含 CRLF）/
+自愈三态各一条。
+
+顺带把 `lib/assistant/llm.js`（3 条）与 `agent.js` 的 `classifyVerifyOutcome`（1 条）
+加进变异目标。后者第一版写 `expectFail: '中断必须走中断收尾'` 抓不住 —— 变异测试
+匹配的是**用例名**，不是断言消息里的关键词。改成 `'结局分派'` 才命中。
+
+全量：**1769 项 / 152 文件全绿**（行为 123 + 静态门禁 29），变异 7 个文件全过。
+
+## 轮 94：把「发生过一次」当成「全都」—— 两处同型的误判
+
+### 一、确定性预检把「失败过」读成了「一次都没成」
+
+`claim-check.js` 的规则 2 原本是：
+
+```js
+if (claimsWrite && mutating.every((t) => failed.includes(t)))   // 「这个写类工具全失败了」
+```
+
+读起来没问题，直到你看清 `failedTools` 是怎么来的：`[...new Set(failedToolNames)]`
+—— **按工具名去重，不含次数**。于是「`click_element` 第一次点偏了，第二次点中了」
+在名单上表现为这个名字出现在失败名单里。规则 2 于是判定：
+
+> 总结里声称完成了「点击」类操作，但用到的写类工具全部失败：click_element。
+
+而事实是它成功了。一次完全正确的任务被判成撒谎，代价是：
+
+1. 白烧一次 verification 配额（这个配额是有限的，`maxVerifications`）；
+2. 灌给模型一条**内容错误**的反思 —— 它读到「全部失败」，很可能去重复一个已经成功的动作
+   （点第二次 = 重复提交），或者把总结改口成「没做成」。
+
+这条 bug 还藏着一层：测试里**早就有**一条名字叫「写类工具部分失败时不误判」的用例，
+但它传的是 `mutatingRanTools: ['set_element_style', 'click_element']` —— 两个**不同**的工具。
+`every()` 在第一个元素上就是 false，测试自然绿。也就是说：
+
+> 用例名声明的是「部分失败」，实际测的是「不同工具各自成败」。它绕开了唯一会出错的那条路径。
+
+这是「测试存在但没盯住它声称要盯的东西」的典型形态 —— 比没有测试更危险，
+因为它会给评审一个「这块已经覆盖了」的错觉。
+
+**修法**：把「成功过」和「失败过」分开记，判据改成差集。
+
+```js
+mutating.every((t) => failed.includes(t) && !succeeded.includes(t))
+```
+
+`agent.js` 里补上 `succeededToolNames`（与 `failedToolNames` 成对：`res.ok === false` 进前者，
+否则进后者），随 run 落盘、恢复时读回，并传进 `checkCompletionClaim`。
+`succeededTools` 缺省为空数组 ⇒ 退化成旧行为，不引入新的放行方向。
+
+三条新用例：同名失败→成功 **不得**误判（牙）、同名全部失败 **仍要**抓到（防改瘫）、
+「只成功过别的工具」不算这个工具成功。前两条互为反向，任何一边写瘫都会红。
+
+变异测试同步扩到 `claim-check.js`（3 个算子：规则 2 退回只看失败名单 / 规则 1 去掉
+「调用过工具」前提 / 去掉描述性措辞的完成态线索要求）。3 条都被抓住。
+
+### 二、一次瞬态写失败就把变异门禁整段崩掉
+
+跑 `run-all-checks` 时变异阶段直接抛栈退出：
+
+```
+errno: -4094, code: 'UNKNOWN', syscall: 'open',
+path: '...\lib\assistant\claim-check.js'
+```
+
+`-4094` 是 Windows 上的 `STATUS_UNKNOWN`。文件**刚刚才读出来**、目录权限正常，
+过几分钟再跑就过了 —— 典型是杀毒/索引服务在读完文件后短暂持有句柄。
+
+后果不是「红一下」那么简单：
+
+* 门禁是带着一段栈崩的，看不出是环境问题还是断言没牙齿；
+* 崩在 `writeBackup` 之后、`writeFileSync(变异版)` 之中，于是**盘上留了一份备份**；
+* 这份备份要等下一次运行的自愈来收（日志里能看到「发现上次被中断时留下的变异版本」）。
+
+也就是说：上一轮刚做的自愈，当天就被真实触发了一次 —— 这是好事（说明它有用），
+但它本来不该被触发。**瞬态失败和真失败必须分开处理**：
+
+```js
+export function writeFileRetry(file, data, opts = {}) { /* 瞬态码退避重试，其余立即抛 */ }
+```
+
+* 瞬态（`EPERM/EACCES/EBUSY/UNKNOWN/EBADF/EMFILE/EAGAIN`）：线性退避 25/50/75ms，最多 4 次；
+* 真问题（`ENOSPC` 之类）：**一次都不多试**，直接抛 —— 重试只会拖慢报错；
+* 用尽次数后抛出的错误带**路径 + 真实原因 + 尝试次数**，而不是把原始 errno 往上丢。
+
+三处写入全部改走它：写备份、写变异版本、以及**还原**。还原这一步是整个脚本最不能失败的
+写入（它失败就意味着源码带着变异版本留在盘上），所以它也从"一次 `copyFileSync` 定生死"
+改成了 `readFileSync` 取 Buffer + 带重试写回 —— Buffer 直通，不经过任何编码转换，
+逐字节还原这条性质仍然成立（有测试专门用中文 + CRLF 盯这一点）。
+
+`tests/mutation-guard.test.mjs` 从 8 条增到 12 条：瞬态两次后成功（含退避序列断言）/
+非瞬态立即抛出且只试一次 / 一直是瞬态则用尽后抛出且报错指名道姓 / 还原逐字节。
+`write` 与 `sleep` 只是测试接缝，生产路径不传。
+
+### 三、顺手把没压过的 spec 压了一遍
+
+`scroll-follow / stream-scroll / reattach-edge / persistence / knowledge-indexeddb`
+各跑 `--repeat-each 3`，共 **36 次全绿**，没有再出现顺序相关的 flaky。
+（上一轮修掉的三条 flaky 都在 `golden` 与 `sessions` 里，那两个已经单独压过。）
+
+全量：**1775 项 / 152 文件全绿**，变异 8 个文件 / 32 个算子全过。
+
+## 轮 95：`readOnly` 被当成两个问题的答案
+
+### 一、「查资料并总结」被问成了「页面按要求变了吗」
+
+完成校验（`verifyCompletion`）有两套判据：mutation 问「页面是否真的按要求变了」，
+read 问「结论与页面是否矛盾、是否有据」。选错判据的代价，注释里早就写过：
+
+> 纯阅读/提炼类任务没有状态变化可验证，若仍套用「证据能否证明达成」的问法，
+> 长页面上必然被判未达成（证据永远是片段）。
+
+而选哪一套，取决于 `readOnlyRun = ranToolNames.every(名字 => 元数据.readOnly === true)`。
+问题在 `fetch_webpage` —— 研究类任务的主力工具 —— **没有 `readOnly: true`**。
+于是一次 `web_search → fetch_webpage → complete_task` 的典型研究任务：
+
+```
+web_search     readOnly: true
+fetch_webpage  readOnly: 未标 → 算「写类工具」
+complete_task  readOnly: true
+```
+
+`every()` 里出现一个 false，整个 run 就被判成 mutation，然后拿「页面按要求变了吗」
+去问一次纯资料任务。答案几乎必然是「未达成」，于是注入反思、再跑一轮，直到
+`maxVerifications` 烧完。
+
+### 二、直接补 `readOnly: true` 是错的 —— 这个字段是复合承诺
+
+第一版我直接给 `fetch_webpage` 标了 `readOnly: true`，然后被一条既有门禁挡住：
+
+```
+not ok — 只读工具不得要求审批（否则用户被无意义弹窗打断）：fetch_webpage
+```
+
+翻回去看才发现，本仓库的 `readOnly` 不只是「不改状态」，它是**两件事的合取**：
+不改状态 **且** 不需要审批。`registry.test.mjs` 明确守着这条不变量，而它的理由很实在 ——
+只读却要审批，就是让用户为「看一眼」点弹窗。
+
+而 `fetch_webpage` **必须**保留审批：它要联网、要花用户的钱。
+所以「不改状态」和「不需要审批」在这个工具上**恰好分开了**，而 `readOnly` 一个布尔装不下。
+
+修法：把两件事拆成两个字段。
+
+```js
+fetch_webpage: { risk: 'network', mutatesState: false, requiresApproval: true, ... }
+```
+
+* `readOnly: true` ⇒ 不改状态 **且** 不审批（语义不变，既有不变量继续成立）；
+* `mutatesState: false` ⇒ 只声明「不改状态」，审批另说。
+
+判据收拢到一个纯函数里，两处消费共用：
+
+```js
+function changesState(md) {
+  if (!md) return true;                       // 查不到元数据 ⇒ 当成会改（安全方向）
+  return md.readOnly !== true && md.mutatesState !== false;
+}
+```
+
+`classifyTaskKind`（选判据）与 `mutatingRun`（deterministic 预检的「写类工具」名单）
+都改成用它，于是两个消费点不会再各自漂移。
+
+### 三、连带的一处：证据采集会把它整个吞掉
+
+`evidenceAfter` 里有一句「只读动作不改变页面，不能当作『做了事』的证据」——
+它是为截图这类动作写的（回执里除了一句「截了图」什么都没有）。
+`fetch_webpage` 一旦被标成只读，它抓到的**正文**也会被这句吞掉，
+而研究类任务的结论全建立在那份正文上。
+
+所以 `fetch_webpage` 被加进 `EVIDENCE_READ_TOOLS`：**先按内容取证据，再按 readOnly 决定要不要回执**。
+顺序很关键，两段代码的相对位置本身就是这条修复的一部分。
+
+### 四、`打开` 不是写操作动词
+
+`claim-check` 的规则 1 是「声称改了东西，却没调用过任何写类工具」。
+它的动词表里混着 `打开`。以前这不是问题 —— `open_tab`、`fetch_webpage` 都算写类工具，
+run 里总有一个，规则 1 根本不会走到判断。但 `fetch_webpage` 不再是写类工具之后，
+一句「已打开原文并总结出 3 条要点」就会被判成撒谎。
+
+而且这个判断本身也是错的：**导航不是修改**。把动词表拆开：
+
+* `MUTATION_VERBS`：隐藏 / 删除 / 修改 / 点击 / 提交 …（只有写类工具能满足）
+* `NAV_VERBS`：打开 / 跳转 / 前往 / 进入 / 访问（`open_tab` / `switch_tab` / `fetch_webpage` 都能满足）
+
+规则 1 于是变成 1a + 1b：改页面的部分照旧抓；导航类声明改判「有没有**能完成导航**的工具跑过」。
+`NAV_CAPABLE_TOOLS` **刻意不含** `read_current_page` / `get_page_snapshot` / `web_search` ——
+它们能证明「看过内容」，不能证明「打开过那个页面」。「只搜过摘要却说已打开原文」
+仍然是最常见的幻觉形态，必须留着抓。
+
+三条用例互相约束：只读过页面却说「已打开淘宝」→ 抓到；跑过抓取类工具 → 不误判；
+只搜过摘要 → 抓到；「已打开设置页并把主题改成深色」→ 仍按写操作抓（导航例外不是后门）。
+
+### 五、顺手把两个判定变成可测的
+
+`classifyTaskKind(ranToolNames)` 从 2000 行的循环里抽出来成为纯函数 ——
+它全部价值都在边界上（哪种工具算读、MCP 这类未知工具算哪边），而原先只能靠跑完一整个 run 才看得到。
+
+变异算子 5 条，覆盖这次新增的全部分支：一律判 mutation / 忽略 mutatesState / 未知工具当只读 /
+去掉导航例外 / 把「看过内容」当成「打开过」。5 条都被抓住。
+注册表指纹也同步更新（`mutatesState` 已纳入指纹覆盖范围，否则把字段删掉不会有任何红灯）。
+
+全量：**1786 项 / 152 文件全绿**，变异 9 个文件 / 37 个算子全过。
+
+## 轮 96：面板里那两个「用户唯一能看见的闸门」，第一次有单测
+
+`chat.js` 是 4911 行、长期零 import 的文件。轮 89 让它第一次被真 import（9 条断言），
+本轮补的是它里面**最不该只靠 E2E 覆盖**的两块：
+
+* 工具审批条 —— 用户唯一能看到的「Agent 要动你的页面了」；
+* 发送/停止按钮的状态派生 —— 决定「任务还在跑，我能不能停下来」。
+
+它们共同的特征是：**错了不会抛异常**。没有断言，就只能等用户在真机上踩到。
+
+### 一、审批条：三条错了会静默泄露或静默放行
+
+`renderApprovalPrompt` 里混着渲染、事件绑定和一段「要显示什么」的判断。
+把后者抽成纯函数 `describeApprovalRequest(name, args, risk, allowSession)`，因为那里有三条
+**只有断言才能守住**的性质：
+
+1. `type_text` 的 `value` 必须遮蔽成 `[输入内容已隐藏]` —— 否则用户输入的密码 / 证件号
+   直接印在屏幕上。**遮蔽的只是值**，目标元素（`ref`）仍要显示，不然用户不知道往哪输入。
+2. `run_javascript` 的 `code` 必须**整段**出现在 `<pre>` 里，且参数区只留
+   `[完整内容见下方]` —— 用户批准的正是这段代码，省略等于让他批准一段自己没看见的东西；
+   反过来，参数区再重复一遍整段代码又会把真正的参数（`tabId` 之类）挤出可视区。
+3. `allowSession === false` 时「本任务内允许」必须**不渲染**（不是 `display:none`）——
+   少了这条，一个「只准一次」的工具就多了一个一键放行整轮任务的按钮。
+
+事件绑定那一半也一并钉住：三个按钮分别发出 `once` / `session` / `reject`，载荷是
+`{ type: 'tool-approval', callId, decision }`。这三对字符串是页面与后台之间**唯一的契约**，
+写错一个就是「用户点了拒绝，任务继续跑」——而它不会抛任何异常。
+
+另外两条边界也补上了：`postMessage` 抛错（扩展重载后端口断开是常态）时不能把异常冒出去；
+代码里的 `<` 必须转义 —— 桩的 innerHTML 是**真解析**的，所以「代码里的 `</pre><img onerror=…>`
+会不会变成真元素」这件事真的被验证了，而不是断言了一句字符串里有没有 `&lt;` 就算完。
+
+### 二、发送/停止：四种组合里三种写错都不报错
+
+`updateRunControlState` 的两个输入来自两条完全不同的通道：
+本页自己在流式输出（`streaming`），或正在**跟随**另一个标签页发起的 run（`followedRunState`）。
+代码注释里早就写着「否则会出现『B 页看得到任务在跑，却没有停止按钮』这种状态分裂」——
+但那句话在此之前**没有任何断言**。
+
+派生逻辑抽成 `computeRunControls({ streaming, followed })` → `{ showStop, stopDisabled, stopText, sendDisabled }`：
+
+* 跟随页在跑也必须显示停止按钮（就是那句注释说的分裂）；
+* 运行中必须禁用发送（否则往同一个会话里塞第二条指令）；
+* 停止中必须**禁点**并改文案（否则用户连点，把同一个中断请求发很多遍）；
+* 跟随的 run 结束后要回到初始态 —— **`stopping` 的残留不能把按钮锁死**。
+
+顺带改掉一条**形态断言**：`thinking-record.test.mjs` 里原来盯着 `updateRunControlState`
+的函数体逐字匹配 `stopBtn.style.display = running ? ...`。它守的性质是对的（owner 与跟随页
+共用同一个入口），但判据绑在了代码形状上 —— 抽函数就必然红，而它并没有真的证明行为正确。
+现在改成「状态派生覆盖了什么 + 渲染函数确实调用了它」，真正的行为交给
+`tests/chat-run-controls.test.mjs` 的 6 条断言。
+
+### 三、变异验证
+
+两块各加了变异算子，9 条全部被抓（每条都由**预期的那一条**用例抓住，不是"红了就算"）：
+
+| 变异 | 抓住它的用例 |
+| --- | --- |
+| 不遮蔽 `type_text` 的内容 | type_text 的输入内容必须遮蔽（隐私） |
+| 永远给出「本任务内允许」 | allowSession=false 时不给批量放行按钮 |
+| 「本任务内允许」按成 once | 点「本任务内允许」→ session |
+| 「拒绝」按成 once | 点「拒绝」→ reject |
+| 代码块不转义（innerHTML 拼接） | 代码里的尖括号必须转义 |
+| 只看本页 `streaming` | 跟随别的标签页的 run：同样要有停止按钮 |
+| 运行中不禁用发送 | 本页自己在跑：显示停止、发送禁用 |
+| 停止中不禁点 | 停止中：按钮禁点并改文案 |
+| 停止中文案不变 | 停止中：按钮禁点并改文案 |
+
+`content.js` 已重新构建（+38/−17 行）。全量：**1806 项 / 154 文件全绿**
+（行为 125 + 静态门禁 29），变异 9 个文件 / 46 个算子全过。
+
+## 轮 97：E2E 测的是产物，而产物可能早就不是源码了
+
+### 一、一条没人管的通道：`content.js` 过期
+
+`content.js` 是提交进仓库的**打包产物**，E2E 加载的是它，不是 `lib/page/**` 的源码。
+于是「改完 `chat.js` 忘了跑 `node scripts/build-content.mjs`」的后果是：
+
+> E2E 对着旧代码全绿。它不报错、不提示，只是悄悄测了个已经不存在的东西。
+
+这条规则此前只写在文档和记忆里（「改了 `lib/page/**` 必须重建」），**没有任何门禁**。
+本轮自己就差点踩进去 —— 改完 chat.js 单测全绿，直到打开构建脚本才发现还要重建。
+
+### 二、更糟的一半：体积守卫早就红了，也没人知道
+
+重建产物时脚本打出：
+
+```
+产物大小：415 KB
+产物超过 410KB，请检查是否引入了不该进内容脚本的依赖。
+exit=1
+```
+
+而它上一次成功（HEAD 的 `content.js` 是 413.7 KB）就已经超过 410KB 了。
+两件事同时成立才让它一直没被发现：
+
+1. **`build-content.mjs` 不在任何门禁里跑** —— 谁不手动执行，谁就不会知道；
+2. **它 exit 1 之后照样把产物写进了盘**（`write` 只由 `--check` 控制，与规格检查无关）。
+
+于是「体积超了」这件事，只会在某个人恰好手动重建时闪一下，然后被忽略。
+
+### 三、把规格判据抽成纯函数
+
+`scripts/build-content.mjs` 重构成三块：
+
+* `checkBundle(text, bytes)` —— 自包含性（无运行时 `import(`）+ 体积预算，返回问题列表；
+* `compareBundle(diskText, builtText)` —— 逐行比，返回第一处差异所在行；**行尾差异不算**（git 的
+  autocrlf 会把签出的文件变成 CRLF，把它算成"过期"会让这条门禁在 Windows 上永远红）；
+* `buildContentBundle({ write })` —— 一律 `write: false` 构建、自己写盘，于是两种模式都能拿到
+  `text`，规格检查用**同一份**内容判断，不必区分"产物在哪"。
+
+CLI 只在被直接调用时跑（`argv[1]` 以 `build-content.mjs` 结尾），所以测试 import 它不会写盘。
+
+体积预算改成一条**棘轮**（`SIZE_BUDGET_BYTES = 416KB`，实际 415KB），并在注释里写清：
+先确认不是误引入大依赖；真需要涨就上调并写明原因 —— 但别为了变绿去压缩代码。
+
+### 四、新门禁：5 条，含自己的牙
+
+`tests/content-bundle-freshness.test.mjs`：
+
+1. **盘上的 `content.js` 与现在源码打出来的逐字节一致**；不一致时报出第一处差异在第几行，
+   并直接给修法（`node scripts/build-content.mjs`）。
+   失败信息里还有一句关键提醒：E2E 加载的是这个产物，不重建就等于在测旧代码。
+2. **规格**：`checkBundle` 返回空（自包含 + 在预算内）。
+3. **预算不能松到失去意义**：`预算 - 实际 < 16KB`。否则一条"上限写大了"的棘轮只是装饰。
+4. `compareBundle` 的**合成数据**用例（CRLF 归一、少行、多行、空串）——
+   没有这条，「永远返回 null」也能让第 1 条绿。
+5. `checkBundle` 的**合成数据**用例（动态 import / 超预算 / 两者同时）。
+
+牙的验证（这条值得记下来，因为第一次试错了两次）：
+
+* 往 `chat.js` 追加一行**注释** → 门禁**仍然绿**。因为 esbuild 会剥注释，产物确实没变。
+* 追加一个**没人用的 `export const`** → 仍然绿。因为 iife 下未被引用的导出会被 tree-shake 掉。
+* 追加 `globalThis.__FRESHNESS_PROBE = 1;` → **红**，报出差异行；撤销后恢复绿。
+
+也就是说：只有**真的会进产物**的改动才会触发它 —— 这正是「过期」的定义。
+（反过来说，被摇掉的改动本来也没有运行时影响，不算过期。）
+
+`assertion-quality` 的「读源码棘轮」把本文件加进了 `EXEMPT`：它的被测对象**就是仓库根那个
+`content.js` 文件**，除把它读进来逐字节比之外没有别的判据 —— 这不是「用静态断言替代行为断言」，
+而且它同时还有 4 条合成数据的行为用例。
+
+全量：**1811 项 / 155 文件全绿**（行为 126 + 静态门禁 29），变异 13 目标 / 46 算子全过。
+
+## 轮 98：失败的那一轮，屏幕和记录会同时丢掉半截回答
+
+失败最常见的形态不是「一步都没跑成」，而是**回答读到一半，API 报错**。
+这条路径上原本有两个独立的洞，而且它们在同一个瞬间一起生效 —— 用户什么都拿不回来。
+
+### 一、屏幕上：错误把已经流出的正文覆盖掉了
+
+```js
+const errEl = pendingContentEl || ensureTextEl();
+errEl.textContent = errText;      // ← 正文就是在这个元素里
+errEl.style.color = '#e74c3c';
+```
+
+`pendingContentEl` 正是流式正文所在的那个块。于是跑到一半失败时，用户刚读完的两屏回答
+**当场换成一行红字**。更糟的是它并没有真的丢 —— 正文还在 `conversation` 里，
+重开面板又会冒出来。同一个事实，两种显示，怎么看都像 bug。
+
+修法不是「别覆盖」这么简单，要分情况：**有半截正文就另起一块追加，没有就原地改**
+（那块元素可能还停在「正在输入」的三个点上，白插一个空块很难看）。
+这段判断被抽成 `renderRunError(flow, contentEl, errText, hasPartial)`，导出直测。
+
+### 二、记录里：失败轮次把正文丢了
+
+```js
+export function buildFailedTurn(parts, errorText) {
+  return { role: 'assistant', content: text, parts: list, failed: true };
+}
+```
+
+正文只累积在 `pendingNarration` 里，**要等 `end` 事件才被 push 进 `parts`**，
+而失败根本走不到 `end`。所以一次中途失败，记录里只剩一行错误文本。
+
+讽刺的是，同一族问题在**断线**那条路上早就修过了 —— `buildInterruptedTurn(parts, liveText, reason)`
+明确带上了 `liveText`，注释还写着「失败/中断最需要留档」。失败这条路当时漏了，
+而失败比断线常见得多。
+
+修法：`buildFailedTurn(parts, errorText, liveText)`，顺序与 `buildInterruptedTurn` 一致
+（**错误在前、正文在后**）。调用点传 `pendingNarration || pendingAcc` —— 必须在 `endStream()`
+之前取，它会把这两个都清空。
+
+### 三、顺带修掉一个会让面板卡死的 TypeError
+
+`needSetup`（缺 API Key）分支里直接 `pendingAiMsg.appendChild(...)`。而 `pendingAiMsg`
+在 `endStream()` 之后是 `null`，错误被重发一次、或者错误晚于收尾到达时就会抛。
+它抛在**端口消息监听器里** ⇒ 后面的「失败轮次入库 / endStream / closePort」全都不执行 ——
+面板会一直停在「正在运行」：停止按钮不消失、发送框禁用、用户只能刷新页面。
+
+现在 `anchor = pendingAiMsg || flowEl`，并顺手把那个按钮抽成 `buildOpenSettingsButton()`，
+它点击后发的 `openOptions` 也第一次有了断言（这是缺 Key 时用户唯一的自救入口）。
+
+### 四、变异验证
+
+4 条算子，全部被抓，且各由**预期的那一条**用例抓住：
+
+| 变异 | 抓住它的用例 |
+| --- | --- |
+| 错误覆盖已流出的正文 | renderRunError：已经流出正文时**追加**，不许覆盖 |
+| 错误不用红色 | 同上（红色是"这是失败"的唯一视觉信号） |
+| 「打开设置」发错消息类型 | 点一下就去打开设置页 |
+| 失败轮次只留错误文本 | buildFailedTurn：**已经流出的正文必须留下来** |
+
+`content.js` 已重建（+39/−25）。全量：**1819 项 / 156 文件全绿**（行为 127 + 静态门禁 29），
+变异 15 目标 / 50 算子全过。
+
+### 五、一处清理（不是代码问题）
+
+`lib/page/chat.js.mutation-backup` 还躺在盘上（`.gitignore` 里，所以 `git status` 看不见）。
+它是上一轮门禁跑完后没被删掉的备份 —— 说明 `removeBackup` 的删除失败是被**静默吞掉**的。
+备份本身无害（源码是对的、下次运行的自愈会扫掉），但「静默」正是这个项目反复吃亏的地方，
+先记在这里：若哪天要动它，记得 `recoverLeftovers` 只在**下一次运行开始时**扫，
+进程被 kill 之后不会立刻自愈。
+
+### 六、顺手收了一条 flaky：Shadow DOM 那条把快照当成了「最终状态」
+
+跑全量时红了一条（`golden: Shadow DOM`），单跑 3/3 绿、再跑一轮全量又全绿 —— 顺序相关的偶发。
+根因不在被测功能，而在断言写法：
+
+```js
+const seen = toolResultsText();
+expect(seen).toContain('咖啡');
+expect(seen, '第二层 shadow 的内容没有读到（穿透深度不足）').toContain('深层组件就绪');
+```
+
+`toolResultsText()` 汇总的是**模型请求里带的工具结果**，而一条工具结果要等到
+**下一次请求**发出才进得来。这一轮若发生两次读取（先浅一层、再深一层），
+第二条会晚到；一次性快照只看到前半段，于是红在「穿透深度不足」上 ——
+而真相只是**还没到**。这和轮 91 那批 flaky 是同一个形状：**拿一次性快照当最终状态**。
+
+改成逐个 `expect.poll`（各自 20s）。这条用例现在单跑 `--repeat-each 3` 3/3 绿，
+全量两轮 54/54。
+
+> 记一笔判据：**只要断言的取值函数会随时间增长，就必须 poll，不能先赋值再断言。**
+> 光看代码很难分辨 `toolResultsText()` 是"当前屏幕状态"还是"累积日志"，所以这里
+> 在注释里写清了它为什么会长。

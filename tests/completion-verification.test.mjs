@@ -111,5 +111,7 @@ test('要告诉校验方本次任务的性质（决定用哪套判据）', () =>
   const fn = sliceBetween('async function runCompletionVerification', '// 任务结束时清理');
   assert.match(fn, /taskKind/, 'verifyCompletion 要收到 taskKind');
   const callSite = sliceBetween('const taskKind =', 'runCompletionVerification(');
-  assert.match(callSite, /readOnlyRun \? 'read' : 'mutation'/, '任务性质应由「是否跑过写类工具」推出');
+  // 判据已抽成 classifyTaskKind（可直测，见 completion-evidence.test.mjs）——
+  // 这里只钉住**接线**：必须由实际调用过的工具推出，不能在调用点写死。
+  assert.match(callSite, /classifyTaskKind\(ranToolNames\)/, '任务性质应由「是否跑过写类工具」推出');
 });

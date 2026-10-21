@@ -8,6 +8,9 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # 夜间 02:00 UTC：完整 E2E 只在定时与手动触发时跑（e2e-nightly job 里有 if 守卫）。
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   checks:
@@ -22,6 +25,13 @@ jobs:
       - name: 安装 MCP 子包依赖
         working-directory: integrations/opencode/recallflow-mcp
         run: npm ci || npm install
+        # 依赖缓存：MCP 子包是唯一的外部依赖来源（扩展本体零依赖）。
+        # 没有缓存时每个 PR 都要重新拉一遍 SDK，纯属白等。
+      - name: 缓存 MCP 子包依赖
+        uses: actions/cache@v4
+        with:
+          path: integrations/opencode/recallflow-mcp/node_modules
+          key: ${{ runner.os }}-mcp-${{ hashFiles('integrations/opencode/recallflow-mcp/package-lock.json', 'integrations/opencode/recallflow-mcp/package.json') }}
       # 一条命令跑「单测 + 三道静态门禁」。用 node 直接调用，
       # 不依赖 npm 的脚本执行策略（Windows 上 npm.ps1 常被执行策略拦住）。
       - name: 单元测试 + 静态门禁
@@ -30,3 +40,32 @@ jobs:
       # 这一段「改一次就要重载扩展 + 重启 server」，此前完全没有回归测试。
       - name: 桥接 WS 鉴权端到端验证
         run: node scripts/verify-bridge-ws-handshake.mjs
+
+  # 完整 E2E（87 条）不适合塞进 PR —— 真浏览器 + 真扩展，跑完要好几分钟。
+  # 但只在本地跑就等于没有：本地跑不跑全靠人记得。所以放夜间定时 + 可手动触发，
+  # 失败时把 trace/截图留下来，第二天来看得见。
+  e2e-nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: 安装根依赖
+        run: npm ci
+      - name: 安装 Chromium 与系统依赖
+        run: npx playwright install --with-deps chromium
+      - name: 确保有虚拟显示
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: 完整 E2E
+        run: xvfb-run -a npm run test:e2e
+      - name: 上传失败诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-nightly-failure
+          path: |
+            tests/e2e/test-results
+          if-no-files-found: ignore

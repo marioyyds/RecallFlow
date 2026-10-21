@@ -35,6 +35,8 @@ import {
   panelStyle,
   panelText,
   readTextAsAgent,
+  settle,
+  waitForRunEnd,
   PANEL,
 } from './helpers.mjs';
 
@@ -305,11 +307,19 @@ test('golden: 审批拒绝后写操作必须没有发生（副作用为零）', 
 
   await sendInstruction(page, '点提交，但不要批准');
 
-  // 审批框出现 → 点「拒绝」
-  await clickApproval(page, 'reject');
+  // 审批框出现 → **先确认它问的正是那次写操作**，再点「拒绝」。
+  // 这一步不是仪式：若模型压根没请求 click_element，后面的 `__clicked === false`
+  // 就是一句废话（"没有写操作"当然"没写"）。
+  await page.locator(PANEL + ' .tool-approve').waitFor({ state: 'visible', timeout: 30_000 });
+  expect(
+    (await page.locator(PANEL + ' .tool-approval-tool').innerText()).trim(),
+    '这条用例的前提是"模型真的要写页面"：审批的却不是 click_element，负例断言就失去意义'
+  ).toBe('click_element');
+  await page.locator(PANEL + ' .tool-reject').click();
 
-  // 给它足够时间把「拒绝」处理完（若闸门失效，这里的点击会真的发生）
-  await page.waitForTimeout(2500);
+  // 等这一轮**真的跑完**再断言，而不是睡 2.5 秒赌它跑完：
+  // 睡短了在慢机器上就是假通过（拒绝还没被判掉，点击当然还没发生）。
+  await waitForRunEnd(page);
   expect(await page.evaluate(() => window.__clicked)).toBe(false);
   expect(await page.title()).toBe('夹具主站');
 
@@ -1185,10 +1195,16 @@ test('golden: Shadow DOM —— 两层 shadow 内的元素都能定位、操作�
 
   // ② 两层 shadow 里的内容都必须进到模型手里
   await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('组件内结果');
-  const seen = toolResultsText();
-  expect(seen).toContain('咖啡');
+  // ⚠ 下面两条**必须各自 poll**，不能用一次性快照 `const seen = toolResultsText()`。
+  // 原因：toolResultsText 汇总的是「模型**请求**里带的工具结果」，而一条结果要等到
+  // **下一次请求**发出才进得来。这一轮若发生两次读取（先浅一层、再深一层），
+  // 第二条会晚到 —— 快照就可能只看到前半段，于是红在「穿透深度不足」上，
+  // 而真相只是「还没到」。实测：两轮全量跑里偶发 1 条红在这一句，单跑 3/3 绿。
+  await expect.poll(() => toolResultsText(), { timeout: 20_000 }).toContain('咖啡');
   // 第二层 shadow（shadow 里套 shadow）的内容 —— 探穿透深度
-  expect(seen, '第二层 shadow 的内容没有读到（穿透深度不足）').toContain('深层组件就绪');
+  await expect
+    .poll(() => toolResultsText(), { timeout: 20_000 })
+    .toContain('深层组件就绪');
 
   await page.close();
 });
@@ -1273,7 +1289,9 @@ test('golden: canvas —— DOM 路线点不动，按可访问性树坐标点击
   // 基线②：**证明 DOM 路线是死路** —— 对覆盖元素做程序化点击，canvas 收不到任何东西。
   // 这条不是走过场：它就是"为什么必须按坐标点"的证据。
   await page.locator('#ax div[aria-label="保存"]').evaluate((el) => el.click());
-  await page.waitForTimeout(200);
+  // 程序化 click 是同步派发的，夹具的监听器也是同步记数 —— 两帧足够，
+  // 原先的 200ms 只是"差不多够了"，快了白耗、极端情况下还可能假通过。
+  await settle(page);
   expect(await page.evaluate(() => window.__clicks), 'DOM 路线竟然生效了，本场景的难点不成立').toBe(0);
   expect(await page.evaluate(() => window.__hit)).toBe(null);
 
@@ -1544,7 +1562,8 @@ test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读
   expect(await page.evaluate(() => window.__renderedIds.includes('i87'))).toBe(false);
   // 基线③：**滚动窗口对它没用** —— 这条正是"必须滚容器"的证据
   await page.evaluate(() => window.scrollBy(0, 600));
-  await page.waitForTimeout(200);
+  // 滚动的 scroll 事件在帧内派发、夹具的 render 同步跑完 → 两帧即确定性边界
+  await settle(page);
   expect(
     await page.evaluate(() => window.__renderedIds.includes('i87')),
     '滚窗口竟然让第 87 条出现了，本场景的难点不成立'
@@ -1810,7 +1829,8 @@ test('golden: 表单校验 —— 提交被静默拦住，读出原因改好后�
   await page.fill('#email', 'lilei#example.com');
   await page.check('#agree');
   await page.click('#ok');
-  await page.waitForTimeout(300);
+  // 无效表单的点击是同步被拦的（约束校验发生在事件派发中），两帧足够
+  await settle(page);
   expect(await page.evaluate(() => window.__submits), '这次提交竟然成功了，本场景的难点不成立').toBe(0);
   expect(await page.evaluate(() => document.getElementById('f').checkValidity())).toBe(false);
   await expect(page.locator('#status')).toHaveText('未提交');
@@ -2109,6 +2129,10 @@ test('golden: 无限滚动 + hover 预览 —— 目标在第 4 批，预览只�
   // ② 一次滚动只加载一批；**追加之后不会自动接着加载**（否则"滚一次"就够了）
   await page.evaluate(() => window.scrollTo(0, 999999));
   await expect.poll(() => page.evaluate(() => window.__feed.batches), { timeout: 10_000 }).toBe(2);
+  // ⚠ 这一处是**观察窗口**，不是"等某个事件"：断言的对象是"追加之后**没有**自动再加载"。
+  //   反面（bug）在夹具里表现为 loadNext() 被链式调用 —— 它没有可等的事件，
+  //   只能"给够时间看它不出现"。900ms > 夹具自己的 SETTLE_MS(150) + LOAD_MS(500)，
+  //   留了 250ms 余量；若哪天调大夹具的这两个常量，这个数要跟着涨（否则假通过）。
   await page.waitForTimeout(900);
   expect(
     await page.evaluate(() => window.__feed.batches),
@@ -2116,7 +2140,8 @@ test('golden: 无限滚动 + hover 预览 —— 目标在第 4 批，预览只�
   ).toBe(2);
   // ④ 「加载更多」按钮推不动页面（看起来能点的东西 ≠ 能推进的东西）
   await page.locator('#more').click();
-  await page.waitForTimeout(400);
+  // 迷惑按钮的点击处理器是同步的（只加计数 + 改提示文案）→ 两帧即确定性边界
+  await settle(page);
   expect(
     await page.evaluate(() => window.__feed.batches),
     '点「加载更多」竟然加载了新的一批：迷惑项不成立（那剧本与技能里写的"正确的路"就是错的）'
@@ -2254,6 +2279,9 @@ test('golden: 视频播放器状态 —— 「看起来在播」不等于真的�
 
   // ③ 迷惑控件推不动页面：点它只增加自己的计数，真实播放状态一位不变
   await page.click('#fake-play');
+  // ⚠ 同样是**观察窗口**：判据是"帧计数不许再涨"（解码没发生）。解码是异步且无事件的，
+  //   没有可轮询的"它没有开始"信号 —— 只能给一个足够长的窗口。这个 1300ms 与视频
+  //   首帧解码的时间尺度同量级（见上方环境说明），不是随手写的数。
   await page.waitForTimeout(1300);
   const afterDecoy = await page.evaluate(() => ({
     decoy: window.__decoyPresses,
@@ -2686,7 +2714,15 @@ test('golden: 富文本 —— 结构要真的改上（选区 / 可信输入 / �
   await sendInstruction(page, PLAYBOOKS['rich-text-structure'].eval.instruction);
 
   // ---- 双层判据 ①：页面状态 ----
+  // ⚠ 先等**"结构真的被改了"**（这是 agent 能力的第一个证据），再等**这一轮跑完**，
+  //    最后才逐条断言。
+  //    为什么必须等跑完：脚本是**分步推进**的（快照 → 点编辑区 → 打字 → 全选 → 加粗 → 列表
+  //    → 装饰键 → 失焦 → 读回），`strong > 0` 在第 5 步就成立了，而 list / fakeBold / selectAlls
+  //    分别在第 6/7/4 步才落地。原先 poll 一等到 strong 就连续断言后面几条 ——
+  //    等于**在 run 跑到一半时**检查最终状态，快一步慢一步就红（本会话实测：53 条全绿、
+  //    只有这条挂在"装饰键没被点过"，而装饰键那一步明明在后面几步）。
   await expect.poll(() => page.evaluate(() => window.__rt.strong), { timeout: 90_000 }).toBeGreaterThan(0);
+  await waitForRunEnd(page);
   expect(await page.evaluate(() => window.__rt.list), '列表结构没写进编辑器').toBeGreaterThan(0);
   // ⚠「空操作」与「失焦同步」不放在 agent 判据里：它们由**基线**用真点击证明（页面侧不变量 ✓）。
   //   原因：agent 的工具派发的是**合成事件**（实测 `isTrusted=false`、`detail=0`）⇒ 合成点击**不能让编辑区失焦**，

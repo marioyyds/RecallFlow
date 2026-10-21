@@ -131,6 +131,15 @@ test('只读工具不得要求审批（否则用户被无意义弹窗打断）',
   }
 });
 
+test('「不改状态但需要审批」用 mutatesState 表达，不许硬塞进 readOnly', () => {
+  // 这条守住两个字段的分工，否则下一个人会图省事给 fetch_webpage 标 readOnly，
+  // 顺手把「联网抓取要用户批准」这道闸门一起拆掉（上面那条只读不变量会放它过去）。
+  const fp = TOOL_REGISTRY.find((t) => t.name === 'fetch_webpage');
+  assert.equal(fp.mutatesState, false, '抓网页不改任何页面/浏览器状态');
+  assert.equal(fp.requiresApproval, true, '联网抓取必须保留审批 —— 它要花用户的钱');
+  assert.equal(fp.readOnly, false, 'readOnly 在本仓库还隐含「不审批」，这里不能借它表达');
+});
+
 test('route 只能是 background 或 content', () => {
   for (const t of TOOL_REGISTRY) {
     assert.ok(['background', 'content'].includes(t.route), '非法 route：' + t.name + ' → ' + t.route);

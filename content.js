@@ -3764,10 +3764,11 @@
       partial: true
     };
   }
-  function buildFailedTurn(parts, errorText) {
+  function buildFailedTurn(parts, errorText, liveText) {
     const list = (Array.isArray(parts) ? parts : []).slice();
     const text = String(errorText === void 0 || errorText === null ? "" : errorText).trim() || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09";
-    return { role: "assistant", content: text, parts: list, failed: true };
+    const live = String(liveText === void 0 || liveText === null ? "" : liveText).trim();
+    return { role: "assistant", content: live ? text + "\n\n" + live : text, parts: list, failed: true };
   }
   function stripTrailingSources(text) {
     const s = String(text === void 0 || text === null ? "" : text);
@@ -5516,6 +5517,140 @@
     }
   }
 
+  // lib/page/fab-position.js
+  var FAB_POSITION_KEY = "recallflow.fab-position.v1";
+  var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
+  var FAB_EDGE_GAP = 8;
+  var DEFAULT_FAB_RATIO = 0.38;
+  var FAB_FALLBACK_HEIGHT_NARROW = 46;
+  var FAB_FALLBACK_HEIGHT = 52;
+  var NARROW_WIDTH = 600;
+  function normalizeFabRatio(value) {
+    if (value === null || value === void 0 || value === "") return null;
+    const ratio = Number(value);
+    return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
+  }
+  function createFabController(deps = {}) {
+    const getFab = typeof deps.getFab === "function" ? deps.getFab : () => null;
+    const win = deps.win || { innerWidth: 1280, innerHeight: 800 };
+    const storage = deps.storage || null;
+    const localStore = deps.localStore || null;
+    const now = typeof deps.now === "function" ? deps.now : () => Date.now();
+    let ratio = DEFAULT_FAB_RATIO;
+    function fabHeight() {
+      const fab2 = getFab();
+      const measured = fab2 ? fab2.offsetHeight : 0;
+      return measured || (win.innerWidth <= NARROW_WIDTH ? FAB_FALLBACK_HEIGHT_NARROW : FAB_FALLBACK_HEIGHT);
+    }
+    function currentFabTop2() {
+      const fab2 = getFab();
+      if (!fab2) return FAB_EDGE_GAP;
+      const styled = parseFloat(fab2.style.top);
+      return Number.isFinite(styled) ? styled : fab2.getBoundingClientRect().top;
+    }
+    function clampFabTop2(top) {
+      const height = fabHeight();
+      const maxTop = Math.max(FAB_EDGE_GAP, win.innerHeight - height - FAB_EDGE_GAP);
+      return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
+    }
+    function available() {
+      const height = fabHeight();
+      return Math.max(1, win.innerHeight - height - FAB_EDGE_GAP * 2);
+    }
+    function topFromRatio(r) {
+      return clampFabTop2(FAB_EDGE_GAP + r * available());
+    }
+    function ratioFromTop(top) {
+      return normalizeFabRatio((clampFabTop2(top) - FAB_EDGE_GAP) / available());
+    }
+    function applySaved() {
+      const fab2 = getFab();
+      if (!fab2) return;
+      fab2.style.top = topFromRatio(ratio) + "px";
+    }
+    function legacyRatio() {
+      if (!localStore) return null;
+      try {
+        const saved = JSON.parse(localStore.getItem(LEGACY_FAB_POSITION_KEY) || "null");
+        if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
+        return normalizeFabRatio(saved.ratio);
+      } catch (e) {
+        return null;
+      }
+    }
+    function clearLegacy() {
+      if (!localStore) return;
+      try {
+        localStore.removeItem(LEGACY_FAB_POSITION_KEY);
+      } catch (e) {
+      }
+    }
+    function persist() {
+      const fab2 = getFab();
+      if (!fab2) return;
+      const next = ratioFromTop(currentFabTop2());
+      ratio = next == null ? DEFAULT_FAB_RATIO : next;
+      if (!storage || !storage.local) return;
+      try {
+        const pending = storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: now() } });
+        if (pending && pending.catch) pending.catch(() => {
+        });
+      } catch (e) {
+      }
+      clearLegacy();
+    }
+    async function load() {
+      if (storage && storage.local) {
+        try {
+          const stored = await storage.local.get(FAB_POSITION_KEY);
+          let r = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
+          if (r == null) {
+            const legacy = legacyRatio();
+            if (legacy != null) {
+              r = legacy;
+              try {
+                await storage.local.set({ [FAB_POSITION_KEY]: { ratio: r, updatedAt: now() } });
+              } catch (e) {
+              }
+            }
+          }
+          if (r != null) ratio = r;
+        } catch (e) {
+        }
+      } else {
+        const legacy = legacyRatio();
+        if (legacy != null) ratio = legacy;
+      }
+      clearLegacy();
+      applySaved();
+    }
+    function moveBy(delta) {
+      const fab2 = getFab();
+      if (!fab2) return;
+      fab2.style.top = clampFabTop2(currentFabTop2() + delta) + "px";
+      persist();
+    }
+    return {
+      fabHeight,
+      currentFabTop: currentFabTop2,
+      clampFabTop: clampFabTop2,
+      available,
+      topFromRatio,
+      ratioFromTop,
+      applySaved,
+      persist,
+      load,
+      moveBy,
+      legacyRatio,
+      getRatio: () => ratio,
+      setRatio: (r) => {
+        const v = normalizeFabRatio(r);
+        if (v != null) ratio = v;
+        return ratio;
+      }
+    };
+  }
+
   // lib/page/chat.js
   function isExtContextAlive() {
     try {
@@ -5598,16 +5733,27 @@
   var sendBtn = null;
   var streaming = false;
   var runAgent = null;
+  function computeRunControls(input) {
+    const src = input || {};
+    const followingRunning = Boolean(src.followed && src.followed.status === "running");
+    const running = Boolean(src.streaming || followingRunning);
+    const stopping = Boolean(followingRunning && src.followed.stopping);
+    return {
+      showStop: running,
+      // 停止中必须**禁点**：否则用户连点几次，会把同一个中断请求反复发出去。
+      stopDisabled: stopping,
+      stopText: stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62",
+      sendDisabled: running
+    };
+  }
   function updateRunControlState() {
-    const followingRunning = Boolean(followedRunState && followedRunState.status === "running");
-    const running = Boolean(streaming || followingRunning);
-    const stopping = Boolean(followingRunning && followedRunState.stopping);
+    const control = computeRunControls({ streaming, followed: followedRunState });
     if (stopBtn) {
-      stopBtn.style.display = running ? "" : "none";
-      stopBtn.disabled = stopping;
-      stopBtn.textContent = stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62";
+      stopBtn.style.display = control.showStop ? "" : "none";
+      stopBtn.disabled = control.stopDisabled;
+      stopBtn.textContent = control.stopText;
     }
-    if (sendBtn) sendBtn.disabled = running;
+    if (sendBtn) sendBtn.disabled = control.sendDisabled;
   }
   var pendingAcc = "";
   var pendingAiMsg = null;
@@ -5753,84 +5899,38 @@
   var currentCitations = null;
   var pageContextEnabled = true;
   var citeHighlightEntered2 = false;
-  var FAB_POSITION_KEY = "recallflow.fab-position.v1";
-  var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
-  var FAB_EDGE_GAP = 8;
-  var fabPositionRatio = 0.38;
-  function fabHeight() {
-    const measured = fab ? fab.offsetHeight : 0;
-    return measured || (window.innerWidth <= 600 ? 46 : 52);
-  }
+  var fabCtl = createFabController({
+    getFab: () => fab,
+    win: window,
+    storage: typeof chrome !== "undefined" ? chrome.storage : null,
+    localStore: (() => {
+      try {
+        return localStorage;
+      } catch (e) {
+        return null;
+      }
+    })()
+  });
   function currentFabTop() {
-    if (!fab) return FAB_EDGE_GAP;
-    const styled = parseFloat(fab.style.top);
-    return Number.isFinite(styled) ? styled : fab.getBoundingClientRect().top;
+    return fabCtl.currentFabTop();
   }
   function clampFabTop(top) {
-    const height = fabHeight();
-    const maxTop = Math.max(FAB_EDGE_GAP, window.innerHeight - height - FAB_EDGE_GAP);
-    return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
+    return fabCtl.clampFabTop(top);
   }
-  function normalizeFabRatio(value) {
-    const ratio = Number(value);
-    return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
-  }
-  function legacyFabRatio() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(LEGACY_FAB_POSITION_KEY) || "null");
-      if (!saved || typeof saved !== "object" || saved.ratio == null) return null;
-      return normalizeFabRatio(saved.ratio);
-    } catch (e) {
-      return null;
-    }
+  function normalizeFabRatio2(value) {
+    return normalizeFabRatio(value);
   }
   function applySavedFabPosition() {
-    if (!fab) return;
-    const height = fabHeight();
-    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
-    fab.style.top = clampFabTop(FAB_EDGE_GAP + fabPositionRatio * available) + "px";
+    fabCtl.applySaved();
   }
   function persistFabPosition() {
-    if (!fab) return;
-    const height = fabHeight();
-    const available = Math.max(1, window.innerHeight - height - FAB_EDGE_GAP * 2);
-    const top = clampFabTop(currentFabTop());
-    fabPositionRatio = normalizeFabRatio((top - FAB_EDGE_GAP) / available);
-    if (fabPositionRatio == null) fabPositionRatio = 0.38;
-    try {
-      const pending = chrome.storage.local.set({
-        [FAB_POSITION_KEY]: { ratio: fabPositionRatio, updatedAt: Date.now() }
-      });
-      if (pending && pending.catch) pending.catch(() => {
-      });
-      localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
-    } catch (e) {
-    }
+    fabCtl.persist();
   }
   async function loadFabPosition() {
-    try {
-      const stored = await chrome.storage.local.get(FAB_POSITION_KEY);
-      let ratio = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
-      if (ratio == null) {
-        const legacy = legacyFabRatio();
-        if (legacy != null) {
-          ratio = legacy;
-          await chrome.storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: Date.now() } });
-        }
-      }
-      if (ratio != null) fabPositionRatio = ratio;
-      try {
-        localStorage.removeItem(LEGACY_FAB_POSITION_KEY);
-      } catch (e) {
-      }
-    } catch (e) {
-    }
-    applySavedFabPosition();
+    await fabCtl.load();
   }
   function moveFabBy(delta) {
-    if (!fab) return;
-    fab.style.top = clampFabTop(currentFabTop() + delta) + "px";
-    persistFabPosition();
+    fabCtl.moveBy(delta);
   }
   function togglePanelFromShortcut() {
     const now = Date.now();
@@ -6440,18 +6540,28 @@
     if (panel) panel.classList.remove("approval-open");
     fitPanelHeight();
   }
+  var APPROVAL_LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
+  function describeApprovalRequest(name, args, risk, allowSession) {
+    const toolArgs = args && typeof args === "object" ? args : {};
+    const longField = APPROVAL_LONG_TEXT_FIELD[name];
+    const longText = longField ? String(toolArgs[longField] || "") : "";
+    const shownArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
+    return {
+      riskLabel: risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C",
+      // 没有参数时给空串：渲染层据此决定要不要出那一行（空 JSON `{}` 对用户毫无信息）。
+      argsJson: Object.keys(shownArgs).length ? JSON.stringify(shownArgs) : "",
+      longText,
+      longLabel: !longText ? "" : name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801",
+      // allowSession === false 表示「只能一次一次批准」，不给批量放行的按钮。
+      showSession: allowSession !== false
+    };
+  }
   function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
     if (!box || !conn) return false;
-    const toolArgs = args && typeof args === "object" ? args : {};
-    const LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
-    const longField = LONG_TEXT_FIELD[name];
-    const longText = longField ? String(toolArgs[longField] || "") : "";
-    const approvalArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
-    const detail = approvalArgs && Object.keys(approvalArgs).length ? " \u53C2\u6570\uFF1A" + JSON.stringify(approvalArgs) : "";
-    const codeBlock = longText ? '<div class="tool-approval-label">' + (name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801") + '</div><pre class="tool-approval-code">' + escHtml(longText) + "</pre>" : "";
-    const riskLabel = risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C";
-    const sessionBtn = allowSession === false ? "" : '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>';
-    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + riskLabel + "</span></div>" + (detail ? '<div class="tool-approval-detail">' + escHtml(detail.replace(/^ 参数：/, "")) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
+    const view = describeApprovalRequest(name, args, risk, allowSession);
+    const codeBlock = view.longLabel ? '<div class="tool-approval-label">' + escHtml(view.longLabel) + '</div><pre class="tool-approval-code">' + escHtml(view.longText) + "</pre>" : "";
+    const sessionBtn = view.showSession ? '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>' : "";
+    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + escHtml(view.riskLabel) + "</span></div>" + (view.argsJson ? '<div class="tool-approval-detail">' + escHtml(view.argsJson) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
     box.style.display = "";
     const decide = (decision) => {
       try {
@@ -6517,6 +6627,33 @@
     return html;
   }
   var streamingCursors = /* @__PURE__ */ new WeakMap();
+  function makeContentEl(flow) {
+    if (!flow) return null;
+    const el = document.createElement("div");
+    el.className = "agent-content";
+    flow.appendChild(el);
+    return el;
+  }
+  function renderRunError(flow, contentEl, errText, hasPartial) {
+    const el = hasPartial || !contentEl ? makeContentEl(flow) : contentEl;
+    if (!el) return null;
+    removeStreamCursor(el);
+    el.textContent = String(errText === void 0 || errText === null ? "" : errText);
+    el.style.color = "#e74c3c";
+    return el;
+  }
+  function buildOpenSettingsButton() {
+    const go = document.createElement("button");
+    go.textContent = "\u6253\u5F00\u8BBE\u7F6E";
+    go.style.cssText = "margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;";
+    go.addEventListener("click", () => {
+      try {
+        chrome.runtime.sendMessage({ type: "openOptions" });
+      } catch (e) {
+      }
+    });
+    return go;
+  }
   function removeStreamCursor(host2) {
     const rec = host2 && streamingCursors.get(host2);
     if (!rec) return;
@@ -8370,11 +8507,7 @@
       typingEl = null;
     }
     function ensureTextEl() {
-      if (!flowEl) return null;
-      const el = document.createElement("div");
-      el.className = "agent-content";
-      flowEl.appendChild(el);
-      return el;
+      return makeContentEl(flowEl);
     }
     function pushReasoning(text) {
       const piece = String(text || "");
@@ -8980,27 +9113,17 @@
         } else if (resp.type === "error") {
           removeTypingEl();
           const errText = String(resp.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
-          const errEl = pendingContentEl || ensureTextEl();
-          if (errEl) {
-            removeStreamCursor(errEl);
-            errEl.textContent = errText;
-            errEl.style.color = "#e74c3c";
-          }
+          const hasPartial = Boolean(String(pendingNarration || "").trim());
+          renderRunError(flowEl, pendingContentEl, errText, hasPartial);
           if (resp.needSetup) {
             refreshApiKeyBanner();
-            const go = document.createElement("button");
-            go.textContent = "\u6253\u5F00\u8BBE\u7F6E";
-            go.style.cssText = "margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;";
-            go.addEventListener("click", () => {
-              try {
-                chrome.runtime.sendMessage({ type: "openOptions" });
-              } catch (e) {
-              }
-            });
-            pendingAiMsg.appendChild(document.createElement("br"));
-            pendingAiMsg.appendChild(go);
+            const anchor = pendingAiMsg || flowEl;
+            if (anchor) {
+              anchor.appendChild(document.createElement("br"));
+              anchor.appendChild(buildOpenSettingsButton());
+            }
           }
-          conversation.push(buildFailedTurn(pendingParts, errText));
+          conversation.push(buildFailedTurn(pendingParts, errText, pendingNarration || pendingAcc));
           saveConversation();
           endStream();
           closePort();
@@ -9443,9 +9566,9 @@
         if (changes.aiSettings) refreshApiKeyBanner();
         if (!changes[FAB_POSITION_KEY]) return;
         const next = changes[FAB_POSITION_KEY].newValue;
-        const ratio = normalizeFabRatio(next && next.ratio);
+        const ratio = normalizeFabRatio2(next && next.ratio);
         if (ratio == null) return;
-        fabPositionRatio = ratio;
+        fabCtl.setRatio(ratio);
         applySavedFabPosition();
       });
     } catch (e) {

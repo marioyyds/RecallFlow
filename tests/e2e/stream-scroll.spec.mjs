@@ -56,12 +56,21 @@ test('流式输出中用户上滚：不被后续增量拉回底部', async () =>
 
   // 继续接收新的流式增量：缺陷会把 observerAutoScroll 留在 true，
   // 下一次 pinToBottom 会把 gap 打回 0。
-  await page.waitForTimeout(1200);
+  //
+  // ⚠ 这里原先是两次 waitForTimeout(1200)。改成**等到"确实又来了一批增量"**再断言：
+  // 睡固定时长在慢机器上可能还没等到增量就断言（于是测了个寂寞），
+  // 在快机器上又白等（比需要的更久）。判据不变，等待方式从"猜时间"改成"等事件"。
+  const heightBefore = await body.evaluate((el) => el.scrollHeight);
+  await expect
+    .poll(() => body.evaluate((el) => el.scrollHeight), { timeout: 15_000 })
+    .toBeGreaterThan(heightBefore);
   expect(await gap(page), '流式增量不得把上滚的用户拽回底部').toBeGreaterThan(80);
   const topLater = await body.evaluate((el) => el.scrollTop);
   expect(topLater, '滚动位置不应跳到底部').toBeLessThanOrEqual(topAfterWheel + 30);
 
-  await page.waitForTimeout(1200);
+  await expect
+    .poll(() => body.evaluate((el) => el.scrollHeight), { timeout: 15_000 })
+    .toBeGreaterThan(heightBefore + 1);
   expect(await gap(page), '持续流式期间也必须保持用户选择的滚动位置').toBeGreaterThan(80);
 
   await page.close();
@@ -71,7 +80,12 @@ test('跟随页在 owner 流式期间必须持续增长（不是只出终稿）'
   await configureSettings(context);
   const a = await openFixturePage(context);
   await sendInstruction(a, '验证流式上滚');
-  await a.waitForTimeout(600);
+  // 原先 sleep 600ms 再开跟随页，赌的是"这时 owner 已经流起来了"。
+  // 改成等到 owner 真的有正文 —— 否则这条用例测的是"跟随页比 owner 晚多少"，
+  // 而这个"多少"在不同机器上完全不一样。
+  await expect
+    .poll(async () => String(await panelText(a, '.p-body') || '').length, { timeout: 10_000 })
+    .toBeGreaterThan(0);
 
   const b = await openFixturePage(context);
   await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
@@ -79,14 +93,21 @@ test('跟随页在 owner 流式期间必须持续增长（不是只出终稿）'
     .poll(async () => String(await panelText(b, '.p-body') || '').length, { timeout: 5_000 })
     .toBeGreaterThan(20);
   const len1 = String(await panelText(b, '.p-body') || '').length;
-  const samples = [len1];
-  for (let i = 0; i < 5; i++) {
-    await b.waitForTimeout(250);
-    samples.push(String(await panelText(b, '.p-body') || '').length);
-  }
+  // 原先固定睡 250ms × 5 次来采样。判据是"多个时间点都在变"，等待方式不该是猜时长：
+  // 流得快时白等，流得慢时样本全一样（于是断言在慢机器上假红）。
+  // 改成 poll 采样 —— 间隔由框架控制，条件一成立就停。
+  const seen = new Set([len1]);
+  await expect
+    .poll(
+      async () => {
+        seen.add(String(await panelText(b, '.p-body') || '').length);
+        return seen.size;
+      },
+      { timeout: 8_000, message: '跟随页应在多个时间点持续更新，而不是一次性刷出' }
+    )
+    .toBeGreaterThan(2);
   const len2 = String(await panelText(b, '.p-body') || '').length;
   expect(len2, '跟随页正文应在流式期间继续增长').toBeGreaterThan(len1 + 20);
-  expect(new Set(samples).size, '跟随页应在多个时间点持续更新，而不是一次性刷出').toBeGreaterThan(2);
 
   await a.close();
   await b.close();
@@ -96,7 +117,10 @@ test('同步面板的流式游标在连续增量之间保持同一个 DOM 节点
   await configureSettings(context);
   const a = await openFixturePage(context);
   await sendInstruction(a, '验证流式上滚');
-  await a.waitForTimeout(600);
+  // 同上：等 owner 真的开始出正文，而不是睡固定时长赌它已经开始了。
+  await expect
+    .poll(async () => String(await panelText(a, '.p-body') || '').length, { timeout: 10_000 })
+    .toBeGreaterThan(0);
 
   const b = await openFixturePage(context);
   await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });
@@ -112,7 +136,11 @@ test('同步面板的流式游标在连续增量之间保持同一个 DOM 节点
     animations: el.getAnimations().length,
   }));
 
-  await b.waitForTimeout(900);
+  // 原先 sleep 900ms 后断言"又收到新正文"。改成**等正文长度真的变化**（有上界）：
+  // 睡 900ms 在慢机器上可能还没到、在快机器上又多等 —— 两种都是在赌。
+  await expect
+    .poll(async () => String(await panelText(b, '.p-body') || '').length, { timeout: 15_000 })
+    .toBeGreaterThan(textBefore);
   const textAfter = String(await panelText(b, '.p-body') || '').length;
   expect(textAfter, '标记之后必须仍收到新的正文增量').toBeGreaterThan(textBefore);
   const probes = await b.locator(PANEL + ' .stream-cursor').evaluateAll((els) =>
@@ -136,7 +164,8 @@ test('同步窗口刚连上、还没有正文时不显示「（无内容）」',
   await configureSettings(context);
   const a = await openFixturePage(context);
   await sendInstruction(a, '验证同步初始空态');
-  await a.waitForTimeout(300);
+  // 等 owner 的会话真的建立起来（用户消息已呈现），而不是睡 300ms 赌它好了。
+  await expect(a.locator(PANEL + ' .msg.user')).toBeVisible({ timeout: 10_000 });
 
   const b = await openFixturePage(context);
   await expect(b.locator(PANEL + ' .panel')).toBeVisible({ timeout: 15_000 });

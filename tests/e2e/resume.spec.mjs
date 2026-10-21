@@ -37,6 +37,16 @@ test.afterAll(async () => {
 });
 
 test('golden: 端口断开后自动重连并接着跑完', async () => {
+  // 本用例的前提是夹具「把流挂住不结束」（E2E_LLM_HOLD_OPEN=1），这样才能模拟
+  // "跑到一半端口断了"。漏设这个变量时流会正常结束，失败会落在
+  // "重连后没有续跑"上 —— 看起来像重连逻辑坏了，实际是夹具没被要求挂住。
+  // 因此先 fail fast，把原因说在前面（同 vision-switch 开启臂的处理）。
+  expect(
+    String(process.env.E2E_LLM_HOLD_OPEN || ''),
+    '本用例需要夹具把流挂住：请带上 E2E_LLM_HOLD_OPEN=1，\n' +
+      '或直接跑 node scripts/run-e2e.mjs 的「断线恢复」阶段。'
+  ).toMatch(/^(1|true|yes)$/i);
+
   await configureSettings(context);
   const sw = context.serviceWorkers()[0];
   const logs = [];
@@ -56,8 +66,11 @@ test('golden: 端口断开后自动重连并接着跑完', async () => {
 
   // 等后台真的开始跑（用它自己的日志，而不是猜 DOM）
   await expect.poll(() => logs.some((t) => t.includes('agent run start')), { timeout: 20_000 }).toBe(true);
-  // 夹具已把这次流挂起 → 此刻必定处于"流已开始、尚未结束"，断线必然落在生成中
-  await page.waitForTimeout(500);
+  // 夹具已把这次流挂起：它会先发一个可见增量「正在处理…」然后**不结束**。
+  // 等到这个增量真的渲染出来，才等于"流已开始、尚未结束"这个前提成立 ——
+  // 原先在这里睡 500ms，而实测一轮 run 约 600ms 就结束，是靠抖动抢时机
+  // （夹具注释里也写了"400ms 的 sleep 竞争不过抖动"）。
+  await expect(page.locator(PANEL + ' .p-body')).toContainText('正在处理…', { timeout: 20_000 });
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('__RF_E2E__dropPort')));
   expect(await page.evaluate(() => window.__rfE2EDropped === true), '面板应收到跨世界事件并断开端口').toBe(true);
 

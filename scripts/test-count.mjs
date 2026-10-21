@@ -55,6 +55,39 @@ export function collectTestCount() {
   return { tests, pass: pick('pass'), fail: pick('fail'), files: countTestFiles() };
 }
 
+/**
+ * 把测试文件分成「行为测试」与「静态门禁」两类。
+ *
+ * 为什么必须分：评审实测 136 个测试文件里有 69 个（51%）用 readFileSync 读源码做正则，
+ * 其中 32 个**完全不 import 任何 lib 模块**。它们确实抓到过"静默失效"（有价值），
+ * 但把它们与真跑代码的行为测试混成一个总数，"1670 项"会给一种它给不了的信心 ——
+ * 一个读源码的正则断言和一个真并发执行的集成断言，在这一个数字里是等权的。
+ *
+ * 判定口径（刻意保守，宁可少算静态也不要冤枉行为测试）：
+ *   静态 = 读了源码 **且** 没有 import 任何 lib/入口模块；
+ *   其余一律算行为测试。
+ */
+export function classifyTestFiles() {
+  const dirs = [
+    path.join(ROOT, 'tests'),
+    path.join(ROOT, 'integrations', 'opencode', 'recallflow-mcp', 'test'),
+  ];
+  const importsProduct = /['"`][^'"`]*\.\.\/(lib|background\.js|content\.js|popup\.js|options\.js|manager\.js)/;
+  const staticFiles = [];
+  const behaviorFiles = [];
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.test.mjs')) continue;
+      const src = fs.readFileSync(path.join(dir, f), 'utf8');
+      const readsSource = /readFileSync/.test(src);
+      if (readsSource && !importsProduct.test(src)) staticFiles.push(f);
+      else behaviorFiles.push(f);
+    }
+  }
+  return { behavior: behaviorFiles.length, static: staticFiles.length, staticFiles };
+}
+
 /** 读取已提交的快照（单测用；不 spawn 任何进程）。 */
 export function readSnapshot() {
   try {
@@ -67,8 +100,15 @@ export function readSnapshot() {
 function main() {
   if (process.argv.includes('--write')) {
     const info = collectTestCount();
-    fs.writeFileSync(SNAPSHOT, JSON.stringify(info, null, 2) + '\n');
-    console.log('已写入 ' + path.relative(ROOT, SNAPSHOT) + '：' + info.tests + ' 项 / ' + info.files + ' 个文件');
+    const kinds = classifyTestFiles();
+    const payload = Object.assign({}, info, {
+      files: { total: kinds.behavior + kinds.static, behavior: kinds.behavior, static: kinds.static },
+    });
+    fs.writeFileSync(SNAPSHOT, JSON.stringify(payload, null, 2) + '\n');
+    console.log(
+      '已写入 ' + path.relative(ROOT, SNAPSHOT) + '：' + info.tests + ' 项 / ' +
+        payload.files.total + ' 个文件（行为 ' + kinds.behavior + ' + 静态门禁 ' + kinds.static + '）'
+    );
     return;
   }
   const info = collectTestCount();

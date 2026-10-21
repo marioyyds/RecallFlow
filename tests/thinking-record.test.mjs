@@ -331,12 +331,21 @@ test('chat.js：流式重开时「停止 / 发送」的初值必须跟着 stream
   // **按钮创建之前**（它碰到的只会是上一个面板遗留的按钮）⇒ 任务还在跑但按不到「■ 停止」。
   // 判据：owner 的 `streaming` 与跟随页的 `followedRunState` 必须走同一个状态入口，
   // 且恢复函数里**不许**去动按钮。
-  const stateAt = chatSrc.indexOf('function updateRunControlState()');
+  // ⚠ 判据已从「渲染函数体长什么样」改成「状态派生覆盖了什么」：
+  // 派生逻辑抽成纯函数 computeRunControls 之后，盯着渲染函数逐字匹配只会逼后来者
+  // 把代码写成某个形状；而这条用例真正要守的性质（owner 与跟随页共用同一个入口）
+  // 现在由 tests/chat-run-controls.test.mjs 的**行为**断言直接钉住（6 条 + 4 个变异算子）。
+  const stateAt = chatSrc.indexOf('export function computeRunControls(');
   assert.ok(stateAt >= 0, '应有统一的运行控件状态入口');
   const stateBody = chatSrc.slice(stateAt, chatSrc.indexOf('\n}', stateAt) + 2);
-  assert.match(stateBody, /streaming \|\| followingRunning/, '运行态必须同时覆盖 owner 与跟随页');
-  assert.match(stateBody, /stopBtn\.style\.display = running \? '' : 'none';/, '停止按钮要由运行态决定');
-  assert.match(stateBody, /sendBtn\.disabled = running;/, '"发送"同样由运行态决定');
+  assert.match(stateBody, /src\.streaming \|\| followingRunning/, '运行态必须同时覆盖 owner 与跟随页');
+  assert.match(stateBody, /showStop: running/, '停止按钮要由运行态决定');
+  assert.match(stateBody, /sendDisabled: running/, '"发送"同样由运行态决定');
+  // 统一入口必须真的被渲染函数调用 —— 否则它可以是个没人用的死函数，上面几条就白守了
+  const renderAt = chatSrc.indexOf('function updateRunControlState(');
+  assert.ok(renderAt >= 0);
+  const renderBody = chatSrc.slice(renderAt, chatSrc.indexOf('\n}', renderAt) + 2);
+  assert.match(renderBody, /computeRunControls\(/, 'updateRunControlState 必须走这个统一入口');
   const at = chatSrc.indexOf('function restoreStreamingUI(');
   const body = chatSrc.slice(at, chatSrc.indexOf('\nfunction ', at + 10));
   assert.ok(!/stopBtn\.style\.display/.test(body), '恢复函数不得去动停止按钮（它跑在按钮创建之前）');

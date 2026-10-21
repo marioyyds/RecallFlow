@@ -56,6 +56,18 @@ test('run state: 审批等待、计划、用量和状态事件都能反映到快
   assert.ok(msg.parts.some((p) => p.type === 'notice' && p.text.includes('等待发起标签页确认')));
 });
 
+test('run state: 只有待批的那次调用返回，才清掉审批（别的工具返回不许关弹窗）', () => {
+  // 并发/乱序返回在真实运行里很常见：先发出的 c1 还没批，c2 的结果先回来了。
+  // 若"任意 tool-result 都清审批"，用户会看到弹窗自己消失 —— 然后那次写操作**静默没执行**。
+  const s = state();
+  applyRunEvent(s, { type: 'tool-call', callId: 'c1', name: 'click_element', args: {}, requiresApproval: true });
+  assert.equal(s.approval && s.approval.callId, 'c1', '前提：c1 在等审批');
+  applyRunEvent(s, { type: 'tool-result', callId: 'c2', name: 'read_page_text', status: 'ok', result: 'x' });
+  assert.equal(s.approval && s.approval.callId, 'c1', '无关的 tool-result 不得清掉待批的 c1');
+  applyRunEvent(s, { type: 'tool-result', callId: 'c1', name: 'click_element', status: 'ok', result: 'ok' });
+  assert.equal(s.approval, null, 'c1 自己返回后审批必须清掉');
+});
+
 test('run state: 错误与结束状态会保留已生成的思考/正文，不清空', () => {
   const s = state();
   applyRunEvent(s, { type: 'reasoning', text: '想法' });

@@ -27,16 +27,35 @@ test('声称隐藏广告但没有任何写类工具 → fail（本轮最核心�
   assert.ok(r.reasons[0].message.includes('没有调用过任何页面修改类工具'), r.reasons[0].message);
 });
 
-test('声称修改但写类工具全失败 → fail', () => {
+test('声称修改但写类工具一次都没成功过 → fail', () => {
   const r = checkCompletionClaim({
     claim: '已把表头居中对齐。',
     ranTools: ['set_element_style'],
     mutatingRanTools: ['set_element_style'],
     failedTools: ['set_element_style'],
+    succeededTools: [],
     evidenceText: '',
   });
   assert.equal(r.verdict, 'fail');
   assert.equal(r.reasons[0].code, 'all-mutations-failed');
+  assert.ok(r.reasons[0].message.includes('一次都没成功过'), r.reasons[0].message);
+});
+
+test('**同名工具失败后又重试成功** → 不得误判（两个名单都是按工具名去重的）', () => {
+  // 这条是本模块最容易写反的地方：failedTools / succeededTools 都只记**名字**，
+  // 不记次数。于是「点偏一次、第二次点中」在名单上表现为
+  // 同名工具同时出现在两个名单里。若规则 2 只看 failedTools，
+  // 就会把一次完全正确的任务判成撒谎 —— 白烧一次校验配额，
+  // 还灌给模型一条错误的反思（「全部失败」），它据此可能重复已成功的动作。
+  const r = checkCompletionClaim({
+    claim: '已点击「下载」并开始下载。',
+    ranTools: ['click_element', 'click_element'],
+    mutatingRanTools: ['click_element'],
+    failedTools: ['click_element'],
+    succeededTools: ['click_element'],
+    evidenceText: '',
+  });
+  assert.equal(r.verdict, 'unknown', JSON.stringify(r.reasons));
 });
 
 test('写类工具部分失败时不误判（可能另一部分成功了）', () => {
@@ -45,9 +64,24 @@ test('写类工具部分失败时不误判（可能另一部分成功了）', ()
     ranTools: ['set_element_style', 'set_element_style'],
     mutatingRanTools: ['set_element_style', 'click_element'],
     failedTools: ['set_element_style'],
+    succeededTools: ['click_element'],
     evidenceText: '',
   });
   assert.equal(r.verdict, 'unknown', JSON.stringify(r.reasons));
+});
+
+test('**同名工具全部调用都失败**时仍要抓到（别把规则 2 改瘫）', () => {
+  const r = checkCompletionClaim({
+    claim: '已把表头居中对齐。',
+    ranTools: ['set_element_style', 'set_element_style'],
+    mutatingRanTools: ['set_element_style'],
+    failedTools: ['set_element_style'],
+    // 只成功过**别的**工具，不代表这个写类工具成功了。
+    succeededTools: ['get_page_snapshot'],
+    evidenceText: '',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'all-mutations-failed');
 });
 
 test('声称「可见 0 次」但没有可见性核查证据 → fail', () => {
@@ -193,4 +227,61 @@ test('buildDeterministicReflection: 含每条原因与下一步指引', () => {
   // 脏数据
   assert.equal(typeof buildDeterministicReflection(null), 'string');
   assert.ok(buildDeterministicReflection({}).length > 0);
+});
+
+test('导航类声明：只读过页面却说「已打开淘宝」→ 仍然抓到（这是最典型的幻觉）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开淘宝首页，列出了推荐商品。',
+    ranTools: ['read_current_page'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['read_current_page'],
+    evidenceText: '页面文本…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-navigation');
+});
+
+test('导航类声明：跑过抓取类工具时不再误判（研究类任务的高频句式）', () => {
+  // `打开` 不需要写类工具也能成立 —— fetch_webpage 抓到网页、switch_tab 切过去，
+  // 模型说「已打开原文并总结」完全属实。原先 `打开` 混在写动词里，
+  // 而 fetch_webpage 现在又是只读工具，于是这种总结会被判成「声称写但没做」。
+  for (const ran of [['fetch_webpage'], ['open_tab'], ['switch_tab', 'read_current_page']]) {
+    const r = checkCompletionClaim({
+      claim: '已打开原文并总结出 3 条要点。',
+      ranTools: ran,
+      // open_tab 是写类工具，fetch_webpage / switch_tab 现在是只读
+      mutatingRanTools: ran.filter((n) => n === 'open_tab'),
+      failedTools: [],
+      succeededTools: ran,
+      evidenceText: '正文片段…',
+    });
+    assert.equal(r.verdict, 'unknown', '不应误判：' + ran.join('+') + ' → ' + JSON.stringify(r.reasons));
+  }
+});
+
+test('导航类声明：只搜过摘要却说「已打开原文」→ 仍要抓到（看过内容 ≠ 打开过页面）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开原文并总结出 3 条要点。',
+    ranTools: ['web_search'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['web_search'],
+    evidenceText: '搜索结果摘要…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-navigation');
+});
+
+test('「打开了」和「改了页面」同时声称时，仍按写操作抓（导航例外不能变成后门）', () => {
+  const r = checkCompletionClaim({
+    claim: '已打开设置页，并把主题改成了深色。',
+    ranTools: ['fetch_webpage'],
+    mutatingRanTools: [],
+    failedTools: [],
+    succeededTools: ['fetch_webpage'],
+    evidenceText: '页面文本…',
+  });
+  assert.equal(r.verdict, 'fail');
+  assert.equal(r.reasons[0].code, 'claim-without-mutation', '改页面的部分必须照常抓');
 });

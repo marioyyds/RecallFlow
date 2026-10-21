@@ -20,7 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { shouldVerifyCompletion } from '../lib/assistant/agent.js';
+import { shouldVerifyCompletion, resolveVerifyIntent } from '../lib/assistant/agent.js';
 import { INTENTS } from '../lib/assistant/intent-router.js';
 
 const SETTINGS = { apiKey: 'k' };
@@ -51,6 +51,37 @@ test('用户可以关掉它；没配 API Key 也不能调（否则会静默失�
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, { verifierEnabled: true }), false, '缺 apiKey 时不调');
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, null), false);
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, undefined), false);
+});
+
+test('画像提升后必须按研究意图校验（回归：promoteToResearch 不改 intent ⇒ 校验被跳过）', () => {
+  // 起因：promoteToResearch 只换工具集与系统提示，intent 仍是运行期常量 CHAT。
+  // 于是「以普通对话启动 → 用到研究/网络类工具 → 被提升为研究画像」的 run 在收尾时
+  // 拿 shouldVerifyCompletion(CHAT, ...) ⇒ false ⇒ **永远不做 LLM 完成校验**，
+  // 而这类 run 恰恰是最可能"查了一圈其实没查到"的。
+  assert.equal(
+    shouldVerifyCompletion(resolveVerifyIntent(INTENTS.CHAT, true), 5, SETTINGS),
+    true,
+    '被提升为研究画像的 run 必须参与完成校验'
+  );
+  assert.equal(
+    shouldVerifyCompletion(resolveVerifyIntent(INTENTS.CHAT, false), 5, SETTINGS),
+    false,
+    '没被提升的普通对话仍不校验（否则每次闲聊都白花一次调用）'
+  );
+  // 已经是研究/浏览器意图时，提升与否都不改变结论
+  assert.equal(resolveVerifyIntent(INTENTS.RESEARCH, true), INTENTS.RESEARCH);
+  assert.equal(resolveVerifyIntent(INTENTS.BROWSER, false), INTENTS.BROWSER);
+});
+
+test('resolveVerifyIntent 这条断言有牙齿：它必须真的会改变 CHAT 的判定结果', () => {
+  // 反证：如果 resolveVerifyIntent 只是原样返回 intent，上面那条"提升后应校验"就会恒定失败，
+  // 而下面这两行的差异证明这个函数确实在做事。
+  assert.notEqual(
+    resolveVerifyIntent(INTENTS.CHAT, true),
+    resolveVerifyIntent(INTENTS.CHAT, false),
+    'promoted 标志必须真的改变有效意图，否则等于没接'
+  );
+  assert.equal(resolveVerifyIntent(INTENTS.CHAT, true), INTENTS.RESEARCH);
 });
 
 test('这条门禁本身有牙齿：「永远校验」与「永远不校验」都必须被判为不合格', () => {
