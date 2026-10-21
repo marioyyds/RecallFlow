@@ -50,6 +50,9 @@
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
   }
+  function isFileUrl(u) {
+    return /^file:\/\//i.test(String(u || ""));
+  }
   function formatElementLocator(locator, selector, tag) {
     const l = locator || {};
     if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
@@ -4166,6 +4169,141 @@
     };
   }
 
+  // lib/page/save-clean.js
+  var HOST_ID = "__kb-ai-host";
+  var SUSPEND_ATTR = "data-rf-export-hidden";
+  var SAFETY_RESTORE_MS = 6e4;
+  var INTERACTION_GRACE_MS = 800;
+  function createExportGuard(options = {}) {
+    const doc = options.doc || document;
+    const win = options.win || window;
+    const getHost = options.getHost || (() => doc.getElementById(HOST_ID));
+    const onSuspend = options.onSuspend || (() => {
+    });
+    const onResume = options.onResume || (() => {
+    });
+    const now = options.now || (() => Date.now());
+    let suspended = false;
+    let parked = null;
+    let safetyTimer = null;
+    let graceUntil = 0;
+    let lastReason = "";
+    let installed = false;
+    function clearSafetyTimer() {
+      if (safetyTimer) {
+        const cancel = win.clearTimeout || clearTimeout;
+        cancel(safetyTimer);
+        safetyTimer = null;
+      }
+    }
+    function armSafetyTimer() {
+      clearSafetyTimer();
+      const schedule = win.setTimeout || setTimeout;
+      safetyTimer = schedule(() => {
+        safetyTimer = null;
+        restore("safety");
+      }, SAFETY_RESTORE_MS);
+    }
+    function suspend(reason) {
+      if (suspended) return false;
+      suspended = true;
+      lastReason = String(reason || "export");
+      onSuspend(lastReason);
+      const host2 = getHost();
+      let detached = false;
+      if (host2 && host2.parentNode) {
+        const parent = host2.parentNode;
+        const next = host2.nextSibling;
+        host2.setAttribute(SUSPEND_ATTR, "1");
+        const holder = doc.createDocumentFragment();
+        holder.appendChild(host2);
+        parked = { node: host2, holder, parent, next };
+        detached = true;
+      }
+      graceUntil = now() + INTERACTION_GRACE_MS;
+      armSafetyTimer();
+      return detached;
+    }
+    function restore(reason) {
+      if (!suspended) return false;
+      clearSafetyTimer();
+      const p = parked;
+      parked = null;
+      if (p && p.node) {
+        try {
+          p.node.removeAttribute(SUSPEND_ATTR);
+          const parent = p.parent && p.parent.isConnected ? p.parent : doc.documentElement || doc.body;
+          if (parent) {
+            if (p.next && p.next.parentNode === parent) parent.insertBefore(p.node, p.next);
+            else parent.appendChild(p.node);
+          }
+        } catch (e) {
+        }
+      }
+      suspended = false;
+      lastReason = "";
+      onResume(String(reason || "export"));
+      return true;
+    }
+    function isSuspended() {
+      return suspended;
+    }
+    function onKeyDown(e) {
+      if (!e || e.altKey) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = String(e.key || "").toLowerCase();
+      if (key !== "s") return;
+      suspend("save-shortcut");
+    }
+    function onBeforePrint() {
+      suspend("print");
+    }
+    function onAfterPrint() {
+      restore("print");
+    }
+    function onVisibilityChange() {
+      if (doc.visibilityState === "hidden") return;
+      restore("visibility");
+    }
+    function onFocus() {
+      restore("focus");
+    }
+    function onInteract() {
+      if (!suspended) return;
+      if (now() < graceUntil) return;
+      restore("interaction");
+    }
+    function install() {
+      if (installed) return () => {
+      };
+      installed = true;
+      doc.addEventListener("keydown", onKeyDown, true);
+      win.addEventListener("beforeprint", onBeforePrint);
+      win.addEventListener("afterprint", onAfterPrint);
+      win.addEventListener("focus", onFocus);
+      doc.addEventListener("visibilitychange", onVisibilityChange);
+      doc.addEventListener("pointerdown", onInteract, true);
+      doc.addEventListener("keydown", onInteract, true);
+      return uninstall;
+    }
+    function uninstall() {
+      if (!installed) return;
+      installed = false;
+      try {
+        doc.removeEventListener("keydown", onKeyDown, true);
+        win.removeEventListener("beforeprint", onBeforePrint);
+        win.removeEventListener("afterprint", onAfterPrint);
+        win.removeEventListener("focus", onFocus);
+        doc.removeEventListener("visibilitychange", onVisibilityChange);
+        doc.removeEventListener("pointerdown", onInteract, true);
+        doc.removeEventListener("keydown", onInteract, true);
+      } catch (e) {
+      }
+      restore("uninstall");
+    }
+    return { suspend, restore, isSuspended, install, uninstall };
+  }
+
   // lib/shared/handoff.js
   var ID_PREFIX = "RF-";
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -5238,6 +5376,13 @@
       .session-actions button { width: 36px; height: 36px; }
       .quick-prompt { min-height: 32px; }
     }
+    /* \u6253\u5370 / \u5BFC\u51FA PDF\uFF1A\u6253\u5370\u8D70\u7684\u662F**\u6E32\u67D3**\uFF0Cshadow \u91CC\u7684\u60AC\u6D6E\u7403\u4E0E\u9762\u677F\u4F1A\u5B9E\u6253\u5B9E\u5370\u51FA\u6765\u3002
+       \u8FD9\u6761\u89C4\u5219\u5199\u5728 shadow \u5185\u90E8\uFF0C\u56E0\u6B64\u4E0D\u9700\u8981\u5F80\u9875\u9762 light DOM \u91CC\u63D2\u4EFB\u4F55 <style> \u2014\u2014
+       \u5BFC\u51FA\u4EA7\u7269\u91CC\u4E5F\u5C31\u4E0D\u4F1A\u591A\u51FA\u4E00\u4E2A"\u6269\u5C55\u7559\u4E0B\u7684\u6837\u5F0F\u6807\u7B7E"\u3002
+       \u4E0E lib/page/save-clean.js \u7684 beforeprint \u6458\u9664\u4E92\u4E3A\u4FDD\u9669\uFF1A\u4EFB\u4E00\u6761\u751F\u6548\uFF0C\u7EB8\u9762\u4E0A\u90FD\u5E72\u51C0\u3002 */
+    @media print {
+      :host { display: none !important; visibility: hidden !important; }
+    }
 `;
 
   // lib/assistant/run-hub.js
@@ -5686,6 +5831,16 @@
     } catch (e) {
     }
   }
+  var IS_LOCAL_PAGE = (() => {
+    try {
+      return isFileUrl(location.href);
+    } catch (e) {
+      return false;
+    }
+  })();
+  var AUTO_MOUNT_UI = !IS_LOCAL_PAGE;
+  var uiSuspended = false;
+  var exportGuard = null;
   var host = null;
   var shadow = null;
   var bubble = null;
@@ -5939,6 +6094,7 @@
     togglePanel();
   }
   function ensureHost() {
+    if (uiSuspended) return;
     if (host && !host.isConnected) resetDetachedHostState();
     if (host) return;
     if (!isExtContextAlive()) {
@@ -6050,6 +6206,7 @@
   function watchHostKeepalive() {
     setInterval(() => {
       try {
+        if (uiSuspended) return;
         if (host && !host.isConnected) {
           ensureHost();
           if (panelUiOpen) {
@@ -6060,6 +6217,20 @@
       } catch (e) {
       }
     }, 1e3);
+  }
+  function installExportGuard() {
+    if (exportGuard) return exportGuard;
+    exportGuard = createExportGuard({
+      getHost: () => host,
+      onSuspend: () => {
+        uiSuspended = true;
+      },
+      onResume: () => {
+        uiSuspended = false;
+      }
+    });
+    exportGuard.install();
+    return exportGuard;
   }
   function removeBubble() {
     if (bubble) {
@@ -6206,6 +6377,7 @@
   }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
+    if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
     const dockGap = getDockGap();
@@ -9553,6 +9725,7 @@
         refreshPanelForSelection();
         return;
       }
+      if (!AUTO_MOUNT_UI && !host) return;
       ensureHost();
       showBubble(rect.left + rect.width / 2, rect.top + window.scrollY);
     });
@@ -9615,7 +9788,8 @@
     } catch (e) {
       warnExtDead();
     }
-    ensureHost();
+    installExportGuard();
+    if (AUTO_MOUNT_UI) ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
     panelUiReadyPromise = syncPanelUiOnInit();

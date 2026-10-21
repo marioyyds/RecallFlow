@@ -290,7 +290,21 @@ class Element extends EventTargetish {
   }
   get firstChild() { return this.childNodes[0] || null; }
   get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
-  get nextSibling() { return null; }
+  // nextSibling / previousSibling：此前恒返回 null，于是"按原位插回"这类断言**恒真**
+  // （导出守卫 save-clean.js 靠 nextSibling 把宿主插回原位置；chat.js 的流式光标
+  // 也要插在 host.nextSibling 之前）。桩缺这一项，就等于把两条真实行为测成了空话。
+  get nextSibling() {
+    const p = this.parentNode;
+    if (!p || !p.childNodes) return null;
+    const i = p.childNodes.indexOf(this);
+    return i >= 0 ? p.childNodes[i + 1] || null : null;
+  }
+  get previousSibling() {
+    const p = this.parentNode;
+    if (!p || !p.childNodes) return null;
+    const i = p.childNodes.indexOf(this);
+    return i > 0 ? p.childNodes[i - 1] || null : null;
+  }
   get innerHTML() { return this._html; }
   set innerHTML(v) {
     this._html = String(v == null ? '' : v);
@@ -309,8 +323,19 @@ class Element extends EventTargetish {
     this.childNodes.length = 0;
     this._html = '';
   }
+  // appendChild / insertBefore 必须**先从原父节点摘掉**再挂 —— 这是真实 DOM 的语义
+  //（一个节点在文档里只有一个位置）。桩此前只往新父节点 push，于是"把节点移走"
+  //（导出守卫摘宿主、面板改挂载点）在测试里看起来"既在新位置又在旧位置"，
+  // 而"宿主还在文档里吗"这种断言就永远为真。
+  _detachFromOldParent(nextParent) {
+    const old = this.parentNode;
+    if (!old || old === nextParent || !old.childNodes) return;
+    const i = old.childNodes.indexOf(this);
+    if (i >= 0) old.childNodes.splice(i, 1);
+  }
   appendChild(node) {
     if (!node) return node;
+    if (typeof node._detachFromOldParent === 'function') node._detachFromOldParent(this);
     node.parentNode = this;
     this.childNodes.push(node);
     return node;
@@ -319,6 +344,7 @@ class Element extends EventTargetish {
   insertBefore(node, ref) {
     const i = ref ? this.childNodes.indexOf(ref) : -1;
     if (i < 0) return this.appendChild(node);
+    if (typeof node._detachFromOldParent === 'function') node._detachFromOldParent(this);
     node.parentNode = this;
     this.childNodes.splice(i, 0, node);
     return node;

@@ -6,7 +6,7 @@ import { callDeepSeek } from './lib/assistant/llm.js';
 import { runAgentStream } from './lib/assistant/agent.js';
 import { startMcpRelay } from './lib/bridge/relay.js';
 import { initTargetManager } from './lib/assistant/target-manager.js';
-import { logError } from './lib/shared/utils.js';
+import { logError, isOperableUrl } from './lib/shared/utils.js';
 import { saveHandoff, getHandoff, listHandoffs } from './lib/shared/handoff-store.js';
 import { sanitizeMessages } from './lib/shared/surrogates.js';
 import { loadAgentSession } from './lib/assistant/session-store.js';
@@ -188,7 +188,7 @@ function broadcastPanelSessions(state, sourceTabId) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
-      if (tab.url && !/^https?:/i.test(tab.url)) continue;
+      if (tab.url && !isOperableUrl(tab.url)) continue;
       chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
     }
   });
@@ -204,7 +204,7 @@ function broadcastPanelUi(ui, sourceTabId) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
-      if (tab.url && !/^https?:/i.test(tab.url)) continue;
+      if (tab.url && !isOperableUrl(tab.url)) continue;
       chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
     }
   });
@@ -354,7 +354,8 @@ async function handleAi(request) {
 chrome.commands.onCommand.addListener((command) => {
   if (command !== 'toggle-panel') return;
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-    if (!tab || tab.id == null || !/^https?:/i.test(tab.url || '')) return;
+    // 本地页（file://）也要能开面板：用户正看着它，却连快捷键都没反应，是最难解释的那种"坏了"。
+    if (!tab || tab.id == null || !isOperableUrl(tab.url || '')) return;
     chrome.tabs.sendMessage(
       tab.id,
       { type: 'panel:toggle' },
@@ -724,7 +725,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'userscript:runOnTab') {
     chrome.tabs.query({ currentWindow: true }, (tabs) => {
       // 优先当前激活的普通网页；若当前页是扩展页面（如脚本中心），回退到最近浏览的网页。
-      const webTabs = (tabs || []).filter((t) => t.url && /^https?:/i.test(t.url));
+      const webTabs = (tabs || []).filter((t) => t.url && isOperableUrl(t.url));
       const tab = webTabs.find((t) => t.active) || webTabs[0];
       if (!tab || !tab.id) {
         sendResponse({ ok: false, error: '没有可运行的网页标签页' });

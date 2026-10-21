@@ -121,11 +121,21 @@ test('switch_tab：目标不存在时返回可读失败（不抛）', async () =
 });
 
 test('open_tab：只接受 http/https', async () => {
-  for (const bad of ['', 'file:///etc/passwd', 'javascript:alert(1)', 'chrome://settings']) {
+  for (const bad of ['', 'javascript:alert(1)', 'chrome://settings']) {
     const r = await openTab(mkDeps(), { url: bad });
     assert.equal(r.ok, false, bad + ' 应被拒绝');
     assert.match(r.result, /仅支持 http\/https/);
   }
+});
+
+test('open_tab：本地文件被**单独**拒绝，并告诉模型正确的做法', async () => {
+  // 与上面那条分开写，是因为拒绝的理由不同：file:// 不是"协议不认识"，
+  // 而是"有意不给 agent 一个逐路径探测本机磁盘的读口"。
+  // 混在一条断言里，将来谁把这条单独分支删掉，也只会看到"仅支持 http/https"仍然通过。
+  const r = await openTab(mkDeps(), { url: 'file:///C:/Users/me/secret.html' });
+  assert.equal(r.ok, false);
+  assert.match(r.result, /不支持本地文件路径/);
+  assert.match(r.result, /让用户自己在浏览器里打开/, '要给模型可执行的替代路径，否则它会反复重试');
 });
 
 test('open_tab：默认按 URL 去重复用已有标签页（不新建）', async () => {
