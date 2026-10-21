@@ -148,8 +148,10 @@ Input (`agent_task`): `{ "instruction": "…", "allowRisk": ["page"], "tabId": 1
 
 - 可用类别：`page`、`browser`、`network`、`write`、`destructive`、`external`；
 - `read` 永远允许，不必声明；
-- **`high` 不接受**：任意代码执行 / 第三方用户脚本（`run_javascript`、`run_userscript`、
-  `install_userscript`）**任何声明都换不到**，只能在浏览器面板里由用户当次批准；
+- **`high` 不接受**：第三方用户脚本（`run_userscript`、`install_userscript`）与 `save_skill`
+  **任何声明都换不到**，只能在浏览器面板里由用户当次批准；
+- 注意 `run_javascript` 在新 master 已归为 **`page`**（与产品风险模型一致）：声明 `page` 即可执行。
+  这与 `page_action` 的白名单无关 —— 后者仍然拒绝它（见下文）；
 - 未知类别**报错而不是被忽略** —— 静默丢弃一条安全声明比拒绝更危险；
 - 执行前**逐个**工具判定（汇合点是 `executeAnyTool`，覆盖串行与并行两条路径），
   未声明的类别被拒时给出「缺哪个类别、怎么补」的可操作提示。
@@ -320,7 +322,7 @@ Restart opencode after adding the server or skill (config is loaded once at star
 - ⛔ 已放弃 / 未实现: `kb_search` / `kb_get`（见上文「未实现」说明）、`browser_search_read`。
 - ✅ P3: `agent_task` / `agent_task_status` / `agent_task_cancel` —— 把**一整条任务**交给
   扩展内置 agent，异步 job + 游标轮询；授权形态是开工前声明 `allowRisk`，
-  执行前逐个判定（`high` 任何声明都换不到）。
+  执行前逐个判定（`high` 任何声明都换不到；`run_javascript` 属 `page`，声明 `page` 即可）。
   **真实浏览器 E2E 已通过（2026-10-14）**：`node scripts/verify-agent-task.mjs --run`
   → **16 通过 / 0 失败**，覆盖 `open_tab` → 启动 → 游标增量 → `completed` → **答复回传**。
 - ⛔ 仍不开放: `upload_file`（发带图内容的前提）—— 放开它等于允许任何拿到桥接 token

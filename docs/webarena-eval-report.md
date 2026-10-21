@@ -36,7 +36,8 @@
 1. 起始页 `http://localhost:7780/admin`，**自动登录成功**（见下方"请求头"一节），进入后台。
 2. 导航到 Reports → Bestsellers，找到 Period 下拉与 From/To 日期框。
 3. 卡点：Period 是原生 `<select>`，`click_element` 打不开下拉；没有可用的日期输入路径；
-   唯一能设值的 `run_javascript` 属 **high 风险**（桥接场景任何 `allowRisk` 都换不到）。
+   唯一能设值的 `run_javascript` 属 **high 风险**（旧分支上桥接场景任何 `allowRisk` 都换不到）。
+   ⚠ 新 master 已把 `run_javascript` 归为 `page`，声明 `page` 即可用 —— **本案例需要在当前分支重测**。
 4. 反复尝试后触发**无进展守卫**，agent 结束并如实回答"没有拿到数据，不凭空给答案"。
 
 **判定**：这是 **agent 能力边界**（表单控件处理 + 高风险工具的取舍），不是评测 harness 故障。
@@ -68,22 +69,48 @@ evaluator 只认 `<out>/<task_id>/agent_response.json` 与 `<out>/<task_id>/netw
 `http://127.0.0.1:7801`（我们的桥接地址），并告警 "This is not recommended"。
 模板见 `integrations/webarena/site-config.example.json`。
 
-### 4.4 待修：轮询偶发 `state=undefined`（未改，风险已记录）
+### 4.4 轮询偶发 `state=undefined`（已修：显式收口，不静默重试）
 
 长任务轮询中偶尔会出现 `state=undefined`（同一次运行里与 `state=running` 交替）。
-`waitForJob` 以 `running === false` 作为结束条件，因此这种响应会被**继续轮询**；
+`waitForJob` 原先只以 `running === false` 作为结束条件，因此这种响应会被**继续轮询**；
 若 job 恰好在一次缺字段的快照上结束，就会一直等到墙钟超时，把"已完成"误记为超时失败。
 本轮见过一次疑似症状（240s 那条在 `seq` 长时间不动后判失败）。
-建议：把"连续多次 `seq` 不变且响应缺 `running`"视为异常并显式报错，或对
-`ok && state ∈ 终态集合` 直接收口。**不要**用静默重试掩盖。
+
+修复（`integrations/webarena/mcp-client.mjs`）：
+
+- `ok && state ∈ {completed, failed, cancelled, stalled}` → **直接收口**（不再依赖 `running` 字段）；
+- `ok === false` → 立即抛 `STATUS_ERROR`（job 不存在/服务异常不是"还在跑"）；
+- 连续 3 次 `seq` 不变且 `state`/`running` 都缺失 → 抛 `STATUS_MISSING_STATE`，并带上最后一份快照；
+- 只有 seq 前进或状态字段存在时才算正常快照，避免把真实运行误判为异常。
+
+测试：`tests/webarena-mcp-client.test.mjs` 新增 3 条（终态缺 running 立即收口 / 空快照连续报错 / ok=false 报错）。
+**仍然不静默重试** —— 异常就当异常记录，让失败原因可见。
 
 ### 4.5 运维坑
 
 - **Docker CLI 不在 PATH**，且 `credsStore=desktop` 找不到 `docker-credential-desktop`。
   把 `%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin` 加进 PATH 即可。
 - **7801 可能被一个长期常驻的 MCP server 占用**（实测遇到过两天前启动的实例）。
-  评测会复用它——意味着"跑的是那个进程加载的旧代码"。建议评测前重启该服务，
-  或加一条"端口被非本次启动的 server 占用就明确告警"。
+  评测会复用它——意味着"跑的是那个进程加载的旧代码"。现已**显式告警**：
+  `ensureBridgeServer` 在复用前打印对方 `pid` 与扩展连接状态，并提示先重启（见 `describeBridgeReuse`）。
+
+### 4.6 多个扩展同时连 7801（2026-10-20 复跑定位并修复）
+
+**现象**：task 21 连续两次在 `seq=0 state=running` 之后变成 3 次
+`state=undefined`，`RECALLFLOW_EVAL_DEBUG` 打出的原文是
+`{"_raw":"unknown method: agent_task_status","_isError":true}`。服务端日志里同时出现
+两条 `extension connected (websocket)`。
+
+**根因**：本机另一个浏览器里也加载了 RecallFlow，它的扩展同样连 `127.0.0.1:7801`。
+服务端 `extSocket` 被后连者覆盖，HTTP 长轮询又是共享队列 —— 请求可能落到**没有
+`agent_task_status` 的旧扩展**上。这不是页面能力问题，也不是模型问题，是评测隔离漏洞。
+
+**修复**：
+- 每次评测生成一次性 `RECALLFLOW_BRIDGE_TOKEN`（server 与本次扩展设置同值），
+  其它扩展被 401 拒绝；
+- 扩展 `lib/bridge/relay.js` 不再启动时缓存 token，**每轮 `/poll` 重读**，
+  所以设置写入后立即生效（不需要重启 service worker）。
+- 验证：同一 task 21 从"稳定 unknown method"变为正常跑完（SUCCESS）。
 
 ## 5. 可信度与边界（别过度解读）
 
@@ -94,7 +121,9 @@ evaluator 只认 `<out>/<task_id>/agent_response.json` 与 `<out>/<task_id>/netw
   gitlab / wikipedia / map 未拉（体积大，wikipedia 还需 ZIM、map 需数据 tar）。
 - **覆盖面错位**：WebArena 是英文、标准 HTML 的自建站，测不到本扩展的差异化能力
   （跨域 iframe / Shadow DOM / canvas 坐标点击 / CDP 可信事件 / 视觉 / 中文站）。
-- **`high` 风险工具永远拿不到**（`run_javascript` / 用户脚本 / 上传），依赖它们的任务注定失败。
+- **工具权限跟随产品风险模型**：`run_javascript` 在新 master 是 `page`（声明 `page` 即可），
+  真正的 `high`（userscript / install_userscript / save_skill）仍然永远拿不到；
+  `upload_file` 是 `destructive`，默认不声明就不放行。
 
 ## 6. 复现步骤
 
@@ -109,6 +138,8 @@ docker exec webarena-verified-shopping env-ctrl status   # 期望 [OK]
 npx playwright install chromium
 
 # 2) 实跑（6 条 shopping retrieve）
+#    一次性 token：防止本机其它浏览器里的扩展也连 7801 抢请求（见 4.6）
+export RECALLFLOW_BRIDGE_TOKEN=$(openssl rand -hex 12)
 RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/run-webarena.mjs \
   --tasks webarena-verified.json --task-id 21,22,23,24,25,26 \
   --site-url SHOPPING=http://localhost:7770 \
@@ -124,7 +155,83 @@ admin 站另加：`--site-url SHOPPING_ADMIN=http://localhost:7780/admin --heade
 
 ## 7. 下一步建议（按性价比排序）
 
-1. **修 4.4 的轮询收口**（小改、影响所有长任务的可信度）。
+1. ~~修 4.4 的轮询收口~~（已修：终态直接收口 + 空快照/ok=false 显式报错；见 4.4）。
 2. **扩大 retrieve 样本**到 30~50 条（同配置跑 3 次报分布），先把"稳定基线"立起来。
 3. 再考虑 mutate / navigate；那之前要先把登录态（per-user 凭据）与网络 evaluator 的 config 打通。
 4. 最后才谈 258 条 hard 子集（要先拉全 6 站，成本最高）。
+
+## 8. 2026-10-20 复跑（token 隔离后）
+
+环境：Docker 站点（shopping / shopping_admin / reddit）已就绪、`webarena-verified.json`
+（812 条）从官方仓库下载、headed Chromium + 扩展、`deepseek-chat`。
+代码：pre-rebase 提交 `27f70ca` 的 worktree + 本轮 4.4 / 4.6 修复
+（当时新 master 还没有 `agent_task`/bridge；这是分支迁移前的历史结果，迁移后的结果见 8.2）。
+
+一次完整 6 条实跑 + 官方 evaluator（不带 `--task-ids` 之外的口径修改）：
+
+| task | RecallFlow 终态 | 官方判定 | 失败原因 |
+| --- | --- | --- | --- |
+| 21 | SUCCESS | ❌ | 期望 4 项，只交出 2 项（`Catso`、`Anglebert Dinkherhump`） |
+| 22 | NOT_FOUND_ERROR | ✅ | 正确答案就是查不到 |
+| 23 | SUCCESS | ✅ | — |
+| 24 | UNKNOWN_ERROR | ❌ | 答复内容对，但**没有输出 JSON 终态块**（adapter 如实记 UNKNOWN_ERROR） |
+| 25 | UNKNOWN_ERROR | ❌ | 同上（自然语言结论正确：Roxanne Brandon Coffey / Nelson） |
+| 26 | UNKNOWN_ERROR | ❌ | 同上（自然语言结论正确：RemyRRemyR / Bob in Vegas） |
+
+**官方分：2/6**（`success=[22,23]`）。与早先 5/6 的差异不是"分数退化"这一句话能概括的：
+
+- 24/25/26 是**模型契约合规**问题：结论已经算对，但最后没吐 ```json 块。
+  这三次是同一形态，属于当前最值得修的稳定性问题（不是判据问题，也不是 harness 故障）。
+- 21 是**检索不完整**（少 2 个名字），属于能力问题。
+- 22 说明"NOT_FOUND_ERROR 被官方判对"仍然成立。
+
+同一轮里先跑过一次未做 token 隔离的 6 条，也是官方 2/6，但失败构成不同
+（21 harness 抢占、24 缺 JSON、25/26 多交了名字）。**单次 6 条不能当稳定分数**，
+两次复跑的共同信号只有两个：22/23 稳定过；24-26 的 JSON 契约或取舍不稳定。
+
+后续优先级调整为：
+
+1. **先修"最后不吐 JSON"**（24/25/26 同形态，收益最大）：在 agent 收尾处强制/校验终态块，
+   没有就重试一次而不是直接结束；不要把自然语言结论在 harness 里"翻译"成 JSON（那会伪造成功）。
+2. 再做 4.6 的隔离长期化（已修代码，但复现步骤要写进文档与脚本默认值）。
+3. 样本扩到 30~50 条 × 3 次，按分布报告；在此之前不要用 2/6 或 5/6 下结论。
+
+### 8.1 用 `deepseek-flash` 复跑（评测应使用的模型）
+
+同一批 6 条、同一环境，加 `RECALLFLOW_EVAL_MODEL=deepseek-flash` 重跑：
+
+**官方分：4/6**（`success=[22,24,25,26]`，`failed=[21,23]`）。
+
+| task | 官方 | 原因 |
+| --- | --- | --- |
+| 21 | ❌ | 检索不全：只交出 `Dibbins`，期望 4 项（Catso / Dibbins / Anglebert Dinkherhump / Michelle Davis） |
+| 23 | ❌ | 未吐 JSON 终态块 → `UNKNOWN_ERROR` |
+| 22 / 24 / 25 / 26 | ✅ | 22、24 的 `NOT_FOUND_ERROR` 被官方判对；25/26 检索结果正确 |
+
+对比 `deepseek-chat` 的 2/6（失败为 21/24/25/26）：**换成 flash 后失败构成完全不同**
+（21 仍是能力问题，23 是契约合规问题）。样本只有 6 条，这个对比只能算观察，
+不能据此宣布谁更稳 —— 但可以确认：**之前 2/6 不是 harness 故障，也不是 token 修复引入的**。
+
+### 8.2 分支迁移后的首次评测（新 master + bridge + webarena）
+
+`feat/webarena-eval` 已改为基于 `feat/bridge-new-master`（新 master + 移植的 16 个
+bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同一分支上。
+用 `deepseek-flash`、一次性 token 重跑 6 条 shopping retrieve：
+
+**官方分：2/6**（`success=[24,26]`；21/23/25 failure，22 error）。
+
+| task | 官方 | 原因 |
+| --- | --- | --- |
+| 21 | ❌ | 检索不全：只交出 `Dibbins` |
+| 22 | ⚠ error | agent 返回 `SUCCESS + ["AZ Guy"]`，与期望 `NOT_FOUND_ERROR` 冲突，evaluator 报 schema 错 |
+| 23 | ❌ | 未吐 JSON → `UNKNOWN_ERROR` |
+| 24 | ✅ | `NOT_FOUND_ERROR` 被判对（旧分支上这条是缺 JSON） |
+| 25 | ❌ | 未吐 JSON → `UNKNOWN_ERROR` |
+| 26 | ✅ | 检索正确 |
+
+关键意义：**评测现在真的跑在 rebase 后的分支上**（不再依赖 pre-rebase worktree），
+`agent_task` 通道、`run_javascript` 的 `page` 新语义、知识库 IndexedDB 都在新链路上验证过。
+分数仍只有 2/6，说明分支迁移不是分数变化的主因；**23/25 的"不吐 JSON"依旧是最大的稳定问题**。
+
+注意 21 的输出从旧分支的 778 条事件涨到 3738 条（新 master 的 agent 循环更啰嗦），
+大量事件被 `omitted` 截断；这不影响终态，但值得作为下一步的成本/收敛观察点。

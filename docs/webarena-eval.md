@@ -74,6 +74,23 @@ RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/run-webarena.mjs \
 "agent 说它看到了登录框"，而不是报错）。因此 `run.mjs` 在 `open_tab` 之后会让 Playwright
 **接管该 tab 再导航一次**（见 `harness.navigateTabWithHeaders`），头才跟得上。
 
+### 评测前：用一次性 token 隔离本机其它扩展（实测必需）
+
+本机如果还开着一个加载了 RecallFlow 的浏览器，它的扩展也会连 `127.0.0.1:7801`。
+评测启动的扩展与它**同时在线**时，请求可能被路由到版本不同的那个 —— 症状是任务刚好
+跑起来就变成 `unknown method: agent_task_status`（我们用 task 21 稳定复现过）。
+
+做法：每次评测生成一个一次性 token，server 与本次扩展设置用同一个值；其它扩展会被 401 拒绝。
+
+```powershell
+$env:RECALLFLOW_BRIDGE_TOKEN = -join ((1..24) | ForEach-Object { "{0:x}" -f (Get-Random -Max 16) })
+$env:RECALLFLOW_EVAL_API_KEY = "sk-xxx"
+```
+
+扩展侧 `lib/bridge/relay.js` **每轮轮询都会重读**这个 token（不再启动时缓存一次），
+所以 `configureExtension` 写入设置后立即生效，不需要重启扩展。
+更省事的替代：评测前关掉其它浏览器里加载 RecallFlow 的实例。
+
 ### 评分（官方 evaluator，本机无需 Python）
 
 官方 `webarena-verified` 是 Python 包，用 Docker 跑即可（会写 `<out>/<task_id>/eval_result.json`）：
@@ -99,16 +116,19 @@ evaluator 会"best-effort 从 HAR 猜站点地址"，实测它猜到的可能是
 - **"否"答对也算对**：22/24 我们这边记 `NOT_FOUND_ERROR`（空数组），官方判 SUCCESS
   —— 那两条的正确答案本来就是"没有这样的评论者"。
 - **长表单任务是当前短板**：`shopping_admin` 的 task 0 能跑通全流程（自动登录成功、
-  进到 Bestsellers 报表的日期表单），但**卡在原生 `<select>` / 日期输入**：
-  `run_javascript` 属 high 风险拿不到授权，随后触发无进展守卫而结束。
-  这是 **agent 能力边界**，不是 harness 故障（详见任务答复原文 `recallflow.json`）。
-
+  进到 Bestsellers 报表的日期表单），但**卡在原生 `<select>` / 日期输入**。
+  这份记录来自旧分支：当时 `run_javascript` 属 high 风险、拿不到授权，随后触发无进展守卫而结束。
+  ⚠ 新 master 已把 `run_javascript` 归为 `page`，声明 `page` 后即可用（见下方边界）；
+  该案例需要在当前分支重测，不能直接沿用旧结论。
 
 ## 已知边界（诚实记录）
 
 - **必须 headed**：headless 下 MV3 扩展的 service worker 不注册（见 `tests/e2e/playwright.config.mjs`）。CI 用 `xvfb-run`。
-- **审批**：桥接场景没有面板可点同意。写操作靠 `agent_task` 的声明式 `allowRisk` 放行；
-  `high`（`run_javascript` / 用户脚本 / 上传本地文件）**任何声明都换不到** —— 需要这些动作的任务做不了。
+- **审批**：桥接场景没有面板可点同意。工具权限靠 `agent_task` 的声明式 `allowRisk` 放行，
+  实际判定使用**工具元数据里的 risk**（与产品当前模型一致，不另造同义词）：
+  - `run_javascript` 现在是 `page`：声明 `page` 即可执行（会改变可评测的能力面）；
+  - 真正的 `high`（`run_userscript` / `install_userscript` / `save_skill`）**任何声明都换不到**；
+  - `upload_file` 是 `destructive`：默认 `allowRisk` 不含它，需要显式声明才会放行。
 - **状态隔离**：RecallFlow 的记忆（知识库 / 站点记忆 / 技能 / 会话）落 `chrome.storage`。
   本评测**每条任务清空存储并新建 profile**（见 `harness.mjs`），否则分数不可复现、无法归因。
 - **覆盖面错位**：WebArena 是英文、标准 HTML 的自建站，**测不到**本扩展最值钱的能力

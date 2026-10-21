@@ -8,8 +8,9 @@ import http from 'node:http';
 
 import { McpBridgeClient, BridgeError } from '../integrations/webarena/mcp-client.mjs';
 
-function startFakeBridge() {
+function startFakeBridge(opts = {}) {
   const state = { statusCalls: 0, calls: [] };
+  const statuses = Array.isArray(opts.statuses) ? opts.statuses.slice() : null;
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/health') {
       res.setHeader('content-type', 'application/json');
@@ -48,8 +49,9 @@ function startFakeBridge() {
         else if (name === 'agent_task') payload = { ok: true, jobId: 'job-1' };
         else if (name === 'agent_task_status') {
           state.statusCalls += 1;
-          payload =
-            state.statusCalls < 2
+          payload = statuses
+            ? statuses[Math.min(state.statusCalls - 1, statuses.length - 1)]
+            : state.statusCalls < 2
               ? { running: true, state: 'running', seq: 1, events: [] }
               : { running: false, state: 'completed', seq: 2, events: [], result: '```json\n{"task_type":"retrieve","status":"SUCCESS","retrieved_data":["x"]}\n```' };
         }
@@ -103,6 +105,54 @@ test('McpBridgeClient：waitForJob 轮询到终态并拿到结果', async () => 
     assert.equal(fin.running, false);
     assert.equal(fin.state, 'completed');
     assert.match(fin.result, /retrieved_data/);
+  } finally {
+    server.close();
+  }
+});
+
+test('McpBridgeClient：state 已是终态但缺 running 时立即收口（不死等到超时）', async () => {
+  const { server, port, state } = await startFakeBridge({
+    statuses: [{ ok: true, state: 'completed', seq: 2, events: [], result: 'done' }],
+  });
+  const client = new McpBridgeClient({ host: '127.0.0.1', port });
+  try {
+    await client.connect();
+    const fin = await client.waitForJob('job-1', { pollMs: 5, timeoutMs: 2000 });
+    assert.equal(fin.state, 'completed');
+    assert.equal(fin.result, 'done');
+    assert.equal(state.statusCalls, 1);
+  } finally {
+    server.close();
+  }
+});
+
+test('McpBridgeClient：连续空快照（缺 state/running 且 seq 不动）显式报错，不静默空转', async () => {
+  const { server, port } = await startFakeBridge({
+    statuses: [{ ok: true, seq: 1, events: [] }],
+  });
+  const client = new McpBridgeClient({ host: '127.0.0.1', port });
+  try {
+    await client.connect();
+    await assert.rejects(
+      () => client.waitForJob('job-1', { pollMs: 5, timeoutMs: 2000 }),
+      (e) => e instanceof BridgeError && e.code === 'STATUS_MISSING_STATE'
+    );
+  } finally {
+    server.close();
+  }
+});
+
+test('McpBridgeClient：ok=false 直接抛错，而不是当"还在跑"继续轮询', async () => {
+  const { server, port } = await startFakeBridge({
+    statuses: [{ ok: false, error: '未找到该 job' }],
+  });
+  const client = new McpBridgeClient({ host: '127.0.0.1', port });
+  try {
+    await client.connect();
+    await assert.rejects(
+      () => client.waitForJob('job-1', { pollMs: 5, timeoutMs: 2000 }),
+      (e) => e instanceof BridgeError && e.code === 'STATUS_ERROR'
+    );
   } finally {
     server.close();
   }

@@ -74,10 +74,37 @@ function dryRun(tasks, { allowRisk }) {
   return bad ? 1 : 0;
 }
 
+/** /health 是否像一个活着的桥接服务（有 pid / ws / ok 任一字段）。 */
+function looksLikeBridge(h) {
+  return Boolean(h && (h.pid || h.ws !== undefined || h.ok !== undefined));
+}
+
+/**
+ * 复用**已存在**的桥接服务时的告警文案。
+ *
+ * 为什么必须说：7801 上可能挂着一个两天前启动的常驻实例（报告 4.5 实测遇到过）。
+ * 复用它意味着"跑的是那个进程加载的旧代码" —— 本轮代码修复全部不生效，
+ * 而现象只是"评测结果没变"，不会报错。静默复用是最容易把结论带偏的一处。
+ */
+export function describeBridgeReuse(h) {
+  if (!looksLikeBridge(h)) return '';
+  const pid = h.pid ? 'pid=' + h.pid : 'pid 未知';
+  const ws = h.ws ? '扩展已连上' : '扩展未连上';
+  return (
+    '警告：7801 上已有桥接服务在跑（' + pid + '，' + ws + '），本次将复用它 —— ' +
+    '它可能加载的是旧代码（实测遇到过两天前启动的实例）。评测前建议重启该服务，' +
+    '否则本轮修复可能不生效且不会报错。'
+  );
+}
+
 /** 确保 7801 上的桥接服务在跑；不在就拉起一个（先连上的是它，扩展随后自动连）。 */
 async function ensureBridgeServer(client) {
   const h = await client.health();
-  if (h && (h.pid || h.ws !== undefined || h.ok !== undefined)) return null;
+  const reuse = describeBridgeReuse(h);
+  if (reuse) {
+    console.warn(reuse);
+    return null;
+  }
   const child = spawn(process.execPath, [path.join(MCP_DIR, 'index.js'), '--http'], {
     cwd: MCP_DIR,
     stdio: 'inherit',
@@ -86,7 +113,7 @@ async function ensureBridgeServer(client) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     const probe = await client.health();
-    if (probe && (probe.pid || probe.ws !== undefined || probe.ok !== undefined)) return child;
+    if (looksLikeBridge(probe)) return child;
     await new Promise((r) => setTimeout(r, 400));
   }
   throw new Error('桥接服务 15s 内没起来（' + path.join(MCP_DIR, 'index.js') + ' --http）');

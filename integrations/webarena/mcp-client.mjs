@@ -16,6 +16,14 @@ export class BridgeError extends Error {
   }
 }
 
+/** job 终态：与 lib/bridge/agent-job.js 的 JOB_STATE 对齐，不另造同义词。 */
+export const TERMINAL_JOB_STATES = Object.freeze(['completed', 'failed', 'cancelled', 'stalled']);
+
+// 连续多少次「seq 不动且响应缺 state/running」才判定为快照异常。
+// 一次可能是瞬时抖动；连续三次仍如此，就不是抖动了 —— 此时静默重试只会把
+// "已经结束的任务"拖到墙钟超时（见 docs/webarena-eval-report.md 4.4）。
+const DEFAULT_MAX_STALE = 3;
+
 export class McpBridgeClient {
   constructor(opts = {}) {
     this.host = opts.host || '127.0.0.1';
@@ -151,18 +159,51 @@ export class McpBridgeClient {
    * 一个没人能回答的审批会让 job 永远停在 running（桥接侧 90s 后改判 stalled）。
    * 评测脚本若死等，整批任务会卡在一条上，而不是把这一条如实记为失败继续跑。
    *
+   * 收口判据（不能只看 `running === false`）：
+   *   1. `ok === true` 且 `state` 是终态 → 直接收口。实测见过 `state` 正确却缺 `running`
+   *      的快照；此时死等 `running === false` 会把"已完成"拖成超时。
+   *   2. `ok === false` → 显式抛错。job 不存在/服务异常不是"还在跑"，重试只是掩盖。
+   *   3. 连续多次 `seq` 不变且 `state`/`running` 都缺失 → 显式抛错。
+   *      一次可能是抖动，三次仍是空快照就不是抖动；静默重试会把失败伪装成超时。
+   *
    * @param {(progress:{seq:number,state:string,omitted:number,events:number})=>void} [onProgress]
    */
-  async waitForJob(jobId, { pollMs = 3000, timeoutMs = 300000, onProgress } = {}) {
+  async waitForJob(jobId, { pollMs = 3000, timeoutMs = 300000, maxStale = DEFAULT_MAX_STALE, onProgress } = {}) {
     const deadline = Date.now() + timeoutMs;
     let seq = 0;
     let last = null;
+    let stale = 0;
     while (Date.now() < deadline) {
       const s = await this.agentTaskStatus({ jobId, sinceSeq: seq });
-      if (s && s.seq !== undefined) seq = Number(s.seq) || seq;
+      const nextSeq = s && s.seq !== undefined ? Number(s.seq) || seq : seq;
+      const advanced = nextSeq > seq;
+      seq = nextSeq;
       last = s;
-      if (onProgress) onProgress({ seq, state: s.state, omitted: s.omitted, events: (s.events || []).length, raw: s });
-      if (s.running === false) return s;
+      if (onProgress) onProgress({ seq, state: s && s.state, omitted: s && s.omitted, events: (s && s.events ? s.events : []).length, raw: s });
+
+      if (!s) {
+        stale += 1;
+      } else if (s.ok === false) {
+        throw new BridgeError('agent_task_status 返回 ok=false（' + (s.error || '未给出原因') + '）', {
+          code: 'STATUS_ERROR',
+          jobId,
+          last: s,
+        });
+      } else if (s.running === false || TERMINAL_JOB_STATES.includes(s.state)) {
+        return s;
+      } else if (s.state === undefined && s.running === undefined && !advanced) {
+        stale += 1;
+      } else {
+        stale = 0;
+      }
+
+      if (stale >= maxStale) {
+        throw new BridgeError(
+          'agent_task_status 连续 ' + stale + ' 次返回空快照（缺 state/running，seq 停在 ' + seq + '）；' +
+            '不静默重试，按异常收口以免把已完成任务误记为超时。',
+          { code: 'STATUS_MISSING_STATE', jobId, last }
+        );
+      }
       await new Promise((r) => setTimeout(r, pollMs));
     }
     return Object.assign({}, last, { running: true, timedOut: true });
