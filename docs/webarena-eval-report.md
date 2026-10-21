@@ -292,3 +292,23 @@ bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同�
 
 ⚠ 这仍是一次 6 条样本。21 的改善来自**提示层判据**，不是模型能力突变；
 下一步仍应扩到 30~50 条 × 3 次，并按分布报告。
+
+### 8.6 rebase 到 `origin/master`（493f55d）后复跑：官方 6/6
+
+把 `feat/webarena-eval` 的 26 个提交 rebase 到新的 `origin/master`
+（`493f55d`，Merge PR #1 / opt-agent-and-test-iteration）。rebase 本身无冲突，
+但新 master 的两处重构需要在**测试层**适配：
+
+- `toolNeedsApproval` 从 `agent.js` 搬到 `lib/assistant/approval-policy.js`：
+  `bridge-agent-policy` 的映射漂移门禁改为 import `APPROVAL_CATEGORY_BY_RISK`，不再读源码；
+- 新 master 的 `assertion-quality` 棘轮不允许新增"读源码断言"：
+  `final-json-retry` / `mcp-dispatch` 改为直接 import 纯函数
+  （新增 `shouldRetryFinalJson` / `resolveAgentBudgetGuard`）做行为断言；
+- `content.js` 重新构建后无差异（新 master 有产物新鲜度门禁）。
+
+同一批 6 条、`deepseek-flash`、一次性 token 复跑：
+
+**官方分：6/6**（`success=[21,22,23,24,25,26]`）。
+
+结论：6/6 不是只在旧基线上成立的偶然结果 —— 在新 master（含 opt 分支的
+agent/panel/审批重构）上同样复现。仍未扩样本，下一步仍是 30~50 条 × 3 次。

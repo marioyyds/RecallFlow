@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { collectAgentTools, executeAnyTool } from '../lib/assistant/mcp.js';
+import { resolveAgentBudgetGuard } from '../lib/assistant/agent.js';
 
 test('collectAgentTools: 返回 {tools, mcpIndex} 结构', async () => {
   const r = await collectAgentTools({}, { includeMcp: false });
@@ -158,32 +159,14 @@ test('executeAnyTool: 守卫抛异常不得让整轮崩掉（只读守卫失败�
 // 但 runAgentStream **自己造 ctx**，调用方根本没有参数能塞进去 ——
 // 于是判定永不生效、也不会报错，只会静默放行。
 // 对一条安全边界来说，"没生效"比"报错"危险得多，所以把它钉成门禁。
+//
+// 这里用行为断言（直接调用取守卫的纯函数）；relay → settings 的那段接线由
+// tests/relay-dispatch.test.mjs 的注入 runner 行为测试覆盖。
 
-test('接线：runAgentStream 必须把 settings.agentBudgetGuard 装到 ctx 上', async () => {
-  const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
-  // ctx 初始化里必须出现该字段
-  assert.match(src, /agentBudgetGuard:/, 'agent.js 的 ctx 初始化里必须有 agentBudgetGuard（否则守卫永不生效）');
-  // 且必须从 settings 上取 —— 这是调用方唯一能传进来的通道
-  assert.match(
-    src,
-    /agentBudgetGuard:[\s\S]{0,200}settings\.agentBudgetGuard/,
-    'agentBudgetGuard 必须从 settings 上取：runAgentStream 自己造 ctx，调用方没有别的通道'
-  );
-});
-
-test('接线：relay 必须经 settings 把守卫传进 agent 运行入口', async () => {
-  const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
-  assert.match(src, /agentBudgetGuard:/, 'relay 必须设置 agentBudgetGuard');
-  // 必须带在传给运行入口的那个 settings 对象上，而不是挂在别的东西上。
-  assert.match(
-    src,
-    /agentBudgetGuard: guard/,
-    'relay 应把 checkAgentToolBudget 包装出的 guard 挂到 settings 上'
-  );
-  // 运行入口必须是可注入的变量（测试用它确定性地驱动 running 路径），
-  // 而不是直接写死 runAgentStream —— 写死的话"并发/取消/互斥"这几条就测不了。
-  assert.match(src, /let agentRunner = runAgentStream/, 'agentRunner 默认必须是真实的 runAgentStream');
-  assert.match(src, /await agentRunner\(/, '启动任务必须走 agentRunner（而不是直接调 runAgentStream）');
+test('接线：从 settings 取 guard，且只认函数', () => {
+  const guard = () => ({ allowed: true });
+  assert.equal(resolveAgentBudgetGuard({ agentBudgetGuard: guard }), guard);
+  assert.equal(resolveAgentBudgetGuard({}), undefined, '没有 guard 时必须是 undefined（面板路径不拦）');
+  assert.equal(resolveAgentBudgetGuard(null), undefined);
+  assert.equal(resolveAgentBudgetGuard({ agentBudgetGuard: 'not-a-fn' }), undefined, '非函数不得被当成守卫');
 });

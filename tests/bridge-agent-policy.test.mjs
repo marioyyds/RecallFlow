@@ -18,6 +18,7 @@ import {
   preApprovedToolNames,
 } from '../lib/shared/bridge-agent-policy.js';
 import { TOOL_METADATA } from '../lib/assistant/tool-metadata.js';
+import { APPROVAL_CATEGORY_BY_RISK } from '../lib/assistant/approval-policy.js';
 
 /** 用真实元数据做判定的便捷封装（测的就是真实注册表，不是替身）。 */
 function judge(name, rawRisk) {
@@ -146,20 +147,16 @@ test('缺 getMetadata 依赖时不抛异常，且按默认拒绝处理', () => {
   assert.equal(v.allowed, false, '拿不到元数据必须默认拒绝，而不是静默放行');
 });
 
-// ---------------- 与 agent.js 的映射不得漂移 ----------------
+// ---------------- 与审批策略的映射不得漂移 ----------------
 
-test('与 agent.js 的 risk → 审批类别映射不得漂移', async () => {
-  // 本模块刻意复制了 agent.js 的映射（为了零依赖），复制就会漂移，因此这里核对。
-  // agent.js 的 toolNeedsApproval 里那段是权威来源。
-  const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+test('与 approval-policy.js 的 risk → 审批类别映射不得漂移', () => {
+  // 本模块刻意复制了映射（为了零依赖），复制就会漂移，因此这里核对权威来源。
+  // 注意权威来源已从 agent.js 搬到 lib/assistant/approval-policy.js（纯函数、可直接 import）。
   for (const [risk, category] of Object.entries(RISK_TO_CATEGORY)) {
-    // 形如：if (meta.risk === 'external') category = 'mcp';
-    const re = new RegExp("meta\\.risk === '" + risk + "'[^\\n]*category = '" + category + "'");
-    assert.match(
-      src,
-      re,
-      'agent.js 里 risk=' + risk + ' 的类别应仍是 ' + category + '；若改动了审批映射，' +
+    assert.equal(
+      APPROVAL_CATEGORY_BY_RISK[risk],
+      category,
+      'risk=' + risk + ' 的类别应仍是 ' + category + '；若改动了审批映射，' +
         'bridge-agent-policy.js 的 RISK_TO_CATEGORY 必须同步'
     );
   }
