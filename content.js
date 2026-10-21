@@ -3764,10 +3764,11 @@
       partial: true
     };
   }
-  function buildFailedTurn(parts, errorText) {
+  function buildFailedTurn(parts, errorText, liveText) {
     const list = (Array.isArray(parts) ? parts : []).slice();
     const text = String(errorText === void 0 || errorText === null ? "" : errorText).trim() || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09";
-    return { role: "assistant", content: text, parts: list, failed: true };
+    const live = String(liveText === void 0 || liveText === null ? "" : liveText).trim();
+    return { role: "assistant", content: live ? text + "\n\n" + live : text, parts: list, failed: true };
   }
   function stripTrailingSources(text) {
     const s = String(text === void 0 || text === null ? "" : text);
@@ -6626,6 +6627,33 @@
     return html;
   }
   var streamingCursors = /* @__PURE__ */ new WeakMap();
+  function makeContentEl(flow) {
+    if (!flow) return null;
+    const el = document.createElement("div");
+    el.className = "agent-content";
+    flow.appendChild(el);
+    return el;
+  }
+  function renderRunError(flow, contentEl, errText, hasPartial) {
+    const el = hasPartial || !contentEl ? makeContentEl(flow) : contentEl;
+    if (!el) return null;
+    removeStreamCursor(el);
+    el.textContent = String(errText === void 0 || errText === null ? "" : errText);
+    el.style.color = "#e74c3c";
+    return el;
+  }
+  function buildOpenSettingsButton() {
+    const go = document.createElement("button");
+    go.textContent = "\u6253\u5F00\u8BBE\u7F6E";
+    go.style.cssText = "margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;";
+    go.addEventListener("click", () => {
+      try {
+        chrome.runtime.sendMessage({ type: "openOptions" });
+      } catch (e) {
+      }
+    });
+    return go;
+  }
   function removeStreamCursor(host2) {
     const rec = host2 && streamingCursors.get(host2);
     if (!rec) return;
@@ -8479,11 +8507,7 @@
       typingEl = null;
     }
     function ensureTextEl() {
-      if (!flowEl) return null;
-      const el = document.createElement("div");
-      el.className = "agent-content";
-      flowEl.appendChild(el);
-      return el;
+      return makeContentEl(flowEl);
     }
     function pushReasoning(text) {
       const piece = String(text || "");
@@ -9089,27 +9113,17 @@
         } else if (resp.type === "error") {
           removeTypingEl();
           const errText = String(resp.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
-          const errEl = pendingContentEl || ensureTextEl();
-          if (errEl) {
-            removeStreamCursor(errEl);
-            errEl.textContent = errText;
-            errEl.style.color = "#e74c3c";
-          }
+          const hasPartial = Boolean(String(pendingNarration || "").trim());
+          renderRunError(flowEl, pendingContentEl, errText, hasPartial);
           if (resp.needSetup) {
             refreshApiKeyBanner();
-            const go = document.createElement("button");
-            go.textContent = "\u6253\u5F00\u8BBE\u7F6E";
-            go.style.cssText = "margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;";
-            go.addEventListener("click", () => {
-              try {
-                chrome.runtime.sendMessage({ type: "openOptions" });
-              } catch (e) {
-              }
-            });
-            pendingAiMsg.appendChild(document.createElement("br"));
-            pendingAiMsg.appendChild(go);
+            const anchor = pendingAiMsg || flowEl;
+            if (anchor) {
+              anchor.appendChild(document.createElement("br"));
+              anchor.appendChild(buildOpenSettingsButton());
+            }
           }
-          conversation.push(buildFailedTurn(pendingParts, errText));
+          conversation.push(buildFailedTurn(pendingParts, errText, pendingNarration || pendingAcc));
           saveConversation();
           endStream();
           closePort();

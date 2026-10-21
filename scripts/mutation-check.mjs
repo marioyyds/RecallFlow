@@ -479,6 +479,49 @@ const TARGETS = [
       },
     ],
   },
+  {
+    // 失败态的渲染：两条规则错了都不报错，只让用户丢东西（屏幕上丢半截回答 / 记录里丢正文）。
+    file: 'lib/page/chat.js',
+    mode: 'inplace',
+    test: 'tests/chat-error-state.test.mjs',
+    mutations: [
+      {
+        name: '错误覆盖已流出的正文（读到一半报错，回答当场消失）',
+        from: '  const el = hasPartial || !contentEl ? makeContentEl(flow) : contentEl;',
+        to: '  const el = contentEl || makeContentEl(flow);',
+        expectFail: '不许覆盖',
+      },
+      {
+        name: '错误不用红色（和正常正文看起来一样）',
+        from: "  el.style.color = '#e74c3c';",
+        to: "  el.style.color = '';",
+        expectFail: '不许覆盖',
+      },
+      {
+        name: '「打开设置」发错消息类型（用户点不到设置页）',
+        // 锚点用「监听器 + 里面的调用」两行：文件里另有一处同款调用，
+        // 单看那一行不唯一，而变异脚本按**首次出现**替换 —— 不唯一就等于赌文件顺序。
+        from: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e) {}\n  });",
+        to: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openSettings' }); } catch (e) {}\n  });",
+        expectFail: '打开设置页',
+      },
+    ],
+  },
+  {
+    // 失败轮次入库：正文只累积在 pendingNarration 里（要等 end 才进 parts），
+    // 失败走不到 end ⇒ 不带它，一次中途失败就把用户看到的整段回答从记录里抹掉。
+    file: 'lib/page/transcript.js',
+    mode: 'inplace',
+    test: 'tests/transcript.test.mjs',
+    mutations: [
+      {
+        name: '失败轮次只留错误文本（丢掉已经流出的正文）',
+        from: "  return { role: 'assistant', content: live ? text + '\\n\\n' + live : text, parts: list, failed: true };",
+        to: "  return { role: 'assistant', content: text, parts: list, failed: true };",
+        expectFail: '已经流出的正文必须留下来',
+      },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------- 执行

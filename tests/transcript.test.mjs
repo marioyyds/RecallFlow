@@ -749,6 +749,26 @@ test('buildFailedTurn: 错误文本进 content，并标记 failed', () => {
   assert.equal(m.parts.length, 1, '失败前的工具/叙述必须保留');
 });
 
+test('buildFailedTurn: **已经流出的正文必须留下来**（它还没进 parts，而失败走不到 end）', () => {
+  // 失败最常见的样子不是「一步都没跑成」，而是「回答读到一半 API 报错」。
+  // 那半截正文只累积在 pendingNarration 里，要等 'end' 才被 push 进 parts ——
+  // 不带进来的话，一次中途失败就把用户已经看到的整段回答从记录里抹掉了。
+  const m = buildFailedTurn([{ type: 'tool-call', name: 'read_current_page' }], '请求失败：网络中断', '这是我已经读了一半的回答。');
+  assert.equal(m.failed, true);
+  assert.match(m.content, /请求失败：网络中断/);
+  assert.match(m.content, /这是我已经读了一半的回答。/, '半截回答不能丢');
+  assert.ok(
+    m.content.indexOf('请求失败') < m.content.indexOf('这是我已经'),
+    '顺序是「错误在前、正文在后」，与 buildInterruptedTurn 保持一致'
+  );
+  assert.equal(m.parts.length, 1, '工具轨迹照旧保留');
+});
+
+test('buildFailedTurn: 没有流出正文时不留多余空行', () => {
+  assert.equal(buildFailedTurn([], '出错了', '   ').content, '出错了');
+  assert.equal(buildFailedTurn([], '出错了').content, '出错了');
+});
+
 test('buildFailedTurn: 错误只放 content，不额外塞 text part', () => {
   // 塞进去的话导出侧会判定「已内联展示过」而跳过「### 失败」标题
   const m = buildFailedTurn([], '出错了');

@@ -163,9 +163,10 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 > 硬等待降到 2 处、`context.js` / `run-hub.js` 补上变异算子），留着会误导下一个人。
 
 - **`lib/page/chat.js` 主体仍靠 E2E**：4911 行。已经有单测的部分：fab 位置（抽出）、
-  开合/去抖/审批设置面板（轮 89，DOM 桩）、**审批条**与**发送·停止状态**（轮 96，纯函数 + DOM 桩）。
-  仍然只能靠 Playwright 验的：**错误态渲染**（流中断 / 401 / 空响应分别长什么样）、
-  输入路径（回车发送、Esc 关闭浮层）、以及整个消息流的分段渲染。
+  开合/去抖/审批设置面板（轮 89，DOM 桩）、**审批条**与**发送·停止状态**（轮 96，纯函数 + DOM 桩）、
+  **失败态渲染与失败轮次入库**（轮 98）。
+  仍然只能靠 Playwright 验的：断线重连的中断收尾文案、输入路径（回车发送、Esc 关闭浮层）、
+  以及整个消息流的分段渲染。
 - **上下文折叠没有重要性打分**：`collapseOldToolResults` 只按「最后 N 条」切。
   ⚠ 动手前先读 `context.js` 里那段注释 —— 「一次折干净以摊销前缀抖动」是**刻意设计**；
   改成「按需折叠到预算以内」会让请求前缀几乎每轮都变，把前缀缓存命中率换掉。
@@ -804,3 +805,98 @@ CLI 只在被直接调用时跑（`argv[1]` 以 `build-content.mjs` 结尾），
 而且它同时还有 4 条合成数据的行为用例。
 
 全量：**1811 项 / 155 文件全绿**（行为 126 + 静态门禁 29），变异 13 目标 / 46 算子全过。
+
+## 轮 98：失败的那一轮，屏幕和记录会同时丢掉半截回答
+
+失败最常见的形态不是「一步都没跑成」，而是**回答读到一半，API 报错**。
+这条路径上原本有两个独立的洞，而且它们在同一个瞬间一起生效 —— 用户什么都拿不回来。
+
+### 一、屏幕上：错误把已经流出的正文覆盖掉了
+
+```js
+const errEl = pendingContentEl || ensureTextEl();
+errEl.textContent = errText;      // ← 正文就是在这个元素里
+errEl.style.color = '#e74c3c';
+```
+
+`pendingContentEl` 正是流式正文所在的那个块。于是跑到一半失败时，用户刚读完的两屏回答
+**当场换成一行红字**。更糟的是它并没有真的丢 —— 正文还在 `conversation` 里，
+重开面板又会冒出来。同一个事实，两种显示，怎么看都像 bug。
+
+修法不是「别覆盖」这么简单，要分情况：**有半截正文就另起一块追加，没有就原地改**
+（那块元素可能还停在「正在输入」的三个点上，白插一个空块很难看）。
+这段判断被抽成 `renderRunError(flow, contentEl, errText, hasPartial)`，导出直测。
+
+### 二、记录里：失败轮次把正文丢了
+
+```js
+export function buildFailedTurn(parts, errorText) {
+  return { role: 'assistant', content: text, parts: list, failed: true };
+}
+```
+
+正文只累积在 `pendingNarration` 里，**要等 `end` 事件才被 push 进 `parts`**，
+而失败根本走不到 `end`。所以一次中途失败，记录里只剩一行错误文本。
+
+讽刺的是，同一族问题在**断线**那条路上早就修过了 —— `buildInterruptedTurn(parts, liveText, reason)`
+明确带上了 `liveText`，注释还写着「失败/中断最需要留档」。失败这条路当时漏了，
+而失败比断线常见得多。
+
+修法：`buildFailedTurn(parts, errorText, liveText)`，顺序与 `buildInterruptedTurn` 一致
+（**错误在前、正文在后**）。调用点传 `pendingNarration || pendingAcc` —— 必须在 `endStream()`
+之前取，它会把这两个都清空。
+
+### 三、顺带修掉一个会让面板卡死的 TypeError
+
+`needSetup`（缺 API Key）分支里直接 `pendingAiMsg.appendChild(...)`。而 `pendingAiMsg`
+在 `endStream()` 之后是 `null`，错误被重发一次、或者错误晚于收尾到达时就会抛。
+它抛在**端口消息监听器里** ⇒ 后面的「失败轮次入库 / endStream / closePort」全都不执行 ——
+面板会一直停在「正在运行」：停止按钮不消失、发送框禁用、用户只能刷新页面。
+
+现在 `anchor = pendingAiMsg || flowEl`，并顺手把那个按钮抽成 `buildOpenSettingsButton()`，
+它点击后发的 `openOptions` 也第一次有了断言（这是缺 Key 时用户唯一的自救入口）。
+
+### 四、变异验证
+
+4 条算子，全部被抓，且各由**预期的那一条**用例抓住：
+
+| 变异 | 抓住它的用例 |
+| --- | --- |
+| 错误覆盖已流出的正文 | renderRunError：已经流出正文时**追加**，不许覆盖 |
+| 错误不用红色 | 同上（红色是"这是失败"的唯一视觉信号） |
+| 「打开设置」发错消息类型 | 点一下就去打开设置页 |
+| 失败轮次只留错误文本 | buildFailedTurn：**已经流出的正文必须留下来** |
+
+`content.js` 已重建（+39/−25）。全量：**1819 项 / 156 文件全绿**（行为 127 + 静态门禁 29），
+变异 15 目标 / 50 算子全过。
+
+### 五、一处清理（不是代码问题）
+
+`lib/page/chat.js.mutation-backup` 还躺在盘上（`.gitignore` 里，所以 `git status` 看不见）。
+它是上一轮门禁跑完后没被删掉的备份 —— 说明 `removeBackup` 的删除失败是被**静默吞掉**的。
+备份本身无害（源码是对的、下次运行的自愈会扫掉），但「静默」正是这个项目反复吃亏的地方，
+先记在这里：若哪天要动它，记得 `recoverLeftovers` 只在**下一次运行开始时**扫，
+进程被 kill 之后不会立刻自愈。
+
+### 六、顺手收了一条 flaky：Shadow DOM 那条把快照当成了「最终状态」
+
+跑全量时红了一条（`golden: Shadow DOM`），单跑 3/3 绿、再跑一轮全量又全绿 —— 顺序相关的偶发。
+根因不在被测功能，而在断言写法：
+
+```js
+const seen = toolResultsText();
+expect(seen).toContain('咖啡');
+expect(seen, '第二层 shadow 的内容没有读到（穿透深度不足）').toContain('深层组件就绪');
+```
+
+`toolResultsText()` 汇总的是**模型请求里带的工具结果**，而一条工具结果要等到
+**下一次请求**发出才进得来。这一轮若发生两次读取（先浅一层、再深一层），
+第二条会晚到；一次性快照只看到前半段，于是红在「穿透深度不足」上 ——
+而真相只是**还没到**。这和轮 91 那批 flaky 是同一个形状：**拿一次性快照当最终状态**。
+
+改成逐个 `expect.poll`（各自 20s）。这条用例现在单跑 `--repeat-each 3` 3/3 绿，
+全量两轮 54/54。
+
+> 记一笔判据：**只要断言的取值函数会随时间增长，就必须 poll，不能先赋值再断言。**
+> 光看代码很难分辨 `toolResultsText()` 是"当前屏幕状态"还是"累积日志"，所以这里
+> 在注释里写清了它为什么会长。

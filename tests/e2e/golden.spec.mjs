@@ -1195,10 +1195,16 @@ test('golden: Shadow DOM —— 两层 shadow 内的元素都能定位、操作�
 
   // ② 两层 shadow 里的内容都必须进到模型手里
   await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('组件内结果');
-  const seen = toolResultsText();
-  expect(seen).toContain('咖啡');
+  // ⚠ 下面两条**必须各自 poll**，不能用一次性快照 `const seen = toolResultsText()`。
+  // 原因：toolResultsText 汇总的是「模型**请求**里带的工具结果」，而一条结果要等到
+  // **下一次请求**发出才进得来。这一轮若发生两次读取（先浅一层、再深一层），
+  // 第二条会晚到 —— 快照就可能只看到前半段，于是红在「穿透深度不足」上，
+  // 而真相只是「还没到」。实测：两轮全量跑里偶发 1 条红在这一句，单跑 3/3 绿。
+  await expect.poll(() => toolResultsText(), { timeout: 20_000 }).toContain('咖啡');
   // 第二层 shadow（shadow 里套 shadow）的内容 —— 探穿透深度
-  expect(seen, '第二层 shadow 的内容没有读到（穿透深度不足）').toContain('深层组件就绪');
+  await expect
+    .poll(() => toolResultsText(), { timeout: 20_000 })
+    .toContain('深层组件就绪');
 
   await page.close();
 });
