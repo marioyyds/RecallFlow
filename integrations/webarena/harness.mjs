@@ -54,6 +54,60 @@ export async function configureExtension(context, settings) {
   }, settings);
 }
 
+/**
+ * 任务开始前的站点登录（shopping / reddit）。
+ *
+ * 为什么必须有：WebArena-Verified 的公开数据集去掉了原版的 `storage_state`，
+ * 但大量任务是 "my orders / my account" 这类**必须登录**的（原版用 `.auth/*.json` 预置）。
+ * 不登录时 agent 只会如实返回 PERMISSION_DENIED —— 那不是它的失败，是 harness 缺一步。
+ *
+ * 登录使用同一个 persistent context，所以 cookie 对扩展开的 tab 同样有效。
+ * 失败只告警、不中断：游客可做的任务仍然能跑。
+ */
+export async function prepareSiteLogin(context, sites, logins = {}) {
+  const list = Array.isArray(sites) ? sites : [];
+  const needsShopping = list.includes('shopping') && logins.shopping;
+  const needsReddit = list.includes('reddit') && logins.reddit;
+  if (!needsShopping && !needsReddit) return;
+  const page = await context.newPage();
+  try {
+    if (needsShopping) {
+      const { baseUrl, email, password } = logins.shopping;
+      await page.goto(new URL('/customer/account/login/', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!/customer\/account\/login/.test(page.url())) {
+        // 已经是登录态（profile 里已有 cookie），不用再填。
+      } else {
+        await page.fill('#email', email);
+        await page.fill('#pass', password);
+        await page.click('button.action.login');
+        await page.waitForURL(/customer\/account\//, { timeout: 15000 }).catch(() => {});
+        if (/customer\/account\/login/.test(page.url())) {
+          console.warn('[login] shopping 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
+        }
+      }
+    }
+    if (needsReddit) {
+      const { baseUrl, username, password } = logins.reddit;
+      await page.goto(new URL('/login', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!/\/login/.test(page.url())) {
+        // 已是登录态
+      } else {
+        await page.fill('#login-username', username);
+        await page.fill('#login-password', password);
+        await page.getByRole('button', { name: 'Log in' }).click();
+        await page.waitForURL((u) => !/\/login/.test(u.pathname), { timeout: 15000 }).catch(() => {});
+        if (/\/login/.test(new URL(page.url()).pathname)) {
+          console.warn('[login] reddit 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[login] 站点登录异常（继续）：' + String((e && e.message) || e));
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
 /** 构造扩展设置：真模型 + 开 CDP + 关逐次审批干扰（桥接侧仍按 allowRisk 逐次判定）。 */
 export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, agentBudget, extra } = {}) {
   return Object.assign(

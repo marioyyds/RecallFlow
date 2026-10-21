@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites } from '../integrations/webarena/config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin } from '../integrations/webarena/config.mjs';
 
 test('parseArgs：默认值合理（allowRisk 不含 destructive/external）', () => {
   const o = parseArgs(['--tasks', 't.json']);
@@ -107,4 +107,13 @@ test('selectTasks：sites 只保留**完全落在**允许站点内的任务', ()
   // 多站点任务若有一个站点不在允许集合里，跑它只会得到与 agent 无关的失败 → 排除。
   assert.deepEqual(selectTasks(tasks, { sites: ['shopping', 'reddit'] }).map((t) => t.task_id), [1, 2, 4]);
   assert.deepEqual(selectTasks(tasks, { sites: [] }).map((t) => t.task_id), [1, 2, 3, 4]);
+});
+
+test('parseLogin：按第一个冒号切，密码里可以再带冒号；空用户/空密码视为未配置', () => {
+  assert.deepEqual(parseLogin('emma.lopez@gmail.com:WebArena123!'), { user: 'emma.lopez@gmail.com', password: 'WebArena123!' });
+  assert.deepEqual(parseLogin('root:a:b'), { user: 'root', password: 'a:b' });
+  assert.equal(parseLogin(''), null);
+  assert.equal(parseLogin('nocolon'), null);
+  assert.equal(parseLogin(':password'), null);
+  assert.equal(parseLogin('user:'), null);
 });

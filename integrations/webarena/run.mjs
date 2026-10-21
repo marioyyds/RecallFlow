@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites } from './config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin } from './config.mjs';
 import { normalizeTask, buildInstruction, toAgentResponse, validateAgentResponse } from '../../lib/eval/webarena-adapter.mjs';
 import { McpBridgeClient } from './mcp-client.mjs';
 
@@ -43,6 +43,10 @@ const HELP = `RecallFlow × WebArena-Verified 评测编排器
   --ext <path>          扩展根目录（默认仓库根）
   --dry-run             不启浏览器，只校验任务并打印将发出的指令/终态契约
   -h, --help            显示本帮助
+
+需要登录的站点（shopping / reddit）用环境变量提供凭据：
+  RECALLFLOW_EVAL_SHOPPING_LOGIN=email:password
+  RECALLFLOW_EVAL_REDDIT_LOGIN=username:password
 `;
 
 function readTaskFile(file) {
@@ -126,7 +130,7 @@ async function ensureBridgeServer(client) {
 }
 
 async function runOne({ raw, opts, client, settings, outDir }) {
-  const { launchBrowser, configureExtension, closeBrowser, navigateTabWithHeaders: syncTab } = await import('./harness.mjs');
+  const { launchBrowser, configureExtension, closeBrowser, prepareSiteLogin, navigateTabWithHeaders: syncTab } = await import('./harness.mjs');
   const task = normalizeTask(raw);
   const instruction = buildInstruction(task);
   // 目录布局对齐 WebArena-Verified 的 evaluator：它按 `<out>/<task_id>/agent_response.json`
@@ -142,6 +146,8 @@ async function runOne({ raw, opts, client, settings, outDir }) {
   try {
     context = await launchBrowser({ userDataDir: opts.profileDir || '', harPath, extPath: opts.extPath || undefined, extraHTTPHeaders: opts.headers });
     await configureExtension(context, settings);
+    // 公开数据集去掉了原版的 storage_state；需要登录的站点在任务开始前补一次登录。
+    await prepareSiteLogin(context, task.sites, opts.logins || {});
     await client.waitForExtension(60000);
     const opened = await client.openTab(task.startUrls[0]);
     if (!opened || opened.ok === false) throw new Error('open_tab 失败：' + JSON.stringify(opened));
@@ -253,6 +259,14 @@ async function main() {
     bridgeToken,
   });
 
+  // 需要登录的站点凭据（公开数据集不再带 storage_state；按站点登录一次）。
+  // 格式：email:password / username:password；不配就按游客跑（账户类任务会 PERMISSION_DENIED）。
+  const logins = {};
+  const shopLogin = parseLogin(process.env.RECALLFLOW_EVAL_SHOPPING_LOGIN);
+  if (shopLogin) logins.shopping = { baseUrl: opts.siteUrls.SHOPPING || 'http://localhost:7770', email: shopLogin.user, password: shopLogin.password };
+  const redditLogin = parseLogin(process.env.RECALLFLOW_EVAL_REDDIT_LOGIN);
+  if (redditLogin) logins.reddit = { baseUrl: opts.siteUrls.REDDIT || 'http://localhost:9999', username: redditLogin.user, password: redditLogin.password };
+
   let server = null;
   const records = [];
   try {
@@ -261,7 +275,7 @@ async function main() {
     console.log('桥接就绪，开始跑 ' + tasks.length + ' 条任务 → ' + outDir);
     for (const raw of tasks) {
       process.stdout.write('\n▶ task ' + (raw && (raw.task_id !== undefined ? raw.task_id : raw.taskId)) + '\n');
-      records.push(await runOne({ raw, opts: Object.assign({}, opts, { allowRisk }), client, settings, outDir }));
+      records.push(await runOne({ raw, opts: Object.assign({}, opts, { allowRisk, logins }), client, settings, outDir }));
     }
   } finally {
     if (server) server.kill();

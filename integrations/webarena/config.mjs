@@ -151,3 +151,14 @@ export function detectUnresolvedSites(tasks) {
   }
   return [...found];
 }
+
+/**
+ * 解析 `user:password` 形式的站点登录凭据。
+ * 只按**第一个**冒号切：密码里可以再出现冒号；空用户名/空密码视为未配置。
+ */
+export function parseLogin(raw) {
+  const s = String(raw || '');
+  const i = s.indexOf(':');
+  if (i <= 0 || i === s.length - 1) return null;
+  return { user: s.slice(0, i), password: s.slice(i + 1) };
+}
