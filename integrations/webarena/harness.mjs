@@ -66,6 +66,8 @@ export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, agentBud
       cdpEnabled: true,
       siteMemoryEnabled: false,
       verifierEnabled: false,
+      // 评测要求最终答复带 JSON 终态块；缺失时让 agent 只做一次格式补正（不重做任务）。
+      requireFinalJsonBlock: true,
       parallelToolCalls: true,
       toolApproval: true,
       toolApprovalPolicy: { read: true, edit: true, commands: true, browser: true, mcp: true },

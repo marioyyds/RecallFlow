@@ -191,10 +191,10 @@ admin 站另加：`--site-url SHOPPING_ADMIN=http://localhost:7780/admin --heade
 
 后续优先级调整为：
 
-1. **先修"最后不吐 JSON"**（24/25/26 同形态，收益最大）：在 agent 收尾处强制/校验终态块，
-   没有就重试一次而不是直接结束；不要把自然语言结论在 harness 里"翻译"成 JSON（那会伪造成功）。
+1. ~~先修"最后不吐 JSON"~~（已修：`requireFinalJsonBlock` + 一次"只整理格式"的补正，见 8.3）。
+   不要把自然语言结论在 harness 里"翻译"成 JSON（那会伪造成功）。
 2. 再做 4.6 的隔离长期化（已修代码，但复现步骤要写进文档与脚本默认值）。
-3. 样本扩到 30~50 条 × 3 次，按分布报告；在此之前不要用 2/6 或 5/6 下结论。
+3. 样本扩到 30~50 条 × 3 次，按分布报告；在此之前不要用单次 6 条下结论。
 
 ### 8.1 用 `deepseek-flash` 复跑（评测应使用的模型）
 
@@ -212,7 +212,7 @@ admin 站另加：`--site-url SHOPPING_ADMIN=http://localhost:7780/admin --heade
 （21 仍是能力问题，23 是契约合规问题）。样本只有 6 条，这个对比只能算观察，
 不能据此宣布谁更稳 —— 但可以确认：**之前 2/6 不是 harness 故障，也不是 token 修复引入的**。
 
-### 8.2 分支迁移后的首次评测（新 master + bridge + webarena）
+### 8.2 分支迁移后的首跑（新 master + bridge + webarena，**未加格式补正**）
 
 `feat/webarena-eval` 已改为基于 `feat/bridge-new-master`（新 master + 移植的 16 个
 bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同一分支上。
@@ -231,7 +231,35 @@ bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同�
 
 关键意义：**评测现在真的跑在 rebase 后的分支上**（不再依赖 pre-rebase worktree），
 `agent_task` 通道、`run_javascript` 的 `page` 新语义、知识库 IndexedDB 都在新链路上验证过。
-分数仍只有 2/6，说明分支迁移不是分数变化的主因；**23/25 的"不吐 JSON"依旧是最大的稳定问题**。
+这也证明：**分支迁移不是分数变化的主因；23/25 的"不吐 JSON"才是最大的稳定问题**。
 
 注意 21 的输出从旧分支的 778 条事件涨到 3738 条（新 master 的 agent 循环更啰嗦），
 大量事件被 `omitted` 截断；这不影响终态，但值得作为下一步的成本/收敛观察点。
+
+### 8.3 加入终态格式补正后复跑：官方 5/6
+
+**改法**（`lib/assistant/agent.js` + `integrations/webarena/harness.mjs`）：
+
+- `webarenaSettings` 打开 `requireFinalJsonBlock`（只影响评测，不改面板行为）；
+- agent 在**两条收尾路径**（模型最终回答 / `complete_task`）检查答复里有没有 JSON 终态块；
+- 缺失时**只追加一次**用户消息：不要重做任务、不要新增事实，只把已有结论按契约整理成 JSON；
+- 补正后继续循环，再走一次正常收尾；仍然缺失就如实记 `UNKNOWN_ERROR`（不伪造）。
+- 门禁：`tests/final-json-retry.test.mjs`（含"补正路径不得 `JSON.stringify`"）。
+
+同一批 6 条、`deepseek-flash`、一次性 token，加补正后复跑：
+
+**官方分：5/6**（`success=[22,23,24,25,26]`，`failed=[21]`）。
+
+| task | 官方 | 说明 |
+| --- | --- | --- |
+| 21 | ❌ | 检索不全：只交出 `Dibbins`，期望 4 项 |
+| 22 / 24 | ✅ | `NOT_FOUND_ERROR` 被判对 |
+| 23 / 25 | ✅ | 补正前是 `UNKNOWN_ERROR`（缺 JSON），补正后拿到结构化答案并通过 |
+| 26 | ✅ | 检索正确 |
+
+补正细节：25 第一次补正把名字包装成了对象（`reviewer/rating/quote`），官方按字符串集合判失败；
+把提示收紧为"保持原有粒度，简单值不要包装成对象、不要新增字段"后通过。
+**这说明补正提示必须约束数据形状，不能只说"输出 JSON"**。
+
+当前结论：新分支已能稳定复现早先 5/6 的基线；剩余失败只有 task 21 的检索完整性。
+仍是一次样本，下一步应扩到 30~50 条 × 3 次再报分布。

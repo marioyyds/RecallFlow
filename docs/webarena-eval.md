@@ -40,6 +40,11 @@ RecallFlow 交回的是**自然语言答复**，WebArena-Verified 要的是**结
   读不出就如实记 `UNKNOWN_ERROR`，**绝不**把自由文本挽尊成成功。
 - 结果再做一遍 schema 校验（数组同类型、对象键一致、成功不得带 error_details…）。
 
+**终态格式补正（评测专用）**：`webarenaSettings` 打开 `requireFinalJsonBlock`。
+模型收尾（最终回答或 `complete_task`）时若漏了 JSON 块，agent 只追加**一次**
+"只整理格式、不重做任务、不新增事实"的补正提示；仍缺就如实记 `UNKNOWN_ERROR`。
+补正提示会要求保持原有粒度（名字不要包装成对象），否则官方 evaluator 会按字符串集合判失败。
+
 ## 怎么跑
 
 ```bash
