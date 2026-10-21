@@ -14,6 +14,7 @@ import * as pageText from '../lib/page/page-text.js';
 import * as commands from '../lib/page/commands.js';
 import * as picker from '../lib/page/picker.js';
 import * as debugCapture from '../lib/page/debug-capture.js';
+import * as uiVisibility from '../lib/page/ui-visibility.js';
 import * as chat from '../lib/page/chat.js';
 import { redactSensitiveText, redactSensitiveData, redactPageSnapshot, redactUrl } from '../lib/shared/sensitive-data.js';
 
@@ -164,6 +165,8 @@ export function initContentScript() {
   // 助手 UI 只在顶层文档初始化；子框架（含跨域 iframe）只保留消息处理，
   // 供后台按 frameId 在对应框架内执行页面命令（跨域 iframe 打通的关键）。
   if (isTopFrame) chat.initAssistant();
+  // 保存/打印页面时临时隐藏注入的悬浮图标，避免被写进离线 HTML
+  uiVisibility.installSaveVisibilityGuard();
 }
 
 // 打包产物是 iife，模块导出不会自动执行。这里用**副作用**把入口挂到一个约定变量上，
