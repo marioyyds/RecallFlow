@@ -223,3 +223,13 @@ test('uninstall：复原并摘掉全部监听（守卫可以有第二个实例�
     app.close();
   }
 });
+
+test('打印路径的 CSS 兜底仍在：shadow 内 @media print 隐藏 :host', async () => {
+  // JS 那条路依赖 beforeprint 真的被派发；样式这条不依赖事件，是最后一道保险。
+  // 它写在 shadow 里而不是往页面插 <style>，否则另存出来的 HTML 里会多一个"扩展留下的样式标签"。
+  const { PANEL_CSS } = await import('../lib/page/panel-css.js');
+  const block = PANEL_CSS.match(/@media print\s*\{[\s\S]*?:host[\s\S]*?\}/);
+  assert.ok(block, '缺了这条，beforeprint 未触发时打印/导出 PDF 会印出悬浮球');
+  assert.match(block[0], /display:\s*none/);
+  assert.match(block[0], /visibility:\s*hidden/);
+});
