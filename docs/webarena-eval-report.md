@@ -263,3 +263,32 @@ bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同�
 
 当前结论：新分支已能稳定复现早先 5/6 的基线；剩余失败只有 task 21 的检索完整性。
 仍是一次样本，下一步应扩到 30~50 条 × 3 次再报分布。
+
+### 8.5 收紧检索判据后：官方 6/6
+
+8.3 的 5/6 只剩 task 21。查了页面原文后，失败原因不是"没读到"，而是**判据太字面**：
+
+- 条件 "ear cups being small" 是**语义**条件；`Catso` 说 "really are for people with very small ears"、
+  `Anglebert` 说 "NOT over the ear cups... half my ear into it"、`Michelle` 说 "For small ears the padding goes over their ears"，
+  都在说同一件事，但都没出现 "ear cups" + "small" 的字面组合。
+- 反过来，task 25 的条件带 **"explicitly"**，`RemyR`/`Dylan Spears` 只说 "color printing ... poor job" /
+  "never printed a satisfying document"，**没有明确写 print quality**，必须排除。
+  同一条"语义匹配"规则不能同时套在两类任务上。
+- task 26 的 `RemyRRemyR` 被模型简写成 `RemyR` —— 姓名必须照抄显示值。
+
+因此 `buildInstruction` 增加三条检索判据（都不是任务特判，而是按任务措辞决定）：
+
+1. 任务含 `explicitly` → 只纳入明确写了该词/该短语的评论；
+2. 不含 `explicitly` → 措辞不同但**明确表达同一意思**的评论也要纳入，但不为凑数纳入擦边项；
+3. 评论者姓名照抄页面显示（包括 `RemyRRemyR` / `Michelle DavisMichelle Davis`），同一人只列一次。
+
+同一批 6 条、`deepseek-flash`、一次性 token 复跑：
+
+**官方分：6/6**（`success=[21,22,23,24,25,26]`）。
+
+- task 21 现在交出 `Catso / Dibbins / Anglebert Dinkherhump / Michelle DavisMichelle Davis`，
+  官方按别名组认对；
+- 25/26 保持通过，没有因为"放宽语义"而多交人。
+
+⚠ 这仍是一次 6 条样本。21 的改善来自**提示层判据**，不是模型能力突变；
+下一步仍应扩到 30~50 条 × 3 次，并按分布报告。

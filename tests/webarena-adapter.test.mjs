@@ -80,6 +80,14 @@ test('buildInstruction：mutate/navigate 的占位用 null（不是空数组）'
   assert.match(s, /"retrieved_data": null/);
 });
 
+test('buildInstruction：检索判据要区分 explicitly / 语义匹配，且姓名照抄', () => {
+  const s = buildInstruction(normalizeTask(task7));
+  assert.match(s, /explicitly/, '必须告诉模型任务里的 explicitly 是严格条件');
+  assert.match(s, /措辞不同/, '没有 explicitly 时要允许同义表述');
+  assert.match(s, /照抄页面显示/, '姓名必须照抄（RemyRRemyR 这类不能简写）');
+  assert.match(s, /同一个评论者只列一次/, '同一人不能既列显示名又列简写');
+});
+
 // ---------------- extractFinalJson ----------------
 
 test('extractFinalJson：取**最后一个**可解析的 JSON 块（模型常先举例再给结论）', () => {
