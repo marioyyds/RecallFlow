@@ -89,3 +89,22 @@ test('parseArgs：--header 可重复，按冒号切分（值里的冒号保留�
   assert.deepEqual(o.headers, { 'X-M2-Admin-Auto-Login': 'admin:admin1234' });
   assert.throws(() => parseArgs(['--header', 'nocolon']), /Name: value/);
 });
+
+test('parseArgs：--sites 过滤与 --resume', () => {
+  const o = parseArgs(['--tasks', 't.json', '--sites', 'Shopping, REDDIT', '--resume']);
+  assert.deepEqual(o.sites, ['shopping', 'reddit']);
+  assert.equal(o.resume, true);
+  assert.equal(parseArgs(['--tasks', 't.json']).resume, false);
+});
+
+test('selectTasks：sites 只保留**完全落在**允许站点内的任务', () => {
+  const tasks = [
+    { task_id: 1, sites: ['shopping'] },
+    { task_id: 2, sites: ['shopping', 'reddit'] },
+    { task_id: 3, sites: ['shopping', 'gitlab'] },
+    { task_id: 4, sites: [] },
+  ];
+  // 多站点任务若有一个站点不在允许集合里，跑它只会得到与 agent 无关的失败 → 排除。
+  assert.deepEqual(selectTasks(tasks, { sites: ['shopping', 'reddit'] }).map((t) => t.task_id), [1, 2, 4]);
+  assert.deepEqual(selectTasks(tasks, { sites: [] }).map((t) => t.task_id), [1, 2, 3, 4]);
+});

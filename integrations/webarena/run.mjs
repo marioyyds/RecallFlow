@@ -31,7 +31,9 @@ const HELP = `RecallFlow × WebArena-Verified 评测编排器
   --tasks <file>        WebArena 任务 JSON（[...] 或 { "tasks": [...] }）  [实跑必需]
   --out <dir>           产物目录（默认 ./webarena-out）
   --task-id <a,b>       只跑指定 task_id（可重复，逗号分隔）
-  --limit <n>           只跑前 n 条（在 --task-id 过滤之后）
+  --sites <a,b>         只跑 sites 全部落在这些站点内的任务（如 shopping,shopping_admin,reddit）
+  --resume              跳过产物目录里已有 agent_response.json 的任务（断点续跑）
+  --limit <n>           只跑前 n 条（在 task-id / sites / resume 过滤之后）
   --allow-risk <csv>    开工前声明的风险预算（默认 read,page,write,browser,network；不含 high）
   --site-url N=URL      把任务里的 __N__ 占位符映射到本地站点地址（可重复，如 --site-url SHOPPING=http://localhost:7770）
   --header "N: v"       给浏览器上下文加请求头（可重复；WebArena 站点用头自动登录，如 --header "X-M2-Admin-Auto-Login: admin:admin1234"）
@@ -48,6 +50,10 @@ function readTaskFile(file) {
   const abs = path.isAbsolute(file) ? file : path.join(process.cwd(), file);
   if (!fs.existsSync(abs)) throw new Error('任务文件不存在：' + abs);
   return loadTasksFromJson(fs.readFileSync(abs, 'utf8'));
+}
+
+function taskIdOf(t) {
+  return Number(t && (t.task_id !== undefined ? t.task_id : t.taskId));
 }
 
 /** dry-run：把「任务 → 指令」的路径完整走一遍，但不碰浏览器。 */
@@ -208,7 +214,14 @@ async function main() {
     process.exit(2);
   }
   const mapped = rawTasks.map((t) => applySiteUrls(t, opts.siteUrls));
-  const tasks = selectTasks(mapped, { taskIds: opts.taskIds, limit: opts.limit });
+  const outDir = path.resolve(process.cwd(), opts.out || 'webarena-out');
+  let tasks = selectTasks(mapped, { taskIds: opts.taskIds, sites: opts.sites, limit: 0 });
+  if (opts.resume && !opts.dryRun) {
+    const before = tasks.length;
+    tasks = tasks.filter((t) => !fs.existsSync(path.join(outDir, String(taskIdOf(t)), 'agent_response.json')));
+    if (before !== tasks.length) console.log('[resume] 跳过已完成 ' + (before - tasks.length) + ' 条，剩余 ' + tasks.length + ' 条');
+  }
+  if (opts.limit > 0) tasks = tasks.slice(0, opts.limit);
   const unresolved = detectUnresolvedSites(tasks);
   if (unresolved.length) {
     console.error(
@@ -224,7 +237,6 @@ async function main() {
     process.exit(dryRun(tasks, { allowRisk }));
   }
 
-  const outDir = path.resolve(process.cwd(), opts.out || 'webarena-out');
   fs.mkdirSync(outDir, { recursive: true });
 
   const apiKey = process.env.RECALLFLOW_EVAL_API_KEY || process.env.RECALLFLOW_WEBARENA_API_KEY || '';

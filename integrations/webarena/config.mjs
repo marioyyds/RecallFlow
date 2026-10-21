@@ -13,6 +13,7 @@ export function parseArgs(argv) {
     tasks: '',
     out: '',
     taskIds: [],
+    sites: [],
     limit: 0,
     allowRisk: ['read', 'page', 'write', 'browser', 'network'],
     siteUrls: {},
@@ -22,6 +23,7 @@ export function parseArgs(argv) {
     dryRun: false,
     profileDir: '',
     extPath: '',
+    resume: false,
     help: false,
   };
   const list = Array.isArray(argv) ? argv : [];
@@ -34,11 +36,13 @@ export function parseArgs(argv) {
       return v;
     };
     if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--resume') out.resume = true;
     else if (a === '--help' || a === '-h') out.help = true;
     else if (a === '--tasks') out.tasks = next();
     else if (a === '--out') out.out = next();
     else if (a === '--profile-dir') out.profileDir = next();
     else if (a === '--ext') out.extPath = next();
+    else if (a === '--sites') out.sites = next().split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
     else if (a === '--task-id') out.taskIds = out.taskIds.concat(next().split(',').map((x) => Number(x.trim())).filter(Number.isInteger));
     else if (a === '--limit') out.limit = Number(next());
     else if (a === '--poll-ms') out.pollMs = Number(next());
@@ -90,13 +94,22 @@ export function loadTasksFromJson(text) {
   return arr;
 }
 
-/** 按 --task-id / --limit 选择任务，**保持原顺序**。 */
-export function selectTasks(tasks, { taskIds = [], limit = 0 } = {}) {
+/** 按 --task-id / --sites / --limit 选择任务，**保持原顺序**。 */
+export function selectTasks(tasks, { taskIds = [], sites = [], limit = 0 } = {}) {
   const list = Array.isArray(tasks) ? tasks : [];
   let picked = list;
   if (taskIds.length) {
     const want = new Set(taskIds);
-    picked = list.filter((t) => want.has(Number(t && (t.task_id !== undefined ? t.task_id : t.taskId))));
+    picked = picked.filter((t) => want.has(Number(t && (t.task_id !== undefined ? t.task_id : t.taskId))));
+  }
+  if (sites.length) {
+    // only keep tasks whose **every** site is in the allowlist: running a multi-site task
+    // with one site unavailable would silently produce a failure unrelated to the agent.
+    const allow = new Set(sites.map((s) => String(s).toLowerCase()));
+    picked = picked.filter((t) => {
+      const ts = Array.isArray(t && t.sites) ? t.sites : [];
+      return ts.length === 0 || ts.every((s) => allow.has(String(s).toLowerCase()));
+    });
   }
   if (limit > 0) picked = picked.slice(0, limit);
   return picked;
