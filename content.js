@@ -4859,6 +4859,15 @@
   // lib/page/panel-css.js
   var PANEL_CSS = `
     :host { all: initial; }
+    /* \u5B58\u6863\u81EA\u6BC1\u95F8 \u2014\u2014 \u522B\u5220\u8FD9\u6761\u3002
+       Edge/Chromium \u7684\u300C\u53E6\u5B58\u4E3A\u300D\u4F1A\u628A open shadow root \u4E00\u8D77\u5E8F\u5217\u5316\u6210\u58F0\u660E\u5F0F shadow DOM
+       \uFF08\u5DF2\u5B9E\u6D4B\uFF1A\u4FDD\u5B58\u51FA\u6765\u7684\u526F\u672C\u91CC\u80FD\u770B\u5230 .fab \u4E0E\u56FE\u6807\u5F15\u7528\uFF09\uFF0C\u6240\u4EE5"\u53EA\u8981\u56FE\u6807\u5728 shadow \u91CC\u5C31\u5B89\u5168"\u662F\u9519\u7684\u3002
+       \u5BBF\u4E3B\u6539\u7528\u81EA\u5B9A\u4E49\u5143\u7D20 rf-ai-host\uFF1A\u526F\u672C\u91CC\u6CA1\u6709\u6211\u4EEC\u7684\u811A\u672C\uFF0C\u5143\u7D20\u4E0D\u4F1A\u88AB\u5347\u7EA7\uFF0C
+       \u4E8E\u662F\u8FD9\u6761 :not(:defined) \u547D\u4E2D\uFF0C\u6574\u5757 UI \u5728\u5B58\u6863\u91CC\u662F display:none \u2014\u2014 \u4E0D\u4F9D\u8D56
+       "\u80FD\u4E0D\u80FD\u62E6\u4F4F\u4FDD\u5B58\u52A8\u4F5C"\uFF0C\u4E5F\u4E0D\u9700\u8981\u5077\u5077\u628A DOM \u6458\u6389\u3002
+       \u5B9E\u6D4B\u4E09\u7EC4\u5BF9\u7167\uFF1Adiv + \u8BE5\u89C4\u5219 \u2192 \u4ECD\u7136\u663E\u793A\uFF1Brf-ai-host \u672A\u5B9A\u4E49 \u2192 0\xD70 \u9690\u85CF\uFF1B
+       rf-ai-host \u5DF2\u5B9A\u4E49 \u2192 52\xD752 \u6B63\u5E38\u663E\u793A\u3002 */
+    :host(:not(:defined)) { display: none !important; }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
     .bubble {
       position: fixed; z-index: 2147483647;
@@ -5828,6 +5837,15 @@
     } catch (e) {
     }
   }
+  var HOST_TAG = "rf-ai-host";
+  function createHostElement() {
+    try {
+      const el = document.createElement(HOST_TAG);
+      if (el && typeof el.matches === "function" && el.matches(":defined")) return el;
+    } catch (e) {
+    }
+    return document.createElement("div");
+  }
   var uiSuspended = false;
   var exportGuard = null;
   var host = null;
@@ -6090,8 +6108,13 @@
       warnExtDead();
       return;
     }
-    host = document.createElement("div");
-    host.id = "__kb-ai-host";
+    try {
+      const stale = document.getElementById(HOST_ID);
+      if (stale) stale.remove();
+    } catch (e) {
+    }
+    host = createHostElement();
+    host.id = HOST_ID;
     host.style.all = "initial";
     host.style.position = "fixed";
     host.style.zIndex = "2147483647";

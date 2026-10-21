@@ -69,6 +69,9 @@ const phases = [
   // 流式输出中用户上滚：必须尊重用户的滚动意图，不能被后续增量拉回底部。
   { name: '流式上滚', spec: 'stream-scroll.spec.mjs', hold: '', visionShot: '' },
   { name: '刷新时序边界', spec: 'reattach-edge.spec.mjs', hold: '', visionShot: '' },
+  // 存档自毁闸：实时页面必须看得见悬浮球，而按「另存为」形态重建的副本必须看不见。
+  // 不依赖 LLM，用默认夹具即可。
+  { name: '存档零痕迹', spec: 'save-clean.spec.mjs', hold: '', visionShot: '' },
   { name: '设置提示', spec: 'settings-ui.spec.mjs', hold: '', visionShot: '' },
   { name: '登录拦截提示', spec: 'auth-challenge.spec.mjs', hold: '', visionShot: '' },
   // 会话共享/运行锁：需要真实的“生成中”窗口，否则两个标签页的请求会瞬间结束，

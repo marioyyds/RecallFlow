@@ -226,10 +226,25 @@ test('uninstall：复原并摘掉全部监听（守卫可以有第二个实例�
 
 test('打印路径的 CSS 兜底仍在：shadow 内 @media print 隐藏 :host', async () => {
   // JS 那条路依赖 beforeprint 真的被派发；样式这条不依赖事件，是最后一道保险。
-  // 它写在 shadow 里而不是往页面插 <style>，否则另存出来的 HTML 里会多一个"扩展留下的样式标签"。
   const { PANEL_CSS } = await import('../lib/page/panel-css.js');
   const block = PANEL_CSS.match(/@media print\s*\{[\s\S]*?:host[\s\S]*?\}/);
   assert.ok(block, '缺了这条，beforeprint 未触发时打印/导出 PDF 会印出悬浮球');
   assert.match(block[0], /display:\s*none/);
   assert.match(block[0], /visibility:\s*hidden/);
+});
+
+test('存档自毁闸的接线：样式门控 + 主世界注册，缺一不可', async () => {
+  // 这两处是一根绳的两端，且**都很难在单测里跑到**（一个在 CSS 里、一个在页面主世界的裸脚本里）：
+  //   · 少了样式门控 → 存档里悬浮球照旧显示（就是用户报的那个故障）；
+  //   · 少了主世界注册 → 元素永远不被升级 → 实时页面里悬浮球也显示不出来（更糟，连入口都没了）。
+  // 真正的行为由 tests/e2e/save-clean.spec.mjs 在真浏览器里验；
+  // 这里钉住"接线还在"，让删掉任何一端时**单测就跑红**，而不是等到用户保存文件才发现。
+  const { PANEL_CSS } = await import('../lib/page/panel-css.js');
+  assert.match(
+    PANEL_CSS,
+    /:host\(:not\(:defined\)\)\s*\{\s*display:\s*none\s*!important/,
+    'PANEL_CSS 里的 :not(:defined) 门控没了，存档副本会显示悬浮球'
+  );
+  // 另一半（主世界是否真的注册了 rf-ai-host）由 tests/page-debug-hook.test.mjs 用 vm 沙箱做**行为**断言；
+  // 两端的行为合起来由 tests/e2e/save-clean.spec.mjs 在真浏览器里验。
 });

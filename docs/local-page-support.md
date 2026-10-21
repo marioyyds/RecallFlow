@@ -35,21 +35,29 @@
 曾经试过"本地页不常驻 UI"来保证保存干净，但那是拿最直接的入口去换一个本可以在别处解决的问题：
 用户打开自己那份 HTML，第一眼发现助手不见了，只会认为"本地页不支持"。
 
-所以"保存不留痕"改由两件事承担，**都不依赖牺牲入口**：
+所以"保存不留痕"改由**闸门**承担，不依赖牺牲入口，也不依赖"能不能拦住保存动作"：
 
-1. **导出那一刻把宿主摘出文档**（§4，Ctrl+S / 打印）；
-2. **图标只存在于 shadow root 里** —— 页面自己序列化 DOM（`outerHTML` 一类）根本取不到 shadow 内容，
-   最多留下一个空壳 `<div id="__kb-ai-host">`；离线副本里不会出现点不动的 RecallFlow 图标。
+- 宿主是自定义元素 `<rf-ai-host>`，由主世界脚本 `lib/page/debug-hook.js` 注册；
+- 面板样式里有一条 `:host(:not(:defined)) { display: none !important }`；
+- 存档里没有我们的脚本 ⇒ 元素不会被升级 ⇒ 这条命中 ⇒ **整块 UI 在存档里是隐藏的**；
+- 实时页面里注册成功 ⇒ `:defined` 为真 ⇒ 悬浮球正常显示。
+
+`:defined` 是**运行期状态**，不写进 HTML，所以这条判据与"用户是 Ctrl+S、菜单另存为，还是页面自己写盘"完全无关。
+`lib/page/save-clean.js` 是第二层（Ctrl+S / 打印把宿主整体摘掉，产物里连节点都不留）。
 
 ## 4. 三条导出路径分别怎么处理
 
 实现见 `lib/page/save-clean.js`（守卫）与 `lib/page/panel-css.js`（打印样式）。
 
-| 路径 | 漏的形态 | 处理 |
+| 路径 | 漏的形态（实测） | 处理 |
 | --- | --- | --- |
-| 浏览器「另存为」Ctrl+S | 序列化 light DOM：漏的是宿主空壳（shadow 内容不会被序列化） | 捕获阶段把宿主**移进 DocumentFragment**（不是 `display:none`），焦点回到页面即按原位插回 |
+| 浏览器「另存为」（Ctrl+S / 菜单 / 右键） | **会把 open shadow root 一起序列化**成声明式 shadow DOM：产物里 `.fab`、图标引用、整份面板 CSS 都在 | `:defined` 闸门（对任何保存方式都生效）；Ctrl+S 另加"把宿主移进 DocumentFragment"，产物里连节点都没有 |
 | 打印 / 导出 PDF | 走渲染，shadow 里的 FAB 会印出来 | shadow 内 `@media print { :host { display:none } }` + `beforeprint` 摘除（双保险） |
-| 页面自己保存 | 无法拦截时机 | 图标在 shadow 里，序列化取不到；产物最多留一个空壳宿主 div，**没有图标** |
+| 页面自己保存 | 拦不到时机 | 同上：靠 `:defined` 闸门；存档里最多留下不可见的宿主与样式，**看不到悬浮球** |
+
+**实测证据**（真 Chromium + 真扩展，`Page.captureSnapshot` 与「另存为」共用同一套序列化器）：
+产物确实含 `__kb-ai-host` 与 `recallflow-mark.svg`；`tests/e2e/save-clean.spec.mjs` 把这条固化成用例 ——
+实时页面必须看得见（52×52），用同样内容重建的存档副本必须 `display:none`、0×0。
 
 **为什么不能只靠隐藏**：`display:none` 的节点仍在文档里，另存出来的 HTML 照样带着它。
 这条区别就是"隐藏了却还是被保存下来"的由来。
@@ -94,10 +102,11 @@ npm test                 # 全量门禁（含 content.js 新鲜度与体积预�
 
 ## 8. 残余边界（写清楚，别当成已完成）
 
+- 存档里仍会带上**不可见**的宿主节点与整份面板 CSS（约 42KB）—— 悬浮球不显示，但文件会变大。
+  要进一步瘦身，得把样式改成 `adoptedStyleSheets`（构造样式表不进序列化），
+  代价是存档里会留下**没有样式**的按钮骨架，反而更糟；所以暂不做，见 §4 的取舍；
 - 页面在"保存"时若做的是**截图**（而非序列化 DOM），浏览器层面无法屏蔽 ——
   这属于"把页面当图片存"，扩展无法干预；
-- 页面自己用 `outerHTML` 一类序列化保存时，产物里可能留下一个**空壳** `<div id="__kb-ai-host">`，
-  但不含图标（图标在 shadow root 内，序列化取不到 shadow）；
 - 打印守卫依赖 `beforeprint` 或 `@media print` 生效；两者同时失效属于浏览器异常，未做额外兜底；
 - `open_tab` 对 file:// 的拒绝是产品决策，测试 `tests/tab-tools.test.mjs` 把它钉成断言 ——
   要改就得同时改产品口径，而不是顺手放过。

@@ -43,6 +43,14 @@ function loadHook(opts = {}) {
     this._listeners.push(fn);
   };
   const fakeDocument = { querySelector: () => (opts.element !== undefined ? opts.element : null) };
+  // 自定义元素注册表：钩子会注册面板宿主标签 rf-ai-host（见该文件顶部那段说明）。
+  // 桩必须真的"记住"注册结果，否则这条注册就等于没测。
+  const registry = new Map();
+  const fakeCustomElements = {
+    get: (name) => registry.get(name),
+    define: (name, ctor) => { registry.set(name, ctor); },
+  };
+  class FakeHTMLElement {}
   const ctx = {
     window: win,
     document: fakeDocument,
@@ -59,13 +67,15 @@ function loadHook(opts = {}) {
     Promise,
     WeakMap,
     setTimeout,
+    customElements: fakeCustomElements,
+    HTMLElement: FakeHTMLElement,
   };
   ctx.globalThis = ctx;
   vm.createContext(ctx);
   // 必须给 filename：否则 vm 里的栈帧显示为 evalmachine.<anonymous>，
   // 而 stackOf() 会按文件名跳过自身帧 —— 断言「initiator 不含自身帧」会永远通过（恒真）。
   vm.runInContext(SRC, ctx, { filename: 'lib/page/debug-hook.js' });
-  return { win, XHR: FakeXHR, listeners, posted, ctx };
+  return { win, XHR: FakeXHR, listeners, posted, ctx, registry };
 }
 
 /** 触发出一次「隔离世界读取缓冲」的消息，返回其回复数据。 */
@@ -81,6 +91,19 @@ function readBuffer(env, kind, selector) {
 // element-source 分支要求消息里带 selector（否则不会去查 DOM），
 // 因此下面统一用这个占位选择器；document.querySelector 由桩返回预设元素。
 const SEL = '#target';
+
+// ---------------------------------------------------------------- 面板宿主标签
+
+test('主世界注册了面板宿主 rf-ai-host（存档自毁闸的另一半）', () => {
+  const env = loadHook();
+  const ctor = env.registry.get('rf-ai-host');
+  assert.ok(ctor, '必须注册 rf-ai-host：存档里没有脚本、元素不被升级，靠 :not(:defined) 藏起 UI；不注册则实时页面也会被藏掉');
+  assert.equal(typeof ctor, 'function');
+  assert.ok(
+    ctor.prototype instanceof env.ctx.HTMLElement,
+    '必须继承 HTMLElement，否则升级时元素会失去原生原型（实测过 host.matches is not a function）'
+  );
+});
 
 // ---------------------------------------------------------------- 透传语义
 
