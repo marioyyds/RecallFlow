@@ -50,9 +50,6 @@
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
   }
-  function isFileUrl(u) {
-    return /^file:\/\//i.test(String(u || ""));
-  }
   function formatElementLocator(locator, selector, tag) {
     const l = locator || {};
     if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
@@ -5831,14 +5828,6 @@
     } catch (e) {
     }
   }
-  var IS_LOCAL_PAGE = (() => {
-    try {
-      return isFileUrl(location.href);
-    } catch (e) {
-      return false;
-    }
-  })();
-  var AUTO_MOUNT_UI = !IS_LOCAL_PAGE;
   var uiSuspended = false;
   var exportGuard = null;
   var host = null;
@@ -9725,7 +9714,6 @@
         refreshPanelForSelection();
         return;
       }
-      if (!AUTO_MOUNT_UI && !host) return;
       ensureHost();
       showBubble(rect.left + rect.width / 2, rect.top + window.scrollY);
     });
@@ -9789,7 +9777,7 @@
       warnExtDead();
     }
     installExportGuard();
-    if (AUTO_MOUNT_UI) ensureHost();
+    ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
     panelUiReadyPromise = syncPanelUiOnInit();

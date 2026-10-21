@@ -43,8 +43,8 @@ RecallFlow 不是把 HTML 塞给模型，而是**在你的真实浏览器里动�
 2. **配置**：点击扩展图标 → 设置，填入 DeepSeek API Key（未配置时知识库仍可正常使用）。
 3. **使用**：打开一个页面 → 点右侧「RecallFlow」气泡 → 输入指令，或直接选用快捷语句。
 4. **本地网页（可选）**：要让它也能操作你双击打开的本地 HTML，需在 `edge://extensions/` → 本扩展 → 详情 → 打开
-   **「允许访问文件网址」**；本地页默认**不常驻**悬浮球，按 `Alt+Shift+R` 唤起面板（原因与验收见
-   [docs/local-page-support.md](docs/local-page-support.md)）。
+   **「允许访问文件网址」**。开启后本地页与普通网页一致（打开就有悬浮球），且保存/打印时不会把扩展图标写进你的文件
+   （细节与验收见 [docs/local-page-support.md](docs/local-page-support.md)）。
 
 ## Agent 设计
 
