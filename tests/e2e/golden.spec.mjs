@@ -744,6 +744,131 @@ test('golden: 拾取元素后对话里看得到它，且刷新后仍在', async 
   await page.close();
 });
 
+// 划词上下文有两个容易被漏掉的边界：
+//   ① 面板里的选文预览必须能显式移除，不能只能靠关闭面板；
+//   ② 发送后选文要成为那条用户消息的一部分，不能只作为“发送前提示”随后消失。
+// 同时覆盖“面板已打开时再次划词也应出现预览”的结构性遗漏。
+test('golden: 划词引用可清除，并随用户消息保留到刷新后', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  const selectHeading = () =>
+    page.locator('h1').first().evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const rect = range.getBoundingClientRect();
+      document.dispatchEvent(
+        new MouseEvent('mouseup', {
+          bubbles: true,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        })
+      );
+      return selection.toString().trim();
+    });
+
+  const selectedText = await selectHeading();
+  expect(selectedText).toBe('Fixture');
+  await expect(page.locator(PANEL + ' .bubble')).toBeVisible();
+  await page.locator(PANEL + ' .bubble').click();
+  const preview = page.locator(PANEL + ' .p-text');
+  await expect(preview).toContainText('Fixture');
+  await expect
+    .poll(async () => Math.round(await preview.evaluate((el) => el.getBoundingClientRect().height)))
+    .toBeGreaterThanOrEqual(52);
+  await expect
+    .poll(async () => {
+      const previewBox = await preview.boundingBox();
+      const quickBox = await page.locator(PANEL + ' .quick-prompts').boundingBox();
+      return Boolean(previewBox && quickBox && previewBox.y + previewBox.height <= quickBox.y);
+    })
+    .toBe(true);
+
+  // ① 显式清除后，预览条和空会话提示都要同步恢复。
+  await page.locator(PANEL + ' .p-text-clear').click();
+  await expect(page.locator(PANEL + ' .p-text')).toHaveCount(0);
+  await expect(page.locator(PANEL + ' .p-body')).toContainText('直接执行');
+
+  // 清除必须同时清掉待发送状态，而不只是摘掉预览节点。
+  await page.locator(PANEL + ' .cmd-input').fill('清除后发送');
+  await page.locator(PANEL + ' .cmd-send').click();
+  const clearedTurn = page.locator(PANEL + ' .user-turn', { hasText: '清除后发送' });
+  await expect(clearedTurn).toBeVisible();
+  await expect(clearedTurn.locator('.user-selection')).toHaveCount(0);
+  await waitForRunEnd(page);
+
+  // ② 面板已经打开时再次划词，引用条仍要出现。
+  expect(await selectHeading()).toBe('Fixture');
+  await expect(page.locator(PANEL + ' .p-text')).toContainText('Fixture');
+
+  await page.locator(PANEL + ' .cmd-input').fill('解释这段引用');
+  await page.locator(PANEL + ' .cmd-send').click();
+  const myTurn = page.locator(PANEL + ' .user-turn', { hasText: '解释这段引用' });
+  await expect(myTurn.locator('.user-selection')).toContainText('Fixture', { timeout: 15_000 });
+  await expect(page.locator(PANEL + ' .p-text')).toHaveCount(0);
+
+  // ③ 真正落盘，而不是只在当前 DOM 里碰巧还在。
+  const storedSelection = async () => {
+    const state = await readActivePanelSession(context);
+    const conv = (state.session && state.session.messages) || [];
+    const mine = conv.find((m) => m.role === 'user' && String(m.content || '').includes('解释这段引用'));
+    return mine && mine.selectedText ? mine.selectedText : null;
+  };
+  await expect.poll(storedSelection, { timeout: 30_000 }).toBe('Fixture');
+
+  await page.reload();
+  await openPanel(page);
+  const restoredTurn = page.locator(PANEL + ' .user-turn', { hasText: '解释这段引用' });
+  await expect(restoredTurn.locator('.user-selection')).toContainText('Fixture', { timeout: 15_000 });
+
+  await page.close();
+});
+
+test('golden: 页面滚动后划词气泡仍紧贴选区', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await page.evaluate(() => {
+    const spacer = document.createElement('div');
+    spacer.style.height = '900px';
+    const target = document.createElement('p');
+    target.id = 'rf-scroll-selection';
+    target.textContent = '滚动后仍应贴近选区的文字';
+    document.body.prepend(spacer);
+    spacer.after(target);
+    window.scrollTo(0, 800);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  const selectionTop = await page.locator('#rf-scroll-selection').evaluate((target) => {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const rect = range.getBoundingClientRect();
+    document.dispatchEvent(
+      new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+      })
+    );
+    return rect.top;
+  });
+
+  const bubble = page.locator(PANEL + ' .bubble');
+  await expect(bubble).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await bubble.boundingBox();
+      return box ? Math.round(selectionTop - (box.y + box.height)) : null;
+    })
+    .toBe(8);
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  await page.close();
+});
+
 // 能力验收：**站内检索**（playbook 'site-search'）。
 //
 // 这条是"能力类"的第一条，形状与别的场景不同，两个要点：

@@ -82,6 +82,11 @@
     const title = list.map((p) => p.locator).filter(Boolean).join(" / ");
     return '<span class="user-picks"' + (title ? ' title="' + esc(title) + '"' : "") + ">\u27E1 " + esc(formatPickedSummary(list)) + "</span>";
   }
+  function selectedTextMessageHtml(selectedText) {
+    const text = String(selectedText || "").trim();
+    if (!text) return "";
+    return '<span class="user-selection" title="' + esc(text) + '"><span class="user-selection-label">\u9875\u9762\u5F15\u7528</span><span class="user-selection-text">' + esc(text) + "</span></span>";
+  }
   var DEFAULT_STYLE_PROPS = Object.freeze([
     "font-size",
     "line-height",
@@ -4990,11 +4995,25 @@
     .panel.dark .session-dialog-actions .primary { background: #4a90d9; border-color: #4a90d9; color: #fff; }
     .panel.dark .session-dialog-actions .danger { background: #d94b3e; border-color: #d94b3e; color: #fff; }
     .p-text {
-      margin: 6px 12px 0; padding: 4px 10px; font-size: 12px; color: #888; line-height: 1.5;
-      max-height: 30px; overflow: auto; border-left: 2px solid #e2e5ea; word-break: break-word;
-      user-select: none; flex-shrink: 0;
+      display: flex; align-items: flex-start; gap: 8px; min-height: 52px;
+      margin: 0 0 7px; padding: 8px 8px 8px 10px; font-size: 12px; color: #777; line-height: 1.6;
+      border-left: 2px solid #e2e5ea; user-select: none; flex-shrink: 0;
     }
+    .p-text-quote {
+      grid-area: quote;
+      flex: 1 1 auto; min-width: 0; max-height: 48px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .p-text-clear {
+      grid-area: clear; align-self: start;
+      flex: 0 0 auto; border: none; background: transparent; color: #8d98a5;
+      width: 26px; height: 26px; border-radius: 5px; cursor: pointer;
+      font: 14px/1 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    .p-text-clear:hover { color: #d14343; background: rgba(209,67,67,.1); }
     .panel.dark .p-text { color: #9aa0a8; border-color: #3a3f46; }
+    .panel.dark .p-text-clear { color: #9aa0a8; }
+    .panel.dark .p-text-clear:hover { color: #ff8a80; background: rgba(255,138,128,.1); }
     /* margin-right \u662F --rf-edge\uFF1A\u628A\u6EDA\u52A8\u6761\u63A8\u5230\u53F3\u4FA7 resize \u624B\u67C4\u7684\u5DE6\u8FB9\u3002
        \u5C11\u4E86\u8FD9\u4E00\u53E5\uFF0C\u624B\u67C4\uFF08\u7EDD\u5BF9\u5B9A\u4F4D + z-index:5\uFF09\u4F1A\u538B\u4F4F\u6EDA\u52A8\u6761\uFF0C\u6EDA\u52A8\u6761\u5C31\u70B9\u4E0D\u52A8\u3001\u62D6\u4E0D\u52A8\u3002 */
     .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
@@ -5022,6 +5041,16 @@
        \u5B83\u5FC5\u987B**\u7559\u5728\u6C14\u6CE1\u5185**\uFF1A\u90A3\u662F\u8FD9\u6761\u6D88\u606F\u7684\u4E0A\u4E0B\u6587\uFF0C\u4E0D\u662F\u63D0\u793A\u6761 \u2014\u2014
        \u653E\u5230\u6C14\u6CE1\u5916\u5C31\u53C8\u4F1A\u53D8\u6210"\u53D1\u9001\u540E\u6D88\u5931\u7684\u4E34\u65F6\u72B6\u6001"\u3002 */
     .user-picks { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.82); word-break: break-all; }
+    .user-selection {
+      display: block; margin-top: 5px; padding-top: 5px;
+      border-top: 1px solid rgba(255,255,255,.24);
+      font-size: 11.5px; line-height: 1.5; color: rgba(255,255,255,.9);
+    }
+    .user-selection-label { display: block; margin-bottom: 1px; font-size: 10px; color: rgba(255,255,255,.68); }
+    .user-selection-text {
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+      overflow: hidden; white-space: pre-wrap; word-break: break-word;
+    }
     .msg.ai .typing { color: #999; }
     .panel.dark .msg.ai .typing { color: #9aa0a8; }
     .typing { display: inline-flex; gap: 4px; align-items: center; }
@@ -6252,6 +6281,62 @@
       bubble = null;
     }
   }
+  function removeSelectionPreview() {
+    if (panelTextEl) {
+      panelTextEl.remove();
+      panelTextEl = null;
+    }
+  }
+  function syncPanelSelectionPreview() {
+    if (!panel) return;
+    const text = String(lastText || "").trim();
+    if (!text) {
+      removeSelectionPreview();
+      return;
+    }
+    if (!panelTextEl || !panelTextEl.isConnected) {
+      const bar = document.createElement("div");
+      bar.className = "p-text";
+      const quote2 = document.createElement("span");
+      quote2.className = "p-text-quote";
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "p-text-clear";
+      clear.textContent = "\u2715";
+      clear.title = "\u79FB\u9664\u9875\u9762\u9009\u6587";
+      clear.setAttribute("aria-label", "\u79FB\u9664\u9875\u9762\u9009\u6587");
+      clear.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearSelectedText();
+      });
+      bar.appendChild(quote2);
+      bar.appendChild(clear);
+      const quickPrompts = panel.querySelector(".quick-prompts");
+      if (quickPrompts && quickPrompts.parentNode) quickPrompts.parentNode.insertBefore(bar, quickPrompts);
+      else panel.appendChild(bar);
+      panelTextEl = bar;
+    }
+    const quote = panelTextEl.querySelector(".p-text-quote");
+    if (quote) {
+      quote.textContent = text.length > 200 ? text.slice(0, 200) + "\u2026" : text;
+      quote.title = text;
+    }
+  }
+  function clearSelectedText(options) {
+    const opts = options || {};
+    lastText = "";
+    removeSelectionPreview();
+    try {
+      const selection2 = window.getSelection();
+      if (selection2) selection2.removeAllRanges();
+    } catch (e) {
+    }
+    if (opts.render !== false && panelBody && !streaming && !conversation.length && !followedMessages.length) {
+      renderConversation();
+    }
+    if (panel && opts.render !== false) fitPanelHeight();
+  }
   function publishPanelUi(open, scope) {
     panelUiOpen = open === true;
     if (suppressPanelUiPublish) return Promise.resolve(null);
@@ -6373,9 +6458,13 @@
       openPanel(x, y);
     });
     shadow.appendChild(bubble);
-    const r = bubble.getBoundingClientRect();
-    const left = Math.min(Math.max(4, x), window.innerWidth - r.width - 4);
-    const top = y - r.height - 8 > 4 ? y - r.height - 8 : y + 12;
+    const bubbleWidth = bubble.offsetWidth;
+    const bubbleHeight = bubble.offsetHeight;
+    const maxLeft = Math.max(4, window.innerWidth - bubbleWidth - 4);
+    const maxTop = Math.max(4, window.innerHeight - bubbleHeight - 4);
+    const left = Math.min(Math.max(4, x), maxLeft);
+    const preferredTop = y - bubbleHeight - 8 > 4 ? y - bubbleHeight - 8 : y + 12;
+    const top = Math.min(Math.max(4, preferredTop), maxTop);
     bubble.style.left = left + "px";
     bubble.style.top = top + "px";
   }
@@ -6953,7 +7042,7 @@
     panelBody.className = "p-body";
     panelBody.innerHTML = view.map((m, index) => {
       if (m.role === "user") {
-        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
+        return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + selectedTextMessageHtml(m.selectedText) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
       }
       return assistantMessageHtml(m, index, view.length);
     }).join("");
@@ -8160,14 +8249,6 @@
     progressEl.appendChild(progressMsgEl);
     progressEl.appendChild(progressTimeEl);
     panel.appendChild(progressEl);
-    if (lastText) {
-      const text = document.createElement("div");
-      text.className = "p-text";
-      text.textContent = lastText.length > 200 ? lastText.slice(0, 200) + "\u2026" : lastText;
-      text.title = lastText;
-      panelTextEl = text;
-      panel.appendChild(text);
-    }
     panelBody = document.createElement("div");
     panelBody.className = "p-body";
     panelBody.setAttribute("role", "log");
@@ -8524,6 +8605,7 @@
     renderPick();
     panel.appendChild(panelBody);
     panel.appendChild(cmdArea);
+    syncPanelSelectionPreview();
     getAISettings().then((s) => {
       quickWrap.innerHTML = "";
       (s.quickPrompts || AI_SETTINGS_DEFAULTS.quickPrompts || []).slice(0, 12).forEach((prompt) => {
@@ -8843,6 +8925,7 @@
     const MAX_PORT_RETRIES = 2;
     let portRetries = 0;
     let activeInstruction = "";
+    let activeSelection = "";
     let lastRunOpts = null;
     let activeConn = null;
     let readyWaiter = null;
@@ -8879,7 +8962,7 @@
           runId: activeRunId,
           sessionId: panelSessionId,
           question: activeInstruction,
-          text: lastText,
+          text: activeSelection,
           page: pageText,
           pageUrl: location.href,
           pageTitle: document.title,
@@ -8897,6 +8980,7 @@
       const runOptions = opts || {};
       activeRunId = runOptions.presetRunId || "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
       activeInstruction = String(instruction || "");
+      activeSelection = String(lastText || "").trim();
       try {
         if (conversationLoadPromise) await conversationLoadPromise;
       } catch (e) {
@@ -8963,19 +9047,22 @@
       };
       lastResponse = "";
       const pickedForMessage = summarizePickedForMessage(pickedElements);
+      const selectedForMessage = activeSelection;
       const skipUserTurn = Boolean(runOptions.skipUserTurn);
       if (!skipUserTurn) {
         conversation.push(
           Object.assign(
             { role: "user", content: instruction },
+            selectedForMessage ? { selectedText: selectedForMessage } : {},
             pickedForMessage.length ? { pickedElements: pickedForMessage } : {}
           )
         );
         saveConversation();
         const userMsg = document.createElement("div");
         userMsg.className = "user-turn";
-        userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
+        userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + selectedTextMessageHtml(selectedForMessage) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
         panelBody.appendChild(userMsg);
+        clearSelectedText({ render: false });
       }
       const aiMsg = document.createElement("div");
       aiMsg.className = "msg ai";
@@ -9377,7 +9464,7 @@
           runId: activeRunId,
           sessionId: panelSessionId,
           question: instruction,
-          text: lastText,
+          text: activeSelection,
           page: pageText,
           pageUrl: location.href,
           pageTitle: document.title,
@@ -9504,10 +9591,7 @@
   function refreshPanelForSelection() {
     if (!streaming) closePort();
     lastResponse = "";
-    if (panelTextEl) {
-      panelTextEl.textContent = lastText.length > 200 ? lastText.slice(0, 200) + "\u2026" : lastText;
-      panelTextEl.title = lastText;
-    }
+    syncPanelSelectionPreview();
     renderConversation();
     restoreStreamingUI();
   }
@@ -9744,7 +9828,7 @@
         return;
       }
       ensureHost();
-      showBubble(rect.left + rect.width / 2, rect.top + window.scrollY);
+      showBubble(rect.left + rect.width / 2, rect.top);
     });
     getAISettings().then((s) => {
       pageContextEnabled = s.pageContext !== false;

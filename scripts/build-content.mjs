@@ -38,15 +38,15 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 打包的意义之一是把体积变得**可见**：超过这个量级通常意味着误引入了大依赖
  * （例如把整个 markdown 渲染器或某个 polyfill 打进了内容脚本）。
  *
- * 这不是「随便定的上限」，而是一条**棘轮**：现在 424KB（本轮加了导出期 UI 守卫
- * `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`，约 421KB；上一档 416KB 是
- * 跟随页的增量渲染 live 容器 + 已定稿 part 节点，约 414KB）。
+ * 这不是「随便定的上限」，而是一条**棘轮**：现在 428KB（本轮加入页面选文的
+ * 清除控件、用户消息内引用渲染与持久化；上一档 424KB 是导出期 UI 守卫
+ * `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
  * 真需要涨的话，请在同一处上调并写清原因 —— 但先确认不是误引入。
  * 它现在由 npm test 守（tests/content-bundle-freshness.test.mjs），不再是
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-export const SIZE_BUDGET_BYTES = 424 * 1024;
+export const SIZE_BUDGET_BYTES = 428 * 1024;
 
 /**
  * 产物规格检查（纯函数，便于直测）。返回问题列表，空数组 = 通过。

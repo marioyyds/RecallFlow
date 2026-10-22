@@ -148,9 +148,15 @@ test('两条渲染路径共用同一个格式化函数（各写一份会漂移�
   // 只有两处调用点（实时发送 / 历史重放）；import 语句里没有左括号，不参与计数
   assert.equal(calls.length, 2, 'pickedSummaryHtml 应恰好被调用 2 次，实际 ' + calls.length);
   // 实时发送那条
-  assert.match(chatSrc, /'<div class="msg user">' \+ escHtml\(instruction\) \+ pickedSummaryHtml\(pickedForMessage\)/);
+  assert.match(
+    chatSrc,
+    /'<div class="msg user">' \+ escHtml\(instruction\) \+ selectedTextMessageHtml\(selectedForMessage\) \+ pickedSummaryHtml\(pickedForMessage\)/
+  );
   // 历史重放那条（注意整行是 `'<div class="user-turn"><div class="msg user">' + …` 一个字符串字面量）
-  assert.match(chatSrc, /<div class="msg user">' \+ escHtml\(m\.content\) \+ pickedSummaryHtml\(m\.pickedElements\)/);
+  assert.match(
+    chatSrc,
+    /<div class="msg user">' \+ escHtml\(m\.content\) \+ selectedTextMessageHtml\(m\.selectedText\) \+ pickedSummaryHtml\(m\.pickedElements\)/
+  );
   // 不允许在别处再手写一份同样的行（比如直接拼 '⟡ '）
   assert.ok(!/escHtml\([^)]*\) \+ '⟡ /.test(chatSrc), '不应有手写的第二份渲染');
 });
