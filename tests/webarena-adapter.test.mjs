@@ -151,11 +151,14 @@ test('validateAgentResponse：retrieve+SUCCESS 必须有数组；非 retrieve �
   assert.equal(validateAgentResponse({ task_type: 'navigate', status: 'SUCCESS', retrieved_data: [1] }).ok, false);
 });
 
-test('validateAgentResponse：成功不得带 error_details，失败必须带', () => {
+test('validateAgentResponse：成功不得带 error_details；失败可以不带（官方 expected 常见）', () => {
   const bad1 = validateAgentResponse({ task_type: 'navigate', status: 'SUCCESS', retrieved_data: null, error_details: 'x' });
   assert.equal(bad1.ok, false);
-  const bad2 = validateAgentResponse({ task_type: 'retrieve', status: 'NOT_FOUND_ERROR', retrieved_data: null });
-  assert.equal(bad2.ok, false);
+  // 官方 task 183/201/235 的 expected 就是 NOT_FOUND + 无 error_details；不能记成 schema-violation
+  const ok2 = validateAgentResponse({ task_type: 'retrieve', status: 'NOT_FOUND_ERROR', retrieved_data: null });
+  assert.equal(ok2.ok, true);
+  const ok3 = validateAgentResponse({ task_type: 'mutate', status: 'ACTION_NOT_ALLOWED_ERROR', retrieved_data: null });
+  assert.equal(ok3.ok, true);
   const good = validateAgentResponse({ task_type: 'retrieve', status: 'NOT_FOUND_ERROR', retrieved_data: null, error_details: 'none' });
   assert.equal(good.ok, true);
 });
@@ -237,6 +240,8 @@ test('buildInstruction：带 schema / 精确集合 / 聚合规则', () => {
   assert.match(s, /聚合问题/);
   assert.match(s, /review title/);
   assert.match(s, /报表 \/ 网格/);
+  assert.match(s, /top-N/);
+  assert.match(s, /ACTION_NOT_ALLOWED_ERROR/);
 });
 
 test('buildInstruction：多站点任务必须列出全部 start URL', () => {
