@@ -114,11 +114,13 @@ export function releaseLock(lockFile, opts = {}) {
  * 但 meta 里同时留着 `to`（变异的替换文本）才能在自愈时**判断这份备份还算不算数** ——
  * 没有这个判断，一次崩溃之后如果你手工改过这个文件，自愈会把你的改动覆盖掉。
  */
-export function writeBackup(absFile, rawText, toText, at = new Date().toISOString()) {
+export function writeBackup(absFile, rawText, toText, fromText = '', at = new Date().toISOString()) {
   writeFileRetry(absFile + BACKUP_SUFFIX, rawText);
   writeFileRetry(
     absFile + META_SUFFIX,
-    JSON.stringify({ file: absFile, at, to: toText }) // 不含原文：原文就在 backup 里
+    // `from` 与 `to` 都要记：自愈时必须能**精确重建**变异版本才能判断"文件是不是停在变异态"。
+    // 只记 `to` 是不够的 —— 见 recoverLeftovers 里那段事故说明。
+    JSON.stringify({ file: absFile, at, to: toText, from: String(fromText || '') })
   );
 }
 
@@ -144,10 +146,20 @@ export function restoreBackup(absFile) {
 
 export function removeBackup(absFile) {
   for (const f of [absFile + BACKUP_SUFFIX, absFile + META_SUFFIX]) {
-    try {
-      fs.unlinkSync(f);
-    } catch (e) {
-      /* 已经不在了 */
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.unlinkSync(f);
+        break;
+      } catch (e) {
+        // 已经不在了 —— 正常。
+        if (!e || e.code === 'ENOENT') break;
+        // ⚠ 删除在 Windows 上同样会被杀毒/索引服务短暂挡住（EBUSY/EPERM/UNKNOWN）。
+        //   原先这里一律吞掉，于是备份**长期留在盘上**：每次启动都要重跑一遍自愈判断，
+        //   而且一旦自愈判据写错，这些残留就是"覆盖新代码"的现成弹药（真实发生过）。
+        //   瞬态错误重试即可，非瞬态（只读、目录被替换）放弃但不再影响正确性。
+        if (!TRANSIENT_WRITE_CODES.has(e.code) || attempt >= 3) break;
+        sleepSync(25 * (attempt + 1));
+      }
     }
   }
 }
@@ -179,9 +191,30 @@ export function recoverLeftovers(absFiles) {
     } catch (e) {
       current = '';
     }
-    if (meta && typeof meta.to === 'string' && meta.to && current.includes(meta.to)) {
+    let original = '';
+    try {
+      original = fs.readFileSync(backup, 'utf8');
+    } catch (e) {
+      original = '';
+    }
+
+    // 判据：当前文件必须**恰好等于**「由备份把 from 替换成 to」的结果。
+    //
+    // 原先的判据是 `current.includes(meta.to)`，而 to 往往是 `  return false;` 这种
+    // **满文件都是**的片段 ⇒ 判据恒真 ⇒ 任何一次崩溃留下的旧备份，都会在下一次启动时
+    // 覆盖掉比它更新的源码，而门禁还"通过"（收尾核对 after === raw 看到的正是旧备份的内容）。
+    // 本仓库真实发生过：一段刚加的功能被悄悄回退，事后只能靠肉眼发现。
+    // 精确重建虽然多读一次备份，但它是这里唯一不会误伤人工改动的判据。
+    const norm = (s) => String(s).replace(/\r\n/g, '\n');
+    const canTell =
+      meta &&
+      typeof meta.from === 'string' && meta.from &&
+      typeof meta.to === 'string' && meta.to;
+    const isMutated = Boolean(canTell) && norm(current) === norm(original).replace(meta.from, meta.to);
+    if (isMutated) {
       if (restoreBackup(abs)) restored.push(abs);
     } else {
+      // 判断不了 / 已被改过 ⇒ 宁可留着变异版本让人看见，也绝不覆盖人工改动。
       removeBackup(abs);
       skipped.push(abs);
     }

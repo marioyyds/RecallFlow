@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { acquireLock, releaseLock, writeBackup, restoreBackup, recoverLeftovers, writeFileRetry, BACKUP_SUFFIX } from './lib/mutation-fs.mjs';
+import { acquireLock, releaseLock, writeBackup, restoreBackup, recoverLeftovers, writeFileRetry, removeBackup, BACKUP_SUFFIX, META_SUFFIX } from './lib/mutation-fs.mjs';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 
@@ -603,7 +603,9 @@ for (const target of TARGETS) {
       // 备份写**原始字节**（finally 里原样拷回，行尾也一起还原），
       // 同时把 `to` 记进 meta —— 崩溃自愈要靠它判断这份备份还算不算数。
       const mutated = toEol(original.replace(m.from, m.to), eol);
-      writeBackup(abs, raw, m.to);
+      // 把 from 一并记进 meta：自愈要靠"精确重建变异版本"来判断文件状态，
+      // 只记 to 会让判据退化成"文件里有没有这个片段"——而 to 常常是通用片段。
+      writeBackup(abs, raw, m.to, m.from);
       // 写变异版本同样走退避重试：这一步被 Windows 的扫描/同步短暂挡住过一次，
       // 表现是 errno -4094 / code UNKNOWN，整个门禁带着栈崩掉并留下备份。
       // 重试之后仍失败就说明是真问题（只读、磁盘满），此时抛出比继续跑更安全 ——
@@ -650,6 +652,22 @@ for (const f of tmpFiles) {
     fs.unlinkSync(f);
   } catch (e) {}
 }
+
+// 兜底清理：每条变异的 finally 都会还原并删备份，但 Windows 上偶发的句柄占用
+// （杀毒/索引服务短暂持锁）会让 unlink 静默失败，备份于是留到下一次启动。
+// 这不是"整洁癖"：残留备份 + 一次写错的自愈判据 = 静默覆盖源码（本仓库真实发生过，
+// 一段新加的功能被回退，而门禁全程"通过"）。跑完即干净是最低要求。
+const leftovers = [];
+for (const target of TARGETS) {
+  const abs = path.resolve(ROOT, target.file);
+  // 判据要**两者都看**：删除是分两步做的，删完 backup 却没删掉 meta 的状态真实存在过
+  //（Windows 上句柄被短暂占用），只检查 backup 会把这种半残留永远留下。
+  if (fs.existsSync(abs + BACKUP_SUFFIX) || fs.existsSync(abs + META_SUFFIX)) {
+    removeBackup(abs);
+    leftovers.push(target.file);
+  }
+}
+if (leftovers.length) console.log('（已清理残留备份）' + leftovers.join('、'));
 
 console.log(
   allGood

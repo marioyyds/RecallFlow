@@ -78,7 +78,7 @@ test('还原必须逐字节：CRLF 源文件不能被悄悄改成 LF', () => {
   const file = path.join(dir, 'src.js');
   const crlf = 'const a = 1;\r\nconst b = 2;\r\n';
   fs.writeFileSync(file, crlf, 'utf8');
-  writeBackup(file, crlf, 'const a = 999;');
+  writeBackup(file, crlf, 'const a = 999;', 'const a = 1;');
   fs.writeFileSync(file, 'const a = 999;\r\nconst b = 2;\r\n', 'utf8');
   assert.equal(restoreBackup(file), true);
   assert.equal(fs.readFileSync(file, 'utf8'), crlf, '还原后必须与原文逐字节一致（含 CRLF）');
@@ -91,7 +91,7 @@ test('自愈：源文件仍含变异文本 → 按备份还原', () => {
   const file = path.join(dir, 'src.js');
   const original = 'export function f() {\r\n  return 1;\r\n}\r\n';
   fs.writeFileSync(file, original, 'utf8');
-  writeBackup(file, original, '  return 2;');
+  writeBackup(file, original, '  return 2;', '  return 1;');
   fs.writeFileSync(file, original.replace('  return 1;', '  return 2;'), 'utf8'); // 模拟"崩溃时变异还留在盘上"
 
   const { restored, skipped } = recoverLeftovers([file]);
@@ -106,7 +106,7 @@ test('自愈：源文件已不含变异文本（崩溃后被改过）→ 绝不�
   const file = path.join(dir, 'src.js');
   const original = 'export const x = 1;\n';
   fs.writeFileSync(file, original, 'utf8');
-  writeBackup(file, original, 'export const x = 2;');
+  writeBackup(file, original, 'export const x = 2;', 'export const x = 1;');
   // 崩溃之后有人把它改成了第三种内容（不是原始、也不是变异）
   const edited = 'export const x = 1; // 手工修过\n';
   fs.writeFileSync(file, edited, 'utf8');
@@ -116,6 +116,40 @@ test('自愈：源文件已不含变异文本（崩溃后被改过）→ 绝不�
   assert.deepEqual(skipped, [file], '要报出来让人看一眼');
   assert.equal(fs.readFileSync(file, 'utf8'), edited, '人工改动必须原样保留');
   assert.equal(fs.existsSync(file + BACKUP_SUFFIX), false, '备份本身要清掉，否则每次启动都会再喊一次');
+});
+
+test('自愈：to 是通用片段时，旧备份绝不能覆盖比它更新的源码', () => {
+  // 这条对应一次真实事故：meta.to 是 `  return false;`（几乎每个 catch 块都有）。
+  // 原判据 `current.includes(to)` 于是恒真 —— 一次崩溃留下的**旧备份**在下一次启动时
+  // 把当时已经新加的功能整段回退，而门禁全程"通过"。
+  // 现在要求"当前文件恰好等于由备份替换 from→to 的结果"，才允许还原。
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  const original = 'if (x) {\n  return false;\n}\n';
+  fs.writeFileSync(file, original, 'utf8');
+  writeBackup(file, original, '  return true;', '  return false;');
+
+  // 崩溃之后文件继续被开发：新增了一段，而且**仍然含** "  return false;" 这个通用片段
+  const newer = original + 'function added() {\n  return false;\n}\n';
+  fs.writeFileSync(file, newer, 'utf8');
+
+  const { restored, skipped } = recoverLeftovers([file]);
+  assert.deepEqual(restored, [], '备份比当前文件旧，不能覆盖');
+  assert.deepEqual(skipped, [file], '要报出来让人看一眼');
+  assert.equal(fs.readFileSync(file, 'utf8'), newer, '新加的代码必须原样保留');
+});
+
+test('自愈：停在变异态（精确匹配）仍能还原 —— 收紧判据不能把自愈本身废掉', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  const original = 'if (x) {\n  return false;\n}\n';
+  fs.writeFileSync(file, original, 'utf8');
+  writeBackup(file, original, '  return true;', '  return false;');
+  fs.writeFileSync(file, original.replace('  return false;', '  return true;'), 'utf8');
+
+  const { restored } = recoverLeftovers([file]);
+  assert.deepEqual(restored, [file]);
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
 });
 
 test('自愈：没有 meta 的老备份无法判断 → 不动源文件，只报告', () => {
@@ -226,7 +260,7 @@ test('还原走重试：备份逐字节写回（Buffer 直通，不经编码转�
   // 故意放一段非 ASCII + CRLF：一旦中间经历一次 utf8 往返，这里就会变样
   const original = '// 中文注释\r\nconst s = "「」";\r\n';
   fs.writeFileSync(file, 'const mutated = 1;\r\n', 'utf8');
-  writeBackup(file, original, 'const mutated = 1;');
+  writeBackup(file, original, 'const mutated = 1;', 'const s = "「」";');
   assert.equal(restoreBackup(file), true);
   assert.equal(fs.readFileSync(file, 'utf8'), original);
   assert.equal(fs.existsSync(file + BACKUP_SUFFIX), false);

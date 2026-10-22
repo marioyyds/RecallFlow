@@ -5537,6 +5537,8 @@
             text: "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (event.reason ? "\uFF1A" + event.reason : ""),
             color: "#16a34a"
           };
+        } else if (event.inconclusive) {
+          pushStepNotice(state, "\u2026 \u672A\u80FD\u5B8C\u6210\u6821\u9A8C\uFF1A" + (event.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528") + "\uFF08\u5DF2\u653E\u884C\uFF09", "#6b7280");
         } else {
           pushStepNotice(
             state,
@@ -9180,8 +9182,12 @@
           let text = "";
           if (resp.ok) {
             text = "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (resp.reason ? "\uFF1A" + resp.reason : "");
+          } else if (resp.inconclusive) {
+            text = "\u2026 \u672A\u80FD\u5B8C\u6210\u6821\u9A8C\uFF1A" + (resp.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528");
           } else if (resp.deterministic) {
             text = "\u26A0 \u5B8C\u6210\u524D\u68C0\u67E5\u672A\u901A\u8FC7\uFF08\u786E\u5B9A\u6027\u89C4\u5219\uFF0C\u672A\u6D88\u8017\u6A21\u578B\u8C03\u7528\uFF09\uFF1A" + (resp.reason || "\u58F0\u79F0\u4E0E\u5B9E\u9645\u52A8\u4F5C\u4E0D\u7B26");
+          } else if (resp.repeated) {
+            text = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF08\u8BC1\u636E\u4E0E\u4E0A\u6B21\u5B8C\u5168\u76F8\u540C\uFF0C\u672A\u91CD\u590D\u8C03\u7528\u6A21\u578B\uFF09\uFF1A" + (resp.reason || "\u8BC1\u636E\u6CA1\u6709\u53D8\u5316");
           } else {
             text = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (resp.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (resp.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + resp.missing + "\uFF09" : "");
           }

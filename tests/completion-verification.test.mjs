@@ -115,3 +115,43 @@ test('要告诉校验方本次任务的性质（决定用哪套判据）', () =>
   // 这里只钉住**接线**：必须由实际调用过的工具推出，不能在调用点写死。
   assert.match(callSite, /classifyTaskKind\(ranToolNames\)/, '任务性质应由「是否跑过写类工具」推出');
 });
+
+// ---------------------------------------------------------------- 收尾接线
+//
+// 这一段是线上两个症状的回归门禁：它们都属于「少做一步、测试不红、只在长任务上暴露」的缺陷，
+// 行为测试要跑完一整个 run 才能触达，因此与上面的做法一致，按源码结构钉住**顺序与存在性**。
+// 与之配套的行为断言（超时错误分类、证据签名、请求形态）在 verifier-timeout.test.mjs。
+
+test('校验中断分支必须补发结束事件（否则面板永远停在"运行中"）', () => {
+  const block = sliceBetween("kind === 'interrupt'", 'fail-open（含');
+  assert.match(block, /emit\(\{ type: 'end' \}\)/, '没有 end 事件 ⇒ run-hub 不会把状态置为 ended ⇒ 前端卡死');
+  assert.match(block, /emitState\(RUN_STATUS\.CANCELLED/, '要显式告诉前端这次是被中断的，而不是静默 return');
+});
+
+test('所有终态出口都必须成对发 end（防止再有分支只 return）', () => {
+  // 成本闸门 / 看门狗 / complete_task / final-answer 各一次，加上循环外的兜底。
+  const endCount = lines.filter((l) => l.includes("emit({ type: 'end' })")).length;
+  assert.ok(endCount >= 5, '结束事件数明显偏少，可能有分支只 return 不发事件（实际 ' + endCount + ' 处）');
+});
+
+test('确定性预检有自己的配额，不再占用 LLM 校验的次数', () => {
+  const block = sliceBetween('const verifierOn =', '完成前独立校验');
+  assert.match(block, /deterministicFails < Number\(budget\.maxVerifications/, '预检准入应看 deterministicFails');
+  assert.doesNotMatch(block, /verificationCount \+= 1/, '预检命中不能再消耗 LLM 校验的配额');
+});
+
+test('同一份证据重复送审要短路，不落在模型调用之后', () => {
+  const start = indexOfLine('signature === lastDeniedSignature');
+  const block = lines.slice(start, indexOfLine('break;', start)).join('\n');
+  assert.match(block, /buildRepeatedVerificationReflection/, '短路时要给出"没有新证据"的反思');
+  assert.doesNotMatch(block, /runCompletionVerification/, '短路分支必须在模型调用之前就结束');
+});
+
+test('final-answer 收尾也要过确定性预检（它是绕过校验器最省力的出口）', () => {
+  // 模型被否决后，只要改成"直接输出最终回答"、不调 complete_task，原先就能完全绕过护栏。
+  const start = indexOfLine('const finalClaim =');
+  const block = lines.slice(start, indexOfLine('emitState(RUN_STATUS.COMPLETED);', start)).join('\n');
+  assert.match(block, /checkCompletionClaim\(/, '最终回答同样要核「声称是否与实际动作相符」');
+  assert.match(block, /continue;/, '判定不通过时要注入反思继续，而不是照常收尾');
+  assert.match(block, /deterministicFails < Number\(budget\.maxVerifications/, '必须有配额，否则会困在"改口 → 再被否"的循环里');
+});
