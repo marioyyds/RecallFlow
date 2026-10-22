@@ -312,3 +312,40 @@ bridge/agent_task 提交），WebArena 相关代码与 4.4/4.6 修复都在同�
 
 结论：6/6 不是只在旧基线上成立的偶然结果 —— 在新 master（含 opt 分支的
 agent/panel/审批重构）上同样复现。仍未扩样本，下一步仍是 30~50 条 × 3 次。
+
+### 8.7 三站 480 条完整实跑（2026-10-22）
+
+范围：官方 812 条里 `sites` 全部落在 **shopping / shopping_admin / reddit** 的 480 条
+（缺 gitlab 204、map 128、wikipedia 23；这三站的数据未就绪）。
+
+环境：rebase 后的 `feat/webarena-eval`、`deepseek-flash`、官方 evaluator 1.2.3、
+一次性桥接 token。公开数据集不含原版 `storage_state`，因此先登录一次并保存
+Playwright state，再在每条任务的 context 里 `addCookies`（shopping 用 `emma.lopez@gmail.com`，
+reddit 用 `MarvelsGrantMan136`；admin 仍用请求头自动登录）。
+
+**官方结果：288 / 480 = 60.0%**
+
+| 站点 | 官方通过 | 总数 | 通过率 |
+| --- | --- | --- | --- |
+| shopping_admin | 113 | 182 | 62.1% |
+| shopping | 85 | 187 | 45.5% |
+| reddit | 90 | 106 | 84.9% |
+| shopping+reddit（跨站） | 0 | 5 | 0% |
+| **合计** | **288** | **480** | **60.0%** |
+
+失败构成（按 RecallFlow 自报终态）：
+
+- 自报 `SUCCESS` 438 条，官方只通过 283 条：**146 条答案不对**，9 条 evaluator error；
+- `UNKNOWN_ERROR` 24 条（缺 JSON / 未完成）→ 24 条全失败；
+- `PERMISSION_DENIED_ERROR` 9 条 → 全失败（登录态或权限仍未覆盖）；
+- `ACTION_NOT_ALLOWED_ERROR` 4 条 → 全失败；
+- `NOT_FOUND_ERROR` 5 条 → **5 条全部被官方判对**（"查不到"本身就是正确答案）。
+
+两个变化值得记住：
+
+- **admin task 0 现在通过了**：`run_javascript` 归 `page` 后，长表单终于有可用的设值路径；
+- 三站里 reddit 最稳（85%），shopping 最弱（45.5%）—— 大量订单/账户类任务
+  需要登录态，且答案要求严格（金额/日期/集合），比 reddit 的列表类任务更容易错。
+
+边界：这是**三站**结果，不是 812 全量；仍是单次运行。剩余 332 条要等
+gitlab / map / wikipedia 数据就绪（map 数据 187GB，wikipedia ZIM 当前不可达）。

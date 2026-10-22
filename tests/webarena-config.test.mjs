@@ -110,7 +110,7 @@ test('selectTasks：sites 只保留**完全落在**允许站点内的任务', ()
 });
 
 test('parseLogin：按第一个冒号切，密码里可以再带冒号；空用户/空密码视为未配置', () => {
-  assert.deepEqual(parseLogin('emma.lopez@gmail.com:WebArena123!'), { user: 'emma.lopez@gmail.com', password: 'WebArena123!' });
+  assert.deepEqual(parseLogin('alice@example.com:s3cret'), { user: 'alice@example.com', password: 's3cret' });
   assert.deepEqual(parseLogin('root:a:b'), { user: 'root', password: 'a:b' });
   assert.equal(parseLogin(''), null);
   assert.equal(parseLogin('nocolon'), null);
