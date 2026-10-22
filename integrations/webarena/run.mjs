@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin } from './config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin, deadlineForTask } from './config.mjs';
 import { normalizeTask, buildInstruction, toAgentResponse, validateAgentResponse } from '../../lib/eval/webarena-adapter.mjs';
 import { McpBridgeClient } from './mcp-client.mjs';
 
@@ -151,9 +151,12 @@ async function runOne({ raw, opts, client, settings, outDir }) {
     if (task.sites.includes('shopping') && opts.shoppingState && fs.existsSync(opts.shoppingState)) states.push(opts.shoppingState);
     if (task.sites.includes('reddit') && opts.redditState && fs.existsSync(opts.redditState)) states.push(opts.redditState);
     context = await launchBrowser({ userDataDir: opts.profileDir || '', harPath, extPath: opts.extPath || undefined, extraHTTPHeaders: opts.headers, storageState: states });
-    await configureExtension(context, settings);
-    // 有 storageState 就不必逐任务登录（也避免把账号打进登录限流）；没有才走 UI 登录兜底。
-    if (!states.length) await prepareSiteLogin(context, task.sites, opts.logins || {});
+    // 先做会话 preflight，再把墙钟预算写进扩展设置（预算从 agent 真正开工时算）。
+    await prepareSiteLogin(context, task.sites, opts.logins || {}, opts.siteUrls || {});
+    const timeoutMs = Number(opts.timeoutMs) || 300000;
+    const { deadlineAt, wrapUpAt } = deadlineForTask({ timeoutMs, startedMs: Date.now() });
+    const taskSettings = Object.assign({}, settings, { deadlineAt, wrapUpAt });
+    await configureExtension(context, taskSettings);
     await client.waitForExtension(60000);
     const opened = await client.openTab(task.startUrls[0]);
     if (!opened || opened.ok === false) throw new Error('open_tab 失败：' + JSON.stringify(opened));

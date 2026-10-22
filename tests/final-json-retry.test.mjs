@@ -14,10 +14,14 @@ import assert from 'node:assert/strict';
 import { FINAL_JSON_RETRY_PROMPT, hasFinalJsonBlock, shouldRetryFinalJson } from '../lib/assistant/agent.js';
 import { webarenaSettings } from '../integrations/webarena/harness.mjs';
 
-test('hasFinalJsonBlock：围栏 JSON 与裸任务对象都算已有', () => {
-  assert.equal(hasFinalJsonBlock('结论如下\n```json\n{"task_type":"retrieve"}\n```'), true);
-  assert.equal(hasFinalJsonBlock('{"task_type":"retrieve"}'), true);
-  assert.equal(hasFinalJsonBlock('{"action":"mutate"}'), true);
+test('hasFinalJsonBlock：围栏 JSON 与裸任务对象都算已有（但必须有 task_type/status）', () => {
+  assert.equal(hasFinalJsonBlock('结论如下\n```json\n{"task_type":"retrieve","status":"SUCCESS"}\n```'), true);
+  assert.equal(hasFinalJsonBlock('{"task_type":"retrieve","status":"SUCCESS"}'), true);
+  assert.equal(hasFinalJsonBlock('{"action":"mutate","status":"SUCCESS"}'), true);
+  // 只有数据字段的 JSON 不算终态（实测 279/280/282 就是这样）
+  assert.equal(hasFinalJsonBlock('```json\n{"names":["a"],"min":1,"max":2}\n```'), false);
+  assert.equal(hasFinalJsonBlock('{"task_type":"retrieve"}'), false, '缺 status 不算');
+  assert.equal(hasFinalJsonBlock('{"action":"mutate"}'), false, '缺 status 不算');
 });
 
 test('hasFinalJsonBlock：纯自然语言结论不算已有（这正是 23/25 的失败形态）', () => {
@@ -33,9 +37,11 @@ test('webarenaSettings：评测默认要求最终 JSON 块', () => {
 test('shouldRetryFinalJson：只有显式要求且确实缺 JSON 时才补', () => {
   const settings = webarenaSettings({ apiKey: 'k' });
   assert.equal(shouldRetryFinalJson({ settings, content: '纯结论' }), true);
-  assert.equal(shouldRetryFinalJson({ settings, content: '结论\n```json\n{}\n```' }), false);
-  // complete_task 的总结里有 JSON 也算已有
-  assert.equal(shouldRetryFinalJson({ settings, content: '', summary: '{"task_type":"retrieve"}' }), false);
+  assert.equal(shouldRetryFinalJson({ settings, content: '结论\n```json\n{"task_type":"retrieve","status":"SUCCESS"}\n```' }), false);
+  // 只有数据字段的 JSON 也要补
+  assert.equal(shouldRetryFinalJson({ settings, content: '```json\n{"names":["a"]}\n```' }), true);
+  // complete_task 的总结里有合法终态 JSON 也算已有
+  assert.equal(shouldRetryFinalJson({ settings, content: '', summary: '{"task_type":"retrieve","status":"SUCCESS"}' }), false);
   // 只补一次
   assert.equal(shouldRetryFinalJson({ settings, content: '纯结论', alreadyRetried: true }), false);
   // 没打开设置就不改面板行为

@@ -12,6 +12,7 @@ import {
   expectedActionOf,
   normalizeTask,
   buildInstruction,
+  describeResultsSchema,
   extractFinalJson,
   normalizeAgentResponse,
   validateAgentResponse,
@@ -198,4 +199,57 @@ test('toAgentResponse：抽到但违反 schema → UNKNOWN_ERROR 并写清原因
 test('failureResponse：形状合法（能被 validateAgentResponse 接受）', () => {
   const r = failureResponse('stalled', '无人审批');
   assert.equal(validateAgentResponse(r).ok, true);
+});
+
+test('normalizeTask：取与期望动作匹配的 results_schema，不丢字段', () => {
+  const t = normalizeTask({
+    task_id: 9,
+    intent: 'count reviews',
+    start_urls: ['__SHOPPING__'],
+    sites: ['shopping'],
+    eval: [
+      { expected: { task_type: 'retrieve' }, results_schema: { type: 'array', items: { type: 'number' } } },
+    ],
+  });
+  assert.deepEqual(t.resultsSchema, { type: 'array', items: { type: 'number' } });
+});
+
+test('describeResultsSchema：数字数组 / 对象数组 / null', () => {
+  assert.match(describeResultsSchema({ type: 'array', items: { type: 'number' } }), /number 数组/);
+  assert.match(
+    describeResultsSchema({ type: 'array', items: { type: 'object', properties: { username: {}, post_title: {}, count: {} } } }),
+    /username \/ post_title \/ count/
+  );
+  assert.match(describeResultsSchema({ type: 'null' }), /NOT_FOUND_ERROR/);
+});
+
+test('buildInstruction：带 schema / 精确集合 / 聚合规则', () => {
+  const t = normalizeTask({
+    task_id: 10,
+    intent: 'Get the total number of reviews that mention "decent"',
+    start_urls: ['__SHOPPING_ADMIN__'],
+    sites: ['shopping_admin'],
+    eval: [{ expected: { task_type: 'retrieve' }, results_schema: { type: 'array', items: { type: 'number' } } }],
+  });
+  const s = buildInstruction(t);
+  assert.match(s, /number 数组/);
+  assert.match(s, /精确集合/);
+  assert.match(s, /聚合问题/);
+  assert.match(s, /review title/);
+  assert.match(s, /报表 \/ 网格/);
+});
+
+test('buildInstruction：多站点任务必须列出全部 start URL', () => {
+  const t = normalizeTask({
+    task_id: 671,
+    intent: 'post reviews to reddit',
+    start_urls: ['http://shop/', 'http://reddit/'],
+    sites: ['shopping', 'reddit'],
+    eval: [{ expected: { task_type: 'mutate' }, results_schema: { type: 'null' } }],
+  });
+  const s = buildInstruction(t);
+  assert.match(s, /http:\/\/shop\//);
+  assert.match(s, /http:\/\/reddit\//);
+  assert.match(s, /跨站任务/);
+  assert.match(s, /回读目标页/);
 });

@@ -76,21 +76,21 @@ export async function configureExtension(context, settings) {
  * 登录使用同一个 persistent context，所以 cookie 对扩展开的 tab 同样有效。
  * 失败只告警、不中断：游客可做的任务仍然能跑。
  */
-export async function prepareSiteLogin(context, sites, logins = {}) {
+export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {}) {
   const list = Array.isArray(sites) ? sites : [];
-  const needsShopping = list.includes('shopping') && logins.shopping;
-  const needsReddit = list.includes('reddit') && logins.reddit;
+  const needsShopping = list.includes('shopping');
+  const needsReddit = list.includes('reddit');
   if (!needsShopping && !needsReddit) return;
   const page = await context.newPage();
   try {
     if (needsShopping) {
-      const { baseUrl, email, password } = logins.shopping;
+      const baseUrl = (logins.shopping && logins.shopping.baseUrl) || siteUrls.SHOPPING || 'http://localhost:7770';
       await page.goto(new URL('/customer/account/login/', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!/customer\/account\/login/.test(page.url())) {
         // 已经是登录态（profile 里已有 cookie），不用再填。
-      } else {
-        await page.fill('#email', email);
-        await page.fill('#pass', password);
+      } else if (logins.shopping && logins.shopping.email) {
+        await page.fill('#email', logins.shopping.email);
+        await page.fill('#pass', logins.shopping.password);
         await page.click('button.action.login');
         // 注意不能等 /customer/account/：登录页自身的 URL 也匹配它。
         // 等的是"离开登录页"，否则会在点击后立刻误判成功（随后又被下面的检查纠正成失败）。
@@ -100,21 +100,25 @@ export async function prepareSiteLogin(context, sites, logins = {}) {
         if (/customer\/account\/login/.test(page.url())) {
           console.warn('[login] shopping 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
         }
+      } else {
+        console.warn('[login] shopping 会话已失效且没有可用凭据（继续；需要登录的任务会返回 PERMISSION_DENIED）');
       }
     }
     if (needsReddit) {
-      const { baseUrl, username, password } = logins.reddit;
+      const baseUrl = (logins.reddit && logins.reddit.baseUrl) || siteUrls.REDDIT || 'http://localhost:9999';
       await page.goto(new URL('/login', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
       if (!/\/login/.test(page.url())) {
         // 已是登录态
-      } else {
-        await page.fill('#login-username', username);
-        await page.fill('#login-password', password);
+      } else if (logins.reddit && logins.reddit.username) {
+        await page.fill('#login-username', logins.reddit.username);
+        await page.fill('#login-password', logins.reddit.password);
         await page.getByRole('button', { name: 'Log in' }).click();
         await page.waitForURL((u) => !/\/login/.test(u.pathname), { timeout: 15000 }).catch(() => {});
         if (/\/login/.test(new URL(page.url()).pathname)) {
           console.warn('[login] reddit 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
         }
+      } else {
+        console.warn('[login] reddit 会话已失效且没有可用凭据（继续）');
       }
     }
   } catch (e) {

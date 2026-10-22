@@ -162,3 +162,17 @@ export function parseLogin(raw) {
   if (i <= 0 || i === s.length - 1) return null;
   return { user: s.slice(0, i), password: s.slice(i + 1) };
 }
+
+/**
+ * 从单任务墙钟上限计算 agent 的软/硬截止时间。
+ *
+ * 硬截止要早于外部等待（否则外部先把 job kill 掉，留下一个 running 快照）；
+ * 软截止只发一次"立即收尾"提醒。纯函数便于直测。
+ */
+export function deadlineForTask({ timeoutMs = 300000, startedMs = Date.now() } = {}) {
+  const t = Number(timeoutMs) > 0 ? Number(timeoutMs) : 300000;
+  const s = Number.isFinite(Number(startedMs)) ? Number(startedMs) : Date.now();
+  const wrapOffset = Math.max(30000, Math.floor(t * 0.75));
+  const deadlineOffset = Math.max(wrapOffset + 10000, t - 30000);
+  return { deadlineAt: s + deadlineOffset, wrapUpAt: s + wrapOffset };
+}
