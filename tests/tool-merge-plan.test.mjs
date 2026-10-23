@@ -62,12 +62,12 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   const pendingAll = PLAN.filter((g) => !g.merged);
   const byId = (ids) => PLAN.filter((g) => ids.includes(g.id));
   // 现状：55 - 2（诊断）- 2（宏）- 2（知识库只读）- 2（元素检查只读）- 3（视觉标注）= 44，
-  // 再 **+1**（本轮新增 `save_skill`，不是合并产物）= 45
-  assert.equal(TOTAL, 45, '当前工具数应为 45（第 1、2、3、4、5 档已合并，另有新增的 save_skill）');
+  // 再 **+1**（`save_skill`）+1（`read_table`，报表/网格结构化查询）= 46
+  assert.equal(TOTAL, 46, '当前工具数应为 46（第 1、2、3、4、5 档已合并，另有新增的 save_skill 与 read_table）');
 
   // 可做档已全部执行完；剩下 8/9 两档属"需取舍"（指针族 / 用户脚本）
-  assert.equal(TOTAL - saveOf(byId([8])), 42, '再做指针族应为 42');
-  assert.equal(TOTAL - saveOf(byId([8, 9])), 39, '全部做完应为 39');
+  assert.equal(TOTAL - saveOf(byId([8])), 43, '再做指针族应为 43');
+  assert.equal(TOTAL - saveOf(byId([8, 9])), 40, '全部做完应为 40');
   // 所有"可重构"档已执行完（pendingMerges 应为空）。剩下的只有"需取舍"档 ——
   // 若将来又出现未执行的 merge 档，这里会失败，提醒同步方案与本文档。
   assert.deepEqual(pendingMerges.map((g) => g.label), [], '所有可重构档应已执行完；若有新增，请同步方案文档与下方数字');

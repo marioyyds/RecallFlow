@@ -242,6 +242,7 @@ test('buildInstruction：带 schema / 精确集合 / 聚合规则', () => {
   assert.match(s, /报表 \/ 网格/);
   assert.match(s, /top-N/);
   assert.match(s, /ACTION_NOT_ALLOWED_ERROR/);
+  assert.match(s, /read_table/);
 });
 
 test('buildInstruction：多站点任务必须列出全部 start URL', () => {

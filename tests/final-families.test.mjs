@@ -151,9 +151,9 @@ function mkPcDeps(overrides = {}) {
   return deps;
 }
 
-test('PAGE_COMMAND_TOOLS 覆盖五个工具名', () => {
+test('PAGE_COMMAND_TOOLS 覆盖六个工具名', () => {
   assert.deepEqual([...PAGE_COMMAND_TOOLS].sort(),
-    ['annotate', 'get_element_source', 'inspect_element', 'scroll_page', 'undo_last_action']);
+    ['annotate', 'get_element_source', 'inspect_element', 'read_table', 'scroll_page', 'undo_last_action']);
 });
 
 test('handlePageCommandTool：不属于本族返回 null', async () => {

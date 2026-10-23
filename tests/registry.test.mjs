@@ -181,7 +181,12 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
   //        而技能族当时只有 `load_skill`（读手册）与 `install_skill`（从 SkillHub 装），
   //        没有任何工具能**写**一份技能 —— 模型只能降级成 macro(op=save) 去做，两头落空。
   //        风险等级取最高档（high + alwaysRequireApproval），理由见 tool-metadata.js 的条目注释。
-  assert.equal(TOOL_REGISTRY.length, 45, '工具数量变化了：' + TOOL_REGISTRY.length + '（若有意新增/合并，请同步更新此断言与 docs/tool-merge-plan.md）');
+  // 46 —— 在 45 的基础上**新增**：`read_table`。
+  //        起因是 480 条 WebArena 实测：admin 报表/top-N/count/日期过滤的失败集中在
+  //        "模型从快照里手抄表格、手工累加、只读第一页"。它是只读、route=content，
+  //        与 inspect_element(op=table) 同族但多了**自动选主表 + where/sort/count/sum + 分页摘要**，
+  //        属于报表任务的执行路径，因此单独成工具（而不是继续给 inspect_element 加参数）。
+  assert.equal(TOOL_REGISTRY.length, 46, '工具数量变化了：' + TOOL_REGISTRY.length + '（若有意新增/合并，请同步更新此断言与 docs/tool-merge-plan.md）');
 });
 
 // ---------------------------------------------------------------- prompt 体积预算
@@ -221,9 +226,14 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 //   与 `load_skill` 同），因此它进「合计」但**不进**下面各意图的数字；
 //   实际每轮下发的 prompt 比表里那几个数各多出这 1459 字符。这是既有设计
 //   （见 lib/assistant/mcp.js 的 alwaysAvailable 分支），这里如实记一笔，避免读者以为表=实际。
+// 2026-10 新增 read_table 一档（45 → 46）：
+//   480 条 WebArena 实测里，admin 报表/top-N/count/日期过滤的失败集中在"从快照手抄表格、
+//   手工累加、只读第一页"。read_table 是只读、route=content，给报表任务一条结构化路径。
+//   按上面的原则先精简了 schema 描述；仍超出原 39000 → 本次**显式**上调合计到 41000。
+//   browser_task 也相应上调（见下方数字）；这是有意的契约变化，不是无声膨胀。
 const SCHEMA_BYTES_BUDGET = {
-  合计: 39000,
-  browser_task: 35900,
+  合计: 41000,
+  browser_task: 38000,
   research_task: 28500,
   chat_task: 9700,
   knowledge_task: 5100,
