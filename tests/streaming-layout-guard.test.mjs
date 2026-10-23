@@ -29,12 +29,14 @@ async function boot() {
   const shadow = () => (host() ? host().shadowRoot : null);
   const panel = () => (shadow() ? shadow().querySelector('.panel') : null);
   const body = () => (panel() ? panel().querySelector('.p-body') : null);
+  const cmdInput = () => (shadow() ? shadow().querySelector('.cmd-input') : null);
   dom.document.emit('keydown', { altKey: true, shiftKey: true, code: 'KeyR', key: 'R', repeat: false });
   return {
     dom,
     mod,
     panel,
     body,
+    cmdInput,
     close() {
       dom.restore();
       restoreChrome(prevChrome);
@@ -136,6 +138,60 @@ test('fitPanelHeight：跳过重测时仍然要置底（不许顺手把置底也
     const second = instrument(app);
     app.mod.fitPanelHeight(); // 第二次：走快路径
     assert.ok(second.body.scrollTop > 0, '快路径必须照样补置底 —— 否则用户看到的最后几个字会停在屏幕外');
+  } finally {
+    app.close();
+  }
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test('fitPanelHeight：TTL 到期必须重新测量（快路径不许把 TTL 续期）', async () => {
+  const app = await boot();
+  try {
+    // 复刻评审附件 ttl-probe.mjs 的时序：**每 ~100ms 命中一次快路径**，
+    // 跑满 1.2 秒。若快路径顺手把"上次测量时间"续期成"本次命中时间"，
+    // 那整轮只会测量 1 次 —— 签名漏判的高度变化就会一直错下去，不会自愈。
+    // 正确实现应当每 500ms 至少真实测量一次 ⇒ 1.2s 内 ≥ 2 次。
+    const readsPerCall = [];
+    for (let i = 0; i < 12; i += 1) {
+      const probe = instrument(app);
+      app.mod.fitPanelHeight();
+      readsPerCall.push(probe.reads());
+      await sleep(100);
+    }
+    const measured = readsPerCall.filter((n) => n > 0).length;
+    assert.ok(
+      measured >= 2,
+      '1.2 秒内只真实测量了 ' + measured + ' 次（共 ' + readsPerCall.length + ' 次调用） —— ' +
+        '快路径把 TTL 续期了，500ms 兜底形同不存在（见 CHROME_MEASURE_TTL_MS 的说明）'
+    );
+    assert.ok(
+      measured < readsPerCall.length,
+      '每次调用都真实测量 ⇒ 复用快路径根本没生效，这条快路径也就没有存在意义'
+    );
+  } finally {
+    app.close();
+  }
+});
+
+test('fitPanelHeight：输入框被输入撑高必须让签名失效（textarea 的 value 不在 textContent 里）', async () => {
+  const app = await boot();
+  try {
+    instrument(app);
+    app.mod.fitPanelHeight(); // 先让缓存就位
+
+    const input = app.cmdInput();
+    assert.ok(input, '面板输入框应就位（否则这条用例在测空气）');
+    // 模拟流式期间用户在输入框里打字：input 事件会把 textarea 从 34px 撑到最多 120px，
+    // 而 `<textarea>` 的当前值**不在 textContent 里** —— 只看 textContent.length 的签名会漏判。
+    input.value = '这是一段会让输入框换行变高的指令，'.repeat(6);
+
+    const after = instrument(app);
+    app.mod.fitPanelHeight();
+    assert.ok(
+      after.reads() > 0,
+      '输入框变高了却还在复用旧测量 —— 面板总高不跟着涨，底部会被 `.panel { overflow:hidden }` 裁掉'
+    );
   } finally {
     app.close();
   }

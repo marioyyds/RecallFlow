@@ -188,6 +188,19 @@ test('fitPanelHeight 必须保留 chrome 测量的复用快路径', () => {
     '面板销毁/重建时必须让测量缓存失效（需 ≥3 处：面板关闭 / removePanel / openPanel，实测 ' + resets.length + ' 处）'
   );
   assert.match(body, /CHROME_MEASURE_TTL_MS/, '缺少 TTL 兜底：签名拦不住"等长改写 / 子元素自身高度变化"');
+  // TTL 的起算点必须是"上一次真实测量"：快路径若把计时续期成"本次命中时间"，
+  // 这个兜底就永远不会到期（评审在 d9f69ed 上实测的缺陷），行为判据见
+  // tests/streaming-layout-guard.test.mjs 的「TTL 到期必须重新测量」。
+  assert.ok(
+    !/chromeMeasure\.measuredAt\s*=/.test(body.replace(/chromeMeasure\s*=\s*\{[^}]*\}/g, '')),
+    '快路径不许给 `measuredAt` 赋值（那等于每次命中都把 TTL 续期）；只允许更新 `usedAt`'
+  );
+  assert.match(src, /panelCmdInput/, '面板输入框的引用未接入（签名会漏判"用户打字把输入区撑高"）');
+  assert.match(
+    codeOnly(sliceFunctionBody('function fitChromeSignature(')),
+    /panelCmdInput[\s\S]*\.value/,
+    '签名必须计入输入框的**当前 value**：textarea 的 value 不在 textContent 里，只看 textContent.length 会漏判'
+  );
 });
 
 test('流式正文重绘必须带自适应节流，且被跳过的帧有兜底补画', () => {

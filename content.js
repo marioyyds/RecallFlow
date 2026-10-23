@@ -6235,6 +6235,7 @@
     }
     panel = null;
     panelBody = null;
+    panelCmdInput = null;
     resetPanelFitCache();
     panelTextEl = null;
     panelTitleEl = null;
@@ -6421,6 +6422,7 @@
       panel.remove();
       panel = null;
       panelBody = null;
+      panelCmdInput = null;
       resetPanelFitCache();
       panelTextEl = null;
       panelTitleEl = null;
@@ -6484,12 +6486,14 @@
   var CHROME_MEASURE_TTL_MS = 500;
   var chromeMeasure = null;
   var fitBodyClamped = false;
+  var panelCmdInput = null;
   function resetPanelFitCache() {
     chromeMeasure = null;
     fitBodyClamped = false;
   }
   function fitChromeSignature() {
     let sig = panel.className + "#";
+    sig += (panelCmdInput && panelCmdInput.isConnected ? String(panelCmdInput.value || "").length : "-") + "#";
     for (const child of panel.children) {
       if (child === panelBody || child.classList.contains("resize-handle")) continue;
       sig += child.tagName + "." + String(child.className || "") + ":" + String(child.hidden ? 1 : 0) + ":" + (child.style ? String(child.style.height || "") : "") + ":" + child.children.length + ":" + String(child.textContent || "").length + "|";
@@ -6505,9 +6509,9 @@
     const vh = window.innerHeight;
     const now = Date.now();
     const sig = fitChromeSignature();
-    const reusable = chromeMeasure && chromeMeasure.sig === sig && chromeMeasure.vw === vw && chromeMeasure.vh === vh && now - chromeMeasure.at < CHROME_MEASURE_TTL_MS;
+    const reusable = chromeMeasure && chromeMeasure.sig === sig && chromeMeasure.vw === vw && chromeMeasure.vh === vh && now - chromeMeasure.measuredAt < CHROME_MEASURE_TTL_MS;
     if (reusable && fitBodyClamped) {
-      chromeMeasure.at = now;
+      chromeMeasure.usedAt = now;
       markSelfScroll();
       if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
       return;
@@ -6530,7 +6534,7 @@
     const bodyAvailableH = Math.max(MIN_BODY_H, maxH - chromeH);
     const bodyH = Math.min(bodyNatH, bodyAvailableH);
     fitBodyClamped = bodyNatH > bodyAvailableH;
-    chromeMeasure = { sig, chromeH, vw, vh, at: now };
+    chromeMeasure = { sig, chromeH, vw, vh, measuredAt: now, usedAt: now };
     panelBody.style.flex = "none";
     panelBody.style.height = bodyH + "px";
     panelBody.style.overflowY = bodyNatH > bodyH ? "auto" : "hidden";
@@ -8585,6 +8589,7 @@
     const cmdWrap = document.createElement("div");
     cmdWrap.className = "cmd-box";
     const cmdInput = document.createElement("textarea");
+    panelCmdInput = cmdInput;
     cmdInput.className = "cmd-input";
     cmdInput.rows = 1;
     cmdInput.placeholder = "\u8F93\u5165\u6307\u4EE4\u540E\u56DE\u8F66\uFF0C\u5982\uFF1A\u7FFB\u8BD1\u6210\u4E2D\u6587 / \u89E3\u91CA\u8FD9\u6BB5\u4EE3\u7801 / \u4F18\u5316\u5E76\u8865\u5168\u2026";
