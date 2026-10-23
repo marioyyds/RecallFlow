@@ -391,3 +391,28 @@ gitlab / map / wikipedia 数据就绪（map 数据 187GB，wikipedia ZIM 当前�
 3. 跨站 state check：发布后回读标题/正文/顺序/版块，逐字比对；
 4. data-only JSON 的二次补正（只补外层契约，不改数据）；
 5. 再跑 480 全量，按站点/动作报分布。
+
+### 8.9 第一项落地：`read_table` + 报表技能
+
+480 条失败分析里，admin 报表类问题集中在三件事：从快照手抄表格、手工累加明细、
+只读第一页就回答。因此新增：
+
+- **`read_table`**（只读 / parallelSafe / route=content）：
+  - 默认自动选"可见且行数最多"的主表（报表页的布局表/筛选表常排在前面）；
+  - `where` 按列筛选（eq/neq/contains/gt/gte/lt/lte，自动去掉货币符号/千分位）；
+  - `sort` 排序、`count` 只返回匹配行数、`sum` 对列求和；
+  - 返回 `pagination`（总条数/当前页/总页数/是否还有下一页），避免"第一页冒充全量"。
+- 查询逻辑放在 `lib/shared/table-query.js`（后台专用），内容脚本只增加
+  "自动选表 + 分页文本解析"，因此 content.js 只涨到 418KB（预算上调到 420KB）。
+- 新增技能 **`query-report-table`**：先设置页面过滤 → 用 `read_table` 的 where/sort/count/sum
+  → 以 `pagination.total` 为准 → top-N 只取 N、count 只输出数字、product type 用业务字段。
+- WebArena 指令同步指向 `read_table`。
+
+**冒烟结果**（admin 0 / 11）：
+
+- **task 0 官方通过**：期望 `Quest Lumaflex Band`，这次输出正确；
+  上一轮它把并列的两个商品都交了出来（top-1 并列），现在按报表排名只取前 1。
+- task 11 仍失败：答案是 4，期望 6。形状已对（数字），但**没有覆盖全部页/全部命中行**；
+  说明"结构化读表"只解决了手抄/手算，**分页与筛选口径**仍要靠模型按技能 iterate。
+
+这是第一项落地；下一项按原计划做 mutate 完成校验、跨站 state check、data-only JSON 二次补正。
