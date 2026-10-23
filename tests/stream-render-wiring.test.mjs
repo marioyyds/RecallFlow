@@ -115,6 +115,95 @@ test('endStream 会丢弃仍在排队的渲染（状态已被重置，晚到的�
   assert.ok(cancelAt < resetAt, 'cancel 应在清空 pending 状态之前，否则只是巧合而非保证');
 });
 
+/**
+ * 取一个函数的**完整**正文：从函数头一直取到下一个顶格行。
+ *
+ * 不用 `sliceFunction` 的"同级缩进 `}`"来定界 —— fitPanelHeight 的快路径本身就有 `  }`，
+ * 朴素定界会把函数切成半截：那样放在函数末尾的置底就永远被判为"不存在"，
+ * 于是"把置底删掉"这种退化照样能变绿。
+ */
+function sliceFunctionBody(header) {
+  const s = lines.findIndex((l) => l.includes(header));
+  assert.notEqual(s, -1, '找不到函数：' + header);
+  let e = s + 1;
+  while (e < lines.length) {
+    const l = lines[e];
+    if (l.trim() !== '' && !/^\s/.test(l)) break;
+    e += 1;
+  }
+  return lines.slice(s, e).join('\n');
+}
+
+/** 剥掉注释后再判定据：注释里写"以前是 `scrollTop = scrollHeight`"不该被当成现在的代码。 */
+function codeOnly(body) {
+  return body
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\/?\*)/.test(l))
+    .join('\n');
+}
+
+// ---------------------------------------------------------------- 流式布局的成本门禁
+//
+// 这一组是 TITA-6 那一轮性能收尾**用源码就能查到**的部分。它们的共同点是：
+// 退化实现**功能完全正常、现有测试全绿**，只是又回到"每帧多几次强制同步布局"。
+// 行为层面的判据（拿真 DOM 数它读了几处几何量）在 tests/streaming-layout-guard.test.mjs。
+
+test('fitPanelHeight 全程只读一次 scrollHeight（收尾置底不允许再读一次）', () => {
+  const body = codeOnly(sliceFunctionBody('function fitPanelHeight('));
+  const reads = body.match(/scrollHeight/g) || [];
+  assert.equal(
+    reads.length,
+    1,
+    'fitPanelHeight 应只在 `bodyNatH = panelBody.scrollHeight` 处取一次几何量，实测 ' +
+      reads.length +
+      ' 处 —— 多出来的那处就是"写完样式再读一次"的强制同步布局'
+  );
+  assert.match(body, /panelBody\.scrollTop = BOTTOM_SCROLL_PX/, '置底应写滚动哨兵，而不是先读 scrollHeight');
+});
+
+test('pinToBottom 一次布局都不读（置底靠写滚动哨兵）', () => {
+  const body = codeOnly(sliceFunctionBody('function pinToBottom()'));
+  const reads = body.match(/scrollHeight|offsetHeight|getBoundingClientRect/g) || [];
+  assert.deepEqual(reads, [], 'pinToBottom 是被逐帧调用的一行，不允许为了置底读几何量：' + String(reads));
+  assert.match(body, /BOTTOM_SCROLL_PX/, '置底应用滚动哨兵（见该常量的说明）');
+});
+
+test('流式游标定位不再用 TreeWalker 遍历整段正文', () => {
+  const body = sliceFunctionBody('function positionStreamCursor(');
+  assert.ok(
+    !/createTreeWalker/.test(codeOnly(body)),
+    'positionStreamCursor 又用 createTreeWalker 了 —— 那会把整段正文的每个文本节点都走一遍（随正文增长）'
+  );
+  // 游标定位允许读几何量（absolute 定位必须取 rect），但**找末文本节点**必须是按树深倒着走。
+  assert.match(body, /lastNonNullTextNode\(host\)/, '末文本节点应按树深倒着找');
+  assert.match(body, /cursorContainingBlock\(host\)/, '包含块必须走缓存，不能每帧爬祖先链做 getComputedStyle');
+});
+
+test('fitPanelHeight 必须保留 chrome 测量的复用快路径', () => {
+  const body = codeOnly(sliceFunctionBody('function fitPanelHeight('));
+  assert.match(body, /reusable\s*&&\s*fitBodyClamped/, '缺少"面板已饱和且 chrome 未变 ⇒ 跳过整次重排"的快路径');
+  const resets = src.match(/resetPanelFitCache\(\)/g) || [];
+  assert.ok(
+    resets.length >= 3,
+    '面板销毁/重建时必须让测量缓存失效（需 ≥3 处：面板关闭 / removePanel / openPanel，实测 ' + resets.length + ' 处）'
+  );
+  assert.match(body, /CHROME_MEASURE_TTL_MS/, '缺少 TTL 兜底：签名拦不住"等长改写 / 子元素自身高度变化"');
+});
+
+test('流式正文重绘必须带自适应节流，且被跳过的帧有兜底补画', () => {
+  assert.match(chunkBranch, /throttleStreamPaint\(/, 'answer 回调应在重绘前先做节流判定');
+  assert.match(
+    sliceFunctionBody('function throttleStreamPaint('),
+    /setTimeout/,
+    '被跳过的帧必须有兜底定时器补画：流式随时可能停住，停住后就不再有 chunk 来排下一次绘制'
+  );
+  assert.match(
+    sliceFunctionBody('function endStream()'),
+    /cancelStreamPaintRetry\(\)/,
+    '收尾必须取消补画定时器，否则一轮结束后还会空跑一次'
+  );
+});
+
 test('接线用 render-scheduler 提供的调度器，而不是就地手写 rAF', () => {
   assert.ok(
     /import\s*\{[^}]*createFrameScheduler[^}]*\}\s*from\s*'\.[^']*render-scheduler\.js'/.test(src),

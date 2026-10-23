@@ -6235,6 +6235,7 @@
     }
     panel = null;
     panelBody = null;
+    resetPanelFitCache();
     panelTextEl = null;
     panelTitleEl = null;
     planBar = null;
@@ -6420,6 +6421,7 @@
       panel.remove();
       panel = null;
       panelBody = null;
+      resetPanelFitCache();
       panelTextEl = null;
       panelTitleEl = null;
       planBar = null;
@@ -6478,11 +6480,38 @@
       openPanel(0, 0, true);
     }
   }
+  var BOTTOM_SCROLL_PX = 1e7;
+  var CHROME_MEASURE_TTL_MS = 500;
+  var chromeMeasure = null;
+  var fitBodyClamped = false;
+  function resetPanelFitCache() {
+    chromeMeasure = null;
+    fitBodyClamped = false;
+  }
+  function fitChromeSignature() {
+    let sig = panel.className + "#";
+    for (const child of panel.children) {
+      if (child === panelBody || child.classList.contains("resize-handle")) continue;
+      sig += child.tagName + "." + String(child.className || "") + ":" + String(child.hidden ? 1 : 0) + ":" + (child.style ? String(child.style.height || "") : "") + ":" + child.children.length + ":" + String(child.textContent || "").length + "|";
+    }
+    return sig;
+  }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
     if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const now = Date.now();
+    const sig = fitChromeSignature();
+    const reusable = chromeMeasure && chromeMeasure.sig === sig && chromeMeasure.vw === vw && chromeMeasure.vh === vh && now - chromeMeasure.at < CHROME_MEASURE_TTL_MS;
+    if (reusable && fitBodyClamped) {
+      chromeMeasure.at = now;
+      markSelfScroll();
+      if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
+      return;
+    }
     const dockGap = getDockGap();
     const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
     let maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
@@ -6500,6 +6529,8 @@
     const bodyNatH = panelBody.scrollHeight;
     const bodyAvailableH = Math.max(MIN_BODY_H, maxH - chromeH);
     const bodyH = Math.min(bodyNatH, bodyAvailableH);
+    fitBodyClamped = bodyNatH > bodyAvailableH;
+    chromeMeasure = { sig, chromeH, vw, vh, at: now };
     panelBody.style.flex = "none";
     panelBody.style.height = bodyH + "px";
     panelBody.style.overflowY = bodyNatH > bodyH ? "auto" : "hidden";
@@ -6510,7 +6541,7 @@
       panel.style.bottom = dockGap + "px";
     }
     markSelfScroll();
-    if (wasPinned) panelBody.scrollTop = panelBody.scrollHeight;
+    if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
   }
   function getDockGap() {
     return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));
@@ -6519,7 +6550,7 @@
     if (!observerAutoScroll) return false;
     if (!panelBody || !panelBody.isConnected) return false;
     markSelfScroll();
-    panelBody.scrollTop = panelBody.scrollHeight;
+    panelBody.scrollTop = BOTTOM_SCROLL_PX;
     return true;
   }
   var SELF_SCROLL_MUTE_MS = 300;
@@ -6934,20 +6965,40 @@
     if (!rec) return;
     if (rec.cursor && rec.cursor.parentNode) rec.cursor.parentNode.removeChild(rec.cursor);
     streamingCursors.delete(host2);
+    cursorFlowCache.delete(host2);
   }
-  function positionStreamCursor(host2, cursor) {
+  var cursorFlowCache = /* @__PURE__ */ new WeakMap();
+  function cursorContainingBlock(host2) {
+    const cached = cursorFlowCache.get(host2);
+    if (cached && cached.isConnected && cached.contains(host2)) return cached;
     let flow = host2 && host2.parentElement;
     while (flow && getComputedStyle(flow).position === "static") flow = flow.parentElement;
+    if (flow) cursorFlowCache.set(host2, flow);
+    return flow;
+  }
+  function lastNonNullTextNode(root) {
+    if (!root) return null;
+    const children = root.childNodes;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i];
+      if (!child) continue;
+      if (child.nodeType === 3) {
+        if (child.nodeValue && /\S/.test(child.nodeValue)) return child;
+        continue;
+      }
+      if (child.nodeType === 1) {
+        const found = lastNonNullTextNode(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  function positionStreamCursor(host2, cursor) {
+    const flow = cursorContainingBlock(host2);
     if (!flow || !cursor) return;
     let rect = null;
     try {
-      const walker = document.createTreeWalker(host2, NodeFilter.SHOW_TEXT);
-      let lastText2 = null;
-      let node = walker.nextNode();
-      while (node) {
-        if (node.nodeValue && node.nodeValue.trim()) lastText2 = node;
-        node = walker.nextNode();
-      }
+      const lastText2 = lastNonNullTextNode(host2);
       if (lastText2) {
         let end = lastText2.nodeValue.length;
         while (end > 0 && /\s/.test(lastText2.nodeValue.charAt(end - 1))) end -= 1;
@@ -6970,6 +7021,38 @@
       cursor.style.left = Math.max(0, hostRect.left - flowRect.left) + "px";
       cursor.style.top = Math.max(0, hostRect.bottom - flowRect.top - 13) + "px";
     }
+  }
+  var STREAM_PAINT_GAP_CAP_MS = 120;
+  var lastStreamPaintAt = 0;
+  var lastStreamPaintMs = 0;
+  var streamPaintTimer = null;
+  function cancelStreamPaintRetry() {
+    if (streamPaintTimer) {
+      clearTimeout(streamPaintTimer);
+      streamPaintTimer = null;
+    }
+    lastStreamPaintAt = 0;
+    lastStreamPaintMs = 0;
+  }
+  function throttleStreamPaint(paint2) {
+    const now = Date.now();
+    const gapMs = Math.min(STREAM_PAINT_GAP_CAP_MS, lastStreamPaintMs);
+    if (!lastStreamPaintAt || now - lastStreamPaintAt >= gapMs) return false;
+    if (!streamPaintTimer) {
+      streamPaintTimer = setTimeout(
+        () => {
+          streamPaintTimer = null;
+          streamRender.schedule("answer", paint2);
+        },
+        Math.max(1, gapMs - (now - lastStreamPaintAt))
+      );
+    }
+    return true;
+  }
+  function noteStreamPaint(startedAt) {
+    const ended = Date.now();
+    lastStreamPaintMs = ended - startedAt;
+    lastStreamPaintAt = ended;
   }
   function showStreamingAnswer(host2, text, citations) {
     if (!host2) return;
@@ -8250,6 +8333,7 @@
     progressEl.appendChild(progressTimeEl);
     panel.appendChild(progressEl);
     panelBody = document.createElement("div");
+    resetPanelFitCache();
     panelBody.className = "p-body";
     panelBody.setAttribute("role", "log");
     panelBody.setAttribute("aria-live", "polite");
@@ -8731,6 +8815,7 @@
     }
     function endStream() {
       streamRender.cancel();
+      cancelStreamPaintRetry();
       const endedRunId = activeRunId || "";
       const endedSessionId = panelSessionId;
       streaming = false;
@@ -9310,8 +9395,14 @@
             if (pendingContentEl) pendingContentEl.innerHTML = "";
           }
           streamRender.schedule("answer", () => {
-            if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
-            pendingAiMsg._raw = pendingAcc;
+            const paintPendingAnswer = () => {
+              const startedAt = Date.now();
+              if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
+              pendingAiMsg._raw = pendingAcc;
+              noteStreamPaint(startedAt);
+            };
+            if (throttleStreamPaint(paintPendingAnswer)) return;
+            paintPendingAnswer();
           });
           streamRender.schedule("layout", () => {
             fitPanelHeight();
