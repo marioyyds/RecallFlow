@@ -74,23 +74,25 @@
       }
     });
 
-    if (reduceMotion && !img.complete) {
-      img.addEventListener(
-        "load",
-        function () {
-          try {
-            setState(true);
-          } catch (error) {
-            /* 忽略：保持原图播放 */
-          }
-        },
-        { once: true }
-      );
-    } else if (reduceMotion) {
-      try {
-        setState(true);
-      } catch (error) {
-        /* 忽略：保持原图播放 */
+    if (reduceMotion) {
+      if (img.complete && img.naturalWidth > 0) {
+        try {
+          setState(true);
+        } catch (error) {
+          /* 忽略：保持原图播放 */
+        }
+      } else {
+        img.addEventListener(
+          "load",
+          function () {
+            try {
+              setState(true);
+            } catch (error) {
+              /* 忽略：保持原图播放 */
+            }
+          },
+          { once: true }
+        );
       }
     }
   }
