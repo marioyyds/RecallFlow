@@ -38,15 +38,18 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 打包的意义之一是把体积变得**可见**：超过这个量级通常意味着误引入了大依赖
  * （例如把整个 markdown 渲染器或某个 polyfill 打进了内容脚本）。
  *
- * 这不是「随便定的上限」，而是一条**棘轮**：现在 428KB（本轮加入页面选文的
- * 清除控件、用户消息内引用渲染与持久化；上一档 424KB 是导出期 UI 守卫
- * `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
+ * 这不是「随便定的上限」，而是一条**棘轮**：现在 438KB（本轮加入面板布局存档
+ * `lib/page/panel-layout.js` 与 chat.js 侧的读写接线；与 perf 分支合并后实测产物
+ * 446834 字节，故在 perf 的 434KB 之上再抬一档，留 ~1.6KB 余量）。上一档 434KB 是
+ * 面板流式渲染的两处性能优化 —— `fitPanelHeight` 的 chrome 测量复用、流式游标按树深
+ * 定位最后一个文本节点；再上一档 428KB 是页面选文的清除控件、用户消息内引用渲染与
+ * 持久化；424KB 是导出期 UI 守卫 `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
  * 真需要涨的话，请在同一处上调并写清原因 —— 但先确认不是误引入。
  * 它现在由 npm test 守（tests/content-bundle-freshness.test.mjs），不再是
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-export const SIZE_BUDGET_BYTES = 428 * 1024;
+export const SIZE_BUDGET_BYTES = 438 * 1024;
 
 /**
  * 产物规格检查（纯函数，便于直测）。返回问题列表，空数组 = 通过。

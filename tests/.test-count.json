@@ -1,10 +1,10 @@
 {
-  "tests": 1861,
-  "pass": 1861,
-  "fail": 0,
+  "tests": 1893,
+  "pass": 1878,
+  "fail": 15,
   "files": {
-    "total": 161,
-    "behavior": 131,
+    "total": 164,
+    "behavior": 134,
     "static": 30
   }
 }

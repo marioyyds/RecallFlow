@@ -5420,6 +5420,149 @@
     }
 `;
 
+  // lib/page/panel-layout.js
+  var PANEL_POS_KEY = "recallflow-panel-pos";
+  var PANEL_SIZE_KEY = "recallflow-panel-size";
+  var PANEL_MIN_WIDTH = 280;
+  var PANEL_MIN_HEIGHT = 320;
+  var PANEL_VIEWPORT_INSET = 24;
+  var PANEL_LAYOUT_VERSION = 2;
+  function isFiniteNumber(v) {
+    return typeof v === "number" && Number.isFinite(v);
+  }
+  function normalizeViewport(viewport) {
+    const width = Number(viewport && viewport.width);
+    const height = Number(viewport && viewport.height);
+    return {
+      width: Number.isFinite(width) ? width : 0,
+      height: Number.isFinite(height) ? height : 0
+    };
+  }
+  function clampPanelSize(size, viewport) {
+    const { width: vw, height: vh } = normalizeViewport(viewport);
+    const width = Number(size && size.width);
+    const height = Number(size && size.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return {
+      width: Math.max(1, Math.min(vw - PANEL_VIEWPORT_INSET, Math.max(PANEL_MIN_WIDTH, width))),
+      height: Math.max(1, Math.min(vh - PANEL_VIEWPORT_INSET, Math.max(PANEL_MIN_HEIGHT, height)))
+    };
+  }
+  function readPanelLayout(storage) {
+    const empty = { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+    if (!storage) return empty;
+    let pos = null;
+    let size = null;
+    try {
+      pos = JSON.parse(storage.getItem(PANEL_POS_KEY) || "null");
+    } catch (e) {
+      pos = null;
+    }
+    try {
+      size = JSON.parse(storage.getItem(PANEL_SIZE_KEY) || "null");
+    } catch (e) {
+      size = null;
+    }
+    const out = Object.assign({}, empty);
+    if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
+    if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
+    if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
+      out.left = pos.left;
+      out.top = pos.top;
+      out.hasPos = true;
+    }
+    if (pos && typeof pos.docked === "boolean") out.docked = pos.docked;
+    return out;
+  }
+  function writePanelLayout(storage, snapshot) {
+    if (!storage) return null;
+    const s = snapshot || {};
+    const width = Number(s.width);
+    const height = Number(s.height);
+    const record = {
+      width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+      left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
+      top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+      docked: s.docked === true
+    };
+    try {
+      if (s.writeSize !== false && record.width && record.height) {
+        storage.setItem(
+          PANEL_SIZE_KEY,
+          JSON.stringify({ version: PANEL_LAYOUT_VERSION, width: record.width, height: record.height })
+        );
+      }
+      storage.setItem(
+        PANEL_POS_KEY,
+        JSON.stringify({ version: PANEL_LAYOUT_VERSION, docked: record.docked, left: record.left, top: record.top })
+      );
+    } catch (e) {
+      return null;
+    }
+    return record;
+  }
+  function resolvePanelPlacement(options) {
+    const opts = options || {};
+    const viewport = normalizeViewport(opts.viewport);
+    const sizeWidth = Math.max(1, Number(opts.size && opts.size.width) || 0);
+    const sizeHeight = Math.max(1, Number(opts.size && opts.size.height) || 0);
+    const dockGap = Number.isFinite(Number(opts.dockGap)) ? Number(opts.dockGap) : 0;
+    const layout = opts.layout || null;
+    const savedDocked = layout && typeof layout.docked === "boolean" ? layout.docked : null;
+    const docked = opts.docked == null ? savedDocked === true : opts.docked === true;
+    if (layout && layout.hasPos && isFiniteNumber(layout.left) && isFiniteNumber(layout.top)) {
+      return {
+        docked,
+        manualPos: true,
+        left: Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, layout.left)),
+        top: Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, layout.top)),
+        right: null,
+        bottom: null
+      };
+    }
+    if (docked) {
+      return {
+        docked: true,
+        manualPos: false,
+        left: null,
+        top: null,
+        right: 0,
+        // 底部留白是「大屏上移」的观感，视口太矮时它会把面板顶部顶出屏幕
+        // （实测：1200×520 + 480 高面板 ⇒ top=-38）。越界时收窄留白，正常视口不变。
+        bottom: Math.min(dockGap, Math.max(0, viewport.height - sizeHeight - 8))
+      };
+    }
+    const pointX = Number(opts.point && opts.point.x);
+    const pointY = Number(opts.point && opts.point.y);
+    const x = Number.isFinite(pointX) ? pointX : 0;
+    const y = Number.isFinite(pointY) ? pointY : 0;
+    return {
+      docked: false,
+      manualPos: false,
+      left: Math.min(Math.max(4, x), Math.max(4, viewport.width - sizeWidth - 4)),
+      // 与旧实现一致：点太靠下时按「面板较高」预留，避免顶部被推出视口。
+      top: Math.min(
+        Math.max(4, y),
+        Math.max(4, viewport.height - Math.min(sizeHeight, viewport.height - PANEL_VIEWPORT_INSET) - 4)
+      ),
+      right: null,
+      bottom: null
+    };
+  }
+  function clampPanelIntoView(rect, viewport) {
+    const { width: vw, height: vh } = normalizeViewport(viewport);
+    const r = rect || {};
+    const width = Math.max(0, Number(r.width) || 0);
+    const height = Math.max(0, Number(r.height) || 0);
+    const left = Number(r.left);
+    const top = Number(r.top);
+    return {
+      left: Math.min(Math.max(0, vw - width), Math.max(0, Number.isFinite(left) ? left : 0)),
+      top: Math.min(Math.max(0, vh - height), Math.max(0, Number.isFinite(top) ? top : 0))
+    };
+  }
+
   // lib/assistant/run-hub.js
   function endReasoning(state) {
     if (!state.reasoning) return;
@@ -6235,6 +6378,8 @@
     }
     panel = null;
     panelBody = null;
+    panelCmdInput = null;
+    resetPanelFitCache();
     panelTextEl = null;
     panelTitleEl = null;
     planBar = null;
@@ -6253,7 +6398,7 @@
         if (host && !host.isConnected) {
           ensureHost();
           if (panelUiOpen) {
-            openPanel(0, 0, true);
+            openPanel(0, 0, true, true);
             if (streaming) restoreStreamingUI();
           }
         }
@@ -6367,7 +6512,7 @@
           ensureHost();
           lastText = "";
           pageText = pageContextEnabled ? extractPageText() : "";
-          openPanel(0, 0, true);
+          openPanel(0, 0, true, true);
         } finally {
           suppressPanelUiPublish = false;
         }
@@ -6412,14 +6557,12 @@
     shotLightboxOpen = false;
     clearCiteHighlight();
     if (panel) {
-      if (panel.offsetWidth && panel.offsetHeight) localStorage.setItem("recallflow-panel-size", JSON.stringify({ width: panel.offsetWidth, height: panel.offsetHeight }));
-      if (panel._manualPos || panel.style.top !== "auto") {
-        const r = panel.getBoundingClientRect();
-        localStorage.setItem("recallflow-panel-pos", JSON.stringify({ left: r.left, top: r.top }));
-      }
+      persistPanelLayoutNow();
       panel.remove();
       panel = null;
       panelBody = null;
+      panelCmdInput = null;
+      resetPanelFitCache();
       panelTextEl = null;
       panelTitleEl = null;
       planBar = null;
@@ -6478,11 +6621,40 @@
       openPanel(0, 0, true);
     }
   }
+  var BOTTOM_SCROLL_PX = 1e7;
+  var CHROME_MEASURE_TTL_MS = 500;
+  var chromeMeasure = null;
+  var fitBodyClamped = false;
+  var panelCmdInput = null;
+  function resetPanelFitCache() {
+    chromeMeasure = null;
+    fitBodyClamped = false;
+  }
+  function fitChromeSignature() {
+    let sig = panel.className + "#";
+    sig += (panelCmdInput && panelCmdInput.isConnected ? String(panelCmdInput.value || "").length : "-") + "#";
+    for (const child of panel.children) {
+      if (child === panelBody || child.classList.contains("resize-handle")) continue;
+      sig += child.tagName + "." + String(child.className || "") + ":" + String(child.hidden ? 1 : 0) + ":" + (child.style ? String(child.style.height || "") : "") + ":" + child.children.length + ":" + String(child.textContent || "").length + "|";
+    }
+    return sig;
+  }
   function fitPanelHeight() {
     if (!panel || !panelBody) return;
     if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const now = Date.now();
+    const sig = fitChromeSignature();
+    const reusable = chromeMeasure && chromeMeasure.sig === sig && chromeMeasure.vw === vw && chromeMeasure.vh === vh && now - chromeMeasure.measuredAt < CHROME_MEASURE_TTL_MS;
+    if (reusable && fitBodyClamped) {
+      chromeMeasure.usedAt = now;
+      markSelfScroll();
+      if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
+      return;
+    }
     const dockGap = getDockGap();
     const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
     let maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
@@ -6500,6 +6672,8 @@
     const bodyNatH = panelBody.scrollHeight;
     const bodyAvailableH = Math.max(MIN_BODY_H, maxH - chromeH);
     const bodyH = Math.min(bodyNatH, bodyAvailableH);
+    fitBodyClamped = bodyNatH > bodyAvailableH;
+    chromeMeasure = { sig, chromeH, vw, vh, measuredAt: now, usedAt: now };
     panelBody.style.flex = "none";
     panelBody.style.height = bodyH + "px";
     panelBody.style.overflowY = bodyNatH > bodyH ? "auto" : "hidden";
@@ -6507,10 +6681,10 @@
     panel.style.height = totalH + "px";
     if (panel.classList.contains("docked") && !panel._manualPos) {
       panel.style.top = "auto";
-      panel.style.bottom = dockGap + "px";
+      panel.style.bottom = Math.min(dockGap, Math.max(0, window.innerHeight - totalH - 8)) + "px";
     }
     markSelfScroll();
-    if (wasPinned) panelBody.scrollTop = panelBody.scrollHeight;
+    if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
   }
   function getDockGap() {
     return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));
@@ -6519,7 +6693,7 @@
     if (!observerAutoScroll) return false;
     if (!panelBody || !panelBody.isConnected) return false;
     markSelfScroll();
-    panelBody.scrollTop = panelBody.scrollHeight;
+    panelBody.scrollTop = BOTTOM_SCROLL_PX;
     return true;
   }
   var SELF_SCROLL_MUTE_MS = 300;
@@ -6673,15 +6847,44 @@
       persistPanelLayoutNow();
     }, 200);
   }
-  function persistPanelLayoutNow() {
+  function persistPanelLayoutNow(opts) {
     if (!panel) return;
+    if (!panel.offsetWidth || !panel.offsetHeight) return;
     const r = panel.getBoundingClientRect();
-    const layout = { width: panel.offsetWidth, height: panel.offsetHeight, left: Math.round(r.left), top: Math.round(r.top) };
+    const docked = panel.classList.contains("docked");
     try {
-      localStorage.setItem("recallflow-panel-size", JSON.stringify({ width: layout.width, height: layout.height }));
-      localStorage.setItem("recallflow-panel-pos", JSON.stringify({ left: layout.left, top: layout.top }));
+      writePanelLayout(localStorage, {
+        width: panel.offsetWidth,
+        height: panel.offsetHeight,
+        left: r.left,
+        top: r.top,
+        docked,
+        // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
+        manualPos: docked ? Boolean(panel._manualPos) : true,
+        writeSize: !(opts && opts.size === false)
+      });
     } catch (e) {
     }
+  }
+  function clampPanelToViewport() {
+    if (!panel) return;
+    if (!panel.offsetWidth || !panel.offsetHeight) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const docked = panel.classList.contains("docked");
+    if (docked && !panel._manualPos) {
+      const top = panel.getBoundingClientRect().top;
+      if (top < 0) panel.style.bottom = Math.max(0, vh - panel.offsetHeight - 8) + "px";
+      return;
+    }
+    if (!panel._manualPos) return;
+    const r = panel.getBoundingClientRect();
+    const next = clampPanelIntoView(
+      { left: r.left, top: r.top, width: panel.offsetWidth, height: panel.offsetHeight },
+      { width: vw, height: vh }
+    );
+    if (Math.round(next.left) !== Math.round(r.left)) panel.style.left = next.left + "px";
+    if (Math.round(next.top) !== Math.round(r.top)) panel.style.top = next.top + "px";
   }
   function renderDecisionButtonsIfPresent() {
     if (!panelBody || !panel) return;
@@ -6934,20 +7137,40 @@
     if (!rec) return;
     if (rec.cursor && rec.cursor.parentNode) rec.cursor.parentNode.removeChild(rec.cursor);
     streamingCursors.delete(host2);
+    cursorFlowCache.delete(host2);
   }
-  function positionStreamCursor(host2, cursor) {
+  var cursorFlowCache = /* @__PURE__ */ new WeakMap();
+  function cursorContainingBlock(host2) {
+    const cached = cursorFlowCache.get(host2);
+    if (cached && cached.isConnected && cached.contains(host2)) return cached;
     let flow = host2 && host2.parentElement;
     while (flow && getComputedStyle(flow).position === "static") flow = flow.parentElement;
+    if (flow) cursorFlowCache.set(host2, flow);
+    return flow;
+  }
+  function lastNonNullTextNode(root) {
+    if (!root) return null;
+    const children = root.childNodes;
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i];
+      if (!child) continue;
+      if (child.nodeType === 3) {
+        if (child.nodeValue && /\S/.test(child.nodeValue)) return child;
+        continue;
+      }
+      if (child.nodeType === 1) {
+        const found = lastNonNullTextNode(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  function positionStreamCursor(host2, cursor) {
+    const flow = cursorContainingBlock(host2);
     if (!flow || !cursor) return;
     let rect = null;
     try {
-      const walker = document.createTreeWalker(host2, NodeFilter.SHOW_TEXT);
-      let lastText2 = null;
-      let node = walker.nextNode();
-      while (node) {
-        if (node.nodeValue && node.nodeValue.trim()) lastText2 = node;
-        node = walker.nextNode();
-      }
+      const lastText2 = lastNonNullTextNode(host2);
       if (lastText2) {
         let end = lastText2.nodeValue.length;
         while (end > 0 && /\s/.test(lastText2.nodeValue.charAt(end - 1))) end -= 1;
@@ -6970,6 +7193,38 @@
       cursor.style.left = Math.max(0, hostRect.left - flowRect.left) + "px";
       cursor.style.top = Math.max(0, hostRect.bottom - flowRect.top - 13) + "px";
     }
+  }
+  var STREAM_PAINT_GAP_CAP_MS = 120;
+  var lastStreamPaintAt = 0;
+  var lastStreamPaintMs = 0;
+  var streamPaintTimer = null;
+  function cancelStreamPaintRetry() {
+    if (streamPaintTimer) {
+      clearTimeout(streamPaintTimer);
+      streamPaintTimer = null;
+    }
+    lastStreamPaintAt = 0;
+    lastStreamPaintMs = 0;
+  }
+  function throttleStreamPaint(paint2) {
+    const now = Date.now();
+    const gapMs = Math.min(STREAM_PAINT_GAP_CAP_MS, lastStreamPaintMs);
+    if (!lastStreamPaintAt || now - lastStreamPaintAt >= gapMs) return false;
+    if (!streamPaintTimer) {
+      streamPaintTimer = setTimeout(
+        () => {
+          streamPaintTimer = null;
+          streamRender.schedule("answer", paint2);
+        },
+        Math.max(1, gapMs - (now - lastStreamPaintAt))
+      );
+    }
+    return true;
+  }
+  function noteStreamPaint(startedAt) {
+    const ended = Date.now();
+    lastStreamPaintMs = ended - startedAt;
+    lastStreamPaintAt = ended;
   }
   function showStreamingAnswer(host2, text, citations) {
     if (!host2) return;
@@ -8113,7 +8368,7 @@
       }
     });
   }
-  function openPanel(x, y, docked) {
+  function openPanel(x, y, docked, restore) {
     if (!isExtContextAlive()) {
       warnExtDead();
       return;
@@ -8121,26 +8376,18 @@
     removeBubble();
     removePanel({ publish: false });
     if (fab) fab.classList.add("hidden");
+    const layout = readPanelLayout(localStorage);
+    const dockedIntent = restore ? null : docked === true;
     panel = document.createElement("div");
     panel.className = "panel" + (preferredTheme() === "dark" ? " dark" : "");
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "false");
     panel.setAttribute("aria-label", "RecallFlow \u6D4F\u89C8\u5668\u52A9\u624B");
-    if (docked) panel.classList.add("docked");
-    try {
-      const saved = JSON.parse(localStorage.getItem("recallflow-panel-size") || "null");
-      if (saved) {
-        panel.style.width = Math.min(window.innerWidth - 24, Math.max(280, saved.width)) + "px";
-        panel.style.height = Math.min(window.innerHeight - 24, Math.max(320, saved.height)) + "px";
-        panel._manualSize = true;
-      }
-    } catch (_) {
-    }
-    let savedPos = null;
-    try {
-      savedPos = JSON.parse(localStorage.getItem("recallflow-panel-pos") || "null");
-    } catch (_) {
-      savedPos = null;
+    const savedSize = clampPanelSize(layout, { width: window.innerWidth, height: window.innerHeight });
+    if (savedSize) {
+      panel.style.width = savedSize.width + "px";
+      panel.style.height = savedSize.height + "px";
+      panel._manualSize = true;
     }
     const head = document.createElement("div");
     head.className = "p-head";
@@ -8250,6 +8497,7 @@
     progressEl.appendChild(progressTimeEl);
     panel.appendChild(progressEl);
     panelBody = document.createElement("div");
+    resetPanelFitCache();
     panelBody.className = "p-body";
     panelBody.setAttribute("role", "log");
     panelBody.setAttribute("aria-live", "polite");
@@ -8501,6 +8749,7 @@
     const cmdWrap = document.createElement("div");
     cmdWrap.className = "cmd-box";
     const cmdInput = document.createElement("textarea");
+    panelCmdInput = cmdInput;
     cmdInput.className = "cmd-input";
     cmdInput.rows = 1;
     cmdInput.placeholder = "\u8F93\u5165\u6307\u4EE4\u540E\u56DE\u8F66\uFF0C\u5982\uFF1A\u7FFB\u8BD1\u6210\u4E2D\u6587 / \u89E3\u91CA\u8FD9\u6BB5\u4EE3\u7801 / \u4F18\u5316\u5E76\u8865\u5168\u2026";
@@ -8640,7 +8889,7 @@
     copyFullBtn.title = "\u540C\u4E0A\uFF0C\u4F46**\u4E0D\u622A\u65AD**\u5DE5\u5177\u7ED3\u679C \u2014\u2014 \u9002\u5408\u7559\u6863\u3001\u6392\u67E5\u3001\u6216\u8BA9\u63A5\u624B\u7684 AI \u770B\u5230\u524D\u4E00\u4E2A AI \u8BD5\u8FC7\u7684\u5168\u90E8\u6B65\u9AA4";
     const exportTranscript = (btn, mode) => {
       const label = btn.textContent;
-      const restore = () => setTimeout(() => btn.textContent = label, 1600);
+      const restore2 = () => setTimeout(() => btn.textContent = label, 1600);
       let text = "";
       try {
         text = buildTranscriptMarkdown(mode);
@@ -8649,17 +8898,17 @@
       }
       if (!text) {
         btn.textContent = "\u6682\u65E0\u53EF\u5BFC\u51FA\u7684\u5BF9\u8BDD";
-        restore();
+        restore2();
         return;
       }
       navigator.clipboard.writeText(text).then(
         () => {
           btn.textContent = "\u5DF2\u590D\u5236 " + text.length + " \u5B57";
-          restore();
+          restore2();
         },
         () => {
           btn.textContent = "\u590D\u5236\u5931\u8D25";
-          restore();
+          restore2();
         }
       );
     };
@@ -8704,33 +8953,33 @@
       panel.appendChild(h);
     });
     shadow.appendChild(panel);
-    const prw = panel.offsetWidth;
-    const prh = panel.offsetHeight;
-    if (docked) {
-      const edgeGap = getDockGap();
-      if (savedPos && Number.isFinite(savedPos.left) && Number.isFinite(savedPos.top)) {
-        const maxLeft = Math.max(0, window.innerWidth - panel.offsetWidth);
-        const maxTop = Math.max(0, window.innerHeight - panel.offsetHeight);
-        panel.style.left = Math.min(maxLeft, Math.max(0, savedPos.left)) + "px";
-        panel.style.top = Math.min(maxTop, Math.max(0, savedPos.top)) + "px";
-        panel.style.right = "auto";
-        panel.style.bottom = "auto";
-        panel._manualPos = true;
-      } else {
-        panel.style.right = "0px";
-        panel.style.left = "auto";
-        panel.style.top = "auto";
-        panel.style.bottom = edgeGap + "px";
-      }
-    } else {
-      panel.style.right = "auto";
-      const left = Math.min(Math.max(4, x), window.innerWidth - prw - 4);
-      const top = Math.min(Math.max(4, y), window.innerHeight - Math.min(prh, window.innerHeight - 24) - 4);
-      panel.style.left = left + "px";
-      panel.style.top = top + "px";
-    }
+    const placement = resolvePanelPlacement({
+      layout,
+      docked: dockedIntent,
+      point: { x, y },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      size: { width: panel.offsetWidth, height: panel.offsetHeight },
+      dockGap: getDockGap()
+    });
+    if (placement.docked) panel.classList.add("docked");
+    else panel.classList.remove("docked");
+    panel.style.right = placement.right == null ? "auto" : placement.right + "px";
+    panel.style.bottom = placement.bottom == null ? "auto" : placement.bottom + "px";
+    panel.style.left = placement.left == null ? "auto" : placement.left + "px";
+    panel.style.top = placement.top == null ? "auto" : placement.top + "px";
+    panel._manualPos = placement.manualPos;
+    writePanelLayout(globalThis.localStorage, {
+      docked: placement.docked,
+      manualPos: placement.manualPos,
+      left: placement.left,
+      top: placement.top,
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+      writeSize: false
+    });
     function endStream() {
       streamRender.cancel();
+      cancelStreamPaintRetry();
       const endedRunId = activeRunId || "";
       const endedSessionId = panelSessionId;
       streaming = false;
@@ -9310,8 +9559,14 @@
             if (pendingContentEl) pendingContentEl.innerHTML = "";
           }
           streamRender.schedule("answer", () => {
-            if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
-            pendingAiMsg._raw = pendingAcc;
+            const paintPendingAnswer = () => {
+              const startedAt = Date.now();
+              if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
+              pendingAiMsg._raw = pendingAcc;
+              noteStreamPaint(startedAt);
+            };
+            if (throttleStreamPaint(paintPendingAnswer)) return;
+            paintPendingAnswer();
           });
           streamRender.schedule("layout", () => {
             fitPanelHeight();
@@ -9669,7 +9924,7 @@
             if (streaming) return;
             const keepClosed = !panelUiOpen;
             suppressPanelUiPublish = keepClosed;
-            openPanel(0, 0, true);
+            openPanel(0, 0, true, true);
             suppressPanelUiPublish = false;
             const last = conversation.length ? conversation[conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
@@ -9714,6 +9969,10 @@
           saveConversation();
         } catch (e) {
         }
+        try {
+          persistPanelLayoutNow();
+        } catch (e) {
+        }
       });
     } catch (e) {
     }
@@ -9731,6 +9990,8 @@
     document.addEventListener("scroll", () => removeBubble(), true);
     window.addEventListener("resize", () => {
       if (fab) applySavedFabPosition();
+      clampPanelToViewport();
+      if (panel && panel._manualPos) persistPanelLayoutNow({ size: false });
     });
     document.addEventListener("keydown", (e) => {
       if (e.altKey && e.shiftKey && e.code === "KeyR") {
