@@ -453,6 +453,11 @@ function toNode(spec, parent) {
   const el = new Element(spec.tag);
   el.parentNode = parent || null;
   for (const [k, v] of Object.entries(spec.attrs || {})) el.setAttribute(k, v);
+  // 布尔属性：真 DOM 里 `<div hidden>` 会让 `el.hidden === true`，这里必须一致 ——
+  // chat.js 用 `!el.hidden` 判断「审批设置弹层是否打开」，桩不认的话 Esc 永远被吞掉。
+  if (Object.prototype.hasOwnProperty.call(spec.attrs || {}, 'hidden')) el.hidden = true;
+  if (Object.prototype.hasOwnProperty.call(spec.attrs || {}, 'disabled')) el.disabled = true;
+  if (Object.prototype.hasOwnProperty.call(spec.attrs || {}, 'checked')) el.checked = true;
   for (const child of spec.children || []) {
     const c = toNode(child, el);
     el.childNodes.push(c);
