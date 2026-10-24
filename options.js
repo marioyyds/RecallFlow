@@ -3,6 +3,9 @@ import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecut
 import { esc } from './lib/shared/utils.js';
 import { getUserscriptSettings, saveUserscriptSettings } from './lib/userscript/settings.js';
 import { USERSCRIPTS_KEY } from './lib/userscript/store.js';
+// 复用后台那一套握手（initialize → notifications/initialized → tools/list），
+// 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
+import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from './lib/assistant/mcp.js';
 
 const $ = (id) => document.getElementById(id);
 let settingsDirty = false;
@@ -33,6 +36,7 @@ async function load() {
   // 因此那两个输入框不再存在 —— 留一个没人读的设置就是"静默无效"。
   $('budget-tokens').value = Number.isInteger(Number(budget.maxTotalTokens)) && Number(budget.maxTotalTokens) > 0 ? String(budget.maxTotalTokens) : '';
   $('quick-prompts').value = (s.quickPrompts || AI_SETTINGS_DEFAULTS.quickPrompts).join('\n');
+  await loadMcpStatus();
   renderMcp(s.mcpServers || []);
 
   const us = await getUserscriptSettings();
@@ -64,6 +68,54 @@ async function renderUserscriptSummary() {
   }
 }
 
+// 最近一次连接结果（由后台 Agent 运行或本页「测试」写入），按 url|id 索引。
+let mcpLastStatus = new Map();
+
+function mcpKeyOf(s) {
+  return (s && (s.url || '') + '|' + (s.id || '')) || '';
+}
+
+async function loadMcpStatus() {
+  try {
+    const data = await chrome.storage.local.get(MCP_STATUS_STORAGE_KEY);
+    const rec = data && data[MCP_STATUS_STORAGE_KEY];
+    mcpLastStatus = new Map(((rec && rec.servers) || []).map((st) => [mcpKeyOf(st), st]));
+  } catch (e) {
+    mcpLastStatus = new Map();
+  }
+}
+
+async function saveMcpStatus(st) {
+  try {
+    const data = await chrome.storage.local.get(MCP_STATUS_STORAGE_KEY);
+    const rec = (data && data[MCP_STATUS_STORAGE_KEY]) || { ts: 0, servers: [] };
+    const servers = ((rec && rec.servers) || []).filter((x) => mcpKeyOf(x) !== mcpKeyOf(st));
+    servers.push(st);
+    await chrome.storage.local.set({ [MCP_STATUS_STORAGE_KEY]: { ts: Date.now(), servers } });
+  } catch (e) {
+    /* 展示用，失败不影响设置本身 */
+  }
+}
+
+// 失败要给出能动手的指引，而不是一句「连接失败」：MCP 端点没有登录页，
+// 403 绝大多数就是 token 没填或与服务端不一致。
+function setMcpStatusEl(el, st) {
+  if (!st) {
+    el.className = 'mcp-status';
+    el.textContent = '尚未连接过（点「测试」，或跑一次对话后这里会显示结果）';
+    return;
+  }
+  if (st.ok) {
+    el.className = 'mcp-status ok';
+    el.textContent = '✓ 已连接：' + st.toolCount + ' 个工具' + (st.ms ? '（' + st.ms + 'ms）' : '');
+    return;
+  }
+  el.className = 'mcp-status bad';
+  el.textContent =
+    '✗ 连接失败' + (st.status ? '（HTTP ' + st.status + '）' : '') + '：' + (st.error || '未知原因') +
+    '。请检查地址是否可达，以及 Bearer Token 是否与服务端一致；MCP 端点用浏览器打开只会得到 401/403，它不是登录页。';
+}
+
 function renderMcp(list) {
   const box = $('mcp-list');
   box.innerHTML = '';
@@ -78,11 +130,28 @@ function renderMcp(list) {
       '<input class="mcp-id" placeholder="标识(英文)" value="' + esc(s.id || '') + '">' +
       '<input class="mcp-url" placeholder="https://host/mcp" value="' + esc(s.url || '') + '">' +
       '<input class="mcp-token" placeholder="Bearer Token(可选)" value="' + esc((s.headers && s.headers.Authorization || '').replace(/^Bearer\s*/i, '')) + '">' +
+      '<button class="mcp-test icon-btn" type="button" title="测试这台服务器能否连通">测试</button>' +
       '<button class="mcp-del icon-btn" title="删除">✕</button>';
+    const statusEl = document.createElement('div');
+    setMcpStatusEl(statusEl, mcpLastStatus.get(mcpKeyOf(s)));
+    row.appendChild(statusEl);
     row.querySelector('.mcp-del').addEventListener('click', () => {
       list.splice(i, 1);
       renderMcp(list);
       markDirty();
+    });
+    row.querySelector('.mcp-test').addEventListener('click', async () => {
+      // 直接读这一行的当前输入（而不是 collectMcp()[i]）：collectMcp 会跳过
+      // 没填 id/url 的行，下标与行号并不一致，取错行会让「测 A 得到 B 的结果」。
+      const cfg = { id: row.querySelector('.mcp-id').value.trim(), url: row.querySelector('.mcp-url').value.trim() };
+      const token = row.querySelector('.mcp-token').value.trim();
+      if (token) cfg.headers = { Authorization: 'Bearer ' + token };
+      statusEl.className = 'mcp-status';
+      statusEl.textContent = '连接中…';
+      const st = await probeMcpServer(cfg);
+      mcpLastStatus.set(mcpKeyOf(cfg), st);
+      setMcpStatusEl(statusEl, st);
+      await saveMcpStatus(st);
     });
     box.appendChild(row);
   });

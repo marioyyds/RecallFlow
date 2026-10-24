@@ -6589,7 +6589,7 @@
     if (!auth || auth.required !== true) return "";
     const loginUrl = safeAuthLink(auth.loginUrl);
     const summary = String(auth.summary || auth.message || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\uFF0C\u8BF7\u767B\u5F55\u540E\u91CD\u8BD5\u3002");
-    const reason = auth.reason === "permission-denied" ? "\u6743\u9650\u9650\u5236" : "\u767B\u5F55\u62E6\u622A";
+    const reason = auth.reason === "permission-denied" ? "\u6743\u9650\u9650\u5236" : auth.reason === "mcp-token-required" ? "\u670D\u52A1\u7AEF\u70B9\u62D2\u7EDD\uFF08\u51ED\u636E\uFF09" : "\u767B\u5F55\u62E6\u622A";
     return '<div class="auth-challenge" role="alert" data-auth-reason="' + escAttr(auth.reason || "login-required") + '"><div class="auth-challenge-title">\u26A0 \u64CD\u4F5C\u88AB' + escHtml(reason) + '</div><div class="auth-challenge-summary">' + escHtml(summary) + "</div>" + (loginUrl ? '<a class="auth-challenge-link" href="' + escAttr(loginUrl) + '" target="_blank" rel="noopener noreferrer">\u6253\u5F00\u767B\u5F55\u9875</a>' : "") + "</div>";
   }
   function authChallengeElement(auth) {

@@ -58,3 +58,25 @@ test('关键词明显领先时仍保留高置信度快路径', () => {
   const d = detectIntent('打开百度搜索今天的热搜');
   assert.equal(d.confidence, 'high');
 });
+
+// MCP 是用户在设置页自己装的扩展能力，不该只在「资料研究」意图下存在：
+// 从前 CHAT/BROWSER/KNOWLEDGE 的 includeMcp 都是 false，于是「你有可用的 mcp 吗？」
+// 落在 CHAT、本次运行一个 MCP 工具都没有，模型只能如实回答「我没有 MCP」。
+test('询问 / 使用 MCP 的指令也要带 includeMcp', () => {
+  assert.equal(detectIntent('你有可用的mcp吗？').includeMcp, true);
+  assert.equal(detectIntent('用 Obsidian 读一下当前笔记').includeMcp, true);
+});
+
+test('四类意图都要加载 MCP（工具审批仍由 toolApprovalPolicy.mcp 控制）', () => {
+  const intents = [
+    ['打开百度搜索今天的热搜', INTENTS.BROWSER],
+    ['我的收藏里有没有 nginx 的笔记', INTENTS.KNOWLEDGE],
+    ['帮我总结这篇论文', INTENTS.RESEARCH],
+    ['你好', INTENTS.CHAT],
+  ];
+  for (const [q, intent] of intents) {
+    const d = detectIntent(q);
+    assert.equal(d.intent, intent, q);
+    assert.equal(d.includeMcp, true, q + ' → includeMcp 应为 true');
+  }
+});

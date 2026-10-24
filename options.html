@@ -198,6 +198,7 @@
     <section class="card" id="settings-mcp">
       <h2><span class="ico">🔌</span> MCP 服务器（Agent 工具扩展）</h2>
       <span class="hint">配置远程 MCP 服务器（Streamable HTTP），Agent 会自动连接并加载其工具（工具名以 mcp__ 开头）。<b>需把各服务器域名加入 manifest.json 的 host_permissions</b>，否则无法跨域访问。</span>
+      <span class="hint">工具在<b>所有意图</b>下都会加载（普通对话 / 浏览器 / 知识库 / 资料研究），是否需要逐次确认由上面的「使用 MCP 服务器」审批开关控制。每行下方显示这台服务器<b>最近一次连接结果</b>；失败多为 Bearer Token 未填写或与服务端不一致 —— MCP 端点没有登录页，用浏览器打开只会得到 401/403。</span>
       <div id="mcp-list" class="mcp-list"></div>
       <button id="mcp-add" class="btn btn-ghost" type="button">+ 添加服务器</button>
     </section>

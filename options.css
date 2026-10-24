@@ -318,6 +318,7 @@ body {
 
 .mcp-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
@@ -342,6 +343,19 @@ body {
 .mcp-row .mcp-id { flex: 0 0 110px; }
 .mcp-row .mcp-url { flex: 2; }
 .mcp-row .mcp-token { flex: 1.4; }
+.mcp-row .mcp-test { flex: 0 0 auto; }
+
+/* 最近一次连接结果：占满一整行，成功/失败用颜色区分（不改整体视觉）。 */
+.mcp-status {
+  flex: 0 0 100%;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-sub);
+  padding: 2px 2px 0;
+}
+
+.mcp-status.ok { color: #2f9e44; }
+.mcp-status.bad { color: #e03131; }
 
 /* ---- 用户脚本卡片 ---- */
 .us-summary {
