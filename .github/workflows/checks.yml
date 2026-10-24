@@ -14,24 +14,36 @@ on:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    # 钉版本而不是 ubuntu-latest：GitHub 会在自己决定的那天把 ubuntu-latest
+    # 指向新系统镜像（2026-10-19 起开始指向 Ubuntu 26），门禁结果就不再可复现。
+    # 要迁移时显式改这个标签，并跑一次夜间 E2E 确认。
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
-      # MCP 子包有独立依赖（@modelcontextprotocol/sdk、ws）。
-      # 根目录刻意不参与 lockfile/依赖安装（扩展本体零依赖）。
+      # 依赖缓存：缓存 npm 的下载缓存（~/.npm），不是 node_modules。
+      # node_modules 缓存 + npm ci 收益为零 —— npm ci 会先把整个 node_modules 删掉，
+      # 命中缓存也没有意义。缓存必须排在对应的 npm ci 之前。
+      - name: 缓存依赖下载缓存
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json', 'package.json', 'integrations/opencode/recallflow-mcp/package-lock.json', 'integrations/opencode/recallflow-mcp/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+      # 根目录必须装依赖：扩展**运行时**零依赖，但测试门禁不是。
+      # run-all-checks 会跑 tests/content-bundle-freshness.test.mjs（静态 import
+      # scripts/build-content.mjs → esbuild）和 tests/e2e-hygiene.test.mjs
+      # （动态 import @playwright/test）。只装 MCP 子包会让第一步就
+      # ERR_MODULE_NOT_FOUND，整个 job exit 1（2026-10-24 run 40114474817）。
+      - name: 安装根依赖
+        run: npm ci --prefer-offline --no-audit --no-fund
+      # MCP 子包有独立依赖（@modelcontextprotocol/sdk、ws），根依赖覆盖不到它。
       - name: 安装 MCP 子包依赖
         working-directory: integrations/opencode/recallflow-mcp
-        run: npm ci || npm install
-        # 依赖缓存：MCP 子包是唯一的外部依赖来源（扩展本体零依赖）。
-        # 没有缓存时每个 PR 都要重新拉一遍 SDK，纯属白等。
-      - name: 缓存 MCP 子包依赖
-        uses: actions/cache@v4
-        with:
-          path: integrations/opencode/recallflow-mcp/node_modules
-          key: ${{ runner.os }}-mcp-${{ hashFiles('integrations/opencode/recallflow-mcp/package-lock.json', 'integrations/opencode/recallflow-mcp/package.json') }}
+        run: npm ci --prefer-offline --no-audit --no-fund
       # 一条命令跑「单测 + 三道静态门禁」。用 node 直接调用，
       # 不依赖 npm 的脚本执行策略（Windows 上 npm.ps1 常被执行策略拦住）。
       - name: 单元测试 + 静态门禁
@@ -45,12 +57,12 @@ jobs:
   # 但只在本地跑就等于没有：本地跑不跑全靠人记得。所以放夜间定时 + 可手动触发，
   # 失败时把 trace/截图留下来，第二天来看得见。
   e2e-nightly:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - name: 安装根依赖
@@ -63,7 +75,7 @@ jobs:
         run: xvfb-run -a npm run test:e2e
       - name: 上传失败诊断
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-nightly-failure
           path: |
