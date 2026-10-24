@@ -24,12 +24,12 @@ GitHub Pages            # https://marioyyds.github.io/RecallFlow/
 - **`site/assets/` 不入库**：它是 `docs/assets/` 的副本，提交进去只会和源头慢慢分叉。CI 每次都重新生成。
 - **站点零依赖**：页面和两道脚本都只用 Node 内置模块，所以流水线里没有 `npm ci` —— 站点不需要任何 `devDependencies`。
 
-## 2. 一次性人工步骤：启用 Pages
+## 2. 一次性人工步骤：把 Pages Source 切到 GitHub Actions
 
-> **当前状态：未启用。** 仓库 `has_pages: false`，Pages API 返回 404，因此**必须先由仓库管理员在 GitHub 网页上开启一次**；不开的话 workflow 的 deploy 步骤会失败、站点一直是 404。这一步无法用脚本或 API 代劳（本环境没有 `gh` CLI，也没有可用的 token）。
+> **当前状态：Pages 已启用，但 Source 是「Deploy from a branch」——线上发布的是 master 根目录（README 经 Jekyll 渲染），不是 `site/`。** 需由仓库管理员把 Source 改成 **GitHub Actions**（见 §2），改完合入 master 才会由 `pages.yml` 发布 `site/`。这一步无法用脚本或 API 代劳（本环境没有 `gh` CLI，也没有可用的 token）。
 
 1. 打开 <https://github.com/marioyyds/RecallFlow/settings/pages>
-2. **Build and deployment** → **Source** 选 **GitHub Actions**（不要选 “Deploy from a branch” —— 那样会绕过校验直接发 `site/`，门禁就没意义了）
+2. **Build and deployment** → **Source** 选 **GitHub Actions**（不要选 "Deploy from a branch" —— 那样发布的是仓库根目录的 README/docs，不是 `site/`，且完全绕过 `verify-site` 门禁）
 3. 保存后回到 **Actions** 页，若 `pages` workflow 没自动跑，手动 **Run workflow**（`workflow_dispatch`）
 4. 首次部署通常要等 **1~2 分钟**；job 详情里的 `page_url` 就是站点地址
 
@@ -69,7 +69,8 @@ CI 里完全相同的两条命令也会各跑一次（`.github/workflows/pages.y
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| 站点 404 | Pages 未启用（本文 §2），或 deploy job 根本没跑 | 先看 Actions 里 `pages` 有没有成功运行；再看 Settings → Pages 的 Source 是不是 **GitHub Actions** |
+| 站点显示的是 README / 文档列表而不是官网 | Pages 的 Source 仍是「Deploy from a branch」 | Settings → Pages → Source 改成 GitHub Actions，再手动 Run workflow |
+| 站点 404 | Pages 未启用或 Source 不是 GitHub Actions（本文 §2），或 deploy job 根本没跑 | 先看 Actions 里 `pages` 有没有成功运行；再看 Settings → Pages 的 Source 是不是 **GitHub Actions** |
 | 资源 404（图裂 / 样式丢） | 漏了 `node scripts/site-assets.mjs`，产物里没有 `site/assets/` | 补跑脚本；本地用 `node scripts/verify-site.mjs` 复现 |
 | `verify-site` 报体积超限 | GIF 太大 | 压缩或换更轻的资源；红线是 `index.html` 1MB、其他单文件 8MB |
 | deploy 报权限不足 | 缺 `pages: write` 或 `id-token: write` | 核对 workflow 顶层与 deploy job 的 `permissions`；组织默认 token 为只读时需放行 |
