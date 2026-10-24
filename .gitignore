@@ -1,6 +1,11 @@
 # 依赖目录（任意层级）
 node_modules/
 
+# 站点资源产物：docs/assets/** 是唯一来源，site/assets/ 由 `node scripts/site-assets.mjs`
+# 复制而来（本地预览与 CI 部署各生成一次）。提交进去只会和源头慢慢分叉，
+# 而且会让「忘了跑 site-assets」这件事在本地看不出来、只在 Pages 上变成 404。
+site/assets/
+
 # 日志与本地验证产物
 *.log
 scripts/out/
