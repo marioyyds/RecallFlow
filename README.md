@@ -91,6 +91,9 @@ flowchart TD
 | 接手继续开发（剩什么、为什么没做、怎么开始） | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |
 | 最近一轮改了什么、怎么验证的 | [docs/change-delivery-summary.md](docs/change-delivery-summary.md) |
 | 本地网页（file://）支持到哪、为什么导出不留痕 | [docs/local-page-support.md](docs/local-page-support.md) |
+| 官网怎么发上去、Pages 怎么启用、部署怎么排障 | [docs/github-pages.md](docs/github-pages.md) |
+
+> 官网：<https://marioyyds.github.io/RecallFlow/>（**需先把 Settings → Pages → Source 切到 GitHub Actions**；当前 Source 是「Deploy from a branch」，线上发布的是仓库根目录的 README，不是 `site/`，见 [docs/github-pages.md](docs/github-pages.md)）
 
 > 规模数字（能力剧本 / 技能 / 判据 / 测试数与文件数）一律由脚本生成，见上述清单与
 > [`tests/.test-count.json`](tests/.test-count.json)；README 不手写数字 —— 手写的必然腐烂。

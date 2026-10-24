@@ -1,0 +1,68 @@
+name: pages
+
+# 站点部署流水线：push 到 master 且站点相关文件变动时，校验后自动发布 GitHub Pages。
+#
+# 为什么单独一个 workflow：站点与扩展本体互不相关 —— 改 lib/** 不该触发发布，
+# 改 README 也不该。所以 `paths` 只圈住 site/、docs/assets/（资源来源）、
+# 两个站点脚本和本文件本身。
+#
+# 为什么不用 `npm ci`：站点是零依赖静态页，`verify-site.mjs` 也只用 Node 内置模块。
+# 装依赖只会让发布多等一分钟，还会把 TITA-14/15 那个「门禁所需依赖没进 CI」的坑
+# 换个地方再踩一次 —— 这道闸刻意不需要任何 devDependency。
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'site/**'
+      - 'docs/assets/**'
+      - 'scripts/site-assets.mjs'
+      - 'scripts/verify-site.mjs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Pages 部署的三件套：读源码、写 Pages、取 OIDC token（deploy-pages 靠它鉴权）。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 部署不能并发：两次部署互相覆盖会得到「谁先跑完谁生效」的随机结果。
+# 但要让后一次排上队（cancel-in-progress: false），否则连续 push 只发布其中一次。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # docs/assets 是资源的唯一来源，site/assets 由脚本复制而来、不入库；
+      # 少了这一步，产物里就没有 GIF / 图标，页面全靠 404 撑着。
+      - name: 同步站点资源
+        run: node scripts/site-assets.mjs
+      # 发布前最后一道闸：引用存在性 / 越界 / 站外子资源 / 体积红线。
+      - name: 站点静态门禁
+        run: node scripts/verify-site.mjs
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
