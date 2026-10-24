@@ -40,7 +40,7 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  *
  * 这不是「随便定的上限」，而是一条**棘轮**：现在 438KB（本轮加入面板布局存档
  * `lib/page/panel-layout.js` 与 chat.js 侧的读写接线；与 perf 分支合并后实测产物
- * 446834 字节，故在 perf 的 434KB 之上再抬一档，留 ~1.6KB 余量）。上一档 434KB 是
+ * 446864 字节，故在 perf 的 434KB 之上再抬一档，留 ~1.6KB 余量）。上一档 434KB 是
  * 面板流式渲染的两处性能优化 —— `fitPanelHeight` 的 chrome 测量复用、流式游标按树深
  * 定位最后一个文本节点；再上一档 428KB 是页面选文的清除控件、用户消息内引用渲染与
  * 持久化；424KB 是导出期 UI 守卫 `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
