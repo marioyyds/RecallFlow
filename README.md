@@ -93,7 +93,7 @@ flowchart TD
 | 本地网页（file://）支持到哪、为什么导出不留痕 | [docs/local-page-support.md](docs/local-page-support.md) |
 | 官网怎么发上去、Pages 怎么启用、部署怎么排障 | [docs/github-pages.md](docs/github-pages.md) |
 
-> 官网：<https://marioyyds.github.io/RecallFlow/ >（**部署启用后生效** —— 仓库当前尚未开启 Pages，
+> 官网：<https://marioyyds.github.io/RecallFlow/>（**部署启用后生效** —— 仓库当前尚未开启 Pages，
 > 需先在 Settings → Pages → Source 选 GitHub Actions，见 [docs/github-pages.md](docs/github-pages.md)）
 
 > 规模数字（能力剧本 / 技能 / 判据 / 测试数与文件数）一律由脚本生成，见上述清单与
