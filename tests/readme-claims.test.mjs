@@ -18,7 +18,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const readme = fs.readFileSync('README.md', 'utf8');
+// 两份 README 都受同一组约束：README.md（英文，GitHub 默认渲染）与 README.zh-CN.md（中文）。
+// 只校验英文那份的话，中文版会在无人看管下腐烂 —— 链接失效、措辞漂移都不会有人发现。
+export const README_FILES = ['README.md', 'README.zh-CN.md'];
 
 /** 精简后必须仍被 README 链接到的关键生成物 / 事实来源。 */
 const MUST_LINK = [
@@ -26,6 +28,24 @@ const MUST_LINK = [
   'docs/skills-overview.md',
   'docs/integration-status.md',
 ];
+
+/** 「失败软着陆」这条语义在每个语言版本里各自怎么锚定。 */
+const SOFT_LANDING = {
+  'README.md': {
+    heading: /soft landing/i,
+    ok: /does not remove|never removes|only injects/i,
+    bad: /removes the offending tool|removes the problematic tool|removes the failing tool/i,
+  },
+  'README.zh-CN.md': {
+    heading: /失败软着陆/,
+    ok: /只注入反思|不摘除工具/,
+    bad: /只摘除问题工具|摘除问题工具并/,
+  },
+};
+
+// 两份都在文件顶部各读一次（`assertion-quality` 有一条 readFileSync 调用总数的棘轮，
+// 在每个 test() 里重复读盘会把它顶红）；下面所有断言都复用这份快照。
+const SRC = Object.fromEntries(README_FILES.map((f) => [f, fs.readFileSync(f, 'utf8')]));
 
 /** 抓 markdown 里的本地链接目标（[..](x) 与 ![..](x)），去掉锚点与查询串。 */
 export function localLinks(md) {
@@ -41,13 +61,30 @@ export function localLinks(md) {
   return out;
 }
 
+test('两份 README 都真实存在（少一份就红，而不是被静默跳过）', () => {
+  const missing = README_FILES.filter((f) => !fs.existsSync(path.resolve(f)));
+  assert.deepEqual(missing, [], 'README 缺失：\n  ' + missing.join('\n  '));
+});
+
 test('README 的每个相对链接都指向真实存在的文件', () => {
-  const missing = localLinks(readme).filter((p) => !fs.existsSync(path.resolve(p)));
+  const missing = [];
+  for (const f of README_FILES) {
+    const src = SRC[f];
+    for (const p of localLinks(src)) {
+      if (!fs.existsSync(path.resolve(p))) missing.push(f + ' → ' + p);
+    }
+  }
   assert.deepEqual(missing, [], 'README 里有失效链接（精简时最容易踩）：\n  ' + missing.join('\n  '));
 });
 
 test('README 仍链接到关键生成物 / 事实来源', () => {
-  const missing = MUST_LINK.filter((doc) => !readme.includes(doc));
+  const missing = [];
+  for (const f of README_FILES) {
+    const src = SRC[f];
+    for (const doc of MUST_LINK) {
+      if (!src.includes(doc)) missing.push(f + ' → ' + doc);
+    }
+  }
   assert.deepEqual(missing, [], '精简不应把关键文档藏起来，README 缺少链接：\n  ' + missing.join('\n  '));
 });
 
@@ -57,24 +94,37 @@ test('README 的「失败软着陆」描述必须与守卫的真实语义一致'
   // （本文件原先只校验链接，不校验声明）。这是最容易误导读者的一种漂移：
   // 读者会以为"工具会被自动拿走"，从而误判失败恢复的行为。
   const { GUARD_CAN_DISABLE_TOOLS } = await import('../lib/assistant/tool-guard.js');
-  const bullet = readme.split('\n').find((line) => line.includes('失败软着陆')) || '';
-  assert.ok(bullet, 'README 应保留「失败软着陆」这条说明');
-  if (GUARD_CAN_DISABLE_TOOLS === false) {
-    // 正向锚定而不是去猜否定词：文档必须**明确写出**真实语义。
-    // （早先一版想用「出现摘除字样即违规」，结果把「不摘除工具」这句正确表述也判红了 ——
-    //   检测否定在自然语言里不可靠，改成要求它把话说全。）
-    assert.match(bullet, /只注入反思|不摘除工具/, '守卫不摘除工具，README 的软着陆说明必须明确写出这一点');
-    assert.doesNotMatch(bullet, /只摘除问题工具|摘除问题工具并/, 'README 不得宣称守卫会摘除工具');
+  for (const f of README_FILES) {
+    const rule = SOFT_LANDING[f];
+    const src = SRC[f];
+    const bullet = src.split('\n').find((line) => rule.heading.test(line)) || '';
+    assert.ok(bullet, f + ' 应保留「失败软着陆 / soft landing」这条说明');
+    if (GUARD_CAN_DISABLE_TOOLS === false) {
+      // 正向锚定而不是去猜否定词：文档必须**明确写出**真实语义。
+      // （早先一版想用「出现摘除字样即违规」，结果把「不摘除工具」这句正确表述也判红了 ——
+      //   检测否定在自然语言里不可靠，改成要求它把话说全。）
+      // 每个语言版本各用一组锚点：英文版写 "removes the offending tool" 同样要红。
+      assert.match(bullet, rule.ok, f + ' 的软着陆说明必须明确写出「只注入反思 / 不摘除工具」');
+      assert.doesNotMatch(bullet, rule.bad, f + ' 不得宣称守卫会摘除工具');
+    }
   }
 });
 
-test('这条 README 门禁本身有牙齿：把错误的「摘除」说法写回去必须变红', () => {
+test('这条 README 门禁本身有牙齿：把错误的「摘除」说法写回去必须变红（两种语言各一组）', () => {
   // 反证：上面的两条正则必须真的能区分正确与错误的措辞，否则它是一道假门禁。
+  // 中文版沿用原来的样本；英文版用同源的错误措辞 —— 只加语言不换语义的话，
+  // 英文版写「守卫会摘除工具」就没人拦了。
   const wrong = '失败软着陆：重复调用时，只摘除问题工具并注入反思继续；';
   const right = '失败软着陆：重复调用时，守卫只注入反思建议、不摘除工具；';
-  assert.match(wrong, /只摘除问题工具|摘除问题工具并/, '错误措辞应被抓到');
-  assert.match(right, /只注入反思|不摘除工具/, '正确措辞应通过');
-  assert.doesNotMatch(right, /只摘除问题工具|摘除问题工具并/);
+  assert.match(wrong, SOFT_LANDING['README.zh-CN.md'].bad, '错误措辞应被抓到');
+  assert.match(right, SOFT_LANDING['README.zh-CN.md'].ok, '正确措辞应通过');
+  assert.doesNotMatch(right, SOFT_LANDING['README.zh-CN.md'].bad);
+
+  const wrongEn = '**Failure soft landing**: on repeated calls the guard removes the offending tool and injects reflection;';
+  const rightEn = '**Failure soft landing**: on repeated calls the guard only injects reflection and does not remove tools;';
+  assert.match(wrongEn, SOFT_LANDING['README.md'].bad, '英文错误措辞应被抓到');
+  assert.match(rightEn, SOFT_LANDING['README.md'].ok, '英文正确措辞应通过');
+  assert.doesNotMatch(rightEn, SOFT_LANDING['README.md'].bad);
 });
 
 test('这条门禁本身有牙齿：失效链接必须被抓，外链 / 锚点不受影响', () => {
@@ -85,4 +135,15 @@ test('这条门禁本身有牙齿：失效链接必须被抓，外链 / 锚点�
   assert.deepEqual(localLinks('[x](docs/ok.md#sec)'), ['docs/ok.md'], '锚点应被剥掉');
   // 用一个真实存在的门禁自身文件反证：存在的路径不应出现在 missing 里
   assert.ok(fs.existsSync(path.resolve('README.md')), '前提：README.md 存在');
+});
+
+test('语言切换行互相指向（两份 README 顶部各有一行，且都指向真实文件）', () => {
+  for (const f of README_FILES) {
+    const src = SRC[f];
+    const links = localLinks(src);
+    const other = README_FILES.filter((x) => x !== f);
+    for (const o of other) {
+      assert.ok(links.includes(o), f + ' 顶部应有指向 ' + o + ' 的语言切换链接');
+    }
+  }
 });
