@@ -46,3 +46,6 @@ desktop.ini
 # 而浏览器加载扩展时不会执行构建 —— 不提交它，扩展就无法加载。
 # 修改内容脚本请改 entries/content.js，然后重新构建（不要手工编辑 content.js）。
 # 对应的门禁：tests/silent-failure-regressions.test.mjs 会核对产物确实自包含且已调用入口。
+
+# 站点构建产物：预览/CI 由 scripts/site-assets.mjs 从 docs/assets 复制，不入库（GIF 约 12MB）
+site/assets/
