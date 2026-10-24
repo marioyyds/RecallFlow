@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RecallFlow · 你的浏览器办公助手</title>
+<meta name="description" content="RecallFlow 是运行在真实浏览器里的办公助手扩展：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<meta name="theme-color" content="#123b73">
+<link rel="icon" type="image/png" href="assets/icon-32.png">
+<link rel="apple-touch-icon" href="assets/icon-128.png">
+<link rel="stylesheet" href="styles.css">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="RecallFlow">
+<meta property="og:title" content="RecallFlow · 你的浏览器办公助手">
+<meta property="og:description" content="在你的真实浏览器里动手：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<meta property="og:url" content="https://marioyyds.github.io/RecallFlow/">
+<!-- og:image 取舍：Open Graph 抓取器要求绝对 URL，所以这里用 GitHub Pages 的绝对地址（部署后生效）。
+     页面内所有可见子资源（样式 / 脚本 / 图片 / 字体）仍然全部是本地的相对路径，没有任何 CDN 依赖。 -->
+<meta property="og:image" content="https://marioyyds.github.io/RecallFlow/assets/recallflow-github-logo.svg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="RecallFlow · 你的浏览器办公助手">
+<meta name="twitter:description" content="在你的真实浏览器里动手：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<meta name="twitter:image" content="https://marioyyds.github.io/RecallFlow/assets/recallflow-github-logo.svg">
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="#top" aria-label="RecallFlow 首页">
+      <img src="assets/recallflow-mark.svg" alt="" width="32" height="32">
+      <span>RecallFlow</span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <ul>
+        <li><a href="#quickstart">快速上手</a></li>
+        <li><a href="#capabilities">核心能力</a></li>
+        <li><a href="#demos">真实执行</a></li>
+        <li><a href="#design">Agent 设计</a></li>
+        <li><a href="#mcp">MCP 集成</a></li>
+        <li><a href="#docs">文档</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="container hero-inner">
+      <img class="hero-logo" src="assets/recallflow-github-logo.svg" alt="RecallFlow 标志" width="668" height="100">
+      <p class="eyebrow">Edge 扩展 · Manifest V3 · 数据保存在本地</p>
+      <h1>把重复的网页工作，交给在真实浏览器里动手的 Agent</h1>
+      <p class="lead">你的浏览器办公助手 —— 读、点、填、拖、上传、翻页、跨页搬运</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/marioyyds/RecallFlow">在 GitHub 查看源码</a>
+        <a class="btn btn-ghost" href="#quickstart">四步快速上手</a>
+      </div>
+      <p class="hero-note">不是把 HTML 塞给模型，而是在你的真实浏览器里动手：登录态、SPA、内网页面都能读能操作；合成事件失效时经 CDP 派发可信事件。</p>
+    </div>
+  </section>
+
+  <section class="section" id="quickstart">
+    <div class="container">
+      <h2>快速上手</h2>
+      <p class="section-lead">从下载到跑起来，只需要四步。</p>
+      <ol class="steps">
+        <li>
+          <h3>加载解压缩的扩展</h3>
+          <p>打开 <code>edge://extensions/</code>，启用「开发人员模式」，选择「加载解压缩的扩展」并指向项目目录。</p>
+        </li>
+        <li>
+          <h3>配置 DeepSeek API Key</h3>
+          <p>点击扩展图标进入设置，填入自配的 DeepSeek API Key。未配置时，知识库仍可正常使用。</p>
+        </li>
+        <li>
+          <h3>在页面右侧气泡使用</h3>
+          <p>打开任意网页，点右侧「RecallFlow」气泡，输入指令，或直接选用快捷语句。</p>
+        </li>
+        <li>
+          <h3>可选：允许访问文件网址</h3>
+          <p>要操作双击打开的本地 HTML，需在扩展详情里打开「允许访问文件网址」；开启后本地页与普通网页一致。</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="capabilities">
+    <div class="container">
+      <h2>核心能力</h2>
+      <p class="section-lead">目标是网页上的一切元素：跨域 iframe、Shadow DOM、canvas、虚拟列表、上传 / 拖拽 / 级联下拉、分页与无限滚动。</p>
+      <ul class="cards">
+        <li class="card">
+          <h3>跨 iframe / Shadow DOM / canvas</h3>
+          <p>在真实页面的真实结构里定位与操作，不靠对 DOM 结构的猜测。</p>
+        </li>
+        <li class="card">
+          <h3>上传、拖拽与级联下拉</h3>
+          <p>覆盖自定义日期选择器、文件上传、拖拽排序与级联选择；合成事件失效时经 CDP 派发可信事件。</p>
+        </li>
+        <li class="card">
+          <h3>分页与无限滚动</h3>
+          <p>翻页、滚动加载之后继续操作，虚拟列表里的目标同样能命中。</p>
+        </li>
+        <li class="card">
+          <h3>跨页搬运</h3>
+          <p>把信息从一个页面搬到另一个页面，读、点、填、拖可以串成一条流程。</p>
+        </li>
+        <li class="card">
+          <h3>会记、会复用</h3>
+          <p>站点记忆、技能与宏让重复流程可以复用；数据全部保存在本地。</p>
+        </li>
+        <li class="card">
+          <h3>失败软着陆与可观测</h3>
+          <p>重复调用或连续失败时只注入反思建议、不摘除工具；逐轮记录工具、耗时与运行轨迹。</p>
+        </li>
+      </ul>
+      <p class="capability-link">每条能力的保证方式（夹具页 / 剧本 / E2E / 技能 / 判据）见
+        <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">能力清单</a>。</p>
+    </div>
+  </section>
+
+  <section class="section" id="demos">
+    <div class="container">
+      <h2>真实执行演示</h2>
+      <p class="section-lead">在扩展面板里让 Agent 在真实页面上干活，右栏是逐步长出的工具记录。以下录制均为<strong>加速回放</strong>；第三方站点需登录，属真实场景展示。</p>
+      <div class="demos">
+        <figure class="demo">
+          <div class="demo-media">
+            <img class="demo-gif" src="assets/recallflow-page-ops.gif" alt="页面操作演示：在真实页面上完成点击、输入与提交" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="page-ops" aria-pressed="false" aria-label="暂停动画：页面操作演示" hidden>暂停动画</button>
+          </div>
+          <figcaption>
+            <h3>页面操作</h3>
+            <p>在真实页面上完成点击 / 输入 / 提交，每一步都留在工具记录里。</p>
+          </figcaption>
+        </figure>
+        <figure class="demo">
+          <div class="demo-media">
+            <img class="demo-gif" src="assets/recallflow-find-in-page.gif" alt="当前页面搜索演示：在页面内检索目标并定位到结果" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="find-in-page" aria-pressed="false" aria-label="暂停动画：当前页面搜索演示" hidden>暂停动画</button>
+          </div>
+          <figcaption>
+            <h3>当前页面搜索</h3>
+            <p>在页面内检索目标并定位到结果，适合长文档与信息密集的后台页面。</p>
+          </figcaption>
+        </figure>
+      </div>
+      <p class="demo-note">演示文件较大，已启用懒加载；点击「暂停动画」可以停在当前帧阅读。</p>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="design">
+    <div class="container">
+      <h2>Agent 设计</h2>
+      <p class="section-lead">收到指令后组装上下文，模型输出经工具守卫判定与分级审批，执行结果回到模型；最终答复前还会做一次完成校验。</p>
+      <img class="diagram" src="assets/read-operate-remember.svg" alt="RecallFlow 价值闭环：读 → 操作 → 记忆" width="900" height="320" decoding="async">
+      <ol class="flow">
+        <li class="flow-step">
+          <h3>收到指令</h3>
+          <p>组装上下文：意图路由、系统提示、历史与预算。</p>
+        </li>
+        <li class="flow-step">
+          <h3>模型输出</h3>
+          <p>工具调用进入工具守卫；最终答复进入完成校验。</p>
+        </li>
+        <li class="flow-step">
+          <h3>分级审批</h3>
+          <p>按风险与站点信任分级，通过后执行工具。</p>
+        </li>
+        <li class="flow-step">
+          <h3>执行并回流</h3>
+          <p>执行结果回到模型，继续下一轮；无进展时只注入反思建议。</p>
+        </li>
+        <li class="flow-step">
+          <h3>完成校验</h3>
+          <p>未达成则注入反思继续，达成后交付回答。</p>
+        </li>
+      </ol>
+      <ul class="design-notes">
+        <li><strong>失败软着陆</strong>：重复调用、连续失败或无进展时只注入反思建议，不替模型做决定；仅在跨工具持续无进展或预算触顶时收尾。</li>
+        <li><strong>统一注册表</strong>：模型工具列表、权限策略与参数校验共用一份定义。</li>
+        <li><strong>可靠性与可观测</strong>：共享会话、运行锁、卡死检测与动作前后快照校验，逐轮记录缓存命中率与耗时分段。</li>
+      </ul>
+      <p class="capability-link">完整流程图见
+        <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/assets/recallflow-page-ops-e2e.svg">页面操作 E2E 流程图</a>。</p>
+    </div>
+  </section>
+
+  <section class="section" id="mcp">
+    <div class="container">
+      <h2>与外部 AI 集成（MCP）</h2>
+      <div class="mcp">
+        <p><code>webfetch</code> 读不到的 SPA、登录态或内网页面，交由 RecallFlow 以真实浏览器会话读取，返回带时间戳与哈希的证据；外部 agent 还能经唯一写通道 <code>page_action</code> 碰页面，形成「读 → 改 → 验」的前端调试闭环。</p>
+        <p>集成路线的唯一事实来源是
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">docs/integration-status.md</a>，安装与配置见
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/integrations/opencode/recallflow-mcp/README.md">recallflow-mcp/README.md</a>。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="docs">
+    <div class="container">
+      <h2>文档导航</h2>
+      <p class="section-lead">从能力边界到集成细节，都在仓库的 docs/ 目录里。</p>
+      <ul class="doc-list">
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">能力清单</a>
+          <span>每条能力由什么保证：夹具页、剧本、E2E、技能与判据。</span>
+        </li>
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/skills-overview.md">技能清单</a>
+          <span>技能、剧本归属、孤儿技能与薄技能。</span>
+        </li>
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">集成路线</a>
+          <span>与外部 AI 集成到底实现了哪些，唯一事实来源。</span>
+        </li>
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/panel-sessions.md">面板会话</a>
+          <span>会话如何共享、切换，以及运行锁与跨标签页跟随。</span>
+        </li>
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/e2e-testing-guide.md">真浏览器 E2E 指南</a>
+          <span>E2E 怎么写、怎么跑，以及黄金任务的约定。</span>
+        </li>
+        <li>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/local-page-support.md">本地网页支持</a>
+          <span>file:// 页面支持到哪一步，为什么导出不留痕。</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <p>RecallFlow · MIT License</p>
+    <p>
+      <a href="https://github.com/marioyyds/RecallFlow">GitHub 仓库</a>
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <a href="https://github.com/marioyyds/RecallFlow/blob/master/LICENSE">许可协议</a>
+    </p>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>
