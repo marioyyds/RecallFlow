@@ -182,7 +182,10 @@
     <div class="container">
       <h2 data-i18n="design.title">Agent design</h2>
       <p class="section-lead" data-i18n="design.lead">After receiving an instruction it assembles context; model output goes through the tool guard and graded approval; execution results flow back to the model; before the final answer there is one more completion check.</p>
-      <img class="diagram" src="assets/read-operate-remember.svg" data-i18n-attr="alt:design.diagramAlt" alt="RecallFlow value loop: read → operate → remember" width="900" height="320" decoding="async">
+      <!-- 静态 src 保持英文版：SEO 抓取器不执行 JS，静态 HTML 必须是英文（i18n.js 顶部约定 2）。
+           中文版由 `data-i18n-attr` 的 `src:design.diagramSrc` 在运行时回填，
+           初始加载（带存档语言）与点击切换走的是同一条 `i18n.apply()` 路径，幂等。 -->
+      <img class="diagram" src="assets/read-operate-remember.svg" data-i18n-attr="alt:design.diagramAlt src:design.diagramSrc" alt="RecallFlow value loop: read → operate → remember" width="900" height="320" decoding="async">
       <ol class="flow">
         <li class="flow-step">
           <h3 data-i18n="design.flow1.title">Receive instruction</h3>

@@ -142,6 +142,10 @@
       'design.lead':
         'After receiving an instruction it assembles context; model output goes through the tool guard and graded approval; execution results flow back to the model; before the final answer there is one more completion check.',
       'design.diagramAlt': 'RecallFlow value loop: read → operate → remember',
+      // 示意图有两份（英文原图 + TITA-47 拆出来的中文版），靠 `src` 走 `data-i18n-attr`
+      // 跟着语言换 —— 只切 alt 会让中文页面继续显示英文图。两份字典**都必须**有这条 key：
+      // `applyAttrPairs` 取不到文案时会保留静态默认值（英文图），漏一条就退化成不换图。
+      'design.diagramSrc': 'assets/read-operate-remember.svg',
       'design.flow1.title': 'Receive instruction',
       'design.flow1.body': 'Assemble context: intent routing, system prompt, history and budget.',
       'design.flow2.title': 'Model output',
@@ -286,6 +290,8 @@
       'design.lead':
         '收到指令后组装上下文，模型输出经工具守卫判定与分级审批，执行结果回到模型；最终答复前还会做一次完成校验。',
       'design.diagramAlt': 'RecallFlow 价值闭环：读 → 操作 → 记忆',
+      // 与 en 的 `design.diagramSrc` 成对，删掉任意一条都会静默回退成英文图（见上方注释）。
+      'design.diagramSrc': 'assets/read-operate-remember.zh-CN.svg',
       'design.flow1.title': '收到指令',
       'design.flow1.body': '组装上下文：意图路由、系统提示、历史与预算。',
       'design.flow2.title': '模型输出',
