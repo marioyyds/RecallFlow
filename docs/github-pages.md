@@ -26,7 +26,18 @@ GitHub Pages            # https://marioyyds.github.io/RecallFlow/
 
 ## 2. 一次性人工步骤：把 Pages Source 切到 GitHub Actions
 
-> **当前状态：Pages 已启用，但 Source 是「Deploy from a branch」——线上发布的是 master 根目录（README 经 Jekyll 渲染），不是 `site/`。** 需由仓库管理员把 Source 改成 **GitHub Actions**（见 §2），改完合入 master 才会由 `pages.yml` 发布 `site/`。这一步无法用脚本或 API 代劳（本环境没有 `gh` CLI，也没有可用的 token）。
+> **当前状态（2026-10-25 实测，带取证方式）：Pages 已启用，且 Source 已经是 GitHub Actions —— 线上发布的是 `site/`。** 取证：
+>
+> | 断言 | 实测值 | 命令 |
+> | --- | --- | --- |
+> | Pages 是否启用 | `has_pages: true` | `gh api repos/marioyyds/RecallFlow --jq .has_pages` |
+> | Source 类型 | `build_type=workflow`、`status=built` | `gh api repos/marioyyds/RecallFlow/pages` |
+> | 发布流水线 | 最新 run `conclusion=success, event=push, head=a004e5e, 2026-10-25T02:54:55Z` | `gh api "repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3"` |
+> | 线上站点 | `200`，`<html lang="zh-CN">`，正文是 `site/index.html` 落地页（不是 README） | `curl -s https://marioyyds.github.io/RecallFlow/` |
+>
+> 换句话说：**下面 §2 的人工切换已经完成**，这一节保留下来只用于「换仓库 / Pages 被关掉后怎么重来」。
+> 另需注意：改 README 不会触发重新发布 —— `pages.yml` 的 `paths` 只圈住 `site/**`、`docs/assets/**`、
+> `scripts/site-assets.mjs`、`scripts/verify-site.mjs` 与 workflow 自身。
 
 1. 打开 <https://github.com/marioyyds/RecallFlow/settings/pages>
 2. **Build and deployment** → **Source** 选 **GitHub Actions**（不要选 "Deploy from a branch" —— 那样发布的是仓库根目录的 README/docs，不是 `site/`，且完全绕过 `verify-site` 门禁）

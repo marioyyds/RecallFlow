@@ -33,6 +33,8 @@ const SURFACES = [
   'lib/assistant/page-command-tools.js',
   'lib/page/commands.js',
   'README.md',
+  // 中文 README 是 README.md 的逐节副本：文本搬走后不能因此逃出这道门禁。
+  'README.zh-CN.md',
   'docs/e2e-testing-guide.md',
 ];
 
