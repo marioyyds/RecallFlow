@@ -97,7 +97,7 @@ installation and configuration are in [recallflow-mcp/README.md](integrations/op
 
 > Website: <https://marioyyds.github.io/RecallFlow/> (measured as of 2026-10-25: Pages Source is already **GitHub Actions** and the published artifact is `site/`, not the repository-root README —
 > see `gh api repos/marioyyds/RecallFlow/pages` (`build_type=workflow`, `status=built`) and `gh api repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3`
-> (latest run `conclusion=success`, pushed from `e807bdb`, 2026-10-24T18:39:52Z).
+> (latest run `conclusion=success`, pushed from `a004e5e`, 2026-10-25T02:54:55Z).
 > Also: editing a README does **not** trigger a re-publish — `pages.yml`'s `paths` only covers `site/**`, `docs/assets/**`,
 > `scripts/site-assets.mjs`, `scripts/verify-site.mjs` and the workflow itself, see [docs/github-pages.md](docs/github-pages.md))
 

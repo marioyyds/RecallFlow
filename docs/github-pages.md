@@ -32,7 +32,7 @@ GitHub Pages            # https://marioyyds.github.io/RecallFlow/
 > | --- | --- | --- |
 > | Pages 是否启用 | `has_pages: true` | `gh api repos/marioyyds/RecallFlow --jq .has_pages` |
 > | Source 类型 | `build_type=workflow`、`status=built` | `gh api repos/marioyyds/RecallFlow/pages` |
-> | 发布流水线 | 最新 run `conclusion=success, event=push, head=e807bdb, 2026-10-24T18:39:52Z` | `gh api "repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3"` |
+> | 发布流水线 | 最新 run `conclusion=success, event=push, head=a004e5e, 2026-10-25T02:54:55Z` | `gh api "repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3"` |
 > | 线上站点 | `200`，`<html lang="zh-CN">`，正文是 `site/index.html` 落地页（不是 README） | `curl -s https://marioyyds.github.io/RecallFlow/` |
 >
 > 换句话说：**下面 §2 的人工切换已经完成**，这一节保留下来只用于「换仓库 / Pages 被关掉后怎么重来」。

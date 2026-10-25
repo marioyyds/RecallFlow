@@ -97,7 +97,7 @@ flowchart TD
 
 > 官网：<https://marioyyds.github.io/RecallFlow/>（截至 2026-10-25 实测：Pages Source 已是 **GitHub Actions**，线上发布的是 `site/`，不是仓库根目录的 README ——
 > 取证 `gh api repos/marioyyds/RecallFlow/pages`（`build_type=workflow`、`status=built`）与
-> `gh api repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3`（最新 run `conclusion=success`，push 自 `e807bdb`，2026-10-24T18:39:52Z）。
+> `gh api repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3`（最新 run `conclusion=success`，push 自 `a004e5e`，2026-10-25T02:54:55Z）。
 > 另：改 README **不会**触发重新发布 —— `pages.yml` 的 `paths` 只圈住 `site/**`、`docs/assets/**`、
 > `scripts/site-assets.mjs`、`scripts/verify-site.mjs` 与 workflow 自身，见 [docs/github-pages.md](docs/github-pages.md)）
 
