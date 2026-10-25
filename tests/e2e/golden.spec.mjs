@@ -17,6 +17,7 @@ import {
   configureSettings,
   openFixturePage,
   openPanel,
+  clickFab,
   createFreshPanelSession,
   sendInstruction,
   clickApproval,
@@ -163,7 +164,9 @@ test('golden: SPA 导航移除宿主后自动重建（FAB 回来且可再开面�
   await expect(page.locator(PANEL + ' .fab')).toBeVisible({ timeout: 10_000 });
 
   // 重建后的 FAB 要真的能开面板（不是只挂了个空壳）
-  await page.locator(PANEL + ' .fab').click();
+  // ⚠ 面板关着时 FAB 是收起的（只露出一条边），直接 click 会点到气泡之外 ——
+  //   走 clickFab 先 hover 等它滑出来。
+  await clickFab(page);
   await expect(page.locator(PANEL + ' .cmd-input')).toBeVisible();
 
   await page.close();

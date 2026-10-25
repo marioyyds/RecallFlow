@@ -38,18 +38,22 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 打包的意义之一是把体积变得**可见**：超过这个量级通常意味着误引入了大依赖
  * （例如把整个 markdown 渲染器或某个 polyfill 打进了内容脚本）。
  *
- * 这不是「随便定的上限」，而是一条**棘轮**：现在 438KB（本轮加入面板布局存档
- * `lib/page/panel-layout.js` 与 chat.js 侧的读写接线；与 perf 分支合并后实测产物
- * 446864 字节，故在 perf 的 434KB 之上再抬一档，留 ~1.6KB 余量）。上一档 434KB 是
+ * 这不是「随便定的上限」，而是一条**棘轮**：现在 444KB（本轮加入 FAB 收起 / 展开的
+ * `peek` 视图态 —— `lib/page/fab-position.js` 的 `resolveFabPeek` / `isPointerInFabZone`
+ * 与 chat.js 侧的悬浮 / 聚焦 / 拖拽接线，加上 panel-css.js 里的 `.fab.peek` 与
+ * `right` 过渡；实测产物 452306 字节 = 441.7KB，故在上一档 438KB 之上再抬一档，
+ * 留 ~2.3KB 余量）。
+ * 上一档 438KB 是面板布局存档 `lib/page/panel-layout.js` 与 chat.js 侧的读写接线
+ * （与 perf 分支合并后实测 446864 字节）；再上一档 434KB 是
  * 面板流式渲染的两处性能优化 —— `fitPanelHeight` 的 chrome 测量复用、流式游标按树深
- * 定位最后一个文本节点；再上一档 428KB 是页面选文的清除控件、用户消息内引用渲染与
+ * 定位最后一个文本节点；428KB 是页面选文的清除控件、用户消息内引用渲染与
  * 持久化；424KB 是导出期 UI 守卫 `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
  * 真需要涨的话，请在同一处上调并写清原因 —— 但先确认不是误引入。
  * 它现在由 npm test 守（tests/content-bundle-freshness.test.mjs），不再是
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-export const SIZE_BUDGET_BYTES = 438 * 1024;
+export const SIZE_BUDGET_BYTES = 444 * 1024;
 
 /**
  * 产物规格检查（纯函数，便于直测）。返回问题列表，空数组 = 通过。

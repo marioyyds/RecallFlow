@@ -14,6 +14,7 @@ import {
   openFixturePage,
   sendInstruction,
   createFreshPanelSession,
+  clickFab,
   PANEL,
 } from './helpers.mjs';
 
@@ -103,7 +104,7 @@ test('① 关掉会话再打开：视图停在最后一条（而不是顶部）'
   await page.locator(PANEL + ' .close').click();
   await expect(page.locator(PANEL + ' .panel')).toHaveCount(0);
 
-  await page.locator(PANEL + ' .fab').click();
+  await clickFab(page);
   await expect(page.locator(PANEL + ' .p-body')).toBeVisible();
 
   const after = await page.locator(PANEL + ' .p-body').evaluate((el) => ({

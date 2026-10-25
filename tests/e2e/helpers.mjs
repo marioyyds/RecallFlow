@@ -315,6 +315,32 @@ export async function readTextAsAgent(page, selector) {
   }, selector);
 }
 
+/**
+ * 点悬浮气泡（FAB）打开面板。
+ *
+ * ⚠ 面板关闭时气泡是**收起**的：它大部分在视口右缘之外，只露出约 12px
+ *   （TITA-36）。Playwright 会把点击点夹进视口，于是点到那条露出边上 ——
+ *   这没问题（悬浮即展开），但气泡随即向左滑走，点击点可能落在气泡之外，
+ *   于是收不到 click。所以**先 hover 等它展开**，再按展开后的中心点下去。
+ */
+export async function clickFab(page) {
+  const fab = page.locator(PANEL + ' .fab');
+  const box = await fab.boundingBox();
+  if (!box) throw new Error('FAB 不可见（收起态下也应露出一条边）');
+  // 收起态的气泡右半边在视口之外，Playwright 自动挑的落点会被夹到 `innerWidth`
+  //（**含**滚动条）⇒ 压在滚动条上，命中 `<html>` 而不是气泡，于是一路重试到超时。
+  // 所以按布局视口（不含滚动条）手动移到露出那条边上：悬浮即整颗滑出。
+  const layoutWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  const y = box.y + box.height / 2;
+  await page.mouse.move(Math.min(box.x + box.width / 2, layoutWidth - 4), y);
+  await page.waitForTimeout(360); // 大于 `.fab` 的 right 过渡（220ms）
+  // 滑出之后再按下：此时气泡完整在视口内，点它的中心一定命中。
+  const shown = await fab.boundingBox();
+  await page.mouse.move(shown.x + shown.width / 2, shown.y + shown.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
 /** 展开助手面板。 */
 export async function openPanel(page) {
   // 面板开合现在是全浏览器同步的：新标签页可能已经自动打开面板。
@@ -337,7 +363,8 @@ export async function openPanel(page) {
       //   它就对着一个永远不会再可见的 FAB 重试到动作超时（约 86 秒），
       //   整条用例被判超时。而实际上那一刻面板已经开好了（错误截图里面板好好的）。
       //   短超时 + continue 让每一轮都重新判断"面板好了没"，这才是幂等。
-      await fab.click({ timeout: 2000 }).catch(() => {});
+      //   另外 FAB 收起态只露出一条边，必须先 hover 等它滑出来再点（见 clickFab）。
+      await clickFab(page).catch(() => {});
       continue;
     }
     await page.waitForTimeout(100);

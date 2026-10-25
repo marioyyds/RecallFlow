@@ -5222,7 +5222,9 @@
       color: #fff; display: flex; align-items: center; justify-content: center;
       font-size: 14px; font-weight: 700; letter-spacing: .4px; cursor: grab;
       box-shadow: 0 8px 22px rgba(45,105,165,.36), inset 0 1px 1px rgba(255,255,255,.35);
-      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+      /* \u26A0 right \u5FC5\u987B\u8FDB\u8FC7\u6E21\u5217\u8868\uFF1A\u6536\u8D77 / \u5C55\u5F00\u6ED1\u7684\u662F right\uFF08\u89C1\u4E0B\u9762 .fab.peek\uFF09\u3002
+         \u6F0F\u4E86\u5B83\uFF0C\u60AC\u6D6E\u65F6\u6C14\u6CE1\u4F1A\u77AC\u95F4\u8DF3\u51FA\u6765 \u2014\u2014 \u90A3\u5C31\u662F\u9A8C\u6536\u6807\u51C6 2 \u91CC\u7684"\u65E0\u8DF3\u53D8"\u6CA1\u8FC7\u3002 */
+      transition: right .22s ease, transform .18s ease, box-shadow .18s ease, filter .18s ease;
       user-select: none; touch-action: none;
     }
     .user-turn { width: fit-content; max-width: 96%; margin: 0 0 14px auto; }
@@ -5243,7 +5245,20 @@
     .fab.hidden { display: none; }
     .fab.thinking { animation: fab-pulse 1.2s ease-in-out infinite; }
     @keyframes fab-pulse { 0%,100% { box-shadow: 0 8px 22px rgba(45,105,165,.36), 0 0 0 0 rgba(82,211,138,.35); } 50% { box-shadow: 0 10px 26px rgba(45,105,165,.48), 0 0 0 7px rgba(82,211,138,0); } }
-    @media (max-width: 600px) { .fab { right: 12px; width: 46px; height: 46px; font-size: 13px; } }
+    /* TITA-36 \u6536\u8D77\u6001\uFF1A\u6574\u9897\u6C14\u6CE1\u5411\u53F3\u63A8\u51FA\u89C6\u53E3\uFF0C\u53EA\u7559 FAB_PEEK_VISIBLE(12px) \u5728\u89C6\u53E3\u91CC\u3002
+       \u7B97\u672F\uFF1A\u5BBD\u5C4F 52 - 12 = 40\uFF1B\u7A84\u5C4F\uFF08\u4E0B\u9762\u90A3\u6761\u5A92\u4F53\u67E5\u8BE2\uFF0946 - 12 = 34\u3002
+       \u6C14\u6CE1\u76F4\u5F84\u6539\u4E86\uFF0C\u8FD9\u4E24\u4E2A\u6570\u5FC5\u987B\u8DDF\u7740\u6539\uFF0C\u5426\u5219\u4E0D\u662F\u9732\u592A\u591A\u5C31\u662F\u9732\u4E0D\u7740\u3002 */
+    .fab.peek { right: -40px; }
+    @media (max-width: 600px) {
+      .fab { right: 12px; width: 46px; height: 46px; font-size: 13px; }
+      .fab.peek { right: -34px; }
+    }
+    @media (hover: none) {
+      /* \u89E6\u5C4F\u6CA1\u6709"\u60AC\u6D6E"\u8FD9\u56DE\u4E8B\uFF1A\u6536\u8D77\u6001\u5524\u4E0D\u56DE\u6765\uFF0C\u53EA\u5269 12px \u7684\u70B9\u4E0D\u5230\u3002
+         \u6CA1\u6709 hover \u80FD\u529B\u7684\u8BBE\u5907\u76F4\u63A5\u53D6\u6D88\u6536\u8D77\u3002 */
+      .fab.peek { right: 16px; }
+    }
+    @media (hover: none) and (max-width: 600px) { .fab.peek { right: 12px; } }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
     }
@@ -5847,6 +5862,11 @@
   var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
   var FAB_EDGE_GAP = 8;
   var DEFAULT_FAB_RATIO = 0.38;
+  var FAB_PEEK_VISIBLE = 12;
+  var FAB_PEEK_CLASS = "peek";
+  var FAB_PEEK_ZONE_PAD = 4;
+  var FAB_SIZE = 52;
+  var FAB_RIGHT_GAP = 16;
   var FAB_FALLBACK_HEIGHT_NARROW = 46;
   var FAB_FALLBACK_HEIGHT = 52;
   var NARROW_WIDTH = 600;
@@ -5973,6 +5993,76 @@
         if (v != null) ratio = v;
         return ratio;
       }
+    };
+  }
+  function resolveFabPeek(input) {
+    const s = input || {};
+    if (s.panelOpen === true) return false;
+    return !(s.hovered === true || s.focused === true || s.dragging === true);
+  }
+  function isPointerInFabZone(input) {
+    const s = input || {};
+    const viewportWidth = Number(s.viewportWidth);
+    const rect = s.rect;
+    if (!Number.isFinite(viewportWidth) || !rect) return false;
+    const pad = Number.isFinite(Number(s.pad)) ? Number(s.pad) : FAB_PEEK_ZONE_PAD;
+    const x = Number(s.x);
+    const y = Number(s.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const inVerticalBand = y >= rect.top - pad && y <= rect.bottom + pad;
+    if (!inVerticalBand) return false;
+    const inCollapsedStrip = x >= viewportWidth - FAB_PEEK_VISIBLE - pad && x <= viewportWidth + pad;
+    const inExpandedBox = x >= viewportWidth - FAB_RIGHT_GAP - FAB_SIZE - pad && x <= viewportWidth - FAB_RIGHT_GAP + pad;
+    return inCollapsedStrip || inExpandedBox;
+  }
+  function createFabPeekController(deps = {}) {
+    const getFab = typeof deps.getFab === "function" ? deps.getFab : () => null;
+    const viewportWidth = typeof deps.getViewportWidth === "function" ? deps.getViewportWidth : () => 1280;
+    const applyPeek = typeof deps.applyPeek === "function" ? deps.applyPeek : (fab2, on) => fab2.classList.toggle(FAB_PEEK_CLASS, on);
+    const state = { panelOpen: false, hovered: false, focused: false, dragging: false };
+    let peeked = resolveFabPeek(state);
+    function apply() {
+      peeked = resolveFabPeek(state);
+      const fab2 = getFab();
+      if (fab2) applyPeek(fab2, peeked);
+      return peeked;
+    }
+    function set(key, value) {
+      const next = value === true;
+      if (state[key] === next) return peeked;
+      state[key] = next;
+      return apply();
+    }
+    return {
+      apply,
+      isPeeked: () => peeked,
+      getState: () => ({ ...state }),
+      /**
+       * 鼠标移动：只有**真的离开**气泡的地盘才收起。
+       *
+       * 不用 pointerleave：气泡向左滑出时会"自己离开鼠标"，那样要么抖要么卡住
+       * （见 isPointerInFabZone 的注释）。所以收起的判据始终是坐标，不是边界事件。
+       * ⚠ 悬浮态之外（绝大多数鼠标移动）这里只做一次布尔判断就返回，不读布局。
+       */
+      handlePointerMove: (x, y) => {
+        if (!state.hovered) return peeked;
+        const fab2 = getFab();
+        if (!fab2) return peeked;
+        if (isPointerInFabZone({ x, y, rect: fab2.getBoundingClientRect(), viewportWidth: viewportWidth() })) {
+          return peeked;
+        }
+        return set("hovered", false);
+      },
+      setPanelOpen: (v) => {
+        if (v === true) {
+          state.hovered = false;
+          state.focused = false;
+        }
+        return set("panelOpen", v);
+      },
+      setHovered: (v) => set("hovered", v),
+      setFocused: (v) => set("focused", v),
+      setDragging: (v) => set("dragging", v)
     };
   }
 
@@ -6247,6 +6337,13 @@
       }
     })()
   });
+  var fabPeek = createFabPeekController({
+    getFab: () => fab,
+    // ⚠ 必须是**布局视口**宽度（`documentElement.clientWidth`，不含滚动条）：
+    // 气泡的 `right` 是相对布局视口算的，用 `innerWidth`（含滚动条）会让热区整体
+    // 右偏一个滚动条宽度，页面一有滚动条就点不到最右边那条边。
+    getViewportWidth: () => document.documentElement.clientWidth
+  });
   function currentFabTop() {
     return fabCtl.currentFabTop();
   }
@@ -6312,6 +6409,9 @@
       if (Date.now() < fabSuppressClickUntil) return;
       togglePanel();
     });
+    fab.addEventListener("pointerenter", () => fabPeek.setHovered(true));
+    fab.addEventListener("focus", () => fabPeek.setFocused(true));
+    fab.addEventListener("blur", () => fabPeek.setFocused(false));
     fab.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || !e.isPrimary) return;
       fabDragState = {
@@ -6321,6 +6421,7 @@
         moved: false
       };
       fab.classList.add("dragging");
+      fabPeek.setDragging(true);
       try {
         fab.setPointerCapture(e.pointerId);
       } catch (err) {
@@ -6341,6 +6442,7 @@
       const moved = fabDragState.moved;
       fabDragState = null;
       fab.classList.remove("dragging");
+      fabPeek.setDragging(false);
       try {
         fab.releasePointerCapture(e.pointerId);
       } catch (err) {
@@ -6359,6 +6461,7 @@
       moveFabBy(e.key === "ArrowUp" ? -16 : 16);
     });
     shadow.appendChild(fab);
+    fabPeek.apply();
     applySavedFabPosition();
     loadFabPosition();
     document.documentElement.appendChild(host);
@@ -6567,6 +6670,7 @@
       panelTitleEl = null;
       planBar = null;
       if (fab) fab.classList.remove("hidden");
+      fabPeek.setPanelOpen(false);
     }
     if (hadPanel && !(options && options.publish === false)) publishPanelUi(false, "global");
     if (hadPanel && !(options && options.publish === false)) {
@@ -8376,6 +8480,7 @@
     removeBubble();
     removePanel({ publish: false });
     if (fab) fab.classList.add("hidden");
+    fabPeek.setPanelOpen(true);
     const layout = readPanelLayout(localStorage);
     const dockedIntent = restore ? null : docked === true;
     panel = document.createElement("div");
@@ -9987,6 +10092,7 @@
       if (path.includes(approvalSettingsEl)) return;
       closeApprovalPopover();
     }, true);
+    document.addEventListener("pointermove", (e) => fabPeek.handlePointerMove(e.clientX, e.clientY), true);
     document.addEventListener("scroll", () => removeBubble(), true);
     window.addEventListener("resize", () => {
       if (fab) applySavedFabPosition();
