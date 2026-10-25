@@ -6315,6 +6315,9 @@
   }
   var keepAliveTimer = null;
   var usageEl = null;
+  function resetUsageChip() {
+    if (usageEl) usageEl.textContent = "";
+  }
   var handoffId = "";
   var conversationLoaded = false;
   var conversationLoadPromise = null;
@@ -7953,6 +7956,7 @@
   function adoptPanelSession(session, options) {
     if (!session || !session.id) return false;
     const opts = options || {};
+    if (panelSessionId !== session.id) resetUsageChip();
     panelSessionId = session.id;
     panelSessionSeq = Number(session.seq) || 0;
     if (opts.activeId) panelSessionActiveId = String(opts.activeId);
