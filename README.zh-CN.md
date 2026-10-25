@@ -13,7 +13,7 @@
 [![Manifest V3](https://img.shields.io/badge/Manifest-v3-blue.svg?style=flat-square)](manifest.json)
 [![GitHub Repo](https://img.shields.io/badge/Repo-GitHub-blue.svg?style=flat-square)](https://github.com/marioyyds/RecallFlow)
 
-![RecallFlow 价值闭环：读 → 操作 → 记忆](docs/assets/read-operate-remember.svg)
+![RecallFlow 价值闭环：读 → 操作 → 记忆](docs/assets/read-operate-remember.zh-CN.svg)
 
 ## 它是什么
 
