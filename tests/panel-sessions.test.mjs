@@ -115,6 +115,37 @@ test('bootstrap: 旧版按 tab 的对话迁成历史会话，最近一条成为�
   assert.ok(storage.data[panelSessionKey(state.activeId)]);
 });
 
+test('save 后 list()/get() 的 messageCount 保留条数（读路径不得把索引里已存的数字归零）', async () => {
+  const { store, storage } = makeStore();
+  const boot = await store.bootstrap();
+  const id = boot.activeId;
+  const saved = await store.save({
+    id,
+    messages: [
+      { role: 'user', content: '你好' },
+      { role: 'assistant', content: '在的' },
+    ],
+  });
+  assert.equal(saved.ok, true);
+  // 写索引时算出来的是对的：索引条目里存的 messageCount 就是真实条数。
+  assert.equal(storage.data[PSESS_INDEX_KEY].sessions[id].messageCount, 2);
+  // 读索引时会把「只有数字、没有 messages 数组」的索引条目再摘要一次，
+  // 这一步不能把已存的条数丢掉（旧实现在这里恒为 0，面板所有会话都显示「0 条」）。
+  assert.equal(saved.sessions.find((s) => s.id === id).messageCount, 2);
+  const listed = await store.list();
+  assert.equal(listed.sessions.find((s) => s.id === id).messageCount, 2);
+  const got = await store.get(id);
+  assert.equal(got.sessions.find((s) => s.id === id).messageCount, 2);
+});
+
+test('空会话的 messageCount 是 0，读路径不得把它误报成非 0', async () => {
+  const { store } = makeStore();
+  const boot = await store.bootstrap();
+  assert.equal(boot.sessions[0].messageCount, 0);
+  const listed = await store.list();
+  assert.equal(listed.sessions[0].messageCount, 0);
+});
+
 test('save: 按 seq 拒绝旧标签页的过期写入，并返回最新正文', async () => {
   const { store } = makeStore();
   const boot = await store.bootstrap();
