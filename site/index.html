@@ -1,84 +1,94 @@
 <!doctype html>
-<html lang="zh-CN">
+<!-- 语言：静态默认是英文（`html lang="en"`、所有静态文案与 meta 都是英文），
+     SEO 抓取器与禁用 JS 的浏览器拿到的就是英文；中文由 site/i18n.js 在前端回填。
+     文案的唯一来源是 site/i18n.js —— 本文件里每个用户可见的节点都带 data-i18n* 标记，
+     这里的静态文本只是「没有 JS 时的兜底 + 英文默认值」。 -->
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RecallFlow · 你的浏览器办公助手</title>
-<meta name="description" content="RecallFlow 是运行在真实浏览器里的办公助手扩展：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<title data-i18n="meta.title">RecallFlow · Your browser office assistant</title>
+<meta name="description" data-i18n-attr="content:meta.description" content="RecallFlow is an office assistant extension that runs in your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work to an agent.">
 <meta name="theme-color" content="#0f0f0f">
 <link rel="icon" type="image/png" href="assets/icon-32.png">
 <link rel="apple-touch-icon" href="assets/icon-128.png">
 <link rel="stylesheet" href="styles.css">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="RecallFlow">
-<meta property="og:title" content="RecallFlow · 你的浏览器办公助手">
-<meta property="og:description" content="在你的真实浏览器里动手：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<meta property="og:title" data-i18n-attr="content:meta.title" content="RecallFlow · Your browser office assistant">
+<meta property="og:description" data-i18n-attr="content:meta.socialDescription" content="It acts inside your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work to an agent.">
 <meta property="og:url" content="https://marioyyds.github.io/RecallFlow/">
 <!-- og:image 取舍：Open Graph 抓取器要求绝对 URL，所以这里用 GitHub Pages 的绝对地址（部署后生效）。
      页面内所有可见子资源（样式 / 脚本 / 图片 / 字体）仍然全部是本地的相对路径，没有任何 CDN 依赖。 -->
 <meta property="og:image" content="https://marioyyds.github.io/RecallFlow/assets/recallflow-github-logo.svg">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="RecallFlow · 你的浏览器办公助手">
-<meta name="twitter:description" content="在你的真实浏览器里动手：读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给 Agent。">
+<meta name="twitter:title" data-i18n-attr="content:meta.title" content="RecallFlow · Your browser office assistant">
+<meta name="twitter:description" data-i18n-attr="content:meta.socialDescription" content="It acts inside your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work to an agent.">
 <meta name="twitter:image" content="https://marioyyds.github.io/RecallFlow/assets/recallflow-github-logo.svg">
 </head>
 <body>
-<a class="skip-link" href="#main">跳到主要内容</a>
+<a class="skip-link" href="#main" data-i18n="skip.toMain">Skip to main content</a>
 
 <header class="site-header">
   <div class="container header-inner">
-    <a class="brand" href="#top" aria-label="RecallFlow 首页">
+    <a class="brand" href="#top" data-i18n-attr="aria-label:brand.home" aria-label="RecallFlow home">
       <img src="assets/recallflow-mark.svg" alt="" width="32" height="32">
       <span>RecallFlow</span>
     </a>
-    <nav class="site-nav" aria-label="主导航">
+    <nav class="site-nav" data-i18n-attr="aria-label:nav.label" aria-label="Main navigation">
       <ul>
-        <li><a href="#quickstart">快速上手</a></li>
-        <li><a href="#capabilities">核心能力</a></li>
-        <li><a href="#demos">真实执行</a></li>
-        <li><a href="#design">Agent 设计</a></li>
-        <li><a href="#mcp">MCP 集成</a></li>
-        <li><a href="#docs">文档</a></li>
+        <li><a href="#quickstart" data-i18n="nav.quickstart">Quick start</a></li>
+        <li><a href="#capabilities" data-i18n="nav.capabilities">Core capabilities</a></li>
+        <li><a href="#demos" data-i18n="nav.demos">Real execution</a></li>
+        <li><a href="#design" data-i18n="nav.design">Agent design</a></li>
+        <li><a href="#mcp" data-i18n="nav.mcp">MCP integration</a></li>
+        <li><a href="#docs" data-i18n="nav.docs">Docs</a></li>
       </ul>
     </nav>
+    <!-- 语言切换：两个真实 button（键盘可达），aria-pressed 表示当前语言。
+         按钮上写的是语言自己的名字（EN / 中文），屏幕阅读器读的是 aria-label（切换到 X）。 -->
+    <div class="lang-switch" role="group" data-i18n-attr="aria-label:lang.group" aria-label="Language">
+      <button class="lang-btn" type="button" data-lang="en" data-i18n-attr="aria-label:lang.switchToEn" aria-label="Switch to English" aria-pressed="true">EN</button>
+      <button class="lang-btn" type="button" data-lang="zh" data-i18n-attr="aria-label:lang.switchToZh" aria-label="Switch to Chinese" aria-pressed="false">中文</button>
+    </div>
   </div>
 </header>
 
 <main id="main">
   <section class="hero" id="top">
     <div class="container hero-inner">
-      <img class="hero-logo" src="assets/recallflow-github-logo.svg" alt="RecallFlow 标志" width="668" height="100">
-      <p class="eyebrow">Edge 扩展 · Manifest V3 · 数据保存在本地</p>
-      <h1>把重复的网页工作，交给在真实浏览器里动手的 Agent</h1>
-      <p class="lead">你的浏览器办公助手 —— 读、点、填、拖、上传、翻页、跨页搬运</p>
+      <img class="hero-logo" src="assets/recallflow-github-logo.svg" data-i18n-attr="alt:hero.logoAlt" alt="RecallFlow logo" width="668" height="100">
+      <p class="eyebrow" data-i18n="hero.eyebrow">Edge extension · Manifest V3 · data stays local</p>
+      <h1 data-i18n="hero.title">Hand the repetitive web work to an agent that acts in your real browser</h1>
+      <p class="lead" data-i18n="hero.lead">Your browser office assistant — read, click, fill, drag, upload, paginate, carry data across pages</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/marioyyds/RecallFlow">在 GitHub 查看源码</a>
-        <a class="btn btn-ghost" href="#quickstart">四步快速上手</a>
+        <a class="btn btn-primary" href="https://github.com/marioyyds/RecallFlow" data-i18n="hero.ctaRepo">View source on GitHub</a>
+        <a class="btn btn-ghost" href="#quickstart" data-i18n="hero.ctaQuickstart">Four-step quick start</a>
       </div>
-      <p class="hero-note">不是把 HTML 塞给模型，而是在你的真实浏览器里动手：登录态、SPA、内网页面都能读能操作；合成事件失效时经 CDP 派发可信事件。</p>
+      <p class="hero-note" data-i18n="hero.note">It does not shove HTML at a model — it acts inside your real browser: logged-in sessions, SPAs and intranet pages are all readable and operable; when synthesized events fall short, it dispatches trusted events over CDP.</p>
     </div>
   </section>
 
   <section class="section" id="quickstart">
     <div class="container">
-      <h2>快速上手</h2>
-      <p class="section-lead">从下载到跑起来，只需要四步。</p>
+      <h2 data-i18n="qs.title">Quick start</h2>
+      <p class="section-lead" data-i18n="qs.lead">From download to a running agent — four steps.</p>
       <ol class="steps">
         <li>
-          <h3>加载解压缩的扩展</h3>
-          <p>打开 <code>edge://extensions/</code>，启用「开发人员模式」，选择「加载解压缩的扩展」并指向项目目录。</p>
+          <h3 data-i18n="qs.step1.title">Load the unpacked extension</h3>
+          <p data-i18n-html="qs.step1.body">Open <code>edge://extensions/</code>, enable “Developer mode”, choose “Load unpacked” and point it at the project directory.</p>
         </li>
         <li>
-          <h3>配置 DeepSeek API Key</h3>
-          <p>点击扩展图标进入设置，填入自配的 DeepSeek API Key。未配置时，知识库仍可正常使用。</p>
+          <h3 data-i18n="qs.step2.title">Configure your DeepSeek API Key</h3>
+          <p data-i18n-html="qs.step2.body">Click the extension icon to open Settings and fill in your own DeepSeek API Key. Without it, the knowledge base still works.</p>
         </li>
         <li>
-          <h3>在页面右侧气泡使用</h3>
-          <p>打开任意网页，点右侧「RecallFlow」气泡，输入指令，或直接选用快捷语句。</p>
+          <h3 data-i18n="qs.step3.title">Use the bubble on the right</h3>
+          <p data-i18n-html="qs.step3.body">Open any page, click the “RecallFlow” bubble on the right, type an instruction — or pick a quick phrase.</p>
         </li>
         <li>
-          <h3>可选：允许访问文件网址</h3>
-          <p>要操作双击打开的本地 HTML，需在扩展详情里打开「允许访问文件网址」；开启后本地页与普通网页一致。</p>
+          <h3 data-i18n="qs.step4.title">Optional: allow access to file URLs</h3>
+          <p data-i18n-html="qs.step4.body">To operate local HTML you opened by double-clicking, turn on “Allow access to file URLs” in the extension details; once enabled, local pages behave like any web page.</p>
         </li>
       </ol>
     </div>
@@ -86,166 +96,162 @@
 
   <section class="section section-alt" id="capabilities">
     <div class="container">
-      <h2>核心能力</h2>
-      <p class="section-lead">目标是网页上的一切元素：跨域 iframe、Shadow DOM、canvas、虚拟列表、上传 / 拖拽 / 级联下拉、分页与无限滚动。</p>
+      <h2 data-i18n="cap.title">Core capabilities</h2>
+      <p class="section-lead" data-i18n="cap.lead">The target is every element on a web page: cross-origin iframes, Shadow DOM, canvas, virtual lists, upload / drag-and-drop / cascading selects, pagination and infinite scroll.</p>
       <ul class="cards">
         <li class="card">
-          <h3>跨 iframe / Shadow DOM / canvas</h3>
-          <p>在真实页面的真实结构里定位与操作，不靠对 DOM 结构的猜测。</p>
+          <h3 data-i18n="cap.card1.title">Cross-origin iframes / Shadow DOM / canvas</h3>
+          <p data-i18n="cap.card1.body">Locate and operate in the real structure of the real page — no guessing at the DOM structure.</p>
         </li>
         <li class="card">
-          <h3>上传、拖拽与级联下拉</h3>
-          <p>覆盖自定义日期选择器、文件上传、拖拽排序与级联选择；合成事件失效时经 CDP 派发可信事件。</p>
+          <h3 data-i18n="cap.card2.title">Upload, drag-and-drop and cascading selects</h3>
+          <p data-i18n="cap.card2.body">Covers custom date pickers, file upload, drag-and-drop sorting and cascading selects; when synthesized events fall short, it dispatches trusted events over CDP.</p>
         </li>
         <li class="card">
-          <h3>分页与无限滚动</h3>
-          <p>翻页、滚动加载之后继续操作，虚拟列表里的目标同样能命中。</p>
+          <h3 data-i18n="cap.card3.title">Pagination and infinite scroll</h3>
+          <p data-i18n="cap.card3.body">It keeps operating after turning a page or loading more — targets inside virtual lists are hit just as reliably.</p>
         </li>
         <li class="card">
-          <h3>跨页搬运</h3>
-          <p>把信息从一个页面搬到另一个页面，读、点、填、拖可以串成一条流程。</p>
+          <h3 data-i18n="cap.card4.title">Carrying data across pages</h3>
+          <p data-i18n="cap.card4.body">Move information from one page to another; read, click, fill and drag can be chained into one flow.</p>
         </li>
         <li class="card">
-          <h3>会记、会复用</h3>
-          <p>站点记忆、技能与宏让重复流程可以复用；数据全部保存在本地。</p>
+          <h3 data-i18n="cap.card5.title">It remembers, and it reuses</h3>
+          <p data-i18n="cap.card5.body">Site memory, skills and macros make repeated flows reusable; all data stays local.</p>
         </li>
         <li class="card">
-          <h3>失败软着陆与可观测</h3>
-          <p>重复调用或连续失败时只注入反思建议、不摘除工具；逐轮记录工具、耗时与运行轨迹。</p>
+          <h3 data-i18n="cap.card6.title">Failure soft landing and observability</h3>
+          <p data-i18n="cap.card6.body">On repeated calls or consecutive failures it only injects reflection suggestions and never removes a tool; tools, latency and the run trace are logged every turn.</p>
         </li>
       </ul>
-      <p class="capability-link">每条能力的保证方式（夹具页 / 剧本 / E2E / 技能 / 判据）见
-        <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">能力清单</a>。</p>
+      <p class="capability-link" data-i18n-html="cap.link">How each capability is guaranteed (fixture pages / scripts / E2E / skills / criteria) lives in the <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">capability inventory</a>.</p>
     </div>
   </section>
 
   <section class="section" id="demos">
     <div class="container">
-      <h2>真实执行演示</h2>
-      <p class="section-lead">在扩展面板里让 Agent 在真实页面上干活，右栏是逐步长出的工具记录。以下录制均为<strong>加速回放</strong>；第三方站点需登录，属真实场景展示。</p>
+      <h2 data-i18n="demo.title">Real execution demos</h2>
+      <p class="section-lead" data-i18n-html="demo.lead">Ask the Agent to work on real pages from inside the extension panel; the right column is the tool log growing step by step. The recordings below are all <strong>speeded-up replays</strong>; third-party sites require login, so they are real-world demonstrations.</p>
       <div class="demos">
         <figure class="demo">
           <div class="demo-media">
-            <img class="demo-gif" src="assets/recallflow-xhs-publish.gif" alt="自动发布小红书演示：打开创作页、填标题与正文、插入图片、添加话题、点击发布" width="800" height="410" loading="lazy" decoding="async">
-            <button class="gif-toggle" type="button" data-gif="xhs-publish" aria-pressed="false" aria-label="暂停动画：自动发布小红书演示" hidden>暂停动画</button>
+            <img class="demo-gif" src="assets/recallflow-xhs-publish.gif" data-i18n-attr="alt:demo.xhs.alt" alt="Auto-publishing to Xiaohongshu demo: open the composer, fill title and body, insert images, add topics, click publish" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="xhs-publish" data-demo-name="demo.xhs.title" aria-pressed="false" aria-label="Pause animation: Auto-publishing to Xiaohongshu" hidden data-i18n="demo.pause">Pause animation</button>
           </div>
           <figcaption>
-            <h3>自动发布小红书</h3>
-            <p>打开创作页、填标题与正文、插入图片、添加话题、点击发布，全流程一步不落。</p>
+            <h3 data-i18n="demo.xhs.title">Auto-publishing to Xiaohongshu</h3>
+            <p data-i18n="demo.xhs.desc">Open the composer, fill title and body, insert images, add topics, click publish — the whole flow, not one step skipped.</p>
           </figcaption>
         </figure>
         <figure class="demo">
           <div class="demo-media">
-            <img class="demo-gif" src="assets/recallflow-page-ops.gif" alt="页面操作演示：在真实页面上完成点击、输入与提交" width="800" height="410" loading="lazy" decoding="async">
-            <button class="gif-toggle" type="button" data-gif="page-ops" aria-pressed="false" aria-label="暂停动画：页面操作演示" hidden>暂停动画</button>
+            <img class="demo-gif" src="assets/recallflow-page-ops.gif" data-i18n-attr="alt:demo.pageops.alt" alt="Page operations demo: click, type and submit on a real page" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="page-ops" data-demo-name="demo.pageops.title" aria-pressed="false" aria-label="Pause animation: Page operations" hidden data-i18n="demo.pause">Pause animation</button>
           </div>
           <figcaption>
-            <h3>页面操作</h3>
-            <p>在真实页面上完成点击 / 输入 / 提交，每一步都留在工具记录里。</p>
+            <h3 data-i18n="demo.pageops.title">Page operations</h3>
+            <p data-i18n="demo.pageops.desc">Click, type and submit on a real page, with every step kept in the tool log.</p>
           </figcaption>
         </figure>
         <figure class="demo">
           <div class="demo-media">
-            <img class="demo-gif" src="assets/recallflow-find-in-page.gif" alt="当前页面搜索演示：在页面内检索目标并定位到结果" width="800" height="410" loading="lazy" decoding="async">
-            <button class="gif-toggle" type="button" data-gif="find-in-page" aria-pressed="false" aria-label="暂停动画：当前页面搜索演示" hidden>暂停动画</button>
+            <img class="demo-gif" src="assets/recallflow-find-in-page.gif" data-i18n-attr="alt:demo.find.alt" alt="Demo of search on the current page: find a target inside the page and jump to the result" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="find-in-page" data-demo-name="demo.find.title" aria-pressed="false" aria-label="Pause animation: Search on the current page" hidden data-i18n="demo.pause">Pause animation</button>
           </div>
           <figcaption>
-            <h3>当前页面搜索</h3>
-            <p>在页面内检索目标并定位到结果，适合长文档与信息密集的后台页面。</p>
+            <h3 data-i18n="demo.find.title">Search on the current page</h3>
+            <p data-i18n="demo.find.desc">Search inside the page for a target and jump to the result — built for long documents and information-dense admin pages.</p>
           </figcaption>
         </figure>
         <figure class="demo">
           <div class="demo-media">
-            <img class="demo-gif" src="assets/recallflow-highlight.gif" alt="画出页面重点演示：高亮、标注页面上的关键信息" width="800" height="410" loading="lazy" decoding="async">
-            <button class="gif-toggle" type="button" data-gif="highlight" aria-pressed="false" aria-label="暂停动画：画出页面重点演示" hidden>暂停动画</button>
+            <img class="demo-gif" src="assets/recallflow-highlight.gif" data-i18n-attr="alt:demo.highlight.alt" alt="Demo of marking up what matters: highlight and annotate key information on the page" width="800" height="410" loading="lazy" decoding="async">
+            <button class="gif-toggle" type="button" data-gif="highlight" data-demo-name="demo.highlight.title" aria-pressed="false" aria-label="Pause animation: Mark up what matters" hidden data-i18n="demo.pause">Pause animation</button>
           </div>
           <figcaption>
-            <h3>画出页面重点</h3>
-            <p>高亮 / 标注页面上的关键信息，读到的内容一眼可辨。</p>
+            <h3 data-i18n="demo.highlight.title">Mark up what matters</h3>
+            <p data-i18n="demo.highlight.desc">Highlight and annotate key information on the page, so what was read stands out at a glance.</p>
           </figcaption>
         </figure>
       </div>
-      <p class="demo-note">演示文件较大，已启用懒加载；点击「暂停动画」可以停在当前帧阅读。</p>
+      <p class="demo-note" data-i18n="demo.note">The demo files are large, so lazy loading is on; click “Pause animation” to freeze on the current frame and read.</p>
     </div>
   </section>
 
   <section class="section section-alt" id="design">
     <div class="container">
-      <h2>Agent 设计</h2>
-      <p class="section-lead">收到指令后组装上下文，模型输出经工具守卫判定与分级审批，执行结果回到模型；最终答复前还会做一次完成校验。</p>
-      <img class="diagram" src="assets/read-operate-remember.svg" alt="RecallFlow 价值闭环：读 → 操作 → 记忆" width="900" height="320" decoding="async">
+      <h2 data-i18n="design.title">Agent design</h2>
+      <p class="section-lead" data-i18n="design.lead">On receiving an instruction it assembles context; model output goes through the tool guard for decisions and graded approval, and execution results flow back to the model; one more completion check runs before the final answer.</p>
+      <img class="diagram" src="assets/read-operate-remember.svg" data-i18n-attr="alt:design.diagramAlt" alt="RecallFlow value loop: read → operate → remember" width="900" height="320" decoding="async">
       <ol class="flow">
         <li class="flow-step">
-          <h3>收到指令</h3>
-          <p>组装上下文：意图路由、系统提示、历史与预算。</p>
+          <h3 data-i18n="design.flow1.title">Receive instruction</h3>
+          <p data-i18n="design.flow1.body">Assemble context: intent routing, system prompt, history and budget.</p>
         </li>
         <li class="flow-step">
-          <h3>模型输出</h3>
-          <p>工具调用进入工具守卫；最终答复进入完成校验。</p>
+          <h3 data-i18n="design.flow2.title">Model output</h3>
+          <p data-i18n="design.flow2.body">Tool calls go to the tool guard; the final answer goes to the completion check.</p>
         </li>
         <li class="flow-step">
-          <h3>分级审批</h3>
-          <p>按风险与站点信任分级，通过后执行工具。</p>
+          <h3 data-i18n="design.flow3.title">Graded approval</h3>
+          <p data-i18n="design.flow3.body">Graded by risk and site trust; once approved, the tool runs.</p>
         </li>
         <li class="flow-step">
-          <h3>执行并回流</h3>
-          <p>执行结果回到模型，继续下一轮；无进展时只注入反思建议。</p>
+          <h3 data-i18n="design.flow4.title">Execute and flow back</h3>
+          <p data-i18n="design.flow4.body">Results flow back to the model for the next turn; with no progress it only injects reflection suggestions.</p>
         </li>
         <li class="flow-step">
-          <h3>完成校验</h3>
-          <p>未达成则注入反思继续，达成后交付回答。</p>
+          <h3 data-i18n="design.flow5.title">Completion check</h3>
+          <p data-i18n="design.flow5.body">Not met yet: inject reflection and continue. Met: deliver the answer.</p>
         </li>
       </ol>
       <ul class="design-notes">
-        <li><strong>失败软着陆</strong>：重复调用、连续失败或无进展时只注入反思建议，不替模型做决定；仅在跨工具持续无进展或预算触顶时收尾。</li>
-        <li><strong>统一注册表</strong>：模型工具列表、权限策略与参数校验共用一份定义。</li>
-        <li><strong>可靠性与可观测</strong>：共享会话、运行锁、卡死检测与动作前后快照校验，逐轮记录缓存命中率与耗时分段。</li>
+        <li data-i18n-html="design.note1"><strong>Failure soft landing</strong>: on repeated calls, consecutive failures or no progress it only injects reflection suggestions and never decides for the model; it wraps up only on sustained no-progress across tools or when the budget runs out.</li>
+        <li data-i18n-html="design.note2"><strong>Unified registry</strong>: the model's tool list, the permission policy and argument validation share one definition.</li>
+        <li data-i18n-html="design.note3"><strong>Reliability and observability</strong>: shared sessions, a run lock, stall detection, and snapshots before and after each action; cache hit rate and latency breakdown are logged every turn.</li>
       </ul>
-      <p class="capability-link">完整流程图见
-        <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/assets/recallflow-page-ops-e2e.svg">页面操作 E2E 流程图</a>。</p>
+      <p class="capability-link" data-i18n-html="design.link">The full flow chart is in the <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/assets/recallflow-page-ops-e2e.svg">page operations E2E flow chart</a>.</p>
     </div>
   </section>
 
   <section class="section" id="mcp">
     <div class="container">
-      <h2>与外部 AI 集成（MCP）</h2>
+      <h2 data-i18n="mcp.title">Integrating with external AI (MCP)</h2>
       <div class="mcp">
-        <p><code>webfetch</code> 读不到的 SPA、登录态或内网页面，交由 RecallFlow 以真实浏览器会话读取，返回带时间戳与哈希的证据；外部 agent 还能经唯一写通道 <code>page_action</code> 碰页面，形成「读 → 改 → 验」的前端调试闭环。</p>
-        <p>集成路线的唯一事实来源是
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">docs/integration-status.md</a>，安装与配置见
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/integrations/opencode/recallflow-mcp/README.md">recallflow-mcp/README.md</a>。</p>
+        <p data-i18n-html="mcp.body">SPAs, logged-in pages or intranet pages that <code>webfetch</code> cannot read are handed to RecallFlow, which reads them in a real browser session and returns evidence with timestamps and hashes; external agents can also touch the page through the single write channel <code>page_action</code>, closing a “read → change → verify” loop for front-end debugging.</p>
+        <p data-i18n-html="mcp.refs">The single source of truth for the integration roadmap is <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">docs/integration-status.md</a>, and installation and configuration live in <a href="https://github.com/marioyyds/RecallFlow/blob/master/integrations/opencode/recallflow-mcp/README.md">recallflow-mcp/README.md</a>.</p>
       </div>
     </div>
   </section>
 
   <section class="section section-alt" id="docs">
     <div class="container">
-      <h2>文档导航</h2>
-      <p class="section-lead">从能力边界到集成细节，都在仓库的 docs/ 目录里。</p>
+      <h2 data-i18n="docs.title">Documentation map</h2>
+      <p class="section-lead" data-i18n="docs.lead">From capability boundaries to integration details, it is all in the repo’s docs/ directory.</p>
       <ul class="doc-list">
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">能力清单</a>
-          <span>每条能力由什么保证：夹具页、剧本、E2E、技能与判据。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md" data-i18n="docs.capability.title">Capability inventory</a>
+          <span data-i18n="docs.capability.desc">What guarantees each capability: fixture pages, scripts, E2E, skills and criteria.</span>
         </li>
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/skills-overview.md">技能清单</a>
-          <span>技能、剧本归属、孤儿技能与薄技能。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/skills-overview.md" data-i18n="docs.skills.title">Skills inventory</a>
+          <span data-i18n="docs.skills.desc">Skills, the scripts they belong to, orphan skills and thin skills.</span>
         </li>
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">集成路线</a>
-          <span>与外部 AI 集成到底实现了哪些，唯一事实来源。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md" data-i18n="docs.integration.title">Integration roadmap</a>
+          <span data-i18n="docs.integration.desc">What has actually been built for external AI integration — the single source of truth.</span>
         </li>
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/panel-sessions.md">面板会话</a>
-          <span>会话如何共享、切换，以及运行锁与跨标签页跟随。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/panel-sessions.md" data-i18n="docs.panel.title">Panel sessions</a>
+          <span data-i18n="docs.panel.desc">How sessions are shared and switched, plus the run lock and following across tabs.</span>
         </li>
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/e2e-testing-guide.md">真浏览器 E2E 指南</a>
-          <span>E2E 怎么写、怎么跑，以及黄金任务的约定。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/e2e-testing-guide.md" data-i18n="docs.e2e.title">Real-browser E2E guide</a>
+          <span data-i18n="docs.e2e.desc">How to write and run E2E in a real browser, and the golden task conventions.</span>
         </li>
         <li>
-          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/local-page-support.md">本地网页支持</a>
-          <span>file:// 页面支持到哪一步，为什么导出不留痕。</span>
+          <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/local-page-support.md" data-i18n="docs.local.title">Local page support</a>
+          <span data-i18n="docs.local.desc">How far file:// page support goes, and why exports leave no trace.</span>
         </li>
       </ul>
     </div>
@@ -254,15 +260,16 @@
 
 <footer class="site-footer">
   <div class="container footer-inner">
-    <p>RecallFlow · MIT License</p>
+    <p data-i18n="footer.tagline">RecallFlow · MIT License</p>
     <p>
-      <a href="https://github.com/marioyyds/RecallFlow">GitHub 仓库</a>
+      <a href="https://github.com/marioyyds/RecallFlow" data-i18n="footer.repo">GitHub repository</a>
       <span class="footer-sep" aria-hidden="true">·</span>
-      <a href="https://github.com/marioyyds/RecallFlow/blob/master/LICENSE">许可协议</a>
+      <a href="https://github.com/marioyyds/RecallFlow/blob/master/LICENSE" data-i18n="footer.license">License</a>
     </p>
   </div>
 </footer>
 
+<script src="i18n.js" defer></script>
 <script src="app.js" defer></script>
 </body>
 </html>

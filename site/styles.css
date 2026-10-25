@@ -214,6 +214,45 @@ img {
   text-decoration: none;
 }
 
+/* ---------- 语言切换 ---------- */
+
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.lang-btn {
+  min-width: 44px;
+  min-height: 30px;
+  padding: 0.2rem 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #bcbcbc;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.lang-btn:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lang-btn[aria-pressed="true"] {
+  background: var(--brand);
+  color: #0f0f0f;
+}
+
 /* ---------- hero ---------- */
 
 .hero {
@@ -706,7 +745,15 @@ img {
     justify-content: flex-start;
   }
 
+  /* 英文导航更长：窄屏下让它整行独占，语言切换挪到品牌那一行的最右侧，
+     避免三者挤在一行把导航挤成两半或撑出横向滚动。 */
+  .lang-switch {
+    order: 1;
+    margin-inline-start: auto;
+  }
+
   .site-nav {
+    order: 2;
     width: 100%;
   }
 
