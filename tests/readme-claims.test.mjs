@@ -45,7 +45,19 @@ const SOFT_LANDING = {
 
 // 两份都在文件顶部各读一次（`assertion-quality` 有一条 readFileSync 调用总数的棘轮，
 // 在每个 test() 里重复读盘会把它顶红）；下面所有断言都复用这份快照。
-const SRC = Object.fromEntries(README_FILES.map((f) => [f, fs.readFileSync(f, 'utf8')]));
+//
+// ⚠ 读盘必须是**容错**的：早先一版直接 `fs.readFileSync(f)`，删掉 README.zh-CN.md 后
+// 模块在**加载期**就 ENOENT 崩溃 —— 退出码非 0，但 **0 条用例执行**，于是「少一份 README
+// 要变红」这条门禁根本没有跑，看起来红了其实是崩了（评审退回的阻断项）。
+// 这里让缺失落到 `null`，由 requireSrc() 在用例里给出**具名失败**。
+const read = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null);
+const SRC = Object.fromEntries(README_FILES.map((f) => [f, read(f)]));
+
+/** 取某份 README 的内容；文件缺失时报成**用例失败**，而不是让模块加载崩溃。 */
+function requireSrc(f) {
+  assert.notEqual(SRC[f], null, 'README 缺失或不可读：' + f + '（这条必须是用例失败，不能是模块加载崩溃）');
+  return SRC[f];
+}
 
 /** 抓 markdown 里的本地链接目标（[..](x) 与 ![..](x)），去掉锚点与查询串。 */
 export function localLinks(md) {
@@ -69,7 +81,7 @@ test('两份 README 都真实存在（少一份就红，而不是被静默跳过
 test('README 的每个相对链接都指向真实存在的文件', () => {
   const missing = [];
   for (const f of README_FILES) {
-    const src = SRC[f];
+    const src = requireSrc(f);
     for (const p of localLinks(src)) {
       if (!fs.existsSync(path.resolve(p))) missing.push(f + ' → ' + p);
     }
@@ -80,7 +92,7 @@ test('README 的每个相对链接都指向真实存在的文件', () => {
 test('README 仍链接到关键生成物 / 事实来源', () => {
   const missing = [];
   for (const f of README_FILES) {
-    const src = SRC[f];
+    const src = requireSrc(f);
     for (const doc of MUST_LINK) {
       if (!src.includes(doc)) missing.push(f + ' → ' + doc);
     }
@@ -96,7 +108,7 @@ test('README 的「失败软着陆」描述必须与守卫的真实语义一致'
   const { GUARD_CAN_DISABLE_TOOLS } = await import('../lib/assistant/tool-guard.js');
   for (const f of README_FILES) {
     const rule = SOFT_LANDING[f];
-    const src = SRC[f];
+    const src = requireSrc(f);
     const bullet = src.split('\n').find((line) => rule.heading.test(line)) || '';
     assert.ok(bullet, f + ' 应保留「失败软着陆 / soft landing」这条说明');
     if (GUARD_CAN_DISABLE_TOOLS === false) {
@@ -139,7 +151,7 @@ test('这条门禁本身有牙齿：失效链接必须被抓，外链 / 锚点�
 
 test('语言切换行互相指向（两份 README 顶部各有一行，且都指向真实文件）', () => {
   for (const f of README_FILES) {
-    const src = SRC[f];
+    const src = requireSrc(f);
     const links = localLinks(src);
     const other = README_FILES.filter((x) => x !== f);
     for (const o of other) {
