@@ -9,7 +9,7 @@
 **你的浏览器办公助手**：能操作网页上的**一切元素** —— 读、点、填、拖、上传、翻页、跨页搬运，把重复的网页工作交给它。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Microsoft%20Edge-blue.svg?style=flat-square)](https://www.microsoft.com/edge)
+[![Platform](https://img.shields.io/badge/Platform-Chrome%20%7C%20Edge-blue.svg?style=flat-square)](https://www.microsoft.com/edge)
 [![Manifest V3](https://img.shields.io/badge/Manifest-v3-blue.svg?style=flat-square)](manifest.json)
 [![GitHub Repo](https://img.shields.io/badge/Repo-GitHub-blue.svg?style=flat-square)](https://github.com/marioyyds/RecallFlow)
 
@@ -41,10 +41,10 @@ RecallFlow 不是把 HTML 塞给模型，而是**在你的真实浏览器里动�
 
 ## 快速上手
 
-1. **安装**：Edge 打开 `edge://extensions/`，启用「开发人员模式」→「加载解压缩的扩展」→ 指向本目录。
+1. **安装**：Chrome 或 Edge 打开各自的扩展管理页 —— Chrome 用 `chrome://extensions/`，Edge 用 `edge://extensions/`，启用「开发人员模式」→「加载解压缩的扩展」→ 指向本目录。
 2. **配置**：点击扩展图标 → 设置，填入 DeepSeek API Key（未配置时知识库仍可正常使用）。
 3. **使用**：打开一个页面 → 点右侧「RecallFlow」气泡 → 输入指令，或直接选用快捷语句。
-4. **本地网页（可选）**：要让它也能操作你双击打开的本地 HTML，需在 `edge://extensions/` → 本扩展 → 详情 → 打开
+4. **本地网页（可选）**：要让它也能操作你双击打开的本地 HTML，需在 `chrome://extensions/`（Chrome）或 `edge://extensions/`（Edge）→ 本扩展 → 详情 → 打开
    **「允许访问文件网址」**。开启后本地页与普通网页一致（打开就有悬浮球），且保存/打印时不会把扩展图标写进你的文件
    （细节与验收见 [docs/local-page-support.md](docs/local-page-support.md)）。
 
