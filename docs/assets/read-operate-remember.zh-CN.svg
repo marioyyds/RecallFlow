@@ -1,0 +1,57 @@
+<svg width="900" height="320" viewBox="0 0 900 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rbg" x1="60" y1="60" x2="230" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2369B3"/>
+      <stop offset="1" stop-color="#123B73"/>
+    </linearGradient>
+    <linearGradient id="obg" x1="360" y1="60" x2="540" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2d9d78"/>
+      <stop offset="1" stop-color="#1e7a5b"/>
+    </linearGradient>
+    <linearGradient id="mbg" x1="670" y1="60" x2="840" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9b59b6"/>
+      <stop offset="1" stop-color="#6d3a9b"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#123B73"/>
+    </marker>
+  </defs>
+
+  <!-- 连接箭头（循环） -->
+  <path d="M 248 250 Q 300 285 370 250" stroke="#7ea6d8" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M 548 250 Q 610 285 680 250" stroke="#7ea6d8" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M 680 70 Q 450 8 220 70" stroke="#7ea6d8" stroke-width="3" fill="none" stroke-dasharray="8 6" marker-end="url(#arrow)"/>
+
+  <!-- READ -->
+  <rect x="40" y="70" width="210" height="180" rx="18" fill="url(#rbg)"/>
+  <circle cx="82" cy="104" r="14" fill="#BDEBFF" opacity=".9"/>
+  <text x="82" y="104" text-anchor="middle" dy="0.35em" font-size="14" fill="#0e2a4a" font-weight="bold">读</text>
+  <text x="108" y="109" font-size="22" fill="#ffffff" font-weight="bold">Read</text>
+  <text x="64" y="150" font-size="14" fill="#cfe6ff">划词即问 · 翻译</text>
+  <text x="64" y="176" font-size="14" fill="#cfe6ff">总结 · 解释 · 补全</text>
+  <text x="64" y="202" font-size="14" fill="#cfe6ff">RAG 知识库检索</text>
+  <text x="64" y="228" font-size="14" fill="#cfe6ff">结合整页上下文</text>
+
+  <!-- OPERATE -->
+  <rect x="345" y="70" width="210" height="180" rx="18" fill="url(#obg)"/>
+  <circle cx="387" cy="104" r="14" fill="#BDEBFF" opacity=".9"/>
+  <text x="387" y="104" text-anchor="middle" dy="0.35em" font-size="14" fill="#0c2f24" font-weight="bold">操作</text>
+  <text x="413" y="109" font-size="22" fill="#ffffff" font-weight="bold">Operate</text>
+  <text x="369" y="150" font-size="14" fill="#d9fff0">高亮 · 定位 · 滚动</text>
+  <text x="369" y="176" font-size="14" fill="#d9fff0">描边 · 点击 · 改样式</text>
+  <text x="369" y="202" font-size="14" fill="#d9fff0">page_command 结构化命令</text>
+  <text x="369" y="228" font-size="14" fill="#d9fff0">Agent 直接操作网页</text>
+
+  <!-- REMEMBER -->
+  <rect x="650" y="70" width="210" height="180" rx="18" fill="url(#mbg)"/>
+  <circle cx="692" cy="104" r="14" fill="#BDEBFF" opacity=".9"/>
+  <text x="692" y="104" text-anchor="middle" dy="0.35em" font-size="14" fill="#2a1142" font-weight="bold">记忆</text>
+  <text x="718" y="109" font-size="22" fill="#ffffff" font-weight="bold">Remember</text>
+  <text x="674" y="150" font-size="14" fill="#f0dfff">一键沉淀进本地知识库</text>
+  <text x="674" y="176" font-size="14" fill="#f0dfff">错题 · 文章 · Prompt · 笔记</text>
+  <text x="674" y="202" font-size="14" fill="#f0dfff">下次 AI 基于它回答</text>
+  <text x="674" y="228" font-size="14" fill="#f0dfff">数据 100% 本地存储</text>
+
+  <!-- 底部说明 -->
+  <text x="450" y="300" text-anchor="middle" font-size="15" fill="#123B73" font-weight="600">在浏览器里，让 AI 替你「读 → 操作 → 记忆」任何网页</text>
+</svg>
