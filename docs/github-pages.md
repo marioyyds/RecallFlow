@@ -12,6 +12,7 @@ docs/assets/**          # 资源的唯一来源（GIF / SVG / 图标），入库
 site/index.html         # 站点页面，入库
 site/styles.css
 site/app.js
+site/i18n.js            # 双语字典（en/zh）与语言切换运行时；文案的唯一来源
 site/assets/**          # 由脚本生成，.gitignore 忽略（CI 里同样由脚本生成）
    │
    │  node scripts/verify-site.mjs     ← 发布前静态门禁
@@ -22,7 +23,9 @@ GitHub Pages            # https://marioyyds.github.io/RecallFlow/
 两个约定：
 
 - **`site/assets/` 不入库**：它是 `docs/assets/` 的副本，提交进去只会和源头慢慢分叉。CI 每次都重新生成。
-- **站点零依赖**：页面和两道脚本都只用 Node 内置模块，所以流水线里没有 `npm ci` —— 站点不需要任何 `devDependencies`。
+- **站点零依赖**：页面和 `verify-site.mjs` 都只用 Node 内置模块，所以流水线里没有 `npm ci` —— 发布这道闸不需要任何 `devDependencies`。
+- **文案双语，默认英文**：静态 HTML（含 `<html lang>`、`<title>`、OG / twitter）本身就是英文，中文由 `site/i18n.js` 在前端回填（语言记忆放在 localStorage）。
+  因此不执行 JavaScript 的抓取器拿到的永远是英文；这一点由 `verify-site.mjs` 兜底。
 
 ## 2. 一次性人工步骤：把 Pages Source 切到 GitHub Actions
 
@@ -33,7 +36,7 @@ GitHub Pages            # https://marioyyds.github.io/RecallFlow/
 > | Pages 是否启用 | `has_pages: true` | `gh api repos/marioyyds/RecallFlow --jq .has_pages` |
 > | Source 类型 | `build_type=workflow`、`status=built` | `gh api repos/marioyyds/RecallFlow/pages` |
 > | 发布流水线 | 最新 run `conclusion=success, event=push, head=a004e5e, 2026-10-25T02:54:55Z` | `gh api "repos/marioyyds/RecallFlow/actions/workflows/pages.yml/runs?per_page=3"` |
-> | 线上站点 | `200`，`<html lang="zh-CN">`，正文是 `site/index.html` 落地页（不是 README） | `curl -s https://marioyyds.github.io/RecallFlow/` |
+> | 线上站点 | `200`，正文是 `site/index.html` 落地页（不是 README）。`<html lang>` 在双语改造落地前是 `zh-CN`；2026-10-25 起**默认英文**（静态 `lang="en"`，只有用户在站内切到中文才是 `zh-CN`） | `curl -s https://marioyyds.github.io/RecallFlow/` |
 >
 > 换句话说：**下面 §2 的人工切换已经完成**，这一节保留下来只用于「换仓库 / Pages 被关掉后怎么重来」。
 > 另需注意：改 README 不会触发重新发布 —— `pages.yml` 的 `paths` 只圈住 `site/**`、`docs/assets/**`、
@@ -64,10 +67,21 @@ node scripts/site-assets.mjs && node scripts/verify-site.mjs
 | 引用不越界 | `<img src="../outside.png">` —— 解析后落在 `site/` 之外 |
 | 站外子资源 | `<script src="https://cdn...">`：只有 `<a href="https://...">` 这类**超链接**允许指向站外 |
 | 体积红线 | `site/index.html` > 1MB，或 `site/` 下任一文件 > 8MB |
+| 双语一致性 | `site/index.html` 的静态默认不是英文、`data-i18n*` 引用的 key 在字典里缺失、英文字典里残留汉字 |
 
 它同时会挡住 `file://`、盘符路径（`C:/...`）、UNC 路径和根绝对路径（`/...` —— 站点挂在 `/RecallFlow/` 子路径下，`/...` 会指到 `github.io` 根域）。
 
 CI 里完全相同的两条命令也会各跑一次（`.github/workflows/pages.yml`），**门禁不通过就不会上传产物、不会部署**。
+
+**双语 / 视觉行为门禁**（需要 `devDependencies`，因此进不了零依赖的发布流水线，改动站点后在本地跑）：
+
+```bash
+npm ci
+node scripts/verify-site-lang.mjs      # 真 Chromium：默认英文 / 切换 / 刷新记忆 / 键盘可达 / 无残留文案 / 无横向溢出
+node scripts/verify-site-visual.mjs    # 真 Chromium：深色主题、对比度、窄屏溢出
+```
+
+静态门禁只能证明「不跑 JS 时页面是英文」，证明不了「点了切换器整页真的变成中文、刷新后还记得」——后者只有 `verify-site-lang.mjs` 会说话。
 
 ## 4. 部署后验证
 

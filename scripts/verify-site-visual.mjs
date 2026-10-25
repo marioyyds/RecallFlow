@@ -267,7 +267,9 @@ async function checkInteractions(page) {
       text: button.textContent.trim(),
     };
   });
-  check('点击后停帧（is-frozen + canvas + aria-pressed）', frozen.frozen && frozen.hasStill && frozen.pressed === 'true' && frozen.text === '播放动画', JSON.stringify(frozen));
+  // TITA-41/42 起站点默认英文：这里读到的应当是英文字典里的文案。
+  // 双语本身的行为门禁是 scripts/verify-site-lang.mjs，这里只顺带确认默认值没跑偏。
+  check('点击后停帧（is-frozen + canvas + aria-pressed）', frozen.frozen && frozen.hasStill && frozen.pressed === 'true' && frozen.text === 'Resume animation', JSON.stringify(frozen));
   await firstToggle.click();
   const resumed = await page.evaluate(() => {
     const media = document.querySelector('.demo-media');
