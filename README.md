@@ -9,7 +9,7 @@
 **Your browser office assistant**: it can operate **every element** on a web page — read, click, fill, drag, upload, paginate, carry data across pages. Hand the repetitive web work over to it.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Microsoft%20Edge-blue.svg?style=flat-square)](https://www.microsoft.com/edge)
+[![Platform](https://img.shields.io/badge/Platform-Chrome%20%7C%20Edge-blue.svg?style=flat-square)](https://www.microsoft.com/edge)
 [![Manifest V3](https://img.shields.io/badge/Manifest-v3-blue.svg?style=flat-square)](manifest.json)
 [![GitHub Repo](https://img.shields.io/badge/Repo-GitHub-blue.svg?style=flat-square)](https://github.com/marioyyds/RecallFlow)
 
@@ -41,10 +41,10 @@ upload / drag-and-drop / cascading selects, pagination and infinite scroll… Di
 
 ## Quick start
 
-1. **Install**: in Edge, open `edge://extensions/`, enable "Developer mode" → "Load unpacked" → point at this directory.
+1. **Install**: in Chrome or Edge, open `chrome://extensions/` (Chrome) or `edge://extensions/` (Edge), enable "Developer mode" → "Load unpacked" → point at this directory.
 2. **Configure**: click the extension icon → Settings, fill in your DeepSeek API Key (the knowledge base still works without it).
 3. **Use**: open a page → click the "RecallFlow" bubble on the right → type an instruction, or pick a quick phrase.
-4. **Local pages (optional)**: to let it also operate local HTML you opened by double-clicking, go to `edge://extensions/` → this extension → Details → turn on
+4. **Local pages (optional)**: to let it also operate local HTML you opened by double-clicking, go to `chrome://extensions/` (Chrome) or `edge://extensions/` (Edge) → this extension → Details → turn on
    **"Allow access to file URLs"**. After that, local pages behave like any web page (the floating ball appears on open), and saving/printing will not write the extension icon into your file
    (details and acceptance criteria in [docs/local-page-support.md](docs/local-page-support.md)).
 
