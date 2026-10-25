@@ -27,8 +27,8 @@
   // 逐条对照 site/index.html 的可见文案。`zh` 一列与原文逐字一致；
   // `en` 一列来自 TITA-43 交付的译稿 `RecallFlow-site-en-translation-table.md`
   // （术语与 README.md 的英文版对齐：capability inventory / tool guard /
-  // failure soft landing / real execution ...）。命令与路径（`edge://extensions/`）、
-  // 品牌名 RecallFlow 不译。
+  // failure soft landing / real execution ...）。命令与路径（`chrome://extensions/`、
+  // `edge://extensions/`）、浏览器名（Chrome / Edge）、品牌名 RecallFlow 不译。
   // 例外（译稿与门禁冲突时保留自译）：`demo.play` / `demo.playLabel` —— 译稿是
   // “Play animation”，但 scripts/verify-site-visual.mjs 对停帧后的按钮文案断言
   // “Resume animation”，改动字典会让该门禁变红，故保留（详见 TITA-44 交付评论）。
@@ -58,7 +58,7 @@
       'lang.switchToZh': 'Switch to Chinese',
 
       'hero.logoAlt': 'RecallFlow logo',
-      'hero.eyebrow': 'Edge extension · Manifest V3 · all data stays local',
+      'hero.eyebrow': 'Chrome and Edge extension · Manifest V3 · all data stays local',
       'hero.title': 'Hand the repetitive web work to an Agent that acts inside your real browser',
       'hero.lead':
         'Your browser office assistant — read, click, fill, drag, upload, paginate, carry data across pages',
@@ -71,7 +71,7 @@
       'qs.lead': 'From download to running: just four steps.',
       'qs.step1.title': 'Load the unpacked extension',
       'qs.step1.body':
-        'Open <code>edge://extensions/</code>, enable “Developer mode”, choose “Load unpacked” and point it at the project directory.',
+        'Open <code>chrome://extensions/</code> in Chrome, or <code>edge://extensions/</code> in Edge, enable “Developer mode”, choose “Load unpacked” and point it at the project directory.',
       'qs.step2.title': 'Configure your DeepSeek API Key',
       'qs.step2.body':
         'Click the extension icon to open Settings and fill in your own DeepSeek API Key. Without it, the knowledge base still works.',
@@ -217,7 +217,7 @@
       'lang.switchToZh': '切换到中文',
 
       'hero.logoAlt': 'RecallFlow 标志',
-      'hero.eyebrow': 'Edge 扩展 · Manifest V3 · 数据保存在本地',
+      'hero.eyebrow': 'Chrome 与 Edge 扩展 · Manifest V3 · 数据保存在本地',
       'hero.title': '把重复的网页工作，交给在真实浏览器里动手的 Agent',
       'hero.lead': '你的浏览器办公助手 —— 读、点、填、拖、上传、翻页、跨页搬运',
       'hero.ctaRepo': '在 GitHub 查看源码',
@@ -229,7 +229,7 @@
       'qs.lead': '从下载到跑起来，只需要四步。',
       'qs.step1.title': '加载解压缩的扩展',
       'qs.step1.body':
-        '打开 <code>edge://extensions/</code>，启用「开发人员模式」，选择「加载解压缩的扩展」并指向项目目录。',
+        '在 Chrome 打开 <code>chrome://extensions/</code>，或在 Edge 打开 <code>edge://extensions/</code>，启用「开发人员模式」，选择「加载解压缩的扩展」并指向项目目录。',
       'qs.step2.title': '配置 DeepSeek API Key',
       'qs.step2.body':
         '点击扩展图标进入设置，填入自配的 DeepSeek API Key。未配置时，知识库仍可正常使用。',
