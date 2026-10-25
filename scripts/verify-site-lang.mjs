@@ -133,9 +133,16 @@ function collectText() {
   }
   const visible = nodes.join('\n');
   const accessible = names.join('\n');
+  // 「Agent 设计」那张示意图有两份（英文原图 / 中文版），`src` 跟着语言换。
+  // `loaded` 比 `src` 更硬：路径写错、或 `scripts/site-assets.mjs` 没把图复制进
+  // `site/assets`，字符串照样对得上，但 `naturalWidth` 会是 0。
+  const diagramEl = document.querySelector('.diagram');
   return {
     visible,
     accessible,
+    diagram: diagramEl
+      ? { src: diagramEl.getAttribute('src'), loaded: Boolean(diagramEl.complete && diagramEl.naturalWidth > 0) }
+      : { src: null, loaded: false },
     cjkInVisible: (visible.match(new RegExp(CJK.source, 'g')) || []).slice(0, 5),
     cjkInAccessible: (accessible.match(new RegExp(CJK.source, 'g')) || []).slice(0, 5),
     lang: document.documentElement.getAttribute('lang'),
@@ -200,6 +207,7 @@ async function main() {
     check('首访 meta description 为英文文案', first.metaDescription === en['meta.description'], first.metaDescription);
     check('首访可见文本无中文残留', first.cjkInVisible.length === 0, JSON.stringify(first.cjkInVisible));
     check('首访可访问名（aria-label / alt）无中文残留', first.cjkInAccessible.length === 0, JSON.stringify(first.cjkInAccessible));
+    check('首访示意图为英文版且真的加载出来了', first.diagram.src === en['design.diagramSrc'] && first.diagram.loaded, JSON.stringify(first.diagram));
     const enHeroOfEnglish = await page.locator('h1').innerText();
     check('首访 h1 为英文文案', enHeroOfEnglish.trim() === en['hero.title'], enHeroOfEnglish.trim());
     await checkNoOverflow(page, '英文 / 1440');
@@ -232,6 +240,11 @@ async function main() {
       footer.length === 2 && footer[0] === zh['footer.repo'] && footer[1] === zh['footer.license'],
       JSON.stringify(footer),
     );
+    check(
+      '切换到中文后示意图换为中文版且真的加载出来了',
+      chinese.diagram.src === zh['design.diagramSrc'] && chinese.diagram.loaded,
+      JSON.stringify(chinese.diagram),
+    );
     const pauseButtonZh = await page.locator('.gif-toggle').first();
     check('暂停按钮文案为中文', (await pauseButtonZh.innerText()).trim() === zh['demo.pause'], (await pauseButtonZh.innerText()).trim());
     check(
@@ -249,6 +262,9 @@ async function main() {
     check('刷新后仍是 zh-CN', reloaded.lang === 'zh-CN', reloaded.lang);
     check('刷新后 title 仍为中文', reloaded.title === zh['meta.title'], reloaded.title);
     check('刷新后可见文本无英文原文残留', SWITCH_KEYS.every((key) => !reloaded.visible.includes(en[key].replace(/\s+/g, ' '))));
+    // 这条是「带存档语言首次加载即正确」：刷新后 localStorage 里已经是 zh，
+    // 页面第一次跑 i18n.apply 就得落在中文图上，不能先闪一下英文图。
+    check('刷新后（带存档语言）示意图仍是中文版', reloaded.diagram.src === zh['design.diagramSrc'] && reloaded.diagram.loaded, JSON.stringify(reloaded.diagram));
 
     // ---- 4. 键盘可达 + Enter 切回英文 ----
     const tabs = await focusLangButtonByKeyboard(page, 'en');
@@ -261,6 +277,7 @@ async function main() {
     const missingEn = SWITCH_KEYS.filter((key) => !back.visible.includes(en[key].replace(/\s+/g, ' ')));
     check(`切回英文后 ${SWITCH_KEYS.length} 条英文文案全部到位`, missingEn.length === 0, `缺 ${missingEn.length} 条：${missingEn.join('、')}`);
     check('切回英文后可见文本无中文残留', back.cjkInVisible.length === 0, JSON.stringify(back.cjkInVisible));
+    check('切回英文后示意图换回英文版', back.diagram.src === en['design.diagramSrc'] && back.diagram.loaded, JSON.stringify(back.diagram));
     await checkNoOverflow(page, '英文 / 390', { width: 390, height: 844 });
     await page.screenshot({ path: path.join(args.out, 'en-desktop.png'), fullPage: true });
 
