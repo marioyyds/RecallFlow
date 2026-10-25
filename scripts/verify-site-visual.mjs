@@ -243,7 +243,7 @@ async function checkInteractions(page) {
   const got = anchors.map((a) => a.href);
   check('导航锚点全部指向存在的区块', missing.length === 0 && expected.every((id) => got.includes(id)) && anchors.length === expected.length, JSON.stringify(got));
 
-  check('演示区存在 2 个暂停按钮', (await page.locator('.gif-toggle').count()) === 2);
+  check('演示区存在 4 个暂停按钮', (await page.locator('.gif-toggle').count()) === 4);
 
   await page.locator('#demos').scrollIntoViewIfNeeded();
   await page.waitForFunction(
