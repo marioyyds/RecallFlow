@@ -24,17 +24,21 @@
   var LANGS = ['en', 'zh'];
   var HTML_LANG = { en: 'en', zh: 'zh-CN' };
 
-  // 逐条对照 site/index.html 的可见文案。`zh` 一列与原文逐字一致，
-  // `en` 一列的术语与 README.md 的英文版对齐（capability inventory / tool guard /
+  // 逐条对照 site/index.html 的可见文案。`zh` 一列与原文逐字一致；
+  // `en` 一列来自 TITA-43 交付的译稿 `RecallFlow-site-en-translation-table.md`
+  // （术语与 README.md 的英文版对齐：capability inventory / tool guard /
   // failure soft landing / real execution ...）。命令与路径（`edge://extensions/`）、
   // 品牌名 RecallFlow 不译。
+  // 例外（译稿与门禁冲突时保留自译）：`demo.play` / `demo.playLabel` —— 译稿是
+  // “Play animation”，但 scripts/verify-site-visual.mjs 对停帧后的按钮文案断言
+  // “Resume animation”，改动字典会让该门禁变红，故保留（详见 TITA-44 交付评论）。
   var COPY = {
     en: {
-      'meta.title': 'RecallFlow · Your browser office assistant',
+      'meta.title': 'RecallFlow · Your Browser Office Assistant',
       'meta.description':
-        'RecallFlow is an office assistant extension that runs in your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work to an agent.',
+        'RecallFlow is an office-assistant extension that runs inside your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work over to the Agent.',
       'meta.socialDescription':
-        'It acts inside your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work to an agent.',
+        'It acts inside your real browser: read, click, fill, drag, upload, paginate, carry data across pages — hand the repetitive web work over to the Agent.',
 
       'skip.toMain': 'Skip to main content',
       'brand.home': 'RecallFlow home',
@@ -54,87 +58,89 @@
       'lang.switchToZh': 'Switch to Chinese',
 
       'hero.logoAlt': 'RecallFlow logo',
-      'hero.eyebrow': 'Edge extension · Manifest V3 · data stays local',
-      'hero.title': 'Hand the repetitive web work to an agent that acts in your real browser',
+      'hero.eyebrow': 'Edge extension · Manifest V3 · all data stays local',
+      'hero.title': 'Hand the repetitive web work to an Agent that acts inside your real browser',
       'hero.lead':
         'Your browser office assistant — read, click, fill, drag, upload, paginate, carry data across pages',
       'hero.ctaRepo': 'View source on GitHub',
-      'hero.ctaQuickstart': 'Four-step quick start',
+      'hero.ctaQuickstart': 'Quick start in four steps',
       'hero.note':
         'It does not shove HTML at a model — it acts inside your real browser: logged-in sessions, SPAs and intranet pages are all readable and operable; when synthesized events fall short, it dispatches trusted events over CDP.',
 
       'qs.title': 'Quick start',
-      'qs.lead': 'From download to a running agent — four steps.',
+      'qs.lead': 'From download to running: just four steps.',
       'qs.step1.title': 'Load the unpacked extension',
       'qs.step1.body':
         'Open <code>edge://extensions/</code>, enable “Developer mode”, choose “Load unpacked” and point it at the project directory.',
       'qs.step2.title': 'Configure your DeepSeek API Key',
       'qs.step2.body':
         'Click the extension icon to open Settings and fill in your own DeepSeek API Key. Without it, the knowledge base still works.',
-      'qs.step3.title': 'Use the bubble on the right',
+      'qs.step3.title': 'Use the bubble on the right of the page',
       'qs.step3.body':
-        'Open any page, click the “RecallFlow” bubble on the right, type an instruction — or pick a quick phrase.',
+        'Open any web page, click the “RecallFlow” bubble on the right, type an instruction, or pick a quick phrase.',
       'qs.step4.title': 'Optional: allow access to file URLs',
       'qs.step4.body':
-        'To operate local HTML you opened by double-clicking, turn on “Allow access to file URLs” in the extension details; once enabled, local pages behave like any web page.',
+        'To operate local HTML you opened by double-clicking, turn on “Allow access to file URLs” in the extension details; after that, local pages behave like any web page.',
 
       'cap.title': 'Core capabilities',
       'cap.lead':
         'The target is every element on a web page: cross-origin iframes, Shadow DOM, canvas, virtual lists, upload / drag-and-drop / cascading selects, pagination and infinite scroll.',
-      'cap.card1.title': 'Cross-origin iframes / Shadow DOM / canvas',
+      'cap.card1.title': 'Across iframes / Shadow DOM / canvas',
       'cap.card1.body':
-        "Locate and operate in the real structure of the real page — no guessing at the DOM structure.",
+        'Locate and operate inside the real structure of the real page, without guessing at the DOM.',
       'cap.card2.title': 'Upload, drag-and-drop and cascading selects',
       'cap.card2.body':
-        'Covers custom date pickers, file upload, drag-and-drop sorting and cascading selects; when synthesized events fall short, it dispatches trusted events over CDP.',
+        'Covers custom date pickers, file uploads, drag-to-sort and cascading selects; when synthesized events fall short, trusted events are dispatched over CDP.',
       'cap.card3.title': 'Pagination and infinite scroll',
       'cap.card3.body':
-        'It keeps operating after turning a page or loading more — targets inside virtual lists are hit just as reliably.',
-      'cap.card4.title': 'Carrying data across pages',
+        'Keeps operating after paging or scroll-loading; targets inside virtual lists are hit too.',
+      'cap.card4.title': 'Carry data across pages',
       'cap.card4.body':
-        'Move information from one page to another; read, click, fill and drag can be chained into one flow.',
-      'cap.card5.title': 'It remembers, and it reuses',
+        'Move information from one page to another — read, click, fill and drag can be chained into one flow.',
+      'cap.card5.title': 'Remembers and reuses',
       'cap.card5.body':
-        'Site memory, skills and macros make repeated flows reusable; all data stays local.',
+        'Site memory, skills and macros make repeated flows reusable; all data is stored locally.',
       'cap.card6.title': 'Failure soft landing and observability',
       'cap.card6.body':
-        'On repeated calls or consecutive failures it only injects reflection suggestions and never removes a tool; tools, latency and the run trace are logged every turn.',
+        'On repeated calls or consecutive failures it only injects reflection suggestions and does not remove tools; tools, timings and the run trace are recorded round by round.',
       'cap.link':
-        'How each capability is guaranteed (fixture pages / scripts / E2E / skills / criteria) lives in the <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">capability inventory</a>.',
+        'For what guarantees each capability (fixture pages / scripts / E2E / skills / criteria), see <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/capability-inventory.md">Capability inventory</a>.',
 
       'demo.title': 'Real execution demos',
       'demo.lead':
-        'Ask the Agent to work on real pages from inside the extension panel; the right column is the tool log growing step by step. The recordings below are all <strong>speeded-up replays</strong>; third-party sites require login, so they are real-world demonstrations.',
+        'Inside the extension panel, the Agent works on real pages; the right column is the tool log growing step by step. All recordings below are <strong>speeded-up replays</strong>; third-party sites require login, so these are real-world demos.',
       'demo.xhs.alt':
         'Auto-publishing to Xiaohongshu demo: open the composer, fill title and body, insert images, add topics, click publish',
       'demo.xhs.title': 'Auto-publishing to Xiaohongshu',
       'demo.xhs.desc':
-        'Open the composer, fill title and body, insert images, add topics, click publish — the whole flow, not one step skipped.',
+        'Open the composer, fill title and body, insert images, add topics, click publish — the whole flow, no step skipped.',
       'demo.pageops.alt': 'Page operations demo: click, type and submit on a real page',
       'demo.pageops.title': 'Page operations',
       'demo.pageops.desc':
-        'Click, type and submit on a real page, with every step kept in the tool log.',
+        'Click / type / submit on a real page, with every step kept in the tool log.',
       'demo.find.alt':
-        'Demo of search on the current page: find a target inside the page and jump to the result',
+        'Search on the current page demo: find a target in the page and jump to the result',
       'demo.find.title': 'Search on the current page',
       'demo.find.desc':
-        'Search inside the page for a target and jump to the result — built for long documents and information-dense admin pages.',
+        'Find a target in the page and jump to the result — good for long documents and information-dense admin pages.',
       'demo.highlight.alt':
-        'Demo of marking up what matters: highlight and annotate key information on the page',
+        'Mark up what matters demo: highlight / annotate key information on the page',
       'demo.highlight.title': 'Mark up what matters',
       'demo.highlight.desc':
-        'Highlight and annotate key information on the page, so what was read stands out at a glance.',
+        'Highlight / annotate key information on the page, so what was read is obvious at a glance.',
       'demo.pause': 'Pause animation',
+      // 译稿给的是 “Play animation”，但这会让 scripts/verify-site-visual.mjs
+      // 停帧按钮文案那条断言变红（门禁本轮不改），故保留自译 “Resume animation”。
       'demo.play': 'Resume animation',
       'demo.pauseLabel': 'Pause animation: {name}',
       'demo.playLabel': 'Resume animation: {name}',
-      'demo.fallbackName': 'Demo',
+      'demo.fallbackName': 'demo',
       'demo.note':
-        'The demo files are large, so lazy loading is on; click “Pause animation” to freeze on the current frame and read.',
+        'Demo files are large and lazy-loaded; click “Pause animation” to freeze the current frame and read.',
 
       'design.title': 'Agent design',
       'design.lead':
-        'On receiving an instruction it assembles context; model output goes through the tool guard for decisions and graded approval, and execution results flow back to the model; one more completion check runs before the final answer.',
+        'After receiving an instruction it assembles context; model output goes through the tool guard and graded approval; execution results flow back to the model; before the final answer there is one more completion check.',
       'design.diagramAlt': 'RecallFlow value loop: read → operate → remember',
       'design.flow1.title': 'Receive instruction',
       'design.flow1.body': 'Assemble context: intent routing, system prompt, history and budget.',
@@ -142,44 +148,45 @@
       'design.flow2.body':
         'Tool calls go to the tool guard; the final answer goes to the completion check.',
       'design.flow3.title': 'Graded approval',
-      'design.flow3.body': 'Graded by risk and site trust; once approved, the tool runs.',
-      'design.flow4.title': 'Execute and flow back',
+      'design.flow3.body': 'Graded by risk and site trust; tools execute once approved.',
+      'design.flow4.title': 'Execute and feed back',
       'design.flow4.body':
-        'Results flow back to the model for the next turn; with no progress it only injects reflection suggestions.',
+        'Execution results go back to the model for the next round; when there is no progress, only reflection suggestions are injected.',
       'design.flow5.title': 'Completion check',
       'design.flow5.body':
-        'Not met yet: inject reflection and continue. Met: deliver the answer.',
+        'If it is not met, inject reflection and continue; once met, deliver the answer.',
       'design.note1':
-        '<strong>Failure soft landing</strong>: on repeated calls, consecutive failures or no progress it only injects reflection suggestions and never decides for the model; it wraps up only on sustained no-progress across tools or when the budget runs out.',
+        '<strong>Failure soft landing</strong>: on repeated calls, consecutive failures or no progress, it only injects reflection suggestions and does not decide for the model; it wraps up only when there is sustained no-progress across tools or the budget is exhausted.',
       'design.note2':
-        "<strong>Unified registry</strong>: the model's tool list, the permission policy and argument validation share one definition.",
+        "<strong>Unified registry</strong>: the model's tool list, permission policy and parameter validation share a single definition.",
       'design.note3':
-        '<strong>Reliability and observability</strong>: shared sessions, a run lock, stall detection, and snapshots before and after each action; cache hit rate and latency breakdown are logged every turn.',
+        '<strong>Reliability and observability</strong>: sessions shared across the browser, run lock, stall detection and before-and-after action snapshot verification, with per-round cache hit rate and latency breakdown.',
       'design.link':
-        'The full flow chart is in the <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/assets/recallflow-page-ops-e2e.svg">page operations E2E flow chart</a>.',
+        'For the full flowchart, see <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/assets/recallflow-page-ops-e2e.svg">Page operations E2E flowchart</a>.',
 
       'mcp.title': 'Integrating with external AI (MCP)',
       'mcp.body':
-        'SPAs, logged-in pages or intranet pages that <code>webfetch</code> cannot read are handed to RecallFlow, which reads them in a real browser session and returns evidence with timestamps and hashes; external agents can also touch the page through the single write channel <code>page_action</code>, closing a “read → change → verify” loop for front-end debugging.',
+        'SPAs, logged-in pages or intranet pages that <code>webfetch</code> cannot read are handed to RecallFlow, which reads them over a real browser session and returns evidence with timestamps and hashes; external agents can also touch the page through the single write channel <code>page_action</code>, forming a “read → change → verify” front-end debugging loop.',
       'mcp.refs':
-        'The single source of truth for the integration roadmap is <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">docs/integration-status.md</a>, and installation and configuration live in <a href="https://github.com/marioyyds/RecallFlow/blob/master/integrations/opencode/recallflow-mcp/README.md">recallflow-mcp/README.md</a>.',
+        'The single source of truth for the integration roadmap is <a href="https://github.com/marioyyds/RecallFlow/blob/master/docs/integration-status.md">docs/integration-status.md</a>; installation and configuration are in <a href="https://github.com/marioyyds/RecallFlow/blob/master/integrations/opencode/recallflow-mcp/README.md">recallflow-mcp/README.md</a>.',
 
       'docs.title': 'Documentation map',
-      'docs.lead': 'From capability boundaries to integration details, it is all in the repo’s docs/ directory.',
+      'docs.lead':
+        'From capability boundaries to integration details, it is all in the repository’s docs/ directory.',
       'docs.capability.title': 'Capability inventory',
       'docs.capability.desc':
         'What guarantees each capability: fixture pages, scripts, E2E, skills and criteria.',
-      'docs.skills.title': 'Skills inventory',
-      'docs.skills.desc': 'Skills, the scripts they belong to, orphan skills and thin skills.',
+      'docs.skills.title': 'Skill inventory',
+      'docs.skills.desc': 'Skills, script ownership, orphan and thin skills.',
       'docs.integration.title': 'Integration roadmap',
       'docs.integration.desc':
-        'What has actually been built for external AI integration — the single source of truth.',
+        'What the external-AI integration actually delivered — the single source of truth.',
       'docs.panel.title': 'Panel sessions',
       'docs.panel.desc':
-        'How sessions are shared and switched, plus the run lock and following across tabs.',
+        'How sessions are shared, switched, run-locked, and followed across tabs.',
       'docs.e2e.title': 'Real-browser E2E guide',
       'docs.e2e.desc':
-        'How to write and run E2E in a real browser, and the golden task conventions.',
+        'How to write and run E2E, and the golden-task conventions.',
       'docs.local.title': 'Local page support',
       'docs.local.desc':
         'How far file:// page support goes, and why exports leave no trace.',
