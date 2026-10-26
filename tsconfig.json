@@ -1,0 +1,67 @@
+{
+  // 迁移期类型基础设施。目标形态：**新增/迁移的模块可以是 .ts，存量 .js 一律不动**。
+  //
+  // 用法：
+  //   npm run check:types        # = tsc --noEmit（当前**不**进 run-all-checks，见文件末尾）
+  //
+  // 三条硬约束，改之前先看：
+  //   1. `allowJs: true` + `checkJs: false`：存量 .js 只被**解析**（为了让 .ts 能推断它们的形状），
+  //      不做类型检查。这是 allowJs 渐进迁移的全部意义 —— 存量 JS 不会因为接上 tsc 而整片变红。
+  //   2. `noEmit: true`：产物只有 esbuild 那一条路（`scripts/build-content.mjs`）。
+  //      类型检查永远不参与出包，tsc 与 esbuild 各管一段，互不干扰。
+  //   3. `allowImportingTsExtensions: true`（只有 noEmit 下才允许）：让模块之间可以用
+  //      真实扩展名互引（`import { x } from './table.ts'`）。理由见下。
+  //
+  // 为什么导入路径写 `.ts` 而不是 `.js`：
+  //   - 测试是 Node 直跑（`node --test`），Node 的 type stripping **不会**把 `./x.js` 重写成
+  //     `./x.ts`，写 `.js` 会直接 ERR_MODULE_NOT_FOUND（2026-10-26 实测）；
+  //   - esbuild 拿 `./x.ts` 也能正常解析（它按真实路径找文件）。
+  //   两条链路唯一共用的写法，就是写真实扩展名。
+  //
+  // ⚠ `exclude` 必须显式带上 node_modules：一旦写了 `exclude`，TS 就不再套用默认的
+  // node_modules 排除，上千个依赖 .js 会被 allowJs 拉进 program（实测直接把 tsc 拖崩）。
+  "compilerOptions": {
+    "target": "ES2022",
+    // 内容脚本跑在页面里（DOM），background 是 MV3 service worker（chrome.* + 部分 DOM）。
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // 与根 package.json 的 "type": "module" 一致：nodenext 据此把 .ts/.js 都当 ESM 处理。
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    // esbuild 是逐文件转译的，不做跨文件类型信息合并 —— isolatedModules 保证写出来的 .ts
+    // 一定是「单文件可擦除」的，也就一定是 Node type stripping 能吃的语法
+    // （enum / namespace / 参数属性这些不可擦除语法要留到 transform 模式，本轮一律不用）。
+    "isolatedModules": true,
+    "strict": true,
+    // ⚠ **必须显式关掉，否则产物会变**。`strict: true` 会让 TS 把 `alwaysStrict` 也视为 true，
+    // 而 esbuild 读 tsconfig 时认这一项 —— 于是它会在 IIFE 产物头部补一行 `"use strict";`，
+    // 实测 `content.js` 凭空多 14 字节、对 `entries/content.js` 一字未改而言就是一次假变更，
+    // 会把体积棘轮、新鲜度门禁和 `git diff -- content.js` 全部卷进来。
+    // 关掉它不会丢语义：本仓库源码全是 ESM（package.json 的 "type": "module"），
+    // ESM 本来就是严格模式，不需要这条指令；它只是 esbuild 在把 ESM 降级成 IIFE 时补的。
+    // 迁移期判定「接上 tsc 对产物零影响」的唯一口径，就是这条 + `git diff -- content.js` 为空。
+    "alwaysStrict": false,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    // @types/* 内部的问题不关我们的事，别让它们挡住自己的报错。
+    "skipLibCheck": true,
+    // 只自动引入 MV3 的 chrome.* 与 Node 类型，不让 @types/* 里的其他东西混进全局。
+    // @types/node 钉 ^22：与 .github/workflows/checks.yml 的 setup-node '22' 对齐，
+    // 这样「本地 Node 24 能过、CI 过不了」会先在 tsc 这里报出来。
+    "types": ["chrome", "node"],
+    "forceConsistentCasingInFileNames": true
+  },
+  // 口径先收窄到「入口 + 叶子工具模块」，随迁移批次扩（每迁一批往里加一个目录）。
+  // 现在这里面一个 .ts 都没有，所以 tsc --noEmit 必然 0 错误 —— 它还不是门禁，
+  // 是「接入点已经就绪」的占位：等第一批 .ts 进来，它才开始有牙齿。
+  // 别图省事一步 include 到 ["lib/**", "*.js"]：那会在迁移批次之外拉进上万行存量 JS，
+  // 让 tsc 的启动时间与后续排查面都失控。
+  "include": ["entries/**/*", "lib/shared/**/*"],
+  "exclude": ["node_modules"]
+  // ▼ `npm run check:types`（= `tsc --noEmit`）**刻意没有**挂进 scripts/run-all-checks.mjs。
+  // 上面这个 include 里现在一个 .ts 都没有，纳入门禁就是一条「永远为绿」的假闸 ——
+  // 门禁不运行等于不存在，但运行了却永远绿，比不运行更坏：它会让后面的人以为有网接着。
+  // 纳入门禁的时点：第一批 .ts 落地之后，且必须先在**坏样本**上证明它会红（自证有牙齿），
+  // 再把这一条补进 run-all-checks.mjs 的 STEPS。
+}

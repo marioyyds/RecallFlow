@@ -55,6 +55,29 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  */
 export const SIZE_BUDGET_BYTES = 444 * 1024;
 
+// 入口候选，按迁移顺序排：迁移期 `entries/content.js` 会先变成 `entries/content.ts`，
+// 两个都在时以 .ts 为准（旧文件留在原地当回滚手段，构建不会再读它）。
+const ENTRY_CANDIDATES = ['entries/content.ts', 'entries/content.js'];
+
+/**
+ * 选出内容脚本入口（纯函数，便于直测）。
+ *
+ * esbuild 本身就吃 .ts（loader 按扩展名自动选），这里要解决的只是「入口写死了 .js」：
+ * 不先解决它，第一批入口迁移就必须连带改构建脚本，那就不叫渐进迁移了。
+ *
+ * @param {(absPath: string) => boolean} [exists] 默认 `fs.existsSync`，测试里换成数组查询
+ * @returns {string} 入口的绝对路径
+ */
+export function resolveContentEntry(exists = (p) => fs.existsSync(p)) {
+  for (const rel of ENTRY_CANDIDATES) {
+    const abs = path.join(ROOT, rel);
+    if (exists(abs)) return abs;
+  }
+  // 两个都不在：仍返回 .js 那一个，让 esbuild 报「找不到入口」并带上真实路径，
+  // 而不是由本脚本猜一个路径然后静默构建出空产物。
+  return path.join(ROOT, 'entries', 'content.js');
+}
+
 /**
  * 产物规格检查（纯函数，便于直测）。返回问题列表，空数组 = 通过。
  * @param {string} text 产物全文
@@ -111,7 +134,7 @@ export async function buildContentBundle(opts = {}) {
   // 一律 `write: false` + 自己写盘：这样两种模式都能拿到 text，
   // 规格检查（自包含性 / 体积）可以用**同一份**内容判断，不必区分"产物在哪"。
   const result = await build({
-    entryPoints: [path.join(ROOT, 'entries', 'content.js')],
+    entryPoints: [resolveContentEntry()],
     outfile: OUT_FILE,
     bundle: true,
     format: 'iife',
