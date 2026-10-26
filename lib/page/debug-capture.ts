@@ -2,7 +2,7 @@
 // 主世界（MAIN）与内容脚本（ISOLATED）是独立 JS 上下文，通过 window.postMessage 发起请求，
 // 并用 MessageChannel 把响应定向回本次请求（避免向页面广播敏感数据）。
 let reqSeq = 0;
-const waiters = new Map();
+const waiters = new Map<number, (value: unknown) => void>();
 
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (e) => {
@@ -18,11 +18,11 @@ if (typeof window !== 'undefined') {
 // 通过 MessageChannel 请求主世界：响应只回给本次请求的端口，不再用 window.postMessage('*')
 // 广播，避免页面脚本监听 __rfDebugRes 读取捕获的 console/network 数据。MessageChannel
 // 不可用时退回旧广播方式。
-function request(payload, fallback, timeoutMs = 1500) {
+function request(payload: Record<string, unknown>, fallback: any, timeoutMs: number = 1500): Promise<any> {
   return new Promise((resolve) => {
     const id = ++reqSeq;
     let settled = false;
-    const done = (value) => {
+    const done = (value: unknown) => {
       if (settled) return;
       settled = true;
       resolve(value);
@@ -57,11 +57,11 @@ function request(payload, fallback, timeoutMs = 1500) {
 }
 
 // 读取 console / network 环形缓冲（数组）。
-export function getDebugBuffer(kind) {
+export function getDebugBuffer(kind: string): Promise<any[]> {
   return request({ kind }, []).then((d) => (Array.isArray(d) ? d : []));
 }
 
 // 把一个 CSS 选择器解析为框架源码位置（对象或 null）。
-export function getElementSource(selector) {
+export function getElementSource(selector: string): Promise<any> {
   return request({ kind: 'element-source', selector }, null);
 }

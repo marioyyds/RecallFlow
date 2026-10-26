@@ -45,7 +45,7 @@ const NARROW_WIDTH = 600;
  * 会让它返回一个合法的 0 —— 于是"存的 ratio 是空"被当成"比例 0"，
  * 气泡会直接跳到屏幕最顶端。那是数据缺失，不是用户想要贴顶。
  */
-export function normalizeFabRatio(value) {
+export function normalizeFabRatio(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const ratio = Number(value);
   return Number.isFinite(ratio) ? Math.min(1, Math.max(0, ratio)) : null;
@@ -54,14 +54,29 @@ export function normalizeFabRatio(value) {
 /**
  * 造一个 FAB 位置控制器。
  *
- * @param {Object} deps
- * @param {() => Element|null} deps.getFab 取当前气泡元素（可能为 null）
- * @param {{innerWidth:number, innerHeight:number}} deps.win
- * @param {Object} [deps.storage] chrome.storage（可为 undefined，此时不持久化）
- * @param {Object} [deps.localStore] localStorage（可为 undefined）
- * @param {() => number} [deps.now]
+ * @param deps
+ * @param deps.getFab 取当前气泡元素（可能为 null）
+ * @param deps.win 只需 innerWidth / innerHeight；不传时用 1280×800 的兜底
+ * @param [deps.storage] chrome.storage（不传则不做持久化）
+ * @param [deps.localStore] localStorage（旧版本位置的来源）
+ * @param [deps.now]
  */
-export function createFabController(deps = {}) {
+/** 位置控制器的注入点。 */
+export interface FabControllerDeps {
+  getFab?: () => HTMLElement | null;
+  win?: { innerWidth: number; innerHeight: number };
+  /** chrome.storage.local 的最小子集：get / set 各一个即可 */
+  storage?: {
+    local?: {
+      get(key: string): Promise<Record<string, unknown>>;
+      set(obj: Record<string, unknown>): unknown;
+    };
+  } | null;
+  localStore?: Pick<Storage, 'getItem' | 'removeItem'> | null;
+  now?: () => number;
+}
+
+export function createFabController(deps: FabControllerDeps = {}) {
   const getFab = typeof deps.getFab === 'function' ? deps.getFab : () => null;
   const win = deps.win || { innerWidth: 1280, innerHeight: 800 };
   const storage = deps.storage || null;
@@ -83,7 +98,7 @@ export function createFabController(deps = {}) {
     return Number.isFinite(styled) ? styled : fab.getBoundingClientRect().top;
   }
 
-  function clampFabTop(top) {
+  function clampFabTop(top: number): number {
     const height = fabHeight();
     const maxTop = Math.max(FAB_EDGE_GAP, win.innerHeight - height - FAB_EDGE_GAP);
     return Math.min(maxTop, Math.max(FAB_EDGE_GAP, Number(top) || 0));
@@ -95,11 +110,11 @@ export function createFabController(deps = {}) {
     return Math.max(1, win.innerHeight - height - FAB_EDGE_GAP * 2);
   }
 
-  function topFromRatio(r) {
+  function topFromRatio(r: number): number {
     return clampFabTop(FAB_EDGE_GAP + r * available());
   }
 
-  function ratioFromTop(top) {
+  function ratioFromTop(top: number): number | null {
     return normalizeFabRatio((clampFabTop(top) - FAB_EDGE_GAP) / available());
   }
 
@@ -135,8 +150,9 @@ export function createFabController(deps = {}) {
     ratio = next == null ? DEFAULT_FAB_RATIO : next;
     if (!storage || !storage.local) return;
     try {
-      const pending = storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: now() } });
-      if (pending && pending.catch) pending.catch(() => {});
+      // chrome.storage.local.set 返回 Promise；测试里的桩通常什么都不返回，这里两者都接。
+      const pending = storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: now() } }) as Promise<unknown> | undefined;
+      if (pending && typeof pending.catch === 'function') pending.catch(() => {});
     } catch (e) {}
     clearLegacy();
   }
@@ -145,7 +161,8 @@ export function createFabController(deps = {}) {
     if (storage && storage.local) {
       try {
         const stored = await storage.local.get(FAB_POSITION_KEY);
-        let r = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
+        const savedEntry = stored ? (stored[FAB_POSITION_KEY] as { ratio?: unknown } | undefined) : undefined;
+        let r = normalizeFabRatio(savedEntry && savedEntry.ratio);
         if (r == null) {
           const legacy = legacyRatio();
           if (legacy != null) {
@@ -165,7 +182,7 @@ export function createFabController(deps = {}) {
     applySaved();
   }
 
-  function moveBy(delta) {
+  function moveBy(delta: number): void {
     const fab = getFab();
     if (!fab) return;
     fab.style.top = clampFabTop(currentFabTop() + delta) + 'px';
@@ -185,7 +202,7 @@ export function createFabController(deps = {}) {
     moveBy,
     legacyRatio,
     getRatio: () => ratio,
-    setRatio: (r) => {
+    setRatio: (r: unknown) => {
       const v = normalizeFabRatio(r);
       if (v != null) ratio = v;
       return ratio;
@@ -213,9 +230,17 @@ export function createFabController(deps = {}) {
  * 面板打开期间气泡本来就 `hidden`（见 chat.js 的 openPanel），留一个半收起的
  * 状态只会让"面板关掉那一刻"闪一下 —— 那是个纯视觉噪声。
  *
- * @param {{panelOpen?: boolean, hovered?: boolean, focused?: boolean, dragging?: boolean}} [input]
+ * @param [input]
  */
-export function resolveFabPeek(input) {
+/** 决定收起 / 展开的四个输入信号。 */
+export interface FabPeekInput {
+  panelOpen?: boolean;
+  hovered?: boolean;
+  focused?: boolean;
+  dragging?: boolean;
+}
+
+export function resolveFabPeek(input: FabPeekInput | null): boolean {
   const s = input || {};
   if (s.panelOpen === true) return false;
   return !(s.hovered === true || s.focused === true || s.dragging === true);
@@ -236,10 +261,22 @@ export function resolveFabPeek(input) {
  *   而 ∪ 里超出露出宽度的那一截只在**已经展开**时才可达，
  *   不会产生"鼠标还没碰到就弹出来"的幽灵热区。
  *
- * @param {{x: number, y: number, rect: {top: number, bottom: number}, viewportWidth: number, pad?: number}} input
+ * @param input
  */
-export function isPointerInFabZone(input) {
-  const s = input || {};
+/** isPointerInFabZone 的输入：鼠标坐标 + 气泡的纵向范围 + 布局视口宽度。 */
+export interface FabZoneInput {
+  x: number;
+  y: number;
+  rect: { top: number; bottom: number };
+  /** 布局视口宽度（documentElement.clientWidth，不含滚动条） */
+  viewportWidth: number;
+  /** 热区宽容度，默认 FAB_PEEK_ZONE_PAD */
+  pad?: number;
+}
+
+export function isPointerInFabZone(input: FabZoneInput | null): boolean {
+  // input 整体可空（调用方拿不到 rect 时会传 null），因此这里按全可选读。
+  const s: Partial<FabZoneInput> = input || {};
   const viewportWidth = Number(s.viewportWidth);
   const rect = s.rect;
   if (!Number.isFinite(viewportWidth) || !rect) return false;
@@ -259,16 +296,23 @@ export function isPointerInFabZone(input) {
 /**
  * 造一个收起 / 展开控制器：记账 + 应用，不碰任何存储。
  *
- * @param {Object} deps
- * @param {() => Element|null} deps.getFab
- * @param {() => number} [deps.getViewportWidth] 布局视口宽度（不含滚动条），默认 1280
- * @param {(fab: Element, peeked: boolean) => void} [deps.applyPeek] 默认是切 class
+ * @param deps
+ * @param deps.getFab
+ * @param [deps.getViewportWidth] 布局视口宽度（不含滚动条），默认 1280
+ * @param [deps.applyPeek] 默认是切 class
  */
-export function createFabPeekController(deps = {}) {
+/** 收起 / 展开控制器的注入点。 */
+export interface FabPeekDeps {
+  getFab?: () => HTMLElement | null;
+  getViewportWidth?: () => number;
+  applyPeek?: (fab: HTMLElement, peeked: boolean) => void;
+}
+
+export function createFabPeekController(deps: FabPeekDeps = {}) {
   const getFab = typeof deps.getFab === 'function' ? deps.getFab : () => null;
   const viewportWidth = typeof deps.getViewportWidth === 'function' ? deps.getViewportWidth : () => 1280;
   const applyPeek =
-    typeof deps.applyPeek === 'function' ? deps.applyPeek : (fab, on) => fab.classList.toggle(FAB_PEEK_CLASS, on);
+    typeof deps.applyPeek === 'function' ? deps.applyPeek : (fab: HTMLElement, on: boolean) => fab.classList.toggle(FAB_PEEK_CLASS, on);
   const state = { panelOpen: false, hovered: false, focused: false, dragging: false };
   let peeked = resolveFabPeek(state);
 
@@ -280,7 +324,7 @@ export function createFabPeekController(deps = {}) {
     return peeked;
   }
 
-  function set(key, value) {
+  function set(key: keyof FabPeekInput, value: boolean): boolean {
     const next = value === true;
     if (state[key] === next) return peeked;
     state[key] = next;
@@ -298,7 +342,7 @@ export function createFabPeekController(deps = {}) {
      * （见 isPointerInFabZone 的注释）。所以收起的判据始终是坐标，不是边界事件。
      * ⚠ 悬浮态之外（绝大多数鼠标移动）这里只做一次布尔判断就返回，不读布局。
      */
-    handlePointerMove: (x, y) => {
+    handlePointerMove: (x: number, y: number) => {
       if (!state.hovered) return peeked;
       const fab = getFab();
       if (!fab) return peeked;
@@ -307,7 +351,7 @@ export function createFabPeekController(deps = {}) {
       }
       return set('hovered', false);
     },
-    setPanelOpen: (v) => {
+    setPanelOpen: (v: boolean) => {
       // 面板一开气泡就 hidden（chat.js 的 openPanel），"悬浮 / 聚焦 / 拖拽"三个
       // 信号都不可能再更新 —— 必须就地清空，否则关掉面板后会卡在"整颗显示"。
       if (v === true) {
@@ -316,8 +360,8 @@ export function createFabPeekController(deps = {}) {
       }
       return set('panelOpen', v);
     },
-    setHovered: (v) => set('hovered', v),
-    setFocused: (v) => set('focused', v),
-    setDragging: (v) => set('dragging', v),
+    setHovered: (v: boolean) => set('hovered', v),
+    setFocused: (v: boolean) => set('focused', v),
+    setDragging: (v: boolean) => set('dragging', v),
   };
 }

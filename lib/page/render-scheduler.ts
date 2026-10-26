@@ -31,36 +31,44 @@
  */
 const FRAME_FALLBACK_MS = 32;
 
-/**
- * @param {object} [options]
- * @param {(cb:Function)=>any} [options.requestFrame] 默认 rAF，回退到 setTimeout
- * @param {(handle:any)=>void} [options.cancelFrame]
- * @param {(cb:Function,ms:number)=>any} [options.setFallbackTimer] 兜底定时器（测试注入用）
- * @param {(handle:any)=>void} [options.clearFallbackTimer]
- */
-export function createFrameScheduler(options = {}) {
+/** 帧句柄：rAF 是 number、setTimeout 在 node 里是 Timeout，这里不区分。 */
+type FrameHandle = number | ReturnType<typeof setTimeout>;
+
+/** 注入点，全部可省：省了就用浏览器全局（并按需回退到定时器）。 */
+export interface FrameSchedulerOptions {
+  /** 安排下一次绘制，默认 requestAnimationFrame（不可用时回退 setTimeout 16ms） */
+  requestFrame?: (cb: () => void) => FrameHandle;
+  /** 取消已排的帧 */
+  cancelFrame?: (handle: FrameHandle) => void;
+  /** 兜底定时器（失焦/隐藏标签页里 rAF 会被暂停，见 FRAME_FALLBACK_MS） */
+  setFallbackTimer?: (cb: () => void, ms: number) => FrameHandle | null;
+  /** 取消兜底定时器 */
+  clearFallbackTimer?: (handle: FrameHandle) => void;
+}
+
+export function createFrameScheduler(options: FrameSchedulerOptions = {}) {
   const requestFrame =
     options.requestFrame ||
     (typeof requestAnimationFrame === 'function'
-      ? (cb) => requestAnimationFrame(cb)
-      : (cb) => setTimeout(cb, 16));
+      ? (cb: () => void) => requestAnimationFrame(cb)
+      : (cb: () => void) => setTimeout(cb, 16));
   const cancelFrame =
     options.cancelFrame ||
     (typeof cancelAnimationFrame === 'function'
-      ? (h) => cancelAnimationFrame(h)
-      : (h) => clearTimeout(h));
+      ? (h: FrameHandle) => cancelAnimationFrame(Number(h))
+      : (h: FrameHandle) => clearTimeout(h as ReturnType<typeof setTimeout>));
   const setFallbackTimer =
     options.setFallbackTimer ||
-    ((cb, ms) => (typeof setTimeout === 'function' ? setTimeout(cb, ms) : null));
+    ((cb: () => void, ms: number) => (typeof setTimeout === 'function' ? setTimeout(cb, ms) : null));
   const clearFallbackTimer =
     options.clearFallbackTimer ||
-    ((h) => {
-      if (typeof clearTimeout === 'function') clearTimeout(h);
+    ((h: FrameHandle) => {
+      if (typeof clearTimeout === 'function') clearTimeout(h as ReturnType<typeof setTimeout>);
     });
 
-  let handle = null;
-  let fallbackHandle = null;
-  let pending = new Map(); // key -> 最新回调；Map 保留首次插入顺序
+  let handle: FrameHandle | null = null;
+  let fallbackHandle: FrameHandle | null = null;
+  let pending = new Map<string, () => void>(); // key -> 最新回调；Map 保留首次插入顺序
 
   /** 清掉两个"本次绘制已被安排"的凭据（帧 + 兜底定时器）。 */
   const clearScheduled = () => {
@@ -99,7 +107,7 @@ export function createFrameScheduler(options = {}) {
      * @param {string} key 逻辑绘制目标（如 'answer' / 'layout'），决定去重粒度
      * @param {Function} fn
      */
-    schedule(key, fn) {
+    schedule(key: string, fn: () => void) {
       if (typeof fn !== 'function') return;
       pending.set(String(key), fn);
       if (handle === null) handle = requestFrame(runPending);

@@ -28,8 +28,44 @@ export const SETTLE_DEFAULTS = Object.freeze({
  * 归一化参数，非法值一律退回默认（0/负数/非数字不表示"不等待"）。
  * @returns {{quietMs:number,maxMs:number,fallbackStepMs:number}}
  */
-export function normalizeSettleOptions(opts = {}) {
-  const pick = (v, d) => {
+export interface SettleOptions {
+  /** 静默窗口（ms），非法值退回默认 */
+  quietMs?: number;
+  /** 硬上限（ms） */
+  maxMs?: number;
+  /** rAF 不可用时的退避步长（ms） */
+  fallbackStepMs?: number;
+}
+
+/** normalizeSettleOptions 的输出：三个字段都已被合法化。 */
+export interface NormalizedSettleOptions {
+  quietMs: number;
+  maxMs: number;
+  fallbackStepMs: number;
+}
+
+/** 等待原语的结果。 */
+export interface SettleResult {
+  settled: boolean;
+  reason: string;
+  elapsedMs: number;
+  mutations: number;
+}
+
+/**
+ * 运行环境注入点（便于测试用桩替换浏览器全局）。
+ * 每个字段都可省：省了就用对应的浏览器全局，浏览器不可用时退化到「退避式等待」。
+ */
+export interface SettleEnv {
+  doc?: Document | null;
+  raf?: ((cb: () => void) => number) | null;
+  now?: () => number;
+  setTimeoutFn?: typeof setTimeout;
+  clearTimeoutFn?: typeof clearTimeout;
+}
+
+export function normalizeSettleOptions(opts: SettleOptions = {}): NormalizedSettleOptions {
+  const pick = (v: number | undefined, d: number) => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : d;
   };
@@ -51,7 +87,7 @@ export function normalizeSettleOptions(opts = {}) {
  * @param {Object} [options] 见 normalizeSettleOptions
  * @returns {Promise<{settled:boolean,reason:string,elapsedMs:number,mutations:number}>}
  */
-export function waitForSettle(env = {}, options = {}) {
+export function waitForSettle(env: SettleEnv = {}, options: SettleOptions = {}): Promise<SettleResult> {
   const { quietMs, maxMs, fallbackStepMs } = normalizeSettleOptions(options);
   const doc = env.doc || (typeof document !== 'undefined' ? document : null);
   const raf = env.raf || (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame : null);
@@ -61,14 +97,14 @@ export function waitForSettle(env = {}, options = {}) {
 
   const start = now();
   let mutations = 0;
-  let observer = null;
-  let rafId = null;
-  let quietTimer = null;
-  let maxTimer = null;
+  let observer: MutationObserver | null = null;
+  let rafId: number | null = null;
+  let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  let maxTimer: ReturnType<typeof setTimeout> | null = null;
   let done = false;
-  let resolveFn = null;
+  let resolveFn: ((value: SettleResult) => void) | null = null;
 
-  const finish = (reason) => {
+  const finish = (reason: string) => {
     if (done) return;
     done = true;
     if (observer) {

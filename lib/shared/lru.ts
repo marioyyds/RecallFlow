@@ -8,27 +8,27 @@
 // 「已失效」，而它恰恰是最可能被反复读取的那张。真正需要的是 LRU（读过的算最近使用）。
 //
 // get() 会改变顺序，这一点是刻意的，也在测试里钉住了 —— 否则它会悄悄退化成 FIFO。
-export function createLruCache(max) {
+export function createLruCache<K = string, V = unknown>(max: number) {
   const limit = Math.max(1, Math.floor(Number(max) || 1));
   // Map 保证插入顺序，因此「第一个 key」就是最久未使用的。
-  const map = new Map();
+  const map = new Map<K, V>();
 
   return {
     get size() {
       return map.size;
     },
-    has(key) {
+    has(key: K) {
       return map.has(key);
     },
-    get(key) {
+    get(key: K) {
       if (!map.has(key)) return undefined;
-      const value = map.get(key);
+      const value = map.get(key) as V;
       // 触碰即移到队尾：少了这两行就只是 FIFO，最近看过的反而会先被淘汰
       map.delete(key);
       map.set(key, value);
       return value;
     },
-    set(key, value) {
+    set(key: K, value: V) {
       if (map.has(key)) map.delete(key);
       map.set(key, value);
       // 超出容量时从最久未使用的开始丢，直到回到上限
@@ -38,7 +38,7 @@ export function createLruCache(max) {
         map.delete(oldest.value);
       }
     },
-    delete(key) {
+    delete(key: K) {
       return map.delete(key);
     },
     clear() {

@@ -27,11 +27,17 @@ export const PANEL_MIN_HEIGHT = 320;
 export const PANEL_VIEWPORT_INSET = 24;
 export const PANEL_LAYOUT_VERSION = 2;
 
-function isFiniteNumber(v) {
+function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-function normalizeViewport(viewport) {
+/** 视口尺寸。测试里注入，浏览器里由 caller 从 window 取。 */
+export interface Viewport {
+  width?: number;
+  height?: number;
+}
+
+function normalizeViewport(viewport: Viewport | null | undefined): { width: number; height: number } {
   const width = Number(viewport && viewport.width);
   const height = Number(viewport && viewport.height);
   return {
@@ -41,7 +47,7 @@ function normalizeViewport(viewport) {
 }
 
 /** 尺寸夹取：不低于 280×320，不超过视口（与旧实现同一套数字）。无法解析返回 null。 */
-export function clampPanelSize(size, viewport) {
+export function clampPanelSize(size: { width?: number; height?: number } | null | undefined, viewport: Viewport | null | undefined): { width: number; height: number } | null {
   const { width: vw, height: vh } = normalizeViewport(viewport);
   const width = Number(size && size.width);
   const height = Number(size && size.height);
@@ -55,11 +61,30 @@ export function clampPanelSize(size, viewport) {
 /**
  * 读回上次关闭时的布局。
  * 容错：任何一段 JSON 坏掉都只丢那一段，不抛；不认识的字段忽略。
- * @returns {{width:number|null, height:number|null, left:number|null, top:number|null, docked:boolean|null, hasPos:boolean}}
  */
-export function readPanelLayout(storage) {
-  const empty = { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
-  if (!storage) return empty;
+export interface PanelLayoutSnapshot {
+  width: number | null;
+  height: number | null;
+  left: number | null;
+  top: number | null;
+  docked: boolean | null;
+  hasPos: boolean;
+}
+
+/** 最简 storage 接口：只需要 getItem/setItem（localStorage 与测试桩都满足）。 */
+export interface LayoutStorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/** 读档的初始形态：四个字段都还没值。抽成函数是为了让返回类型一次说清，
+ *  不必给一个模块级 const 补标注（本批的口径是「先给导出签名加类型」）。 */
+function emptySnapshot(): PanelLayoutSnapshot {
+  return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+}
+
+export function readPanelLayout(storage: LayoutStorageLike | null | undefined): PanelLayoutSnapshot {
+  if (!storage) return emptySnapshot();
   let pos = null;
   let size = null;
   try {
@@ -72,7 +97,7 @@ export function readPanelLayout(storage) {
   } catch (e) {
     size = null;
   }
-  const out = Object.assign({}, empty);
+  const out = emptySnapshot();
   if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
   if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
   if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
@@ -88,9 +113,20 @@ export function readPanelLayout(storage) {
  * 写回布局。`manualPos` 为真才记录 left/top；否则记 null（= 自动停靠）。
  * `docked` 必须如实记录，否则重开时无法还原停靠/浮动态。
  * `writeSize === false` 时只更新位置（打开瞬间的自动高度不该被当成用户尺寸存下来）。
- * @returns {{width:number|null, height:number|null, left:number|null, top:number|null, docked:boolean}|null}
+ * @returns 实际写下的记录；写失败返回 null
  */
-export function writePanelLayout(storage, snapshot) {
+export function writePanelLayout(
+  storage: LayoutStorageLike | null | undefined,
+  snapshot: {
+    width?: number;
+    height?: number;
+    left?: number;
+    top?: number;
+    docked?: boolean;
+    manualPos?: boolean;
+    writeSize?: boolean;
+  } | null
+): { width: number | null; height: number | null; left: number | null; top: number | null; docked: boolean } | null {
   if (!storage) return null;
   const s = snapshot || {};
   const width = Number(s.width);
@@ -131,10 +167,27 @@ export function writePanelLayout(storage, snapshot) {
  * 只有 `docked == null`（自动恢复：SPA 保活重挂 / 跨标签页同步 / run 恢复）才沿用存档，
  * 因为那条路径要的正是「还原关闭前的样子」。
  *
- * @param {{layout?:object|null, docked?:boolean|null, point?:{x:number,y:number}, viewport?:object, size?:object, dockGap?:number}} options
- * @returns {{docked:boolean, manualPos:boolean, left:number|null, top:number|null, right:number|null, bottom:number|null}}
+ * @param options
+ * @returns 摆放结果：四条边里只有一对有值（left/top 手动位置，或 right/bottom 停靠）
  */
-export function resolvePanelPlacement(options) {
+/** 摆放结果。left/top 与 right/bottom 互斥：前者是手动像素位置，后者是 CSS 侧停靠。 */
+export interface PanelPlacement {
+  docked: boolean;
+  manualPos: boolean;
+  left: number | null;
+  top: number | null;
+  right: number | null;
+  bottom: number | null;
+}
+
+export function resolvePanelPlacement(options: {
+  layout?: PanelLayoutSnapshot | null;
+  docked?: boolean | null;
+  point?: { x?: number; y?: number };
+  viewport?: Viewport | null;
+  size?: { width?: number; height?: number } | null;
+  dockGap?: number;
+} | null): PanelPlacement {
   const opts = options || {};
   const viewport = normalizeViewport(opts.viewport);
   const sizeWidth = Math.max(1, Number(opts.size && opts.size.width) || 0);
@@ -185,7 +238,7 @@ export function resolvePanelPlacement(options) {
 }
 
 /** 把矩形夹回可视区（只动 left/top）。窗口变小后重开、或开着时被缩窗口都走这里。 */
-export function clampPanelIntoView(rect, viewport) {
+export function clampPanelIntoView(rect: { width?: number; height?: number; left?: number; top?: number } | null | undefined, viewport: Viewport | null | undefined): { left: number; top: number } {
   const { width: vw, height: vh } = normalizeViewport(viewport);
   const r = rect || {};
   const width = Math.max(0, Number(r.width) || 0);

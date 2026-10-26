@@ -17,6 +17,80 @@
 import { sliceSafe } from '../shared/surrogates.js';
 
 /** 进行中轮次的说明标记。放进 content 而不是另设字段 —— 交接包的 trimMessages 只保留 {role, content}。 */
+/**
+ * 面板的一「步」：叙述 / 正文 / 工具调用 / 工具结果 / 截图 / 提示。
+ * 字段按 `type` 组合出现，这里全部写成可选；索引签名留给各轮按需附加的字段
+ * （如 `resultTruncated` / `textTruncated` / `⟨…省略参数⟩`）。
+ */
+export interface TranscriptPart {
+  type?: string;
+  name?: string;
+  text?: string;
+  args?: unknown;
+  result?: unknown;
+  callId?: string;
+  label?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  [key: string]: unknown;
+}
+
+/** 一条引用（ shaping 由 commands.js 采集后交给导出侧）。 */
+export interface TranscriptCitation {
+  index?: unknown;
+  source?: unknown;
+  id?: unknown;
+  title?: string;
+  url?: string;
+  snippet?: string;
+  snippetTruncated?: boolean;
+}
+
+/** 内存里的对话消息。 */
+export interface TranscriptMessage {
+  role?: string;
+  content?: string;
+  parts?: TranscriptPart[];
+  plan?: unknown[];
+  toolSummary?: string;
+  selectedText?: string;
+  pickedElements?: unknown[];
+  citations?: TranscriptCitation[];
+  failed?: boolean;
+  partial?: boolean;
+  interrupted?: boolean;
+  /** 下面几个是**持久化时**补上的留痕字段（读回来才可能有） */
+  partsOmitted?: number;
+  partsTotal?: number;
+  contentTruncated?: boolean;
+  [key: string]: unknown;
+}
+
+/** serializeConversationMessages 的输出：白名单字段 + 每处截断的留痕。 */
+export interface SerializedTranscriptMessage {
+  role?: string;
+  content?: string;
+  contentTruncated?: boolean;
+  toolSummary?: string;
+  toolSummaryTruncated?: boolean;
+  selectedText?: string;
+  selectedTextTotal?: number;
+  selectedTextTruncated?: boolean;
+  pickedElements?: unknown[];
+  pickedElementsTotal?: number;
+  pickedElementsOmitted?: number;
+  parts?: TranscriptPart[];
+  partsTotal?: number;
+  partsOmitted?: number;
+  citations?: TranscriptCitation[];
+  citationsTotal?: number;
+  citationsOmitted?: number;
+  plan?: unknown[];
+  earlierMessagesOmitted?: number;
+  messagesTotal?: number;
+}
+
 export const PARTIAL_TURN_NOTE = '（本段在导出时尚未结束：任务仍在进行中，以下是已发生的部分）';
 
 /**
@@ -39,7 +113,7 @@ export const INTERRUPTED_TURN_NOTE = '（任务已中断：以下是中断前已
  * 入参：`reasonText` 是给用户看的原因（如"任务被中断且后台未能恢复会话"），
  * `liveText` 是已经流出的正文。两者与说明标记一起进 content（交接包只保留 content）。
  */
-export function buildInterruptedTurn(parts, liveText, reasonText) {
+export function buildInterruptedTurn(parts: unknown, liveText: unknown, reasonText: unknown): TranscriptMessage {
   const list = (Array.isArray(parts) ? parts : []).slice();
   const live = String(liveText === undefined || liveText === null ? '' : liveText).trim();
   const reason = String(reasonText === undefined || reasonText === null ? '' : reasonText).trim();
@@ -62,7 +136,7 @@ export function buildInterruptedTurn(parts, liveText, reasonText) {
  * 叙述文本不拆成 narration part 而是放进 content：既避免与 parts 里已固化的叙述重复，
  * 也让导出侧的「结论段」拿到它。
  */
-export function buildPartialTurn(parts, liveText) {
+export function buildPartialTurn(parts: unknown, liveText: unknown): TranscriptMessage | null {
   const list = (Array.isArray(parts) ? parts : []).slice();
   const live = String(liveText === undefined || liveText === null ? '' : liveText).trim();
   if (!list.length && !live) return null;
@@ -84,7 +158,7 @@ export function buildPartialTurn(parts, liveText) {
  * 「这段文字已经内联展示过」而跳过「### 失败」标题，那个标题就永远不出现。
  * 面板侧由 renderConversation 对 m.failed 强制渲染 content 来保证可见。
  */
-export function buildFailedTurn(parts, errorText, liveText) {
+export function buildFailedTurn(parts: unknown, errorText: unknown, liveText: unknown): TranscriptMessage {
   const list = (Array.isArray(parts) ? parts : []).slice();
   const text = String(errorText === undefined || errorText === null ? '' : errorText).trim() || '任务失败（未提供错误信息）';
   // **已经流出的正文必须留下来。**
@@ -108,7 +182,7 @@ export function buildFailedTurn(parts, errorText, liveText) {
  * 只删**末尾**那一段，且要求其后每一非空行都长得像来源条目（`- x` / `[n] x` / `1. x`），
  * 避免误删正文里讨论「参考来源」的段落。删空时保留原文，不为了去重把内容弄没。
  */
-export function stripTrailingSources(text) {
+export function stripTrailingSources(text: unknown): string {
   const s = String(text === undefined || text === null ? '' : text);
   if (!s) return s;
   const lines = s.split('\n');
@@ -142,10 +216,10 @@ export function stripTrailingSources(text) {
  * 按内容比较，且 narration 与 text 都算。只比较最近的一段文字 ——
  * 隔了别的文字之后再说一遍同一句话，那是有意重复，不该被吞掉。
  */
-export function alreadyCommittedAsText(parts, text) {
+export function alreadyCommittedAsText(parts: unknown, text: unknown): boolean {
   const want = citationNeutralTextKey(collapseImmediateRepeatedText(text));
   if (!want) return false;
-  const list = Array.isArray(parts) ? parts : [];
+  const list: TranscriptPart[] = Array.isArray(parts) ? (parts as TranscriptPart[]) : [];
   for (let i = list.length - 1; i >= 0; i--) {
     const p = list[i];
     if (!p) continue;
@@ -163,7 +237,7 @@ export function alreadyCommittedAsText(parts, text) {
  * 经常在引文重编号前后各落一份；如果拿原始字符串比较，就会把同一段话误判成
  * 两段不同内容。这个指纹只用于判断“是否同一段文字”，不会改动展示内容。
  */
-export function citationNeutralTextKey(text) {
+export function citationNeutralTextKey(text: unknown): string {
   return norm(text).replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (whole, inner) => {
     const label = String(inner).replace(/\s*\d+\s*$/, '').trim();
     return label ? '[' + label + ']' : '[]';
@@ -177,7 +251,7 @@ export function citationNeutralTextKey(text) {
  * 只接受长度 ≥200 且归一后完全一致的上下半段；标题或空行处作为候选切分点。
  * 保留后一份，因为它通常已经过最终引文重编号。
  */
-export function collapseImmediateRepeatedText(text) {
+export function collapseImmediateRepeatedText(text: unknown): string {
   const s = String(text == null ? '' : text);
   if (s.length < 400) return s;
   const candidates = [];
@@ -221,9 +295,9 @@ export function collapseImmediateRepeatedText(text) {
  * 只处理中间没有工具/截图/提示隔开的文字段，并保留较新的那一份（它通常已经过了
  * 最终引文重编号）。短文本不去重，避免把有意的重复表达（“好”“继续”）吃掉。
  */
-export function dedupeAdjacentTextParts(parts) {
-  const src = Array.isArray(parts) ? parts : [];
-  const out = [];
+export function dedupeAdjacentTextParts(parts: unknown): TranscriptPart[] {
+  const src: TranscriptPart[] = Array.isArray(parts) ? (parts as TranscriptPart[]) : [];
+  const out: TranscriptPart[] = [];
   let lastTextKey = '';
   let lastTextIndex = -1;
   for (const part of src) {
@@ -253,7 +327,7 @@ export function dedupeAdjacentTextParts(parts) {
  * 清理已落盘的旧会话：修复上线前产生的重复 parts / 重复 content 会在打开历史会话时
  * 自动收敛。返回新数组，不修改传入对象；后续正常 saveConversation 会写回干净版本。
  */
-export function normalizeConversationDuplicates(messages) {
+export function normalizeConversationDuplicates(messages: unknown): TranscriptMessage[] {
   return (Array.isArray(messages) ? messages : []).map((m) => {
     if (!m || m.role !== 'assistant') return m;
     const content = collapseImmediateRepeatedText(m.content || '');
@@ -285,7 +359,7 @@ export const MAX_PART_TEXT_CHARS = 2000;
 export const MAX_MESSAGE_CONTENT_CHARS = 20000;
 
 /** 单步有界化（只裁长度，不改结构）。 */
-function clipPart(p) {
+function clipPart(p: TranscriptPart): TranscriptPart {
   const out = Object.assign({}, p);
   if (typeof out.result === 'string' && out.result.length > MAX_PART_RESULT_CHARS) {
     out.result = sliceSafe(out.result, 0, MAX_PART_RESULT_CHARS);
@@ -308,7 +382,8 @@ function clipPart(p) {
     //  因为 tests/omit-mark.test.mjs 的 ⑤ 只扫了 debug-hook —— 现在两边都扫。）
     if (s.length > MAX_PART_ARGS_CHARS) {
       out.args = {};
-      out.args[OMIT_ARGS_KEY] = '参数过长（' + s.length + ' 字符），已省略（原文未留存，取不回）';
+      // 赋值走整对象替换：`out.args` 的类型是 unknown，不能对它做下标写。
+      out.args = { [OMIT_ARGS_KEY]: '参数过长（' + s.length + ' 字符），已省略（原文未留存，取不回）' };
     }
   }
   return out;
@@ -344,11 +419,11 @@ export const MAX_SELECTED_TEXT_CHARS = 2000;
  * 静默丢消息会让"会话真实步数"看起来像整个会话，其实只是最近一段 ✗
  * （`parts` 与 `content` 早就有 `partsOmitted` / `contentTruncated` 标记，这里补齐其余各处。）
  */
-export function serializeConversationMessages(conversation) {
-  const all = Array.isArray(conversation) ? conversation : [];
+export function serializeConversationMessages(conversation: unknown): SerializedTranscriptMessage[] {
+  const all: TranscriptMessage[] = Array.isArray(conversation) ? (conversation as TranscriptMessage[]) : [];
   const kept = all.slice(-MAX_MESSAGES);
   return kept.map((m, i) => {
-    const copy = { role: m.role };
+    const copy: SerializedTranscriptMessage = { role: m.role };
     // 只在**第一条**留痕：它表示"这条之前还有 N 条没被导出"（取不回）
     if (i === 0 && all.length > kept.length) {
       copy.earlierMessagesOmitted = all.length - kept.length;
@@ -390,9 +465,9 @@ export function serializeConversationMessages(conversation) {
     }
     if (Array.isArray(m.citations)) {
       const keptCites = m.citations.slice(0, MAX_CITATIONS);
-      copy.citations = keptCites.map((c) => {
+      copy.citations = keptCites.map((c): TranscriptCitation => {
         const snippet = String(c.snippet || '');
-        const out = {
+        const out: TranscriptCitation = {
           index: c.index, source: c.source, id: c.id, title: c.title, url: c.url,
           snippet: sliceSafe(snippet, 0, MAX_CITATION_SNIPPET_CHARS),
         };
@@ -415,8 +490,8 @@ export function serializeConversationMessages(conversation) {
  * 模型上下文仍由 agent.js 的 normalizeHistory 单独限制；把“完整存档”和
  * “发给模型的窗口”分开，避免为了省 token 永久删除用户历史。
  */
-export function serializeCompleteConversationMessages(conversation) {
-  const src = Array.isArray(conversation) ? conversation : [];
+export function serializeCompleteConversationMessages(conversation: unknown): TranscriptMessage[] {
+  const src: TranscriptMessage[] = Array.isArray(conversation) ? (conversation as TranscriptMessage[]) : [];
   try {
     if (typeof structuredClone === 'function') return structuredClone(src);
   } catch (e) {}
@@ -427,14 +502,14 @@ export function serializeCompleteConversationMessages(conversation) {
   }
 }
 
-function clipInline(text, max) {
+function clipInline(text: unknown, max: number): string {
   const t = norm(text);
   if (!t) return '';
   return t.length > max ? sliceSafe(t, 0, max) + '…（共 ' + t.length + ' 字符，已截断）' : t;
 }
 
 /** 空白归一：只用于**比较**与散文压缩，绝不用于 JSON 参数（会破坏原文）。 */
-function norm(text) {
+function norm(text: unknown): string {
   return String(text === undefined || text === null ? '' : text).replace(/\s+/g, ' ').trim();
 }
 
@@ -458,7 +533,7 @@ function norm(text) {
  */
 export const OMIT_MARK_START = '⟨…省略 ';
 export const OMIT_MARK_END = ' 项⟩';
-export function formatOmittedItems(n) {
+export function formatOmittedItems(n: number | string): string {
   return OMIT_MARK_START + n + OMIT_MARK_END;
 }
 
@@ -477,19 +552,20 @@ export const OMIT_ARGS_KEY = '⟨…省略参数⟩';
  *
  * 仍然超长时退化为「只列字段名」，同样保证合法。
  */
-export function previewArgsJson(args, maxLen = 240) {
-  const shorten = (v, depth) => {
+export function previewArgsJson(args: unknown, maxLen: number = 240): string {
+  const shorten = (v: unknown, depth: number): unknown => {
     if (typeof v === 'string') return v.length > 80 ? sliceSafe(v, 0, 80) + '…' : v;
     if (Array.isArray(v)) {
       const cap = 3;
-      const head = v.slice(0, cap).map((x) => shorten(x, depth + 1));
+      const head: unknown[] = v.slice(0, cap).map((x) => shorten(x, depth + 1));
       if (v.length > cap) head.push(formatOmittedItems(v.length));
       return head;
     }
     if (v && typeof v === 'object') {
       if (depth >= 3) return '…';
-      const o = {};
-      for (const k of Object.keys(v)) o[k] = shorten(v[k], depth + 1);
+      const src = v as Record<string, unknown>;
+      const o: Record<string, unknown> = {};
+      for (const k of Object.keys(src)) o[k] = shorten(src[k], depth + 1);
       return o;
     }
     return v;
@@ -497,10 +573,10 @@ export function previewArgsJson(args, maxLen = 240) {
   try {
     const json = JSON.stringify(shorten(args || {}, 0));
     if (json && json.length <= maxLen) return json;
-    const keys = Object.keys(args || {});
+    const keys = Object.keys((args && typeof args === 'object' ? args : {}) as Record<string, unknown>);
     if (!keys.length) return '{}';
     // 同 clipPart：退化成"说明"时，键名必须是可辨的元信息形态（不能是 `'…'`）。
-    const out = {};
+    const out: Record<string, string> = {};
     out[OMIT_ARGS_KEY] = '参数过长，字段：' + keys.slice(0, 8).join(', ') + '（其余未列出）';
     return JSON.stringify(out);
   } catch (e) {
@@ -509,14 +585,14 @@ export function previewArgsJson(args, maxLen = 240) {
   }
 }
 
-function toolLine(p, result, maxResultLen) {
+function toolLine(p: TranscriptPart, result: TranscriptPart | undefined, maxResultLen: number): string {
   const mark = !result ? '…' : result.status === 'completed' ? '✓' : result.status === 'failed' ? '✗' : '—';
   const args = previewArgsJson(p.args);
   const detail = clipInline(result ? result.result : '', maxResultLen);
   return '- `' + p.name + '` ' + args + ' → ' + mark + (detail ? ' ' + detail : '');
 }
 
-function screenshotLine(p) {
+function screenshotLine(p: TranscriptPart): string {
   const bits = [];
   if (p.label) bits.push(String(p.label));
   if (p.width && p.height) bits.push(p.width + '×' + p.height);
@@ -525,16 +601,26 @@ function screenshotLine(p) {
 }
 
 /**
- * @param {object} input
- * @param {string} input.title 页面标题
- * @param {string} input.url 页面 URL
- * @param {string} input.exportedAt 导出时间（已格式化）
- * @param {string} [input.handoffId] 会话标识，形如 RF-XXXXXX
- * @param {Array} input.conversation 对话数据模型
- * @param {number} [input.maxResultLen] 单条工具结果的截断长度
- * @returns {string} markdown
+ * @param input
+ * @param input.title 页面标题
+ * @param input.url 页面 URL
+ * @param input.exportedAt 导出时间（已格式化）
+ * @param [input.handoffId] 会话标识，形如 RF-XXXXXX
+ * @param input.conversation 对话数据模型
+ * @param [input.maxResultLen] 单条工具结果的截断长度
+ * @returns markdown
  */
-export function buildTranscript(input = {}) {
+/** buildTranscript 的输入。 */
+export interface TranscriptInput {
+  title?: string;
+  url?: string;
+  exportedAt?: string;
+  handoffId?: string;
+  conversation?: TranscriptMessage[];
+  maxResultLen?: number;
+}
+
+export function buildTranscript(input: TranscriptInput = {}): string {
   const { title, url, exportedAt, handoffId, conversation, maxResultLen = 500 } = input;
   const out = [];
   out.push('# RecallFlow 对话记录');
@@ -549,7 +635,7 @@ export function buildTranscript(input = {}) {
   }
   out.push('');
 
-  const list = Array.isArray(conversation) ? conversation : [];
+  const list: TranscriptMessage[] = Array.isArray(conversation) ? conversation : [];
   if (!list.length) {
     out.push('（暂无对话）');
     return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
@@ -585,8 +671,8 @@ export function buildTranscript(input = {}) {
     const parts = dedupeAdjacentTextParts(Array.isArray(m.parts) ? m.parts : []);
     // 工具结果先建索引：它总是跟在对应的 tool-call 之后，按下标顺序渲染时
     // 就能把两者合成一行，而不是多出一行「返回结果」。
-    const results = new Map();
-    const callIds = new Set();
+    const results = new Map<unknown, TranscriptPart>();
+    const callIds = new Set<unknown>();
     for (const p of parts) {
       if (!p) continue;
       if (p.type === 'tool-call') {
@@ -602,11 +688,11 @@ export function buildTranscript(input = {}) {
     // 所以拿工具结果做去重依据前必须确认它没被截断 —— 否则一段超过 maxResultLen 的
     // 最终答复会被叙述与结论两处同时挡掉，而工具行只剩前 maxResultLen 字：
     // 尾部整段丢失，且记录里完全看不出丢了东西。
-    const fullyInline = (s) => Boolean(s) && s.length <= maxResultLen;
+    const fullyInline = (s: string) => Boolean(s) && s.length <= maxResultLen;
     // 工具行必须攒成**一个连续列表块**，块后再补一个空行。
     // 少了这个空行，紧跟其后的叙述会被 markdown 当成上一条列表项的延续
     // （lazy continuation），整段话被渲染进项目符号里 —— 这是实测踩到的。
-    let pending = [];
+    let pending: string[] = [];
     const flushTools = () => {
       if (!pending.length) return;
       out.push(...pending);

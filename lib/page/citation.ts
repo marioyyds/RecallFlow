@@ -20,12 +20,13 @@ export const PAGE_TEXT_EXCLUDE =
  * 注意 `document.querySelectorAll(PAGE_TEXT_EXCLUDE)` 同样不穿透 shadow，
  * 所以正文抽取那条路径也要走这里（见 page-text.js）。
  */
-export function closestComposed(el, selector) {
-  let node = el;
+export function closestComposed(el: Node | null, selector: string): Element | null {
+  let node: Node | null = el;
   try {
     while (node && node.nodeType === 1) {
-      if (node.matches && node.matches(selector)) return node;
-      const parent = node.parentNode;
+      const asElement = node as Element;
+      if (asElement.matches && asElement.matches(selector)) return asElement;
+      const parent = node.parentNode as Node & { host?: Element } | null;
       // ShadowRoot 的 nodeType 是 11，它的宿主才在上一层文档树里。
       if (parent && parent.nodeType === 11 && parent.host) node = parent.host;
       else node = parent;
@@ -37,7 +38,7 @@ export function closestComposed(el, selector) {
 }
 
 /** 该元素是否属于「不该当作页面内容」的子树（穿透 shadow 判断）。 */
-export function isPageContentExcluded(el) {
+export function isPageContentExcluded(el: Node | null): boolean {
   return Boolean(el && closestComposed(el, PAGE_TEXT_EXCLUDE));
 }
 
@@ -60,17 +61,17 @@ export function isPageContentExcluded(el) {
  */
 export const ELEMENT_COLLECT_EXCLUDE = '#__kb-ai-host,#toast,[data-rf-injected],script,style,noscript';
 
-export function isElementCollectExcluded(el) {
+export function isElementCollectExcluded(el: Node | null): boolean {
   return Boolean(el && closestComposed(el, ELEMENT_COLLECT_EXCLUDE));
 }
 
-let citeHighlightRange = null;
+let citeHighlightRange: Range | null = null;
 let citeHighlightEntered = false;
 
 // 全角标点 → 半角（1:1 单字符替换，不改变字符数，因此不破坏 charmap 的 node/offset 索引）。
 // 引用 snippet 与页面原文常因全角/半角标点差异而匹配失败，这里统一后两侧一致。
-function normalizeMatchChar(ch) {
-  const FULL = {
+function normalizeMatchChar(ch: string): string {
+  const FULL: Record<string, string> = {
     '，': ',', '、': ',', '。': '.', '．': '.',
     '（': '(', '）': ')', '［': '[', '］': ']', '【': '[', '】': ']',
     '：': ':', '；': ';', '？': '?', '！': '!',
@@ -80,7 +81,7 @@ function normalizeMatchChar(ch) {
   return FULL[ch] || ch;
 }
 
-export function normalizeCitationText(value) {
+export function normalizeCitationText(value: unknown): string {
   return String(value || '')
     .replace(/\u00a0/g, ' ')
     .replace(/\s+/g, ' ')
@@ -90,8 +91,8 @@ export function normalizeCitationText(value) {
     .trim();
 }
 
-function isCitationTextNode(node) {
-  const parent = node && node.parentElement;
+function isCitationTextNode(node: Node | null): boolean {
+  const parent = node && (node.parentElement as HTMLElement | null);
   if (!parent || parent.closest(PAGE_TEXT_EXCLUDE)) return false;
   try {
     const style = getComputedStyle(parent);
@@ -106,7 +107,7 @@ export function clearCiteHighlight() {
   citeHighlightEntered = false;
 }
 
-export function isPointerInCitationRange(event) {
+export function isPointerInCitationRange(event: MouseEvent): boolean {
   if (!citeHighlightRange) return false;
   try {
     return Array.prototype.some.call(citeHighlightRange.getClientRects(), (rect) =>
@@ -120,11 +121,18 @@ export function isPointerInCitationRange(event) {
 // 把页面所有可见文本节点按「去除所有空白」拼接成扁平文本，并记录每个字符对应的
 // (节点, 偏移)。这样无论 innerText 与 DOM 在换行/空格/内联元素拆分上的差异，
 // 都能用子串查找精确定位。跳过脚本/样式/代码块，避免误匹配到代码。
-export function buildPageCharMap() {
+/** buildPageCharMap 的结果：扁平文本的每个字符都能回到它原来的 (节点, 偏移)。 */
+export interface PageCharMap {
+  text: string;
+  charNode: Text[];
+  charOffset: number[];
+}
+
+export function buildPageCharMap(): PageCharMap {
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let n;
-  const charNode = [];
-  const charOffset = [];
+  let n: Node | null;
+  const charNode: Text[] = [];
+  const charOffset: number[] = [];
   let text = '';
   while ((n = walker.nextNode())) {
     if (!isCitationTextNode(n)) continue;
@@ -132,14 +140,14 @@ export function buildPageCharMap() {
     for (let i = 0; i < v.length; i++) {
       if (/\s/.test(v[i])) continue;
       text += normalizeMatchChar(v[i]);
-      charNode.push(n);
+      charNode.push(n as Text);
       charOffset.push(i);
     }
   }
   return { text, charNode, charOffset };
 }
 
-function rangeFromCharMap(start, length, map) {
+function rangeFromCharMap(start: number, length: number, map: PageCharMap): Range | null {
   if (length <= 0 || start + length > map.text.length) return null;
   const sNode = map.charNode[start];
   const sOff = map.charOffset[start];
@@ -156,7 +164,7 @@ function rangeFromCharMap(start, length, map) {
 const MIN_SNIPPET_LEN = 10;
 
 // 用「去除空白后的子串」在页面中查找引用片段，返回 Range（可跨节点）
-export function findRangeBySubstr(map, snippet) {
+export function findRangeBySubstr(map: PageCharMap, snippet: unknown): Range | null {
   const q = normalizeCitationText(snippet).replace(/\s+/g, '');
   if (!q) return null;
 
@@ -173,7 +181,7 @@ export function findRangeBySubstr(map, snippet) {
     return at < 0 ? null : rangeFromCharMap(at, q.length, map);
   }
 
-  const findAll = (needle) => {
+  const findAll = (needle: string): number[] => {
     const indexes = [];
     let from = 0;
     while (needle.length >= MIN_SNIPPET_LEN) {
@@ -228,7 +236,7 @@ export function findRangeBySubstr(map, snippet) {
 // 生成单个绝对定位浮层，覆盖指定矩形（outline 为描边模式，否则为底色高亮）。
 // 采用 position:fixed（视口坐标），与 getBoundingClientRect 直接对齐；
 // 浮层位置由下方 overlayRange/overlayElement 的 scroll/resize 监听实时重算。
-export function makeOverlay(rect, color, outline) {
+export function makeOverlay(rect: DOMRect, color: string, outline: boolean): HTMLElement {
   const d = document.createElement('div');
   const fill = outline ? '' : 'background-color:' + normalizeFillColor(color) + ';';
   d.style.cssText =
@@ -244,7 +252,7 @@ export function makeOverlay(rect, color, outline) {
 
 // 无论模型传的是实色还是高透明度颜色，都统一转成低透明度 rgba，
 // 避免不透明的高亮把正文文字盖住。
-function normalizeFillColor(color) {
+function normalizeFillColor(color: string): string {
   const fallback = overlayColor();
   const cap = 0.32;
   const floor = 0.12;
@@ -271,7 +279,7 @@ function normalizeFillColor(color) {
   return fallback;
 }
 
-export function overlayColor() {
+export function overlayColor(): string {
   return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches
     ? 'rgba(255,196,0,.20)'
     : 'rgba(255,196,0,.26)';
@@ -279,10 +287,19 @@ export function overlayColor() {
 
 // 滚动感知浮层注册表：每个条目保存「如何取当前矩形」，window scroll / 页面内
 // 滚动容器 scroll / resize 时统一重算位置，保证高亮跟随内容（含 overflow 容器与懒加载）。
-let liveOverlays = [];
+/** 一个浮层条目：buildRects 回答「此刻该覆盖哪些矩形」，els 是上一批生成的浮层。 */
+interface OverlayItem {
+  color: string;
+  outline: boolean;
+  owner: string;
+  buildRects: () => DOMRect[];
+  els?: HTMLElement[];
+}
+
+let liveOverlays: OverlayItem[] = [];
 let repositionQueued = false;
 
-function rebuildOverlay(item) {
+function rebuildOverlay(item: OverlayItem): HTMLElement[] {
   const rects = item.buildRects();
   // 就地更新位置（滚动时矩形数量/形状通常不变）：避免「移除→重建」在快速滚动时产生拖影。
   if (item.els && item.els.length === rects.length) {
@@ -325,8 +342,8 @@ if (typeof window !== 'undefined') {
 
 // 用绝对定位的浮层覆盖匹配文本，不改动页面 DOM（无空行、无列表编号/代码结构破坏）。
 // owner 用于分组管理，disposeOverlays(owner) 可批量清理；滚动时浮层实时跟随文本。
-export function overlayRange(range, color, owner) {
-  const item = {
+export function overlayRange(range: Range, color: string | null, owner: string): HTMLElement[] {
+  const item: OverlayItem = {
     color: color || overlayColor(),
     outline: false,
     owner: owner || 'default',
@@ -344,8 +361,8 @@ export function overlayRange(range, color, owner) {
 }
 
 // 用浮层覆盖一个页面元素（高亮或描边），同样滚动跟随。
-export function overlayElement(el, color, outline, owner) {
-  const item = {
+export function overlayElement(el: Element | null, color: string | null, outline: boolean, owner: string): HTMLElement[] {
+  const item: OverlayItem = {
     color: color || overlayColor(),
     outline: outline === true,
     owner: owner || 'default',
@@ -361,7 +378,7 @@ export function overlayElement(el, color, outline, owner) {
 }
 
 // 按 owner 清理浮层（移除 DOM 并停止跟随）。
-export function disposeOverlays(owner) {
+export function disposeOverlays(owner: string): void {
   for (let i = liveOverlays.length - 1; i >= 0; i--) {
     const item = liveOverlays[i];
     if (item.owner === owner) {
@@ -372,10 +389,10 @@ export function disposeOverlays(owner) {
 }
 
 // 在页面中查找引用片段并高亮精确匹配的文本，滚动到该位置
-export function findAndHighlightCitation(snippet) {
+export function findAndHighlightCitation(snippet: unknown): boolean {
   clearCiteHighlight();
 
-  let range = null;
+  let range: Range | null = null;
   try {
     range = findRangeBySubstr(buildPageCharMap(), snippet);
   } catch (e) {

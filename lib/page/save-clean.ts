@@ -39,16 +39,28 @@ const SAFETY_RESTORE_MS = 60_000;
 /** 交互恢复的宽限期：让本次 Ctrl+S 的 keydown 自己不要立刻把宿主挂回来。 */
 const INTERACTION_GRACE_MS = 800;
 
-/**
- * @param {object} [options]
- * @param {Document} [options.doc]
- * @param {Window} [options.win]
- * @param {() => Element|null} [options.getHost] 取宿主；默认按 id 找
- * @param {(reason: string) => void} [options.onSuspend] 摘除**之前**调用（宿主侧应据此拒绝重建）
- * @param {(reason: string) => void} [options.onResume]  复原**之后**调用
- * @param {() => number} [options.now]
- */
-export function createExportGuard(options = {}) {
+/** 注入点：全部可省，省了用浏览器全局。测试用桩替换它们。 */
+export interface ExportGuardOptions {
+  doc?: Document;
+  win?: Window;
+  /** 取宿主；默认按 id 找 */
+  getHost?: () => Element | null;
+  /** 摘除**之前**调用（宿主侧应据此拒绝重建） */
+  onSuspend?: (reason: string) => void;
+  /** 复原**之后**调用 */
+  onResume?: (reason: string) => void;
+  now?: () => number;
+}
+
+/** 摘除期间保管的「原位信息」，用于把宿主挂回原处。 */
+interface ParkedHost {
+  node: Element;
+  holder: DocumentFragment;
+  parent: Node | null;
+  next: ChildNode | null;
+}
+
+export function createExportGuard(options: ExportGuardOptions = {}) {
   const doc = options.doc || document;
   const win = options.win || window;
   const getHost = options.getHost || (() => doc.getElementById(HOST_ID));
@@ -57,15 +69,17 @@ export function createExportGuard(options = {}) {
   const now = options.now || (() => Date.now());
 
   let suspended = false;
-  let parked = null; // { node, parent, next }
-  let safetyTimer = null;
+  let parked: ParkedHost | null = null;
+  let safetyTimer: ReturnType<typeof setTimeout> | null = null;
   let graceUntil = 0;
   let lastReason = '';
   let installed = false;
 
   function clearSafetyTimer() {
     if (safetyTimer) {
-      const cancel = win.clearTimeout || clearTimeout;
+      // window.setTimeout 返回 number、node 的返回 Timeout：两个 libs 同时挂着，
+      // 句柄只在这里来回传递（不参与运算），统一按 unknown 进、原类型出来。
+      const cancel = (win.clearTimeout || clearTimeout) as (handle: unknown) => void;
       cancel(safetyTimer);
       safetyTimer = null;
     }
@@ -73,7 +87,10 @@ export function createExportGuard(options = {}) {
 
   function armSafetyTimer() {
     clearSafetyTimer();
-    const schedule = win.setTimeout || setTimeout;
+    const schedule = (win.setTimeout || setTimeout) as unknown as (
+      cb: () => void,
+      ms: number
+    ) => ReturnType<typeof setTimeout>;
     safetyTimer = schedule(() => {
       safetyTimer = null;
       restore('safety');
@@ -86,7 +103,7 @@ export function createExportGuard(options = {}) {
    * 保存期间如果恰好有流式增量/看门狗要建宿主，挂起态能拦住它，
    * 否则会出现"用户按了 Ctrl+S，宿主恰好在序列化那一刻被建出来"的竞态。
    */
-  function suspend(reason) {
+  function suspend(reason: string) {
     if (suspended) return false;
     suspended = true;
     lastReason = String(reason || 'export');
@@ -111,7 +128,7 @@ export function createExportGuard(options = {}) {
     return detached;
   }
 
-  function restore(reason) {
+  function restore(reason: string) {
     if (!suspended) return false;
     clearSafetyTimer();
     const p = parked;
@@ -141,7 +158,7 @@ export function createExportGuard(options = {}) {
   // ---- 触发点 ----
 
   // Ctrl/Cmd+S：捕获阶段拦一手（**不** preventDefault —— 保存是用户要的，我们只让路）。
-  function onKeyDown(e) {
+  function onKeyDown(e: KeyboardEvent) {
     if (!e || e.altKey) return;
     if (!(e.ctrlKey || e.metaKey)) return;
     const key = String(e.key || '').toLowerCase();

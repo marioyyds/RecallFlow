@@ -8,28 +8,54 @@
 
 import { sliceSafe } from './surrogates.js';
 
+/** 一个单元格的 DOM 侧描述（由 commands.js 采集，这里只消费）。 */
+export interface TableCellInput {
+  text?: string;
+  colspan?: number;
+  rowspan?: number;
+  isHeader?: boolean;
+}
+
+/** `expandTableGrid` 的形状选项。 */
+export interface ExpandTableGridOptions {
+  /** 行数上限，默认 200。 */
+  maxRows?: number;
+  /** 列数上限，0 = 不限，默认 0。 */
+  maxCols?: number;
+  /** 合并单元格的延续格是否重复填入同一文本，默认 true。 */
+  fillMerged?: boolean;
+}
+
+/** `expandTableGrid` 的结果：矩形网格（缺格已补空串）。 */
+export interface TableGrid {
+  headers: string[];
+  rows: string[][];
+  widths: number;
+  headerRowCount: number;
+  mergedCells: number;
+}
+
 /**
  * 把「按 DOM 顺序排列的单元格描述」展开成矩形网格。
  *
- * @param {Array<Array<{text?:string, colspan?:number, rowspan?:number, isHeader?:boolean}>>} rows
- * @param {Object} [options]
- * @param {number} [options.maxRows=200] 行数上限
- * @param {number} [options.maxCols=0]   列数上限（0 = 不限）
- * @param {boolean} [options.fillMerged=true]
+ * @param rows 每行一个单元格数组，按 DOM 顺序
+ * @param [options]
+ * @param [options.maxRows=200] 行数上限
+ * @param [options.maxCols=0]   列数上限（0 = 不限）
+ * @param [options.fillMerged=true]
  *   合并单元格的延续格是否重复填入同一文本。默认 true：下游（尤其模型）按列读取时
  *   不希望遇到空洞；设 false 可保留「这里是合并延续」的忠实形态（延续格为空串）。
- * @returns {{headers:string[], rows:string[][], widths:number, headerRowCount:number, mergedCells:number}}
  */
-export function expandTableGrid(rows, options = {}) {
+export function expandTableGrid(rows: readonly (readonly TableCellInput[])[], options: ExpandTableGridOptions = {}): TableGrid {
   const maxRows = Math.max(1, Number(options.maxRows) || 200);
   const maxCols = Math.max(0, Number(options.maxCols) || 0);
   const fillMerged = options.fillMerged !== false;
   const src = Array.isArray(rows) ? rows.slice(0, maxRows) : [];
 
-  const grid = [];
-  const occupancy = []; // occupancy[r][c] = true 表示该格已被上方 rowspan 占用
-  const isOccupied = (r, c) => Boolean(occupancy[r] && occupancy[r][c]);
-  const occupy = (r, c) => {
+  const grid: string[][] = [];
+  const occupancy: boolean[][] = []; // occupancy[r][c] = true 表示该格已被上方 rowspan 占用
+  const isOccupied = (r: number, c: number) => Boolean(occupancy[r] && occupancy[r][c]);
+  const occupy = (r: number, c: number) => {
     if (!occupancy[r]) occupancy[r] = [];
     occupancy[r][c] = true;
   };
@@ -98,17 +124,17 @@ export function expandTableGrid(rows, options = {}) {
 
 /**
  * 渲染成紧凑文本（给模型读），按行列上限截断并标注。
- * @param {{headers:string[], rows:string[][]}} table
- * @param {Object} [options]
- * @param {number} [options.maxRows=40]
- * @param {number} [options.maxCellChars=60]
+ * @param table `expandTableGrid` 的输出（或手工构造的同形状对象）
+ * @param [options]
+ * @param [options.maxRows=40]
+ * @param [options.maxCellChars=60]
  */
-export function formatTableText(table, options = {}) {
+export function formatTableText(table: { headers?: string[]; rows?: string[][] }, options: { maxRows?: number; maxCellChars?: number } = {}): string {
   const maxRows = Math.max(1, Number(options.maxRows) || 40);
   const maxCellChars = Math.max(4, Number(options.maxCellChars) || 60);
-  const headers = Array.isArray(table && table.headers) ? table.headers : [];
-  const rows = Array.isArray(table && table.rows) ? table.rows : [];
-  const cell = (v) => {
+  const headers = Array.isArray(table.headers) ? table.headers : [];
+  const rows = Array.isArray(table.rows) ? table.rows : [];
+  const cell = (v: unknown) => {
     const s = String(v === undefined || v === null ? '' : v).replace(/\s+/g, ' ').trim();
     // ⚠ 必须用 sliceSafe，不能直接 slice：这里是**一次线上 400 事故的触发点**。
     // 论文/数学页面的 `𝑦 𝒜 𝐺 𝐽` 每个都是星形平面字符（2 个 UTF-16 码元），
