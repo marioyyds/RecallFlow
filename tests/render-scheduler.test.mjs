@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createFrameScheduler } from '../lib/page/render-scheduler.js';
+import { createFrameScheduler } from '../lib/page/render-scheduler.ts';
 
 /** 假帧队列：把「同一帧」「跨帧」变成可控的显式步骤。 */
 function fakeFrames() {

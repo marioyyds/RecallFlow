@@ -18,7 +18,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const SRC = fs.readFileSync('lib/page/page-text.js', 'utf8');
+const SRC = fs.readFileSync('lib/page/page-text.ts', 'utf8');
 
 /** 抽出实际使用的两份名单（不复制粘贴，避免文档与实现漂移）。 */
 function selectorList() {

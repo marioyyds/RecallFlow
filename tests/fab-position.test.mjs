@@ -6,7 +6,7 @@
 // 它只能证明"源码里有这行字"，证明不了"拖拽后气泡真的没被拖到屏幕外"。
 // 那种断言改一行格式就红、改坏行为却不红，是最典型的一类假信心。
 //
-// 之所以能重写，是因为这段逻辑从 chat.js 抽到了 `lib/page/fab-position.js`，
+// 之所以能重写，是因为这段逻辑从 chat.js 抽到了 `lib/page/fab-position.ts`，
 // 依赖改为**显式注入**（fab / window / storage / localStorage 都由外部给）。
 // 于是它第一次可以在 node 里被真正执行 —— 这里用的全是假对象，不引入 jsdom。
 import test from 'node:test';
@@ -18,7 +18,7 @@ import {
   DEFAULT_FAB_RATIO,
   FAB_POSITION_KEY,
   LEGACY_FAB_POSITION_KEY,
-} from '../lib/page/fab-position.js';
+} from '../lib/page/fab-position.ts';
 
 /** 造一个可观察的假气泡元素。 */
 function fakeFab(opts = {}) {

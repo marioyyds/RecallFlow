@@ -510,7 +510,9 @@ const TARGETS = [
   {
     // 失败轮次入库：正文只累积在 pendingNarration 里（要等 end 才进 parts），
     // 失败走不到 end ⇒ 不带它，一次中途失败就把用户看到的整段回答从记录里抹掉。
-    file: 'lib/page/transcript.js',
+    // TITA-74（TS 迁移 Batch 1a）：本文件改名 .ts，file 字段必须跟着改，
+    // 否则这一步直接 ENOENT 崩（§3.3：迁移 PR 撞上 mutation-check 目标时自己同步锚点）。
+    file: 'lib/page/transcript.ts',
     mode: 'inplace',
     test: 'tests/transcript.test.mjs',
     mutations: [

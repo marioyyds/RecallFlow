@@ -5,7 +5,7 @@ import { selectedTextMessageHtml } from '../lib/shared/utils.js';
 import {
   serializeConversationMessages,
   MAX_SELECTED_TEXT_CHARS,
-} from '../lib/page/transcript.js';
+} from '../lib/page/transcript.ts';
 
 test('选文 HTML 转义页面内容，空文本不生成节点', () => {
   assert.equal(selectedTextMessageHtml(''), '');

@@ -30,7 +30,7 @@ const ALLOWED = {
   'lib/userscript/runner.js': '由 executeScript 以路径注入的裸脚本，不是 ES 模块',
   // 这两个只经 entries/content.js 静态导入（内容脚本打包入口），页面侧行为由 E2E 覆盖。
   'lib/page/picker.js': '内容脚本侧，仅经 entries/content.js 导入；行为由 E2E 的拾取用例覆盖',
-  'lib/page/debug-capture.js': '内容脚本侧，仅经 entries/content.js 导入；行为由 E2E 覆盖',
+  'lib/page/debug-capture.ts': '内容脚本侧，仅经 entries/content.js 导入；行为由 E2E 覆盖',
   // service worker 入口 background.js 才 import 它，而测试从不 import 入口（会真起 chrome API）。
   'lib/shared/idb-kv.js': '只被 background.js 导入；入口不能 import（会摸真 chrome API）',
 };
@@ -45,11 +45,19 @@ export function stripQuery(spec) {
 }
 
 /** 相对路径 specifier → 真实文件（含 .js / .mjs / index.js 三种省略写法）。 */
+/** 迁移期的后缀互换：`importer 写 .js、文件已是 .ts` 由 scripts/ts-resolve.mjs 兜住，
+ *  静态分析这里也得认，否则「改名」会被误判成「没人引用它」/「它是死代码」。
+ *  Batch 5 收口（所有 specifier 都写真实后缀）后可删掉 swapExt。 */
+function swapExt(file) {
+  return file.replace(/\.(js|mjs|ts|mts)$/, (ext) =>
+    ext === '.js' ? '.ts' : ext === '.mjs' ? '.mts' : ext === '.ts' ? '.js' : '.mjs');
+}
+
 function resolveImport(fromFile, spec) {
   const s = stripQuery(spec);
   if (!s.startsWith('.')) return null;
   const base = path.resolve(path.dirname(fromFile), s);
-  for (const cand of [base, base + '.js', base + '.mjs', path.join(base, 'index.js')]) {
+  for (const cand of [base, base + '.js', base + '.mjs', swapExt(base), path.join(base, 'index.js')]) {
     try {
       if (fs.statSync(cand).isFile()) return cand;
     } catch (e) {
@@ -63,7 +71,9 @@ function walk(dir, out = []) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, ent.name);
     if (ent.isDirectory()) walk(p, out);
-    else if (/\.(js|mjs)$/.test(p)) out.push(path.resolve(p));
+    // ⚠ `.ts` 必须进扫描集：改名后如果它继续只认 .js，被迁的模块会从 LIB_FILES 里
+    // 消失 —— 于是「每个 lib 模块都要被测试碰过」这条对它们静默失效（与 §3.4 同源的病）。
+    else if (/\.(js|mjs|ts|mts)$/.test(p)) out.push(path.resolve(p));
   }
   return out;
 }
@@ -156,6 +166,8 @@ test('被豁免的模块必须真的被**生产代码**用到（否则它是死�
       }
     })
     .join('\n');
-  const dead = Object.keys(ALLOWED).filter((f) => !haystack.includes(f));
+  // 同一个原因的另一处：产品代码里的 specifier 可能还写着 .js，而文件已是 .ts。
+  // 两种后缀任一出现就算「被用到」，否则改名会把活模块误判成死代码。
+  const dead = Object.keys(ALLOWED).filter((f) => !haystack.includes(f) && !haystack.includes(swapExt(f)));
   assert.deepEqual(dead, [], '这些被豁免的模块在产品代码里也找不到任何引用：是死代码，请删除或接回去');
 });

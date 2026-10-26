@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { serializeConversationMessages } from '../lib/page/transcript.js';
+import { serializeConversationMessages } from '../lib/page/transcript.ts';
 
 const CHAT = fs.readFileSync(new URL('../lib/page/chat.js', import.meta.url), 'utf8');
 

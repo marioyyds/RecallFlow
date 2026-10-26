@@ -139,7 +139,7 @@ test('④ visionLimitationNote 的默认整句：改动前**就已经**是条件
 test('⑤ 不算一处：panel-css.js 里那句是样式表**注释**，不面向模型 ⇒ 刻意不条件化', () => {
   // 它与模型输入无关（只决定面板怎么显示截图），所以没有引用开关的义务；
   // 但若哪天它变成会发给模型的文本，这个用例会红，逼人重新评估 ✓
-  const css = read('lib/page/panel-css.js');
+  const css = read('lib/page/panel-css.ts');
   const line = css.split('\n').find((l) => l.includes('模型看不到图'));
   assert.ok(line, '锚点失效（这句被删或被改写）：请同步本用例');
   assert.match(line.trim(), /^\/\*.*\*\/$/, '它必须仍然只是一条 CSS 注释');

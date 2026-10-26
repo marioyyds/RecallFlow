@@ -18,7 +18,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PANEL_CSS } from '../lib/page/panel-css.js';
+import { PANEL_CSS } from '../lib/page/panel-css.ts';
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
 
@@ -107,7 +107,7 @@ function rulesFor(selector, needle) {
 }
 
 test('CSS：收起态把整个气泡推出视口，只留 FAB_PEEK_VISIBLE 那么宽', async () => {
-  const { FAB_PEEK_VISIBLE } = await import('../lib/page/fab-position.js');
+  const { FAB_PEEK_VISIBLE } = await import('../lib/page/fab-position.ts');
   const base = rulesFor('.fab.peek', null);
   assert.equal(base.length, 1, '`.fab.peek` 的基础规则应当只有一条（多了会被后面的覆盖）');
   // 宽屏气泡直径 52（见 `.fab` 的 width），收起后 right = -(52 - 12) = -40
@@ -118,7 +118,7 @@ test('CSS：收起态把整个气泡推出视口，只留 FAB_PEEK_VISIBLE 那�
 });
 
 test('CSS：窄屏（≤600px，气泡 46px）收起后同样只露 FAB_PEEK_VISIBLE', async () => {
-  const { FAB_PEEK_VISIBLE } = await import('../lib/page/fab-position.js');
+  const { FAB_PEEK_VISIBLE } = await import('../lib/page/fab-position.ts');
   const narrow = rulesFor('.fab.peek', '(max-width: 600px)').filter((b) => !b.media.some((m) => m.includes('hover')));
   assert.equal(narrow.length, 1, '窄屏必须单独覆盖收起偏移（气泡更小，沿用宽屏会露不着）');
   assert.equal(declOf(narrow[0].body, 'right'), '-' + (46 - FAB_PEEK_VISIBLE) + 'px');

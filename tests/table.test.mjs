@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { expandTableGrid, formatTableText } from '../lib/shared/table.js';
+import { expandTableGrid, formatTableText } from '../lib/shared/table.ts';
 
 const cell = (text, extra) => Object.assign({ text }, extra || {});
 const th = (text, extra) => Object.assign({ text, isHeader: true }, extra || {});

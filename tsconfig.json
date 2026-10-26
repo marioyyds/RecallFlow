@@ -63,12 +63,15 @@
     "types": ["chrome", "node"],
     "forceConsistentCasingInFileNames": true
   },
-  // 口径先收窄到「入口 + 叶子工具模块」，随迁移批次扩（每迁一批往里加一个目录）。
-  // 现在这里面一个 .ts 都没有，所以 tsc --noEmit 必然 0 错误 —— 它还不是门禁，
-  // 是「接入点已经就绪」的占位：等第一批 .ts 进来，它才开始有牙齿。
+  // 口径随迁移批次扩（每迁一批往里加一个目录）。
   // 别图省事一步 include 到 ["lib/**", "*.js"]：那会在迁移批次之外拉进上万行存量 JS，
   // 让 tsc 的启动时间与后续排查面都失控。
-  "include": ["entries/**/*", "lib/shared/**/*"],
+  //
+  // Batch 1a（TITA-74）把 `lib/page/**` 加了进来：本批 12 个文件里 10 个在 `lib/page`，
+  // 靠 entries/content.js **间接**拉进 program 也能覆盖到，但那层依赖是隐式的 ——
+  // 谁改了 content 的 import，哪天某个文件就悄悄退出类型检查了。写进来是显式化。
+  // `checkJs: false` 的含义不变：这个目录里**还没迁**的 .js 只被解析，不被检查。
+  "include": ["entries/**/*", "lib/shared/**/*", "lib/page/**/*"],
   "exclude": ["node_modules"]
   // ▼ `npm run check:types`（= `tsc --noEmit`）**刻意没有**挂进 scripts/run-all-checks.mjs。
   // 上面这个 include 里现在一个 .ts 都没有，纳入门禁就是一条「永远为绿」的假闸 ——

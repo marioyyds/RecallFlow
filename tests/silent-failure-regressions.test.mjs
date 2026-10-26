@@ -23,7 +23,7 @@ import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.js';
 import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
-import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.js';
+import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.ts';
 import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
 import { toRuntimeSkill } from '../lib/assistant/skill-md.js';
@@ -631,13 +631,13 @@ test('元素收集的排除名单不得包含任何用户交互控件', () => {
 test('元素定位路径不得再用正文抽取名单做候选过滤', () => {
   // 上述缺陷的**具体成因**就是这一行：`el.closest(PAGE_TEXT_EXCLUDE)` 会把按钮挡在
   // role/name 匹配之前。这里确保它不会以任何形式回来。
-  for (const rel of ['../lib/page/commands.js', '../lib/page/page-text.js']) {
+  for (const rel of ['../lib/page/commands.js', '../lib/page/page-text.ts']) {
     const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
     const bad = src.match(/closest\(\s*PAGE_TEXT_EXCLUDE\s*\)/g) || [];
     assert.deepEqual(bad, [], rel + ' 里仍有 closest(PAGE_TEXT_EXCLUDE) 做元素过滤（应改用 isElementCollectExcluded）');
   }
   // page-text.js 的可交互元素收集也必须走收集名单。
-  const pt = readFileSync(new URL('../lib/page/page-text.js', import.meta.url), 'utf8');
+  const pt = readFileSync(new URL('../lib/page/page-text.ts', import.meta.url), 'utf8');
   assert.match(pt, /isElementCollectExcluded\(el\)/, 'isVisibleElement 应使用元素收集名单');
 });
 

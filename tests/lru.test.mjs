@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createLruCache } from '../lib/shared/lru.js';
+import { createLruCache } from '../lib/shared/lru.ts';
 
 test('未超容量时正常读写', () => {
   const c = createLruCache(3);

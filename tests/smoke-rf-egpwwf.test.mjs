@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { stripHtml } from '../lib/assistant/tools.js';
-import { closestComposed, isPageContentExcluded, PAGE_TEXT_EXCLUDE } from '../lib/page/citation.js';
+import { closestComposed, isPageContentExcluded, PAGE_TEXT_EXCLUDE } from '../lib/page/citation.ts';
 
 // ---------------------------------------------------------------- ① stripHtml
 
@@ -102,7 +102,7 @@ test('isPageContentExcluded：深层 shadow（shadow 里再套 shadow）也要�
 });
 
 test('接线：page-text.js 不得再用原生 closest 做排除', () => {
-  const src = fs.readFileSync('lib/page/page-text.js', 'utf8');
+  const src = fs.readFileSync('lib/page/page-text.ts', 'utf8');
   assert.ok(!/el\.closest\(PAGE_TEXT_EXCLUDE\)/.test(src), '原生 closest 到 ShadowRoot 就停，会漏掉自己的面板');
   assert.ok(/isPageContentExcluded\(el\)/.test(src), '应改用穿透 shadow 的判断');
 });

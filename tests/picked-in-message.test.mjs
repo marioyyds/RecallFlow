@@ -21,7 +21,7 @@ import {
 } from '../lib/shared/utils.js';
 
 const chatSrc = fs.readFileSync('lib/page/chat.js', 'utf8');
-const transcriptSrc = fs.readFileSync('lib/page/transcript.js', 'utf8');
+const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
 
 const onePick = {

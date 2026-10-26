@@ -220,7 +220,7 @@
     return parts.length ? parts.join(" \xB7 ") : "\u6B63\u5728\u601D\u8003\u2026";
   }
 
-  // lib/page/citation.js
+  // lib/page/citation.ts
   var PAGE_TEXT_EXCLUDE = "script,style,noscript,iframe,svg,canvas,nav,header,footer,aside,form,button,input,select,textarea,[contenteditable],.ad,.ads,.advertisement,.banner,[class*=cookie],[id*=cookie],[class*=popup],[class*=modal],#__kb-ai-host,#toast,[data-rf-injected]";
   function closestComposed(el, selector) {
     let node = el;
@@ -533,7 +533,7 @@
     return true;
   }
 
-  // lib/page/page-text.js
+  // lib/page/page-text.ts
   function extractPageText(options = {}) {
     if (options && options.visibleOnly) {
       try {
@@ -911,7 +911,8 @@
     let ref = elToRef.get(el);
     const fp = fingerprintEl(el);
     if (ref && refToEl.has(ref)) {
-      const cur = refToEl.get(ref).deref && refToEl.get(ref).deref();
+      const holder = refToEl.get(ref);
+      const cur = holder.deref ? holder.deref() : null;
       if (cur === el) {
         refFingerprint.set(ref, fp);
         return ref;
@@ -975,9 +976,10 @@
   }
   function describeElement(el, index) {
     const rect = el.getBoundingClientRect();
+    const ctl = el;
     const abs = absoluteRect(el);
     const label = normalizeSnapshotText(
-      el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.getAttribute("alt") || el.innerText || el.textContent || el.getAttribute("name") || "",
+      el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.getAttribute("alt") || ctl.innerText || el.textContent || el.getAttribute("name") || "",
       180
     );
     return {
@@ -991,13 +993,13 @@
       placeholder: el.getAttribute("placeholder") || "",
       href: el.tagName === "A" ? normalizeSnapshotText(el.getAttribute("href"), 120) : void 0,
       selector: elementSelector(el),
-      disabled: Boolean(el.disabled || el.getAttribute("aria-disabled") === "true"),
-      checked: typeof el.checked === "boolean" ? el.checked : void 0,
+      disabled: Boolean(ctl.disabled || el.getAttribute("aria-disabled") === "true"),
+      checked: typeof ctl.checked === "boolean" ? ctl.checked : void 0,
       expanded: el.hasAttribute("aria-expanded") ? el.getAttribute("aria-expanded") === "true" : void 0,
       hasPopup: el.getAttribute("aria-haspopup") || void 0,
-      valuePresent: ["INPUT", "TEXTAREA"].includes(el.tagName) ? Boolean(el.value) : void 0,
-      selectedIndex: el.tagName === "SELECT" ? el.selectedIndex : void 0,
-      selectedLabel: el.tagName === "SELECT" && el.selectedOptions && el.selectedOptions[0] ? normalizeSnapshotText(el.selectedOptions[0].textContent, 120) : void 0,
+      valuePresent: ["INPUT", "TEXTAREA"].includes(el.tagName) ? Boolean(ctl.value) : void 0,
+      selectedIndex: el.tagName === "SELECT" ? ctl.selectedIndex : void 0,
+      selectedLabel: el.tagName === "SELECT" && ctl.selectedOptions && ctl.selectedOptions[0] ? normalizeSnapshotText(ctl.selectedOptions[0].textContent, 120) : void 0,
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
       center: { x: abs.centerX, y: abs.centerY },
       inViewport: inViewport(rect)
@@ -1204,7 +1206,15 @@
       }));
       return snapshot;
     } catch (e) {
-      return { version: 2, url: location.href, title: document.title || "", elements: [], text: "", fingerprint: "error", error: e.message };
+      return {
+        version: 2,
+        url: location.href,
+        title: document.title || "",
+        elements: [],
+        text: "",
+        fingerprint: "error",
+        error: e instanceof Error ? e.message : String(e)
+      };
     }
   }
   function getInteractiveElementByRef(ref) {
@@ -1221,7 +1231,7 @@
     return el ? refFor(el) : null;
   }
 
-  // lib/shared/table.js
+  // lib/shared/table.ts
   function expandTableGrid(rows, options = {}) {
     const maxRows = Math.max(1, Number(options.maxRows) || 200);
     const maxCols = Math.max(0, Number(options.maxCols) || 0);
@@ -1285,8 +1295,8 @@
   function formatTableText(table, options = {}) {
     const maxRows = Math.max(1, Number(options.maxRows) || 40);
     const maxCellChars = Math.max(4, Number(options.maxCellChars) || 60);
-    const headers = Array.isArray(table && table.headers) ? table.headers : [];
-    const rows = Array.isArray(table && table.rows) ? table.rows : [];
+    const headers = table && Array.isArray(table.headers) ? table.headers : [];
+    const rows = table && Array.isArray(table.rows) ? table.rows : [];
     const cell = (v) => {
       const s = String(v === void 0 || v === null ? "" : v).replace(/\s+/g, " ").trim();
       return s.length > maxCellChars ? sliceSafe(s, 0, maxCellChars) + "\u2026" : s;
@@ -1305,7 +1315,7 @@
     return lines.join("\n");
   }
 
-  // lib/page/settle.js
+  // lib/page/settle.ts
   var SETTLE_DEFAULTS = Object.freeze({
     /** 静默窗口：连续这么久没有 DOM 变更就认为稳定 */
     quietMs: 180,
@@ -3088,7 +3098,7 @@
     return cmdRunJs(params || {});
   }
 
-  // lib/page/debug-capture.js
+  // lib/page/debug-capture.ts
   var debug_capture_exports = {};
   __export(debug_capture_exports, {
     getDebugBuffer: () => getDebugBuffer,
@@ -3102,7 +3112,7 @@
       if (d && d.__rfDebugRes && waiters.has(d.id)) {
         const resolve = waiters.get(d.id);
         waiters.delete(d.id);
-        resolve(d.data);
+        if (resolve) resolve(d.data);
       }
     });
   }
@@ -3743,7 +3753,7 @@
     return merged;
   }
 
-  // lib/page/transcript.js
+  // lib/page/transcript.ts
   var PARTIAL_TURN_NOTE = "\uFF08\u672C\u6BB5\u5728\u5BFC\u51FA\u65F6\u5C1A\u672A\u7ED3\u675F\uFF1A\u4EFB\u52A1\u4ECD\u5728\u8FDB\u884C\u4E2D\uFF0C\u4EE5\u4E0B\u662F\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
   var INTERRUPTED_TURN_NOTE = "\uFF08\u4EFB\u52A1\u5DF2\u4E2D\u65AD\uFF1A\u4EE5\u4E0B\u662F\u4E2D\u65AD\u524D\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
   function buildInterruptedTurn(parts, liveText, reasonText) {
@@ -3918,8 +3928,9 @@
       }
       if (v && typeof v === "object") {
         if (depth >= 3) return "\u2026";
+        const src = v;
         const o = {};
-        for (const k of Object.keys(v)) o[k] = shorten(v[k], depth + 1);
+        for (const k of Object.keys(src)) o[k] = shorten(src[k], depth + 1);
         return o;
       }
       return v;
@@ -3927,7 +3938,7 @@
     try {
       const json = JSON.stringify(shorten(args || {}, 0));
       if (json && json.length <= maxLen) return json;
-      const keys = Object.keys(args || {});
+      const keys = Object.keys(args && typeof args === "object" ? args : {});
       if (!keys.length) return "{}";
       const out = {};
       out[OMIT_ARGS_KEY] = "\u53C2\u6570\u8FC7\u957F\uFF0C\u5B57\u6BB5\uFF1A" + keys.slice(0, 8).join(", ") + "\uFF08\u5176\u4F59\u672A\u5217\u51FA\uFF09";
@@ -4062,11 +4073,11 @@
     return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
 
-  // lib/page/render-scheduler.js
+  // lib/page/render-scheduler.ts
   var FRAME_FALLBACK_MS = 32;
   function createFrameScheduler(options = {}) {
     const requestFrame = options.requestFrame || (typeof requestAnimationFrame === "function" ? (cb) => requestAnimationFrame(cb) : (cb) => setTimeout(cb, 16));
-    const cancelFrame = options.cancelFrame || (typeof cancelAnimationFrame === "function" ? (h) => cancelAnimationFrame(h) : (h) => clearTimeout(h));
+    const cancelFrame = options.cancelFrame || (typeof cancelAnimationFrame === "function" ? (h) => cancelAnimationFrame(Number(h)) : (h) => clearTimeout(h));
     const setFallbackTimer = options.setFallbackTimer || ((cb, ms) => typeof setTimeout === "function" ? setTimeout(cb, ms) : null);
     const clearFallbackTimer = options.clearFallbackTimer || ((h) => {
       if (typeof clearTimeout === "function") clearTimeout(h);
@@ -4131,7 +4142,7 @@
     };
   }
 
-  // lib/shared/lru.js
+  // lib/shared/lru.ts
   function createLruCache(max) {
     const limit = Math.max(1, Math.floor(Number(max) || 1));
     const map = /* @__PURE__ */ new Map();
@@ -4171,7 +4182,7 @@
     };
   }
 
-  // lib/page/save-clean.js
+  // lib/page/save-clean.ts
   var HOST_ID = "__kb-ai-host";
   var SUSPEND_ATTR = "data-rf-export-hidden";
   var SAFETY_RESTORE_MS = 6e4;
@@ -4861,7 +4872,7 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  // lib/page/panel-css.js
+  // lib/page/panel-css.ts
   var PANEL_CSS = `
     :host { all: initial; }
     /* \u5B58\u6863\u81EA\u6BC1\u95F8 \u2014\u2014 \u522B\u5220\u8FD9\u6761\u3002
@@ -5435,7 +5446,7 @@
     }
 `;
 
-  // lib/page/panel-layout.js
+  // lib/page/panel-layout.ts
   var PANEL_POS_KEY = "recallflow-panel-pos";
   var PANEL_SIZE_KEY = "recallflow-panel-size";
   var PANEL_MIN_WIDTH = 280;
@@ -5463,9 +5474,11 @@
       height: Math.max(1, Math.min(vh - PANEL_VIEWPORT_INSET, Math.max(PANEL_MIN_HEIGHT, height)))
     };
   }
+  function emptySnapshot() {
+    return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+  }
   function readPanelLayout(storage) {
-    const empty = { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
-    if (!storage) return empty;
+    if (!storage) return emptySnapshot();
     let pos = null;
     let size = null;
     try {
@@ -5478,7 +5491,7 @@
     } catch (e) {
       size = null;
     }
-    const out = Object.assign({}, empty);
+    const out = emptySnapshot();
     if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
     if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
     if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
@@ -5857,7 +5870,7 @@
     }
   }
 
-  // lib/page/fab-position.js
+  // lib/page/fab-position.ts
   var FAB_POSITION_KEY = "recallflow.fab-position.v1";
   var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
   var FAB_EDGE_GAP = 8;
@@ -5938,7 +5951,7 @@
       if (!storage || !storage.local) return;
       try {
         const pending = storage.local.set({ [FAB_POSITION_KEY]: { ratio, updatedAt: now() } });
-        if (pending && pending.catch) pending.catch(() => {
+        if (pending && typeof pending.catch === "function") pending.catch(() => {
         });
       } catch (e) {
       }
@@ -5948,7 +5961,8 @@
       if (storage && storage.local) {
         try {
           const stored = await storage.local.get(FAB_POSITION_KEY);
-          let r = normalizeFabRatio(stored && stored[FAB_POSITION_KEY] && stored[FAB_POSITION_KEY].ratio);
+          const savedEntry = stored ? stored[FAB_POSITION_KEY] : void 0;
+          let r = normalizeFabRatio(savedEntry && savedEntry.ratio);
           if (r == null) {
             const legacy = legacyRatio();
             if (legacy != null) {

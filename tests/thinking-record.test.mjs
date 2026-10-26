@@ -15,7 +15,7 @@ import fs from 'node:fs';
 
 const chatSrc = fs.readFileSync('lib/page/chat.js', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
-const cssSrc = fs.readFileSync('lib/page/panel-css.js', 'utf8');
+const cssSrc = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
 const bundle = fs.readFileSync('content.js', 'utf8');
 
 // ---------------------------------------------------------------- 后台侧

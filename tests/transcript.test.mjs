@@ -24,7 +24,7 @@ import {
   MAX_PART_RESULT_CHARS,
   MAX_MESSAGE_CONTENT_CHARS,
   PARTIAL_TURN_NOTE,
-} from '../lib/page/transcript.js';
+} from '../lib/page/transcript.ts';
 
 const wrap = (conversation, extra = {}) =>
   buildTranscript({ title: 'T', url: 'https://e.test/', exportedAt: '2026-01-01 00:00:00', conversation, ...extra });

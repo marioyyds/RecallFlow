@@ -132,8 +132,9 @@ export function expandTableGrid(rows: readonly (readonly TableCellInput[])[], op
 export function formatTableText(table: { headers?: string[]; rows?: string[][] }, options: { maxRows?: number; maxCellChars?: number } = {}): string {
   const maxRows = Math.max(1, Number(options.maxRows) || 40);
   const maxCellChars = Math.max(4, Number(options.maxCellChars) || 60);
-  const headers = Array.isArray(table.headers) ? table.headers : [];
-  const rows = Array.isArray(table.rows) ? table.rows : [];
+  // 先判 table 本身：调用方可能直接传 null/undefined，而 `table.headers` 会抛。
+  const headers = table && Array.isArray(table.headers) ? table.headers : [];
+  const rows = table && Array.isArray(table.rows) ? table.rows : [];
   const cell = (v: unknown) => {
     const s = String(v === undefined || v === null ? '' : v).replace(/\s+/g, ' ').trim();
     // ⚠ 必须用 sliceSafe，不能直接 slice：这里是**一次线上 400 事故的触发点**。

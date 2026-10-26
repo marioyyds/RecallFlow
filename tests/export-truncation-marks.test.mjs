@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import {
   serializeConversationMessages,
   serializeCompleteConversationMessages,
-} from '../lib/page/transcript.js';
+} from '../lib/page/transcript.ts';
 
 test('导出序列化：消息条数被截断时**必须留痕**（否则下游计数看起来像整个会话）', () => {
   const conv = [];

@@ -33,11 +33,10 @@ const STEPS = [
       'integrations/opencode/recallflow-mcp/test/*.test.mjs',
     ],
   },
-  // ▼ `tsc --noEmit` 门禁**刻意不在这里**：当前仓库 0 个 .ts 文件，纳入就是一条
-  // 永远为绿的假闸（门禁不运行等于不存在，运行了却永远绿更坏 —— 会让人以为有网接着）。
-  // 纳入门禁的时点：Batch 1 首批 .ts 落地的**同一提交**，且必须先在坏样本上证明它会红。
-  // 到时在这里补：{ name: '门禁：TypeScript 类型检查', cmd: process.execPath,
-  //                 args: ['node_modules/typescript/bin/tsc', '--noEmit'] }
+  // `tsc --noEmit`：Batch 1a（TITA-74）首批 .ts 落地时，与它们**同一提交**进 STEPS。
+  // 在此之前它是一条永远为绿的假闸，故刻意不挂；现在 include 里已有 12 个 .ts。
+  // 进 STEPS 前已在坏样本上验证过它会红（见 TITA-74 交付评论 §5）。
+  { name: '门禁：TypeScript 类型检查', cmd: process.execPath, args: ['node_modules/typescript/bin/tsc', '--noEmit'] },
   { name: '门禁：对 const 赋值', cmd: process.execPath, args: ['scripts/check-const-assign.mjs'] },
   { name: '门禁：请求前缀稳定性', cmd: process.execPath, args: ['scripts/check-prefix-stability.mjs'] },
   { name: '门禁：变异测试（断言是否真有牙齿）', cmd: process.execPath, args: ['scripts/mutation-check.mjs'] },

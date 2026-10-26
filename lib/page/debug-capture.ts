@@ -10,7 +10,7 @@ if (typeof window !== 'undefined') {
     if (d && d.__rfDebugRes && waiters.has(d.id)) {
       const resolve = waiters.get(d.id);
       waiters.delete(d.id);
-      resolve(d.data);
+      if (resolve) resolve(d.data);
     }
   });
 }

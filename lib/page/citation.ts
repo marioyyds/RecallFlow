@@ -24,8 +24,8 @@ export function closestComposed(el: Node | null, selector: string): Element | nu
   let node: Node | null = el;
   try {
     while (node && node.nodeType === 1) {
-      const asElement = node as Element;
-      if (asElement.matches && asElement.matches(selector)) return asElement;
+      // 断言擦除后这里回到原来的 `node.matches(...)`，产物字节不变。
+      if ((node as Element).matches && (node as Element).matches(selector)) return node as Element;
       const parent = node.parentNode as Node & { host?: Element } | null;
       // ShadowRoot 的 nodeType 是 11，它的宿主才在上一层文档树里。
       if (parent && parent.nodeType === 11 && parent.host) node = parent.host;

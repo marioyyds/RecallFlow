@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { waitForSettle, normalizeSettleOptions, SETTLE_DEFAULTS } from '../lib/page/settle.js';
+import { waitForSettle, normalizeSettleOptions, SETTLE_DEFAULTS } from '../lib/page/settle.ts';
 
 // 可控的假时钟 + 假定时器：让「静默/超时」的比较在测试里确定且瞬时。
 function makeHarness() {

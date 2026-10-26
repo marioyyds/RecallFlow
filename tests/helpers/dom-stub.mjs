@@ -511,7 +511,7 @@ export function createWindowStub(doc) {
   win.scrollY = 0;
   win.devicePixelRatio = 1;
   // 布局视口（不含滚动条）也按同一个视口给。页面侧有代码用
-  // `documentElement.clientWidth` 做几何判定（气泡悬浮热区，见 lib/page/fab-position.js）：
+  // `documentElement.clientWidth` 做几何判定（气泡悬浮热区，见 lib/page/fab-position.ts）：
   // 桩若给 0，那条判定会**恒假**，于是"鼠标还在气泡上"这件事永远检测不到。
   if (doc.documentElement) {
     doc.documentElement.clientWidth = win.innerWidth;

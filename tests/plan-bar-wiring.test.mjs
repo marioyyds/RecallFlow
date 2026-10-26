@@ -129,7 +129,7 @@ test('计划条样式**不得**限定高度或内层滚动 —— 改为收起/�
   // 步骤一多它就变成一个小滚动框，既难看又要二次滚动。
   // 用户明确要求「换一种」，于是改为「默认收成一行 / 点击展开全部」，
   // 展开时不设高度上限 —— 因此任何情况下都不该再有内层滚动条。
-  const css = fs.readFileSync('lib/page/panel-css.js', 'utf8');
+  const css = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
   const block = /\.agent-plan-bar\s*\{([^}]*)\}/.exec(css);
   assert.ok(block, '缺少 .agent-plan-bar 样式');
   assert.ok(!/max-height/.test(block[1]), '计划条不该再限高：' + block[1].trim());

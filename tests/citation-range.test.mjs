@@ -18,7 +18,7 @@ globalThis.document = {
   }),
 };
 
-const { findRangeBySubstr, normalizeCitationText } = await import('../lib/page/citation.js');
+const { findRangeBySubstr, normalizeCitationText } = await import('../lib/page/citation.ts');
 
 /** 按 buildPageCharMap 的规则造一个假 map：逐字符归一、跳过空白。 */
 function fakeMap(raw) {

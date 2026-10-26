@@ -24,7 +24,7 @@ import {
   sliceSafe,
   rangeSafe,
 } from '../lib/shared/surrogates.js';
-import { formatTableText } from '../lib/shared/table.js';
+import { formatTableText } from '../lib/shared/table.ts';
 import { buildCollapsed, collapseOldToolResults } from '../lib/assistant/context.js';
 import { expandResult } from '../lib/assistant/run-state-tools.js';
 import { streamAgentStep } from '../lib/assistant/agent.js';
@@ -256,7 +256,7 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
   // 这几个点是**按码元下标截断页面原文**的地方，是事故的高发区。
   // 用正则钉住"不许再出现裸 slice"：改回去就会红（和 vision-wiring 那类门禁同款）。
   assert.doesNotMatch(read('lib/assistant/agent.js'), /\.slice\(0,\s*3000\)/, 'agent.js 的两处 3000 字截断都要走 sliceSafe');
-  assert.doesNotMatch(read('lib/shared/table.js'), /\.slice\(0,\s*maxCellChars\)/, '表格单元格截断必须走 sliceSafe（本次事故的触发点）');
+  assert.doesNotMatch(read('lib/shared/table.ts'), /\.slice\(0,\s*maxCellChars\)/, '表格单元格截断必须走 sliceSafe（本次事故的触发点）');
   assert.doesNotMatch(read('lib/assistant/context.js'), /body\.slice\(/, '折叠的头尾切片必须走 sliceSafe');
   assert.doesNotMatch(read('lib/assistant/run-state-tools.js'), /String\(text\)\.slice\(/, 'expand_result 必须走 rangeSafe（offset 由模型给）');
   assert.doesNotMatch(read('lib/assistant/tools.js'), /fromCharCode\(parseInt\(/, 'HTML 数字实体必须用 fromCodePoint');

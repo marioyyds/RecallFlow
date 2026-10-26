@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PANEL_CSS } from '../lib/page/panel-css.js';
+import { PANEL_CSS } from '../lib/page/panel-css.ts';
 
 /** 取出某个选择器的规则体（要求 `{` 紧跟选择器，故 `.panel.dark` 不会误配 `.panel`）。 */
 function ruleBody(selector) {
