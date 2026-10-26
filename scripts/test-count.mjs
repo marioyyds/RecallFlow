@@ -38,6 +38,25 @@ function countTestFiles() {
   return files.length;
 }
 
+/**
+ * 同两个目录里**任何测试后缀**（.test.mjs / .test.ts / .test.mts …）的文件数。
+ *
+ * 存在的唯一理由是给 `files.total` 当对照：TS 迁移期一旦有人把测试文件改成 `.test.ts`，
+ * 上面的 `countTestFiles()`（只认 `.test.mjs`）会**少算一个**，而所有棘轮都是「只许减不许增」，
+ * 于是门禁变弱却不吭声（预研报告 §3.4 的 R2）。两个数字对不上就说明有文件从统计里消失了。
+ */
+export function countTestFilesAnyExt() {
+  const files = [];
+  for (const pattern of GLOBS) {
+    const dir = path.join(ROOT, path.dirname(pattern));
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir)) {
+      if (/\.test\.[cm]?[jt]s$/.test(f)) files.push(f);
+    }
+  }
+  return files.length;
+}
+
 /** 运行测试并解析 node:test 的汇总行。仅在 --write / 默认模式调用。 */
 export function collectTestCount() {
   const r = spawnSync(process.execPath, ['--test', ...GLOBS], { cwd: ROOT, encoding: 'utf8' });
@@ -104,6 +123,18 @@ function main() {
     const payload = Object.assign({}, info, {
       files: { total: kinds.behavior + kinds.static, behavior: kinds.behavior, static: kinds.static },
     });
+    // 自检（L-22 口径）：files.total 必须等于实际测试文件数，且不许有文件「换了个后缀就消失」。
+    // 这里的两个数字来自**两套独立枚举**（只认 .test.mjs 的 / 任何测试后缀的），
+    // 对不上就拒绝写快照 —— 否则一个改名的测试文件会让棘轮静默变松。
+    const anyExt = countTestFilesAnyExt();
+    if (payload.files.total !== anyExt) {
+      process.stderr.write(
+        '[test-count] files.total（' + payload.files.total + '）与实际测试文件数（' + anyExt +
+          '）不一致：有文件不在统计口径内（多半是被改成了 .test.ts 之类的其他后缀）。\n' +
+          '  修法：把它的后缀纳入 scripts/test-count.mjs 的枚举，而不是忽略这个报错。\n'
+      );
+      process.exit(1);
+    }
     fs.writeFileSync(SNAPSHOT, JSON.stringify(payload, null, 2) + '\n');
     console.log(
       '已写入 ' + path.relative(ROOT, SNAPSHOT) + '：' + info.tests + ' 项 / ' +

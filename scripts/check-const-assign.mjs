@@ -46,7 +46,29 @@ const ROOTS = ['.'];
 const SKIP = /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|\.min\.js$/;
 // 生成物（源码在 entries/ 下）；按相对路径精确排除，避免误伤未来同名源码。
 const GENERATED = new Set(['content.js']);
-const EXTENSIONS = ['.js', '.mjs'];
+// TS 迁移期（TITA-73 / Batch 0）：必须把 .ts / .mts 纳入扫描集。
+//
+// 不加的后果是**静默失效**，不是报错：文件一改名成 .ts，这道闸既不红也不报警，
+// 只是从此不再覆盖它 —— 而「对 const 赋值」是运行时必崩（Assignment to constant variable）
+// 且 node --check 与单测都抓不到的一类问题，少了覆盖等于防线整段消失。
+// 这正是 TITA-70 预研报告列的 R1（唯一一条标红的静默失效）。
+const EXTENSIONS = ['.js', '.mjs', '.ts', '.mts'];
+
+// 声明收集正则（TS 版）。
+//
+// 旧的写法要求名字后紧跟 `= ; , ) ] }` 之一：
+//     /\b(const|let|var)\s+(\w+)\s*(?=[=;,)\]}])/
+// 于是 `const total: number = 1` 这种**带类型标注**的声明一个都收集不到
+// （名字后面是 `:`，不在那个集合里）—— 既不登记 const，也就永远不会报它的赋值。
+// 预研实测：4 个带标注的样本（`total: number` / `Opts` / `Array<Map<...>>` /
+// `(a: string) => boolean`）在旧正则下 **0/4 检出**。
+//
+// 修法：名字后允许一个可选的 `: 类型` 片段，再接原来的 lookahead。
+// 类型片段的字符集刻意**只放类型里会出现的字符**（不放 `?` 之外的语法符号、
+// 不放引号），这样普通 JS 代码不会被它吃掉；放不放 `=` 都无所谓 ——
+// 真正决定「哪里结束」的是后面那个 lookahead，捕获组只取名字。
+export const DECL_RE =
+  /\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[A-Za-z_$(][\w$<>|&(),\[\]{}\.\s:=>]*)?(?=[=;,)\]}])/g;
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -238,8 +260,8 @@ export function findConstAssignments(roots = ROOTS) {
 
       for (let i = 0; i < lines.length; i++) {
         const code = lines[i];
-        // 声明：允许有/无初始化，允许 of/in
-        for (const m of code.matchAll(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?=[=;,)\]}])/g)) note(m[2], m[1], i + 1);
+        // 声明：允许有/无初始化，允许 of/in，允许类型标注（见文件头 DECL_RE 的说明）
+        for (const m of code.matchAll(DECL_RE)) note(m[2], m[1], i + 1);
         for (const m of code.matchAll(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s+(?:of|in)\b/g)) note(m[2], m[1], i + 1);
         // 解构声明：`let [sw] = ...` / `const { a, b } = ...` / `const [a, b] = ...`。
         // 为什么必须单独处理：上面的正则要求标识符后紧跟 `=` 或 `,` 等，

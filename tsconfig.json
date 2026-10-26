@@ -47,8 +47,19 @@
     // @types/* 内部的问题不关我们的事，别让它们挡住自己的报错。
     "skipLibCheck": true,
     // 只自动引入 MV3 的 chrome.* 与 Node 类型，不让 @types/* 里的其他东西混进全局。
-    // @types/node 钉 ^22：与 .github/workflows/checks.yml 的 setup-node '22' 对齐，
-    // 这样「本地 Node 24 能过、CI 过不了」会先在 tsc 这里报出来。
+    //
+    // 与 TITA-70 报告 §4.4 Batch 0 项 1 的 delta：报告写的是 `types: ["chrome"]`，
+    // 这里多一个 "node"。保留理由（TITA-71 的既有选择，本批不动）：
+    //   include 里的 `entries/**` 与 `lib/shared/**` 有模块同时被 Node 侧脚本
+    //   （scripts/、tests/）与浏览器侧引用，缺 node 类型会在这些文件出现
+    //   `Cannot find name 'process'` 一类噪音。加了不引入额外全局语义
+    //   （`types` 只控制**自动引入**哪些 @types/*，不影响 lib 与模块解析）。
+    //
+    // ⚠ 已知的**版本差**（本批刻意未动，属 Batch 5 收口项）：
+    //   package.json 里 `@types/node` 钉的是 `^22.x`，而 CI 的 setup-node 已改为
+    //   `'24'`（见 .github/workflows/checks.yml）。即「用 Node 22 的类型检查跑在
+    //   Node 24 上」。当前 include 不含 `scripts/**` / `tests/**`，所以 tsc 结果
+    //   不受影响（实测 exit 0）；等 include 扩到这两处时，应先把 @types/node 抬到 ^24。
     "types": ["chrome", "node"],
     "forceConsistentCasingInFileNames": true
   },

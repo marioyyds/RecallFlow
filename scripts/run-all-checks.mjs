@@ -17,8 +17,27 @@ const STEPS = [
   {
     name: '单元测试（含 MCP）',
     cmd: process.execPath,
-    args: ['--test', 'tests/*.test.mjs', 'integrations/opencode/recallflow-mcp/test/*.test.mjs'],
+    // `--import ./scripts/ts-resolve-reg.mjs`：TS 迁移期挂上 resolve hook，
+    // 让 importer 里仍写 `.js` 的 specifier 能解析到已改名的 `.ts`（详见该文件头注释）。
+    // 没有它，「A 把文件改成 .ts、B 还没改 import 后缀」的中间态会直接
+    // ERR_MODULE_NOT_FOUND —— 而那正是两个 Dev 并行迁移时的常态。
+    // 放在 `--test` 前面：node --test 会为每个测试文件起子进程，
+    // 实测 execArgv（含 --import）会传下去（2026-10-26 用临时样本验证过）。
+    // ⚠ 迁移期脚手架：Batch 5 收口（全部 specifier 改成真实后缀）时连同
+    //   scripts/ts-resolve.mjs / ts-resolve-reg.mjs 一起删掉这一项。
+    args: [
+      '--import',
+      './scripts/ts-resolve-reg.mjs',
+      '--test',
+      'tests/*.test.mjs',
+      'integrations/opencode/recallflow-mcp/test/*.test.mjs',
+    ],
   },
+  // ▼ `tsc --noEmit` 门禁**刻意不在这里**：当前仓库 0 个 .ts 文件，纳入就是一条
+  // 永远为绿的假闸（门禁不运行等于不存在，运行了却永远绿更坏 —— 会让人以为有网接着）。
+  // 纳入门禁的时点：Batch 1 首批 .ts 落地的**同一提交**，且必须先在坏样本上证明它会红。
+  // 到时在这里补：{ name: '门禁：TypeScript 类型检查', cmd: process.execPath,
+  //                 args: ['node_modules/typescript/bin/tsc', '--noEmit'] }
   { name: '门禁：对 const 赋值', cmd: process.execPath, args: ['scripts/check-const-assign.mjs'] },
   { name: '门禁：请求前缀稳定性', cmd: process.execPath, args: ['scripts/check-prefix-stability.mjs'] },
   { name: '门禁：变异测试（断言是否真有牙齿）', cmd: process.execPath, args: ['scripts/mutation-check.mjs'] },

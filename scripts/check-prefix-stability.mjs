@@ -25,9 +25,27 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripStringsAndComments } from './check-const-assign.mjs';
 
-export const TARGET = 'lib/assistant/agent.js';
-const LOOP_RE = /for\s*\(\s*let\s+iter\s*=\s*resumeIteration/;
-const PLAN_FN_RE = /const\s+injectPlanMessage\s*=/;
+// 迁移期（TITA-73 / Batch 0）：agent.js 随时可能先被改成 agent.ts，
+// 因此目标路径**按存在性二选一**，而不是写死一个后缀。
+// 顺序上 .ts 优先：改名之后两个文件并存（git 里留着旧的）的窗口里，
+// 检查的应该是**正在用**的那一份。
+// 抽成纯函数是为了能在测试里直接喂 exists 谓词 —— 否则「改名后选中哪一份」
+// 这个行为只能靠真去改仓库文件才能验证。
+export const TARGET_CANDIDATES = ['lib/assistant/agent.ts', 'lib/assistant/agent.js'];
+export function pickTarget(exists) {
+  return TARGET_CANDIDATES.find(exists) || TARGET_CANDIDATES[TARGET_CANDIDATES.length - 1];
+}
+export const TARGET = pickTarget((f) => fs.existsSync(f));
+
+// 两个锚点正则都允许一个可选的 `: 类型` 片段：
+// `let iter: number = resumeIteration` / `const injectPlanMessage: () => void = ...`。
+// 旧写法要求名字后紧跟 `=`，加标注后锚点**一个都匹配不上**：
+// LOOP_RE 失配会走 R0「未找到主循环」而显式报错（这条还算好，是高声失败），
+// 但 PLAN_FN_RE 失配只让 planFnStart 变成 -1，于是本来合法的那一处
+// splice 被判成「出现在 injectPlanMessage 之外」—— 报错指向的行和实际原因
+// 隔了上千行，属于最难排查的那一类。
+const LOOP_RE = /for\s*\(\s*let\s+iter\s*(?::\s*[^=;]+)?=\s*resumeIteration/;
+const PLAN_FN_RE = /const\s+injectPlanMessage\s*(?::\s*[^=;]+)?=/;
 
 /** 从 startIdx 行开始，找到第一个平衡的 `}` 所在行号（含嵌套块）。 */
 function findBlockEnd(lines, startIdx) {
