@@ -246,7 +246,7 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
   const paths = [
     ['lib/assistant/agent.js', read('lib/assistant/agent.js')],
     ['lib/assistant/llm.js', read('lib/assistant/llm.js')],
-    ['background.js', read('background.js')],
+    ['entries/background.js', read('entries/background.js')],
   ];
   for (const [name, src] of paths) {
     assert.match(src, /surrogates\.js/, name + ' 必须复用 surrogates 模块（别各写一份判据）');

@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "types": ["chrome", "node"]
+  },
+  "include": [
+    "lib/page/markdown.js",
+    "lib/assistant/run-hub.js",
+    "lib/shared/utils.js",
+    "lib/shared/surrogates.js",
+    "lib/shared/constants.js",
+    "lib/shared/editable-text.js",
+    "lib/shared/screenshot-store.js",
+    "lib/shared/settings.js",
+    "lib/shared/handoff.js",
+    "lib/userscript/*.js"
+  ],
+  "exclude": ["node_modules"]
+}

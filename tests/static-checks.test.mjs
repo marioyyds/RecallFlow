@@ -94,7 +94,7 @@ test('注释不许把下一行代码吃掉（注释里出现"紧贴着声明关�
     }
   };
   for (const r of roots) if (existsSync(r)) walk(r);
-  for (const f of ['background.js', 'popup.js', 'options.js', 'manager.js', 'skills-page.js', 'userscripts.js']) {
+  for (const f of ['entries/background.js', 'entries/popup.js', 'entries/options.js', 'entries/manager.js', 'entries/skills-page.js', 'entries/userscripts.js']) {
     if (existsSync(f)) files.push(f);
   }
   const bad = [];
@@ -130,13 +130,28 @@ test('扫描范围覆盖根目录文件与 .mjs（原先只有 lib/ 与 .js，�
   // 这里把「覆盖面」本身钉住 —— 否则将来有人把范围改回去，不会有人发现。
   const { files, scanned } = findConstAssignments();
   assert.ok(scanned > 100, '应扫描整个仓库（含根目录与 tests/scripts），实际 ' + scanned);
-  for (const expected of ['background.js', 'popup.js']) {
-    assert.ok(files.includes(expected), '根目录文件应被扫描：' + expected);
+  for (const expected of ['entries/background.js', 'entries/popup.js']) {
+    assert.ok(files.includes(expected), '入口源码应被扫描：' + expected);
   }
   // content.js 现在是 scripts/build-content.mjs 的**构建产物**，源码在 entries/content.ts。
   // 检查产物等于检查生成器，因此源码必须被扫描、产物必须被跳过（否则 3721 处假阳性）。
   assert.ok(files.includes('entries/content.ts'), '内容脚本源码应被扫描');
   assert.ok(!files.includes('content.js'), '构建产物不应被扫描（会产生大量假阳性）');
+  // TITA-78（Batch 2）：浏览器入口同样变成**构建产物**（scripts/build-entries.mjs），
+  // 源码在 entries/。这条断言把「产物必须被跳过」从 content.js 一条扩到整组 ——
+  // 否则 bundle 里名字相近的局部变量会让本检查器产生大量假阳性，把真信号淹掉。
+  for (const artifact of [
+    'background.js',
+    'popup.js',
+    'options.js',
+    'manager.js',
+    'skills-page.js',
+    'userscripts.js',
+    'lib/userscript/runner.js',
+  ]) {
+    assert.ok(!files.includes(artifact), '入口产物不应被扫描：' + artifact);
+  }
+  assert.ok(files.includes('entries/userscript-runner.js'), '注入用运行时脚本的源码应被扫描');
   assert.ok(files.some((f) => f.endsWith('.mjs')), '应扫描 .mjs 文件（门禁脚本与测试都是 .mjs）');
   assert.ok(files.some((f) => f.startsWith('scripts/')), '应扫描 scripts/');
   assert.ok(!files.some((f) => f.includes('node_modules')), '不应扫描 node_modules');

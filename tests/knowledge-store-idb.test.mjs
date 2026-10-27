@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const store = fs.readFileSync('lib/shared/store.js', 'utf8');
-const manager = fs.readFileSync('manager.js', 'utf8');
-const popup = fs.readFileSync('popup.js', 'utf8');
+const manager = fs.readFileSync('entries/manager.js', 'utf8');
+const popup = fs.readFileSync('entries/popup.js', 'utf8');
 const e2e = fs.readFileSync('tests/e2e/helpers.mjs', 'utf8');
 
 test('知识库主存储是 IndexedDB，并拆分为 entries / documents / meta', () => {

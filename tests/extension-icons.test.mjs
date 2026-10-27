@@ -70,7 +70,7 @@ test('128 图标体积合理（避免误把超大图当图标提交）', () => {
 });
 
 test('通知图标也必须是位图（chrome.notifications 与 manifest 同一条约束）', () => {
-  const bg = fs.readFileSync(path.join(ROOT, 'background.js'), 'utf8');
+  const bg = fs.readFileSync(path.join(ROOT, 'entries/background.js'), 'utf8');
   const m = bg.match(/iconUrl:\s*chrome\.runtime\.getURL\(\s*'([^']+)'/);
   assert.ok(m, 'background.js 里应能找到通知的 iconUrl');
   assert.ok(

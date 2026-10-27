@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 const AGENT = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
 const CHAT = fs.readFileSync(new URL('../lib/page/chat.ts', import.meta.url), 'utf8');
-const BACKGROUND = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+const BACKGROUND = fs.readFileSync(new URL('../entries/background.js', import.meta.url), 'utf8');
 
 function functionSlice(src, startNeedle, endNeedle) {
   const at = src.indexOf(startNeedle);

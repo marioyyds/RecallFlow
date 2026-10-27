@@ -45,7 +45,21 @@ const ROOTS = ['.'];
 //    实测扫出 3721 处假阳性，把真正的信号淹没了。
 const SKIP = /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|\.min\.js$/;
 // 生成物（源码在 entries/ 下）；按相对路径精确排除，避免误伤未来同名源码。
-const GENERATED = new Set(['content.js']);
+//
+// TITA-78（Batch 2）起浏览器入口也变成构建产物（`scripts/build-entries.mjs`）：
+// 它们的源码同样在 `entries/`，产物落在仓库根 / `lib/userscript/runner.js`。
+// 不排除的后果与 `content.js` 同型 —— 扫产物等于扫生成器，且 bundle 里
+// 大量「名字相近的局部变量」会被本检查器的保守策略误判。
+const GENERATED = new Set([
+  'content.js',
+  'background.js',
+  'popup.js',
+  'options.js',
+  'manager.js',
+  'skills-page.js',
+  'userscripts.js',
+  'lib/userscript/runner.js',
+]);
 // TS 迁移期（TITA-73 / Batch 0）：必须把 .ts / .mts 纳入扫描集。
 //
 // 不加的后果是**静默失效**，不是报错：文件一改名成 .ts，这道闸既不红也不报警，

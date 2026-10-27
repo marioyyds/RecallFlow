@@ -48,8 +48,18 @@ const stripComments = (s) => String(s).replace(/\/\*[\s\S]*?\*\//g, '').replace(
  *    除了把它读进来逐字节比，没有别的判据 —— 它不是「用静态断言替代行为断言」，
  *    而是「这个文件就是被测对象」。注意它**同时**有 compareBundle / checkBundle 的
  *    合成数据用例（那些是真行为断言），读盘只占其中一条。
+ *  · entries-build（TITA-78）—— 与上一条同型：被测对象是 7 个**入口构建产物**与
+ *    `manifest.json` / 5 个 HTML 里的引用路径。「产物是不是源码打出来的那份」
+ *    「manifest 引用的文件名有没有对应产物」只有读盘能回答。它同样带
+ *    checkEntryArtifact / compareEntry 的合成坏样本用例（真行为断言）。
  */
-const EXEMPT = new Set([SELF, 'module-references.test.mjs', 'mutation-guard.test.mjs', 'content-bundle-freshness.test.mjs']);
+const EXEMPT = new Set([
+  SELF,
+  'module-references.test.mjs',
+  'mutation-guard.test.mjs',
+  'content-bundle-freshness.test.mjs',
+  'entries-build.test.mjs',
+]);
 
 function scan(dir = TEST_DIR) {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.test.mjs') && !EXEMPT.has(f));

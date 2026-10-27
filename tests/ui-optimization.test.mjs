@@ -13,11 +13,11 @@ const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const optionsHtml = fs.readFileSync('options.html', 'utf8');
 const optionsCss = fs.readFileSync('options.css', 'utf8');
 const managerCss = fs.readFileSync('manager.css', 'utf8');
-const skills = fs.readFileSync('skills-page.js', 'utf8');
+const skills = fs.readFileSync('entries/skills-page.js', 'utf8');
 const skillsHtml = fs.readFileSync('skills.html', 'utf8');
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
-const popup = fs.readFileSync('popup.js', 'utf8');
-const background = fs.readFileSync('background.js', 'utf8');
+const popup = fs.readFileSync('entries/popup.js', 'utf8');
+const background = fs.readFileSync('entries/background.js', 'utf8');
 const managerHtml = fs.readFileSync('manager.html', 'utf8');
 
 test('对话输入框：输入法组词阶段的 Enter 不得发送消息', () => {
@@ -51,7 +51,7 @@ test('设置页：保留保存按钮逻辑，同时提供 sticky 保存栏、脏
   assert.match(optionsHtml, /id="save-state"/);
   assert.match(optionsCss, /\.actions\s*\{[^}]*position:\s*sticky/s);
   assert.match(optionsCss, /\.save-state\.dirty/);
-  assert.match(fs.readFileSync('options.js', 'utf8'), /ctrlKey \|\| e\.metaKey/);
+  assert.match(fs.readFileSync('entries/options.js', 'utf8'), /ctrlKey \|\| e\.metaKey/);
   assert.ok(!/\*\*只有 deepseek-reasoner/.test(optionsHtml), '设置说明不应把 Markdown 星号原样显示');
 });
 

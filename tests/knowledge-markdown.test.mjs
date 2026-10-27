@@ -10,13 +10,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const managerHtml = fs.readFileSync('manager.html', 'utf8');
-const managerJs = fs.readFileSync('manager.js', 'utf8');
+const managerJs = fs.readFileSync('entries/manager.js', 'utf8');
 const managerCss = fs.readFileSync('manager.css', 'utf8');
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
-const popupJs = fs.readFileSync('popup.js', 'utf8');
+const popupJs = fs.readFileSync('entries/popup.js', 'utf8');
 
 test('知识库复用安全 Markdown 渲染器', () => {
-  assert.match(managerJs, /import \{ renderMarkdown \} from '\.\/lib\/page\/markdown\.js'/);
+  assert.match(managerJs, /import \{ renderMarkdown \} from '\.\.\/lib\/page\/markdown\.js'/);
   assert.match(managerJs, /renderMarkdown\(String\(item\.note\), null, false\)/);
 });
 

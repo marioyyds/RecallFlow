@@ -151,7 +151,7 @@ test('被豁免的模块必须真的被**生产代码**用到（否则它是死�
   const sources = [
     ...walk(path.join(ROOT, 'lib')),
     ...walk(path.join(ROOT, 'entries')),
-    ...['background.js', 'manager.js', 'options.js', 'popup.js', 'skills-page.js', 'userscripts.js'].map((f) =>
+    ...['entries/background.js', 'entries/manager.js', 'entries/options.js', 'entries/popup.js', 'entries/skills-page.js', 'entries/userscripts.js'].map((f) =>
       path.join(ROOT, f)
     ),
     path.join(ROOT, 'manifest.json'),

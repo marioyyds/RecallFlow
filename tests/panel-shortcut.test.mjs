@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-const background = fs.readFileSync('background.js', 'utf8');
+const background = fs.readFileSync('entries/background.js', 'utf8');
 
 test('扩展注册 Alt+Shift+R 打开/关闭对话面板', () => {
   assert.deepEqual(manifest.commands['toggle-panel'].suggested_key, { default: 'Alt+Shift+R' });

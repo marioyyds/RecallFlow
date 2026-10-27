@@ -34,7 +34,7 @@ test('pageTokens: 页数少时全列，页数多时用省略号收窄', () => {
 });
 
 test('知识库页面接入分页并按 12 条切页', () => {
-  const manager = fs.readFileSync('manager.js', 'utf8');
+  const manager = fs.readFileSync('entries/manager.js', 'utf8');
   const html = fs.readFileSync('manager.html', 'utf8');
   assert.match(html, /id="kb-pagination"/);
   assert.match(manager, /const KB_PAGE_SIZE = 12/);
