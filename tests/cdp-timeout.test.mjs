@@ -133,7 +133,7 @@ test('⑨b detach 的**源码**也必须包在 withTimeout 里（行为用例可
   assert.ok(m, '应能定位 detach 函数体');
   assert.match(m[1], /withTimeout\(/, 'detach 必须走 withTimeout —— 否则回调不触发时 promise 永不 settle');
   // 每条 chrome.debugger.* 调用都必须在 cdp.js 里（别处私自直连就会绕过这层保障）
-  const files = ['lib/assistant/target-manager.js', 'lib/assistant/tools.js', 'lib/bridge/relay.js'];
+  const files = ['lib/assistant/target-manager.ts', 'lib/assistant/tools.ts', 'lib/bridge/relay.js'];
   for (const f of files) {
     const other = fs.readFileSync(f, 'utf8');
     assert.ok(!/chrome\.debugger\.(attach|detach|sendCommand)\(/.test(other), f + ' 不得自己直连 chrome.debugger（会绕过超时层）');
@@ -145,7 +145,7 @@ test('⑨b detach 的**源码**也必须包在 withTimeout 里（行为用例可
 // 只给 CDP 层加超时还不够：截图有降质阶梯（最多三档），每档各等 8s 就是 24s ——
 // **比 agent 层 15s 的通用包装还慢**，修完反而更糟（用户等到 15s 被杀，而错误还说不出卡在哪）。
 
-const { takeScreenshot } = await import('../lib/assistant/screenshot-tool.js');
+const { takeScreenshot } = await import('../lib/assistant/screenshot-tool.ts');
 
 function shotDeps({ mode = 'hang', budgetMs = 150, perCallMs = 100 } = {}) {
   let shotCalls = 0;
@@ -223,7 +223,7 @@ test('⑧ 截图：正常路径不受影响（回读尺寸，成功返回）', a
 // 而且抄漏了两件事（面板侧有、桥接侧没有）：**总预算**与**"超时 vs 附加失败"的区分**。
 // 实测症状：桥接那份三档各等默认 8s ⇒ 最坏 24s+；失败一律报"无法附加"（把人指向 DevTools 占用）。
 // 修法是把它抽成共享的 `captureWithLadder`（面板与桥接共用），并在这里钉住"两端都用它"。
-const { captureWithLadder, DEFAULT_SCREENSHOT_BUDGET_MS } = await import('../lib/assistant/screenshot-tool.js');
+const { captureWithLadder, DEFAULT_SCREENSHOT_BUDGET_MS } = await import('../lib/assistant/screenshot-tool.ts');
 
 test('⑩ captureWithLadder：预算约束 + 超时标记（桥接侧的失败语义靠它才有）', async () => {
   let calls = 0;

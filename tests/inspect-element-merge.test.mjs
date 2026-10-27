@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
+import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
@@ -36,7 +36,7 @@ test('分派表必须与 lib/page/commands.ts 的命令名一致（否则得到"
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
   // C-1 拆分把 INSPECT_OPS 搬进 ./page-command-tools.js 时，
   // 基于切片的老写法会静默切到空串（然后断言失败但原因指向错误的地方）。
-  const { INSPECT_OPS } = await import('../lib/assistant/page-command-tools.js');
+  const { INSPECT_OPS } = await import('../lib/assistant/page-command-tools.ts');
   assert.deepEqual(INSPECT_OPS, {
     text: 'get_text',
     inspect: 'inspect_element',
@@ -93,7 +93,7 @@ test('合并后权限不变：仍是 read + readOnly + parallelSafe', () => {
   assert.equal(byName.inspect_element.readOnly, true);
   assert.equal(byName.inspect_element.requiresApproval, false);
 
-  const md = fs.readFileSync(new URL('../lib/assistant/tool-metadata.js', import.meta.url), 'utf8');
+  const md = fs.readFileSync(new URL('../lib/assistant/tool-metadata.ts', import.meta.url), 'utf8');
   const line = md.split('\n').find((l) => l.trim().startsWith('inspect_element:'));
   assert.ok(line, '元数据里应有 inspect_element');
   assert.match(line, /parallelSafe: true/, '读类只读工具应保持可并行');
@@ -103,7 +103,7 @@ test('完成校验的证据名单必须认得合并后的名字', () => {
   // agent.js 的 EVIDENCE_READ_TOOLS 里原先写的是 get_element_text。
   // 改名后若不同步，「划出关键信息」这类任务的完成校验会重新丢掉文本证据
   //（那正是当初把 get_element_text 加进名单要修的问题）。
-  const agent = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+  const agent = fs.readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
   const block = agent.slice(agent.indexOf('const EVIDENCE_READ_TOOLS'), agent.indexOf('const EVIDENCE_READ_TOOLS') + 400);
   assert.match(block, /'inspect_element'/, '证据名单应包含 inspect_element');
   assert.ok(!/'get_element_text'/.test(block), '证据名单不得再引用已消失的 get_element_text');

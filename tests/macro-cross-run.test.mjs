@@ -13,8 +13,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rememberTrace, recallTrace, LAST_TRACE_TTL_MS, LAST_TRACE_KEY } from '../lib/assistant/macro-store.js';
-import { macroSave, REPLAYABLE_TOOLS } from '../lib/assistant/macros.js';
+import { rememberTrace, recallTrace, LAST_TRACE_TTL_MS, LAST_TRACE_KEY } from '../lib/assistant/macro-store.ts';
+import { macroSave, REPLAYABLE_TOOLS } from '../lib/assistant/macros.ts';
 
 // 安装 chrome.storage.local 桩（行为对齐真实 API：get 接受字符串或数组）。
 function installStorage() {

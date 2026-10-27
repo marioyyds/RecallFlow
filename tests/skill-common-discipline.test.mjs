@@ -22,9 +22,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { loadSkill, COMMON_OPERATING_DISCIPLINE } from '../lib/assistant/skill-tools.js';
+import { loadSkill, COMMON_OPERATING_DISCIPLINE } from '../lib/assistant/skill-tools.ts';
 
-const SRC = fs.readFileSync('lib/assistant/skill-tools.js', 'utf8');
+const SRC = fs.readFileSync('lib/assistant/skill-tools.ts', 'utf8');
 
 const mkDeps = (skill) => ({
   getMergedSkills: async () => [skill],

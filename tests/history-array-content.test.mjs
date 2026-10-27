@@ -21,7 +21,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { flattenHistoryContent, normalizeHistory } from '../lib/assistant/context.js';
+import { flattenHistoryContent, normalizeHistory } from '../lib/assistant/context.ts';
 import { VISION_ENABLED } from '../lib/shared/utils.ts';
 
 // 两臂各自的**原文**（改动前 vs 开启后），写在用例里当基准。

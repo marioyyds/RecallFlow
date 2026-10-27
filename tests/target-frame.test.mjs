@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseRef, frameIdFromArgs, localTargetArgs, planFrameBatches } from '../lib/assistant/target-frame.js';
+import { parseRef, frameIdFromArgs, localTargetArgs, planFrameBatches } from '../lib/assistant/target-frame.ts';
 
 test('parseRef：带 f<frameId>: 前缀时拆出框架，无前缀时 frameId 为 null', () => {
   assert.deepEqual(parseRef('f12:rf-3'), { frameId: 12, ref: 'rf-3' });

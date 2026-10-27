@@ -13,9 +13,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { collapseOldToolResults } from '../lib/assistant/context.js';
-import { expandResult } from '../lib/assistant/run-state-tools.js';
-import { formatTruncationNotice } from '../lib/assistant/agent.js';
+import { collapseOldToolResults } from '../lib/assistant/context.ts';
+import { expandResult } from '../lib/assistant/run-state-tools.ts';
+import { formatTruncationNotice } from '../lib/assistant/agent.ts';
 
 /** 造一个"大结果已被截断"的 tool 消息（用**真实的**通知格式）。 */
 function truncatedToolMessage(totalChars, id) {
@@ -82,8 +82,8 @@ test('⑤ 两类"没取到"必须分开说（否则模型会反复重试同一�
 });
 
 test('⑥ 跨模块的格式耦合必须有单一来源（防止改成一处、另一处静默失效）', () => {
-  const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
-  const ctxSrc = fs.readFileSync('lib/assistant/context.js', 'utf8');
+  const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+  const ctxSrc = fs.readFileSync('lib/assistant/context.ts', 'utf8');
   assert.match(agentSrc, /export function formatTruncationNotice/, '通知格式要由本函数提供');
   assert.match(agentSrc, /formatTruncationNotice\(res\.result\.length, rid\)/, '截断处必须用它，不许再手拼字符串');
   // context.js 仍然靠正则解析这条通知 —— 这正是需要"单一来源 + 用真实字符串测"的原因

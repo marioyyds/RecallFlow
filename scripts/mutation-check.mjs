@@ -116,13 +116,13 @@ const TARGETS = [
     // 为什么选 tool-guard 作为第二个目标：它是"只提醒不否决"这套策略的唯一实现，
     // 且 tests/tool-guard.test.mjs 有 22 条**行为**断言（不是读源码的静态断言）。
     // 变异测试的价值取决于"被测断言是不是行为断言" —— 对静态断言做变异没有意义。
-    file: 'lib/assistant/tool-guard.js',
+    file: 'lib/assistant/tool-guard.ts',
     mode: 'inplace',
     test: 'tests/tool-guard.test.mjs',
     mutations: [
       {
         name: '把精确跨越改成永远提醒（恢复"每次重复都打扰"的噪音行为）',
-        from: 'function crosses(count, thresholds) {\n  return thresholds.indexOf(count) !== -1;\n}',
+        from: 'function crosses(count: any, thresholds: any) {\n  return thresholds.indexOf(count) !== -1;\n}',
         to: 'function crosses(count, thresholds) {\n  return true;\n}',
         expectFail: '精确达到',
       },
@@ -156,7 +156,7 @@ const TARGETS = [
     // 审批判定：这是"用户点了同意才写页面"的唯一闸门，判错的后果是**静默放行**。
     // 它原先住在 agent.js 里（为了测它得先起一整套 chrome 桩），所以只有 3 条断言；
     // 搬到 lib/assistant/approval-policy.js 后可以直接单测，那 14 条到底有没有牙齿由这里验证。
-    file: 'lib/assistant/approval-policy.js',
+    file: 'lib/assistant/approval-policy.ts',
     mode: 'inplace',
     test: 'tests/approval-policy.test.mjs',
     mutations: [
@@ -294,7 +294,7 @@ const TARGETS = [
     // 上下文折叠：它是"长任务不会把上下文撑爆"的唯一手段，同时也是**唯一会改写历史中部**的
     // 操作（每次改写都会让服务端前缀缓存失效）。三条算子分别对应它的三个性质：
     // 只折叠靠前的、折叠过的绝不再动、折叠后一定更短。
-    file: 'lib/assistant/context.js',
+    file: 'lib/assistant/context.ts',
     mode: 'inplace',
     test: 'tests/context.test.mjs',
     mutations: [
@@ -348,7 +348,7 @@ const TARGETS = [
   {
     // LLM 调用的中断语义：这三条错任何一条，用户按停止都会变成「再等 1.5 秒、再花钱」，
     // 甚至变成「记录里写着任务已完成」（见 tests/llm-abort-retry.test.mjs 的说明）。
-    file: 'lib/assistant/llm.js',
+    file: 'lib/assistant/llm.ts',
     mode: 'inplace',
     test: 'tests/llm-abort-retry.test.mjs',
     mutations: [
@@ -376,7 +376,7 @@ const TARGETS = [
     // 完成校验的结局分派（classifyVerifyOutcome）：把「中断」误读成「校验器故障」的后果是
     // 用户按了停止、记录里却写着任务已完成（详见 tests/llm-abort-retry.test.mjs）。
     // 单独一个 target 是因为它属于另一个测试文件（变异脚本一次只跑一个目标测试）。
-    file: 'lib/assistant/agent.js',
+    file: 'lib/assistant/agent.ts',
     mode: 'inplace',
     test: 'tests/llm-abort-retry.test.mjs',
     mutations: [
@@ -392,7 +392,7 @@ const TARGETS = [
   {
     // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
     // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
-    file: 'lib/assistant/agent.js',
+    file: 'lib/assistant/agent.ts',
     mode: 'inplace',
     test: 'tests/silent-failure-regressions.test.mjs',
     mutations: [
@@ -416,13 +416,13 @@ const TARGETS = [
     // 完成前确定性断言（claim-check）：它是"省掉一次 LLM 校验"的零成本预检，
     // 但判错的方向比漏判更贵 —— 误判 fail 会灌给模型一条**内容错误**的反思，
     // 它据此可能重复已经成功的动作，或把总结改口成"没做成"。
-    file: 'lib/assistant/claim-check.js',
+    file: 'lib/assistant/claim-check.ts',
     mode: 'inplace',
     test: 'tests/claim-check.test.mjs',
     mutations: [
       {
         name: '规则 2 退回「只看失败名单」（失败后重试成功的任务被判成撒谎）',
-        from: 'mutating.every((t) => failed.includes(t) && !succeeded.includes(t))',
+        from: 'mutating.every((t: any) => failed.includes(t) && !succeeded.includes(t))',
         to: 'mutating.every((t) => failed.includes(t))',
         expectFail: '同名工具失败后又重试成功',
       },
@@ -440,7 +440,7 @@ const TARGETS = [
       },
       {
         name: '把导航类声明放回写动词里（研究类任务的「已打开原文」全被判成撒谎）',
-        from: '  if (!claimsMutation && claimsNav && mutating.length === 0 && ran.length > 0 && !ran.some((n) => NAV_CAPABLE_TOOLS.has(n))) {',
+        from: '  if (!claimsMutation && claimsNav && mutating.length === 0 && ran.length > 0 && !ran.some((n: any) => NAV_CAPABLE_TOOLS.has(n))) {',
         to: '  if (false) {',
         expectFail: '导航类声明',
       },
@@ -455,7 +455,7 @@ const TARGETS = [
   {
     // 任务性质分派（classifyTaskKind）：它决定完成校验问哪一种问题。
     // 判成 mutation 而实际是纯读取，研究类任务会在长页面上被反复判未达成。
-    file: 'lib/assistant/agent.js',
+    file: 'lib/assistant/agent.ts',
     mode: 'inplace',
     test: 'tests/completion-evidence.test.mjs',
     mutations: [

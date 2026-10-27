@@ -14,7 +14,7 @@ import {
   NO_PROGRESS_THRESHOLDS,
   ARGS_PREVIEW_CHARS,
   DEFAULT_EXCLUDED_TOOLS,
-} from '../lib/assistant/tool-guard.js';
+} from '../lib/assistant/tool-guard.ts';
 
 const okResult = (extra = {}) => Object.assign({ ok: true, result: 'done' }, extra);
 const failResult = (extra = {}) => Object.assign({ ok: false, result: 'boom' }, extra);

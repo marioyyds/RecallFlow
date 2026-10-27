@@ -603,7 +603,7 @@ export function isCspEvalBlockError(message: unknown) {
  *
  * ## 打开它需要同时做完（见 docs/remaining-work.md）—— 已全部完成
  *
- * 1. 把截图作为**追加的 user 消息**送进请求（工具消息只能放文本）—— 已完成（`lib/assistant/vision.js`）；
+ * 1. 把截图作为**追加的 user 消息**送进请求（工具消息只能放文本）—— 已完成（`lib/assistant/vision.ts`）；
  * 2. "你看不到图像"的文案条件化 —— 已完成，做法是**整句二选一**：
  *    `tool-schemas.js` 的 `take_screenshot` 说明、`skill-defs.js` 的 readability-fix 技能、
  *    本文件的 `formatScreenshotSummary`、`context.js` 的历史回放占位说明 ✓
@@ -656,7 +656,7 @@ export function visionLimitationNote(visionEnabled: unknown, prefix?: unknown) {
 /**
  * 截图工具说明里那句「你看不到图像内容」的**原文**（条件化的禁用分支）。
  *
- * 单一来源就在这里 —— `lib/assistant/tool-schemas.js` 直接 import 它，
+ * 单一来源就在这里 —— `lib/assistant/tool-schemas.ts` 直接 import 它，
  * 而不是自己再抄一份字面量（抄一份 = 开关打开后两处文案漂移 ✗）。
  */
 export const VISION_UNAVAILABLE_TOOL_COPY =

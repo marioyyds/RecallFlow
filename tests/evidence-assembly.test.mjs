@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildVerificationEvidence } from '../lib/assistant/agent.js';
+import { buildVerificationEvidence } from '../lib/assistant/agent.ts';
 
 const receipt = '【最近一次页面动作】highlight_text（已执行成功）\n参数：{"texts":["甲","乙"]}\n返回：已高亮 12 / 12 处关键信息';
 

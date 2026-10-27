@@ -119,9 +119,9 @@ const HIGH_RISK = [
   'page/chat.js',
   'page/commands.js',
   'backend/cdp.js',
-  'assistant/agent.js',
-  'assistant/skill-defs.js',
-  'assistant/tools.js',
+  'assistant/agent.ts',
+  'assistant/skill-defs.ts',
+  'assistant/tools.ts',
   'shared/utils.js',
 ];
 

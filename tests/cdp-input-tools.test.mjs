@@ -15,7 +15,7 @@ import {
   uploadFile,
   CDP_INPUT_TOOLS,
   handleCdpInputTool,
-} from '../lib/assistant/cdp-input-tools.js';
+} from '../lib/assistant/cdp-input-tools.ts';
 
 /** 造一套假依赖，记录每次调用。 */
 function mkDeps(overrides = {}) {

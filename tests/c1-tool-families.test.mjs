@@ -10,9 +10,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { updatePlan, expandResult, getRunTrace, RUN_STATE_TOOLS, handleRunStateTool } from '../lib/assistant/run-state-tools.js';
-import { trustSite, handleDialogTool, PERMISSION_TOOLS, handlePermissionTool } from '../lib/assistant/permission-tools.js';
-import { takeScreenshot, saveScreenshot, MAX_SHOTS, SHOT_KEY, MAX_SHOT_STORE_CHARS } from '../lib/assistant/screenshot-tool.js';
+import { updatePlan, expandResult, getRunTrace, RUN_STATE_TOOLS, handleRunStateTool } from '../lib/assistant/run-state-tools.ts';
+import { trustSite, handleDialogTool, PERMISSION_TOOLS, handlePermissionTool } from '../lib/assistant/permission-tools.ts';
+import { takeScreenshot, saveScreenshot, MAX_SHOTS, SHOT_KEY, MAX_SHOT_STORE_CHARS } from '../lib/assistant/screenshot-tool.ts';
 
 // ---------------------------------------------------------------- 运行状态族
 

@@ -17,7 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
+import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
 
 // 指纹覆盖：名字 + 完整 schema + 权限元数据。顺序无关（先按名字排序）。
 function computeRegistryFingerprint(registry) {

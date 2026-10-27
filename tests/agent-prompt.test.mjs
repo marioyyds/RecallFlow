@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { promoteToResearch, toolNeedsApproval, sanitizeToolPairing, compactSessionMessages } from '../lib/assistant/agent.js';
+import { promoteToResearch, toolNeedsApproval, sanitizeToolPairing, compactSessionMessages } from '../lib/assistant/agent.ts';
 
 // ---------------------------------------------------------------- 画像提升
 //

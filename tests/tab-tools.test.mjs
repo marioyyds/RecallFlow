@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { listTabs, switchTab, openTab, handleTabTool, TAB_TOOLS } from '../lib/assistant/tab-tools.js';
+import { listTabs, switchTab, openTab, handleTabTool, TAB_TOOLS } from '../lib/assistant/tab-tools.ts';
 
 /** 造一个假的 chrome.tabs 与依赖集合。 */
 function mkDeps(overrides = {}) {

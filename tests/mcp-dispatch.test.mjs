@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { collectAgentTools, executeAnyTool } from '../lib/assistant/mcp.js';
+import { collectAgentTools, executeAnyTool } from '../lib/assistant/mcp.ts';
 
 test('collectAgentTools: 返回 {tools, mcpIndex} 结构', async () => {
   const r = await collectAgentTools({}, { includeMcp: false });

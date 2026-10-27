@@ -152,7 +152,7 @@ test('用到 alwaysRequireApproval 工具的剧本，其 E2E 必须自动批审�
   // 而用例没有点审批 —— 整个 run **卡在审批上**，现象是"工具结果里只有第一条快照、
   // 后面什么都没有"，看起来像"脚本没生效/工具没执行"，实际是没人批准（排查花了 40 秒）。
   // 所以：凡是剧本工具里含这类工具的，spec 里就必须出现 autoApprove。
-  const meta = read('lib/assistant/tool-metadata.js');
+  const meta = read('lib/assistant/tool-metadata.ts');
   const needApproval = new Set();
   for (const m of meta.matchAll(/^\s{2}([a-z_]+):\s*\{([^}]*)\}/gm)) {
     if (/alwaysRequireApproval:\s*true/.test(m[2])) needApproval.add(m[1]);

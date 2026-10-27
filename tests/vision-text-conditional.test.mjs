@@ -39,9 +39,9 @@ import {
   VISION_ENABLED_SKILL_COPY,
   VISION_ENABLED_SUMMARY_COPY,
 } from '../lib/shared/utils.ts';
-import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
-import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
-import { flattenHistoryContent } from '../lib/assistant/context.js';
+import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.ts';
+import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
+import { flattenHistoryContent } from '../lib/assistant/context.ts';
 import { sourcePath } from './source-path.mjs';
 
 const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
@@ -82,23 +82,23 @@ test('前提：开关是布尔的**打开**态（第 6 步已完成），且关�
 });
 
 test('① take_screenshot 工具说明：关闭臂与改动前逐字节相同（且两臂不同）', async () => {
-  const off = await loadWithVision(false, 'lib/assistant/tool-schemas.js');
+  const off = await loadWithVision(false, 'lib/assistant/tool-schemas.ts');
   assert.equal(descOf(off), BASELINE_TOOL_DESC);
-  const on = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
+  const on = await loadWithVision(true, 'lib/assistant/tool-schemas.ts');
   assert.notEqual(descOf(on), BASELINE_TOOL_DESC, '开启臂必须真的换了整句（否则开关没接上）');
   // 生产（真 import）落在**开启**那一档 ⇒ 顺手确认它和开启臂一致
   assert.equal(screenshotDesc(), descOf(on), '真模块必须等于开启臂');
 });
 
 test('② readability-fix 技能正文：关闭臂与改动前逐字节相同（含段落空行）', async () => {
-  const off = await loadWithVision(false, 'lib/assistant/skill-defs.js');
+  const off = await loadWithVision(false, 'lib/assistant/skill-defs.ts');
   const content = skillOf(off);
   assert.ok(content.includes(BASELINE_SKILL_FRAGMENT), '技能正文里那一段必须仍是原文（含结尾的 \\n\\n）');
   assert.ok(
     !content.includes('已经改好。\n## 绝不允许'),
     '少一个换行也是"改了模型能看到的内容" ✗（本次改动中真实发生过一次）'
   );
-  const on = await loadWithVision(true, 'lib/assistant/skill-defs.js');
+  const on = await loadWithVision(true, 'lib/assistant/skill-defs.ts');
   assert.ok(!skillOf(on).includes(BASELINE_SKILL_FRAGMENT), '开启臂必须整段替换掉');
 });
 
@@ -152,13 +152,13 @@ test('⑤ 不算一处：panel-css.js 里那句是样式表**注释**，不面�
 const SITES = [
   {
     name: 'take_screenshot 工具说明',
-    file: 'lib/assistant/tool-schemas.js',
+    file: 'lib/assistant/tool-schemas.ts',
     from: "name: 'take_screenshot'",
     to: 'parameters:',
   },
   {
     name: 'readability-fix 技能正文',
-    file: 'lib/assistant/skill-defs.js',
+    file: 'lib/assistant/skill-defs.ts',
     from: '- 需要给用户可视证据时用',
     to: '## 绝不允许的',
   },
@@ -172,7 +172,7 @@ const SITES = [
     // ⚠ 第 4 处（第 6 步找出）：它**不**随开关翻转而改变输出（因为原先根本没读开关），
     // 所以"两臂渲染比对"不会把它列为差异 —— 只有**逐条读模型可见文本**才发现它打开后会变成假话。
     name: '历史回放占位说明（flattenHistoryContent）',
-    file: 'lib/assistant/context.js',
+    file: 'lib/assistant/context.ts',
     from: 'export function flattenHistoryContent',
     to: '\n}',
   },
@@ -225,8 +225,8 @@ test('单一来源：禁用文案只在 utils.js 定义一份，工具 / 技能�
 
   // 迁移期：specifier 可能是 `.js` 或 `.ts`（同一模块改名后 import 侧跟着改），两种都认。
   const importRe = (sym) => new RegExp("import\\s*\\{[^}]*" + sym + "[^}]*\\}\\s*from\\s*'\\.\\./shared/utils\\.(?:js|ts)'");
-  assert.match(read('lib/assistant/tool-schemas.js'), importRe('VISION_UNAVAILABLE_TOOL_COPY'));
-  assert.match(read('lib/assistant/skill-defs.js'), importRe('VISION_UNAVAILABLE_SKILL_COPY'));
+  assert.match(read('lib/assistant/tool-schemas.ts'), importRe('VISION_UNAVAILABLE_TOOL_COPY'));
+  assert.match(read('lib/assistant/skill-defs.ts'), importRe('VISION_UNAVAILABLE_SKILL_COPY'));
 
   // 有牙齿：自带字面量的假源码不该被这条判为合格
   const guilty = "const VISION_UNAVAILABLE_TOOL_COPY = '不进入你的上下文 —— 当前模型是纯文本的…';";
@@ -297,8 +297,8 @@ async function loadWithVision(enabled, file) {
 
 test('开关打开后：四处都不再说"看不到图像"，且技能段落的空行仍在', async () => {
   const onUtils = await loadWithVision(true, 'lib/shared/utils.js');
-  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
-  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.js');
+  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.ts');
+  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.ts');
 
   const desc = descOf(onSchemas);
   const skill = skillOf(onSkills);
@@ -356,8 +356,8 @@ test('⑥ 开启分支的文案常数：单一来源、如实、且不含任何"
 
 test('⑦ 开启分支的实际渲染：不复现第 7 步审校发现的那两类坏话（整句二选一）', async () => {
   const onUtils = await loadWithVision(true, 'lib/shared/utils.js');
-  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.js');
-  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.js');
+  const onSchemas = await loadWithVision(true, 'lib/assistant/tool-schemas.ts');
+  const onSkills = await loadWithVision(true, 'lib/assistant/skill-defs.ts');
   const desc = descOf(onSchemas);
   const skill = skillFragmentOf(skillOf(onSkills));
   const summary = onUtils.formatScreenshotSummary(META);

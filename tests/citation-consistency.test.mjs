@@ -46,7 +46,7 @@ test('非数字标签不会被重编号，也不会生成来源（它就是死�
 // ---------------------------------------------------------------- 提示层：不许要求给当前页面编号
 
 const DEMANDING = [
-  { file: 'lib/assistant/intent-router.js', label: 'agent 规则 3' },
+  { file: 'lib/assistant/intent-router.ts', label: 'agent 规则 3' },
   { file: 'lib/shared/rag.js', label: '面板直答提示' },
 ];
 

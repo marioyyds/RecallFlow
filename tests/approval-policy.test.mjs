@@ -11,8 +11,8 @@ import {
   resolveApprovalCategory,
   APPROVAL_CATEGORY_BY_RISK,
   RISK_WITHOUT_CATEGORY,
-} from '../lib/assistant/approval-policy.js';
-import { TOOL_METADATA } from '../lib/assistant/tool-metadata.js';
+} from '../lib/assistant/approval-policy.ts';
+import { TOOL_METADATA } from '../lib/assistant/tool-metadata.ts';
 
 const ALL_ON = Object.freeze({ read: true, edit: true, commands: true, browser: true, mcp: true });
 const ALL_OFF = Object.freeze({ read: false, edit: false, commands: false, browser: false, mcp: false });

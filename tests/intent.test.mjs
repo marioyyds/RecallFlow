@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectIntent, extractKeyword, INTENTS, buildSystemPrompt } from '../lib/assistant/intent-router.js';
+import { detectIntent, extractKeyword, INTENTS, buildSystemPrompt } from '../lib/assistant/intent-router.ts';
 
 test('detects browser intent', () => {
   assert.equal(detectIntent('打开百度搜索今天的热搜').intent, INTENTS.BROWSER);

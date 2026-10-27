@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { appendTrace, flushTraces, getTrace, listTraces, clearTrace, __resetTraceCache, TRACE_PREFIX, TRACE_INDEX_KEY, TRACE_KEY } from '../lib/assistant/trace.js';
+import { appendTrace, flushTraces, getTrace, listTraces, clearTrace, __resetTraceCache, TRACE_PREFIX, TRACE_INDEX_KEY, TRACE_KEY } from '../lib/assistant/trace.ts';
 
 function installStorage(initial = {}) {
   const store = { ...initial };

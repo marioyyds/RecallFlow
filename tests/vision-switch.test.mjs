@@ -29,8 +29,8 @@ import {
   VISION_ENABLED_SKILL_COPY,
   VISION_ENABLED_SUMMARY_COPY,
 } from '../lib/shared/utils.ts';
-import { flattenHistoryContent } from '../lib/assistant/context.js';
-import { visionMessagesFor } from '../lib/assistant/vision.js';
+import { flattenHistoryContent } from '../lib/assistant/context.ts';
+import { visionMessagesFor } from '../lib/assistant/vision.ts';
 import { sourcePath } from './source-path.mjs';
 
 const META = { width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 };
@@ -143,11 +143,11 @@ test('依赖链要短：开关与说明必须是纯函数，不引入浏览器�
 });
 
 test('默认预算不可配置这一点有**如实标注**（别假装 ctx.visionBudget 可配）', () => {
-  const vision = fs.readFileSync('lib/assistant/vision.js', 'utf8');
+  const vision = fs.readFileSync('lib/assistant/vision.ts', 'utf8');
   assert.match(vision, /没有任何地方赋值/, 'vision.js 必须如实标注"ctx.visionBudget 从未被赋值"');
   assert.match(vision, /不可配置/, '必须明确写"不可配置"');
   // 有牙齿：源码里若真的出现赋值点，这个用例会红，逼人把标注改成"可配置"并补门禁
-  const agent = fs.readFileSync('lib/assistant/agent.js', 'utf8');
+  const agent = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
   const assignments = agent.match(/ctx\.visionBudget\s*=/g) || [];
   assert.equal(assignments.length, 0, 'agent.js 里不应有 visionBudget 赋值（若加了，请同步上面两处标注）');
 });

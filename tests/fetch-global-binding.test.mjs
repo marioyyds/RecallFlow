@@ -30,7 +30,7 @@ test('生产接线：fetch_webpage 的 fetchImpl 绑定全局对象，不得抛 
 
   try {
     // 带 query 的 import 让本文件拿到一份在替身 fetch 安装后加载的新模块实例。
-    const { executeTool } = await import('../lib/assistant/tools.js?fetch-global-binding');
+    const { executeTool } = await import('../lib/assistant/tools.ts?fetch-global-binding');
     const ctx = { failedUrls: [] };
     const r = await executeTool('fetch_webpage', { url: 'https://example.test/page' }, ctx);
 

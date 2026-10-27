@@ -13,10 +13,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const AGENT = fs.readFileSync('lib/assistant/agent.js', 'utf8');
+const AGENT = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
 
 test('agent.js 必须导入并调用 visionMessagesFor（接线真的接上了，而不是只写了个模块）', () => {
-  assert.match(AGENT, /import \{ visionMessagesFor \} from '\.\/vision\.js'/, '要导入装配函数');
+  assert.match(AGENT, /import \{ visionMessagesFor \} from '\.\/vision\.(?:js|ts)'/, '要导入装配函数');
   assert.match(AGENT, /visionMessagesFor\(\[res\.screenshot\]/, '要在截图结果处调用它');
 });
 
@@ -35,7 +35,7 @@ test('接线必须受开关约束（开关**打开**时才产出；关着时一�
   // ⚠ 第 6 步已把开关打开 ⇒ 现在这段**真的会产出图片消息**；"关着就不产出"由
   //    tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住 ✓
   assert.ok(!/image_url/.test(AGENT), 'agent.js 里不该自己拼 image_url（必须走 vision.js）');
-  const vision = fs.readFileSync('lib/assistant/vision.js', 'utf8');
+  const vision = fs.readFileSync('lib/assistant/vision.ts', 'utf8');
   assert.match(vision, /if \(!enabled\) return \[\];/, 'vision.js 里开关关闭时一律返回空');
 });
 

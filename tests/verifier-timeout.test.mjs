@@ -13,9 +13,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { callDeepSeek, isRetryableError, makeAbortError } from '../lib/assistant/llm.js';
-import { verifyCompletion, buildRepeatedVerificationReflection, VERIFIER_TIMEOUT_MS } from '../lib/assistant/verifier.js';
-import { classifyVerifyOutcome, verifyEvidenceSignature } from '../lib/assistant/agent.js';
+import { callDeepSeek, isRetryableError, makeAbortError } from '../lib/assistant/llm.ts';
+import { verifyCompletion, buildRepeatedVerificationReflection, VERIFIER_TIMEOUT_MS } from '../lib/assistant/verifier.ts';
+import { classifyVerifyOutcome, verifyEvidenceSignature } from '../lib/assistant/agent.ts';
 
 const SETTINGS = { apiKey: 'k', baseUrl: 'https://example.invalid', model: 'm' };
 

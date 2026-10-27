@@ -14,7 +14,7 @@ import {
   removeEntry,
   KNOWLEDGE_STORE_TOOLS,
   handleKnowledgeStoreTool,
-} from '../lib/assistant/knowledge-store-tools.js';
+} from '../lib/assistant/knowledge-store-tools.ts';
 import {
   annotate,
   inspectElement,
@@ -25,8 +25,8 @@ import {
   INSPECT_OPS,
   PAGE_COMMAND_TOOLS,
   handlePageCommandTool,
-} from '../lib/assistant/page-command-tools.js';
-import { TOOL_REGISTRY, executeTool, registeredToolNames } from '../lib/assistant/tools.js';
+} from '../lib/assistant/page-command-tools.ts';
+import { TOOL_REGISTRY, executeTool, registeredToolNames } from '../lib/assistant/tools.ts';
 
 // ---------------------------------------------------------------- 知识库存储族
 
@@ -301,7 +301,7 @@ test('未知工具名回落到「未知工具」而不是抛错', async () => {
 });
 
 test('重名注册在**模块加载时**就抛错（不留到运行时静默走错分支）', () => {
-  const src = fs.readFileSync(new URL('../lib/assistant/tools.js', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
   const fn = src.slice(src.indexOf('function registerHandlers('));
   const body = fn.slice(0, fn.indexOf('\n}'));
   assert.match(body, /TOOL_HANDLERS\.has\(n\)/, '注册函数必须先查重');

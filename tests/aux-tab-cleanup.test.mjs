@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const AGENT = fs.readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+const AGENT = fs.readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
 const CHAT = fs.readFileSync(new URL('../lib/page/chat.ts', import.meta.url), 'utf8');
 const BACKGROUND = fs.readFileSync(new URL('../entries/background.js', import.meta.url), 'utf8');
 
@@ -16,7 +16,7 @@ function functionSlice(src, startNeedle, endNeedle) {
 }
 
 test('Agent 收尾只登记辅助页，不直接关闭', () => {
-  const body = functionSlice(AGENT, 'async function closeAuxTabs(ctx)', 'function emitTabsClosePending');
+  const body = functionSlice(AGENT, 'async function closeAuxTabs(', 'function emitTabsClosePending');
   assert.doesNotMatch(body, /chrome\.tabs\.remove\(/, 'closeAuxTabs 不得先于最终落盘直接关页');
   assert.doesNotMatch(body, /closeAgentWindow\(/, 'Agent 窗口也要延后关闭');
   assert.match(body, /pendingCloseTabs/, '必须把待关闭 tabs 交给后台');

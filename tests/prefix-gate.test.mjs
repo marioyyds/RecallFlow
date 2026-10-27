@@ -74,5 +74,5 @@ test('前缀稳定性门禁：目标文件缺失时报错', () => {
 
 test('前缀稳定性门禁：TARGET 指向 agent 主循环所在文件', () => {
   assert.ok(fs.existsSync(TARGET), TARGET);
-  assert.ok(/agent\.js$/.test(TARGET));
+  assert.ok(/agent\.(?:js|ts)$/.test(TARGET));
 });

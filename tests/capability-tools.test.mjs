@@ -12,8 +12,8 @@ import {
   runUserscript,
   USERSCRIPT_TOOLS,
   handleUserscriptTool,
-} from '../lib/assistant/userscript-tools.js';
-import { loadSkill, installSkill, saveSkill, normalizeSkillName, SKILL_TOOLS, handleSkillTool, MIN_SKILL_CONTENT } from '../lib/assistant/skill-tools.js';
+} from '../lib/assistant/userscript-tools.ts';
+import { loadSkill, installSkill, saveSkill, normalizeSkillName, SKILL_TOOLS, handleSkillTool, MIN_SKILL_CONTENT } from '../lib/assistant/skill-tools.ts';
 
 // ---------------------------------------------------------------- 用户脚本族
 

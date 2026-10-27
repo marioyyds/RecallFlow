@@ -16,7 +16,7 @@ import {
   parseSearchResults,
   readBounded,
   decodeBuffer,
-} from '../lib/assistant/net-parse.js';
+} from '../lib/assistant/net-parse.ts';
 
 // 造一个最小的 ReadableStream<Uint8Array> 来喂 readBounded
 function streamOf(chunks) {

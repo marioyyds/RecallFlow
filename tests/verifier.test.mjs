@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildVerificationReflection, buildStuckReflection } from '../lib/assistant/verifier.js';
+import { buildVerificationReflection, buildStuckReflection } from '../lib/assistant/verifier.ts';
 
 test('verification reflection includes reason, missing and suggestion', () => {
   const r = buildVerificationReflection({ ok: false, reason: '目标页未打开', missing: '目标页未加载', suggestion: '重新 open_tab' });

@@ -621,7 +621,7 @@ async function getAISettings() {
   return merged;
 }
 
-// lib/assistant/context.js
+// lib/assistant/context.ts
 var CJK_RE = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
 function estimateTokens(text) {
   const s = String(text || "");
@@ -972,7 +972,7 @@ function buildAiMessages(action, payload, settings, book) {
   return null;
 }
 
-// lib/assistant/llm.js
+// lib/assistant/llm.ts
 async function callDeepSeekOnce(settings, messages, signal) {
   if (signal && signal.aborted) throw makeAbortError();
   const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
@@ -1536,7 +1536,7 @@ async function userscriptXhr(details) {
   }
 }
 
-// lib/assistant/skill-defs.js
+// lib/assistant/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
@@ -2291,7 +2291,7 @@ var SKILL_REGISTRY = Object.freeze([
   }
 ]);
 
-// lib/assistant/skill-md.js
+// lib/assistant/skill-md.ts
 function compileKeywords(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -2383,7 +2383,7 @@ function toRuntimeSkill(skill, builtin = false) {
   };
 }
 
-// lib/assistant/skill-store.js
+// lib/assistant/skill-store.ts
 var STORAGE_KEY2 = "recallflow.skills";
 function compileAll(list, builtin) {
   return list.map((s) => toRuntimeSkill(s, builtin));
@@ -2822,7 +2822,7 @@ async function handleJavaScriptDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/site-memory.js
+// lib/assistant/site-memory.ts
 var KEY = "recallflow.siteMemory.v1";
 var MAX_PER_ORIGIN = 60;
 var MAX_ORIGINS = 50;
@@ -2881,12 +2881,13 @@ async function getSiteHints(url, limit = 12) {
   const all = await readAll();
   const site = all[origin];
   if (!site) return [];
-  return Object.values(site).sort(
+  const values = Object.values(site);
+  return values.sort(
     (a, b) => (Number(b.hits) || 0) - (Number(a.hits) || 0) || String(a.selector || "").localeCompare(String(b.selector || ""))
   ).slice(0, limit);
 }
 
-// lib/assistant/macro-store.js
+// lib/assistant/macro-store.ts
 var KEY2 = "recallflow.macros.v1";
 var MAX_PER_ORIGIN2 = 20;
 var MAX_ORIGINS2 = 50;
@@ -2951,7 +2952,8 @@ async function listMacros(url) {
   const all = await readAll2();
   const site = all[origin];
   if (!site) return [];
-  return Object.values(site).sort(
+  const values = Object.values(site);
+  return values.sort(
     (a, b) => (b.hits || 0) - (a.hits || 0) || String(a.name || "").localeCompare(String(b.name || ""))
   );
 }
@@ -3021,7 +3023,7 @@ async function recallTrace(url, opts = {}) {
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
 
-// lib/assistant/target-manager.js
+// lib/assistant/target-manager.ts
 var state = /* @__PURE__ */ new Map();
 var listening = false;
 function bucket(tabId) {
@@ -3064,7 +3066,7 @@ async function handleDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/trace.js
+// lib/assistant/trace.ts
 var TRACE_PREFIX = "recallflow.runTrace.v1.";
 var TRACE_INDEX_KEY = "recallflow.runTraceIndex.v1";
 var LEGACY_KEY = "recallflow.runTraces.v1";
@@ -3212,7 +3214,7 @@ async function listTraces() {
   return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
-// lib/assistant/tool-schemas.js
+// lib/assistant/tool-schemas.ts
 var HIGHLIGHT_MAX_TEXTS = 20;
 var TOOL_SCHEMAS = [
   {
@@ -4027,7 +4029,7 @@ var TOOL_SCHEMAS = [
   }
 ];
 
-// lib/assistant/tool-metadata.js
+// lib/assistant/tool-metadata.ts
 var TOOL_METADATA = {
   // C-4 合并第 4 档：只读三件套（search/list/get）→ knowledge_read({ op })。
   // 三者权限完全一致（read/readOnly/parallelSafe），因此合并**不改变任何权限语义**。
@@ -4167,7 +4169,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   }
 }
 
-// lib/assistant/net-parse.js
+// lib/assistant/net-parse.ts
 function stripHtmlTags(html) {
   return String(html || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&ensp;/g, " ").replace(/&emsp;/g, " ").replace(/&middot;/g, "\xB7").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&#(\d+);/g, (_, n) => {
     try {
@@ -4322,7 +4324,7 @@ async function searchWeb(query, maxResults = 6) {
   return [];
 }
 
-// lib/assistant/page-action-verify.js
+// lib/assistant/page-action-verify.ts
 function buildActionVerification(observed, reason) {
   const text = String(reason || "");
   if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
@@ -4371,7 +4373,7 @@ function verifyPageAction(command2, before, after, response) {
   };
 }
 
-// lib/assistant/target-frame.js
+// lib/assistant/target-frame.ts
 function parseRef(ref) {
   const m = String(ref || "").match(/^f(\d+):(.*)$/);
   if (m) return { frameId: Number(m[1]), ref: m[2] };
@@ -4402,7 +4404,7 @@ function planFrameBatches(targets) {
   return Array.from(groups.entries()).map(([frameId, items]) => ({ frameId, items }));
 }
 
-// lib/assistant/tool-results.js
+// lib/assistant/tool-results.ts
 function summarizeCdpError(e) {
   const msg = e && e.message ? e.message : String(e);
   return msg.replace(/^[A-Za-z.]+：/, "");
@@ -4422,7 +4424,7 @@ function compactSnapshotSummary(snapshot) {
   return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
 }
 
-// lib/assistant/diagnostics.js
+// lib/assistant/diagnostics.ts
 async function readConsole(sendTabMessage2, tabId, args) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   try {
@@ -4480,7 +4482,7 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/macros.js
+// lib/assistant/macros.ts
 var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
   "click_element",
   "type_text",
@@ -4597,7 +4599,7 @@ async function macroTool(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/knowledge.js
+// lib/assistant/knowledge.ts
 var KNOWLEDGE_READ_OPS = ["search", "list", "get"];
 function knowledgeRead(deps, args) {
   const op = String(args && args.op || "").trim();
@@ -4648,7 +4650,7 @@ function knowledgeGet(deps, args) {
   };
 }
 
-// lib/assistant/tab-tools.js
+// lib/assistant/tab-tools.ts
 var DEFAULT_MAX_TAB_SWITCHES = 6;
 function tabSwitchBudget(ctx) {
   const used = Math.max(0, Number(ctx && ctx.tabSwitchCount) || 0);
@@ -4826,7 +4828,7 @@ async function handleTabTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/run-metrics.js
+// lib/assistant/run-metrics.ts
 var num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 function summarizeRunTrace(entries) {
   const list = Array.isArray(entries) ? entries : [];
@@ -4870,7 +4872,7 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
-// lib/assistant/run-state-tools.js
+// lib/assistant/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
   const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
@@ -4922,7 +4924,7 @@ async function handleRunStateTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/permission-tools.js
+// lib/assistant/permission-tools.ts
 async function trustSite(deps) {
   const ctx = deps.ctx;
   const origin = siteKeyOf(ctx.pageUrl);
@@ -5063,7 +5065,7 @@ function removeSessionScreenshots(chromeApi, sessionId) {
   });
 }
 
-// lib/assistant/screenshot-tool.js
+// lib/assistant/screenshot-tool.ts
 var MAX_SHOT_B64 = 4e5;
 var DEFAULT_SCREENSHOT_BUDGET_MS = 12e3;
 async function captureWithLadder(deps) {
@@ -5181,7 +5183,7 @@ function editableTextSummary(expected, actual) {
   };
 }
 
-// lib/assistant/page-input-tools.js
+// lib/assistant/page-input-tools.ts
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
   const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + '); if (!el) return null; if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || ""); return typeof el.value === "string" ? el.value : null; })()';
@@ -5301,7 +5303,7 @@ async function handlePageInputTool(name, args, deps) {
   return await thinPageCommand(deps, name, args);
 }
 
-// lib/assistant/auth-challenge.js
+// lib/assistant/auth-challenge.ts
 var AUTH_PATH_RE = /(?:^|\/)(?:login|log-in|signin|sign-in|sign_in|passport|sso|auth)(?:\/|$)/i;
 var MCP_PATH_RE = /(?:^|\/)mcp(?:\/|$)/i;
 var MCP_HINT_RE = /(mcp[-_ ]?session|mcp\s*(?:server|服务器|端点)|jsonrpc|streamable\s*http)/i;
@@ -5479,7 +5481,7 @@ function authChallengeNotice(challenge) {
   return "\n\n\u26A0 " + challenge.message + "\n\u8BF7\u5148\u628A\u4E0A\u9762\u7684\u767B\u5F55 / \u6388\u6743\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u5E76\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u3002\u5728\u7528\u6237\u660E\u786E\u8868\u793A\u5DF2\u767B\u5F55\u524D\uFF0C\u4E0D\u8981\u53CD\u590D\u70B9\u51FB\u3001\u731C\u6D4B\u5176\u5B83\u5730\u5740\uFF0C\u4E5F\u4E0D\u8981\u5728\u6807\u7B7E\u9875\u4E4B\u95F4\u6765\u56DE\u5207\u6362\u3002";
 }
 
-// lib/assistant/fetch-tools.js
+// lib/assistant/fetch-tools.ts
 async function fetchWebpage(deps, args) {
   const ctx = deps.ctx;
   ctx.failedUrls = Array.isArray(ctx.failedUrls) ? ctx.failedUrls : [];
@@ -5593,7 +5595,7 @@ async function handleFetchTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/cdp-input-tools.js
+// lib/assistant/cdp-input-tools.ts
 async function clickElement(deps, args) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, "click", args, ctx);
@@ -5724,7 +5726,7 @@ async function handleCdpInputTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-read-tools.js
+// lib/assistant/page-read-tools.ts
 async function listFramesRaw(deps, tabId) {
   try {
     const results = await deps.chrome.scripting.executeScript({
@@ -5978,7 +5980,7 @@ async function handlePageReadTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/userscript-tools.js
+// lib/assistant/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
   const text = scripts.length ? scripts.map(
@@ -6021,7 +6023,7 @@ async function handleUserscriptTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/skill-tools.js
+// lib/assistant/skill-tools.ts
 var COMMON_OPERATING_DISCIPLINE = [
   "## \u901A\u7528\u64CD\u4F5C\u7EAA\u5F8B\uFF08\u6240\u6709\u6280\u80FD\u5171\u7528\uFF0C\u52A1\u5FC5\u9075\u5B88\uFF09",
   "",
@@ -6138,7 +6140,7 @@ async function handleSkillTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/code-access-tools.js
+// lib/assistant/code-access-tools.ts
 var pageWorldPreferred = /* @__PURE__ */ new Set();
 function tabKey(ctx) {
   return ctx && ctx.tabId != null ? String(ctx.tabId) : "";
@@ -6296,7 +6298,7 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-command-tools.js
+// lib/assistant/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
   outline: "outline",
@@ -6376,7 +6378,7 @@ async function handlePageCommandTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/knowledge-store-tools.js
+// lib/assistant/knowledge-store-tools.ts
 async function knowledgeReadTool(deps, args) {
   return deps.knowledgeRead(
     { book: deps.ctx.book, buildRagContext: deps.buildRagContext, buildCitations: deps.buildCitations, typeInfo: deps.typeInfo, starLevels: deps.STAR_LEVELS },
@@ -6412,7 +6414,7 @@ async function handleKnowledgeStoreTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/tools.js
+// lib/assistant/tools.ts
 var TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
     const name = tool.function.name;
@@ -7144,7 +7146,7 @@ function stripHtml(html) {
   return s.trim();
 }
 
-// lib/assistant/mcp.js
+// lib/assistant/mcp.ts
 var MCP_PROTOCOL_VERSION = "2024-11-05";
 var MCP_TTL = 5 * 60 * 1e3;
 var _mcpCache = /* @__PURE__ */ new Map();
@@ -7408,7 +7410,7 @@ async function executeAnyTool(name, args, ctx) {
   return executeTool(name, args, ctx);
 }
 
-// lib/assistant/agent-state.js
+// lib/assistant/agent-state.ts
 var RUN_STATUS = Object.freeze({
   CREATED: "created",
   PLANNING: "planning",
@@ -7451,7 +7453,7 @@ function createRun(runId, budget) {
 }
 var TOOL_STATUS = Object.freeze({ PENDING: "pending", APPROVAL_REQUIRED: "approval_required", APPROVED: "approved", REJECTED: "rejected", RUNNING: "running", SUCCEEDED: "succeeded", FAILED: "failed", TIMEOUT: "timeout" });
 
-// lib/assistant/session-store.js
+// lib/assistant/session-store.ts
 var SESSION_PREFIX = "recallflow.agentSession.v1.";
 var INDEX_KEY = "recallflow.agentSessionIndex.v1";
 var LEGACY_KEY2 = "recallflow.agentSessions.v1";
@@ -7623,7 +7625,7 @@ async function removeAgentSession(id) {
   }
 }
 
-// lib/assistant/tool-guard.js
+// lib/assistant/tool-guard.ts
 function canonicalize(value) {
   if (value === null || value === void 0) return String(value);
   if (typeof value !== "object") return JSON.stringify(value);
@@ -7746,7 +7748,7 @@ function createToolGuard(budget = {}) {
   };
 }
 
-// lib/assistant/skills.js
+// lib/assistant/skills.ts
 function buildSkillCatalog(skills = []) {
   const list = Array.isArray(skills) ? skills : [];
   if (!list.length) return "";
@@ -7762,7 +7764,7 @@ function buildSkillCatalog(skills = []) {
   ].join("\n");
 }
 
-// lib/assistant/intent-router.js
+// lib/assistant/intent-router.ts
 var INTENTS = Object.freeze({
   BROWSER: "browser_task",
   KNOWLEDGE: "knowledge_task",
@@ -8166,7 +8168,7 @@ function buildSystemPrompt(intent, instruction = "", toolNames = [], skills = []
   return [lines.join("\n"), skillCatalog].filter(Boolean).join("\n\n");
 }
 
-// lib/assistant/prefix-watch.js
+// lib/assistant/prefix-watch.ts
 function fingerprintMessage(m) {
   if (!m || typeof m !== "object") return "";
   return canonicalize(m);
@@ -8218,7 +8220,7 @@ function formatPrefixReport(diff) {
   return "prefix changed at " + diff.reason + "\uFF1A" + diff.detail + "\uFF08" + diff.prevLength + " \u2192 " + diff.nextLength + " \u6761\uFF09";
 }
 
-// lib/assistant/parallel-tools.js
+// lib/assistant/parallel-tools.ts
 var DEFAULT_MAX_BATCH = 4;
 function planParallelGroups(toolCalls, opts = {}) {
   const isParallelSafe = typeof opts.isParallelSafe === "function" ? opts.isParallelSafe : () => false;
@@ -8245,7 +8247,7 @@ function planParallelGroups(toolCalls, opts = {}) {
   return groups;
 }
 
-// lib/assistant/context-tuning.js
+// lib/assistant/context-tuning.ts
 var CONTEXT_TUNING = Object.freeze({
   // ---- 历史折叠 ----
   // 按 **token 估算**而不是字符数：中英文密度差约 4 倍，同样 6 万字符，
@@ -8265,7 +8267,7 @@ var CONTEXT_TUNING = Object.freeze({
   sessionMaxTailMessages: 39
 });
 
-// lib/assistant/conversation-guard.js
+// lib/assistant/conversation-guard.ts
 var CONTENT_OK = (m) => typeof m.content === "string" || Array.isArray(m.content);
 function diagnoseConversation(messages) {
   const list = Array.isArray(messages) ? messages : [];
@@ -8383,7 +8385,7 @@ function repairConversation(messages) {
   return out;
 }
 
-// lib/assistant/verifier.js
+// lib/assistant/verifier.ts
 var VERIFIER_SYSTEM = `\u4F60\u662F RecallFlow \u7684\u4EFB\u52A1\u6821\u9A8C\u5668\u3002\u6839\u636E\u300C\u7528\u6237\u76EE\u6807\u300D\u300CAgent \u58F0\u79F0\u7684\u7ED3\u679C\u300D\u300C\u672C\u6B21\u4EFB\u52A1\u6027\u8D28\u300D\u548C\u300C\u9875\u9762/\u73AF\u5883\u8BC1\u636E\u300D\uFF0C\u5224\u65AD\u76EE\u6807\u662F\u5426\u771F\u7684\u8FBE\u6210\u3002
 \u53EA\u8F93\u51FA\u4E25\u683C JSON\uFF1A
 {"ok": true|false, "confidence": 0~1\u7684\u5C0F\u6570, "reason": "\u4E00\u53E5\u8BDD\u7ED3\u8BBA", "missing": "\u672A\u8FBE\u6210\u65F6\u8FD8\u5DEE\u4EC0\u4E48", "suggestion": "\u672A\u8FBE\u6210\u65F6\u4E0B\u4E00\u6B65\u7684\u5177\u4F53\u5EFA\u8BAE"}
@@ -8495,7 +8497,7 @@ function adviceFor(reason, attempt) {
   return "\u8BF7\u5206\u6790\u5361\u70B9\u5E76\u6362\u4E00\u79CD\u65B9\u5F0F\uFF1A\u66F4\u6362\u5B9A\u4F4D\u65B9\u5F0F\uFF08role+name / testid / text\uFF09\u3001\u6362\u7528\u5176\u5B83\u5DE5\u5177\u3001\u6539\u7528 CDP\uFF08get_ax_snapshot + click_at\uFF09\u3001\u6216\u5148\u7B49\u5F85/\u5173\u95ED\u906E\u6321\uFF1B\u4E0D\u8981\u91CD\u590D\u540C\u6837\u7684\u52A8\u4F5C\u3002" + (attempt >= 2 ? "" : "");
 }
 
-// lib/assistant/claim-check.js
+// lib/assistant/claim-check.ts
 var MUTATION_VERBS = [
   "\u9690\u85CF",
   "\u6E05\u9664",
@@ -8596,7 +8598,7 @@ function buildDeterministicReflection(result) {
   return parts.join("\n");
 }
 
-// lib/assistant/evidence.js
+// lib/assistant/evidence.ts
 var EVIDENCE_BUDGET = 3600;
 var SNIPPET_PAD = 130;
 var HEAD_CHARS = 420;
@@ -8735,7 +8737,7 @@ function selectEvidence(input = {}) {
   return { text: body, coverage, hitTokens, missedTokens };
 }
 
-// lib/assistant/initial-messages.js
+// lib/assistant/initial-messages.ts
 var UNTRUSTED_BEGIN = "<<<RECALLFLOW_UNTRUSTED_DATA>>>";
 var UNTRUSTED_END = "<<<END_RECALLFLOW_UNTRUSTED_DATA>>>";
 function sanitizeUntrusted(text) {
@@ -8783,7 +8785,7 @@ function buildInitialMessagesPure(input = {}) {
   return messages;
 }
 
-// lib/assistant/vision.js
+// lib/assistant/vision.ts
 var MAX_IMAGES_PER_TASK = 3;
 function shouldSendImage(sentCount, cap = MAX_IMAGES_PER_TASK) {
   return (Number(sentCount) || 0) < (Number(cap) || 0);
@@ -8842,7 +8844,7 @@ function visionMessagesFor(screenshots, options = {}) {
   return msg ? [msg] : [];
 }
 
-// lib/assistant/approval-policy.js
+// lib/assistant/approval-policy.ts
 var APPROVAL_CATEGORY_BY_RISK = Object.freeze({
   read: "read",
   page: "commands",
@@ -8875,7 +8877,7 @@ function toolNeedsApproval(name, settings = {}, pageUrl = "") {
   return p[category] !== true;
 }
 
-// lib/assistant/agent.js
+// lib/assistant/agent.ts
 var AGENT_BUDGET_DEFAULTS = Object.freeze({
   // **没有轮数上限、没有工具数上限、没有任务时长上限**（对齐 DSH：dsh-agent-loop 里
   // 既没有 maxTurns 也没有 maxToolCalls，唯一的限制常量是并发度）。
@@ -9019,7 +9021,7 @@ function buildInitialMessages(instruction, selectedText, page, pageUrl, history,
     const l = p.locator || {};
     const head = picks.length > 1 ? "\u9009\u53D6\u7684\u5143\u7D20 " + (i + 1) + "\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A" : "\u7528\u6237\u5728\u9875\u9762\u4E0A\u9009\u53D6\u7684\u5143\u7D20\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A";
     const lines = [head];
-    if (l.role || l.name) lines.push("- \u8BED\u4E49\u5B9A\u4F4D\uFF1A" + formatElementLocator(l));
+    if (l.role || l.name) lines.push("- \u8BED\u4E49\u5B9A\u4F4D\uFF1A" + formatElementLocator(l, void 0, void 0));
     if (l.testid) lines.push("- testid\uFF1A" + l.testid);
     if (p.selector) lines.push("- CSS \u9009\u62E9\u5668\uFF1A" + p.selector);
     if (p.tag) lines.push("- \u6807\u7B7E\uFF1A" + p.tag);
@@ -12175,7 +12177,7 @@ var RunStreamHub = class {
   }
 };
 
-// lib/assistant/run-channel.js
+// lib/assistant/run-channel.ts
 var RunChannel = class {
   constructor() {
     this.port = null;

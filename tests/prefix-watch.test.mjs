@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fingerprintMessage, snapshotMessages, diffSnapshots, formatPrefixReport } from '../lib/assistant/prefix-watch.js';
+import { fingerprintMessage, snapshotMessages, diffSnapshots, formatPrefixReport } from '../lib/assistant/prefix-watch.ts';
 
 const sys = (c) => ({ role: 'system', content: c });
 const user = (c) => ({ role: 'user', content: c });

@@ -241,7 +241,7 @@ function formatVisibilityReport(results) {
   return "\u3010\u53EF\u89C1\u6027\u6838\u67E5\u3011\u5224\u65AD\u300C\u6587\u6848\u662F\u5426\u8FD8\u770B\u5F97\u89C1\u300D\u53EA\u80FD\u770B**\u53EF\u89C1\u6B21\u6570**\uFF1BDOM \u6B21\u6570\u5305\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u7684\u6587\u5B57\u3002\n" + lines.join("\n");
 }
 
-// lib/assistant/skill-defs.js
+// lib/assistant/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
@@ -996,7 +996,7 @@ var SKILL_REGISTRY = Object.freeze([
   }
 ]);
 
-// lib/assistant/skill-md.js
+// lib/assistant/skill-md.ts
 function compileKeywords(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -1115,7 +1115,7 @@ function toRuntimeSkill(skill, builtin = false) {
   };
 }
 
-// lib/assistant/skill-store.js
+// lib/assistant/skill-store.ts
 var STORAGE_KEY2 = "recallflow.skills";
 var PAGE_SIZE = 6;
 function compileAll(list, builtin) {
@@ -2215,7 +2215,7 @@ async function handleJavaScriptDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/site-memory.js
+// lib/assistant/site-memory.ts
 var KEY = "recallflow.siteMemory.v1";
 var MAX_PER_ORIGIN = 60;
 var MAX_ORIGINS = 50;
@@ -2269,7 +2269,7 @@ async function rememberElement(url, info) {
   await writeAll(Object.fromEntries(origins));
 }
 
-// lib/assistant/macro-store.js
+// lib/assistant/macro-store.ts
 var KEY2 = "recallflow.macros.v1";
 var MAX_PER_ORIGIN2 = 20;
 var MAX_ORIGINS2 = 50;
@@ -2334,7 +2334,8 @@ async function listMacros(url) {
   const all = await readAll2();
   const site = all[origin];
   if (!site) return [];
-  return Object.values(site).sort(
+  const values = Object.values(site);
+  return values.sort(
     (a, b) => (b.hits || 0) - (a.hits || 0) || String(a.name || "").localeCompare(String(b.name || ""))
   );
 }
@@ -2380,7 +2381,7 @@ async function recallTrace(url, opts = {}) {
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
 
-// lib/assistant/target-manager.js
+// lib/assistant/target-manager.ts
 var state = /* @__PURE__ */ new Map();
 function bucket(tabId) {
   const id = Number(tabId);
@@ -2406,7 +2407,7 @@ async function handleDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/trace.js
+// lib/assistant/trace.ts
 var TRACE_PREFIX = "recallflow.runTrace.v1.";
 var TRACE_INDEX_KEY = "recallflow.runTraceIndex.v1";
 var LEGACY_KEY = "recallflow.runTraces.v1";
@@ -2534,7 +2535,7 @@ async function listTraces() {
   return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
-// lib/assistant/tool-schemas.js
+// lib/assistant/tool-schemas.ts
 var HIGHLIGHT_MAX_TEXTS = 20;
 var TOOL_SCHEMAS = [
   {
@@ -3349,7 +3350,7 @@ var TOOL_SCHEMAS = [
   }
 ];
 
-// lib/assistant/tool-metadata.js
+// lib/assistant/tool-metadata.ts
 var TOOL_METADATA = {
   // C-4 合并第 4 档：只读三件套（search/list/get）→ knowledge_read({ op })。
   // 三者权限完全一致（read/readOnly/parallelSafe），因此合并**不改变任何权限语义**。
@@ -3489,7 +3490,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   }
 }
 
-// lib/assistant/net-parse.js
+// lib/assistant/net-parse.ts
 function stripHtmlTags(html) {
   return String(html || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&ensp;/g, " ").replace(/&emsp;/g, " ").replace(/&middot;/g, "\xB7").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&#(\d+);/g, (_, n) => {
     try {
@@ -3644,7 +3645,7 @@ async function searchWeb(query, maxResults = 6) {
   return [];
 }
 
-// lib/assistant/page-action-verify.js
+// lib/assistant/page-action-verify.ts
 function buildActionVerification(observed, reason) {
   const text = String(reason || "");
   if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
@@ -3693,7 +3694,7 @@ function verifyPageAction(command2, before, after, response) {
   };
 }
 
-// lib/assistant/target-frame.js
+// lib/assistant/target-frame.ts
 function parseRef(ref) {
   const m = String(ref || "").match(/^f(\d+):(.*)$/);
   if (m) return { frameId: Number(m[1]), ref: m[2] };
@@ -3714,7 +3715,7 @@ function localTargetArgs(args) {
   return out;
 }
 
-// lib/assistant/tool-results.js
+// lib/assistant/tool-results.ts
 function summarizeCdpError(e) {
   const msg = e && e.message ? e.message : String(e);
   return msg.replace(/^[A-Za-z.]+：/, "");
@@ -3734,7 +3735,7 @@ function compactSnapshotSummary(snapshot) {
   return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
 }
 
-// lib/assistant/diagnostics.js
+// lib/assistant/diagnostics.ts
 async function readConsole(sendTabMessage2, tabId, args) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   try {
@@ -3792,7 +3793,7 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/macros.js
+// lib/assistant/macros.ts
 var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
   "click_element",
   "type_text",
@@ -3909,7 +3910,7 @@ async function macroTool(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/knowledge.js
+// lib/assistant/knowledge.ts
 var KNOWLEDGE_READ_OPS = ["search", "list", "get"];
 function knowledgeRead(deps, args) {
   const op = String(args && args.op || "").trim();
@@ -3960,7 +3961,7 @@ function knowledgeGet(deps, args) {
   };
 }
 
-// lib/assistant/tab-tools.js
+// lib/assistant/tab-tools.ts
 var DEFAULT_MAX_TAB_SWITCHES = 6;
 function tabSwitchBudget(ctx) {
   const used = Math.max(0, Number(ctx && ctx.tabSwitchCount) || 0);
@@ -4138,7 +4139,7 @@ async function handleTabTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/run-metrics.js
+// lib/assistant/run-metrics.ts
 var num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 function summarizeRunTrace(entries) {
   const list = Array.isArray(entries) ? entries : [];
@@ -4182,7 +4183,7 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
-// lib/assistant/run-state-tools.js
+// lib/assistant/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
   const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
@@ -4234,7 +4235,7 @@ async function handleRunStateTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/permission-tools.js
+// lib/assistant/permission-tools.ts
 async function trustSite(deps) {
   const ctx = deps.ctx;
   const origin = siteKeyOf(ctx.pageUrl);
@@ -4355,7 +4356,7 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
   });
 }
 
-// lib/assistant/screenshot-tool.js
+// lib/assistant/screenshot-tool.ts
 var MAX_SHOT_B64 = 4e5;
 var DEFAULT_SCREENSHOT_BUDGET_MS = 12e3;
 async function captureWithLadder(deps) {
@@ -4473,7 +4474,7 @@ function editableTextSummary(expected, actual) {
   };
 }
 
-// lib/assistant/page-input-tools.js
+// lib/assistant/page-input-tools.ts
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
   const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + '); if (!el) return null; if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || ""); return typeof el.value === "string" ? el.value : null; })()';
@@ -4593,7 +4594,7 @@ async function handlePageInputTool(name, args, deps) {
   return await thinPageCommand(deps, name, args);
 }
 
-// lib/assistant/auth-challenge.js
+// lib/assistant/auth-challenge.ts
 var AUTH_PATH_RE = /(?:^|\/)(?:login|log-in|signin|sign-in|sign_in|passport|sso|auth)(?:\/|$)/i;
 var MCP_PATH_RE = /(?:^|\/)mcp(?:\/|$)/i;
 var MCP_HINT_RE = /(mcp[-_ ]?session|mcp\s*(?:server|服务器|端点)|jsonrpc|streamable\s*http)/i;
@@ -4771,7 +4772,7 @@ function authChallengeNotice(challenge) {
   return "\n\n\u26A0 " + challenge.message + "\n\u8BF7\u5148\u628A\u4E0A\u9762\u7684\u767B\u5F55 / \u6388\u6743\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u5E76\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u3002\u5728\u7528\u6237\u660E\u786E\u8868\u793A\u5DF2\u767B\u5F55\u524D\uFF0C\u4E0D\u8981\u53CD\u590D\u70B9\u51FB\u3001\u731C\u6D4B\u5176\u5B83\u5730\u5740\uFF0C\u4E5F\u4E0D\u8981\u5728\u6807\u7B7E\u9875\u4E4B\u95F4\u6765\u56DE\u5207\u6362\u3002";
 }
 
-// lib/assistant/fetch-tools.js
+// lib/assistant/fetch-tools.ts
 async function fetchWebpage(deps, args) {
   const ctx = deps.ctx;
   ctx.failedUrls = Array.isArray(ctx.failedUrls) ? ctx.failedUrls : [];
@@ -4885,7 +4886,7 @@ async function handleFetchTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/cdp-input-tools.js
+// lib/assistant/cdp-input-tools.ts
 async function clickElement(deps, args) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, "click", args, ctx);
@@ -5016,7 +5017,7 @@ async function handleCdpInputTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-read-tools.js
+// lib/assistant/page-read-tools.ts
 async function listFramesRaw(deps, tabId) {
   try {
     const results = await deps.chrome.scripting.executeScript({
@@ -5270,7 +5271,7 @@ async function handlePageReadTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/userscript-tools.js
+// lib/assistant/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
   const text = scripts.length ? scripts.map(
@@ -5313,7 +5314,7 @@ async function handleUserscriptTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/skill-tools.js
+// lib/assistant/skill-tools.ts
 var COMMON_OPERATING_DISCIPLINE = [
   "## \u901A\u7528\u64CD\u4F5C\u7EAA\u5F8B\uFF08\u6240\u6709\u6280\u80FD\u5171\u7528\uFF0C\u52A1\u5FC5\u9075\u5B88\uFF09",
   "",
@@ -5430,7 +5431,7 @@ async function handleSkillTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/code-access-tools.js
+// lib/assistant/code-access-tools.ts
 var pageWorldPreferred = /* @__PURE__ */ new Set();
 function tabKey(ctx) {
   return ctx && ctx.tabId != null ? String(ctx.tabId) : "";
@@ -5588,7 +5589,7 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-command-tools.js
+// lib/assistant/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
   outline: "outline",
@@ -5668,7 +5669,7 @@ async function handlePageCommandTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/knowledge-store-tools.js
+// lib/assistant/knowledge-store-tools.ts
 async function knowledgeReadTool(deps, args) {
   return deps.knowledgeRead(
     { book: deps.ctx.book, buildRagContext: deps.buildRagContext, buildCitations: deps.buildCitations, typeInfo: deps.typeInfo, starLevels: deps.STAR_LEVELS },
@@ -5704,7 +5705,7 @@ async function handleKnowledgeStoreTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/tools.js
+// lib/assistant/tools.ts
 var TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
     const name = tool.function.name;

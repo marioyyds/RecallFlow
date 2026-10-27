@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOL_REGISTRY, getToolMetadata, validateToolCall, BUILTIN_TOOLS } from '../lib/assistant/tools.js';
-import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
-import { TOOL_METADATA } from '../lib/assistant/tool-metadata.js';
-import { resolveIntent, INTENTS } from '../lib/assistant/intent-router.js';
+import { TOOL_REGISTRY, getToolMetadata, validateToolCall, BUILTIN_TOOLS } from '../lib/assistant/tools.ts';
+import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.ts';
+import { TOOL_METADATA } from '../lib/assistant/tool-metadata.ts';
+import { resolveIntent, INTENTS } from '../lib/assistant/intent-router.ts';
 
 const NAMES = TOOL_SCHEMAS.map((t) => t && t.function && t.function.name);
 

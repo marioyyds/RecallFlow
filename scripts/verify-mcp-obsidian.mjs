@@ -7,7 +7,7 @@
 // 安全：token **只在运行时从插件自己的 data.json 读取**，不写文件、不进日志、
 // 不进 git；本脚本只打印状态码 / 工具数 / 是否成功，绝不打印 token 本身。
 import fs from 'node:fs';
-import { mcpToolPrefix } from '../lib/assistant/mcp.js';
+import { mcpToolPrefix } from '../lib/assistant/mcp.ts';
 
 // 与扩展里一致的 serverId（BOSS 的配置就是它），用来估算工具定义真正占多少 token。
 const SERVER_ID = process.env.MCP_SERVER_ID || 'Obsidian MCP Server';

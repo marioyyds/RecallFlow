@@ -21,8 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { isContentScriptUnreachable, describeContentScriptUnreachable } from '../lib/shared/utils.ts';
-import { readCurrentPage } from '../lib/assistant/page-read-tools.js';
-import { runJavascript } from '../lib/assistant/code-access-tools.js';
+import { readCurrentPage } from '../lib/assistant/page-read-tools.ts';
+import { runJavascript } from '../lib/assistant/code-access-tools.ts';
 import { sourcePath } from './source-path.mjs';
 
 const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');

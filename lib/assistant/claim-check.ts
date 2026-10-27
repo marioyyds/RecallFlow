@@ -1,0 +1,150 @@
+// 完成前「确定性断言」预检：在花一次 LLM 校验之前，用零成本规则先筛一遍。
+//
+// 设计上刻意**不对称**：只返回 'fail'（确定性抓谎）或 'unknown'（交给 LLM），
+// **永不返回 'pass'**。这样确定性规则只在「本来就要重试」的情况下省下一次 LLM 调用，
+// 绝不会因为规则放行而削弱护栏。确定性规则也不该假装能证明「真做成了」——
+// 「页面确实变了」这类判断需要看证据，那仍是 LLM 校验器与 verify_change 的职责。
+//
+// 本模块为纯函数（无 chrome / DOM 依赖），可单测。
+
+// 「**改动了东西**」的动词：这类自称只能由写类工具满足，是最强的抓谎信号。
+const MUTATION_VERBS = [
+  '隐藏', '清除', '删掉', '删除', '移除', '去掉', '屏蔽', '拦截',
+  '修改', '改为', '改成', '设置', '设成', '居中', '对齐', '加粗', '高亮', '描边', '换色', '改色', '放大', '缩小',
+  '点击', '输入', '填写', '提交', '发送', '新建', '创建', '保存', '导出', '上传', '下载',
+  '勾选', '选中', '取消勾选', '还原', '撤销', '回退',
+];
+
+// 「**导航**」类动词单列。原因：`打开` 这类说法**不需要写类工具**也能成立 ——
+// `fetch_webpage` 抓到网页、`switch_tab` 切过去、`get_page_snapshot` 读到内容，
+// 模型说一句「已打开原文并总结」是完全属实的。
+// 原先 `打开` 混在写动词里，于是「只抓了几个网页」的研究类任务一旦这么写总结，
+// 就会被规则 1 判成「声称写但没调写类工具」。而且这个误判在 fetch_webpage 标了
+// readOnly 之后会**立刻变多**：它不再被算作写类工具了。
+// 折中方案：导航类声明仍然要核，但判据换成「有没有**能完成导航**的工具跑过」。
+const NAV_VERBS = ['打开', '跳转', '前往', '进入', '访问'];
+
+// 能"把页面打开/带出来"的工具。只要其中任一个跑过，导航类声明就不算无凭。
+//
+// ⚠ 这里**刻意不含** read_current_page / get_page_snapshot / web_search：
+// 它们能证明「看过内容」，但不能证明「打开过那个页面」。
+// 只搜过摘要却说「已打开原文」，仍然是声称与实际不符 —— 而那恰恰是最常见的幻觉形态。
+const NAV_CAPABLE_TOOLS = new Set(['open_tab', 'switch_tab', 'fetch_webpage']);
+
+// 仅用于在提示语里点出「总结里到底出现了哪个动词」。
+const WRITE_VERBS = [...MUTATION_VERBS, ...NAV_VERBS];
+
+/**
+ * 判断总结是否在**声称自己做了写操作**。
+ *
+ * 不能只做「包含动词」匹配：「打开页面后可见 3 个商品」「页面设置为深色」这类**描述性**表述
+ * 也会命中动词，造成误判（代价是一次白跑的校验 + 一次多余的反思）。
+ * 因此要求完成态线索：动词前有「已/已经/成功/全部」，或动词后紧跟「了/完成/成功」。
+ */
+function claimsWriteAction(claim: any, verbs: any) {
+  const alt = verbs.join('|');
+  const before = new RegExp('(?:已|已经|均已|都已|全部|成功|完成)[^。；;\\n]{0,14}(?:' + alt + ')');
+  const after = new RegExp('(?:' + alt + ')[^。；;\\n]{0,4}(?:了|完成|成功)');
+  return before.test(claim) || after.test(claim);
+}
+
+// 声称「可见性/残留」结论的措辞。
+const VISIBILITY_CLAIM_RE =
+  /可见\s*0|0\s*次可见|已不可见|全部不可见|均已不可见|可见次数\s*(?:为|是)?\s*0|零残留|清除干净|清干净|全清|彻底清除|不再出现|已无残留/;
+
+// 证据里出现这些即视为「做过可见性核查」。
+const VISIBILITY_EVIDENCE_RE =
+  /可见性核查|可见\s*\d+\s*次|DOM\s*\d+\s*次|display\s*[:=]\s*none|checkVisibility|getComputedStyle|offsetHeight|offsetParent/i;
+
+/**
+ * @param {Object} input
+ * @param {string} [input.claim] 完成总结（complete_task 的内容）
+ * @param {string[]} [input.ranTools] 本次任务调用过的工具名
+ * @param {string[]} [input.mutatingRanTools] 其中属于「页面修改类」（readOnly=false）的工具名
+ * @param {string[]} [input.failedTools] 失败过的工具名（**按名字**，不含"几次"）
+ * @param {string[]} [input.succeededTools] 成功过的工具名（同上，按名字）
+ * @param {string} [input.evidenceText] 最近的页面证据文本
+ * @returns {{verdict:'fail'|'unknown', reasons:Array<{code:string,message:string}>, reason:string}}
+ */
+export function checkCompletionClaim(input: Record<string, any> = {}) {
+  const claim = String(input.claim === undefined || input.claim === null ? '' : input.claim);
+  const ran = Array.isArray(input.ranTools) ? input.ranTools.filter(Boolean) : [];
+  const mutating = Array.isArray(input.mutatingRanTools) ? input.mutatingRanTools.filter(Boolean) : [];
+  const failed = Array.isArray(input.failedTools) ? input.failedTools.filter(Boolean) : [];
+  // 「成功过」必须和「失败过」分开记：两者都是**按名字**去重的，单看失败名单无法
+  // 区分「一次都没成」和「失败后又重试成功」。缺省为空数组 ⇒ 退化成旧行为，不引入新的放行。
+  const succeeded = Array.isArray(input.succeededTools) ? input.succeededTools.filter(Boolean) : [];
+  const evidence = String(input.evidenceText === undefined || input.evidenceText === null ? '' : input.evidenceText);
+
+  const reasons = [];
+  // 总结为空时无从判断，交给调用方（保持 unknown，不制造噪音）。
+  if (!claim.trim()) return { verdict: 'unknown', reasons: [], reason: '' };
+
+  const claimedVerb = WRITE_VERBS.find((v) => claim.includes(v));
+  const claimsMutation = claimsWriteAction(claim, MUTATION_VERBS);
+  const claimsNav = claimsWriteAction(claim, NAV_VERBS);
+  const claimsWrite = claimsMutation || claimsNav;
+
+  // 规则 1a：声称**改动了东西**，但本次一个写类工具都没调用过。
+  if (claimsMutation && mutating.length === 0 && ran.length > 0) {
+    reasons.push({
+      code: 'claim-without-mutation',
+      message:
+        '总结里声称完成了「' + (claimedVerb || '写') + '」类操作，但本次任务没有调用过任何页面修改类工具（只调用过：' +
+        [...new Set(ran)].slice(0, 8).join('、') +
+        '）。声称与实际动作不符。',
+    });
+  }
+
+  // 规则 1b：只声称**导航**（打开了 / 进入了），且一个能完成导航的工具都没跑过。
+  // 这里必须留一道：模型凭空说「已打开淘宝」而只读了当前页，是最典型的一种幻觉。
+  // 但只要跑过抓取/切页/读页中任意一个，导航声明就是**可能属实**的 —— 确定性规则不该在此下判断。
+  if (!claimsMutation && claimsNav && mutating.length === 0 && ran.length > 0 && !ran.some((n: any) => NAV_CAPABLE_TOOLS.has(n))) {
+    reasons.push({
+      code: 'claim-without-navigation',
+      message:
+        '总结里声称完成了「' + (claimedVerb || '打开') + '」类操作，但本次任务没有任何「能打开/抓取页面」的工具被调用过（只调用过：' +
+        [...new Set(ran)].slice(0, 8).join('、') +
+        '）。声称与实际动作不符。',
+    });
+  }
+
+  // 规则 2：声称做了写操作，但用到的写类工具**一次都没成功过**。
+  //
+  // ⚠ 判据必须是「该工具的所有调用都失败」，不能只判「该工具失败过」。
+  // 失败后重试成功是本产品的常态（点偏了再点、元素还没渲染出来再等等），
+  // 而这两个名单都是按**工具名**去重的 —— 同名工具只要失败过一次，
+  // 名字就进了 failedTools，哪怕后面成功了三次。按名字判「失败过」，
+  // 就会把「第一次点偏、第二次点中」这种**完全正确**的任务判成撒谎：
+  // 白烧一次 verification 配额，还灌给模型一条内容错误的反思（「全部失败」），
+  // 模型据此可能重复已经成功的动作，或者把总结改口成没做。
+  // 因此必须同时看 succeededTools：只要成功过一次，就不能说「全失败」。
+  if (claimsWrite && mutating.length > 0 && mutating.every((t: any) => failed.includes(t) && !succeeded.includes(t))) {
+    reasons.push({
+      code: 'all-mutations-failed',
+      message: '总结里声称完成了「' + (claimedVerb || '写') + '」类操作，但用到的写类工具一次都没成功过：' + [...new Set(mutating)].join('、') + '。',
+    });
+  }
+
+  // 规则 3：给出可见性/残留结论，却没有任何可见性核查证据。
+  if (VISIBILITY_CLAIM_RE.test(claim) && !VISIBILITY_EVIDENCE_RE.test(evidence)) {
+    reasons.push({
+      code: 'visibility-claim-without-evidence',
+      message:
+        '总结里给出了「可见性 / 已无残留」这类结论，但证据中没有任何可见性核查数据。' +
+        '请先用 read_current_page({ checkTexts: [...] }) 取得「可见 N 次 / DOM M 次」，再据此下结论。',
+    });
+  }
+
+  if (!reasons.length) return { verdict: 'unknown', reasons: [], reason: '' };
+  return { verdict: 'fail', reasons, reason: reasons.map((r) => r.message).join(' ') };
+}
+
+// 由确定性预检结果构造给 Agent 的反思消息（与 LLM 校验的反思同构，便于模型一致处理）。
+export function buildDeterministicReflection(result: any) {
+  const parts = ['（完成前检查未通过：确定性规则判定「声称与实际不符」）'];
+  const reasons = (result && result.reasons) || [];
+  for (const r of reasons) parts.push('- ' + (r.message || ''));
+  parts.push('请据实核对页面状态后修正总结或补齐动作；不要重复刚才已失败的动作。');
+  return parts.join('\n');
+}

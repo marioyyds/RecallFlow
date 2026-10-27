@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evidenceAfter, classifyTaskKind } from '../lib/assistant/agent.js';
+import { evidenceAfter, classifyTaskKind } from '../lib/assistant/agent.ts';
 
 const args = (a) => JSON.stringify(a || {});
 

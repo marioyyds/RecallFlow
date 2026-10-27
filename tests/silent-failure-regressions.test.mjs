@@ -13,10 +13,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { validateToolCall, TOOL_REGISTRY, executeTool, getToolMetadata, buildActionVerification, observedChange } from '../lib/assistant/tools.js';
+import { validateToolCall, TOOL_REGISTRY, executeTool, getToolMetadata, buildActionVerification, observedChange } from '../lib/assistant/tools.ts';
 // decodeBuffer 随 web_search 的解析逻辑一起搬到了 net-parse.js（见该文件的搬运说明）。
-import { decodeBuffer } from '../lib/assistant/net-parse.js';
-import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/assistant/agent.js';
+import { decodeBuffer } from '../lib/assistant/net-parse.ts';
+import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/assistant/agent.ts';
 import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
@@ -24,9 +24,9 @@ import { truncateEvidenceText } from '../lib/bridge/relay.js';
 import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.ts';
-import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.js';
-import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
-import { toRuntimeSkill } from '../lib/assistant/skill-md.js';
+import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.ts';
+import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
+import { toRuntimeSkill } from '../lib/assistant/skill-md.ts';
 
 // 宏存储键（与 lib/assistant/macro-store.js 的 KEY 一致）
 const MACRO_KEY = 'recallflow.macros.v1';
@@ -359,7 +359,7 @@ test('observedChange：指纹相同 → unchanged；缺指纹 → unobservable�
 test('CDP 路径不得再硬编码 hadEffect/verified/changed 都为 true', () => {
   // 原先 7 处 CDP 返回体写死 `hadEffect:true` + `changed:true`，而同一条返回里
   // 可能带一个 changed:false 的 verification（自相矛盾），且会让卡死检测永远认为在推进。
-  const src = readFileSync(new URL('../lib/assistant/tools.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
   const hardcoded = src.match(/verification:\s*\{\s*executed:\s*true,\s*verified:\s*true,\s*changed:\s*true/g) || [];
   assert.deepEqual(hardcoded, [], '仍有硬编码 verified/changed 全 true 的验证字段：' + hardcoded.length + ' 处');
 });
@@ -369,7 +369,7 @@ test('不得再声称「已验证」却同时说「没有变化」（语义矛�
   // 它等于宣称「我验证过了」，而实际什么都没观测 —— 会让卡死检测与完成校验双双失准。
   // 注意：buildActionVerification('unchanged') 返回的同样是 verified:true + changed:false，
   // 但那是**真实观测到的结论**（指纹相同），因此下面只针对带固定文案的硬编码字面量。
-  const src = readFileSync(new URL('../lib/assistant/tools.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
   const contradictory = src.match(/verified:\s*true,\s*changed:\s*false,\s*reason:\s*'[^']+'/g) || [];
   assert.deepEqual(
     contradictory,
@@ -595,7 +595,7 @@ test('evaluateLiveness：上限为 0/负数/非数字表示不启用（沿用高
 });
 
 test('存活看门狗必须已接入主循环（不能只定义不调用）', () => {
-  const src = readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
   assert.match(src, /const liveness = evaluateLiveness\(/, '主循环必须调用看门狗');
   assert.match(src, /if \(liveness\.stalled\)/, '必须对判定结果做处理');
   assert.match(src, /if \(progress\) lastProgressIter = iter/, '有进展必须重置基准');
@@ -670,7 +670,7 @@ test('buildPartialStep：无内容返回 null；缺 id 时补齐（OpenAI 结构
 });
 
 test('中断路径必须把部分产出补回历史（接线断言）', () => {
-  const src = readFileSync(new URL('../lib/assistant/agent.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
   assert.match(src, /partialErr\.partial = buildPartialStep\(/, 'streamAgentStep 必须把部分产出附在 AbortError 上');
   assert.match(src, /const partial = e\.partial/, '中断分支必须读取它');
   assert.match(src, /messages\.push\(partial\.assistantMessage\)/, '中断分支必须把它补回历史');
@@ -713,7 +713,7 @@ test('技能触发的"死路"不许再被接回来（含它的门禁也不许复
   // 这条与 skill-common-discipline.test.mjs 同型：钉住一个**反直觉的删除决定**。
   // 有人若"顺手"把关键词匹配加回运行时（无论是恢复 detectSkill，还是换个名字重写一遍），
   // 那都是模型可见内容的改动 ⇒ 必须先按 docs/regression-red-flag.md 测量，而不是直接合。
-  const src = readFileSync(new URL('../lib/assistant/skills.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/assistant/skills.ts', import.meta.url), 'utf8');
   const live = src.split('\n').filter((l) => !l.trim().startsWith('//'));
   assert.ok(
     !live.some((l) => /export\s+(async\s+)?function\s+detectSkill/.test(l)),

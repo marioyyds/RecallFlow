@@ -27,10 +27,10 @@ const read = (p) => fs.readFileSync(p, 'utf8');
 
 /** 会走到用户/模型眼前的文本（描述、技能、错误文案、README）。 */
 const SURFACES = [
-  'lib/assistant/tool-schemas.js',
-  'lib/assistant/skill-defs.js',
-  'lib/assistant/code-access-tools.js',
-  'lib/assistant/page-command-tools.js',
+  'lib/assistant/tool-schemas.ts',
+  'lib/assistant/skill-defs.ts',
+  'lib/assistant/code-access-tools.ts',
+  'lib/assistant/page-command-tools.ts',
   'lib/page/commands.ts',
   'README.md',
   // 中文 README 是 README.md 的逐节副本：文本搬走后不能因此逃出这道门禁。
@@ -60,16 +60,16 @@ test('不许再把"沙箱 eval 被拒"归因给页面的 CSP（那是扩展自�
 });
 
 test('错误文案必须点明"扩展自身的 CSP / 需要 CDP"，而不是只说"页面未放行"', () => {
-  const src = read('lib/assistant/code-access-tools.js');
+  const src = read('lib/assistant/code-access-tools.ts');
   assert.match(src, /MV3 扩展自身的 CSP 不允许 eval/, '未开 CDP 时的失败文案要给出正确归因');
   assert.match(src, /需要页面主世界执行（CDP）/, '并要直接说明需要开 CDP');
   assert.ok(!/沙箱执行被页面 CSP 阻止/.test(src), '不该再出现旧的错误归因文案');
 });
 
 test('技能与工具描述都要写明"这条工具需要 CDP"（否则模型会以为关掉 CDP 也能读）', () => {
-  const schema = read('lib/assistant/tool-schemas.js');
+  const schema = read('lib/assistant/tool-schemas.ts');
   assert.match(schema, /这条工具需要开启 CDP|需要开启 CDP|需 CDP/, 'run_javascript 的描述要点明需要 CDP');
-  const skill = read('lib/assistant/skill-defs.js');
+  const skill = read('lib/assistant/skill-defs.ts');
   assert.match(skill, /这条工具需要开启 CDP|要开 CDP 才能跑/, 'page-world 技能要点明需要 CDP');
 });
 

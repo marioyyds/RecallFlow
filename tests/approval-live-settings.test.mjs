@@ -16,11 +16,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
+const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
 
-// `lib/assistant/agent.js` 在模块顶层会 import 一堆东西，但不会在 import 期访问 chrome，
+// `lib/assistant/agent.ts` 在模块顶层会 import 一堆东西，但不会在 import 期访问 chrome，
 // 因此这里可以直接导入纯函数（另有测试用同样的方式导入它）。
-const { readLiveApprovalSettings, toolNeedsApproval } = await import('../lib/assistant/agent.js');
+const { readLiveApprovalSettings, toolNeedsApproval } = await import('../lib/assistant/agent.ts');
 
 test('现读的设置覆盖快照里的四个审批字段', async () => {
   const snapshot = {
@@ -104,7 +104,7 @@ test('串行路径：审批判断前必须现读，且判断用的是现读结�
 test('并行预执行路径：审批判断必须用现读结果，而不是 o.settings', () => {
   // 这条路更要紧：它决定"这个调用能不能先跑掉"。
   // 若沿用快照而用户中途把某类别改回「需要确认」，这里会以为无需审批而**直接执行**。
-  const at = agentSrc.indexOf('shouldSkip: (name, args) => {');
+  const at = agentSrc.indexOf('shouldSkip: (');
   assert.ok(at > -1, '应能找到并行路径的 shouldSkip');
   const body = agentSrc.slice(at, at + 700);
   assert.match(body, /toolNeedsApproval\(name, o\.approvalSettings,/, 'shouldSkip 必须用 o.approvalSettings');

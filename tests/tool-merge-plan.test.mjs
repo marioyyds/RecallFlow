@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
+import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
 
 const TOTAL = TOOL_REGISTRY.length; // 变更工具集时这里会自动跟随
 
@@ -87,7 +87,7 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   // C-1 拆分后，三个页面读取工具共用一个 deps 对象（其中含 cdpAllowed），
   // 于是 dispatch case 里**必然**出现 `cdpAllowed` 字样 —— 扫 dispatch 会得出相反结论。
   // 本轮就踩过这个坑：切片还一度跨进相邻 case，读到邻居的代码。
-  const readSrc = fs.readFileSync(new URL('../lib/assistant/page-read-tools.js', import.meta.url), 'utf8');
+  const readSrc = fs.readFileSync(new URL('../lib/assistant/page-read-tools.ts', import.meta.url), 'utf8');
   const fnBody = (name) => {
     const start = readSrc.indexOf('export async function ' + name + '(');
     if (start < 0) return '';
@@ -105,7 +105,7 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   // get_ax_snapshot 则**依赖** CDP（它读的是可访问性树）。
   // 断言同样落在**实现**上（./code-access-tools.js），而不是 tools.js 的分派注册表 ——
   // C-1 完成后那里已没有 case，扫它只会切到空串（正是本轮踩过的坑）。
-  const codeSrc = fs.readFileSync(new URL('../lib/assistant/code-access-tools.js', import.meta.url), 'utf8');
+  const codeSrc = fs.readFileSync(new URL('../lib/assistant/code-access-tools.ts', import.meta.url), 'utf8');
   const axImpl = codeSrc.slice(codeSrc.indexOf('export async function getAxSnapshot('));
   assert.match(axImpl.slice(0, 400), /cdpAllowed/, 'get_ax_snapshot 的实现依赖 CDP（合并前必须知道这一点）');
 });
@@ -157,7 +157,7 @@ test('宏合并必须保住"运行期白名单"这条防线（有真实提权先
   //   · op=save 要审批（写操作）
   //   · op=run 要过 REPLAYABLE_TOOLS 白名单（否则历史宏能执行任意工具）
   // 实现已移到 lib/assistant/macros.js —— 断言跟着实现走（否则一次纯搬运就让门禁失效）。
-  const src = fs.readFileSync(new URL('../lib/assistant/macros.js', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../lib/assistant/macros.ts', import.meta.url), 'utf8');
   assert.match(src, /export const REPLAYABLE_TOOLS/, '回放白名单必须存在且被导出（tools.js 记录时也用它）');
   const runIdx = src.indexOf('export async function macroRun');
   assert.ok(runIdx > 0, 'macroRun 应存在');
@@ -165,8 +165,8 @@ test('宏合并必须保住"运行期白名单"这条防线（有真实提权先
   assert.match(runBody, /REPLAYABLE_TOOLS\.has/, 'op=run 执行期必须校验白名单（不能只靠 schema 声明）');
   // 记录时与回放时必须用**同一份**白名单：两处各写一份就会漂移，而漂移后果是
   // "回放能执行记录时不允许的工具"。tools.js 必须从 macros.js 导入它。
-  const toolsSrc = fs.readFileSync(new URL('../lib/assistant/tools.js', import.meta.url), 'utf8');
-  assert.match(toolsSrc, /import \{[^}]*REPLAYABLE_TOOLS[^}]*\} from '\.\/macros\.js'/, 'tools.js 必须从 macros.js 导入白名单（唯一来源）');
+  const toolsSrc = fs.readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
+  assert.match(toolsSrc, /import \{[^}]*REPLAYABLE_TOOLS[^}]*\} from '\.\/macros\.(?:js|ts)'/, 'tools.js 必须从 macros.js 导入白名单（唯一来源）');
   assert.ok(!/const REPLAYABLE_TOOLS = new Set/.test(toolsSrc), 'tools.js 不得再自己声明一份白名单');
 });
 
@@ -178,7 +178,7 @@ test('技能合并不可做：toolNeedsApproval 拿不到 args，无法按 op �
   // 这条断言把"为什么不做"钉住，避免将来有人照着表格直接合并。
   // 实现已搬到 lib/assistant/approval-policy.js —— 断言跟着实现走
   //（否则一次纯搬运就让门禁失效，而它守的是"审批函数拿不到 args"这个架构事实）。
-  const policySrc = fs.readFileSync(new URL('../lib/assistant/approval-policy.js', import.meta.url), 'utf8');
+  const policySrc = fs.readFileSync(new URL('../lib/assistant/approval-policy.ts', import.meta.url), 'utf8');
   const sig = policySrc.match(/export function toolNeedsApproval\(([^)]*)\)/);
   assert.ok(sig, 'toolNeedsApproval 应存在');
   assert.ok(

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { planFrameBatches } from '../lib/assistant/tools.js';
+import { planFrameBatches } from '../lib/assistant/tools.ts';
 
 test('planFrameBatches: 无 frameId 与无 ref 前缀的目标归入顶层框架 0', () => {
   const batches = planFrameBatches([{ selector: '#a' }, { selector: '#b' }]);

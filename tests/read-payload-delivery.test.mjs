@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import { formatInspectMatches } from '../lib/shared/utils.ts';
 
 const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
-const toolsSrc = fs.readFileSync('lib/assistant/tools.js', 'utf8');
+const toolsSrc = fs.readFileSync('lib/assistant/tools.ts', 'utf8');
 
 /** 取一个顶层函数的源码体（到下一个顶层 function 为止）。
  *  ⚠ 必须容忍 `export ` 前缀：`recordTraceStep` 是 `export function`，

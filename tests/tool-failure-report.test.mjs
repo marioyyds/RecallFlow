@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { describeToolFailure } from '../lib/assistant/agent.js';
+import { describeToolFailure } from '../lib/assistant/agent.ts';
 
 /** 造一个与 withTimeout 内部打标一致的超时错误。 */
 const timeoutError = (ms, tool) => Object.assign(new Error('工具执行超时'), { rfToolTimeout: true, timeoutMs: ms, toolName: tool });
@@ -62,10 +62,10 @@ test('工具名为空也不崩（不能因为少个标签就丢掉整条说明�
 // ---------------------------------------------------------------- 接线
 
 test('接线：withTimeout 必须给超时错误打标，调用点必须走 describeToolFailure', () => {
-  const src = fs.readFileSync('lib/assistant/agent.js', 'utf8');
+  const src = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
   assert.ok(/err\.rfToolTimeout = true/.test(src), 'withTimeout 要给超时错误打标，否则调用点无法区分它与工具自己抛的错');
   assert.ok(/describeToolFailure\(e, tc\.name\)/.test(src), '调用点要统一走 describeToolFailure');
   assert.ok(!/result: e\.name === 'AbortError' \? '任务已取消。' : e\.message/.test(src), '旧的内联写法应当已被替换');
   // timer 必须先声明为 null：否则 finish 里引用后面才 const 的 timer 会撞 TDZ。
-  assert.ok(/let timer = null;/.test(src), 'timer 应先声明为 null，避免 TDZ');
+  assert.ok(/let timer(?:\s*:\s*[^=]+)?\s*=\s*null;/.test(src), 'timer 应先声明为 null，避免 TDZ');
 });

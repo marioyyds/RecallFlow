@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const cmdSrcRaw = fs.readFileSync('lib/page/commands.ts', 'utf8');
-const schemaSrcRaw = fs.readFileSync('lib/assistant/tool-schemas.js', 'utf8');
+const schemaSrcRaw = fs.readFileSync('lib/assistant/tool-schemas.ts', 'utf8');
 
 /**
  * 去掉注释再做**源码级**扫描。

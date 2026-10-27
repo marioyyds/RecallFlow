@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { summarizeCdpError, toolError, compactSnapshotSummary } from '../lib/assistant/tool-results.js';
+import { summarizeCdpError, toolError, compactSnapshotSummary } from '../lib/assistant/tool-results.ts';
 
 test('toolError：统一带 ok:false 与 code，并并入 extra 诊断字段', () => {
   const e = toolError('NO_TARGET', '找不到目标', { selector: '#a' });

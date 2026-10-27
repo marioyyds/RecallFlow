@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { selectEvidence, extractClaimTokens, EVIDENCE_BUDGET } from '../lib/assistant/evidence.js';
+import { selectEvidence, extractClaimTokens, EVIDENCE_BUDGET } from '../lib/assistant/evidence.ts';
 
 /** 造一个「关键事实在深处」的长页面，模拟真实场景。 */
 function longPage({ head = 3000, mid = 2500, tail = 1500 } = {}) {

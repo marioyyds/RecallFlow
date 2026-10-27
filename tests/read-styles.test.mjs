@@ -13,11 +13,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/utils.ts';
-import { INSPECT_OPS } from '../lib/assistant/page-command-tools.js';
-import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
+import { INSPECT_OPS } from '../lib/assistant/page-command-tools.ts';
+import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
 
 const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
-const schemaSrc = fs.readFileSync('lib/assistant/tool-schemas.js', 'utf8');
+const schemaSrc = fs.readFileSync('lib/assistant/tool-schemas.ts', 'utf8');
 
 const inspectTool = () => TOOL_REGISTRY.find((t) => t.name === 'inspect_element');
 

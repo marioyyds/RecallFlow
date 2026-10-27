@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { summarizeRunTrace, formatRunMetrics } from '../lib/assistant/run-metrics.js';
+import { summarizeRunTrace, formatRunMetrics } from '../lib/assistant/run-metrics.ts';
 
 const ENTRIES = [
   { ts: 1, phase: 'start', intent: 'BROWSER', instruction: '打开页面' },

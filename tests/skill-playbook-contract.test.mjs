@@ -22,8 +22,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
-import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
+import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
+import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
 import { PLAYBOOKS, playbookTools } from './e2e/fixtures/playbooks.mjs';
 
 const skillWithPlaybook = (id) => SKILL_REGISTRY.find((s) => s.x && s.x.playbook === id);
@@ -259,7 +259,7 @@ test('技能文件里写的技法必须与剧本一致（防止技能教一套�
   assert.match(content, /异步渲染/, '必须提醒"结果列表是异步渲染的"');
   assert.match(content, /value.*是要输入|`value` 是要输入/, '必须说清 value 与 text 的语义区别');
   assert.match(content, /广告/, '必须说清广告条目与真实结果的分工');
-  assert.match(fs.readFileSync('lib/assistant/skill-defs.js', 'utf8'), /不是先断言"页面上没有这个输入框"/,
+  assert.match(fs.readFileSync('lib/assistant/skill-defs.ts', 'utf8'), /不是先断言"页面上没有这个输入框"/,
     '必须提醒"定位失败先怀疑定位条件，而不是断言页面没有这个元素"（本轮真实踩到）');
 });
 

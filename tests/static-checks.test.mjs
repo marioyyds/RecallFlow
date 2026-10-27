@@ -33,7 +33,7 @@ test('创建出来的元素必须被挂载（"建了但忘了 append"是静默�
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(mjs|js)$/.test(e.name)) files.push(p);
+      else if (/\.(mjs|js|ts|mts)$/.test(e.name)) files.push(p);
     }
   };
   if (existsSync('lib')) walk('lib');
@@ -92,7 +92,7 @@ test('注释不许把下一行代码吃掉（注释里出现"紧贴着声明关�
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(mjs|js)$/.test(e.name)) files.push(p);
+      else if (/\.(mjs|js|ts|mts)$/.test(e.name)) files.push(p);
     }
   };
   for (const r of roots) if (existsSync(r)) walk(r);

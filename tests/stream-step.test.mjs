@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { streamAgentStep } from '../lib/assistant/agent.js';
+import { streamAgentStep } from '../lib/assistant/agent.ts';
 
 const SETTINGS = { baseUrl: 'https://api.example.com', model: 'm', apiKey: 'k', requestTimeoutMs: 5000 };
 const ORIGINAL_FETCH = globalThis.fetch;
