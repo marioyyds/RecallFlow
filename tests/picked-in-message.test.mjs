@@ -18,7 +18,8 @@ import {
   summarizePickedForMessage,
   formatPickedSummary,
   pickedSummaryHtml,
-} from '../lib/shared/utils.js';
+} from '../lib/shared/utils.ts';
+import { sourcePath } from './source-path.mjs';
 
 const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
@@ -194,7 +195,7 @@ test('两条渲染路径共用同一个格式化函数（各写一份会漂移�
 test('定位串只有一处实现：三处调用点都走 formatElementLocator', () => {
   // 这个字符串原本有三份手写实现，其中一份在"只有 name 没有 role"时会输出畸形的
   // `role=name="…"` —— 而"复制定位"按钮复制的正是它。改成唯一来源后不会再漂移。
-  const utilsSrc = fs.readFileSync('lib/shared/utils.js', 'utf8');
+  const utilsSrc = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
   assert.match(utilsSrc, /export function formatElementLocator\(/);
   // 三处调用：给模型的元数据（agent.js）、chip 文案与"复制定位"（chat.js）、
   // 存进会话的那一行（utils.js 内的 summarizePickedForMessage）

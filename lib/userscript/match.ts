@@ -2,7 +2,7 @@
 // 并提供运行时 URL 匹配做二次校验（含 @exclude 与正则 include）。
 
 // 把单个 @match/@include 规范化为 Chrome match pattern；无法转换返回 null。
-export function normalizeMatchPattern(pattern) {
+export function normalizeMatchPattern(pattern: string | null | undefined): string | null {
   let p = String(pattern || '').trim().replace(/\s+$/, '');
   if (!p) return null;
   if (p.length > 2 && p[0] === '/' && p[p.length - 1] === '/') return null; // 正则 include 无法用于注册
@@ -23,13 +23,20 @@ export function normalizeMatchPattern(pattern) {
   return scheme + '://' + host + path;
 }
 
+/** 匹配规则的最小结构：解析后的元信息与**已安装脚本记录**都能满足它。 */
+export interface MatchRules {
+  match?: string[];
+  include?: string[];
+  exclude?: string[];
+}
+
 /**
  * 由元信息生成可用于 chrome.scripting.registerContentScripts 的 matches 数组。
  * 同时返回无法注册（如正则 include）的条目，放入 warnings。
  */
-export function buildMatchPatterns(metadata) {
-  const patterns = [];
-  const warnings = [];
+export function buildMatchPatterns(metadata: MatchRules): { patterns: string[]; warnings: string[] } {
+  const patterns: string[] = [];
+  const warnings: string[] = [];
   const sources = (metadata.match || []).concat(metadata.include || []);
   for (const p of sources) {
     const norm = normalizeMatchPattern(p);
@@ -44,7 +51,7 @@ export function buildMatchPatterns(metadata) {
   return { patterns, warnings };
 }
 
-function globToRegExp(pattern) {
+function globToRegExp(pattern: string): RegExp {
   let re = '';
   for (const ch of pattern) {
     if (ch === '*') re += '.*';
@@ -54,7 +61,7 @@ function globToRegExp(pattern) {
   return new RegExp('^' + re + '$', 'i');
 }
 
-function patternMatches(pattern, url) {
+function patternMatches(pattern: string | null | undefined, url: string): boolean {
   const p = String(pattern || '').trim();
   if (!p) return false;
   // <all_urls> 在 Chrome 语义下覆盖所有 scheme；必须特判，否则永不匹配（脚本静默失效）。
@@ -74,7 +81,7 @@ function patternMatches(pattern, url) {
  * @param {Object} metadata - 解析后的元信息
  * @param {string} url
  */
-export function urlMatches(metadata, url) {
+export function urlMatches(metadata: MatchRules, url: string): boolean {
   const u = String(url || '');
   if ((metadata.exclude || []).some((ex) => patternMatches(ex, u))) return false;
   const sources = (metadata.match || []).concat(metadata.include || []);

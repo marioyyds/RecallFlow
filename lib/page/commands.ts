@@ -5,11 +5,11 @@ import { getInteractiveElementByRef, getRefFingerprint, elementSelector, absolut
 import { expandTableGrid, formatTableText } from '../shared/table.ts';
 // 页面原文（含图表/数学/表情符号里的星形平面字符）一律用 sliceSafe 截断：
 // 按码元下标切会留下孤立代理，进请求体就会被服务端整单拒收（见 surrogates.js 的事故说明）。
-import { sliceSafe } from '../shared/surrogates.js';
-import { formatInspectSummary, formatInspectMatches, formatHighlightResult, DEFAULT_STYLE_PROPS, formatStylesSummary, formatSelectOptions, formatInvalidControls } from '../shared/utils.js';
-import { HIGHLIGHT_MAX_TEXTS } from '../shared/constants.js';
+import { sliceSafe } from '../shared/surrogates.ts';
+import { formatInspectSummary, formatInspectMatches, formatHighlightResult, DEFAULT_STYLE_PROPS, formatStylesSummary, formatSelectOptions, formatInvalidControls } from '../shared/utils.ts';
+import { HIGHLIGHT_MAX_TEXTS } from '../shared/constants.ts';
 import { waitForSettle } from './settle.ts';
-import { editableTextSummary } from '../shared/editable-text.js';
+import { editableTextSummary } from '../shared/editable-text.ts';
 
 let cmdStyleReverters: any[] = []; // set_style 的还原函数
 let cmdTimers: any[] = []; // outline / set_style 的定时器

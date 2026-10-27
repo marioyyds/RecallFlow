@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { emptyMetadata, parseUserscriptMetadata, hashId } from '../lib/userscript/metadata.js';
-import { normalizeMatchPattern, buildMatchPatterns, urlMatches } from '../lib/userscript/match.js';
+import { emptyMetadata, parseUserscriptMetadata, hashId } from '../lib/userscript/metadata.ts';
+import { normalizeMatchPattern, buildMatchPatterns, urlMatches } from '../lib/userscript/match.ts';
 
 const HEAD = (lines) => '// ==UserScript==\n' + lines.map((l) => '// ' + l).join('\n') + '\n// ==/UserScript==\nconsole.log(1);';
 

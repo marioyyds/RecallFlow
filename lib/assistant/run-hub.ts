@@ -8,7 +8,50 @@
 
 export const RUN_TEXT_FLUSH_MS = 40;
 
-export function createRunState(input) {
+/** 展示用的一段内容（思考 / 旁白 / 提示 / 正文…）。 */
+export interface RunPart {
+  type: string;
+  text?: string;
+  color?: string;
+  live?: boolean;
+  terminal?: boolean;
+  [key: string]: unknown;
+}
+
+/** 一次 run 的可渲染状态。字段由 applyRunEvent 逐步归约。 */
+export interface RunState {
+  runId: string;
+  sessionId: string;
+  ownerTabId: number | null;
+  instruction: string;
+  status: string;
+  cursor: number;
+  startedAt: number;
+  updatedAt: number;
+  content: string;
+  narration: string;
+  reasoning: string;
+  parts: RunPart[];
+  plan: any[];
+  citations: any[];
+  progress: { state: string; step: number; max: number };
+  tokens: number;
+  approval: any;
+  error: string;
+  terminalNotice: any;
+  stopping: boolean;
+  [key: string]: any;
+}
+
+/** 广播中心的内部记录：状态 + 待 flush 的增量 + 定时器句柄。 */
+interface RunRecord {
+  state: RunState;
+  pending: Array<{ type: string; text: string }>;
+  timer: any;
+}
+
+
+export function createRunState(input: any): RunState {
   const data = input || {};
   return {
     runId: String(data.runId || ''),
@@ -36,25 +79,25 @@ export function createRunState(input) {
   };
 }
 
-function endReasoning(state) {
+function endReasoning(state: RunState): void {
   if (!state.reasoning) return;
   state.parts.push({ type: 'thinking', text: state.reasoning });
   state.reasoning = '';
 }
 
-function flushNarration(state) {
+function flushNarration(state: RunState): void {
   if (!state.narration) return;
   state.parts.push({ type: 'narration', text: state.narration });
   state.narration = '';
 }
 
-function pushNotice(state, text, color) {
+function pushNotice(state: RunState, text: unknown, color?: unknown): void {
   const value = String(text || '').trim();
   if (!value) return;
-  state.parts.push({ type: 'notice', text: value, color: color || '' });
+  state.parts.push({ type: 'notice', text: value, color: String(color || '') });
 }
 
-function pushStepNotice(state, text, color) {
+function pushStepNotice(state: RunState, text: unknown, color?: unknown): void {
   endReasoning(state);
   flushNarration(state);
   pushNotice(state, text, color);
@@ -66,7 +109,7 @@ function pushStepNotice(state, text, color) {
  * 这里刻意不保存 screenshot 的 dataUrl：图片可能几百 KB，逐帧同步会把广播打爆。
  * 只同步截图元数据（id / label / 尺寸）；跟随页按 id 从共享截图存储取回图片。
  */
-export function applyRunEvent(state, event) {
+export function applyRunEvent(state: RunState, event: any): RunState {
   if (!state || !event || typeof event !== 'object') return state;
   switch (event.type) {
     case 'citations':
@@ -210,7 +253,7 @@ export function applyRunEvent(state, event) {
     }
     case 'skill':
       if (Array.isArray(event.skills) && event.skills.length) {
-        pushStepNotice(state, '🛠 启用技能：' + event.skills.map((s) => s.title || s.name).join('、'), '');
+        pushStepNotice(state, '🛠 启用技能：' + event.skills.map((s: any) => s.title || s.name).join('、'), '');
       }
       break;
     case 'error':
@@ -231,7 +274,7 @@ export function applyRunEvent(state, event) {
 }
 
 /** 跟随页使用的临时助手消息；正式落盘消息仍由发起页负责。 */
-export function runStateToAssistantMessage(state) {
+export function runStateToAssistantMessage(state: RunState) {
   if (!state) return null;
   let parts = (state.parts || []).map((p) => Object.assign({}, p));
   if (state.reasoning) parts.push({ type: 'thinking', text: state.reasoning, live: true });
@@ -261,7 +304,7 @@ export function runStateToAssistantMessage(state) {
   };
 }
 
-function citeNumber(inner) {
+function citeNumber(inner: unknown): number | null {
   const m = String(inner || '').match(/(\d{1,2})\s*$/);
   return m ? Number(m[1]) : null;
 }
@@ -271,8 +314,8 @@ function citeNumber(inner) {
  * 这里按正文首次出现顺序过滤并重编号，行为与发起页收尾时的 renumberCitationsAcross 一致：
  * 没有任何正文引用时，citations 必须为空，界面才不会凭空出现“参考来源”。
  */
-function bindCitationsToText(parts, citations) {
-  const list = Array.isArray(citations) ? citations : [];
+function bindCitationsToText(parts: any, citations: any) {
+  const list = (Array.isArray(citations) ? citations : []) as any[];
   // 没有引用时不必扫描全文；跟随页每 40ms 都会走这里，长回答下这是纯浪费。
   if (!list.length) return { parts, citations: [] };
   const collect = /[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g;
@@ -298,7 +341,7 @@ function bindCitationsToText(parts, citations) {
     cited.push(Object.assign({}, found, { index: cited.length + 1 }));
   }
   if (!cited.length) return { parts, citations: [] };
-  const replace = (text) => {
+  const replace = (text: unknown): string => {
     const src = String(text || '');
     return src.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (whole, inner) => {
       const old = citeNumber(inner);
@@ -307,20 +350,30 @@ function bindCitationsToText(parts, citations) {
       return '[' + label + oldToNew.get(old) + ']';
     });
   };
-  const nextParts = parts.map((p) => {
+  const nextParts = parts.map((p: any) => {
     if (!p || (p.type !== 'narration' && p.type !== 'text') || !p.text) return p;
     return Object.assign({}, p, { text: replace(p.text) });
   });
   return { parts: nextParts, citations: cited };
 }
 
-function cloneSnapshot(snapshot) {
+function cloneSnapshot(snapshot: any) {
   if (!snapshot) return null;
   return JSON.parse(JSON.stringify(snapshot));
 }
 
 export class RunStreamHub {
-  constructor(options) {
+  flushMs: number;
+  now: () => number;
+  onStart: (snapshot: any) => void;
+  onDelta: (delta: any) => void;
+  onEnd: (snapshot: any) => void;
+  setTimer: (cb: () => void, ms: number) => any;
+  clearTimer: (handle: any) => void;
+  maxRuns: number;
+  runs: Map<string, RunRecord>;
+
+  constructor(options?: any) {
     const opts = options || {};
     this.flushMs = Math.max(0, Number(opts.flushMs) || RUN_TEXT_FLUSH_MS);
     this.now = typeof opts.now === 'function' ? opts.now : Date.now;
@@ -331,15 +384,17 @@ export class RunStreamHub {
     // 而浏览器原生的 `window.setTimeout` 要求 this=window，否则抛
     // "Illegal invocation"。流式文本正是在这里排第一次 flush —— 一旦抛错，
     // 后续 chunk 全被 emit 的 try/catch 吞掉，跟随页就永远只收到快照、看起来"不流式"。
-    const setTimer = typeof opts.setTimer === 'function' ? opts.setTimer : (cb, ms) => setTimeout(cb, ms);
-    const clearTimer = typeof opts.clearTimer === 'function' ? opts.clearTimer : (handle) => clearTimeout(handle);
+    const setTimer: (cb: () => void, ms: number) => any =
+      typeof opts.setTimer === 'function' ? opts.setTimer : (cb: () => void, ms: number) => setTimeout(cb, ms);
+    const clearTimer: (handle: any) => void =
+      typeof opts.clearTimer === 'function' ? opts.clearTimer : (handle: any) => clearTimeout(handle);
     this.setTimer = (cb, ms) => setTimer(cb, ms);
     this.clearTimer = (handle) => clearTimer(handle);
     this.maxRuns = Math.max(1, Number(opts.maxRuns) || 20);
-    this.runs = new Map();
+    this.runs = new Map<string, RunRecord>();
   }
 
-  begin(input) {
+  begin(input?: any) {
     const data = input || {};
     const runId = String(data.runId || '');
     if (!runId) return null;
@@ -368,7 +423,7 @@ export class RunStreamHub {
     return snapshot;
   }
 
-  push(runId, event) {
+  push(runId: unknown, event: any): void {
     const rec = this.runs.get(String(runId || ''));
     if (!rec || !event) return;
     applyRunEvent(rec.state, event);
@@ -384,7 +439,7 @@ export class RunStreamHub {
     this._publish(rec, event);
   }
 
-  _bufferText(rec, event) {
+  _bufferText(rec: RunRecord, event: any): void {
     const last = rec.pending[rec.pending.length - 1];
     if (last && last.type === event.type) {
       last.text += String(event.text || '');
@@ -393,7 +448,7 @@ export class RunStreamHub {
     rec.pending.push({ type: event.type, text: String(event.text || '') });
   }
 
-  flush(runId) {
+  flush(runId: unknown): void {
     const rec = this.runs.get(String(runId || ''));
     if (!rec) return;
     if (rec.timer) {
@@ -404,7 +459,7 @@ export class RunStreamHub {
     for (const event of pending) this._publish(rec, event);
   }
 
-  _publish(rec, event) {
+  _publish(rec: RunRecord, event: any): void {
     rec.state.cursor += 1;
     rec.state.updatedAt = this.now();
     this.onDelta({
@@ -416,7 +471,7 @@ export class RunStreamHub {
     });
   }
 
-  finish(runId, status) {
+  finish(runId: unknown, status?: string) {
     const rec = this.runs.get(String(runId || ''));
     if (!rec) return null;
     this.flush(runId);
@@ -427,7 +482,7 @@ export class RunStreamHub {
     return snapshot;
   }
 
-  findBySession(sessionId) {
+  findBySession(sessionId: unknown) {
     const wanted = String(sessionId || '');
     if (!wanted) return null;
     let completed = null;
@@ -445,18 +500,18 @@ export class RunStreamHub {
     return completed ? cloneSnapshot(completed) : null;
   }
 
-  snapshot(runId) {
+  snapshot(runId: unknown) {
     const rec = this.runs.get(String(runId || ''));
     return rec ? cloneSnapshot(rec.state) : null;
   }
 
-  clear(runId) {
+  clear(runId: unknown): void {
     const rec = this.runs.get(String(runId || ''));
     if (rec && rec.timer) this.clearTimer(rec.timer);
     this.runs.delete(String(runId || ''));
   }
 
-  _prune() {
+  _prune(): void {
     if (this.runs.size <= this.maxRuns) return;
     for (const [id, rec] of this.runs) {
       if (this.runs.size <= this.maxRuns) break;

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
 import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
-import { HIGHLIGHT_MAX_TEXTS } from '../lib/shared/constants.js';
+import { HIGHLIGHT_MAX_TEXTS } from '../lib/shared/constants.ts';
 
 const skill = SKILL_REGISTRY.find((s) => s.name === 'highlight-key-points');
 const schema = TOOL_SCHEMAS.find((t) => t.function && t.function.name === 'annotate');

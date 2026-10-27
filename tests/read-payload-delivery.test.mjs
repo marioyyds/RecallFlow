@@ -24,7 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { formatInspectMatches } from '../lib/shared/utils.js';
+import { formatInspectMatches } from '../lib/shared/utils.ts';
 
 const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
 const toolsSrc = fs.readFileSync('lib/assistant/tools.js', 'utf8');

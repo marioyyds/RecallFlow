@@ -17,7 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { formatSelectOptions } from '../lib/shared/utils.js';
+import { formatSelectOptions } from '../lib/shared/utils.ts';
 import { INSPECT_OPS } from '../lib/assistant/page-command-tools.js';
 
 const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');

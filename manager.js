@@ -1,4 +1,4 @@
-// lib/shared/constants.js
+// lib/shared/constants.ts
 var STORAGE_KEY = "knowledgeBase";
 var LEGACY_STORAGE_KEY = "wrongBook";
 var DATA_VERSION_KEY = "knowledgeBaseDataVersion";
@@ -28,7 +28,7 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
-// lib/shared/surrogates.js
+// lib/shared/surrogates.ts
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
 function alignRange(text, start, end) {
@@ -53,11 +53,11 @@ function sliceSafe(text, start, end) {
   return s.slice(a, b);
 }
 
-// lib/shared/utils.js
+// lib/shared/utils.ts
 function debounce(fn, delay) {
   let timer = null;
   return function(...args) {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => fn.apply(this, args), delay);
   };
 }
@@ -133,7 +133,7 @@ function starBarHtml(n, interactive) {
 }
 function bindStarKeyboard(root, onSelect) {
   root.addEventListener("keydown", (e) => {
-    const cell = e.target.closest('.star-cell[role="radio"]');
+    const cell = e.target?.closest('.star-cell[role="radio"]');
     if (!cell) return;
     const group = cell.parentElement;
     const cells = Array.from(group.querySelectorAll(".star-cell"));
@@ -202,14 +202,15 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
 function fmtTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
-  const diff = Date.now() - ts;
+  const diff = Date.now() - Number(d.getTime());
   if (diff < 60 * 60 * 1e3) return Math.max(1, Math.round(diff / 6e4)) + " \u5206\u949F\u524D";
   if (diff < 24 * 60 * 60 * 1e3) return Math.round(diff / 36e5) + " \u5C0F\u65F6\u524D";
   if (diff < 7 * 24 * 60 * 60 * 1e3) return Math.round(diff / 864e5) + " \u5929\u524D";
   return d.toLocaleDateString("zh-CN");
 }
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s).replace(/[&<>"']/g, (c) => map[c]);
 }
 var _toastTimer = null;
 function showToast(msg, opts) {
@@ -233,7 +234,7 @@ function showToast(msg, opts) {
     el.appendChild(btn);
   }
   el.classList.add("show");
-  clearTimeout(_toastTimer);
+  if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
 }
 
@@ -439,10 +440,10 @@ async function setBook(book) {
   notifyChange();
 }
 
-// lib/userscript/store.js
+// lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
-// lib/page/markdown.js
+// lib/page/markdown.ts
 var HL_KEYWORDS = new Set(
   "function return if else for while do switch case break continue default new class extends super this const let var typeof instanceof in of try catch finally throw async await yield import export from as static get set null undefined true false void delete package private protected public interface type enum namespace module def elif lambda pass None True False and or not global raise with assert import print del class return if elif else".split(" ")
 );
@@ -486,7 +487,8 @@ function sanitizeHref(raw) {
   return s;
 }
 function renderMarkdown(md, citations, streaming) {
-  const lines = md.split("\n");
+  const lines = String(md === void 0 || md === null ? "" : md).split("\n");
+  const cites = Array.isArray(citations) ? citations : [];
   let html = "";
   let inCode = false;
   let codeBuf = [];
@@ -505,11 +507,11 @@ function renderMarkdown(md, citations, streaming) {
       if (!href) return text;
       return '<a href="' + href.replace(/"/g, "&quot;") + '" target="_blank" rel="noopener noreferrer">' + text + "</a>";
     });
-    if (citations && citations.length) {
+    if (cites.length) {
       r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
         const idx = extractCiteNum(inner);
         if (idx === null) return match;
-        const c = citations[idx - 1];
+        const c = cites[idx - 1];
         if (!c) return match;
         const short = c.title.length > 16 ? c.title.slice(0, 16) + "\u2026" : c.title;
         return '<button class="cite-badge" data-cite-id="' + escAttr(c.id || "") + '" data-cite-source="' + escAttr(c.source || "kb") + '" data-cite-url="' + escAttr(c.url || "") + '" data-cite-snippet="' + escAttr(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr(short) + "</button>";

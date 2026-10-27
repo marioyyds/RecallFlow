@@ -29,11 +29,28 @@
    产物字节数不受迁移影响（全图迁完实测逐字节相同），所以**不要抬体积棘轮**；
    但产物里的路径注释 `// lib/x.js → // lib/x.ts` 会让新鲜度门禁变红。
 
-5. **`tsc --noEmit` 目前还不是门禁。** 仓库里现在 0 个 `.ts`，挂进
-   `scripts/run-all-checks.mjs` 就是一条永远为绿的假闸。
-   Batch 1 首批 `.ts` 落地时，在同一个提交里把它补进 STEPS（入口已就绪：`npm run check:types`）。
+5. **`tsc --noEmit` 已进 `scripts/run-all-checks.mjs`（Batch 1a 起）。** 新增 `.ts` 时
+   必须让 `npm run check:types` 保持 exit 0 —— 它是验收标准，不是可选项。
 
 6. **浏览器不能加载 `.ts`（Chromium 没有 type stripping）。**
    凡是不经过 `content.js` 打包就会被浏览器按文件名取走的模块，都不能只有 `.ts` 版本：
    `manifest.json` 里写死的入口、`chrome.scripting.executeScript({files:[...]})`、
-   `chrome.runtime.getURL('lib/userscript/*.js')`。动到这些之前先做真浏览器复验。
+   `chrome.runtime.getURL('lib/userscript/*.js')`。动到这些之前先做真浏览器复验
+   （`node scripts/verify-mv3-ts-load.mjs`，它在真 MV3 里逐条证明 `.ts` 加载失败）。
+
+7. **浏览器入口是构建产物，源码在 `entries/`（TITA-78 起）。**
+   `background.js` / `popup.js` / `options.js` / `manager.js` / `skills-page.js` /
+   `userscripts.js` / `lib/userscript/runner.js` 都由 `node scripts/build-entries.mjs`
+   从 `entries/*.js` 打包而来（与 `content.js` ← `entries/content.ts` 同一模式）。
+   改这些入口或它们 import 的任何模块后，**两件事都要做**：
+   - `node scripts/build-content.mjs`（内容脚本图）
+   - `node scripts/build-entries.mjs`（浏览器入口图）
+
+   **为什么必须显式写**：产物是提交进仓库的，而单元测试读的是源码 —— 忘了重建时
+   单测全绿、E2E 却对着旧产物跑，**一声不吭**。新鲜度由 `tests/entries-build.test.mjs` 守
+   （它逐字节比盘上与源码产物），`node scripts/build-entries.mjs --check` 可单独验。
+   合并冲突时**不要**接受 git 对这几个产物文件的文本合并，重跑构建。
+
+8. **`entries/**` 里仍可以是 `.js`（入口暂不要求类型化）。** `tsconfig` 的 `include`
+   覆盖 `entries/**/*`，但 `allowJs: true` + `checkJs: false` ⇒ 只解析不检查。
+   入口图里的 `lib/**` 模块可以自由改成 `.ts`（打包会把它们内联），这正是引入构建的目的。

@@ -332,6 +332,21 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 **Batch 2 —— 交集 9 个模块 + `lib/userscript/*`（7 个）**
 动到这里就要先回答「`background.js` 怎么加载 TS」。**必须先做一次 4.1 的真浏览器复验**，再开 `lib/shared/*` 里那 7 个。
 
+> **已落地（TITA-78，2026-10-27）——选的是方案 A（入口构建）**，理由与证据：
+>
+> 1. 真 MV3 复验（`scripts/verify-mv3-ts-load.mjs`，真 Chromium `--load-extension`）六个场景全过：
+>    manifest 直列 `.ts` content script 静默不执行、`background.js` import `.ts` 后 SW 不 boot、
+>    `service_worker` 直接指向 `.ts` 不注册、`getURL` 动态 import `.ts` 被拒
+>    （对照组的 `.js` 版本四种路径都正常）。⇒ 4.1 的推断在 MV3 上成立。
+> 2. 方案 B（浏览器图保持 `.js`）在本批**产不出任何迁移**：交集 9 个模块与
+>    `lib/userscript/*` 的 6 个都在这张图里（实测 85 文件 / 79 lib 模块），
+>    留着 `.js` 就等于这批什么也没做。
+> 3. 实施形态：`entries/*.js` 为源码，`scripts/build-entries.mjs` 打成 7 个自包含产物
+>    （6 个 ESM 入口 + `lib/userscript/runner.js` 的 IIFE），新鲜度由
+>    `tests/entries-build.test.mjs` 与 `--check` 守；`content.js` 的模式被完整复用。
+> 4. 已知代价：入口产物是提交进仓库的（合计约 1.9 MB 未压缩），改任一入口图内的模块要重建
+>    4 个大 bundle；`runner.js` 的两处 `getURL` 动态 import 因此改成静态 import（被打包内联）。
+
 **Batch 3 —— `lib/assistant/*`（53 个文件，14312 行，strict 错误 1172 条）**
 最大的一块，建议再拆：
 - 3a：纯叶子（无 `../` import 的约 34 个文件）

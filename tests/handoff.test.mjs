@@ -18,7 +18,7 @@ import {
   MAX_TRAIL_FULL,
   handoffByteSize,
   fitRecordToBudget,
-} from '../lib/shared/handoff.js';
+} from '../lib/shared/handoff.ts';
 
 const BODY_RE = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 

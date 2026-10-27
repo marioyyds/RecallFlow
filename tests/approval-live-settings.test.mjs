@@ -132,7 +132,7 @@ test('updateAISettings：局部更新不许把其它字段回写成旧值', asyn
       },
     },
   };
-  const { updateAISettings } = await import('../lib/shared/settings.js');
+  const { updateAISettings } = await import('../lib/shared/settings.ts');
   // 模拟"面板打开时读到 model=old-model，之后用户把它改成了 new-model"
   store.aiSettings.model = 'new-model';
   const merged = await updateAISettings({ toolApprovalPolicy: { read: true, commands: true } });

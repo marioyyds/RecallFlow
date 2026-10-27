@@ -14,6 +14,7 @@
 //   ④ 静态契约：三条出站路径都必须过消毒，五个高风险切片点都必须用安全切片
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { sourcePath } from './source-path.mjs';
 import fs from 'node:fs';
 
 import {
@@ -23,7 +24,7 @@ import {
   sanitizeMessages,
   sliceSafe,
   rangeSafe,
-} from '../lib/shared/surrogates.js';
+} from '../lib/shared/surrogates.ts';
 import { formatTableText } from '../lib/shared/table.ts';
 import { buildCollapsed, collapseOldToolResults } from '../lib/assistant/context.js';
 import { expandResult } from '../lib/assistant/run-state-tools.js';
@@ -242,14 +243,15 @@ test('④ 出站消毒：历史里的孤立代理在发送前被清掉，且历�
 // ---------------------------------------------------------------- ⑤ 静态契约
 
 test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片点都用安全切片', () => {
-  const read = (p) => fs.readFileSync(p, 'utf8');
+  const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
   const paths = [
     ['lib/assistant/agent.js', read('lib/assistant/agent.js')],
     ['lib/assistant/llm.js', read('lib/assistant/llm.js')],
     ['entries/background.js', read('entries/background.js')],
   ];
   for (const [name, src] of paths) {
-    assert.match(src, /surrogates\.js/, name + ' 必须复用 surrogates 模块（别各写一份判据）');
+    // 迁移期：specifier 可能是 `.js` 或 `.ts`（模块改名后 import 侧跟着改），两种都认。
+    assert.match(src, /surrogates\.(?:js|ts)/, name + ' 必须复用 surrogates 模块（别各写一份判据）');
     assert.match(src, /sanitizeMessages\(/, name + ' 出站前必须消毒');
   }
 

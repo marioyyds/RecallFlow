@@ -22,7 +22,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { formatInvalidControls } from '../lib/shared/utils.js';
+import { formatInvalidControls } from '../lib/shared/utils.ts';
 
 const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
 

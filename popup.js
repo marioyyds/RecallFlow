@@ -1,4 +1,4 @@
-// lib/shared/constants.js
+// lib/shared/constants.ts
 var STORAGE_KEY = "knowledgeBase";
 var LEGACY_STORAGE_KEY = "wrongBook";
 var DATA_VERSION_KEY = "knowledgeBaseDataVersion";
@@ -36,7 +36,7 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
-// lib/shared/surrogates.js
+// lib/shared/surrogates.ts
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
 function alignRange(text, start, end) {
@@ -61,11 +61,11 @@ function sliceSafe(text, start, end) {
   return s.slice(a, b);
 }
 
-// lib/shared/utils.js
+// lib/shared/utils.ts
 function debounce(fn, delay) {
   let timer = null;
   return function(...args) {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => fn.apply(this, args), delay);
   };
 }
@@ -166,7 +166,7 @@ function starBarHtml(n, interactive) {
 }
 function bindStarKeyboard(root, onSelect) {
   root.addEventListener("keydown", (e) => {
-    const cell = e.target.closest('.star-cell[role="radio"]');
+    const cell = e.target?.closest('.star-cell[role="radio"]');
     if (!cell) return;
     const group = cell.parentElement;
     const cells = Array.from(group.querySelectorAll(".star-cell"));
@@ -235,14 +235,15 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
 function fmtTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
-  const diff = Date.now() - ts;
+  const diff = Date.now() - Number(d.getTime());
   if (diff < 60 * 60 * 1e3) return Math.max(1, Math.round(diff / 6e4)) + " \u5206\u949F\u524D";
   if (diff < 24 * 60 * 60 * 1e3) return Math.round(diff / 36e5) + " \u5C0F\u65F6\u524D";
   if (diff < 7 * 24 * 60 * 60 * 1e3) return Math.round(diff / 864e5) + " \u5929\u524D";
   return d.toLocaleDateString("zh-CN");
 }
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s).replace(/[&<>"']/g, (c) => map[c]);
 }
 function platformColor(id) {
   return id === "other" ? "#95a5a6" : "#4a90d9";
@@ -269,7 +270,7 @@ function showToast(msg, opts) {
     el.appendChild(btn);
   }
   el.classList.add("show");
-  clearTimeout(_toastTimer);
+  if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
 }
 
@@ -503,7 +504,7 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   return item;
 }
 
-// lib/userscript/store.js
+// lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
 // entries/popup.js

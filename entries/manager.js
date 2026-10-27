@@ -1,5 +1,5 @@
 // 完整管理页：类型 Tab、标签筛选、搜索、内联编辑、批量操作、导入导出
-import { STATUS, ITEM_TYPES, STAR_LEVELS } from '../lib/shared/constants.js';
+import { STATUS, ITEM_TYPES, STAR_LEVELS } from '../lib/shared/constants.ts';
 import {
   debounce,
   logError,
@@ -14,10 +14,10 @@ import {
   sortItems,
   parseTags,
   bindStarKeyboard,
-} from '../lib/shared/utils.js';
+} from '../lib/shared/utils.ts';
 import { getBook, setBook, subscribeKnowledgeChanges } from '../lib/shared/store.js';
-import { USERSCRIPTS_KEY } from '../lib/userscript/store.js';
-import { renderMarkdown } from '../lib/page/markdown.js';
+import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
+import { renderMarkdown } from '../lib/page/markdown.ts';
 import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.js';
 
 let bookCache = {};

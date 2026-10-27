@@ -1,8 +1,8 @@
 // 设置页（API Key/模型/RAG/工具审批/快捷语句/MCP）
-import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecutionApproval } from '../lib/shared/settings.js';
-import { esc } from '../lib/shared/utils.js';
-import { getUserscriptSettings, saveUserscriptSettings } from '../lib/userscript/settings.js';
-import { USERSCRIPTS_KEY } from '../lib/userscript/store.js';
+import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
+import { esc } from '../lib/shared/utils.ts';
+import { getUserscriptSettings, saveUserscriptSettings } from '../lib/userscript/settings.ts';
+import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 // 复用后台那一套握手（initialize → notifications/initialized → tools/list），
 // 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
 import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/assistant/mcp.js';

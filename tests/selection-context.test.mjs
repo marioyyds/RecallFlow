@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { selectedTextMessageHtml } from '../lib/shared/utils.js';
+import { selectedTextMessageHtml } from '../lib/shared/utils.ts';
 import {
   serializeConversationMessages,
   MAX_SELECTED_TEXT_CHARS,

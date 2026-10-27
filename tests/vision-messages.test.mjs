@@ -14,7 +14,7 @@ import {
   TOKENS_PER_IMAGE,
   DEFAULT_VISION_BUDGET,
 } from '../lib/assistant/vision.js';
-import { VISION_ENABLED } from '../lib/shared/utils.js';
+import { VISION_ENABLED } from '../lib/shared/utils.ts';
 
 const shot = (id, chars = 100) => ({
   id,
@@ -183,7 +183,8 @@ test('E2E 对照门禁存在、且按常量实际值选臂（不是写死"今天
   const p = 'tests/e2e/vision-switch.spec.mjs';
   assert.ok(fs.existsSync(p), '缺少 E2E 对照门禁：' + p);
   const src = fs.readFileSync(p, 'utf8');
-  assert.match(src, /import\s*\{[^}]*VISION_ENABLED[^}]*\}\s*from\s*'\.\.\/\.\.\/lib\/shared\/utils\.js'/, '必须 import VISION_ENABLED');
+  // 迁移期：specifier 可能是 `.js`（E2E 侧还没跟着改）或 `.ts`，两种都认。
+  assert.match(src, /import\s*\{[^}]*VISION_ENABLED[^}]*\}\s*from\s*'\.\.\/\.\.\/lib\/shared\/utils\.(?:js|ts)'/, '必须 import VISION_ENABLED');
   assert.match(src, /test\.skip\(VISION_ENABLED !== false/, '关闭臂要按常量选臂');
   assert.match(src, /test\.skip\(VISION_ENABLED !== true/, '开启臂要按常量选臂');
   assert.match(src, /image_url/, '必须断言 image_url 的存在/形态');

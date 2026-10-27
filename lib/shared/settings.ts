@@ -73,8 +73,18 @@ export const AI_SETTINGS_DEFAULTS = {
   bridgeToken: 'recallflow-local-bridge-v1',
 };
 
+/**
+ * AI 设置。存储里的内容来自旧版本用户（字段可能缺失、可能多出未知键），
+ * 因此用「默认值的形状 ∩ 任意额外键」描述，而不是一个封闭接口。
+ */
+export type AISettings = typeof AI_SETTINGS_DEFAULTS & Record<string, unknown>;
+
 /** 已有用户补齐新增默认项；新增项优先，确保 12 条已满时也不会被静默挤掉。 */
-export function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
+export function mergeQuickPrompts(
+  saved: unknown,
+  defaults: string[] = AI_SETTINGS_DEFAULTS.quickPrompts,
+  limit = QUICK_PROMPT_LIMIT
+): string[] {
   const list = Array.isArray(saved)
     ? saved.map((item) => String(item || '').trim()).filter(Boolean)
     : [];
@@ -95,7 +105,7 @@ export function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPr
 }
 
 /** 快捷指令只显示短标签；发送时展开为完整任务规范。 */
-export function expandQuickPrompt(text) {
+export function expandQuickPrompt(text: unknown): string {
   return String(text || '').trim() === SESSION_TO_KB_QUICK_PROMPT
     ? SESSION_TO_KB_INSTRUCTION
     : String(text || '');
@@ -108,7 +118,7 @@ export function expandQuickPrompt(text) {
  * runJavascriptApproval。若不回退，老用户升级后设置会被静默重置为默认值 ——
  * 而对一个审批开关来说，「静默变回默认」比「读到一个旧值」更危险。
  */
-export function resolveCodeExecutionApproval(settings) {
+export function resolveCodeExecutionApproval(settings?: Record<string, unknown> | null): string {
   const s = settings || {};
   const v = s.codeExecutionApproval !== undefined && s.codeExecutionApproval !== null && s.codeExecutionApproval !== ''
     ? s.codeExecutionApproval
@@ -128,18 +138,18 @@ export function resolveCodeExecutionApproval(settings) {
  * 合并的基底是**存储里的原值**（不是与默认值合并后的结果）——
  * 这样不会把一堆默认值顺便写进存储，保持"存储里只放用户真正设过的东西"。
  */
-export async function updateAISettings(patch) {
+export async function updateAISettings(patch?: Record<string, unknown>): Promise<AISettings> {
   const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
   const saved = d[AI_SETTINGS_KEY] || {};
   const next = Object.assign({}, saved, patch || {});
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
-  return Object.assign({}, AI_SETTINGS_DEFAULTS, next);
+  return Object.assign({}, AI_SETTINGS_DEFAULTS, next) as AISettings;
 }
 
-export async function getAISettings() {
+export async function getAISettings(): Promise<AISettings> {
   const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
-  const saved = d[AI_SETTINGS_KEY] || {};
-  const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved);
+  const saved = (d[AI_SETTINGS_KEY] || {}) as Record<string, unknown>;
+  const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved) as AISettings;
   // 新版本新增的默认快捷指令会合并进已有用户设置：保留用户自定义项与顺序，去重后补齐新增项。
   if (Array.isArray(saved.quickPrompts)) {
     merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);

@@ -4,7 +4,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// lib/shared/constants.js
+// lib/shared/constants.ts
 var STORAGE_KEY = "knowledgeBase";
 var LEGACY_STORAGE_KEY = "wrongBook";
 var DATA_VERSION_KEY = "knowledgeBaseDataVersion";
@@ -34,7 +34,7 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
-// lib/shared/surrogates.js
+// lib/shared/surrogates.ts
 var REPLACEMENT = "\uFFFD";
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
@@ -79,11 +79,12 @@ function walkStrings(node, apply, depth = 0) {
     }
     return;
   }
-  for (const k of Object.keys(node)) {
-    const v = node[k];
+  const rec = node;
+  for (const k of Object.keys(rec)) {
+    const v = rec[k];
     if (typeof v === "string") {
       const next = apply(v);
-      if (next !== v) node[k] = next;
+      if (next !== v) rec[k] = next;
     } else {
       walkStrings(v, apply, depth + 1);
     }
@@ -130,7 +131,7 @@ function rangeSafe(text, start, end) {
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
 
-// lib/shared/utils.js
+// lib/shared/utils.ts
 function logError(context, error) {
   console.warn(`[BookmarkSorter] ${context}:`, error);
 }
@@ -538,7 +539,7 @@ async function deleteItem(id) {
   notifyChange();
 }
 
-// lib/shared/settings.js
+// lib/shared/settings.ts
 var AI_SETTINGS_KEY = "aiSettings";
 var QUICK_PROMPT_LIMIT = 12;
 var SESSION_TO_KB_QUICK_PROMPT = "\u6574\u7406\u4F1A\u8BDD\u5230\u77E5\u8BC6\u5E93";
@@ -1064,7 +1065,7 @@ async function callDeepSeek(settings, messages, signal) {
   }
 }
 
-// lib/userscript/metadata.js
+// lib/userscript/metadata.ts
 var DEFAULT_GRANTS = ["GM_addStyle", "GM_setValue", "GM_getValue"];
 function emptyMetadata() {
   return {
@@ -1171,7 +1172,7 @@ function hashId(...parts) {
   return hash.toString(36);
 }
 
-// lib/userscript/match.js
+// lib/userscript/match.ts
 function normalizeMatchPattern(pattern) {
   let p = String(pattern || "").trim().replace(/\s+$/, "");
   if (!p) return null;
@@ -1206,7 +1207,7 @@ function buildMatchPatterns(metadata) {
   return { patterns, warnings };
 }
 
-// lib/userscript/store.js
+// lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 function storage() {
   return typeof chrome !== "undefined" && chrome.storage ? chrome.storage.local : null;
@@ -1222,7 +1223,8 @@ async function getScript(id) {
   const area3 = storage();
   if (!area3 || !id) return null;
   const data = await area3.get(USERSCRIPTS_KEY);
-  return (data[USERSCRIPTS_KEY] || {})[id] || null;
+  const map = data[USERSCRIPTS_KEY] || {};
+  return map[id] || null;
 }
 async function saveScript(script) {
   const area3 = storage();
@@ -1246,7 +1248,7 @@ async function removeScript(id) {
   return true;
 }
 
-// lib/userscript/greasyfork.js
+// lib/userscript/greasyfork.ts
 var SEARCH_ENDPOINT = "https://greasyfork.org/zh-CN/scripts.json";
 async function fetchText(url, timeoutMs = 2e4) {
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -1282,11 +1284,11 @@ async function searchGreasyFork(q) {
     installs: Number(it.total_installs || it.installs || 0),
     codeUrl: String(it.code_url || ""),
     pageUrl: String(it.url || ""),
-    updatedAt: it.updated_at || ""
+    updatedAt: String(it.updated_at || "")
   }));
 }
 
-// lib/userscript/settings.js
+// lib/userscript/settings.ts
 var USERSCRIPT_SETTINGS_KEY = "recallflow.userscript.settings.v1";
 var USERSCRIPT_SETTINGS_DEFAULTS = {
   // 允许 Agent 通过 install_userscript 自动安装脚本。
@@ -1302,15 +1304,18 @@ async function getUserscriptSettings() {
   return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
 }
 
-// lib/userscript/manager.js
+// lib/userscript/manager.ts
+var RUN_AT_MAP = {
+  "document-start": "document_start",
+  "document-end": "document_end",
+  "document-idle": "document_idle",
+  "context-menu": "document_idle"
+};
 function runAtValue(runAt) {
-  const map = {
-    "document-start": "document_start",
-    "document-end": "document_end",
-    "document-idle": "document_idle",
-    "context-menu": "document_idle"
-  };
-  return map[String(runAt || "document-idle")] || "document_idle";
+  return RUN_AT_MAP[String(runAt || "document-idle")] || "document_idle";
+}
+function errMessage(e) {
+  return e instanceof Error ? e.message : String(e);
 }
 async function syncUserscriptRegistrations() {
   if (typeof chrome === "undefined" || !chrome.scripting || !chrome.scripting.registerContentScripts) return;
@@ -1342,7 +1347,7 @@ async function syncUserscriptRegistrations() {
     try {
       await chrome.scripting.registerContentScripts([item]);
     } catch (e) {
-      console.warn("[RecallFlow] \u6CE8\u518C\u811A\u672C\u5931\u8D25", item.id, e.message);
+      console.warn("[RecallFlow] \u6CE8\u518C\u811A\u672C\u5931\u8D25", item.id, errMessage(e));
     }
   }
 }
@@ -1388,7 +1393,7 @@ async function buildScriptFromCode(code, sourceUrl) {
     runAt: meta.runAt || settings.defaultRunAt,
     noframes: meta.noframes,
     matches: patterns,
-    excludeMatches: (meta.exclude || []).map((p) => normalizeMatchPattern(p)).filter(Boolean),
+    excludeMatches: (meta.exclude || []).map((p) => normalizeMatchPattern(p)).filter((p) => Boolean(p)),
     grants: meta.grant || [],
     requires: meta.require || [],
     resources,
@@ -1448,8 +1453,9 @@ async function previewCode(code) {
 async function updateScript(id) {
   const existing = await getScript(id);
   if (!existing) return { ok: false, error: "\u811A\u672C\u4E0D\u5B58\u5728\uFF1A" + id };
-  const source = existing.updateURL || existing.sourceUrl;
+  const source = existing.updateURL || existing.sourceUrl || "";
   const installed = await installFromUrl(source);
+  if (!installed.script) return { ok: false, error: "\u66F4\u65B0\u5931\u8D25\uFF1A" + id };
   installed.script.enabled = existing.enabled;
   await saveScript(installed.script);
   await syncUserscriptRegistrations();
@@ -1464,7 +1470,7 @@ async function updateAllScripts() {
       results.updated += 1;
     } catch (e) {
       results.failed += 1;
-      if (results.errors.length < 3) results.errors.push(s.name + "\uFF1A" + e.message);
+      if (results.errors.length < 3) results.errors.push(String(s.name) + "\uFF1A" + errMessage(e));
     }
   }
   return results;
@@ -1499,7 +1505,7 @@ async function runUserscriptOnTab(tabId, scriptId) {
       await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/userscript/runner.js"] });
       res = await deliver();
     } catch (e) {
-      return { ok: false, error: "\u6CE8\u5165\u811A\u672C\u8FD0\u884C\u65F6\u5931\u8D25\uFF1A" + e.message };
+      return { ok: false, error: "\u6CE8\u5165\u811A\u672C\u8FD0\u884C\u65F6\u5931\u8D25\uFF1A" + errMessage(e) };
     }
   }
   return res;
@@ -1512,9 +1518,9 @@ async function userscriptXhr(details) {
   if (!/^https?:\/\//i.test(url)) return { error: "\u4EC5\u652F\u6301 http/https\uFF1A" + url };
   try {
     const resp = await fetch(url, {
-      method: String(details.method || "GET").toUpperCase(),
-      headers: details.headers && typeof details.headers === "object" ? details.headers : void 0,
-      body: details.data !== void 0 ? details.data : void 0,
+      method: String(details?.method || "GET").toUpperCase(),
+      headers: details && details.headers && typeof details.headers === "object" ? details.headers : void 0,
+      body: details?.data !== void 0 ? details.data : void 0,
       redirect: "follow"
     });
     const responseText = await resp.text();
@@ -1526,7 +1532,7 @@ async function userscriptXhr(details) {
       ok: true
     };
   } catch (e) {
-    return { error: e.message + "\uFF08\u76EE\u6807\u57DF\u540D\u9700\u5728 manifest.json \u7684 host_permissions \u4E2D\u6388\u6743\uFF09" };
+    return { error: errMessage(e) + "\uFF08\u76EE\u6807\u57DF\u540D\u9700\u5728 manifest.json \u7684 host_permissions \u4E2D\u6388\u6743\uFF09" };
   }
 }
 
@@ -4949,7 +4955,7 @@ async function handlePermissionTool(name, args, deps) {
   return null;
 }
 
-// lib/shared/screenshot-store.js
+// lib/shared/screenshot-store.ts
 var SHOT_KEY = "recallflow.shots.v1";
 var SHOT_INDEX_KEY = "recallflow.shots.index.v1";
 var SHOT_ITEM_PREFIX = "recallflow.shots.item.v1.";
@@ -5149,7 +5155,7 @@ async function takeScreenshot(deps) {
   };
 }
 
-// lib/shared/editable-text.js
+// lib/shared/editable-text.ts
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
 }
@@ -10397,7 +10403,7 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
   emit({ type: "end" });
 }
 
-// lib/shared/handoff.js
+// lib/shared/handoff.ts
 var ID_PREFIX = "RF-";
 var ID_RE = /^RF-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
 var MAX_MESSAGES = 20;
@@ -11823,7 +11829,7 @@ var PanelSessionStore = class {
   }
 };
 
-// lib/assistant/run-hub.js
+// lib/assistant/run-hub.ts
 var RUN_TEXT_FLUSH_MS = 40;
 function createRunState(input) {
   const data = input || {};
@@ -11865,7 +11871,7 @@ function flushNarration(state2) {
 function pushNotice(state2, text, color) {
   const value = String(text || "").trim();
   if (!value) return;
-  state2.parts.push({ type: "notice", text: value, color: color || "" });
+  state2.parts.push({ type: "notice", text: value, color: String(color || "") });
 }
 function pushStepNotice(state2, text, color) {
   endReasoning(state2);
@@ -12034,6 +12040,15 @@ function cloneSnapshot(snapshot) {
   return JSON.parse(JSON.stringify(snapshot));
 }
 var RunStreamHub = class {
+  flushMs;
+  now;
+  onStart;
+  onDelta;
+  onEnd;
+  setTimer;
+  clearTimer;
+  maxRuns;
+  runs;
   constructor(options) {
     const opts = options || {};
     this.flushMs = Math.max(0, Number(opts.flushMs) || RUN_TEXT_FLUSH_MS);

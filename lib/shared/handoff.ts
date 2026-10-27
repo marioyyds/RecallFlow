@@ -34,6 +34,42 @@ export const MAX_TRAIL_RESULT_CHARS = 600;
 // 仅靠「条数上限」挡不住单条超长（最坏 20×4000 字符），因此再加一道按字节的闸。
 export const MAX_RECORD_BYTES = 160000;
 
+/** 工具轨迹的一步：`调用 → 一行结果`。`textClamped` 表示单步文本被裁过。 */
+export interface ToolTrailStep {
+  name: string;
+  args: string;
+  status: string;
+  result: string;
+  textClamped?: boolean;
+  argsChars?: number;
+  resultChars?: number;
+  [key: string]: unknown;
+}
+
+/** 交接包记录（`buildHandoffRecord` 的产出形状）。 */
+export interface HandoffRecord {
+  id: string;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+  pageUrl: string;
+  pageTitle: string;
+  selection: string;
+  lastError: string;
+  messageCount: number;
+  messages: Array<{ role: string; content: string }>;
+  toolTrail: ToolTrailStep[];
+  trailTotal: number;
+  trailStored: number;
+  trailOmitted: number;
+  trailTextClamped: number;
+  pickedElements: any[];
+  consoleErrors: any[];
+  note: string;
+  truncated?: string;
+  [key: string]: unknown;
+}
+
 /** 生成一个新的会话标识，形如 `RF-7K2M9X`。 */
 export function newHandoffId() {
   let out = '';
@@ -52,7 +88,7 @@ export function newHandoffId() {
  * 归一化用户/AI 给出的标识：去空白、转大写、接受省略前缀或含空格的写法。
  * 无法识别时返回空串（调用方据此报「标识无效」）。
  */
-export function normalizeHandoffId(raw) {
+export function normalizeHandoffId(raw: unknown): string {
   // 先剥掉所有空白与连字符：人工抄写/粘贴常见的变体都要能识别
   // （小写、省略前缀、空格代替连字符、分隔位置随意）。
   let s = String(raw === undefined || raw === null ? '' : raw)
@@ -66,26 +102,26 @@ export function normalizeHandoffId(raw) {
   return ID_RE.test(out) ? out : '';
 }
 
-export function isHandoffId(raw) {
+export function isHandoffId(raw: unknown): boolean {
   return normalizeHandoffId(raw) !== '';
 }
 
-function clampText(v, max) {
+function clampText(v: unknown, max: number): string {
   const s = String(v === undefined || v === null ? '' : v);
   return s.length > max ? s.slice(0, max) + '…（已截断）' : s;
 }
 
 /** 裁剪对话：只保留最近 limit 条，且逐条按字符数封顶，避免交接包无限膨胀。 */
-export function trimMessages(messages, limit = MAX_MESSAGES, maxChars = MAX_MESSAGE_CHARS) {
-  const list = Array.isArray(messages) ? messages : [];
+export function trimMessages(messages: unknown, limit = MAX_MESSAGES, maxChars = MAX_MESSAGE_CHARS) {
+  const list = (Array.isArray(messages) ? messages : []) as any[];
   return list
     .filter((m) => m && typeof m === 'object' && (m.role === 'user' || m.role === 'assistant'))
     .slice(-limit)
     .map((m) => ({ role: m.role, content: clampText(m.content, maxChars) }));
 }
 
-function trimConsole(entries) {
-  const list = Array.isArray(entries) ? entries : [];
+function trimConsole(entries: unknown) {
+  const list = (Array.isArray(entries) ? entries : []) as any[];
   return list
     .filter((e) => e && (e.level === 'error' || e.level === 'warn'))
     .slice(-MAX_CONSOLE)
@@ -97,8 +133,8 @@ function trimConsole(entries) {
     }));
 }
 
-function trimPicked(list) {
-  const arr = Array.isArray(list) ? list : [];
+function trimPicked(list: unknown) {
+  const arr = (Array.isArray(list) ? list : []) as any[];
   return arr.slice(0, MAX_PICKED).map((p) => {
     const src = (p && p.source) || {};
     return {
@@ -134,9 +170,9 @@ function trimPicked(list) {
  *
  * 与 `deriveToolTrail` 的分工：那个返回"交付用的最近 N 步"，这个返回全量步数。
  */
-export function buildToolTrail(messages) {
-  const list = Array.isArray(messages) ? messages : [];
-  const out = [];
+export function buildToolTrail(messages: unknown): ToolTrailStep[] {
+  const list = (Array.isArray(messages) ? messages : []) as any[];
+  const out: ToolTrailStep[] = [];
   for (const m of list) {
     if (!m || m.role !== 'assistant' || !Array.isArray(m.parts)) continue;
     const results = new Map();
@@ -155,7 +191,7 @@ export function buildToolTrail(messages) {
       const rawResult = r ? String(r.result === undefined || r.result === null ? '' : r.result) : '';
       const args = clampText(rawArgs, MAX_TRAIL_ARGS_CHARS);
       const result = clampText(rawResult, MAX_TRAIL_RESULT_CHARS);
-      const item = {
+      const item: ToolTrailStep = {
         name: String(p.name),
         args,
         status: r ? String(r.status || '') : 'unknown',
@@ -179,12 +215,12 @@ export function buildToolTrail(messages) {
  * 与 `trailOmitted`（丢的是**整步**）是两个不同的量，**都要报**：
  * 只报"丢了几步"而不报"多少步的文本被裁"，接手方就会以为剩下的都是完整原文 ✗
  */
-export function countClampedSteps(trail) {
-  return (Array.isArray(trail) ? trail : []).filter((t) => t && t.textClamped === true).length;
+export function countClampedSteps(trail: unknown): number {
+  return ((Array.isArray(trail) ? trail : []) as any[]).filter((t) => t && t.textClamped === true).length;
 }
 
 /** 交付用的轨迹：只留最近 `limit` 步。 */
-export function deriveToolTrail(messages, limit = MAX_TOOL_TRAIL) {
+export function deriveToolTrail(messages: unknown, limit = MAX_TOOL_TRAIL): ToolTrailStep[] {
   return buildToolTrail(messages).slice(-limit);
 }
 
@@ -212,7 +248,7 @@ export const MAX_FULL_TRAIL_BYTES = 400000;
  *               否则接手方会以为"没被 omitted 的步 = 完整原文" ✗（本仓库硬纪律：丢东西必须说明）
  *   summary     记录里随包交付的摘要（最近 MAX_TOOL_TRAIL 步）
  */
-export function prepareHandoffTrail(rawTrail) {
+export function prepareHandoffTrail(rawTrail: unknown) {
   const full = Array.isArray(rawTrail) ? rawTrail : [];
   const fitted = fitFullTrailToBudget(full);
   return {
@@ -229,7 +265,7 @@ export function prepareHandoffTrail(rawTrail) {
  * 用折半收缩而不是"每步试一次"：逐步 slice 会做 O(n) 次整体序列化，
  * 几百步的记录上那是几百次 JSON.stringify —— 保存是用户点一下就要发生的事。
  */
-export function fitFullTrailToBudget(trail, maxBytes = MAX_FULL_TRAIL_BYTES) {
+export function fitFullTrailToBudget(trail: any, maxBytes = MAX_FULL_TRAIL_BYTES) {
   const src = Array.isArray(trail) ? trail : [];
   let kept = src.slice(-MAX_TRAIL_FULL);
   while (kept.length > 0 && handoffByteSize(kept) > maxBytes) {
@@ -239,7 +275,7 @@ export function fitFullTrailToBudget(trail, maxBytes = MAX_FULL_TRAIL_BYTES) {
 }
 
 /** JSON 序列化后的 UTF-8 字节数（chrome.storage 的配额按字节计）。 */
-export function handoffByteSize(value) {
+export function handoffByteSize(value: unknown): number {
   let s = '';
   try {
     s = JSON.stringify(value);
@@ -259,19 +295,19 @@ export function handoffByteSize(value) {
  * 顺序刻意「先砍最不关键的」：控制台堆栈 → 工具轨迹 → 对话条数 → 兜底只留最后一轮。
  * @returns {{record: Object, truncated: string, bytes: number}}
  */
-export function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
-  let out = record && typeof record === 'object' ? record : {};
+export function fitRecordToBudget(record: any, maxBytes = MAX_RECORD_BYTES) {
+  let out: any = record && typeof record === 'object' ? record : {};
   let bytes = handoffByteSize(out);
   if (bytes <= maxBytes) return { record: out, truncated: '', bytes };
 
-  const attempt = (next, label) => {
+  const attempt = (next: any, label: string) => {
     out = Object.assign({}, out, next, { truncated: label });
     bytes = handoffByteSize(out);
     return bytes <= maxBytes;
   };
 
   // 1) 去掉控制台堆栈（正文与 level 仍保留，定位问题通常够用）
-  if (attempt({ consoleErrors: (out.consoleErrors || []).map((e) => Object.assign({}, e, { stack: '' })) }, 'console-stack')) {
+  if (attempt({ consoleErrors: (out.consoleErrors || []).map((e: any) => Object.assign({}, e, { stack: '' })) }, 'console-stack')) {
     return { record: out, truncated: out.truncated, bytes };
   }
   // 2) 工具轨迹只留最近 10 步并压缩单步长度
@@ -284,7 +320,7 @@ export function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
   if (
     attempt(
       {
-        toolTrail: (out.toolTrail || []).slice(-10).map((t) =>
+        toolTrail: (out.toolTrail || []).slice(-10).map((t: any) =>
           Object.assign({}, t, { args: String(t.args || '').slice(0, 80), result: String(t.result || '').slice(0, 120) })
         ),
       },
@@ -296,7 +332,7 @@ export function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
   // 3) 对话只留最近 6 条、单条 1200 字符
   if (
     attempt(
-      { messages: (out.messages || []).slice(-6).map((m) => Object.assign({}, m, { content: String(m.content || '').slice(0, 1200) })) },
+      { messages: (out.messages || []).slice(-6).map((m: any) => Object.assign({}, m, { content: String(m.content || '').slice(0, 1200) })) },
       'messages'
     )
   ) {
@@ -305,7 +341,7 @@ export function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
   // 4) 兜底：只留最后一轮 + 少量拾取元素（同样不动 trailOmitted，理由见第 2 档）
   attempt(
     {
-      messages: (out.messages || []).slice(-2).map((m) => Object.assign({}, m, { content: String(m.content || '').slice(0, 600) })),
+      messages: (out.messages || []).slice(-2).map((m: any) => Object.assign({}, m, { content: String(m.content || '').slice(0, 600) })),
       consoleErrors: [],
       pickedElements: (out.pickedElements || []).slice(0, 3),
       toolTrail: (out.toolTrail || []).slice(-3),
@@ -329,7 +365,7 @@ export function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
  * @param {string} [input.note]
  * @param {number} [input.now]
  */
-export function buildHandoffRecord(input = {}) {
+export function buildHandoffRecord(input: any = {}): HandoffRecord {
   const id = normalizeHandoffId(input.id);
   if (!id) throw new Error('交接包需要合法的会话标识');
   const now = Number(input.now) || Date.now();
@@ -373,8 +409,8 @@ export function buildHandoffRecord(input = {}) {
  * 维护「最近标识」索引：新 id 置顶、去重、按上限截断。
  * 返回 { index, dropped } —— dropped 是需要连带删除存储的旧 id。
  */
-export function updateHandoffIndex(index, id, now, keep = 30) {
-  const list = Array.isArray(index) ? index : [];
+export function updateHandoffIndex(index: unknown, id: string, now?: unknown, keep = 30) {
+  const list = (Array.isArray(index) ? index : []) as any[];
   const at = Number(now) || Date.now();
   const rest = list.filter((e) => e && e.id && e.id !== id);
   // 先按时间倒序（最近在前）再截断：语义是「保留最近的 keep 个」。
@@ -398,7 +434,7 @@ export function updateHandoffIndex(index, id, now, keep = 30) {
  * 现在改为：说明「有会话读取工具就先取回」，并**给出没有能力时的退路**
  * （让用户改用面板的「导出记录」粘贴原文）—— 无论对方是哪种集成，指令都不会落空。
  */
-export function formatHandoffPrompt(id, opts = {}) {
+export function formatHandoffPrompt(id: unknown, opts: any = {}): string {
   const norm = normalizeHandoffId(id);
   if (!norm) return '';
   const title = String((opts && opts.pageTitle) || '').trim();

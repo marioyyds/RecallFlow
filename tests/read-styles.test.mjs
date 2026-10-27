@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/utils.js';
+import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/utils.ts';
 import { INSPECT_OPS } from '../lib/assistant/page-command-tools.js';
 import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
 

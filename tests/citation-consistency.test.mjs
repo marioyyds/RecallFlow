@@ -19,9 +19,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { extractCiteNum, renumberCitations, renumberCitationsAcross } from '../lib/page/markdown.js';
+import { extractCiteNum, renumberCitations, renumberCitationsAcross } from '../lib/page/markdown.ts';
+import { sourcePath } from './source-path.mjs';
 
-const read = (p) => fs.readFileSync(p, 'utf8');
+const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
 
 // ---------------------------------------------------------------- 数字抽取的边界
 

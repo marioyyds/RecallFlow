@@ -5,7 +5,7 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // lib/shared/constants.js
+  // lib/shared/constants.ts
   var HIGHLIGHT_MAX_TEXTS = 20;
   var STATUS = {
     GENERAL: 1,
@@ -21,7 +21,7 @@
     [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
   };
 
-  // lib/shared/surrogates.js
+  // lib/shared/surrogates.ts
   var isHigh = (c) => c >= 55296 && c <= 56319;
   var isLow = (c) => c >= 56320 && c <= 57343;
   function alignRange(text, start, end) {
@@ -46,7 +46,7 @@
     return s.slice(a, b);
   }
 
-  // lib/shared/utils.js
+  // lib/shared/utils.ts
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
   }
@@ -146,7 +146,8 @@
     }).join("\n");
   }
   function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+    const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return String(s).replace(/[&<>"']/g, (c) => map[c]);
   }
   function formatInspectSummary(input) {
     const o = input || {};
@@ -1401,7 +1402,7 @@
     });
   }
 
-  // lib/shared/editable-text.js
+  // lib/shared/editable-text.ts
   function normalizeEditableText(value) {
     return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
   }
@@ -3665,7 +3666,7 @@
     removeOverlay();
   }
 
-  // lib/shared/settings.js
+  // lib/shared/settings.ts
   var AI_SETTINGS_KEY = "aiSettings";
   var QUICK_PROMPT_LIMIT = 12;
   var SESSION_TO_KB_QUICK_PROMPT = "\u6574\u7406\u4F1A\u8BDD\u5230\u77E5\u8BC6\u5E93";
@@ -4317,7 +4318,7 @@
     return { suspend, restore, isSuspended, install, uninstall };
   }
 
-  // lib/shared/handoff.js
+  // lib/shared/handoff.ts
   var ID_PREFIX = "RF-";
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
   var ID_LENGTH = 6;
@@ -4502,7 +4503,7 @@
     return "\u8BFB\u53D6 RecallFlow \u4F1A\u8BDD " + norm2 + where + "\uFF0C\u7136\u540E\u5E2E\u6211\u89E3\u51B3\u5176\u4E2D\u7684\u524D\u7AEF\u95EE\u9898\u3002\n\u82E5\u4F60\u6709 RecallFlow \u7684\u4F1A\u8BDD\u8BFB\u53D6\u5DE5\u5177\uFF0C\u8BF7\u5148\u53D6\u56DE\u8BE5\u4F1A\u8BDD\u4E0A\u4E0B\u6587\u518D\u52A8\u624B\uFF1B\u82E5\u6CA1\u6709\u8FD9\u4E2A\u80FD\u529B\uFF0C\u8BF7\u76F4\u63A5\u8BF4\u660E\uFF0C\u6211\u4F1A\u6539\u7528\u9762\u677F\u7684\u300C\u5BFC\u51FA\u8BB0\u5F55\u300D\u628A\u5185\u5BB9\u7C98\u8D34\u7ED9\u4F60\u3002";
   }
 
-  // lib/page/markdown.js
+  // lib/page/markdown.ts
   var HL_KEYWORDS = new Set(
     "function return if else for while do switch case break continue default new class extends super this const let var typeof instanceof in of try catch finally throw async await yield import export from as static get set null undefined true false void delete package private protected public interface type enum namespace module def elif lambda pass None True False and or not global raise with assert import print del class return if elif else".split(" ")
   );
@@ -4550,8 +4551,8 @@
     if (!raw) return { action: "none" };
     let samePage = false;
     try {
-      const u = new URL(raw, currentHref);
-      const cur = new URL(currentHref);
+      const u = new URL(raw, String(currentHref || ""));
+      const cur = new URL(String(currentHref || ""));
       samePage = u.origin === cur.origin && u.pathname === cur.pathname;
     } catch (e) {
       samePage = false;
@@ -4592,7 +4593,8 @@
     return out;
   }
   function renderMarkdown(md, citations, streaming2) {
-    const lines = md.split("\n");
+    const lines = String(md === void 0 || md === null ? "" : md).split("\n");
+    const cites = Array.isArray(citations) ? citations : [];
     let html = "";
     let inCode = false;
     let codeBuf = [];
@@ -4611,11 +4613,11 @@
         if (!href) return text;
         return '<a href="' + href.replace(/"/g, "&quot;") + '" target="_blank" rel="noopener noreferrer">' + text + "</a>";
       });
-      if (citations && citations.length) {
+      if (cites.length) {
         r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
           const idx = extractCiteNum(inner);
           if (idx === null) return match;
-          const c = citations[idx - 1];
+          const c = cites[idx - 1];
           if (!c) return match;
           const short = c.title.length > 16 ? c.title.slice(0, 16) + "\u2026" : c.title;
           return '<button class="cite-badge" data-cite-id="' + escAttr2(c.id || "") + '" data-cite-source="' + escAttr2(c.source || "kb") + '" data-cite-url="' + escAttr2(c.url || "") + '" data-cite-snippet="' + escAttr2(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr2(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr2(short) + "</button>";
@@ -5591,7 +5593,7 @@
     };
   }
 
-  // lib/assistant/run-hub.js
+  // lib/assistant/run-hub.ts
   function endReasoning(state) {
     if (!state.reasoning) return;
     state.parts.push({ type: "thinking", text: state.reasoning });
@@ -5605,7 +5607,7 @@
   function pushNotice(state, text, color) {
     const value = String(text || "").trim();
     if (!value) return;
-    state.parts.push({ type: "notice", text: value, color: color || "" });
+    state.parts.push({ type: "notice", text: value, color: String(color || "") });
   }
   function pushStepNotice(state, text, color) {
     endReasoning(state);
@@ -5844,7 +5846,7 @@
     return { parts: nextParts, citations: cited };
   }
 
-  // lib/shared/screenshot-store.js
+  // lib/shared/screenshot-store.ts
   var SHOT_KEY = "recallflow.shots.v1";
   var SHOT_ITEM_PREFIX = "recallflow.shots.item.v1.";
   function shotStorageKey(id) {
@@ -5861,7 +5863,7 @@
     const key = shotStorageKey(wanted);
     try {
       const cur = await area.get([key, SHOT_KEY]);
-      const item = cur && cur[key];
+      const item = cur ? cur[key] : void 0;
       if (item && item.dataUrl) return item;
       const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
       return archive.find((entry) => entry && String(entry.id) === wanted && entry.dataUrl) || null;

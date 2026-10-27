@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { saveHandoff, getHandoff, listHandoffs, KEY_PREFIX, TRAIL_KEY_PREFIX, INDEX_KEY, MAX_RECORDS } from '../lib/shared/handoff-store.js';
-import { buildHandoffRecord, buildToolTrail, prepareHandoffTrail, MAX_TOOL_TRAIL } from '../lib/shared/handoff.js';
+import { buildHandoffRecord, buildToolTrail, prepareHandoffTrail, MAX_TOOL_TRAIL } from '../lib/shared/handoff.ts';
 
 // ⚠ 这条钉住的是 ② 「存全量」在**生产链路**上曾经整体失效的那个点：
 //   面板发来的是**已建好的 record**（里面 `toolTrail` 只是交付用摘要），

@@ -321,7 +321,7 @@ const TARGETS = [
   {
     // 多 run 状态机：跟随页与 SW 共用同一份归约。这里错一步，表现是
     // "思考被混进正文""停止按钮永远灰着"这类只有真跑长任务才看得见的问题。
-    file: 'lib/assistant/run-hub.js',
+    file: 'lib/assistant/run-hub.ts',
     mode: 'inplace',
     test: 'tests/run-hub.test.mjs',
     mutations: [

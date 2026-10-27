@@ -10,12 +10,12 @@ const HL_KEYWORDS = new Set(
 );
 const HL_TYPES = new Set('String Number Boolean Array Object Function Promise Error Date RegExp Map Set Symbol BigInt Math JSON Console Node Buffer parseInt parseFloat isNaN isFinite JSON.stringify JSON.parse'.split(' '));
 
-export function hlEscape(s) {
+export function hlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // 简单分块高亮：注释 / 字符串 / 关键字 / 数字 / 函数名 / 类型
-export function highlightCode(code) {
+export function highlightCode(code: string): string {
   const esc = hlEscape(code);
   const tokens = [];
 
@@ -56,7 +56,7 @@ export function highlightCode(code) {
  * 做判定前先剔除控制字符与空白，避免 `java\tscript:` 这类绕过。
  * @returns {string} 安全地址；危险时返回 ''（调用方应只保留文字、不生成链接）
  */
-export function sanitizeHref(raw) {
+export function sanitizeHref(raw: unknown): string {
   const s = String(raw === undefined || raw === null ? '' : raw).trim();
   if (!s) return '';
   const compact = s.replace(/[\u0000-\u0020\u007f]+/g, '');
@@ -81,13 +81,13 @@ export function sanitizeHref(raw) {
  * @param {string} [snippet] 证据片段（用于深链高亮）
  * @returns {{action:'highlight'|'open'|'deny'|'none', target?:string, reason?:string}}
  */
-export function planCitationOpen(url, currentHref, snippet) {
+export function planCitationOpen(url: unknown, currentHref: unknown, snippet: unknown) {
   const raw = String(url === undefined || url === null ? '' : url).trim();
   if (!raw) return { action: 'none' };
   let samePage = false;
   try {
-    const u = new URL(raw, currentHref);
-    const cur = new URL(currentHref);
+    const u = new URL(raw, String(currentHref || ''));
+    const cur = new URL(String(currentHref || ''));
     samePage = u.origin === cur.origin && u.pathname === cur.pathname;
   } catch (e) {
     samePage = false;
@@ -111,8 +111,8 @@ export function planCitationOpen(url, currentHref, snippet) {
  * 结果最多 4 条：这决定面板底部出现几个按钮，过多会挤占输入区。
  * @returns {Array<{label:string, desc:string}>}
  */
-export function parseSuggestionOptions(text) {
-  const out = [];
+export function parseSuggestionOptions(text: unknown): Array<{ label: string; desc: string }> {
+  const out: Array<{ label: string; desc: string }> = [];
   const blockMatch = String(text || '').match(/<options>([\s\S]*?)<\/options>/i);
   if (blockMatch) {
     try {
@@ -142,25 +142,26 @@ export function parseSuggestionOptions(text) {
 // ---- Markdown 渲染 ----
 // citations：可选，传入引用元数据数组后，[n] 会渲染为可点击的引用徽章
 // streaming：是否处于流式输出中（为 true 时末尾追加闪烁光标）
-export function renderMarkdown(md, citations, streaming) {
-  const lines = md.split('\n');
+export function renderMarkdown(md: unknown, citations?: unknown, streaming?: boolean): string {
+  const lines = String(md === undefined || md === null ? '' : md).split('\n');
+  const cites = (Array.isArray(citations) ? citations : []) as any[];
   let html = '';
   let inCode = false;
-  let codeBuf = [];
+  let codeBuf: string[] = [];
   let codeLang = '';
-  let listType = null;
-  let tableBuf = null;
+  let listType: string | null = null;
+  let tableBuf: string[] | null = null;
 
-  const escInline = (s) =>
+  const escInline = (s: string) =>
     s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-  const escAttr = (s) =>
+  const escAttr = (s: unknown) =>
     String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-  const inline = (s) => {
+  const inline = (s: string) => {
     let r = escInline(s);
     r = r.replace(/`([^`]+)`/g, '<code>$1</code>');
     r = r.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -174,12 +175,12 @@ export function renderMarkdown(md, citations, streaming) {
     });
     // 将 [n]（或 [标签n] 如 [K8s文档2]）渲染为可点击的引用徽章（仅当存在引用元数据时）。
     // 容错匹配「括号内以数字结尾」的形式，提取数字对齐全局引用编号。
-    if (citations && citations.length) {
+    if (cites.length) {
       r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
         const idx = extractCiteNum(inner);
         if (idx === null) return match;
         // 按「位置」对齐参考来源区（body [n] → 来源区第 n 条），与重编号后的顺序完全一致。
-        const c = citations[idx - 1];
+        const c = cites[idx - 1];
         if (!c) return match;
         const short = c.title.length > 16 ? c.title.slice(0, 16) + '…' : c.title;
         return (
@@ -198,8 +199,8 @@ export function renderMarkdown(md, citations, streaming) {
     }
   };
 
-  const isTableSep = (l) => /^\s*\|?[\s:\-|]+\|?\s*$/.test(l) && l.includes('-') && l.includes('|');
-  const parseRow = (r) => {
+  const isTableSep = (l: string) => /^\s*\|?[\s:\-|]+\|?\s*$/.test(l) && l.includes('-') && l.includes('|');
+  const parseRow = (r: string) => {
     let t = r.trim();
     if (t.startsWith('|')) t = t.slice(1);
     if (t.endsWith('|')) t = t.slice(0, -1);
@@ -213,7 +214,7 @@ export function renderMarkdown(md, citations, streaming) {
       '<div class="md-table-wrap"><table><thead><tr>' +
       head.map((c) => '<th>' + inline(c) + '</th>').join('') +
       '</tr></thead><tbody>' +
-      rows.map((r) => '<tr>' + parseRow(r).map((c) => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('') +
+      rows.map((r: string) => '<tr>' + parseRow(r).map((c: string) => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('') +
       '</tbody></table></div>';
     tableBuf = null;
   };
@@ -331,15 +332,15 @@ export function renderMarkdown(md, citations, streaming) {
 // 引用标记匹配：支持 [n]、[ n ]、[标签n]、全角［n］。捕获括号内完整内容，数字取「结尾的数字」。
 const CITE_RE = /[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g;
 // 提取括号内容结尾的引用编号；不是引用（无结尾数字）返回 null。
-export function extractCiteNum(inner) {
+export function extractCiteNum(inner: unknown): number | null {
   const m = String(inner || '').match(/(\d{1,2})\s*$/);
   return m ? parseInt(m[1], 10) : null;
 }
 
 // 最终回复后把引用重编号：按「正文中首次出现的顺序」重排为 1..N，且只保留正文实际引用到的来源。
 // 这解决模型对来源编号不可靠的问题——正文永远从 [1] 开始，参考来源只列被引用的文章，二者一一对应。
-export function renumberCitations(text, citations) {
-  const list = Array.isArray(citations) ? citations : [];
+export function renumberCitations(text: unknown, citations?: unknown) {
+  const list = (Array.isArray(citations) ? citations : []) as any[];
   const src = String(text || '');
   // 每次操作都新建正则，杜绝共享 /g 正则的 lastIndex 状态残留
   // （exec 收集与 replace 替换分开用独立正则，绝不串状态）。
@@ -356,8 +357,8 @@ export function renumberCitations(text, citations) {
   }
   // 只保留能匹配到来源的编号：未知编号不重编号、也不生成来源（避免错配到别的来源或造假来源）。
   // 注意：返回全新对象副本，绝不改动传入的 citations（流式每 chunk 都会重编号，改动会破坏幂等）。
-  const oldToNew = {};
-  const cited = [];
+  const oldToNew: Record<number, number> = {};
+  const cited: any[] = [];
   for (const old of order) {
     const found = list.find((c) => Number(c.index) === old);
     if (!found) continue;
@@ -387,7 +388,7 @@ export function renumberCitations(text, citations) {
 //
 // 用法：先把所有会被渲染的文本按**渲染顺序**传进来定出映射，再用返回的 apply
 // 依次改写每一段（包括工具结果里的 [n]，它们与参考来源区共用同一套编号）。
-export function renumberCitationsAcross(texts, citations) {
+export function renumberCitationsAcross(texts: unknown, citations?: unknown) {
   const list = Array.isArray(citations) ? citations : [];
   const sources = Array.isArray(texts) ? texts : [texts];
   const order = [];
@@ -403,15 +404,15 @@ export function renumberCitationsAcross(texts, citations) {
       order.push(n);
     }
   }
-  const oldToNew = {};
-  const cited = [];
+  const oldToNew: Record<number, number> = {};
+  const cited: any[] = [];
   for (const old of order) {
     const found = list.find((c) => Number(c.index) === old);
     if (!found) continue;
     oldToNew[old] = cited.length + 1;
     cited.push(Object.assign({}, found, { index: cited.length + 1 }));
   }
-  const apply = (text) => {
+  const apply = (text: unknown): string => {
     const src = String(text === undefined || text === null ? '' : text);
     if (!cited.length) return src;
     return src.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (mm, inner) => {
@@ -425,7 +426,7 @@ export function renumberCitationsAcross(texts, citations) {
 }
 
 // 跨页引用跳转：把证据片段以 base64url 放进 URL 查询参数，目标页内容脚本据此做容错高亮。
-export function encodeSnippet(snippet) {
+export function encodeSnippet(snippet: unknown): string {
   try {
     return btoa(unescape(encodeURIComponent(String(snippet || ''))))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -433,7 +434,7 @@ export function encodeSnippet(snippet) {
     return '';
   }
 }
-export function decodeSnippet(b64) {
+export function decodeSnippet(b64: unknown): string {
   try {
     let s = String(b64 || '').replace(/-/g, '+').replace(/_/g, '/');
     while (s.length % 4) s += '=';
@@ -443,7 +444,7 @@ export function decodeSnippet(b64) {
     return '';
   }
 }
-export function attachSnippetParam(url, snippet) {
+export function attachSnippetParam(url: string, snippet: unknown): string {
   try {
     const clean = String(snippet || '').trim();
     const b64 = encodeSnippet(clean);
@@ -461,14 +462,14 @@ export function attachSnippetParam(url, snippet) {
 
 // 统一渲染入口：任何回答正文都先重编号引用再渲染，保证界面上永远显示从 [1] 连续的编号，
 // 与参考来源区一致。所有 renderMarkdown 调用点都应改用本函数。
-export function renderAnswer(text, citations, streaming) {
+export function renderAnswer(text: unknown, citations?: unknown, streaming?: boolean): string {
   const ren = renumberCitations(text, citations);
   return renderMarkdown(stripOptionsBlock(ren.text), ren.citations, streaming);
 }
 
 // 生成 Chrome 文本片段深链：在 URL 后追加 #:~:text=…，浏览器打开后会自动
 // 滚动并高亮证据文本，让「跳转」真正落在引用出处，而不是落到页面顶部。
-export function buildCitationDeepLink(url, snippet) {
+export function buildCitationDeepLink(url: string, snippet: unknown): string {
   try {
     let clean = String(snippet || '')
       .replace(/^\[?\d*\]?\s*/, '') // 去掉开头的 [n] 编号
@@ -485,7 +486,7 @@ export function buildCitationDeepLink(url, snippet) {
     const start = clean.slice(sliceStart, sliceStart + 60).trim();
     const suffix = clean.slice(sliceStart + 60, sliceStart + 90).trim();
     if (start.length < 10) return url;
-    const enc = (s) => encodeURIComponent(s).replace(/-/g, '%2D');
+    const enc = (s: string) => encodeURIComponent(s).replace(/-/g, '%2D');
     let frag = ':~:text=' + enc(start);
     if (suffix.length) frag += '-' + enc(suffix);
     return url + (url.indexOf('#') >= 0 ? '' : '#') + frag;
@@ -496,14 +497,14 @@ export function buildCitationDeepLink(url, snippet) {
 
 // 从展示文本中隐藏 <options> 程序块（含未闭合时），避免用户看到原始 JSON。
 // 与 renderMarkdown 同属「纯字符串变换」，随渲染层一起放在本模块。
-function stripOptionsBlock(text) {
+function stripOptionsBlock(text: string): string {
   return String(text || '')
     .replace(/<options>[\s\S]*?(?:<\/options>|$)/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-export function escHtml(s) {
+export function escHtml(s: unknown): string {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 

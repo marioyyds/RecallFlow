@@ -28,9 +28,10 @@ import {
   VISION_ENABLED_TOOL_COPY,
   VISION_ENABLED_SKILL_COPY,
   VISION_ENABLED_SUMMARY_COPY,
-} from '../lib/shared/utils.js';
+} from '../lib/shared/utils.ts';
 import { flattenHistoryContent } from '../lib/assistant/context.js';
 import { visionMessagesFor } from '../lib/assistant/vision.js';
+import { sourcePath } from './source-path.mjs';
 
 const META = { width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 };
 const WITH_IMAGE = [
@@ -90,7 +91,7 @@ test('**两臂都被钉住**：四处受开关影响的文案/装配，override 
 });
 
 test('单一来源：这两个符号只在一个文件里定义（别处硬编码"看不到图像"会被这条盯上）', () => {
-  const utils = fs.readFileSync('lib/shared/utils.js', 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
   // ⚠ 必须用**词边界**数，不能用 `split('export const VISION_ENABLED').length - 1`：
   // 那会把 `VISION_ENABLED_TOOL_COPY` 这类**同前缀的文案常数**也数进去 ⇒ 假红 ✗（第 7 步踩到）
   assert.equal(
@@ -122,7 +123,7 @@ test('这条门禁本身有牙齿：开启侧文案没接上（仍写着"看不�
 });
 
 test('三处启用分支的文案常数都存在且被开关引用（单一来源，别处不许再抄一份）', () => {
-  const utils = fs.readFileSync('lib/shared/utils.js', 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
   for (const [name, copy] of [
     ['tool', VISION_ENABLED_TOOL_COPY],
     ['skill', VISION_ENABLED_SKILL_COPY],
@@ -135,7 +136,7 @@ test('三处启用分支的文案常数都存在且被开关引用（单一来�
 });
 
 test('依赖链要短：开关与说明必须是纯函数，不引入浏览器依赖（否则内容脚本里用不了）', () => {
-  const utils = fs.readFileSync('lib/shared/utils.js', 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
   const at = utils.indexOf('export function visionLimitationNote');
   const body = utils.slice(at, utils.indexOf('\n}', at));
   assert.ok(!/chrome\.|window\.|document\./.test(body), '说明函数不许碰浏览器对象');

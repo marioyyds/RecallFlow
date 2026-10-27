@@ -17,7 +17,7 @@ import {
   buildCitationDeepLink,
   planCitationOpen,
   parseSuggestionOptions,
-} from '../lib/page/markdown.js';
+} from '../lib/page/markdown.ts';
 
 // 引号感知地解析开始标签的属性名。
 // 必须这样做：只看输出里有没有 "onmouseover" 字样会误报 —— 它可能只是被转义进

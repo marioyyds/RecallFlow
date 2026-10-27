@@ -4,7 +4,7 @@
 // 这里只做编辑器无关的轻量归一：换行统一、NBSP 归一、去掉尾随空行；
 // 不折叠正文内部空白，也不猜测编辑器的结构性换行。
 
-export function normalizeEditableText(value) {
+export function normalizeEditableText(value: unknown): string {
   return String(value === undefined || value === null ? '' : value)
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
@@ -12,12 +12,12 @@ export function normalizeEditableText(value) {
     .replace(/\n+$/g, '');
 }
 
-export function editableTextMatches(expected, actual) {
+export function editableTextMatches(expected: unknown, actual: unknown): boolean {
   return normalizeEditableText(expected) === normalizeEditableText(actual);
 }
 
 /** 返回第一个差异的位置与两个片段；完全一致时 index=-1。 */
-export function firstEditableDifference(expected, actual) {
+export function firstEditableDifference(expected: unknown, actual: unknown) {
   const a = normalizeEditableText(expected);
   const b = normalizeEditableText(actual);
   const n = Math.min(a.length, b.length);
@@ -30,7 +30,7 @@ export function firstEditableDifference(expected, actual) {
   };
 }
 
-export function editableTextSummary(expected, actual) {
+export function editableTextSummary(expected: unknown, actual: unknown) {
   const diff = firstEditableDifference(expected, actual);
   return {
     matchesIntent: diff.index === -1,

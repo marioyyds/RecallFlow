@@ -1,14 +1,14 @@
 // Service Worker 入口（ES Module）：AI 请求 / Agent 编排 / 页面命令转发的消息监听
 import { getBook } from '../lib/shared/store.js';
-import { getAISettings } from '../lib/shared/settings.js';
+import { getAISettings } from '../lib/shared/settings.ts';
 import { buildAiMessages } from '../lib/shared/rag.js';
 import { callDeepSeek } from '../lib/assistant/llm.js';
 import { runAgentStream } from '../lib/assistant/agent.js';
 import { startMcpRelay } from '../lib/bridge/relay.js';
 import { initTargetManager } from '../lib/assistant/target-manager.js';
-import { logError, isOperableUrl } from '../lib/shared/utils.js';
+import { logError, isOperableUrl } from '../lib/shared/utils.ts';
 import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.js';
-import { sanitizeMessages } from '../lib/shared/surrogates.js';
+import { sanitizeMessages } from '../lib/shared/surrogates.ts';
 import { loadAgentSession } from '../lib/assistant/session-store.js';
 import {
   PanelSessionStore,
@@ -16,10 +16,10 @@ import {
   PSESS_ACTIVE_KEY,
   PSESS_SESSION_PREFIX,
 } from '../lib/shared/panel-sessions.js';
-import { RunStreamHub } from '../lib/assistant/run-hub.js';
+import { RunStreamHub } from '../lib/assistant/run-hub.ts';
 import { RunChannel } from '../lib/assistant/run-channel.js';
 import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.js';
-import { removeSessionScreenshots } from '../lib/shared/screenshot-store.js';
+import { removeSessionScreenshots } from '../lib/shared/screenshot-store.ts';
 import {
   listScripts,
   installFromUrl,
@@ -34,7 +34,7 @@ import {
   runUserscriptOnTab,
   userscriptXhr,
   syncUserscriptRegistrations,
-} from '../lib/userscript/manager.js';
+} from '../lib/userscript/manager.ts';
 
 const persistentPanelStorage = createIndexedDbKeyValueStore({
   dbName: 'recallflow-history',

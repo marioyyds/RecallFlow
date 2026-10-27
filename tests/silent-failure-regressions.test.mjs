@@ -17,7 +17,7 @@ import { validateToolCall, TOOL_REGISTRY, executeTool, getToolMetadata, buildAct
 // decodeBuffer 随 web_search 的解析逻辑一起搬到了 net-parse.js（见该文件的搬运说明）。
 import { decodeBuffer } from '../lib/assistant/net-parse.js';
 import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/assistant/agent.js';
-import { resolveCodeExecutionApproval } from '../lib/shared/settings.js';
+import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.js';

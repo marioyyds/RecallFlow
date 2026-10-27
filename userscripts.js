@@ -1,4 +1,4 @@
-// lib/shared/constants.js
+// lib/shared/constants.ts
 var STATUS = {
   GENERAL: 1,
   // 一般
@@ -13,7 +13,7 @@ var STAR_LEVELS = {
   [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
 };
 
-// lib/shared/utils.js
+// lib/shared/utils.ts
 var DEFAULT_STYLE_PROPS = Object.freeze([
   "font-size",
   "line-height",
@@ -29,7 +29,8 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
   "z-index"
 ]);
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  return String(s).replace(/[&<>"']/g, (c) => map[c]);
 }
 var _toastTimer = null;
 function showToast(msg, opts) {
@@ -53,11 +54,11 @@ function showToast(msg, opts) {
     el.appendChild(btn);
   }
   el.classList.add("show");
-  clearTimeout(_toastTimer);
+  if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
 }
 
-// lib/userscript/settings.js
+// lib/userscript/settings.ts
 var USERSCRIPT_SETTINGS_KEY = "recallflow.userscript.settings.v1";
 var USERSCRIPT_SETTINGS_DEFAULTS = {
   // 允许 Agent 通过 install_userscript 自动安装脚本。

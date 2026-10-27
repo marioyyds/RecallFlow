@@ -26,6 +26,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -37,12 +38,13 @@ import {
   VISION_ENABLED_TOOL_COPY,
   VISION_ENABLED_SKILL_COPY,
   VISION_ENABLED_SUMMARY_COPY,
-} from '../lib/shared/utils.js';
+} from '../lib/shared/utils.ts';
 import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.js';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.js';
 import { flattenHistoryContent } from '../lib/assistant/context.js';
+import { sourcePath } from './source-path.mjs';
 
-const read = (p) => fs.readFileSync(p, 'utf8');
+const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
 const screenshotDesc = () => TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
 const readabilityFix = () => SKILL_REGISTRY.find((s) => s.name === 'readability-fix').content;
 const descOf = (mod) => mod.TOOL_SCHEMAS.find((t) => t.function.name === 'take_screenshot').function.description;
@@ -221,7 +223,8 @@ test('单一来源：禁用文案只在 utils.js 定义一份，工具 / 技能�
   assert.equal(utils.split('export const VISION_UNAVAILABLE_TOOL_COPY').length - 1, 1, '工具文案只能定义一次');
   assert.equal(utils.split('export const VISION_UNAVAILABLE_SKILL_COPY').length - 1, 1, '技能文案只能定义一次');
 
-  const importRe = (sym) => new RegExp("import\\s*\\{[^}]*" + sym + "[^}]*\\}\\s*from\\s*'\\.\\./shared/utils\\.js'");
+  // 迁移期：specifier 可能是 `.js` 或 `.ts`（同一模块改名后 import 侧跟着改），两种都认。
+  const importRe = (sym) => new RegExp("import\\s*\\{[^}]*" + sym + "[^}]*\\}\\s*from\\s*'\\.\\./shared/utils\\.(?:js|ts)'");
   assert.match(read('lib/assistant/tool-schemas.js'), importRe('VISION_UNAVAILABLE_TOOL_COPY'));
   assert.match(read('lib/assistant/skill-defs.js'), importRe('VISION_UNAVAILABLE_SKILL_COPY'));
 
@@ -248,32 +251,48 @@ function skillFragmentOf(content) {
  * 为什么要这么麻烦：`VISION_ENABLED` 是模块级 const，import 进来就固定了 ⇒
  * 直接 import 只看得到**一档**（当初是关闭、现在是开启），另一臂的断言会退化成
  * "其实还是这一档"而**静默通过** ✗
- * data: URL 让 Node 把改写后的源码当模块执行，且不落盘 ✓ 锚点失效时抛错，不静默。
+ *
+ * ⚠ 迁移期（TITA-78）从 `data:` URL 改成了**临时 `.ts` 文件**：
+ * Node 的 type stripping 按**扩展名**决定要不要擦类型，`data:text/javascript` 没有扩展名
+ * ⇒ 改写后的源码里只要有一句类型标注就 `SyntaxError: Unexpected token 'export'`
+ * （Batch 2 把 utils 改成 .ts 后，这条门禁就是这样从"绿"变成"加载期崩溃"的）。
+ * 落成 `.ts` 文件后，Node 照常擦类型，门禁继续验的是**行为**而不是语法。
+ * 逐次新建文件同时保留了原来 `data:` URL 的另一个性质：每个臂各自独立、不受模块缓存影响。
  *
  * @param {boolean} enabled 想要的臂
  * @param {string} file 要载入的模块（相对仓库根）
  */
+const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rf-vision-arm-'));
+let tmpSeq = 0;
+/** 把源码写成临时 `.ts` 并返回它的 file: URL（不要用 data: URL，见上）。 */
+function writeArm(src) {
+  tmpSeq += 1;
+  const file = path.join(TMP_DIR, 'arm-' + tmpSeq + '.ts');
+  fs.writeFileSync(file, src, 'utf8');
+  return pathToFileURL(file).href;
+}
+
 async function loadWithVision(enabled, file) {
   const anchor = /export const VISION_ENABLED = (?:true|false);/;
   assert.match(read('lib/shared/utils.js'), anchor, '开关定义锚点失效（`export const VISION_ENABLED = <bool>;`）');
   const patched = read('lib/shared/utils.js')
     .replace(anchor, 'export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';')
-    // data: URL 模块**解析不了相对路径**（Node: ERR_UNSUPPORTED_RESOLVE_REQUEST）⇒
+    // 临时文件在 `os.tmpdir()` 下，相对依赖**解析不了** ⇒
     // 同目录的每个相对依赖都要换成绝对 file: URL。
     // 原先只硬编码了 './constants.js'：utils.js 一有新依赖（2026-10-16 加了 './surrogates.js'），
     // 这条门禁就会以"解析失败"的形式炸掉 —— 那是**门禁脆**，不是被测代码错。
     .replace(/from '\.\/([A-Za-z0-9_.\-]+)'/g, (m, f) => "from '" + ABS('lib/shared/' + f) + "'");
-  assert.doesNotMatch(patched, /from '\.\//, '改写后不许再残留相对 import（data: URL 解析不了它）');
+  assert.doesNotMatch(patched, /from '\.\//, '改写后不许再残留相对 import（临时目录里解析不了它）');
   assert.ok(
     patched.includes('export const VISION_ENABLED = ' + (enabled ? 'true' : 'false') + ';'),
     '改写锚点失效（开关定义变了？）'
   );
-  const utilsUrl = 'data:text/javascript;base64,' + Buffer.from(patched, 'utf8').toString('base64');
+  const utilsUrl = writeArm(patched);
   if (file === 'lib/shared/utils.js') return import(utilsUrl);
   const src = read(file);
-  const rewritten = src.replace("from '../shared/utils.js'", "from '" + utilsUrl + "'");
+  const rewritten = src.replace("from '../shared/utils.ts'", "from '" + utilsUrl + "'");
   assert.notEqual(rewritten, src, '改写锚点失效：' + file + ' 不再从 ../shared/utils.js 取开关');
-  return import('data:text/javascript;base64,' + Buffer.from(rewritten, 'utf8').toString('base64'));
+  return import(writeArm(rewritten));
 }
 
 test('开关打开后：四处都不再说"看不到图像"，且技能段落的空行仍在', async () => {

@@ -2,7 +2,28 @@
 
 const DEFAULT_GRANTS = ['GM_addStyle', 'GM_setValue', 'GM_getValue'];
 
-export function emptyMetadata() {
+/** `// ==UserScript==` 头解析出来的元信息。数组字段一律是**多值键**（@match 可出现多次）。 */
+export interface UserscriptMetadata {
+  name: string;
+  namespace: string;
+  version: string;
+  description: string;
+  author: string;
+  match: string[];
+  include: string[];
+  exclude: string[];
+  require: string[];
+  resource: string[];
+  grant: string[];
+  runAt: string;
+  noframes: boolean;
+  updateURL: string;
+  downloadURL: string;
+  homepageURL: string;
+  icon: string;
+}
+
+export function emptyMetadata(): UserscriptMetadata {
   return {
     name: '',
     namespace: '',
@@ -26,10 +47,9 @@ export function emptyMetadata() {
 
 /**
  * 解析用户脚本代码中的元信息块。
- * @param {string} code
- * @returns {Object} metadata（含 valid 标记）
+ * 返回的 `valid` 由「有没有解析到 @name」决定；解析失败时额外带 `error`。
  */
-export function parseUserscriptMetadata(code) {
+export function parseUserscriptMetadata(code: string): UserscriptMetadata & { valid: boolean; error?: string } {
   const meta = emptyMetadata();
   const m = String(code || '').match(/\/\/\s*==UserScript==\s*([\s\S]*?)\/\/\s*==\/UserScript==/i);
   if (!m) return Object.assign(meta, { valid: false, error: '未找到 // ==UserScript== 元信息块' });
@@ -73,7 +93,7 @@ export function parseUserscriptMetadata(code) {
   return Object.assign(meta, { valid: Boolean(meta.name) });
 }
 
-export function hashId(...parts) {
+export function hashId(...parts: Array<string | number>): string {
   const text = parts.join('|');
   let hash = 5381;
   for (let i = 0; i < text.length; i += 1) {

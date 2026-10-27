@@ -25,16 +25,16 @@
 /** U+FFFD：Unicode 官方的「替换字符」，表示"这里有一个无法表示的码元"。 */
 export const REPLACEMENT = '\uFFFD';
 
-const isHigh = (c) => c >= 0xd800 && c <= 0xdbff;
-const isLow = (c) => c >= 0xdc00 && c <= 0xdfff;
+const isHigh = (c: number): boolean => c >= 0xd800 && c <= 0xdbff;
+const isLow = (c: number): boolean => c >= 0xdc00 && c <= 0xdfff;
 
 /**
  * 找出所有孤立代理的下标（高位后面不是低位 / 低位前面不是高位）。
  * 纯诊断用：`sanitizeLoneSurrogates` 内部也走同一套判据，避免两处判据漂移。
  */
-export function loneSurrogateIndexes(text) {
+export function loneSurrogateIndexes(text: unknown): number[] {
   const s = String(text === undefined || text === null ? '' : text);
-  const out = [];
+  const out: number[] = [];
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (isHigh(c)) {
@@ -52,7 +52,7 @@ export function loneSurrogateIndexes(text) {
 }
 
 /** 是否含孤立代理（用于零成本短路）。 */
-export function hasLoneSurrogate(text) {
+export function hasLoneSurrogate(text: unknown): boolean {
   if (typeof text !== 'string' || !text) return false;
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
@@ -78,7 +78,7 @@ export function hasLoneSurrogate(text) {
  * 无孤立代理时**原样返回同一个字符串**（不新建对象）：这个函数在出站路径上会被
  * 高频调用，绝大多数内容都是干净的。
  */
-export function sanitizeLoneSurrogates(text, replacement = REPLACEMENT) {
+export function sanitizeLoneSurrogates(text: string, replacement: unknown = REPLACEMENT): string {
   if (typeof text !== 'string' || !text) return text;
   const idx = loneSurrogateIndexes(text);
   if (!idx.length) return text;
@@ -104,7 +104,7 @@ const MAX_WALK_DEPTH = 6;
  * 而漏掉一个的代价是"整个 run 一次即死"。这里改字符串值本身，
  * **不改结构、不增删字段、不改非字符串**，所以不会改语义。
  */
-function walkStrings(node, apply, depth = 0) {
+function walkStrings(node: unknown, apply: (s: string) => string, depth = 0): void {
   if (depth > MAX_WALK_DEPTH || !node || typeof node !== 'object') return;
   if (Array.isArray(node)) {
     for (const v of node) {
@@ -113,11 +113,12 @@ function walkStrings(node, apply, depth = 0) {
     }
     return;
   }
-  for (const k of Object.keys(node)) {
-    const v = node[k];
+  const rec = node as Record<string, unknown>;
+  for (const k of Object.keys(rec)) {
+    const v = rec[k];
     if (typeof v === 'string') {
       const next = apply(v);
-      if (next !== v) node[k] = next;
+      if (next !== v) rec[k] = next;
     } else {
       walkStrings(v, apply, depth + 1);
     }
@@ -133,22 +134,22 @@ function walkStrings(node, apply, depth = 0) {
  * 代价：历史中部被改写会让前缀缓存从改写点起失效 —— 但只在真的发现孤立代理时才会发生，
  * 而那种情况下"缓存失效"远好于"整个 run 一次即死"。
  */
-export function sanitizeMessages(messages) {
-  const list = Array.isArray(messages) ? messages : [];
+export function sanitizeMessages<T>(messages: T): { count: number; messages: T } {
+  const list = (Array.isArray(messages) ? messages : []) as unknown[];
   let count = 0;
-  const apply = (s) => {
+  const apply = (s: string): string => {
     const fixed = sanitizeLoneSurrogates(s);
     if (fixed !== s) count += loneSurrogateIndexes(s).length;
     return fixed;
   };
   for (const m of list) {
-    if (!m || typeof m !== 'object' || !m.role) continue;
+    if (!m || typeof m !== 'object' || !(m as { role?: unknown }).role) continue;
     // content 可能是字符串，也可能是 part 数组（视觉消息）—— 统一交给深度遍历。
     // 数组里的裸字符串（content: ['a','b'] 这种形态）不属于 OpenAI 规范，这里不碰：
     // 出站消毒只修"不该出现的字符"，不顺手改写不认识的结构。
     walkStrings(m, apply);
   }
-  return { count, messages: list };
+  return { count, messages: list as T };
 }
 
 /**
@@ -160,10 +161,10 @@ export function sanitizeMessages(messages) {
  *
  * @returns {{start:number, end:number}} start ≤ end，且都不在配对中间
  */
-export function alignRange(text, start, end) {
+export function alignRange(text: unknown, start?: unknown, end?: unknown): { start: number; end: number } {
   const s = String(text === undefined || text === null ? '' : text);
   const len = s.length;
-  const clamp = (v, fallback) => {
+  const clamp = (v: unknown, fallback: number): number => {
     if (v === undefined || v === null) return fallback;
     const n = Math.trunc(Number(v));
     if (!Number.isFinite(n)) return fallback;
@@ -180,7 +181,7 @@ export function alignRange(text, start, end) {
 }
 
 /** `String.prototype.slice` 的安全版：同样的下标语义，但绝不切裂代理对。 */
-export function sliceSafe(text, start, end) {
+export function sliceSafe(text: unknown, start?: unknown, end?: unknown): string {
   const s = String(text === undefined || text === null ? '' : text);
   const { start: a, end: b } = alignRange(s, start, end);
   return s.slice(a, b);
@@ -191,7 +192,7 @@ export function sliceSafe(text, start, end) {
  * 需要把区间如实写进结果文本时用它（例如 expand_result 的 `[offset, end)` 标注）：
  * 边界被回退后，沿用请求的 offset 就是一句假话。
  */
-export function rangeSafe(text, start, end) {
+export function rangeSafe(text: unknown, start?: unknown, end?: unknown) {
   const s = String(text === undefined || text === null ? '' : text);
   const { start: a, end: b } = alignRange(s, start, end);
   return { start: a, end: b, text: s.slice(a, b), length: s.length };

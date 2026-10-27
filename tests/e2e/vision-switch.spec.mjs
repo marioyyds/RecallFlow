@@ -50,7 +50,7 @@ import {
   PANEL,
 } from './helpers.mjs';
 import { getLlmRequests, resetLlmRequests, toolResultsText } from './fixtures/server.mjs';
-import { VISION_ENABLED } from '../../lib/shared/utils.js';
+import { VISION_ENABLED } from '../../lib/shared/utils.ts';
 
 let context;
 

@@ -58,7 +58,7 @@ test('op=highlight 的上限必须仍在 schema 里告诉模型（不能只在�
 test('模型可见文案里不得再出现已消失的工具名', () => {
   // 这些字符串会直接进模型上下文：写旧名会让它去调用一个不存在的工具。
   const files = [
-    '../lib/shared/utils.js',
+    '../lib/shared/utils.ts',
     '../lib/assistant/tool-schemas.js',
     '../lib/assistant/intent-router.js',
     '../lib/assistant/skill-defs.js',

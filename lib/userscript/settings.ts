@@ -17,13 +17,19 @@ export const RUN_AT_OPTIONS = [
   { value: 'document-idle', label: '页面空闲时（document-idle）', hint: '页面加载完成后执行，默认且最稳定' },
 ];
 
-export async function getUserscriptSettings() {
+export interface UserscriptSettings {
+  agentCanInstall: boolean;
+  autoCheckUpdates: boolean;
+  defaultRunAt: string;
+}
+
+export async function getUserscriptSettings(): Promise<UserscriptSettings> {
   const d = await chrome.storage.local.get(USERSCRIPT_SETTINGS_KEY);
   const saved = d[USERSCRIPT_SETTINGS_KEY] || {};
   return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
 }
 
-export async function saveUserscriptSettings(patch) {
+export async function saveUserscriptSettings(patch?: Partial<UserscriptSettings>): Promise<UserscriptSettings> {
   const current = await getUserscriptSettings();
   const next = Object.assign({}, current, patch || {});
   await chrome.storage.local.set({ [USERSCRIPT_SETTINGS_KEY]: next });

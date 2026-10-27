@@ -3,8 +3,8 @@
 // - extractPageSnapshot：给模型观察/动作验证用的「可交互元素 + 正文」快照。
 //   改进点：更全的可交互选择器、视口优先排序、稳定 ref（跨快照复用）、更丰富的状态字段。
 import { PAGE_TEXT_EXCLUDE, isPageContentExcluded, isElementCollectExcluded } from './citation.ts';
-import { trimElementsToBudget } from '../shared/utils.js';
-import { sliceSafe } from '../shared/surrogates.js';
+import { trimElementsToBudget } from '../shared/utils.ts';
+import { sliceSafe } from '../shared/surrogates.ts';
 
 export function extractPageText(options: ExtractPageTextOptions = {}): string {
   // visibleOnly：按真实可见性过滤（见 collectVisibleText 的说明）。

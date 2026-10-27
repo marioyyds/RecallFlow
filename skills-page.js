@@ -4,7 +4,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// lib/shared/constants.js
+// lib/shared/constants.ts
 var STORAGE_KEY = "knowledgeBase";
 var LEGACY_STORAGE_KEY = "wrongBook";
 var DATA_VERSION_KEY = "knowledgeBaseDataVersion";
@@ -34,7 +34,7 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
-// lib/shared/surrogates.js
+// lib/shared/surrogates.ts
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
 function alignRange(text, start, end) {
@@ -64,7 +64,7 @@ function rangeSafe(text, start, end) {
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
 
-// lib/shared/utils.js
+// lib/shared/utils.ts
 function typeInfo(id) {
   return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
@@ -1467,7 +1467,7 @@ function buildCitations(relevantItems, isOverview) {
   }));
 }
 
-// lib/userscript/metadata.js
+// lib/userscript/metadata.ts
 var DEFAULT_GRANTS = ["GM_addStyle", "GM_setValue", "GM_getValue"];
 function emptyMetadata() {
   return {
@@ -1574,7 +1574,7 @@ function hashId(...parts) {
   return hash.toString(36);
 }
 
-// lib/userscript/match.js
+// lib/userscript/match.ts
 function normalizeMatchPattern(pattern) {
   let p = String(pattern || "").trim().replace(/\s+$/, "");
   if (!p) return null;
@@ -1609,7 +1609,7 @@ function buildMatchPatterns(metadata) {
   return { patterns, warnings };
 }
 
-// lib/userscript/store.js
+// lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 function storage() {
   return typeof chrome !== "undefined" && chrome.storage ? chrome.storage.local : null;
@@ -1625,7 +1625,8 @@ async function getScript(id) {
   const area2 = storage();
   if (!area2 || !id) return null;
   const data = await area2.get(USERSCRIPTS_KEY);
-  return (data[USERSCRIPTS_KEY] || {})[id] || null;
+  const map = data[USERSCRIPTS_KEY] || {};
+  return map[id] || null;
 }
 async function saveScript(script) {
   const area2 = storage();
@@ -1637,7 +1638,7 @@ async function saveScript(script) {
   return script;
 }
 
-// lib/userscript/greasyfork.js
+// lib/userscript/greasyfork.ts
 var SEARCH_ENDPOINT = "https://greasyfork.org/zh-CN/scripts.json";
 async function fetchText(url, timeoutMs = 2e4) {
   const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -1673,11 +1674,11 @@ async function searchGreasyFork(q) {
     installs: Number(it.total_installs || it.installs || 0),
     codeUrl: String(it.code_url || ""),
     pageUrl: String(it.url || ""),
-    updatedAt: it.updated_at || ""
+    updatedAt: String(it.updated_at || "")
   }));
 }
 
-// lib/userscript/settings.js
+// lib/userscript/settings.ts
 var USERSCRIPT_SETTINGS_KEY = "recallflow.userscript.settings.v1";
 var USERSCRIPT_SETTINGS_DEFAULTS = {
   // 允许 Agent 通过 install_userscript 自动安装脚本。
@@ -1693,15 +1694,18 @@ async function getUserscriptSettings() {
   return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
 }
 
-// lib/userscript/manager.js
+// lib/userscript/manager.ts
+var RUN_AT_MAP = {
+  "document-start": "document_start",
+  "document-end": "document_end",
+  "document-idle": "document_idle",
+  "context-menu": "document_idle"
+};
 function runAtValue(runAt) {
-  const map = {
-    "document-start": "document_start",
-    "document-end": "document_end",
-    "document-idle": "document_idle",
-    "context-menu": "document_idle"
-  };
-  return map[String(runAt || "document-idle")] || "document_idle";
+  return RUN_AT_MAP[String(runAt || "document-idle")] || "document_idle";
+}
+function errMessage(e) {
+  return e instanceof Error ? e.message : String(e);
 }
 async function syncUserscriptRegistrations() {
   if (typeof chrome === "undefined" || !chrome.scripting || !chrome.scripting.registerContentScripts) return;
@@ -1733,7 +1737,7 @@ async function syncUserscriptRegistrations() {
     try {
       await chrome.scripting.registerContentScripts([item]);
     } catch (e) {
-      console.warn("[RecallFlow] \u6CE8\u518C\u811A\u672C\u5931\u8D25", item.id, e.message);
+      console.warn("[RecallFlow] \u6CE8\u518C\u811A\u672C\u5931\u8D25", item.id, errMessage(e));
     }
   }
 }
@@ -1779,7 +1783,7 @@ async function buildScriptFromCode(code, sourceUrl) {
     runAt: meta.runAt || settings.defaultRunAt,
     noframes: meta.noframes,
     matches: patterns,
-    excludeMatches: (meta.exclude || []).map((p) => normalizeMatchPattern(p)).filter(Boolean),
+    excludeMatches: (meta.exclude || []).map((p) => normalizeMatchPattern(p)).filter((p) => Boolean(p)),
     grants: meta.grant || [],
     requires: meta.require || [],
     resources,
@@ -1826,7 +1830,7 @@ async function runUserscriptOnTab(tabId, scriptId) {
       await chrome.scripting.executeScript({ target: { tabId }, files: ["lib/userscript/runner.js"] });
       res = await deliver();
     } catch (e) {
-      return { ok: false, error: "\u6CE8\u5165\u811A\u672C\u8FD0\u884C\u65F6\u5931\u8D25\uFF1A" + e.message };
+      return { ok: false, error: "\u6CE8\u5165\u811A\u672C\u8FD0\u884C\u65F6\u5931\u8D25\uFF1A" + errMessage(e) };
     }
   }
   return res;
@@ -4263,7 +4267,7 @@ async function handlePermissionTool(name, args, deps) {
   return null;
 }
 
-// lib/shared/screenshot-store.js
+// lib/shared/screenshot-store.ts
 var SHOT_KEY = "recallflow.shots.v1";
 var SHOT_INDEX_KEY = "recallflow.shots.index.v1";
 var SHOT_ITEM_PREFIX = "recallflow.shots.item.v1.";
@@ -4443,7 +4447,7 @@ async function takeScreenshot(deps) {
   };
 }
 
-// lib/shared/editable-text.js
+// lib/shared/editable-text.ts
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
 }

@@ -9,8 +9,8 @@
 // 那是「classic 脚本」与「要复用 ES 模块」的唯一兼容写法。引入入口构建后，
 // 静态 import 在构建期被内联，运行时不需要再按路径取模块 —— 少两次 fetch，
 // 也不再需要把 lib/userscript/* 暴露成可被网页取到的资源。
-import { USERSCRIPTS_KEY } from '../lib/userscript/store.js';
-import { urlMatches } from '../lib/userscript/match.js';
+import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
+import { urlMatches } from '../lib/userscript/match.ts';
 
 (async function initRunner() {
   if (window.__rfUserscriptRunner) return;

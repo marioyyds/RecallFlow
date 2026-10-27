@@ -31,39 +31,70 @@ export const MAX_SHOTS_TOTAL = 60;
  */
 export const MAX_SHOT_STORE_CHARS = 420000;
 
-export function shotStorageKey(id) {
+/** 一张截图的落盘形态（含 base64 dataUrl）。 */
+export interface ScreenshotRecord {
+  id: string;
+  dataUrl?: string;
+  label?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  sessionId?: string;
+  createdAt?: number;
+}
+
+/** 索引项：只存元数据，图片本体按 id 单独落盘。 */
+export interface ScreenshotIndexEntry {
+  id: string;
+  sessionId: string;
+  createdAt: number;
+  bytes: number;
+}
+
+/** 注入式 storage 形状：只要求用到的那三个方法，便于单测塞假实现。 */
+export interface StorageAreaLike {
+  get(keys: string | string[]): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+}
+
+export interface ChromeApiLike {
+  storage?: { local?: StorageAreaLike };
+}
+
+export function shotStorageKey(id: unknown): string {
   return SHOT_ITEM_PREFIX + String(id || '');
 }
 
-function localArea(chromeApi) {
+function localArea(chromeApi: ChromeApiLike | null | undefined): StorageAreaLike | null {
   return chromeApi && chromeApi.storage && chromeApi.storage.local ? chromeApi.storage.local : null;
 }
 
-function isRecord(value) {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 // 同一时刻可能有多个 Agent run 在截图；读改写索引必须串行，避免互相覆盖。
-let writeTail = Promise.resolve();
+let writeTail: Promise<unknown> = Promise.resolve();
 
-function enqueueWrite(fn) {
+function enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
   const run = writeTail.then(fn, fn);
   writeTail = run.catch(() => {});
   return run;
 }
 
-function pruneIndex(index) {
+function pruneIndex(index: Record<string, ScreenshotIndexEntry>): Record<string, ScreenshotIndexEntry> {
   const entries = Object.values(index)
     .filter((entry) => isRecord(entry) && entry.id)
     .sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
 
   // 先按会话保留最近的 MAX_SHOTS_PER_SESSION 张。
-  const keep = new Set();
-  const bySession = new Map();
+  const keep = new Set<string>();
+  const bySession = new Map<string, typeof entries>();
   for (const entry of entries) {
     const key = String(entry.sessionId || '');
     if (!bySession.has(key)) bySession.set(key, []);
-    bySession.get(key).push(entry);
+    (bySession.get(key) as typeof entries).push(entry);
   }
   for (const list of bySession.values()) {
     for (const entry of list.slice(-MAX_SHOTS_PER_SESSION)) keep.add(String(entry.id));
@@ -88,7 +119,11 @@ function pruneIndex(index) {
  * @param {string} [sessionId] 所属面板会话；缺省时仍会落盘，只是无法按会话清理
  * @returns {Promise<boolean>} 是否真的写入成功
  */
-export function saveScreenshot(chromeApi, shot, sessionId = '') {
+export function saveScreenshot(
+  chromeApi: ChromeApiLike | null | undefined,
+  shot: ScreenshotRecord | null | undefined,
+  sessionId = ''
+): Promise<boolean> {
   const area = localArea(chromeApi);
   const id = String((shot && shot.id) || '');
   const dataUrl = String((shot && shot.dataUrl) || '');
@@ -98,8 +133,11 @@ export function saveScreenshot(chromeApi, shot, sessionId = '') {
   return enqueueWrite(async () => {
     try {
       const cur = await area.get([SHOT_KEY, SHOT_INDEX_KEY]);
-      const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
-      const index = isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {};
+      const archive = (Array.isArray(cur && cur[SHOT_KEY]) ? (cur[SHOT_KEY] as ScreenshotRecord[]) : []);
+      const index = (isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {}) as Record<
+        string,
+        ScreenshotIndexEntry
+      >;
       const record = Object.assign({}, shot, {
         id,
         sessionId: String(sessionId || (shot && shot.sessionId) || ''),
@@ -141,16 +179,19 @@ export function saveScreenshot(chromeApi, shot, sessionId = '') {
 /**
  * 按 id 取回截图。优先读独立 key；旧版只写 SHOT_KEY 的图也能回退取到。
  */
-export async function loadScreenshot(chromeApi, id) {
+export async function loadScreenshot(
+  chromeApi: ChromeApiLike | null | undefined,
+  id: unknown
+): Promise<ScreenshotRecord | null> {
   const area = localArea(chromeApi);
   const wanted = String(id || '');
   if (!area || !wanted) return null;
   const key = shotStorageKey(wanted);
   try {
     const cur = await area.get([key, SHOT_KEY]);
-    const item = cur && cur[key];
+    const item = cur ? (cur[key] as ScreenshotRecord | undefined) : undefined;
     if (item && item.dataUrl) return item;
-    const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
+    const archive = (Array.isArray(cur && cur[SHOT_KEY]) ? (cur[SHOT_KEY] as ScreenshotRecord[]) : []);
     return archive.find((entry) => entry && String(entry.id) === wanted && entry.dataUrl) || null;
   } catch (e) {
     return null;
@@ -158,7 +199,10 @@ export async function loadScreenshot(chromeApi, id) {
 }
 
 /** 删除某个会话的所有截图（会话被用户删除时调用）。 */
-export function removeSessionScreenshots(chromeApi, sessionId) {
+export function removeSessionScreenshots(
+  chromeApi: ChromeApiLike | null | undefined,
+  sessionId: unknown
+): Promise<boolean> {
   const area = localArea(chromeApi);
   const wanted = String(sessionId || '');
   if (!area || !wanted) return Promise.resolve(false);
@@ -166,11 +210,14 @@ export function removeSessionScreenshots(chromeApi, sessionId) {
   return enqueueWrite(async () => {
     try {
       const cur = await area.get([SHOT_INDEX_KEY, SHOT_KEY]);
-      const index = isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {};
+      const index = (isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {}) as Record<
+        string,
+        ScreenshotIndexEntry
+      >;
       const ids = Object.keys(index).filter((id) => String((index[id] && index[id].sessionId) || '') === wanted);
       if (!ids.length) return true;
       for (const id of ids) delete index[id];
-      const archive = (Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [])
+      const archive = (Array.isArray(cur && cur[SHOT_KEY]) ? (cur[SHOT_KEY] as ScreenshotRecord[]) : [])
         .filter((entry) => !entry || !ids.includes(String(entry.id)));
       await area.set({ [SHOT_INDEX_KEY]: index, [SHOT_KEY]: archive });
       if (typeof area.remove === 'function') await area.remove(ids.map(shotStorageKey));

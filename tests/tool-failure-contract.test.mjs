@@ -20,11 +20,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { isContentScriptUnreachable, describeContentScriptUnreachable } from '../lib/shared/utils.js';
+import { isContentScriptUnreachable, describeContentScriptUnreachable } from '../lib/shared/utils.ts';
 import { readCurrentPage } from '../lib/assistant/page-read-tools.js';
 import { runJavascript } from '../lib/assistant/code-access-tools.js';
+import { sourcePath } from './source-path.mjs';
 
-const read = (p) => fs.readFileSync(path.join(process.cwd(), p), 'utf8');
+const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
 
 // ---------------- 源码级：失败返回必须带 ok:false ----------------
 

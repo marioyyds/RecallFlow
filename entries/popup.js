@@ -1,5 +1,5 @@
 // 弹窗（快速收录 + 列表）
-import { STATUS, ITEM_TYPES } from '../lib/shared/constants.js';
+import { STATUS, ITEM_TYPES } from '../lib/shared/constants.ts';
 import {
   showToast,
   debounce,
@@ -20,9 +20,9 @@ import {
   detectType,
   platformColor,
   parseTags,
-} from '../lib/shared/utils.js';
+} from '../lib/shared/utils.ts';
 import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from '../lib/shared/store.js';
-import { USERSCRIPTS_KEY } from '../lib/userscript/store.js';
+import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 
 let bookCache = {};
 let currentTab = null;

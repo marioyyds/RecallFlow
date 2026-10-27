@@ -1,12 +1,12 @@
 // 网页端 AI 助手 UI：悬浮按钮(FAB)/划词气泡/对话面板 + Markdown 渲染 + 对话持久化
-import { getAISettings, updateAISettings, AI_SETTINGS_DEFAULTS, expandQuickPrompt } from '../shared/settings.js';
+import { getAISettings, updateAISettings, AI_SETTINGS_DEFAULTS, expandQuickPrompt } from '../shared/settings.ts';
 import {
   composeProgressText,
   summarizePickedForMessage,
   pickedSummaryHtml,
   selectedTextMessageHtml,
   formatElementLocator,
-} from '../shared/utils.js';
+} from '../shared/utils.ts';
 import {
   buildTranscript,
   serializeCompleteConversationMessages,
@@ -58,9 +58,9 @@ function warnExtDead() {
   } catch (e: any) {}
 }
 import { extractPageText } from './page-text.ts';
-import { newHandoffId, normalizeHandoffId, buildHandoffRecord, buildToolTrail, prepareHandoffTrail, formatHandoffPrompt } from '../shared/handoff.js';
+import { newHandoffId, normalizeHandoffId, buildHandoffRecord, buildToolTrail, prepareHandoffTrail, formatHandoffPrompt } from '../shared/handoff.ts';
 import { clearCiteHighlight, isPointerInCitationRange, findAndHighlightCitation } from './citation.ts';
-import { escHtml, renumberCitations, renumberCitationsAcross, decodeSnippet, renderAnswer, planCitationOpen, parseSuggestionOptions } from './markdown.js';
+import { escHtml, renumberCitations, renumberCitationsAcross, decodeSnippet, renderAnswer, planCitationOpen, parseSuggestionOptions } from './markdown.ts';
 import { PANEL_CSS } from './panel-css.ts';
 import {
   clampPanelSize,
@@ -69,8 +69,8 @@ import {
   writePanelLayout,
   resolvePanelPlacement,
 } from './panel-layout.ts';
-import { applyRunEvent, runStateToAssistantMessage } from '../assistant/run-hub.js';
-import { loadScreenshot } from '../shared/screenshot-store.js';
+import { applyRunEvent, runStateToAssistantMessage } from '../assistant/run-hub.ts';
+import { loadScreenshot } from '../shared/screenshot-store.ts';
 import {
   createFabController,
   createFabPeekController,

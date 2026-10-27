@@ -14,7 +14,7 @@
 // 导出/交接用的文本一律走 sliceSafe：这里流的全是页面原文与模型输出（星形平面字符很多），
 // 按码元下标切会切裂代理对 —— 导出看起来只是多个"�"，但同一个字符串进了请求体
 // 就会让服务端在解析阶段整单拒收（见 lib/shared/surrogates.js 的事故说明）。
-import { sliceSafe } from '../shared/surrogates.js';
+import { sliceSafe } from '../shared/surrogates.ts';
 
 /** 进行中轮次的说明标记。放进 content 而不是另设字段 —— 交接包的 trimMessages 只保留 {role, content}。 */
 /**

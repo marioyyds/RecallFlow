@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { AI_SETTINGS_DEFAULTS } from '../lib/shared/settings.js';
+import { AI_SETTINGS_DEFAULTS } from '../lib/shared/settings.ts';
 
 test('默认模型是 deepseek-flash', () => {
   assert.equal(AI_SETTINGS_DEFAULTS.model, 'deepseek-flash');

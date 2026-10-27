@@ -6,7 +6,7 @@
 //
 // 被 commands.js（内容脚本采集 DOM 单元格）与 node 单测共用。
 
-import { sliceSafe } from './surrogates.js';
+import { sliceSafe } from './surrogates.ts';
 
 /** 一个单元格的 DOM 侧描述（由 commands.js 采集，这里只消费）。 */
 export interface TableCellInput {

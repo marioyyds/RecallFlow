@@ -6,7 +6,7 @@ import {
   editableTextMatches,
   firstEditableDifference,
   editableTextSummary,
-} from '../lib/shared/editable-text.js';
+} from '../lib/shared/editable-text.ts';
 
 test('normalizeEditableText：统一换行、NBSP 与尾随空行', () => {
   assert.equal(normalizeEditableText('a\r\nb\rc\u00a0d\n\n'), 'a\nb\nc d');

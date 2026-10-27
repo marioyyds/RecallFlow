@@ -1,8 +1,16 @@
 // 通用工具与展示助手（HTML 渲染、文本处理、toast）
-import { ITEM_TYPES, PLATFORMS, STAR_LEVELS } from './constants.js';
+import { ITEM_TYPES, PLATFORMS, STAR_LEVELS } from './constants.ts';
 // 页面原文（元素标签/文案/上下文）一律用 sliceSafe：按码元下标切会切裂代理对，
 // 半个字符进请求体就会被服务端整单拒收（见 surrogates.js 的事故说明）。
-import { sliceSafe } from './surrogates.js';
+import { sliceSafe } from './surrogates.ts';
+
+/** 列表排序用到的最小条目形状（调用方传的是知识库条目，这里只声明被读的字段）。 */
+export interface SortableItem {
+  createdAt?: number;
+  updatedAt?: number;
+  status?: number;
+  [key: string]: unknown;
+}
 
 /**
  * 防抖函数
@@ -10,10 +18,10 @@ import { sliceSafe } from './surrogates.js';
  * @param {number} delay - 延迟毫秒数
  * @returns {Function} 防抖后的函数
  */
-export function debounce(fn, delay) {
-  let timer = null;
-  return function (...args) {
-    clearTimeout(timer);
+export function debounce(fn: (...args: any[]) => any, delay: number): (...args: any[]) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return function (this: unknown, ...args: any[]) {
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => fn.apply(this, args), delay);
   };
 }
@@ -23,23 +31,23 @@ export function debounce(fn, delay) {
  * @param {string} context - 上下文描述
  * @param {Error|*} error - 错误对象
  */
-export function logError(context, error) {
+export function logError(context: string, error: unknown) {
   console.warn(`[BookmarkSorter] ${context}:`, error);
 }
 
-export function typeInfo(id) {
+export function typeInfo(id: string) {
   return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
 
-export function typeColor(id) {
+export function typeColor(id: string) {
   return typeInfo(id).color;
 }
 
-export function starColor(n) {
+export function starColor(n: number | string) {
   return (STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).color;
 }
 
-export function normalizeUrl(u) {
+export function normalizeUrl(u: string) {
   try {
     const x = new URL(u);
     x.hash = '';
@@ -49,19 +57,19 @@ export function normalizeUrl(u) {
   }
 }
 
-export function detectPlatform(u) {
+export function detectPlatform(u: string) {
   for (const p of PLATFORMS) {
     if (p.match.test(u)) return { id: p.id, name: p.name };
   }
   return { id: 'other', name: '其他平台' };
 }
 
-export function detectType(url) {
+export function detectType(url: string) {
   if (url && detectPlatform(url).id !== 'other') return 'wrong';
   return 'article';
 }
 
-export function isWebUrl(u) {
+export function isWebUrl(u: string) {
   return /^https?:/i.test(u);
 }
 
@@ -72,7 +80,7 @@ export function isWebUrl(u) {
  * 它没有 origin（`URL.origin === 'null'`）、`fetch` 走不到、也不该被 agent 主动打开。
  * 把这些判断散落在各处，就会出现"面板能开、收录说页面不可用"这类前后不一致。
  */
-export function isFileUrl(u) {
+export function isFileUrl(u: string) {
   return /^file:\/\//i.test(String(u || ''));
 }
 
@@ -84,7 +92,7 @@ export function isFileUrl(u) {
  * 这里回答"用户此刻正看着的页面，我们能不能注入 UI / 读它"，
  * 那边的回答是"agent 能不能主动去拿一个新页面"，后者放开等于允许逐个探测磁盘文件。
  */
-export function isOperableUrl(u) {
+export function isOperableUrl(u: string) {
   return isWebUrl(u) || isFileUrl(u);
 }
 
@@ -96,7 +104,7 @@ export function isOperableUrl(u) {
  * 信任一个本地页等于信任整块磁盘。本地页改用「目录」当键：同一个目录下的文件算一个站点，
  * 不同目录互不影响（这与用户对"同一批本地文档"的直觉一致，也让信任范围可解释）。
  */
-export function siteKeyOf(u) {
+export function siteKeyOf(u: string) {
   const s = String(u || '');
   if (isFileUrl(s)) {
     try {
@@ -114,7 +122,7 @@ export function siteKeyOf(u) {
   }
 }
 
-export function cleanTitle(title) {
+export function cleanTitle(title: string | null | undefined) {
   let t = (title || '').trim();
   t = t
     .replace(
@@ -125,7 +133,7 @@ export function cleanTitle(title) {
   return t;
 }
 
-export function parseTags(str) {
+export function parseTags(str: unknown) {
   return String(str || '')
     .split(/[,，\s]+/)
     .map((t) => t.trim())
@@ -136,7 +144,7 @@ export function parseTags(str) {
  * 知识库列表用的 Markdown 纯文本摘要。
  * 完整文档只在“阅读”视图中展示；列表只保留可扫读的一段文字。
  */
-export function markdownExcerpt(text, maxChars = 160) {
+export function markdownExcerpt(text: unknown, maxChars = 160) {
   const limit = Math.max(20, Number(maxChars) || 160);
   let s = String(text || '');
   s = s.replace(/```[\s\S]*?```/g, ' [代码块] ');
@@ -154,7 +162,7 @@ export function markdownExcerpt(text, maxChars = 160) {
   return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + '…' : s;
 }
 
-export function sortItems(list, sortBy) {
+export function sortItems(list: SortableItem[], sortBy: string) {
   const arr = list.slice();
   switch (sortBy) {
     case 'created':
@@ -180,7 +188,7 @@ export function sortItems(list, sortBy) {
   return arr;
 }
 
-export function starBarHtml(n, interactive) {
+export function starBarHtml(n: number | string, interactive?: boolean) {
   const level = Math.max(1, Math.min(3, Number(n) || 1));
   const group = interactive ? ' role="radiogroup" aria-label="重要程度"' : '';
   let h = `<span class="star-bar${interactive ? ' interactive' : ''}"${group}>`;
@@ -203,15 +211,15 @@ export function starBarHtml(n, interactive) {
  * @param {HTMLElement} root - 监听键盘事件的容器（如 #list 或 document）
  * @param {(value:number, cell:HTMLElement)=>void} onSelect - 选中回调，cell 为被聚焦的星星元素
  */
-export function bindStarKeyboard(root, onSelect) {
-  root.addEventListener('keydown', (e) => {
-    const cell = e.target.closest('.star-cell[role="radio"]');
+export function bindStarKeyboard(root: HTMLElement | Document, onSelect: (value: number, cell: HTMLElement) => void) {
+  root.addEventListener('keydown', (e: Event) => {
+    const cell = (e.target as Element | null)?.closest('.star-cell[role="radio"]') as HTMLElement | null;
     if (!cell) return;
-    const group = cell.parentElement;
-    const cells = Array.from(group.querySelectorAll('.star-cell'));
+    const group = cell.parentElement as HTMLElement;
+    const cells = Array.from(group.querySelectorAll<HTMLElement>('.star-cell'));
     const max = cells.length - 1;
     let idx = cells.indexOf(cell);
-    switch (e.key) {
+    switch ((e as KeyboardEvent).key) {
       case 'ArrowRight':
       case 'ArrowUp':
         idx = Math.min(max, idx + 1);
@@ -246,17 +254,17 @@ export function bindStarKeyboard(root, onSelect) {
   });
 }
 
-export function levelNameHtml(n) {
+export function levelNameHtml(n: number | string) {
   const st = STAR_LEVELS[Math.max(1, Math.min(3, Number(n) || 1))];
   return `<span class="level-name" style="color:${st.color}">${st.name}</span>`;
 }
 
-export function typeBadgeHtml(type) {
+export function typeBadgeHtml(type: string) {
   const t = typeInfo(type);
   return `<span class="type-badge" style="color:${t.color};background:${t.color}1A;border:1px solid ${t.color}40">${t.name}</span>`;
 }
 
-export function tagsHtml(tags) {
+export function tagsHtml(tags: string[] | null | undefined) {
   if (!Array.isArray(tags) || !tags.length) return '';
   return `<span class="tag-list">${tags
     .map((t) => `<span class="tag-chip">${esc(t)}</span>`)
@@ -277,7 +285,7 @@ export function tagsHtml(tags) {
  * @param {string} [selector] 回退用的 CSS 选择器
  * @param {string} [tag] 最后的回退
  */
-export function formatElementLocator(locator, selector, tag) {
+export function formatElementLocator(locator: any, selector: any, tag: any) {
   const l = locator || {};
   if (l.role) return 'role=' + l.role + (l.name ? ' name="' + l.name + '"' : '');
   if (l.name) return 'name="' + l.name + '"';
@@ -296,7 +304,7 @@ export function formatElementLocator(locator, selector, tag) {
  * @param {Array} picked 原始拾取结果（picker 回传）
  * @returns {Array<{tag:string,label:string,loc:string,locator:string}>}
  */
-export function summarizePickedForMessage(picked) {
+export function summarizePickedForMessage(picked: any) {
   if (!Array.isArray(picked)) return [];
   return picked
     .filter((p) => p && typeof p === 'object')
@@ -313,7 +321,7 @@ export function summarizePickedForMessage(picked) {
 }
 
 /** 一行文本摘要，如 `button「提交」 → src/App.vue:42`。无拾取时返回空串。 */
-export function formatPickedSummary(picks) {
+export function formatPickedSummary(picks: any) {
   const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
   if (!list.length) return '';
   return list
@@ -337,7 +345,7 @@ export function formatPickedSummary(picks) {
  * ⚠ 元素标签 / label / 选择器都来自**页面**（不可信），必须转义：
  * 否则页面上一个 `label` 里带 `<img onerror=...>` 就能在面板里执行脚本。
  */
-export function pickedSummaryHtml(picks) {
+export function pickedSummaryHtml(picks: any) {
   const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
   if (!list.length) return '';
   const title = list.map((p) => p.locator).filter(Boolean).join(' / ');
@@ -353,7 +361,7 @@ export function pickedSummaryHtml(picks) {
  * 或重新打开会话时，用户就看不到“这句话到底基于哪段原文”。
  * 同时供实时发送与历史重放使用，页面文本一律转义。
  */
-export function selectedTextMessageHtml(selectedText) {
+export function selectedTextMessageHtml(selectedText: unknown) {
   const text = String(selectedText || '').trim();
   if (!text) return '';
   return (
@@ -396,7 +404,7 @@ export const DEFAULT_STYLE_PROPS = Object.freeze([
  * 每行写明 `value` 与显示文本，并标出哪个**当前选中**、哪些**禁用** ——
  * 这三样是"能不能选对"的全部依据（价格 / 规格常常只写在显示文本里）。
  */
-export function formatSelectOptions(items) {
+export function formatSelectOptions(items: any) {
   if (!Array.isArray(items) || !items.length) return '';
   return items
     .map((it, i) => {
@@ -417,7 +425,7 @@ export function formatSelectOptions(items) {
  * 每条给出：定位用的 selector、字段名、**与语言无关的约束名**、以及浏览器给的原文提示。
  * 约束名是判据的锚 —— `validationMessage` 随浏览器语言变（中/英/日），拿它做断言会脆。
  */
-export function formatInvalidControls(items) {
+export function formatInvalidControls(items: any) {
   if (!Array.isArray(items) || !items.length) return '';
   const lines = items.map(
     (it, i) =>
@@ -442,7 +450,7 @@ export function formatInvalidControls(items) {
  * @param {Array} items readElementState 的返回值列表
  * @param {number} [total] 命中总数（可能多于列出条数）
  */
-export function formatStylesSummary(items, total) {
+export function formatStylesSummary(items: any, total: any) {
   const list = Array.isArray(items) ? items : [];
   const n = typeof total === 'number' && total > list.length ? total : list.length;
   const head =
@@ -474,7 +482,7 @@ export function formatStylesSummary(items, total) {
  *
  * @param {Array} matches [{selector, tag, visible, size:{w,h}, textLength, shadowDepth, path, containsMainContent}]
  */
-export function formatInspectMatches(matches) {
+export function formatInspectMatches(matches: any) {
   const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
   if (!list.length) return '';
   return list
@@ -492,27 +500,26 @@ export function formatInspectMatches(matches) {
     .join('\n');
 }
 
-export function fmtTime(ts) {
+export function fmtTime(ts: unknown): string {
   if (!ts) return '';
-  const d = new Date(ts);
-  const diff = Date.now() - ts;
+  const d = new Date(ts as string | number | Date);
+  const diff = Date.now() - Number(d.getTime());
   if (diff < 60 * 60 * 1000) return Math.max(1, Math.round(diff / 60000)) + ' 分钟前';
   if (diff < 24 * 60 * 60 * 1000) return Math.round(diff / 3600000) + ' 小时前';
   if (diff < 7 * 24 * 60 * 60 * 1000) return Math.round(diff / 86400000) + ' 天前';
   return d.toLocaleDateString('zh-CN');
 }
 
-export function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+export function esc(s: unknown): string {
+  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return String(s).replace(/[&<>"']/g, (c: string) => map[c]);
 }
 
-export function platformColor(id) {
+export function platformColor(id: string) {
   return id === 'other' ? '#95a5a6' : '#4a90d9';
 }
 
-let _toastTimer = null;
+let _toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * 通用 toast 提示（供 popup / manager 复用）
@@ -521,7 +528,7 @@ let _toastTimer = null;
  * @param {Function} [opts.undoFn] - 撤销回调，提供时显示撤销按钮
  * @param {number} [opts.duration=2000] - 显示时长（毫秒）
  */
-export function showToast(msg, opts) {
+export function showToast(msg: string, opts?: any) {
   const o = opts || {};
   let el = document.getElementById('toast');
   if (!el) {
@@ -545,7 +552,7 @@ export function showToast(msg, opts) {
     el.appendChild(btn);
   }
   el.classList.add('show');
-  clearTimeout(_toastTimer);
+  if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove('show'), o.duration || 2000);
 }
 
@@ -559,7 +566,7 @@ export function showToast(msg, opts) {
  * 命中的调用方应自动改用页面主世界（CDP Runtime.evaluate，不受页面 CSP 限制）。
  * @param {string} message
  */
-export function isCspEvalBlockError(message) {
+export function isCspEvalBlockError(message: unknown) {
   const s = String(message === undefined || message === null ? '' : message);
   if (!s) return false;
   if (/unsafe-eval/i.test(s)) return true;
@@ -639,7 +646,7 @@ export const VISION_CLAUSE = '**看不到图像**（截图只给用户看，不�
  * @param {string} [prefix] 调用方自己的那段禁用文案（关闭时原样返回，见 `formatScreenshotSummary`）
  * @returns {string} 需要追加的说明（未启用视觉时非空）
  */
-export function visionLimitationNote(visionEnabled, prefix) {
+export function visionLimitationNote(visionEnabled: unknown, prefix?: unknown) {
   const enabled = typeof visionEnabled === 'boolean' ? visionEnabled : VISION_ENABLED;
   if (enabled) return '';
   if (typeof prefix === 'string') return prefix;
@@ -706,7 +713,7 @@ export const VISION_ENABLED_SKILL_COPY =
 export const VISION_ENABLED_SUMMARY_COPY =
   '图片会随请求送进你的上下文（本次任务里截的每张都会送；单张过大的会省略并说明），据此可以观察页面外观。';
 
-export function isContentScriptUnreachable(message) {
+export function isContentScriptUnreachable(message: unknown) {
   return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
     String(message === undefined || message === null ? '' : message)
   );
@@ -726,7 +733,7 @@ export function isContentScriptUnreachable(message) {
  * @param {string} message 原始错误
  * @param {string} [prefix] 非此类失败时用的前缀（如「读取页面失败：」）
  */
-export function describeContentScriptUnreachable(message, prefix) {
+export function describeContentScriptUnreachable(message: unknown, prefix?: unknown) {
   const raw = String(message === undefined || message === null ? '' : message);
   if (!isContentScriptUnreachable(raw)) return (prefix || '') + raw;
   return (
@@ -749,7 +756,7 @@ export function describeContentScriptUnreachable(message, prefix) {
  * @param {number} quality 1-100（仅 jpeg 有效）
  * @returns {Array<{format:string, quality?:number}>}
  */
-export function screenshotAttempts(format, quality) {
+export function screenshotAttempts(format: unknown, quality: unknown) {
   const q = Math.min(100, Math.max(20, Math.round(Number(quality) || 72)));
   if (format === 'png') {
     // png 无损但可能极大：先 png，超限退 jpeg 并逐级降质。
@@ -779,7 +786,7 @@ export function screenshotAttempts(format, quality) {
  * @param {{width:number, height:number, format:string, quality?:number, bytes:number, label?:string, degraded?:boolean}} meta
  * @param {boolean} [visionEnabled] 覆盖开关（测试用；生产不传）
  */
-export function formatScreenshotSummary(meta, visionEnabled) {
+export function formatScreenshotSummary(meta: any, visionEnabled: unknown) {
   const m = meta || {};
   const w = Math.max(0, Math.round(Number(m.width) || 0));
   const h = Math.max(0, Math.round(Number(m.height) || 0));
@@ -815,7 +822,7 @@ export function formatScreenshotSummary(meta, visionEnabled) {
  * 同理，被截断时可见性结论必须限定在「列出的部分」内。
  * @param {{total:number, listed:number, visibleCount:number, truncated:boolean, touchesMain?:boolean, main?:{selector:string,textLength:number}}} input
  */
-export function formatInspectSummary(input) {
+export function formatInspectSummary(input: any) {
   const o = input || {};
   const total = Math.max(0, Math.floor(Number(o.total) || 0));
   const listed = Math.max(0, Math.floor(Number(o.listed) || 0));
@@ -844,7 +851,7 @@ export function formatInspectSummary(input) {
  * 原先无论传不传 checkTexts 都拼上整页正文 —— 实测一次 9.8k 字符里真正有用的
  * 只有那 8 行结论，而它会一直留在上下文里，让之后每一轮请求都跟着变长。
  */
-export function formatCurrentPageResult(input) {
+export function formatCurrentPageResult(input: any) {
   const o = input || {};
   const len = Math.max(0, Math.floor(Number(o.textLength) || 0));
   const headLines = ['页面标题：' + String(o.title || ''), '页面URL：' + String(o.url || '')];
@@ -853,7 +860,7 @@ export function formatCurrentPageResult(input) {
   if (len) headLines.push('正文约 ' + len + ' 字');
   const head = headLines.join('\n') + '\n\n';
   const vis = String(o.visReport || '');
-  const texts = (Array.isArray(o.checkTexts) ? o.checkTexts : []).filter((t) => String(t == null ? '' : t).trim());
+  const texts = (Array.isArray(o.checkTexts) ? o.checkTexts : []).filter((t: unknown) => String(t == null ? '' : t).trim());
   if (texts.length && vis) {
     return (
       head +
@@ -895,7 +902,7 @@ const SNAPSHOT_FIXED_ALLOWANCE = 600;
  * 的元素，需要时滚动后重新快照即可（ref 会随新快照重发）。
  * 至少保留一个元素 —— 否则单个超大元素会把结果清空。
  */
-export function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
+export function trimElementsToBudget(described: any, textLength: number, budget = SNAPSHOT_CHAR_BUDGET) {
   const list = Array.isArray(described) ? described : [];
   const limit = Math.max(0, Number(budget) || 0);
   const elements = [];
@@ -924,9 +931,9 @@ export function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CH
  *
  * @param {{hit:number, attempted:number, requested:number, misses?:string[], limit:number}} input
  */
-export function formatHighlightResult(input) {
+export function formatHighlightResult(input: any) {
   const o = input || {};
-  const num = (v) => Math.max(0, Math.floor(Number(v) || 0));
+  const num = (v: unknown): number => Math.max(0, Math.floor(Number(v) || 0));
   const hit = num(o.hit);
   const attempted = num(o.attempted);
   const requested = Math.max(attempted, num(o.requested));
@@ -938,7 +945,7 @@ export function formatHighlightResult(input) {
     s +=
       '；未找到 ' + misses.length + ' 条：' +
       misses
-        .map((m) => {
+        .map((m: unknown) => {
           const t = String(m == null ? '' : m);
           return sliceSafe(t, 0, 16) + (t.length > 16 ? '…' : '');
         })
@@ -962,7 +969,7 @@ export function formatHighlightResult(input) {
  * @param {number} max 总步数（0 表示未知）
  * @param {string} label 状态标签（如「查看结果」），可为空
  */
-export function composeProgressText(step, max, label) {
+export function composeProgressText(step: unknown, max: unknown, label?: unknown) {
   const parts = [];
   const n = Number(step);
   const m = Number(max);
@@ -981,7 +988,7 @@ export function composeProgressText(step, max, label) {
  * 而隐藏节点的文字仍留在 DOM 里 —— 这正是此前校验器反复误判的原因。
  * @param {Array<{text:string, visible:number, dom:number, context?:string}>} results
  */
-export function formatVisibilityReport(results) {
+export function formatVisibilityReport(results: any) {
   const list = Array.isArray(results) ? results : [];
   if (!list.length) return '';
   const lines = list.map((r) => {

@@ -1,5 +1,5 @@
 // 页面内引用定位与高亮：字符级匹配 + 绝对定位浮层（不改动页面 DOM）
-import { logError } from '../shared/utils.js';
+import { logError } from '../shared/utils.ts';
 
 export const PAGE_TEXT_EXCLUDE =
   'script,style,noscript,iframe,svg,canvas,nav,header,footer,aside,form,button,input,select,textarea,[contenteditable],.ad,.ads,.advertisement,.banner,[class*=cookie],[id*=cookie],[class*=popup],[class*=modal],#__kb-ai-host,#toast,[data-rf-injected]';

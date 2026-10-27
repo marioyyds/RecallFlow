@@ -7,7 +7,7 @@ import {
   SESSION_TO_KB_INSTRUCTION,
   mergeQuickPrompts,
   expandQuickPrompt,
-} from '../lib/shared/settings.js';
+} from '../lib/shared/settings.ts';
 
 test('默认快捷语句顺序符合产品配置', () => {
   assert.deepEqual(AI_SETTINGS_DEFAULTS.quickPrompts, [

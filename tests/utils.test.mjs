@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, markdownExcerpt, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.js';
+import { esc, cleanTitle, parseTags, markdownExcerpt, normalizeUrl, detectPlatform, sortItems, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.ts';
 
 test('esc escapes html special chars', () => {
   assert.equal(esc('<a href="x">&'), '&lt;a href=&quot;x&quot;&gt;&amp;');

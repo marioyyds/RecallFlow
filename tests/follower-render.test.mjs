@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { sourcePath } from './source-path.mjs';
 
 const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
-const hub = fs.readFileSync('lib/assistant/run-hub.js', 'utf8');
+const hub = fs.readFileSync(sourcePath('lib/assistant/run-hub.js'), 'utf8');
 
 function bodyOf(src, marker, length = 1800) {
   const at = src.indexOf(marker);
