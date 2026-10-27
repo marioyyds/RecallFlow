@@ -64,7 +64,7 @@ installChrome({
   },
 });
 
-const cdp = await import('../lib/backend/cdp.js');
+  const cdp = await import('../lib/backend/cdp.ts');
 
 function reset() {
   sent.length = 0;

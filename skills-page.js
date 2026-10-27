@@ -1839,7 +1839,7 @@ async function searchScripts(q) {
   return searchGreasyFork(q);
 }
 
-// lib/backend/cdp.js
+// lib/backend/cdp.ts
 var cdp_exports = {};
 __export(cdp_exports, {
   DEFAULT_CDP_TIMEOUT_MS: () => DEFAULT_CDP_TIMEOUT_MS,

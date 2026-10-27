@@ -6,12 +6,12 @@
 >
 > | 本文件声称 | 工作树实际情况（可复核） |
 > | --- | --- |
-> | 「7801 桥接链路整体删除」 | `lib/bridge/relay.js` 仍存在（350 行，`RELAY_HOST = '127.0.0.1:7801'`），且 `background.js` 仍在启动时调用 `startMcpRelay()` |
+> | 「7801 桥接链路整体删除」 | `lib/bridge/relay.ts` 仍存在（`RELAY_HOST = '127.0.0.1:7801'`），且 `background.js` 仍在启动时调用 `startMcpRelay()` |
 > | 「`integrations/opencode/` 整包」删除 | 该目录仍存在，含 `recallflow-mcp/index.js`（852 行）与 `package-lock.json`；根 `package.json` 的 `test` 脚本仍会运行其测试 |
 > | 新增 `tests/no-dead-bridge-refs.test.mjs` 与 `tests/relay-dsh-only.test.mjs` | **两个文件都不存在** |
 > | 7801 检查已从闸门移除 | `scripts/` 下仍有两个 MCP 验证台脚本引用该链路 |
 >
-> **复核方法**：对上述每一项直接在仓库里搜索对应符号（`relay.js`、`startMcpRelay`、两个测试文件名）即可确认。
+> **复核方法**：对上述每一项直接在仓库里搜索对应符号（`relay.ts`、`startMcpRelay`、两个测试文件名）即可确认。
 >
 > **这为什么重要**：仓库里同时存在**三种互相矛盾的集成方向叙述**——本文件的「已删除、改用 DSH」、
 > `README.md` 的「与 opencode / DSH 集成，12 个工具」、以及实际代码里的 opencode MCP server 仍在运行。

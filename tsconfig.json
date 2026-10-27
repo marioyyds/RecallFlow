@@ -74,7 +74,7 @@
   // Batch 2（TITA-78）再加三处：`lib/assistant/**`（run-hub 在浏览器图与内容图交集里）、
   // `lib/userscript/**`（user runner 与脚本管理）、`entries/**`（已在列，产物入口的源码）。
   // 同样只对**已迁移的 .ts** 生效，目录里其余 .js 仍只被解析。
-  "include": ["entries/**/*", "lib/shared/**/*", "lib/page/**/*", "lib/assistant/**/*", "lib/userscript/**/*"],
+  "include": ["entries/**/*", "lib/shared/**/*", "lib/page/**/*", "lib/assistant/**/*", "lib/userscript/**/*", "lib/backend/**/*", "lib/bridge/**/*"],
   "exclude": ["node_modules"]
   // ▼ `npm run check:types`（= `tsc --noEmit`）**刻意没有**挂进 scripts/run-all-checks.mjs。
   // 上面这个 include 里现在一个 .ts 都没有，纳入门禁就是一条「永远为绿」的假闸 ——

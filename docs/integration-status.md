@@ -19,7 +19,7 @@
 | 组成 | 位置 | 现状 |
 | --- | --- | --- |
 | MCP server（stdio + Streamable HTTP） | `integrations/opencode/recallflow-mcp/index.js`（约 1020 行） | 有独立依赖与 lockfile；有集成测试 |
-| 扩展侧桥接（HTTP 长轮询 + WebSocket） | `lib/bridge/relay.js`；由 `background.js` 的 `startMcpRelay()` 启动 | 已实现 |
+| 扩展侧桥接（HTTP 长轮询 + WebSocket） | `lib/bridge/relay.ts`；由 `background.js` 的 `startMcpRelay()` 启动 | 已实现 |
 | 桥接方法清单（跨端唯一来源） | `lib/shared/bridge-methods.js` | 由 `tests/bridge-contract.test.mjs` 与 relay 的 dispatch 双向核对 |
 | 写入许可（桥接层自己的白名单） | `lib/shared/bridge-write-policy.js` | 桥接是独立入口、不经 agent 审批，因此单独设闸 |
 | 会话隔离 | `sessionBuckets` + `AsyncLocalStorage`（`index.js`） | `recallflow-mcp/test/session-isolation.test.mjs` |
@@ -50,7 +50,7 @@
 `tests/docs-drift.test.mjs` 会核对几件具体的事：
 
 - 是否存在声称「7801 桥接已删除」的文档（若有，必须是**带有更正的**历史记录）；
-- `lib/bridge/relay.js`、`integrations/opencode/recallflow-mcp/index.js` 是否仍然存在
+- `lib/bridge/relay.ts`、`integrations/opencode/recallflow-mcp/index.js` 是否仍然存在
   —— 若它们真的被删除，那条断言会失败并提醒同步本文档；
 - 桥接方法清单与 relay 的 dispatch 分支是否仍然一致（既有门禁已覆盖）。
 

@@ -11,13 +11,67 @@ import { validateBridgeWrite } from '../shared/bridge-write-policy.js';
 import { getAISettings } from '../shared/settings.ts';
 import { screenshotAttempts } from '../shared/utils.ts';
 import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../assistant/screenshot-tool.ts';
-import * as cdp from '../backend/cdp.js';
+import * as cdp from '../backend/cdp.ts';
 
 const RELAY_HOST = '127.0.0.1:7801';
 const RELAY_HTTP = 'http://' + RELAY_HOST;
+
+type BridgeParams = Record<string, unknown>;
+
+interface RelayMessage {
+  id?: string | number;
+  method?: string;
+  params?: BridgeParams;
+  session?: unknown;
+}
+
+interface RelayRequest {
+  id: string | number;
+  method: string;
+  params?: BridgeParams;
+  session?: unknown;
+}
+
+interface RelayReplyPayload {
+  id?: string | number;
+  result?: unknown;
+  error?: string;
+  session?: unknown;
+}
+
+interface BrowserReadContext {
+  browsingMode: string;
+  maxOpenedTabs: number;
+  openedTabs: unknown[];
+  openedTabCount: number;
+  tabId?: number;
+  pageUrl?: string;
+  pageTitle?: string;
+}
+
+interface ViewportBox {
+  clientWidth?: number;
+  clientHeight?: number;
+  width?: number;
+  height?: number;
+}
+
+interface LayoutMetrics {
+  cssContentSize?: ViewportBox;
+  contentSize?: ViewportBox;
+  cssVisualViewport?: ViewportBox;
+  visualViewport?: ViewportBox;
+}
+
+export interface TruncateResult {
+  text: string;
+  truncated: boolean;
+  fullChars: number;
+}
+
 // WS 的 token 只能放在查询串里：浏览器 WebSocket API 无法设置请求头。
 // 这是本文件唯一把 token 放进 URL 的位置（HTTP 通道走请求头）。
-function relayWsUrl() {
+function relayWsUrl(): string {
   return 'ws://' + RELAY_HOST + '/?token=' + encodeURIComponent(relayToken);
 }
 
@@ -32,12 +86,12 @@ export const DEFAULT_BRIDGE_TOKEN = 'recallflow-local-bridge-v1';
 let relayToken = '';
 let tokenLoaded = false;
 
-let socket = null;
-let reconnectTimer = null;
-let heartbeatTimer = null;
+let socket: WebSocket | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let httpLoopRunning = false;
 
-async function loadRelayToken() {
+async function loadRelayToken(): Promise<string> {
   if (tokenLoaded) return relayToken;
   try {
     const settings = await getAISettings();
@@ -51,12 +105,12 @@ async function loadRelayToken() {
   return relayToken;
 }
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   // WS 无法在浏览器端设置请求头，因此 token 只走 HTTP 头与 WS 握手负载，绝不进 URL。
   return relayToken ? { 'X-RecallFlow-Token': relayToken } : {};
 }
 
-async function connectWs() {
+async function connectWs(): Promise<void> {
   if (!(await loadRelayToken())) return;
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   try {
@@ -68,7 +122,7 @@ async function connectWs() {
   }
   socket.addEventListener('open', () => {
     try {
-      socket.send(JSON.stringify({ type: 'hello', client: 'recallflow-extension' }));
+      socket!.send(JSON.stringify({ type: 'hello', client: 'recallflow-extension' }));
     } catch (e) {}
     startHeartbeat();
   });
@@ -80,13 +134,13 @@ async function connectWs() {
   });
   socket.addEventListener('error', () => {
     try {
-      socket.close();
+      socket!.close();
     } catch (e) {}
   });
 }
 
 // ---------------- WebSocket（辅助通道） ----------------
-function scheduleReconnect() {
+function scheduleReconnect(): void {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
@@ -94,7 +148,7 @@ function scheduleReconnect() {
   }, 8000);
 }
 
-function startHeartbeat() {
+function startHeartbeat(): void {
   stopHeartbeat();
   heartbeatTimer = setInterval(() => {
     try {
@@ -102,27 +156,27 @@ function startHeartbeat() {
     } catch (e) {}
   }, 25000);
 }
-function stopHeartbeat() {
+function stopHeartbeat(): void {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
 }
 
-async function handleWsMessage(raw) {
-  let msg;
+async function handleWsMessage(raw: string): Promise<void> {
+  let msg: RelayMessage | null | undefined;
   try {
-    msg = JSON.parse(raw);
+    msg = JSON.parse(raw) as RelayMessage | null;
   } catch (e) {
     return;
   }
   if (!msg || msg.id === undefined || !msg.method) return;
-  const reply = (payload) => {
+  const reply = (payload: RelayReplyPayload) => {
     try {
       if (socket && socket.readyState === WebSocket.OPEN) {
         // 回带 session，让服务端把结果路由回发起的那个会话（与 HTTP 通道同理）。
-        const out = Object.assign({ id: msg.id }, payload);
-        if (msg.session !== undefined && msg.session !== null) out.session = msg.session;
+        const out: RelayReplyPayload = Object.assign({ id: msg!.id }, payload);
+        if (msg!.session !== undefined && msg!.session !== null) out.session = msg!.session;
         socket.send(JSON.stringify(out));
       }
     } catch (e) {}
@@ -130,12 +184,12 @@ async function handleWsMessage(raw) {
   try {
     reply({ result: await dispatch(msg.method, msg.params || {}) });
   } catch (e) {
-    reply({ error: String((e && e.message) || e) });
+    reply({ error: String(((e as { message?: string } | null) && (e as { message?: string }).message) || e) });
   }
 }
 
 // ---------------- HTTP 长轮询（主通道） ----------------
-async function httpLoop() {
+async function httpLoop(): Promise<void> {
   if (httpLoopRunning) return;
   // 没配置 token 就不要开始轮询：否则每 3 秒对 127.0.0.1 发一次注定 401 的请求，
   // 既刷控制台也掩盖真正的原因（用户还没填 token）。
@@ -144,18 +198,18 @@ async function httpLoop() {
   while (httpLoopRunning) {
     try {
       const res = await fetch(RELAY_HTTP + '/poll', { cache: 'no-store', headers: authHeaders() });
-      const data = await res.json();
+      const data = (await res.json()) as { requests?: RelayRequest[] } | null;
       const requests = (data && data.requests) || [];
       for (const req of requests) {
         // req.session 由服务端标注（它是哪个 MCP 会话的请求）。扩展**不解释**这个值，
         // 只在回结果时原样带回去，让服务端把结果路由到正确的会话。
         // 不这么做的话，多客户端并发时 A 可能拿到 B 的页面正文。
         const session = req.session;
-        let payload;
+        let payload: RelayReplyPayload;
         try {
           payload = { id: req.id, result: await dispatch(req.method, req.params || {}) };
         } catch (e) {
-          payload = { id: req.id, error: String((e && e.message) || e) };
+          payload = { id: req.id, error: String(((e as { message?: string } | null) && (e as { message?: string }).message) || e) };
         }
         if (session !== undefined && session !== null) payload.session = session;
         try {
@@ -173,7 +227,7 @@ async function httpLoop() {
 }
 
 // ---------------- 请求分发 ----------------
-async function dispatch(method, params) {
+async function dispatch(method: string, params: BridgeParams): Promise<unknown> {
   if (method === 'browser_read') return await browserRead(params);
   // 诊断类统一入口：kind 由 params 指定（桥接方法名 == 扩展工具名，因此参数形状也一致）。
   if (method === 'read_diagnostics') return await readActiveTab('read_diagnostics', params);
@@ -184,7 +238,7 @@ async function dispatch(method, params) {
   // 交接包：读取用户在浏览器面板里复制出来的会话（凭 RF-XXXXXX 标识）。
   // 存储就在后台可直接访问，无需再经内容脚本。
   if (method === 'handoff_get') return await getHandoff(params && params.id);
-  if (method === 'handoff_list') return await listHandoffs(params && params.limit);
+  if (method === 'handoff_list') return await listHandoffs((params && params.limit) as number | undefined);
   if (method === 'screenshot_capture') return await screenshotCapture(params);
   if (method === 'page_action') return await pageAction(params);
   throw new Error('unknown method: ' + method);
@@ -198,9 +252,9 @@ async function dispatch(method, params) {
 //
 // 安全边界：本函数**不**复用 agent 循环的审批（那条路在 agent.js 里），
 // 因此必须自己过一遍 bridge-write-policy 的白名单；未列出的工具一律拒绝并给出替代路径。
-async function pageAction(params) {
+async function pageAction(params: BridgeParams): Promise<Record<string, unknown>> {
   const p = params || {};
-  const verdict = validateBridgeWrite(p.tool, p.args || {});
+  const verdict = validateBridgeWrite(p.tool as string, p.args || {});
   if (!verdict.ok) return { ok: false, error: verdict.error, code: verdict.code };
   const tab = await activeTab();
   if (!tab || !tab.id) return { ok: false, error: '未找到活动标签页（请先让用户切到要调试的页面）', code: 'NO_ACTIVE_TAB' };
@@ -225,9 +279,9 @@ export const SUPPORTED_BRIDGE_METHODS = BRIDGE_METHODS;
 // 截图：MCP 客户端请求当前页面的一张图（给有视觉能力的模型，或留档备查）。
 // 图片体积只能靠 format/quality 控制（Page.captureScreenshot 不支持缩放），
 // 因此沿用与内置 take_screenshot 相同的降质阶梯，避免超长 base64 撑爆桥接消息。
-async function screenshotCapture(params) {
+async function screenshotCapture(params: BridgeParams): Promise<Record<string, unknown>> {
   const p = params || {};
-  let tabId = null;
+  let tabId: number | undefined | null = null;
   try {
     const tab = await activeTab();
     tabId = tab && tab.id;
@@ -277,7 +331,7 @@ async function screenshotCapture(params) {
   let height = 0;
   try {
     // 同一份预算（阶梯留下的 deadline）：这一步也是 CDP 命令，不该各自重新起算。
-    const m = await cdp.command(tabId, 'Page.getLayoutMetrics', {}, { timeoutMs: Math.max(400, shot.deadline - Date.now()) });
+    const m = (await cdp.command(tabId, 'Page.getLayoutMetrics', {}, { timeoutMs: Math.max(400, shot.deadline - Date.now()) })) as LayoutMetrics;
     const box = p.fullPage === true ? m.cssContentSize || m.contentSize : m.cssVisualViewport || m.visualViewport;
     if (box) {
       width = Math.round(box.clientWidth || box.width || 0);
@@ -300,20 +354,20 @@ async function screenshotCapture(params) {
 }
 
 // 返回用户最近在页面上「选取」的元素（选择器 + 标签 + 文本 + 前端源码位置）。
-async function getPickedElement() {
+async function getPickedElement(): Promise<Record<string, unknown>> {
   try {
     const d = await chrome.storage.local.get(['recallflow.lastPicked', 'recallflow.lastPickedList']);
-    const picked = d && d['recallflow.lastPicked'];
+    const picked = (d && d['recallflow.lastPicked']) as { selector?: string } | null | undefined;
     const list = (d && d['recallflow.lastPickedList']) || [];
     if (!picked || !picked.selector) return { found: false };
     return { found: true, picked, list };
   } catch (e) {
-    return { found: false, error: e.message };
+    return { found: false, error: (e as { message?: string }).message };
   }
 }
 
 // 读取用户「当前活动标签页」的运行时信息（console / network），用于前端调试。
-async function activeTab() {
+async function activeTab(): Promise<chrome.tabs.Tab | null> {
   try {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     return (tabs && tabs[0]) || null;
@@ -322,7 +376,7 @@ async function activeTab() {
   }
 }
 
-async function readActiveTab(kind, params) {
+async function readActiveTab(kind: string, params: BridgeParams): Promise<{ text: string }> {
   const tab = await activeTab();
   if (!tab || !tab.id) throw new Error('未找到活动标签页（请切到要调试的页面）');
   const ctx = { tabId: tab.id, pageUrl: tab.url || '', pageTitle: tab.title || '' };
@@ -332,7 +386,7 @@ async function readActiveTab(kind, params) {
 
 // 结构化读取元素源码位置（get_element_source）：返回 source 对象而非格式化文本，
 // 让 MCP 侧按字段归一化，不再依赖「元素源码位置：」这类文案。
-async function readElementSource(params) {
+async function readElementSource(params: BridgeParams): Promise<unknown> {
   const tab = await activeTab();
   if (!tab || !tab.id) throw new Error('未找到活动标签页（请切到要调试的页面）');
   return await collectElementSource(tab.id, params || {});
@@ -340,7 +394,7 @@ async function readElementSource(params) {
 
 // 结构化页面诊断（page_health）：返回原始条目而非文本，
 // 以便 MCP 侧用 at 时间戳做增量游标、用 stack 定位源码。
-async function readPageDiagnostics() {
+async function readPageDiagnostics(): Promise<Record<string, unknown>> {
   const tab = await activeTab();
   if (!tab || !tab.id) throw new Error('未找到活动标签页（请切到要调试的页面）');
   const data = await collectPageDiagnostics(tab.id);
@@ -358,7 +412,7 @@ async function readPageDiagnostics() {
 
 // 改完代码后的验证：一次往返同时拿到「目标元素的渲染态」与「运行时诊断」，
 // 保证两部分证据取自同一时刻，避免两次读取之间的页面变化造成误判。
-async function readVerifyChange(params) {
+async function readVerifyChange(params: BridgeParams): Promise<Record<string, unknown>> {
   const tab = await activeTab();
   if (!tab || !tab.id) throw new Error('未找到活动标签页（请切到要调试的页面）');
   const targets = (params && params.targets) || [];
@@ -387,7 +441,7 @@ async function readVerifyChange(params) {
 // ⚠ 还差半句（本仓库对截断的判据是"给可恢复 id，或明确说取不回 + 怎么取"）：
 // 原文**没有**留在任何暂存里 ⇒ 不要暗示"可以用 id 取回"；能做的只有"调大 maxChars 重读"，
 // 所以那句话必须写出来，否则调用方只知道"少了"，不知道下一步该做什么。
-export function truncateEvidenceText(input, maxChars) {
+export function truncateEvidenceText(input: unknown, maxChars?: number): TruncateResult {
   const full = String(input === undefined || input === null ? '' : input);
   const limit = Number.isFinite(Number(maxChars)) && Number(maxChars) > 0 ? Math.floor(Number(maxChars)) : 12000;
   if (full.length <= limit) return { text: full, truncated: false, fullChars: full.length };
@@ -402,7 +456,7 @@ export function truncateEvidenceText(input, maxChars) {
 }
 
 // 用隔离窗口打开 URL、读取渲染后正文、返回；读取完自动关闭窗口。
-async function browserRead(params) {
+async function browserRead(params: BridgeParams): Promise<Record<string, unknown>> {
   const url = String(params.url || '').trim();
   if (!/^https?:\/\//i.test(url)) throw new Error('browser_read 仅支持 http/https URL');
   // 这两个参数此前**被静默丢弃**（MCP 侧 schema 声明了、也转发了，这里却不读）：
@@ -411,7 +465,7 @@ async function browserRead(params) {
   const waitFor = String((params && params.waitFor) || '').trim();
   const maxCharsRaw = Number(params && params.maxChars);
   const maxChars = Number.isFinite(maxCharsRaw) && maxCharsRaw > 0 ? Math.floor(maxCharsRaw) : 12000;
-  const ctx = {
+  const ctx: BrowserReadContext = {
     browsingMode: 'isolated',
     maxOpenedTabs: 8,
     openedTabs: [],
@@ -432,7 +486,7 @@ async function browserRead(params) {
       const waited = await executeTool('wait_for_element', { selector: waitFor, state: 'visible' }, ctx);
       if (waited && waited.ok === false) waitError = String(waited.result || '等待超时').slice(0, 200);
     } catch (e) {
-      waitError = String((e && e.message) || e).slice(0, 200);
+      waitError = String(((e as { message?: string } | null) && (e as { message?: string }).message) || e).slice(0, 200);
     }
   }
   let text = '';
@@ -464,7 +518,7 @@ async function browserRead(params) {
 
 // ---------------- 启动 ----------------
 let started = false;
-export function startMcpRelay() {
+export function startMcpRelay(): void {
   connectWs();
   httpLoop();
   if (started) return;

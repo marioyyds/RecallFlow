@@ -9,7 +9,7 @@ import { listScripts as listUserscripts, searchScripts, installFromUrl, runUsers
 import { getUserscriptSettings } from '../userscript/settings.ts';
 import { getMergedSkills, addUserSkill, updateUserSkill, getUserSkills, getDefaultSkills } from './skill-store.ts';
 import { mdToSkill } from './skill-md.ts';
-import * as cdp from '../backend/cdp.js';
+import * as cdp from '../backend/cdp.ts';
 // 截断/切片一律走 sliceSafe：切裂代理对（星形平面字符）会让请求体在服务端解析阶段被整单拒收。
 import { sliceSafe } from '../shared/surrogates.ts';
 import { rememberElement } from './site-memory.ts';

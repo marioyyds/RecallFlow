@@ -12,7 +12,7 @@ import { BRIDGE_METHODS, isBridgeMethod } from '../lib/shared/bridge-methods.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MCP_INDEX = path.join(ROOT, 'integrations/opencode/recallflow-mcp/index.js');
-const RELAY = path.join(ROOT, 'lib/bridge/relay.js');
+const RELAY = path.join(ROOT, 'lib/bridge/relay.ts');
 
 const mcpSource = fs.readFileSync(MCP_INDEX, 'utf8');
 const relaySource = fs.readFileSync(RELAY, 'utf8');

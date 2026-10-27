@@ -49,7 +49,7 @@ function installChrome({ hang = true, hangDetach = false } = {}) {
 
 const freshCdp = async () => {
   // 每次重新导入，避免模块级 attached 缓存跨用例串味
-  return await import('../lib/backend/cdp.js?v=' + Math.random().toString(36).slice(2));
+  return await import('../lib/backend/cdp.ts?v=' + Math.random().toString(36).slice(2));
 };
 
 test('① 命令必须超时：Chrome 永不回调时，sendRaw 不能无限等（否则工具挂到 agent 的 15s 包装）', async () => {
@@ -128,12 +128,12 @@ test('⑨ 解除附加（detach）也必须有界：回调永不返回时不许�
 });
 
 test('⑨b detach 的**源码**也必须包在 withTimeout 里（行为用例可能被桩绕过）', async () => {
-  const src = fs.readFileSync('lib/backend/cdp.js', 'utf8');
+  const src = fs.readFileSync('lib/backend/cdp.ts', 'utf8');
   const m = /export async function detach\(([\s\S]*?)\n}/.exec(src);
   assert.ok(m, '应能定位 detach 函数体');
   assert.match(m[1], /withTimeout\(/, 'detach 必须走 withTimeout —— 否则回调不触发时 promise 永不 settle');
   // 每条 chrome.debugger.* 调用都必须在 cdp.js 里（别处私自直连就会绕过这层保障）
-  const files = ['lib/assistant/target-manager.ts', 'lib/assistant/tools.ts', 'lib/bridge/relay.js'];
+  const files = ['lib/assistant/target-manager.ts', 'lib/assistant/tools.ts', 'lib/bridge/relay.ts'];
   for (const f of files) {
     const other = fs.readFileSync(f, 'utf8');
     assert.ok(!/chrome\.debugger\.(attach|detach|sendCommand)\(/.test(other), f + ' 不得自己直连 chrome.debugger（会绕过超时层）');
@@ -262,7 +262,7 @@ test('⑩ captureWithLadder：预算约束 + 超时标记（桥接侧的失败�
 });
 
 test('⑩b 桥接的截图必须走共享阶梯（源码级：不许再抄一份）', () => {
-  const relaySrc = fs.readFileSync('lib/bridge/relay.js', 'utf8');
+  const relaySrc = fs.readFileSync('lib/bridge/relay.ts', 'utf8');
   assert.match(relaySrc, /captureWithLadder\(/, 'relay 的 screenshotCapture 必须用共享实现');
   assert.match(relaySrc, /shot\.timedOut/, '失败要按"超时 / 无法附加"分开报（原实现一律报无法附加）');
   assert.ok(!/for \(let i = 0; i < ladder\.length; i\+\+\)/.test(relaySrc), 'relay 里不该再有自己那份阶梯循环');

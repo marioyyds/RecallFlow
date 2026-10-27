@@ -9,7 +9,7 @@ import { loadAgentSession, saveAgentSession, removeAgentSession } from './sessio
 import { createToolGuard } from './tool-guard.ts';
 import { detectIntent, resolveIntent, resolveIntentForAgent, buildSystemPrompt, INTENTS } from './intent-router.ts';
 import { getMergedSkills } from './skills.ts';
-import { detachAll as detachAllCdp } from '../backend/cdp.js';
+import { detachAll as detachAllCdp } from '../backend/cdp.ts';
 import { getSiteHints } from './site-memory.ts';
 import { listMacros } from './macro-store.ts';
 import { collapseOldToolResults, estimateMessagesTokens, estimateTokens, normalizeHistory, isDuplicateInstruction, formatTailKeptTruncationNotice, HISTORY_MAX_CHARS } from './context.ts';

@@ -2446,7 +2446,7 @@ async function updateUserSkill(id, patch) {
   return list[idx];
 }
 
-// lib/backend/cdp.js
+// lib/backend/cdp.ts
 var cdp_exports = {};
 __export(cdp_exports, {
   DEFAULT_CDP_TIMEOUT_MS: () => DEFAULT_CDP_TIMEOUT_MS,
@@ -10816,7 +10816,7 @@ function validateBridgeWrite(name, args) {
   return { ok: true, name: tool };
 }
 
-// lib/bridge/relay.js
+// lib/bridge/relay.ts
 var RELAY_HOST = "127.0.0.1:7801";
 var RELAY_HTTP = "http://" + RELAY_HOST;
 function relayWsUrl() {

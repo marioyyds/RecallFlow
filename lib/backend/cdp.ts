@@ -9,9 +9,65 @@
 import { logError } from '../shared/utils.ts';
 
 const PROTOCOL_VERSION = '1.3';
-const attached = new Map(); // tabId -> Promise<void>（避免并发重复 attach）
+const attached: Map<number, Promise<void>> = new Map(); // tabId -> Promise<void>（避免并发重复 attach）
 
-export function isCdpAvailable() {
+export type TabId = number | string;
+
+export interface AttachOptions {
+  timeoutMs?: number;
+}
+
+export interface MouseOptions {
+  button?: string;
+  modifiers?: string[];
+  clickCount?: number;
+}
+
+export interface ScreenshotOptions {
+  format?: string;
+  quality?: number;
+  fullPage?: boolean;
+  timeoutMs?: number;
+}
+
+export interface EvaluateOptions {
+  awaitPromise?: boolean;
+  returnByValue?: boolean;
+  userGesture?: boolean;
+}
+
+interface KeyDef {
+  key: string;
+  code: string;
+  keyCode: number;
+  text?: string;
+}
+
+interface KeyInfo {
+  key: string;
+  code: string;
+  windowsVirtualKeyCode: number;
+  nativeVirtualKeyCode: number;
+  modifiers: number;
+  text?: string;
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface FrameTreeNode {
+  frame?: { id: string; parentId?: string };
+  childFrames?: FrameTreeNode[];
+}
+
+interface EvaluateResult {
+  exceptionDetails?: { exception?: { description?: string }; text?: string };
+  result?: { value?: unknown };
+}
+
+export function isCdpAvailable(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.debugger && !!chrome.debugger.sendCommand;
 }
 
@@ -22,13 +78,13 @@ if (isCdpAvailable() && chrome.debugger.onDetach) {
   });
 }
 
-export async function attach(tabId, opts = {}) {
+export async function attach(tabId: TabId, opts: AttachOptions = {}): Promise<void> {
   if (!isCdpAvailable()) throw new Error('当前环境不支持 chrome.debugger（需要 Chromium 内核浏览器）');
   const id = Number(tabId);
   if (!Number.isInteger(id) || id <= 0) throw new Error('无效的 tabId：' + tabId);
-  if (attached.has(id)) return attached.get(id);
+  if (attached.has(id)) return attached.get(id)!;
   const task = withTimeout(
-    new Promise((resolve, reject) => {
+    new Promise<void>((resolve, reject) => {
       chrome.debugger.attach({ tabId: id }, PROTOCOL_VERSION, () => {
         const err = chrome.runtime.lastError;
         // 失败（含 DevTools 已占用）时拒绝，调用方据此回退到内容脚本合成事件。
@@ -69,13 +125,13 @@ export async function attach(tabId, opts = {}) {
 //
 // 语义：解绑是**尽力而为**的收尾动作，超时不该冒泡成错误（调用方只是在清理），
 // 因此这里把超时**吞掉**，但绝不允许 promise 永不 settle。
-export async function detach(tabId, timeoutMs) {
+export async function detach(tabId: TabId, timeoutMs?: number): Promise<void> {
   const id = Number(tabId);
   if (!attached.has(id)) return;
   attached.delete(id);
   if (!isCdpAvailable()) return;
   await withTimeout(
-    new Promise((resolve) => {
+    new Promise<void>((resolve) => {
       try {
         chrome.debugger.detach({ tabId: id }, () => {
           void chrome.runtime.lastError;
@@ -90,13 +146,13 @@ export async function detach(tabId, timeoutMs) {
   ).catch(() => {});
 }
 
-export function detachAll() {
+export function detachAll(): void {
   for (const id of Array.from(attached.keys())) detach(id).catch(() => {});
 }
 
-function sendRaw(tabId, method, params, timeoutMs) {
+function sendRaw(tabId: TabId, method: string, params?: object, timeoutMs?: number): Promise<unknown> {
   return withTimeout(
-    new Promise((resolve, reject) => {
+    new Promise<unknown>((resolve, reject) => {
       chrome.debugger.sendCommand({ tabId: Number(tabId) }, method, params || {}, (result) => {
         const err = chrome.runtime.lastError;
         if (err) reject(new Error(err.message || ('CDP ' + method + ' 失败')));
@@ -117,10 +173,10 @@ function sendRaw(tabId, method, params, timeoutMs) {
 // take_screenshot 与 list_frames 各挂满 15 秒，同一站的 run_javascript 却正常）。
 export const DEFAULT_CDP_TIMEOUT_MS = 8000;
 
-function withTimeout(promise, ms, describe) {
+function withTimeout<T>(promise: Promise<T>, ms?: number, describe?: () => string): Promise<T> {
   const limit = Number(ms) > 0 ? Number(ms) : DEFAULT_CDP_TIMEOUT_MS;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(describe() + '（' + limit + 'ms 未响应）')), limit);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(describe!() + '（' + limit + 'ms 未响应）')), limit);
     promise.then(
       (v) => {
         clearTimeout(timer);
@@ -135,18 +191,23 @@ function withTimeout(promise, ms, describe) {
 }
 
 // 附加并发送一条 CDP 命令；失败时附带方法名便于定位。
-export async function command(tabId, method, params, opts = {}) {
+export async function command(
+  tabId: TabId,
+  method: string,
+  params?: object,
+  opts: AttachOptions = {}
+): Promise<unknown> {
   await attach(tabId, opts);
   try {
     return await sendRaw(tabId, method, params, opts.timeoutMs);
   } catch (e) {
-    throw new Error(method + '：' + (e && e.message ? e.message : String(e)));
+    throw new Error(method + '：' + ((e as { message?: string } | null) && (e as { message?: string }).message ? (e as { message?: string }).message : String(e)));
   }
 }
 
 // ---------------- 输入原语（可信事件） ----------------
 
-function modifiersMask(modifiers) {
+function modifiersMask(modifiers?: string[]): number {
   const list = Array.isArray(modifiers) ? modifiers.map((m) => String(m).toUpperCase()) : [];
   let mask = 0;
   if (list.includes('ALT')) mask |= 1;
@@ -156,7 +217,7 @@ function modifiersMask(modifiers) {
   return mask;
 }
 
-const KEY_DEFS = {
+const KEY_DEFS: Record<string, KeyDef> = {
   Enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
   Tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
   Escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
@@ -173,7 +234,7 @@ const KEY_DEFS = {
   Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
 };
 
-function charKeyDef(ch) {
+function charKeyDef(ch: string): KeyDef {
   const upper = ch.toUpperCase();
   let code = ch;
   if (/[A-Z]/.test(upper)) code = 'Key' + upper;
@@ -181,9 +242,9 @@ function charKeyDef(ch) {
   return { key: ch, code, keyCode: upper.charCodeAt(0), text: ch };
 }
 
-function keyInfo(key, mask) {
+function keyInfo(key: string, mask: number): KeyInfo {
   const def = KEY_DEFS[key] || (/^.$/.test(key) ? charKeyDef(key) : { key, code: key, keyCode: 0 });
-  const info = {
+  const info: KeyInfo = {
     key: def.key,
     code: def.code,
     windowsVirtualKeyCode: def.keyCode,
@@ -194,7 +255,7 @@ function keyInfo(key, mask) {
   return info;
 }
 
-export async function clickAt(tabId, x, y, options = {}) {
+export async function clickAt(tabId: TabId, x: number, y: number, options: MouseOptions = {}): Promise<{ ok: boolean }> {
   const button = options.button || 'left';
   const buttons = button === 'right' ? 2 : button === 'middle' ? 4 : 1;
   const common = { x: Math.round(x), y: Math.round(y), button, modifiers: modifiersMask(options.modifiers) };
@@ -208,7 +269,7 @@ export async function clickAt(tabId, x, y, options = {}) {
   return { ok: true };
 }
 
-export async function moveTo(tabId, x, y, options = {}) {
+export async function moveTo(tabId: TabId, x: number, y: number, options: MouseOptions = {}): Promise<{ ok: boolean }> {
   await command(tabId, 'Input.dispatchMouseEvent', {
     type: 'mouseMoved',
     x: Math.round(x),
@@ -220,7 +281,7 @@ export async function moveTo(tabId, x, y, options = {}) {
 }
 
 // 拖拽：从 (x1,y1) 到 (x2,y2)，插入中间移动步骤以兼容监听 drag 序列的组件。
-export async function drag(tabId, x1, y1, x2, y2) {
+export async function drag(tabId: TabId, x1: number, y1: number, x2: number, y2: number): Promise<{ ok: boolean }> {
   await command(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x1), y: Math.round(y1), buttons: 0 });
   await command(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: Math.round(x1), y: Math.round(y1), button: 'left', buttons: 1, clickCount: 1 });
   const steps = 8;
@@ -234,12 +295,12 @@ export async function drag(tabId, x1, y1, x2, y2) {
 }
 
 // 输入文本：insertText 走输入法通道，对富文本编辑器/受控组件更友好。
-export async function insertText(tabId, text) {
+export async function insertText(tabId: TabId, text: string): Promise<{ ok: boolean }> {
   await command(tabId, 'Input.insertText', { text: String(text == null ? '' : text) });
   return { ok: true };
 }
 
-export async function pressKey(tabId, key, modifiers) {
+export async function pressKey(tabId: TabId, key: string, modifiers?: string[]): Promise<{ ok: boolean }> {
   const mask = modifiersMask(modifiers);
   const info = keyInfo(key, mask);
   await command(tabId, 'Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, info));
@@ -249,7 +310,7 @@ export async function pressKey(tabId, key, modifiers) {
 
 // ---------------- 感知原语 ----------------
 
-export async function screenshot(tabId, options = {}) {
+export async function screenshot(tabId: TabId, options: ScreenshotOptions = {}): Promise<string> {
   // 把调用方的超时传下去：截图工具的降质阶梯要靠"剩余预算"来约束总耗时，
   // 不传的话每一档都会用默认 8s，三档加起来比 agent 的 15s 包装还慢（修完更糟）。
   const r = await command(
@@ -262,28 +323,28 @@ export async function screenshot(tabId, options = {}) {
     },
     { timeoutMs: options.timeoutMs }
   );
-  return (r && r.data) || '';
+  return (r as { data?: string } | null) && (r as { data?: string }).data || '';
 }
 
-export async function getFullAxTree(tabId) {
+export async function getFullAxTree(tabId: TabId): Promise<unknown[]> {
   await command(tabId, 'Accessibility.enable');
   const r = await command(tabId, 'Accessibility.getFullAXTree');
-  return (r && r.nodes) || [];
+  return (r as { nodes?: unknown[] } | null) && (r as { nodes?: unknown[] }).nodes || [];
 }
 
-export async function getBoxModel(tabId, backendNodeId) {
+export async function getBoxModel(tabId: TabId, backendNodeId: number): Promise<unknown> {
   const r = await command(tabId, 'DOM.getBoxModel', { backendNodeId });
-  return (r && r.model) || null;
+  return (r as { model?: unknown } | null) && (r as { model?: unknown }).model || null;
 }
 
 // 在页面主世界执行表达式（不受页面 CSP 限制，且没有扩展权限）。
-export async function evaluate(tabId, expression, options = {}) {
-  const r = await command(tabId, 'Runtime.evaluate', {
+export async function evaluate(tabId: TabId, expression: string, options: EvaluateOptions = {}): Promise<unknown> {
+  const r = (await command(tabId, 'Runtime.evaluate', {
     expression: String(expression),
     awaitPromise: options.awaitPromise !== false,
     returnByValue: options.returnByValue !== false,
     userGesture: options.userGesture === true,
-  });
+  })) as EvaluateResult | null;
   if (r && r.exceptionDetails) {
     const desc = (r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text || '页面执行异常';
     throw new Error(desc);
@@ -293,20 +354,22 @@ export async function evaluate(tabId, expression, options = {}) {
 
 // 在指定 iframe（含跨域）的主世界执行表达式：先在目标 frame 建一个隔离世界上下文，
 // 再在该上下文里求值。frameId 为空/0 时退回主 frame。
-export async function evaluateInFrame(tabId, frameId, expression, options = {}) {
+export async function evaluateInFrame(tabId: TabId, frameId: number, expression: string, options: EvaluateOptions = {}): Promise<unknown> {
   const fid = Number(frameId);
   if (!Number.isInteger(fid) || fid <= 0) return evaluate(tabId, expression, options);
   await command(tabId, 'Page.enable');
-  const world = await command(tabId, 'Page.createIsolatedWorld', { frameId: fid, worldName: 'recallflow' });
+  const world = (await command(tabId, 'Page.createIsolatedWorld', { frameId: fid, worldName: 'recallflow' })) as {
+    executionContextId?: number;
+  } | null;
   const contextId = world && world.executionContextId;
   if (!contextId) throw new Error('无法在目标框架创建执行上下文（frameId=' + fid + '）');
-  const r = await command(tabId, 'Runtime.evaluate', {
+  const r = (await command(tabId, 'Runtime.evaluate', {
     expression: String(expression),
     contextId,
     awaitPromise: options.awaitPromise !== false,
     returnByValue: options.returnByValue !== false,
     userGesture: options.userGesture === true,
-  });
+  })) as EvaluateResult | null;
   if (r && r.exceptionDetails) {
     const desc = (r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text || '页面执行异常';
     throw new Error(desc);
@@ -315,7 +378,7 @@ export async function evaluateInFrame(tabId, frameId, expression, options = {}) 
 }
 
 // 用选择器取元素视口矩形（供 CDP 点击/悬停定位）。
-export async function rectForSelector(tabId, selector) {
+export async function rectForSelector(tabId: TabId, selector: string): Promise<unknown> {
   const expr =
     '(() => { const el = document.querySelector(' + JSON.stringify(String(selector || '')) + ');' +
     ' if (!el) return null; const r = el.getBoundingClientRect();' +
@@ -323,18 +386,20 @@ export async function rectForSelector(tabId, selector) {
   return evaluate(tabId, expr);
 }
 
-export async function uploadFile(tabId, selector, files) {
+export async function uploadFile(tabId: TabId, selector: string, files: string | string[]): Promise<{ ok: boolean }> {
   await command(tabId, 'DOM.enable');
-  const doc = await command(tabId, 'DOM.getDocument', { depth: -1, pierce: true });
+  const doc = (await command(tabId, 'DOM.getDocument', { depth: -1, pierce: true })) as { root?: { nodeId?: number } } | null;
   const rootId = doc && doc.root && doc.root.nodeId;
-  const q = await command(tabId, 'DOM.querySelector', { nodeId: rootId, selector: String(selector || '') });
+  const q = (await command(tabId, 'DOM.querySelector', { nodeId: rootId, selector: String(selector || '') })) as {
+    nodeId?: number;
+  } | null;
   if (!q || !q.nodeId) throw new Error('未找到 file input：' + selector);
   await command(tabId, 'DOM.setFileInputFiles', { files: Array.isArray(files) ? files : [files], nodeId: q.nodeId });
   return { ok: true };
 }
 
-export async function getFrameTree(tabId) {
-  const r = await command(tabId, 'Page.getFrameTree');
+export async function getFrameTree(tabId: TabId): Promise<FrameTreeNode | null> {
+  const r = (await command(tabId, 'Page.getFrameTree')) as { frameTree?: FrameTreeNode } | null;
   return (r && r.frameTree) || null;
 }
 
@@ -342,28 +407,28 @@ export async function getFrameTree(tabId) {
 // CDP 的 getBoxModel 坐标基准在不同 Chromium 版本/场景下可能是「顶层扁平」或「父框架相对」，
 // 因此这里同时尝试两种算法，并用顶层 elementFromPoint 命中 iframe 来校验，取正确的一个；
 // 都无法可靠命中时返回 null（调用方退回内容脚本合成事件，绝不在错误坐标上点击）。
-async function frameParentMap(tabId) {
+async function frameParentMap(tabId: TabId): Promise<Map<string | number, string | null>> {
   const tree = await getFrameTree(tabId);
-  const map = new Map();
-  const walk = (node) => {
+  const map = new Map<string | number, string | null>();
+  const walk = (node?: FrameTreeNode) => {
     if (!node || !node.frame) return;
     map.set(node.frame.id, node.frame.parentId || null);
     for (const c of node.childFrames || []) walk(c);
   };
-  walk(tree);
+  walk(tree as FrameTreeNode);
   return map;
 }
 
-async function frameOffset(tabId, frameId, parentMap) {
-  let fid = frameId;
+async function frameOffset(tabId: TabId, frameId: string | number, parentMap: Map<string | number, string | null>): Promise<Point> {
+  let fid: string | number | null | undefined = frameId;
   let x = 0;
   let y = 0;
   let guard = 0;
   while (fid && parentMap.get(fid)) {
     try {
-      const owner = await command(tabId, 'DOM.getFrameOwner', { frameId: fid });
+      const owner = (await command(tabId, 'DOM.getFrameOwner', { frameId: fid })) as { backendNodeId?: number } | null;
       if (owner && owner.backendNodeId) {
-        const box = await command(tabId, 'DOM.getBoxModel', { backendNodeId: owner.backendNodeId });
+        const box = (await command(tabId, 'DOM.getBoxModel', { backendNodeId: owner.backendNodeId })) as { content?: number[] } | null;
         const q = box && box.content;
         if (q && q.length >= 8) {
           x += Math.min(q[0], q[2], q[4], q[6]);
@@ -378,29 +443,31 @@ async function frameOffset(tabId, frameId, parentMap) {
 }
 
 // 通过「框架内选择器 → 远程对象 → nodeId → getBoxModel」拿到元素的坐标（含子框架）。
-async function elementBoxCenter(tabId, frameId, selector) {
+async function elementBoxCenter(tabId: TabId, frameId: number, selector: string): Promise<Point | null> {
   await command(tabId, 'DOM.enable');
   await command(tabId, 'Page.enable');
-  const world = await command(tabId, 'Page.createIsolatedWorld', { frameId: Number(frameId), worldName: 'recallflow' });
+  const world = (await command(tabId, 'Page.createIsolatedWorld', { frameId: Number(frameId), worldName: 'recallflow' })) as {
+    executionContextId?: number;
+  } | null;
   const contextId = world && world.executionContextId;
   if (!contextId) return null;
-  const ev = await command(tabId, 'Runtime.evaluate', {
+  const ev = (await command(tabId, 'Runtime.evaluate', {
     expression: 'document.querySelector(' + JSON.stringify(String(selector || '')) + ')',
     contextId,
     returnByValue: false,
-  });
+  })) as { result?: { objectId?: string } } | null;
   const objId = ev && ev.result && ev.result.objectId;
   if (!objId) return null;
-  const node = await command(tabId, 'DOM.requestNode', { objectId: objId });
+  const node = (await command(tabId, 'DOM.requestNode', { objectId: objId })) as { nodeId?: number } | null;
   const nodeId = node && node.nodeId;
   if (!nodeId) return null;
-  const box = await command(tabId, 'DOM.getBoxModel', { nodeId });
+  const box = (await command(tabId, 'DOM.getBoxModel', { nodeId })) as { content?: number[] } | null;
   const q = box && box.content;
   if (!q || q.length < 8) return null;
   return { x: (q[0] + q[2] + q[4] + q[6]) / 4, y: (q[1] + q[3] + q[5] + q[7]) / 4 };
 }
 
-async function pointHitsIframe(tabId, x, y) {
+async function pointHitsIframe(tabId: TabId, x: number, y: number): Promise<unknown> {
   const expr =
     '(() => { const el = document.elementFromPoint(' + Math.round(x) + ',' + Math.round(y) + ');' +
     ' return !!el && (el.tagName === "IFRAME" || !!el.closest("iframe")); })()';
@@ -408,10 +475,15 @@ async function pointHitsIframe(tabId, x, y) {
 }
 
 // 解析子框架内元素的顶层视口坐标；fallbackCenter 为该元素在自身框架内的坐标。
-export async function resolveFrameClickPoint(tabId, frameId, selector, fallbackCenter) {
+export async function resolveFrameClickPoint(
+  tabId: TabId,
+  frameId: number,
+  selector: string,
+  fallbackCenter?: Point | null
+): Promise<Point | null> {
   const fid = Number(frameId);
   if (!Number.isInteger(fid) || fid <= 0) return fallbackCenter || null;
-  const parentMap = await frameParentMap(tabId).catch(() => new Map());
+  const parentMap = await frameParentMap(tabId).catch(() => new Map<string | number, string | null>());
   // 算法 1：getBoxModel 直接给出顶层扁平坐标
   try {
     const c = await elementBoxCenter(tabId, fid, selector);
@@ -428,7 +500,7 @@ export async function resolveFrameClickPoint(tabId, frameId, selector, fallbackC
   return null;
 }
 
-export async function handleJavaScriptDialog(tabId, accept, promptText) {
+export async function handleJavaScriptDialog(tabId: TabId, accept: boolean, promptText?: string): Promise<{ ok: boolean }> {
   await command(tabId, 'Page.handleJavaScriptDialog', {
     accept: accept !== false,
     ...(typeof promptText === 'string' ? { promptText } : {}),

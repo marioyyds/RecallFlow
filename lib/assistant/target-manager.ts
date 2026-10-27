@@ -1,6 +1,6 @@
 // 统一 Target 管理：集中维护「当前操作目标」（标签页/框架）与浏览器级事件
 // （JS 对话框 / 下载 / 文件选择），让 Agent 对弹窗、下载、对话框有统一入口。
-import * as cdp from '../backend/cdp.js';
+import * as cdp from '../backend/cdp.ts';
 
 const state = new Map(); // tabId -> { dialogs: [], downloads: [], fileChoosers: [] }
 let listening = false;

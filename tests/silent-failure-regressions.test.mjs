@@ -20,7 +20,7 @@ import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/as
 import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
-import { truncateEvidenceText } from '../lib/bridge/relay.js';
+import { truncateEvidenceText } from '../lib/bridge/relay.ts';
 import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.ts';
@@ -406,7 +406,7 @@ test('truncateEvidenceText：截断必须如实标注长度，不能让人误以
 test('relay 的 browser_read 必须真的使用 waitFor 与 maxChars', () => {
   // 这两个参数此前在 MCP schema 里声明、也被转发，但 relay 侧从不读取 ——
   // 表现为 SPA 上读到空壳（waitFor 无效）与正文无上限（maxChars 无效）。
-  const src = readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/bridge/relay.ts', import.meta.url), 'utf8');
   const body = src.slice(src.indexOf('async function browserRead'));
   assert.match(body, /params\.waitFor|params && params\.waitFor/, 'waitFor 必须被读取');
   assert.match(body, /wait_for_element/, 'waitFor 必须真的触发等待');
@@ -463,7 +463,7 @@ test('桥接写入：缺定位参数时拒绝并给出获取 ref 的路径', () 
 
 test('桥接方法清单必须包含 page_action（清单与 dispatch 分支不得漂移）', () => {
   assert.ok(BRIDGE_METHODS.includes('page_action'), 'page_action 必须登记在唯一来源里');
-  const src = readFileSync(new URL('../lib/bridge/relay.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/bridge/relay.ts', import.meta.url), 'utf8');
   assert.match(src, /method === 'page_action'/, 'relay 必须有对应分支');
   assert.match(src, /validateBridgeWrite\(/, 'relay 必须真的过白名单，而不是只声明');
 });

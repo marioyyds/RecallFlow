@@ -4,7 +4,7 @@ import { getAISettings } from '../lib/shared/settings.ts';
 import { buildAiMessages } from '../lib/shared/rag.js';
 import { callDeepSeek } from '../lib/assistant/llm.js';
 import { runAgentStream } from '../lib/assistant/agent.js';
-import { startMcpRelay } from '../lib/bridge/relay.js';
+import { startMcpRelay } from '../lib/bridge/relay.ts';
 import { initTargetManager } from '../lib/assistant/target-manager.js';
 import { logError, isOperableUrl } from '../lib/shared/utils.ts';
 import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.js';

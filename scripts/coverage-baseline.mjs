@@ -22,7 +22,7 @@
 //
 // 用法：
 //   node scripts/coverage-baseline.mjs                 # 全量，写 test-results/coverage-summary.json
-//   node scripts/coverage-baseline.mjs --focus lib/backend/cdp.js
+//   node scripts/coverage-baseline.mjs --focus lib/backend/cdp.ts
 //   node scripts/coverage-baseline.mjs --print           # 只打印高风险模块，不写文件
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -118,7 +118,7 @@ const libRows = rows
 const HIGH_RISK = [
   'page/chat.js',
   'page/commands.js',
-  'backend/cdp.js',
+  'backend/cdp.ts',
   'assistant/agent.ts',
   'assistant/skill-defs.ts',
   'assistant/tools.ts',
