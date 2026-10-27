@@ -24,6 +24,36 @@ const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
 
+/**
+ * 取一个顶层函数的**函数体**（按花括号配对），用于源码级门禁。
+ *
+ * 为什么要它：原先这两条断言用「从函数签名起切 1600 字符」的定长窗口。定长窗口是
+ * **脆**的——只要函数签名上方的参数/返回类型标注变长，被盯的字面量就被挤出窗口，
+ * 门禁变红而语义完好（L-37 家族）。实测：`transcript.ts` 迁移时补的类型标注让
+ * `copy.pickedElements = ...` 的偏移涨到 1527，离 1600 只剩 73 字符余量；而同一份文件
+ * 在 CRLF 检出下每行多 1 字节，偏移直接变成 1556 —— 换个 `core.autocrlf` 就红（L-19）。
+ *
+ * 两个修法都在这里做掉：①锚到函数体自然边界，不再靠数字；②先把 CRLF 归一成 LF，
+ * 让门禁与行尾无关。函数体若真的找不到闭合括号，退回「到文件末」——
+ * 那时断言只会更严（照旧校验整段），不会静默放行。
+ */
+function functionBody(src, signature) {
+  const s = String(src).replace(/\r\n/g, '\n');
+  const at = s.indexOf(signature);
+  assert.ok(at > 0, '应能找到 ' + signature);
+  const open = s.indexOf('{', at);
+  if (open < 0) return s.slice(at);
+  let depth = 0;
+  for (let k = open; k < s.length; k += 1) {
+    if (s[k] === '{') depth += 1;
+    else if (s[k] === '}') {
+      depth -= 1;
+      if (depth === 0) return s.slice(at, k + 1);
+    }
+  }
+  return s.slice(at);
+}
+
 const onePick = {
   tag: 'button',
   label: '提交',
@@ -196,9 +226,7 @@ test('**持久化白名单**里必须有 pickedElements（漏了就"当时看得
   // 白名单式字段拷贝：新字段不加进去就存不下来 —— 而症状看起来像渲染问题，极易误判。
   // ⚠ 白名单的实现在本轮从 chat.js **搬到了 transcript.js**（纯函数、可单测）。
   // 门禁因此跟着搬：它盯的是**语义**（这个字段必须被拷贝），不是某个文件的位置。
-  const at = transcriptSrc.indexOf('export function serializeConversationMessages(');
-  assert.ok(at > 0, '应能找到 serializeConversationMessages');
-  const body = transcriptSrc.slice(at, at + 1600);
+  const body = functionBody(transcriptSrc, 'export function serializeConversationMessages(');
   assert.match(body, /copy\.pickedElements = m\.pickedElements\.slice\(0, 8\)/, '白名单里必须拷贝 pickedElements');
 });
 
@@ -208,7 +236,6 @@ test('模型上下文**不受影响**：给模型的那份仍由 agent.js 单独
   assert.match(agentSrc, /const pickedBlocks = picks\.map/, 'agent.js 仍应有自己那份元数据装配');
   assert.match(agentSrc, /buildInitialMessagesPure\(\{/, '仍应交给纯函数装配');
   // 会话里存的那份是**压缩后**的，不含 text/ancestors —— 两者形状不同正是刻意的
-  const at = transcriptSrc.indexOf('export function serializeConversationMessages(');
-  const body = transcriptSrc.slice(at, at + 1600);
+  const body = functionBody(transcriptSrc, 'export function serializeConversationMessages(');
   assert.ok(!/ancestors/.test(body), '会话里不该存祖先链（那是给模型看的）');
 });
