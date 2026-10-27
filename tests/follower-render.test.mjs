@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const chat = fs.readFileSync('lib/page/chat.js', 'utf8');
+const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const hub = fs.readFileSync('lib/assistant/run-hub.js', 'utf8');
 
 function bodyOf(src, marker, length = 1800) {

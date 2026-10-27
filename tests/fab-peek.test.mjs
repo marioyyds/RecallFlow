@@ -28,7 +28,7 @@ let seq = 0;
 async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome();
-  const mod = await import('../lib/page/chat.js?case=peek' + (seq += 1));
+  const mod = await import('../lib/page/chat.ts?case=peek' + (seq += 1));
   mod.initAssistant();
   const shadow = () => {
     const host = dom.document.documentElement.querySelector('#__kb-ai-host');

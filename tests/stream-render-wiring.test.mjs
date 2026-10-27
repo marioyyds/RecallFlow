@@ -14,7 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const SRC_PATH = 'lib/page/chat.js';
+const SRC_PATH = 'lib/page/chat.ts';
 // 按行做源码分析前必须先剥掉 \r：本文件在 Windows 工作区是 CRLF，
 // 只按 '\n' 切会留下行尾的 \r，`lines[i] === '  }'` 这种精确比较会全部落空（实测踩到）。
 const src = fs.readFileSync(SRC_PATH, 'utf8');
@@ -219,7 +219,7 @@ test('流式正文重绘必须带自适应节流，且被跳过的帧有兜底�
 
 test('接线用 render-scheduler 提供的调度器，而不是就地手写 rAF', () => {
   assert.ok(
-    /import\s*\{[^}]*createFrameScheduler[^}]*\}\s*from\s*'\.[^']*render-scheduler\.js'/.test(src),
+    /import\s*\{[^}]*createFrameScheduler[^}]*\}\s*from\s*'\.[^']*render-scheduler\.(js|ts)'/.test(src),
     '应从 ./render-scheduler.js 引入 createFrameScheduler'
   );
   assert.ok(/createFrameScheduler\(\)/.test(src), '应实例化一个帧级调度器');

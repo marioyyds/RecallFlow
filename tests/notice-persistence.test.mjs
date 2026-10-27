@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 import { serializeConversationMessages } from '../lib/page/transcript.ts';
 
-const CHAT = fs.readFileSync(new URL('../lib/page/chat.js', import.meta.url), 'utf8');
+const CHAT = fs.readFileSync(new URL('../lib/page/chat.ts', import.meta.url), 'utf8');
 
 test('verify 通过提示延迟到最终回答之后，失败提示仍立即持久化', () => {
   assert.match(

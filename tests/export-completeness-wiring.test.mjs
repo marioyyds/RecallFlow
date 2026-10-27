@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const src = fs.readFileSync('lib/page/chat.js', 'utf8');
+const src = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
 
 /** 取 [startMarker 所在行, endMarker 所在行) 之间的正文。 */

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 
 import { PANEL_CSS } from '../lib/page/panel-css.ts';
 
-const chat = fs.readFileSync('lib/page/chat.js', 'utf8');
+const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const optionsHtml = fs.readFileSync('options.html', 'utf8');
 const optionsCss = fs.readFileSync('options.css', 'utf8');
 const managerCss = fs.readFileSync('manager.css', 'utf8');

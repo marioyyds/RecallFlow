@@ -17,10 +17,10 @@ import {
   buildPartialTurn,
   buildFailedTurn,
   buildInterruptedTurn,
-} from './transcript.js';
-import { createFrameScheduler } from './render-scheduler.js';
-import { createLruCache } from '../shared/lru.js';
-import { createExportGuard, HOST_ID } from './save-clean.js';
+} from './transcript.ts';
+import { createFrameScheduler } from './render-scheduler.ts';
+import { createLruCache } from '../shared/lru.ts';
+import { createExportGuard, HOST_ID } from './save-clean.ts';
 
 // 扩展被重新加载/停用后，旧内容脚本的 chrome.* 调用会抛 "Extension context invalidated"。
 // 用它做防御性判断，避免未捕获异常刷屏。
@@ -29,15 +29,15 @@ function isExtContextAlive() {
     if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) return false;
     chrome.runtime.getManifest();
     return true;
-  } catch (e) {
+  } catch (e: any) {
     return false;
   }
 }
 // 取扩展资源 URL；扩展上下文失效时返回空串，避免抛 "Extension context invalidated"。
-function extUrl(path) {
+function extUrl(path: any) {
   try {
     return chrome.runtime.getURL(path);
-  } catch (e) {
+  } catch (e: any) {
     return '';
   }
 }
@@ -54,21 +54,21 @@ function warnExtDead() {
       'background:#e74c3c;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;' +
       'box-shadow:0 6px 20px rgba(0,0,0,.3);font-family:inherit;';
     (document.body || document.documentElement).appendChild(d);
-    setTimeout(() => { try { d.remove(); } catch (e) {} }, 6000);
-  } catch (e) {}
+    setTimeout(() => { try { d.remove(); } catch (e: any) {} }, 6000);
+  } catch (e: any) {}
 }
-import { extractPageText } from './page-text.js';
+import { extractPageText } from './page-text.ts';
 import { newHandoffId, normalizeHandoffId, buildHandoffRecord, buildToolTrail, prepareHandoffTrail, formatHandoffPrompt } from '../shared/handoff.js';
-import { clearCiteHighlight, isPointerInCitationRange, findAndHighlightCitation } from './citation.js';
+import { clearCiteHighlight, isPointerInCitationRange, findAndHighlightCitation } from './citation.ts';
 import { escHtml, renumberCitations, renumberCitationsAcross, decodeSnippet, renderAnswer, planCitationOpen, parseSuggestionOptions } from './markdown.js';
-import { PANEL_CSS } from './panel-css.js';
+import { PANEL_CSS } from './panel-css.ts';
 import {
   clampPanelSize,
   clampPanelIntoView,
   readPanelLayout,
   writePanelLayout,
   resolvePanelPlacement,
-} from './panel-layout.js';
+} from './panel-layout.ts';
 import { applyRunEvent, runStateToAssistantMessage } from '../assistant/run-hub.js';
 import { loadScreenshot } from '../shared/screenshot-store.js';
 import {
@@ -76,7 +76,7 @@ import {
   createFabPeekController,
   FAB_POSITION_KEY,
   normalizeFabRatio as normFabRatio,
-} from './fab-position.js';
+} from './fab-position.ts';
 
 
 /**
@@ -111,7 +111,7 @@ function createHostElement() {
   try {
     const el = document.createElement(HOST_TAG);
     if (el && typeof el.matches === 'function' && el.matches(':defined')) return el;
-  } catch (e) {}
+  } catch (e: any) {}
   return document.createElement('div');
 }
 
@@ -129,67 +129,67 @@ function createHostElement() {
 // 导出期（Ctrl+S / 打印）：宿主已被摘出文档，所有自动重建路径都必须停手，
 // 否则会在"浏览器正在序列化的那一刻"把宿主挂回去（见 save-clean.js 的说明）。
 let uiSuspended = false;
-let exportGuard = null;
+let exportGuard: any = null;
 
-let host = null;
-let shadow = null;
-let bubble = null;
-let panel = null;
-let panelBody = null;
+let host: any = null;
+let shadow: any = null;
+let bubble: any = null;
+let panel: any = null;
+let panelBody: any = null;
 let lastText = '';
 let lastResponse = '';
-let port = null;
-let dragState = null;
-let resizeState = null;
+let port: any = null;
+let dragState: any = null;
+let resizeState: any = null;
 let pageText = '';
-let panelTextEl = null;
-let fab = null;
-let fabDragState = null;
+let panelTextEl: any = null;
+let fab: any = null;
+let fabDragState: any = null;
 let fabSuppressClickUntil = 0;
 let lastShortcutToggleAt = 0;
-let conversation = [];
-let panelTitleEl = null;
+let conversation: any = [];
+let panelTitleEl: any = null;
 // 全浏览器共享的会话状态。正文仍只在内存里；Service Worker 是唯一写者。
 let panelSessionId = '';
 let panelSessionSeq = 0;
-let panelSessionList = [];
+let panelSessionList: any = [];
 let panelSessionActiveId = '';
-let panelSessionMenuEl = null;
-let panelSessionBtnEl = null;
+let panelSessionMenuEl: any = null;
+let panelSessionBtnEl: any = null;
 let panelSessionMenuOpen = false;
 let panelSessionSaveChain = Promise.resolve();
 let panelSessionSwitchInFlight = false;
 let deferredRemoteSessionId = '';
 let panelSessionLockHeld = false;
 let panelSessionLockRunId = '';
-let activeInterruptFn = null;
+let activeInterruptFn: any = null;
 // 全浏览器共享的面板开合状态。openTabs 由 Service Worker 维护，内容脚本只发
 // “全局切换”或“本页已同步”的回执，避免远端应用状态时又触发一轮广播。
 let panelUiSeq = 0;
 let panelUiOpen = false;
 let suppressPanelUiPublish = false;
-let panelUiReadyPromise = null;
+let panelUiReadyPromise: any = null;
 // 跟随另一个标签页的运行流。状态归约与 SW 使用同一份纯函数。
-let followedRunState = null;
+let followedRunState: any = null;
 let followedRunId = '';
 let followedCursor = 0;
-let followedMessages = [];
+let followedMessages: any = [];
 // 跟随页已把“历史对话 + 当前 live 消息”建过一次 DOM；后续增量只更新 live 部分。
 let followedLiveReady = false;
 // 跟随页 live 消息的增量 DOM 状态（committed 容器 + 当前思考/正文尾部）。
-let followedDom = null;
-let followRefreshTimer = null;
-let followStatusTimer = null;
+let followedDom: any = null;
+let followRefreshTimer: any = null;
+let followStatusTimer: any = null;
 // ⚠ stopBtn / sendBtn 必须是**模块级**：模块级的 restoreStreamingUI()（流式重开面板时恢复 UI）
 // 要用它们把"任务还在跑"的按钮状态恢复回来。sendBtn 原先声明在 openPanel 内部（const），
 // 于是模块级函数一碰它就 ReferenceError —— 面板会**半构建**（连接口都没有），
 // 而所有静态门禁都看不到这个作用域错误，只有真浏览器重开面板才暴露（本轮踩到）。
-let stopBtn = null;
-let sendBtn = null;
+let stopBtn: any = null;
+let sendBtn: any = null;
 let streaming = false;
 // openPanel 执行时把内部的 run 函数挂到这里，供模块级的自动续跑入口调用。
 // （run 是 openPanel 里的闭包，模块级函数拿不到它 —— 用这个引用桥接。）
-let runAgent = null;
+let runAgent: any = null;
 
 // 「当前该把发送/停止按钮画成什么样」—— 纯函数，不碰 DOM。
 //
@@ -198,7 +198,7 @@ let runAgent = null;
 // 跟随页在跑时若漏掉显示停止按钮，用户就只能眼睁睁看着一个停不下来的任务；
 // 运行中若忘记禁掉发送，用户会往同一个会话里塞第二条指令。
 // 这些错了都不会报错，只会「用起来怪」。导出以便直测。
-export function computeRunControls(input) {
+export function computeRunControls(input: any) {
   const src = input || {};
   const followingRunning = Boolean(src.followed && src.followed.status === 'running');
   const running = Boolean(src.streaming || followingRunning);
@@ -229,16 +229,16 @@ function updateRunControlState() {
 }
 
 let pendingAcc = '';
-let pendingAiMsg = null;
-let pendingContentEl = null;
+let pendingAiMsg: any = null;
+let pendingContentEl: any = null;
 let pendingStarted = false;
-let pendingParts = [];
-let pendingVerifyPass = null;
+let pendingParts: any = [];
+let pendingVerifyPass: any = null;
 let budgetStopped = false;
-let flowEl = null;
+let flowEl: any = null;
 let pendingNarration = '';
 let lastNarration = '';
-let typingEl = null;
+let typingEl: any = null;
 // ---- 思考记录（思维链）----
 // **每段思考一块，按发生顺序穿插在对话流里**（思考 → 叙述 → 工具 → 思考 → …）。
 // **默认折叠**：每块只显示一条可点击的折叠条（「思考中…」/「已思考（N 字）」），
@@ -254,7 +254,7 @@ let typingEl = null;
 //
 // ⚠ 思维链**只用于展示**：它不进 conversation 的正文，也不会被写回请求 ——
 // 既不破坏请求前缀缓存，也不会因为 reasoning_content 不是可回传字段而被 API 拒绝。
-let thinkSeg = null;            // 当前**进行中**的那一段（定稿后置 null，下一段重新开块）
+let thinkSeg: any = null;            // 当前**进行中**的那一段（定稿后置 null，下一段重新开块）
 let thinkSegSeq = 0;            // 段序号：给渲染合并器当 key 用（见 pushReasoning 的注释）
 // 用户对「当前段」是否手动开合过。**三态**（与 planExpanded 同一个理由）：
 //   null = 没表过态 → **折叠**（这是默认：进行中也折叠，用户要看就自己点开）
@@ -264,20 +264,20 @@ let thinkSegSeq = 0;            // 段序号：给渲染合并器当 key 用（�
 //   mountThinkSegment（挂载时的初值）与下面的点击处理，外加 finishReasoning 里那处
 //   `thinkExpandedManual === null` 守卫的写。**流式路径（pushReasoning）一个字都不写**，
 //   所以新到的增量在结构上不可能把用户手动展开/折叠的状态改回去。
-let thinkExpandedManual = null;
-let activeRunId = null;
-let planBar = null;
-let apiKeyBanner = null;
-let approvalSettingsEl = null;
-let approvalPopoverEl = null;
-let lastPlan = [];
+let thinkExpandedManual: any = null;
+let activeRunId: any = null;
+let planBar: any = null;
+let apiKeyBanner: any = null;
+let approvalSettingsEl: any = null;
+let approvalPopoverEl: any = null;
+let lastPlan: any = [];
 // 计划条的展开状态。**三态**：
 //   null  = 用户没表过态 → 收成一行（默认）
 //   true  = 用户显式要展开
 //   false = 用户显式要收起
 // 注意不能再写成「单一布尔 + 初值 true」：那样 `collapsed` 的判据会恒为 false，
 // 收起分支永远进不去（截图里 8/8 全划掉却仍整块铺开，就是这个 bug）。
-let planExpanded = null;
+let planExpanded: any = null;
 // 上一次渲染时「是否全部完成」。只在完成↔进行中**切换**时把 planExpanded 归零，
 // 否则用户展开后每一次计划更新都会把它收回去。
 let planWasAllDone = false;
@@ -315,12 +315,12 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 // 深色主题此前是死代码：CSS 里约 50 条 .panel.dark 规则，但全仓库没有任何地方加上 dark 类
 // （panel.className 一直硬编码为 'panel'）。这里把它接上：默认跟随系统，可手动覆盖。
 const THEME_KEY = 'recallflow-panel-theme';
-let themeBtn = null;
+let themeBtn: any = null;
 
 function savedThemeOverride() {
   try {
     return localStorage.getItem(THEME_KEY) || '';
-  } catch (e) {
+  } catch (e: any) {
     return '';
   }
 }
@@ -329,7 +329,7 @@ function preferredTheme() {
   if (saved === 'dark' || saved === 'light') return saved;
   try {
     return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch (e) {
+  } catch (e: any) {
     return 'light';
   }
 }
@@ -353,7 +353,7 @@ function cycleTheme() {
   try {
     if (next) localStorage.setItem(THEME_KEY, next);
     else localStorage.removeItem(THEME_KEY);
-  } catch (e) {}
+  } catch (e: any) {}
   applyTheme();
 }
 try {
@@ -363,22 +363,22 @@ try {
   };
   if (mq.addEventListener) mq.addEventListener('change', onSys);
   else if (mq.addListener) mq.addListener(onSys);
-} catch (e) {}
+} catch (e: any) {}
 
 // ---- 进度与耗时 ----
 // Agent 每轮都会发 agent-state 事件，但前端此前没有任何处理器 ——
 // 长任务只剩一行行工具往下滚，用户无从知道「第几步、多久了、是不是卡住了」。
-let progressEl = null;
-let progressMsgEl = null;
-let progressTimeEl = null;
-let progressTimer = null;
+let progressEl: any = null;
+let progressMsgEl: any = null;
+let progressTimeEl: any = null;
+let progressTimer: any = null;
 let runStartedAt = 0;
 // 只保存「原始事实」，文案每帧从零拼装 ——
 // 曾经把上一帧的完整文案当兜底值拼进来，结果累积成「第 4/32 步 · 第 3/32 步 · 第 3/32 步 · …」。
 let progressState = '';
 let progressStep = 0;
 let progressMax = 0;
-let panelKeyHandler = null;
+let panelKeyHandler: any = null;
 
 // 状态取值来自 agent-state.js 的 RUN_STATUS。
 const STATE_LABELS = {
@@ -394,9 +394,9 @@ const STATE_LABELS = {
   cancelled: '已取消',
   timeout: '已达上限',
 };
-function stateLabel(status) {
+function stateLabel(status: any) {
   const key = String(status || '').toLowerCase();
-  return STATE_LABELS[key] || '';
+  return (STATE_LABELS as Record<string, string>)[key] || '';
 }
 function renderProgress() {
   if (progressTimeEl) {
@@ -425,8 +425,8 @@ function stopProgress() {
   progressStep = 0;
   progressMax = 0;
 }
-let keepAliveTimer = null;
-let usageEl = null;
+let keepAliveTimer: any = null;
+let usageEl: any = null;
 /**
  * 清空标题栏的 token 用量标识（`usageEl`）。
  *
@@ -443,12 +443,12 @@ function resetUsageChip() {
 // 存在 localStorage 里按来源隔离（每个站点一个），清空对话时轮换新标识。
 let handoffId = '';
 let conversationLoaded = false;
-let conversationLoadPromise = null;
-let handoffEl = null;
-let pickedElements = []; // 当前已拾取的元素（单选取为 1 个，多选取为多个）
-let pickUi = null; // 当前面板的拾取 UI 引用 { setActive, onPicked }
+let conversationLoadPromise: any = null;
+let handoffEl: any = null;
+let pickedElements: any = []; // 当前已拾取的元素（单选取为 1 个，多选取为多个）
+let pickUi: any = null; // 当前面板的拾取 UI 引用 { setActive, onPicked }
 let picking = false;
-let currentCitations = null; // 当前回答的引用来源元数据
+let currentCitations: any = null; // 当前回答的引用来源元数据
 let pageContextEnabled = true;
 let citeHighlightEntered = false;
 // 每个页面各自独立的对话（conversation 仅存于本页内存），不做跨 tab 同步。
@@ -461,7 +461,7 @@ const fabCtl = createFabController({
   getFab: () => fab,
   win: window,
   storage: typeof chrome !== 'undefined' ? chrome.storage : null,
-  localStore: (() => { try { return localStorage; } catch (e) { return null; } })(),
+  localStore: (() => { try { return localStorage; } catch (e: any) { return null; } })(),
 });
 
 /**
@@ -486,11 +486,11 @@ function currentFabTop() {
   return fabCtl.currentFabTop();
 }
 
-function clampFabTop(top) {
+function clampFabTop(top: any) {
   return fabCtl.clampFabTop(top);
 }
 
-function normalizeFabRatio(value) {
+function normalizeFabRatio(value: any) {
   return normFabRatio(value);
 }
 
@@ -510,7 +510,7 @@ async function loadFabPosition() {
   await fabCtl.load();
 }
 
-function moveFabBy(delta) {
+function moveFabBy(delta: any) {
   fabCtl.moveBy(delta);
 }
 
@@ -543,7 +543,7 @@ function ensureHost() {
   try {
     const stale = document.getElementById(HOST_ID);
     if (stale) stale.remove();
-  } catch (e) {}
+  } catch (e: any) {}
 
   host = createHostElement();
   host.id = HOST_ID;
@@ -565,7 +565,7 @@ function ensureHost() {
   fab.appendChild(fabIcon);
   fab.title = 'RecallFlow（Alt+Shift+R 打开/关闭，可上下拖动）';
   fab.setAttribute('aria-label', '打开 RecallFlow，快捷键 Alt+Shift+R');
-  fab.addEventListener('click', (e) => {
+  fab.addEventListener('click', (e: any) => {
     e.preventDefault();
     e.stopPropagation();
     if (Date.now() < fabSuppressClickUntil) return;
@@ -580,7 +580,7 @@ function ensureHost() {
   fab.addEventListener('pointerenter', () => fabPeek.setHovered(true));
   fab.addEventListener('focus', () => fabPeek.setFocused(true));
   fab.addEventListener('blur', () => fabPeek.setFocused(false));
-  fab.addEventListener('pointerdown', (e) => {
+  fab.addEventListener('pointerdown', (e: any) => {
     if (e.button !== 0 || !e.isPrimary) return;
     fabDragState = {
       pointerId: e.pointerId,
@@ -591,11 +591,11 @@ function ensureHost() {
     fab.classList.add('dragging');
     // 拖拽期间必须整颗可见：否则鼠标按在露出的那 12px 上，气泡却往回缩，手感是"抓不住"。
     fabPeek.setDragging(true);
-    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    try { fab.setPointerCapture(e.pointerId); } catch (err: any) {}
     e.preventDefault();
     e.stopPropagation();
   });
-  fab.addEventListener('pointermove', (e) => {
+  fab.addEventListener('pointermove', (e: any) => {
     if (!fabDragState || fabDragState.pointerId !== e.pointerId) return;
     const dy = e.clientY - fabDragState.startY;
     if (Math.abs(dy) > 3) fabDragState.moved = true;
@@ -603,13 +603,13 @@ function ensureHost() {
     fab.style.top = clampFabTop(fabDragState.origTop + dy) + 'px';
     e.preventDefault();
   });
-  const finishFabDrag = (e) => {
+  const finishFabDrag = (e: any) => {
     if (!fabDragState || fabDragState.pointerId !== e.pointerId) return;
     const moved = fabDragState.moved;
     fabDragState = null;
     fab.classList.remove('dragging');
     fabPeek.setDragging(false);
-    try { fab.releasePointerCapture(e.pointerId); } catch (err) {}
+    try { fab.releasePointerCapture(e.pointerId); } catch (err: any) {}
     if (moved) {
       fabSuppressClickUntil = Date.now() + 350;
       persistFabPosition();
@@ -617,7 +617,7 @@ function ensureHost() {
   };
   fab.addEventListener('pointerup', finishFabDrag);
   fab.addEventListener('pointercancel', finishFabDrag);
-  fab.addEventListener('keydown', (e) => {
+  fab.addEventListener('keydown', (e: any) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     e.stopPropagation();
@@ -642,7 +642,7 @@ function ensureHost() {
  */
 function resetDetachedHostState() {
   if (picking) {
-    try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e) {}
+    try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e: any) {}
     picking = false;
     if (pickUi) pickUi = null;
   }
@@ -689,7 +689,7 @@ function watchHostKeepalive() {
           if (streaming) restoreStreamingUI();
         }
       }
-    } catch (e) {}
+    } catch (e: any) {}
   }, 1000);
 }
 
@@ -778,21 +778,21 @@ function syncPanelSelectionPreview() {
  * 这是用户显式取消，不会改动已经发送的消息。发送流程也会在把选文快照写进
  * 用户消息后调用它，避免下一条指令误带上一轮引用。
  */
-function clearSelectedText(options) {
+function clearSelectedText(options?: any) {
   const opts = options || {};
   lastText = '';
   removeSelectionPreview();
   try {
     const selection = window.getSelection();
     if (selection) selection.removeAllRanges();
-  } catch (e) {}
+  } catch (e: any) {}
   if (opts.render !== false && panelBody && !streaming && !conversation.length && !followedMessages.length) {
     renderConversation();
   }
   if (panel && opts.render !== false) fitPanelHeight();
 }
 
-function publishPanelUi(open, scope) {
+function publishPanelUi(open: any, scope: any) {
   panelUiOpen = open === true;
   if (suppressPanelUiPublish) return Promise.resolve(null);
   return sendPanelMessage('panel:ui:set', {
@@ -813,7 +813,7 @@ function publishPanelUi(open, scope) {
     .catch(() => null);
 }
 
-async function applyPanelUiState(ui) {
+async function applyPanelUiState(ui: any) {
   if (!ui) return;
   const seq = Number(ui.seq) || 0;
   if (seq < panelUiSeq) return;
@@ -855,11 +855,11 @@ async function syncPanelUiOnInit() {
   if (panelUiOpen) await applyPanelUiState(res.ui);
 }
 
-function removePanel(options) {
+function removePanel(options?: any) {
   const hadPanel = Boolean(panel);
   // 关闭面板时若仍在拾取模式，通知后台让所有 frame 停止拾取。
   if (picking) {
-    try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e) {}
+    try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e: any) {}
     picking = false;
     if (pickUi) pickUi.setActive(false);
   }
@@ -903,23 +903,23 @@ function closePort() {
   if (port) {
     try {
       port.disconnect();
-    } catch (e) {}
+    } catch (e: any) {}
     port = null;
   }
 }
 
-function showBubble(x, y) {
+function showBubble(x: any, y: any) {
   if (!shadow) return; // host 未创建（如扩展上下文已失效）
   removeBubble();
   removePanel({ publish: false });
   bubble = document.createElement('div');
   bubble.className = 'bubble';
   bubble.innerHTML = '<span class="dot"></span><span>RecallFlow</span>';
-  bubble.addEventListener('mousedown', (e) => {
+  bubble.addEventListener('mousedown', (e: any) => {
     e.preventDefault();
     e.stopPropagation();
   });
-  bubble.addEventListener('click', (e) => {
+  bubble.addEventListener('click', (e: any) => {
     e.preventDefault();
     e.stopPropagation();
     openPanel(x, y);
@@ -978,7 +978,7 @@ const BOTTOM_SCROLL_PX = 1e7;
 const CHROME_MEASURE_TTL_MS = 500;
 
 /** 上一次真实测量的 chrome 结果，供同一结论的输入/视口复用。见 fitPanelHeight 里的快路径。 */
-let chromeMeasure = null;
+let chromeMeasure: any = null;
 /** 上一次真实测量后，正文是否已被可用高度夹住（⇒ 内容再涨结论也不变）。 */
 let fitBodyClamped = false;
 /**
@@ -991,7 +991,7 @@ let fitBodyClamped = false;
  * 遍历（面板里可能挂着几百条消息），而这函数在流式路径上每帧都要跑。
  * 面板销毁时随 `panel` 一起置空，避免持有已脱离文档的节点。
  */
-let panelCmdInput = null;
+let panelCmdInput: any = null;
 function resetPanelFitCache() {
   chromeMeasure = null;
   fitBodyClamped = false;
@@ -1179,7 +1179,7 @@ function markSelfScroll() {
 // 下一次 `pinToBottom()` 就把视图拉回底部（实测缺陷）。
 const USER_SCROLL_INTENT_MS = 900;
 let userScrollIntentUntil = 0;
-function markUserScrollIntent(up) {
+function markUserScrollIntent(up: any) {
   const now = Date.now();
   userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
   // 向上滚立刻暂停跟随：不能等 scroll 事件（它可能被流式布局的屏蔽窗口吞掉）。
@@ -1198,7 +1198,7 @@ function isPinnedForFollow() {
 
 // ---- 轻量语法高亮 ----
 // AI 回复底部操作栏（元宝风格：复制等）
-function msgActionsHtml(isLast) {
+function msgActionsHtml(isLast: any) {
   return (
     '<div class="msg-actions"><button class="act-copy" title="复制回答内容">⧉ 复制</button>' +
     (isLast ? '<button class="act-regen" title="按上一条指令重新生成">⟳ 重新生成</button>' : '') +
@@ -1209,7 +1209,7 @@ function msgActionsHtml(isLast) {
 // ---- 工具步骤渲染：默认一行摘要，点开看完整参数/结果 ----
 
 // 摘要里只显示「最能说明这一步在做什么」的参数，避免摘要行过长。
-function argHint(args) {
+function argHint(args: any) {
   if (!args || typeof args !== 'object') return '';
   if (typeof args.query === 'string') return args.query;
   if (typeof args.id === 'string') return args.id;
@@ -1228,14 +1228,14 @@ function argHint(args) {
   return keys.length ? keys.slice(0, 3).join('、') : '';
 }
 
-function clipDetail(text, max) {
+function clipDetail(text: any, max: any) {
   const t = String(text === undefined || text === null ? '' : text);
   if (!t) return '';
   return t.length > max ? t.slice(0, max) + '\n…（共 ' + t.length + ' 字符，已截断）' : t;
 }
 
 // 工具步骤 HTML：有细节时输出 <details>（原生可键盘展开，顺带满足可访问性）。
-function toolStepHtml(lead, name, hint, detailLabel, detail) {
+function toolStepHtml(lead: any, name: any, hint: any, detailLabel: any, detail: any) {
   const head =
     '<span class="agent-tool">' + escHtml(lead) + escHtml(name) + '</span>' +
     (hint ? '<span class="agent-tool-arg">：' + escHtml(hint) + '</span>' : '');
@@ -1249,21 +1249,21 @@ function toolStepHtml(lead, name, hint, detailLabel, detail) {
   );
 }
 
-function toolStepElement(lead, name, hint, detailLabel, detail) {
+function toolStepElement(lead: any, name: any, hint: any, detailLabel: any, detail: any) {
   const wrap = document.createElement('div');
   wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
   return wrap.firstElementChild;
 }
 
 /** 只允许 http/https 链接进入面板；登录提示可能来自历史记录，不能直接信任。 */
-function safeAuthLink(value) {
+function safeAuthLink(value: any) {
   try {
     const u = new URL(String(value || ''));
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
     u.username = '';
     u.password = '';
     return u.href;
-  } catch (e) {
+  } catch (e: any) {
     return '';
   }
 }
@@ -1274,7 +1274,7 @@ function safeAuthLink(value) {
  * 它是 tool-result 的子块：RunHub 快照、跟随页与历史回放都从同一个 parts 数组
  * 重建，因此不需要为每个标签页再维护一份“当前是否要登录”的临时状态。
  */
-function authChallengeHtml(auth) {
+function authChallengeHtml(auth: any) {
   if (!auth || auth.required !== true) return '';
   const loginUrl = safeAuthLink(auth.loginUrl);
   const summary = String(auth.summary || auth.message || '操作被登录 / 权限拦截，请登录后重试。');
@@ -1292,7 +1292,7 @@ function authChallengeHtml(auth) {
   );
 }
 
-function authChallengeElement(auth) {
+function authChallengeElement(auth: any) {
   const html = authChallengeHtml(auth);
   if (!html) return null;
   const wrap = document.createElement('div');
@@ -1316,7 +1316,7 @@ const shotPending = new Set();
 const shotMissing = new Set();
 let shotLightboxOpen = false;
 
-function shotCapText(meta) {
+function shotCapText(meta: any) {
   const m = meta || {};
   const parts = [];
   if (m.label) parts.push(String(m.label));
@@ -1325,7 +1325,7 @@ function shotCapText(meta) {
   return parts.join(' · ');
 }
 
-function hydrateScreenshot(id) {
+function hydrateScreenshot(id: any) {
   const wanted = String(id || '');
   if (!wanted || shotCache.get(wanted) || shotPending.has(wanted) || shotMissing.has(wanted)) return;
   shotPending.add(wanted);
@@ -1344,12 +1344,12 @@ function hydrateScreenshot(id) {
           renderConversation();
           fitPanelHeight();
           pinToBottom();
-        } catch (e) {}
+        } catch (e: any) {}
       }
     });
 }
 
-function screenshotHtml(meta) {
+function screenshotHtml(meta: any) {
   const m = meta || {};
   const id = String(m.id || '');
   const url = id ? shotCache.get(id) : '';
@@ -1375,13 +1375,13 @@ function screenshotHtml(meta) {
   );
 }
 
-function screenshotElement(meta) {
+function screenshotElement(meta: any) {
   const wrap = document.createElement('div');
   wrap.innerHTML = screenshotHtml(meta);
   return wrap.firstElementChild;
 }
 
-function openShotLightbox(url) {
+function openShotLightbox(url: any) {
   if (!url || !panel) return;
   const box = document.createElement('div');
   box.className = 'shot-lightbox';
@@ -1397,11 +1397,11 @@ function openShotLightbox(url) {
   panel.appendChild(box);
 }
 
-function userActionsHtml(index) {
+function userActionsHtml(index: any) {
   return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="撤销这条指令及其后续对话">↶ 撤销</button><button class="act-user-copy" title="复制这条指令">⧉ 复制</button></div>';
 }
 
-let layoutTimer = null;
+let layoutTimer: any = null;
 
 // 节流持久化面板布局（避免拖拽/拉伸 mousemove 高频写入）。
 function persistPanelLayoutThrottled() {
@@ -1419,7 +1419,7 @@ function persistPanelLayoutThrottled() {
 // `opts.size === false`：只写位置。打开面板时用这个 —— 那一刻的高度是 `fitPanelHeight()`
 // 刚算出来的**自动高度**，若连同它一起存，下次打开会被当成用户手动尺寸（`_manualSize`）
 // 而不再随内容伸缩。尺寸仍由「关闭 / 拖拽 / 拉伸结束」三条路径记录。
-function persistPanelLayoutNow(opts) {
+function persistPanelLayoutNow(opts?: any) {
   if (!panel) return;
   // 面板脱离文档时 offset 全是 0：此时写盘会把用户存的尺寸覆盖成 0×0（见 resetDetachedHostState）。
   if (!panel.offsetWidth || !panel.offsetHeight) return;
@@ -1436,7 +1436,7 @@ function persistPanelLayoutNow(opts) {
       manualPos: docked ? Boolean(panel._manualPos) : true,
       writeSize: !(opts && opts.size === false),
     });
-  } catch (e) {}
+  } catch (e: any) {}
 }
 
 // 面板越出可视区时夹回来：手动定位动 left/top；停靠态收窄底部留白。
@@ -1493,13 +1493,13 @@ function renderDecisionButtonsIfPresent() {
  *（见 lib/page/transcript.js 的 clipPart），若重开面板后把它当成完整全文显示，
  * 用户会以为模型只想到这儿 —— 本仓库硬纪律：丢东西必须说明。
  */
-function thinkLabelText(done, len, truncated) {
+function thinkLabelText(done: any, len: any, truncated: any) {
   if (!done) return '思考中…';
   return '已思考（' + len + ' 字' + (truncated ? '，保存时已截断' : '') + '）';
 }
 
 /** 按段状态刷新思考记录的标题（进行中 / 已思考 + 字数）。 */
-function refreshThinkHead(seg) {
+function refreshThinkHead(seg: any) {
   if (!seg || !seg.block) return;
   const label = seg.block.querySelector('.think-label');
   if (!label) return;
@@ -1521,7 +1521,7 @@ function refreshThinkHead(seg) {
  * @param {{open?: boolean, done?: boolean, truncated?: boolean}} [opts]
  *        `open` 不传 = 折叠（默认折叠与是否定稿无关）。
  */
-function thinkBlockHtml(text, opts) {
+function thinkBlockHtml(text: any, opts: any) {
   const o = opts || {};
   const body = String(text == null ? '' : text);
   return (
@@ -1555,7 +1555,7 @@ function thinkBlockHtml(text, opts) {
  * @param open 初始展开态。**只有**面板重建那条路径会传它（把用户之前的手动选择带回来）；
  *             其余调用一律不传 = 折叠。
  */
-function mountThinkSegment(seg, open) {
+function mountThinkSegment(seg: any, open?: any) {
   if (!flowEl) return null;
   // 解析标记用 Range，而**不**建一个中间容器元素：
   // 单文件里"创建了元素却没挂载"正是 tests/static-checks.test.mjs 盯着的静默失效形态
@@ -1575,7 +1575,7 @@ function mountThinkSegment(seg, open) {
 }
 
 /** 把已固化的叙述段 / 思考 / 工具步骤按原顺序渲染进给定 flow。 */
-function renderCommittedParts(flow) {
+function renderCommittedParts(flow: any) {
   // `mountThinkSegment()` 往**模块级 flowEl** 追加；调用方可能刚建了一个新 flow，
   // 而关面板时 `removePanel()` 并不清空 flowEl，所以这里必须先指过去。
   flowEl = flow;
@@ -1659,7 +1659,7 @@ function restoreStreamingUI() {
 }
 
 // 面板内短暂提示（如引用定位失败）。
-function showCitationHint(text) {
+function showCitationHint(text: any) {
   if (!panelBody) return;
   const hint = document.createElement('div');
   hint.style.cssText = 'color:#b45309;font-size:11px;margin:4px 0;padding:4px 6px;background:rgba(180,83,9,.08);border-radius:4px;';
@@ -1709,9 +1709,9 @@ const APPROVAL_LONG_TEXT_FIELD = { run_javascript: 'code', save_skill: 'content'
  *   ③ 同一段长文本不能在参数区再完整出现一次 —— 重复会把真正的参数挤出可视区。
  * 导出以便直测（此前这一段只有 E2E 覆盖）。
  */
-export function describeApprovalRequest(name, args, risk, allowSession) {
+export function describeApprovalRequest(name: any, args: any, risk: any, allowSession: any) {
   const toolArgs = args && typeof args === 'object' ? args : {};
-  const longField = APPROVAL_LONG_TEXT_FIELD[name];
+  const longField = (APPROVAL_LONG_TEXT_FIELD as Record<string, string>)[name];
   const longText = longField ? String(toolArgs[longField] || '') : '';
   const shownArgs = name === 'type_text'
     ? { ...toolArgs, value: '[输入内容已隐藏]' }
@@ -1733,7 +1733,7 @@ export function describeApprovalRequest(name, args, risk, allowSession) {
   };
 }
 
-export function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
+export function renderApprovalPrompt(box: any, conn: any, callId: any, name: any, args: any, risk: any, allowSession: any) {
   if (!box || !conn) return false;
   const view = describeApprovalRequest(name, args, risk, allowSession);
   const codeBlock = view.longLabel
@@ -1750,10 +1750,10 @@ export function renderApprovalPrompt(box, conn, callId, name, args, risk, allowS
     codeBlock +
     '<div class="tool-approval-actions"><button class="tool-approve" aria-label="仅允许本次工具调用">允许一次</button>' + sessionBtn + '<button class="tool-reject" aria-label="拒绝工具调用">拒绝</button></div>';
   box.style.display = '';
-  const decide = (decision) => {
+  const decide = (decision: any) => {
     try {
       conn.postMessage({ type: 'tool-approval', callId, decision });
-    } catch (e) {}
+    } catch (e: any) {}
     box.style.display = 'none';
     box.innerHTML = '';
   };
@@ -1767,12 +1767,12 @@ export function renderApprovalPrompt(box, conn, callId, name, args, risk, allowS
 }
 
 // 当前面板的发送函数（openPanel 里绑定 run），供 renderSuggestionButtons 触发「继续」。
-let activeSendFn = null;
+let activeSendFn: any = null;
 
 // 解析触底建议中的「可选操作」，返回 [{label, desc}]（最多 4 条）。
 // 把建议按钮渲染到 AI 回复下方；点击后以「继续上一任务」方式重发指令。
 // sendFn 用于绑定「所属面板」的发送函数。
-function renderSuggestionButtons(container, text, sendFn) {
+function renderSuggestionButtons(container: any, text: any, sendFn: any) {
   const options = parseSuggestionOptions(text);
   if (!options.length) return;
   const wrap = document.createElement('div');
@@ -1798,13 +1798,13 @@ function renderSuggestionButtons(container, text, sendFn) {
   container.appendChild(wrap);
 }
 
-function citeSourcesHtml(cites) {
+function citeSourcesHtml(cites: any) {
   if (!cites || !cites.length) return '';
   return (
     '<div class="cite-sources"><span class="cite-label">参考来源：</span>' +
     cites
       .map(
-        (c) =>
+        (c: any) =>
           '<button class="cite-badge" data-cite-id="' + escAttr(c.id || '') + '" data-cite-source="' + escAttr(c.source || 'kb') + '" data-cite-url="' + escAttr(c.url || '') + '" data-cite-snippet="' + escAttr(c.snippet || '') + '" title="打开证据：' + escAttr(c.title) + '">' +
           '<span class="cite-idx">[' + c.index + ']</span>' + escAttr(c.title.length > 18 ? c.title.slice(0, 18) + '…' : c.title) + '</button>'
       )
@@ -1813,7 +1813,7 @@ function citeSourcesHtml(cites) {
   );
 }
 
-function escAttr(s) {
+function escAttr(s: any) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
@@ -1821,7 +1821,7 @@ function escAttr(s) {
 // 若不缓存，旧段落会被反复解析（长回答下是超线性成本）。
 const ANSWER_HTML_CACHE_MAX = 240;
 const answerHtmlCache = createLruCache(ANSWER_HTML_CACHE_MAX);
-function cachedAnswerHtml(text, citations) {
+function cachedAnswerHtml(text: any, citations: any) {
   const list = Array.isArray(citations) ? citations : [];
   const sig = list.map((c) => String(c.index) + '|' + String(c.title || '') + '|' + String(c.url || '')).join(',');
   const key = String(text) + '\u0000' + sig;
@@ -1842,7 +1842,7 @@ function cachedAnswerHtml(text, citations) {
 const streamingCursors = new WeakMap();
 
 /** 在对话流里新建一个正文块。`ensureTextEl` 与错误渲染共用（原先两份一样的代码）。 */
-function makeContentEl(flow) {
+function makeContentEl(flow: any) {
   if (!flow) return null;
   const el = document.createElement('div');
   el.className = 'agent-content';
@@ -1860,7 +1860,7 @@ function makeContentEl(flow) {
  *
  * @returns {Element|null} 写入错误的那个元素（拿不到对话流时返回 null）
  */
-export function renderRunError(flow, contentEl, errText, hasPartial) {
+export function renderRunError(flow: any, contentEl: any, errText: any, hasPartial: any) {
   // 有半截回答 ⇒ 另起一块写在它后面；否则复用那块占位（它可能还停在「正在输入」的三个点上）。
   const el = hasPartial || !contentEl ? makeContentEl(flow) : contentEl;
   if (!el) return null;
@@ -1877,12 +1877,12 @@ export function buildOpenSettingsButton() {
   go.style.cssText =
     'margin-left:8px;border:1px solid #4a90d9;color:#4a90d9;background:none;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;';
   go.addEventListener('click', () => {
-    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e) {}
+    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e: any) {}
   });
   return go;
 }
 
-function removeStreamCursor(host) {
+function removeStreamCursor(host: any) {
   const rec = host && streamingCursors.get(host);
   if (!rec) return;
   if (rec.cursor && rec.cursor.parentNode) rec.cursor.parentNode.removeChild(rec.cursor);
@@ -1899,7 +1899,7 @@ function removeStreamCursor(host) {
 const cursorFlowCache = new WeakMap();
 
 /** 找到 host 的绝对定位包含块（拿不到时返回 null，调用方早退）。 */
-function cursorContainingBlock(host) {
+function cursorContainingBlock(host: any) {
   const cached = cursorFlowCache.get(host);
   if (cached && cached.isConnected && cached.contains(host)) return cached;
   let flow = host && host.parentElement;
@@ -1919,7 +1919,7 @@ function cursorContainingBlock(host) {
  * 是 O(树深)，命中顺序与 TreeWalker 的文档序完全一致 —— 因此游标位置不变，
  * 只是不再为找它而遍历整段正文。
  */
-function lastNonNullTextNode(root) {
+function lastNonNullTextNode(root: any): any {
   if (!root) return null;
   const children = root.childNodes;
   for (let i = children.length - 1; i >= 0; i--) {
@@ -1943,7 +1943,7 @@ function lastNonNullTextNode(root) {
  * 游标采用绝对定位，因此不参与正文布局；正文重排时只改 left/top。
  * 这样 Markdown 可以整段重渲染，而游标节点与它的 CSS 动画都保持不变。
  */
-export function positionStreamCursor(host, cursor) {
+export function positionStreamCursor(host: any, cursor: any) {
   const flow = cursorContainingBlock(host);
   if (!flow || !cursor) return;
   let rect = null;
@@ -1959,7 +1959,7 @@ export function positionStreamCursor(host, cursor) {
         rect = range.getBoundingClientRect();
       }
     }
-  } catch (e) {
+  } catch (e: any) {
     rect = null;
   }
   const flowRect = flow.getBoundingClientRect();
@@ -1992,7 +1992,7 @@ export function positionStreamCursor(host, cursor) {
 const STREAM_PAINT_GAP_CAP_MS = 120;
 let lastStreamPaintAt = 0;
 let lastStreamPaintMs = 0;
-let streamPaintTimer = null;
+let streamPaintTimer: any = null;
 
 /** 结束一轮流式时清掉兜底定时器（收尾有自己的最终渲染，晚到的补画没有意义）。 */
 export function cancelStreamPaintRetry() {
@@ -2008,7 +2008,7 @@ export function cancelStreamPaintRetry() {
  * 判断本次"正文重绘"是否该让位。
  * @returns {boolean} true = 本次不画（已安排补画），false = 现在就画
  */
-function throttleStreamPaint(paint) {
+function throttleStreamPaint(paint: any) {
   const now = Date.now();
   const gapMs = Math.min(STREAM_PAINT_GAP_CAP_MS, lastStreamPaintMs);
   if (!lastStreamPaintAt || now - lastStreamPaintAt >= gapMs) return false;
@@ -2025,14 +2025,14 @@ function throttleStreamPaint(paint) {
 }
 
 /** 记一次完成的重绘，作为下一次间隔的依据。 */
-function noteStreamPaint(startedAt) {
+function noteStreamPaint(startedAt: any) {
   const ended = Date.now();
   lastStreamPaintMs = ended - startedAt;
   lastStreamPaintAt = ended;
 }
 
 /** 流式更新正文，并复用同一个游标节点。 */
-function showStreamingAnswer(host, text, citations) {
+function showStreamingAnswer(host: any, text: any, citations: any) {
   if (!host) return;
   host.innerHTML = renderAnswer(text, citations, false);
   let rec = streamingCursors.get(host);
@@ -2052,7 +2052,7 @@ function showStreamingAnswer(host, text, citations) {
 }
 
 /** 单个 part 的 HTML（整轮重绘与增量 part 节点共用）。 */
-function partHtml(p, citations) {
+function partHtml(p: any, citations: any) {
   if (p.type === 'tool-call') {
     return toolStepHtml('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000));
   }
@@ -2082,14 +2082,14 @@ function partHtml(p, citations) {
 }
 
 /** 单条 assistant 消息的 HTML。抽出来供“整轮重绘”与“只重绘 live 消息”共用。 */
-function assistantMessageHtml(m, index, viewLength) {
+function assistantMessageHtml(m: any, index: any, viewLength: any) {
   const parts = Array.isArray(m.parts) ? m.parts : [];
-  const terminalNotices = parts.filter((p) => p && p.type === 'notice' && p.terminal === true && p.text);
+  const terminalNotices = parts.filter((p: any) => p && p.type === 'notice' && p.terminal === true && p.text);
   const flowHtml = parts
-    .filter((p) => !(p && p.type === 'notice' && p.terminal === true))
-    .map((p) => partHtml(p, m.citations))
+    .filter((p: any) => !(p && p.type === 'notice' && p.terminal === true))
+    .map((p: any) => partHtml(p, m.citations))
     .join('');
-  const hasInlineText = parts.some((p) => p.type === 'narration' || (p.type === 'text' && p.text));
+  const hasInlineText = parts.some((p: any) => p.type === 'narration' || (p.type === 'text' && p.text));
   // 失败 / 中断的一轮**强制**渲染 content：它们的原因文字与「已中断」说明只放在 content 里
   //（不占一个 text part，否则导出侧会跳过「### 失败 / ### 中断」标题），
   // 而 hasInlineText 只统计 parts —— 一旦这一轮之前有过叙述，原因就会被整段藏起来。
@@ -2107,7 +2107,7 @@ function assistantMessageHtml(m, index, viewLength) {
   const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : '';
   const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : '';
   const terminalHtml = terminalNotices
-    .map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || '#16a34a') + '">' + escHtml(p.text) + '</div>')
+    .map((p: any) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || '#16a34a') + '">' + escHtml(p.text) + '</div>')
     .join('');
   return (
     '<div class="msg ai"' + failedStyle + '>' + '<div class="agent-flow">' + flowHtml + '</div>' +
@@ -2133,7 +2133,7 @@ function renderConversation() {
   }
   panelBody.className = 'p-body';
   panelBody.innerHTML = view
-    .map((m, index) => {
+    .map((m: any, index: any) => {
       if (m.role === 'user') {
         return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + selectedTextMessageHtml(m.selectedText) + pickedSummaryHtml(m.pickedElements) + '</div>' + (m.live ? '' : userActionsHtml(index)) + '</div>';
       }
@@ -2180,11 +2180,11 @@ function followedRunCommitted() {
     }
   }
   if (userIndex < 0) return false;
-  return conversation.slice(userIndex + 1).some((m) => m && m.role === 'assistant' && !m.live);
+  return conversation.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant' && !m.live);
 }
 
 /** 一条已定稿 part 的 DOM 节点（跟随页增量渲染用）。 */
-function followedPartElement(part, citations) {
+function followedPartElement(part: any, citations: any) {
   if (!part) return null;
   const wrap = document.createElement('div');
   wrap.innerHTML = partHtml(part, citations);
@@ -2199,7 +2199,7 @@ function ensureFollowedDom() {
   const last = conversation.length ? conversation[conversation.length - 1] : null;
   const alreadyHasUser = last && last.role === 'user' && String(last.content || '').trim() === instruction;
   if (!conversation.length) panelBody.innerHTML = '';
-  panelBody.querySelectorAll('.follow-live-user,.follow-live-ai').forEach((el) => el.remove());
+  panelBody.querySelectorAll('.follow-live-user,.follow-live-ai').forEach((el: any) => el.remove());
   let userEl = null;
   if (instruction && !alreadyHasUser) {
     userEl = document.createElement('div');
@@ -2384,7 +2384,7 @@ function ensureFollowedRunWatch() {
   }, 1200);
 }
 
-function resetFollowedRun(options) {
+function resetFollowedRun(options?: any) {
   const opts = options || {};
   if (followRefreshTimer) {
     clearTimeout(followRefreshTimer);
@@ -2410,7 +2410,7 @@ function resetFollowedRun(options) {
   }
 }
 
-function applyFollowedSnapshot(snapshot) {
+function applyFollowedSnapshot(snapshot: any) {
   if (!snapshot || !snapshot.runId) {
     resetFollowedRun({ render: true });
     return;
@@ -2458,7 +2458,7 @@ function scheduleFollowedRunRefresh() {
       }
     }
     const hasCommittedTurn =
-      userIndex >= 0 && messages.slice(userIndex + 1).some((m) => m && m.role === 'assistant');
+      userIndex >= 0 && messages.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant');
     if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionSeq || hasCommittedTurn)) {
       resetFollowedRun();
       adoptPanelSession(got.session, { activeId: got.activeId || sessionId });
@@ -2474,12 +2474,12 @@ function scheduleFollowedRunRefresh() {
   followRefreshTimer = setTimeout(tick, 250);
 }
 
-function handleRunStarted(msg) {
+function handleRunStarted(msg: any) {
   if (!msg || String(msg.sessionId || '') !== panelSessionId) return;
   subscribePanelRun().catch(() => {});
 }
 
-function handleRunDelta(msg) {
+function handleRunDelta(msg: any) {
   if (!msg || String(msg.sessionId || '') !== panelSessionId) return;
   if (!followedRunState || String(msg.runId || '') !== followedRunId) {
     subscribePanelRun().catch(() => {});
@@ -2498,7 +2498,7 @@ function handleRunDelta(msg) {
   }
 }
 
-function renderPlan(plan) {
+function renderPlan(plan: any) {
   lastPlan = Array.isArray(plan) ? plan : [];
   if (!planBar) return;
   if (!lastPlan.length) {
@@ -2508,9 +2508,9 @@ function renderPlan(plan) {
     return;
   }
   const total = lastPlan.length;
-  const doneCount = lastPlan.filter((p) => p && p.status === 'done').length;
+  const doneCount = lastPlan.filter((p: any) => p && p.status === 'done').length;
   const allDone = total > 0 && doneCount === total;
-  const current = lastPlan.find((p) => p && p.status === 'in_progress') || lastPlan.find((p) => p && p.status !== 'done');
+  const current = lastPlan.find((p: any) => p && p.status === 'in_progress') || lastPlan.find((p: any) => p && p.status !== 'done');
   // 「完成 ↔ 进行中」切换时回到默认收起状态；同一状态内的反复更新不动用户的选择
   // （否则用户展开后，任何一次计划更新都会把它收回去）。
   if (allDone !== planWasAllDone) planExpanded = null;
@@ -2521,7 +2521,7 @@ function renderPlan(plan) {
   const collapsed = planExpanded !== true;
 
   const items = lastPlan
-    .map((p) => {
+    .map((p: any) => {
       const st = p.status === 'done' ? 'done' : p.status === 'in_progress' ? 'in_progress' : 'pending';
       const mark = st === 'done' ? '✓' : st === 'in_progress' ? '▶' : '○';
       return '<div class="agent-plan-item ' + st + '">' + mark + ' ' + escHtml(p.text || '') + '</div>';
@@ -2550,7 +2550,7 @@ function renderPlan(plan) {
 // 对话持久化（按 tab，存 chrome.storage.session）：SPA 跳转 / 刷新后仍保留上下文。
 // 把一轮里的工具执行轨迹压成一行摘要，随 assistant 消息一起保存，
 // 使「继续上一步」时模型能看到做过什么（见 context.js normalizeHistory）。
-function summarizeToolParts(parts) {
+function summarizeToolParts(parts: any) {
   const done = (Array.isArray(parts) ? parts : []).filter((p) => p && p.type === 'tool-result');
   if (!done.length) return '';
   return done
@@ -2582,7 +2582,7 @@ function messagesForExport() {
  *
  * @param {'brief'|'full'} [mode] 默认 brief（单条工具结果 500 字）；full 不截断
  */
-function buildTranscriptMarkdown(mode) {
+function buildTranscriptMarkdown(mode: any) {
   return buildTranscript({
     title: document.title || '(无标题)',
     url: location.href,
@@ -2601,7 +2601,7 @@ function serializeConversation() {
   return serializeCompleteConversationMessages(conversation);
 }
 
-function sendPanelMessage(type, payload) {
+function sendPanelMessage(type: any, payload?: any): Promise<any> {
   return new Promise((resolve) => {
     if (!isExtContextAlive()) {
       resolve({ ok: false, error: '扩展已更新，请刷新页面后重试' });
@@ -2615,21 +2615,21 @@ function sendPanelMessage(type, payload) {
           resolve(resp || { ok: false, error: '扩展后台无响应' });
         }
       });
-    } catch (e) {
+    } catch (e: any) {
       resolve({ ok: false, error: e && e.message ? e.message : String(e) });
     }
   });
 }
 
-function sessionTimeText(ts) {
+function sessionTimeText(ts: any) {
   const n = Number(ts) || 0;
   if (!n) return '';
   const d = new Date(n);
-  const pad = (v) => String(v).padStart(2, '0');
+  const pad = (v: any) => String(v).padStart(2, '0');
   return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
-function applyPanelSessionSummaries(state) {
+function applyPanelSessionSummaries(state: any) {
   if (!state) return;
   if (Array.isArray(state.sessions)) panelSessionList = state.sessions.slice();
   if (typeof state.activeId === 'string') panelSessionActiveId = state.activeId;
@@ -2637,7 +2637,7 @@ function applyPanelSessionSummaries(state) {
   renderSessionMenu();
 }
 
-function mergePanelSessionSummary(session) {
+function mergePanelSessionSummary(session: any) {
   if (!session || !session.id) return;
   const summary = {
     id: session.id,
@@ -2651,17 +2651,17 @@ function mergePanelSessionSummary(session) {
     lastRunId: String(session.lastRunId || ''),
     titleAuto: session.titleAuto !== false,
   };
-  const old = panelSessionList.find((s) => s.id === session.id);
+  const old = panelSessionList.find((s: any) => s.id === session.id);
   if (old) Object.assign(old, summary);
   else panelSessionList.push(summary);
-  panelSessionList.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+  panelSessionList.sort((a: any, b: any) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
   renderSessionButton();
   renderSessionMenu();
 }
 
 function renderSessionButton() {
   if (!panelSessionBtnEl) return;
-  const current = panelSessionList.find((s) => s.id === panelSessionId);
+  const current = panelSessionList.find((s: any) => s.id === panelSessionId);
   const count = panelSessionList.length;
   panelSessionBtnEl.textContent = '🗂 会话' + (count ? ' ' + count : '');
   if (panelTitleEl) {
@@ -2788,7 +2788,7 @@ async function refreshPanelSessionState() {
   return state;
 }
 
-function adoptPanelSession(session, options) {
+function adoptPanelSession(session: any, options: any) {
   if (!session || !session.id) return false;
   const opts = options || {};
   // 只有真的换了会话才清掉用量标识：同一会话的回写刷新（save 冲突 / 跟随后接管落盘会话）
@@ -2801,7 +2801,7 @@ function adoptPanelSession(session, options) {
   handoffId = normalizeHandoffId(session.handoffId || '') || loadHandoffId() || newHandoffId();
   try {
     localStorage.setItem(HANDOFF_ID_KEY, handoffId);
-  } catch (e) {}
+  } catch (e: any) {}
   mergePanelSessionSummary(Object.assign({}, session, { messageCount: conversation.length, handoffId }));
   if (followedRunState) {
     // 结束广播可能正好落在跟随页整页重载的窗口里。落盘消息是最终权威：
@@ -2820,7 +2820,7 @@ function adoptPanelSession(session, options) {
   return true;
 }
 
-function saveConversation(options) {
+function saveConversation(options?: any) {
   const opts = options || {};
   const id = panelSessionId;
   if (!id) return Promise.resolve({ ok: false, skipped: true });
@@ -2881,18 +2881,18 @@ async function loadConversation() {
     if (created && created.ok && created.session) {
       adoptPanelSession(created.session, { activeId: created.activeId });
     }
-  } catch (e) {
+  } catch (e: any) {
   } finally {
     conversationLoaded = true;
   }
 }
 
-function showPanelDialog(config) {
+function showPanelDialog(config: any) {
   if (!panel) return;
   const options = config || {};
   const old = panel.querySelector('.session-dialog-backdrop');
   if (old) old.remove();
-  const previousFocus = document.activeElement;
+  const previousFocus: any = document.activeElement;
   const backdrop = document.createElement('div');
   backdrop.className = 'session-dialog-backdrop';
   const box = document.createElement('div');
@@ -2933,7 +2933,7 @@ function showPanelDialog(config) {
           close();
           try {
             if (options.onExtra) options.onExtra();
-          } catch (e) {}
+          } catch (e: any) {}
         });
         return b;
       })()
@@ -2949,12 +2949,12 @@ function showPanelDialog(config) {
     document.removeEventListener('keydown', onDialogKey, true);
     try {
       backdrop.remove();
-    } catch (e) {}
+    } catch (e: any) {}
     if (previousFocus && previousFocus.isConnected) {
-      try { previousFocus.focus(); } catch (e) {}
+      try { previousFocus.focus(); } catch (e: any) {}
     }
   };
-  const onDialogKey = (e) => {
+  const onDialogKey = (e: any) => {
     if (!backdrop.isConnected) return;
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -2963,7 +2963,7 @@ function showPanelDialog(config) {
       return;
     }
     if (e.key !== 'Tab') return;
-    const focusable = [...box.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    const focusable: any[] = [...box.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
       .filter((el) => el.getClientRects().length > 0);
     if (!focusable.length) return;
     const first = focusable[0];
@@ -2991,7 +2991,7 @@ function showPanelDialog(config) {
     try {
       const keep = await options.onConfirm?.(value);
       if (keep !== false) close();
-    } catch (e) {
+    } catch (e: any) {
       message.textContent = e && e.message ? e.message : String(e);
     } finally {
       ok.disabled = false;
@@ -3031,7 +3031,7 @@ function showPanelDialog(config) {
   return { close };
 }
 
-async function switchPanelSession(id, options) {
+async function switchPanelSession(id: any, options?: any) {
   const opts = options || {};
   const wanted = String(id || '');
   if (!wanted) return false;
@@ -3101,8 +3101,8 @@ async function newPanelSession() {
   return true;
 }
 
-function renamePanelSession(id) {
-  const session = panelSessionList.find((s) => s.id === id);
+function renamePanelSession(id: any) {
+  const session = panelSessionList.find((s: any) => s.id === id);
   if (!session) return;
   showPanelDialog({
     title: '重命名会话',
@@ -3111,7 +3111,7 @@ function renamePanelSession(id) {
     value: session.title,
     placeholder: '例如：GitHub 搜索调研',
     confirmText: '保存',
-    onConfirm: async (title) => {
+    onConfirm: async (title: any) => {
       const res = await sendPanelMessage('panel:rename', { id, title });
       if (!res || !res.ok) {
         showCitationHint((res && res.error) || '重命名失败');
@@ -3128,8 +3128,8 @@ function renamePanelSession(id) {
   });
 }
 
-function deletePanelSession(id) {
-  const session = panelSessionList.find((s) => s.id === id);
+function deletePanelSession(id: any) {
+  const session = panelSessionList.find((s: any) => s.id === id);
   if (!session) return;
   showPanelDialog({
     title: '删除会话',
@@ -3156,8 +3156,8 @@ function deletePanelSession(id) {
   });
 }
 
-async function exportPanelSession(id, btn) {
-  const session = panelSessionList.find((s) => s.id === id);
+async function exportPanelSession(id: any, btn: any) {
+  const session = panelSessionList.find((s: any) => s.id === id);
   if (!session) return;
   const res = await sendPanelMessage('panel:get', { id });
   if (!res || !res.ok || !res.session) {
@@ -3173,7 +3173,7 @@ async function exportPanelSession(id, btn) {
       handoffId: res.session.handoffId || '',
       conversation: res.session.messages || [],
     });
-  } catch (e) {}
+  } catch (e: any) {}
   if (!text) {
     showCitationHint('该会话暂无可导出的内容。');
     return;
@@ -3187,12 +3187,12 @@ async function exportPanelSession(id, btn) {
     } else {
       showCitationHint('已复制会话记录（' + text.length + ' 字）。');
     }
-  } catch (e) {
+  } catch (e: any) {
     showCitationHint('复制失败，请检查剪贴板权限。');
   }
 }
 
-async function acquirePanelSessionLock(runId, takeover) {
+async function acquirePanelSessionLock(runId: any, takeover: any) {
   if (!panelSessionId) return { ok: false, error: '会话尚未就绪' };
   const res = await sendPanelMessage('panel:lock', {
     id: panelSessionId,
@@ -3234,7 +3234,7 @@ function renewPanelSessionLock() {
   }).catch(() => {});
 }
 
-async function handleRemotePanelSessions(state) {
+async function handleRemotePanelSessions(state: any) {
   if (!state) return;
   applyPanelSessionSummaries(state);
   const nextActive = String(state.activeId || '');
@@ -3248,7 +3248,7 @@ async function handleRemotePanelSessions(state) {
     return;
   }
   // 同一会话被其他标签页更新：空闲时同步正文。
-  const current = panelSessionList.find((s) => s.id === panelSessionId);
+  const current = panelSessionList.find((s: any) => s.id === panelSessionId);
   // 同一会话有新版本就拉正文。这里不能再要求 `oldActive === nextActive`：
   // 新标签页刚加载时 panelSessionActiveId 可能还是空串（旧值是 ''，nextActive 已是目标会话），
   // 那个条件会把“最终回复已落盘”的更新直接跳过，页面于是停在半截快照。
@@ -3272,7 +3272,7 @@ const HANDOFF_ID_KEY = 'recallflow-handoff-id';
 function loadHandoffId() {
   try {
     return normalizeHandoffId(localStorage.getItem(HANDOFF_ID_KEY) || '');
-  } catch (e) {
+  } catch (e: any) {
     return '';
   }
 }
@@ -3304,21 +3304,21 @@ async function snapshotHandoff() {
     // 用内容脚本入口共享出来的**同一个已打包实例**（见 entries/content.js）。
     // 此前这里是 `import(extUrl('lib/page/debug-capture.js'))` 现取模块 ——
     // 内容脚本打包成单文件后，那个 URL 不再指向可用模块，于是控制台快照会**静默缺失**。
-    const dc = window.__rfDebugCapture;
+    const dc = (window as any).__rfDebugCapture;
     if (dc && typeof dc.getDebugBuffer === 'function') {
       consoleEntries = await dc.getDebugBuffer('console');
     }
-  } catch (e) {
+  } catch (e: any) {
     /* 取不到控制台快照不影响交接 */
   }
   let picked = Array.isArray(pickedElements) ? pickedElements : [];
   if (!picked.length) {
     try {
-      const d = await new Promise((resolve) => {
+      const d: any = await new Promise((resolve) => {
         chrome.storage.local.get(['recallflow.lastPickedList'], (r) => resolve(r || {}));
       });
       picked = (d && d['recallflow.lastPickedList']) || [];
-    } catch (e) {
+    } catch (e: any) {
       picked = [];
     }
   }
@@ -3340,7 +3340,7 @@ async function snapshotHandoff() {
     //   全量那份算完就丢了 ✗ ⇒ 后台（入参就是这份 record）永远拿不到全量。
     //   多算一次导出的代价很小，换来的是"独立 key 真的存全量" ✓
     trailItems = prepareHandoffTrail(buildToolTrail(messagesForExport())).items;
-  } catch (e) {
+  } catch (e: any) {
     return false;
   }
   // 返回是否真的落库：复制是同步的、保存是异步的，若用户刚复制就粘贴，
@@ -3350,13 +3350,13 @@ async function snapshotHandoff() {
       chrome.runtime.sendMessage({ type: 'handoff:save', record, trailItems }, (resp) => {
         resolve(!chrome.runtime.lastError && !(resp && resp.ok === false));
       });
-    } catch (e) {
+    } catch (e: any) {
       resolve(false);
     }
   });
 }
 
-function openPanel(x, y, docked, restore) {
+function openPanel(x: any, y: any, docked?: any, restore?: any) {
   if (!isExtContextAlive()) {
     warnExtDead();
     return;
@@ -3386,7 +3386,7 @@ function openPanel(x, y, docked, restore) {
   // 尺寸：恢复上次的宽高（夹在视口内）。停靠面板被自动高度撑大后，重开会把它当成
   // 用户尺寸（`_manualSize`）—— 这是既有语义，本次不改，但它意味着重开后
   // `fitPanelHeight()` 不再重算高度，所以下面摆放位置时用的是**恢复后的尺寸**。
-  const savedSize = clampPanelSize(layout, { width: window.innerWidth, height: window.innerHeight });
+  const savedSize = clampPanelSize(layout as any, { width: window.innerWidth, height: window.innerHeight });
   if (savedSize) {
     panel.style.width = savedSize.width + 'px';
     panel.style.height = savedSize.height + 'px';
@@ -3424,7 +3424,7 @@ function openPanel(x, y, docked, restore) {
   panelSessionMenuEl.className = 'session-menu';
   panelSessionMenuEl.hidden = true;
   panelSessionMenuEl.setAttribute('role', 'menu');
-  panelSessionBtnEl.addEventListener('click', async (e) => {
+  panelSessionBtnEl.addEventListener('click', async (e: any) => {
     e.preventDefault();
     e.stopPropagation();
     panelSessionMenuOpen = !panelSessionMenuOpen;
@@ -3436,7 +3436,7 @@ function openPanel(x, y, docked, restore) {
       fitPanelHeight();
     }
   });
-  panelSessionMenuEl.addEventListener('click', (e) => {
+  panelSessionMenuEl.addEventListener('click', (e: any) => {
     const target = e.target.closest('[data-session-action]');
     if (!target) return;
     e.preventDefault();
@@ -3490,7 +3490,7 @@ function openPanel(x, y, docked, restore) {
   head.appendChild(themeBtn);
   head.appendChild(close);
   panel.appendChild(head);
-  shadow.addEventListener('mousedown', (e) => {
+  shadow.addEventListener('mousedown', (e: any) => {
     if (panelSessionMenuOpen && !e.target.closest('.session-menu') && !e.target.closest('.session-btn')) {
       closeSessionMenu();
     }
@@ -3548,28 +3548,28 @@ function openPanel(x, y, docked, restore) {
   });
   // 显式记录用户滚动意图：滚轮、触摸、拖动滚动条、键盘翻页。
   // 这些事件优先于「布局变化产生的 scroll 事件」的屏蔽窗口。
-  pbEl.addEventListener('wheel', (e) => {
+  pbEl.addEventListener('wheel', (e: any) => {
     markUserScrollIntent(Number(e.deltaY) < 0);
   }, { passive: true });
-  let touchStartY = null;
-  pbEl.addEventListener('touchstart', (e) => {
+  let touchStartY: any = null;
+  pbEl.addEventListener('touchstart', (e: any) => {
     const t = e.touches && e.touches[0];
     touchStartY = t ? t.clientY : null;
     markUserScrollIntent(false);
   }, { passive: true });
-  pbEl.addEventListener('touchmove', (e) => {
+  pbEl.addEventListener('touchmove', (e: any) => {
     const t = e.touches && e.touches[0];
     if (t && touchStartY != null) markUserScrollIntent(t.clientY > touchStartY);
   }, { passive: true });
-  pbEl.addEventListener('mousedown', (e) => {
+  pbEl.addEventListener('mousedown', (e: any) => {
     // 点在滚动条上时 target 就是容器本身；内容上的点击不算滚动意图。
     if (e.target === pbEl) markUserScrollIntent(false);
   });
-  pbEl.addEventListener('keydown', (e) => {
+  pbEl.addEventListener('keydown', (e: any) => {
     if (['PageUp', 'ArrowUp', 'Home'].includes(e.key)) markUserScrollIntent(true);
     else if (['PageDown', 'ArrowDown', 'End', ' '].includes(e.key)) markUserScrollIntent(false);
   });
-  panelBody.addEventListener('click', (e) => {
+  panelBody.addEventListener('click', (e: any) => {
     // 思考记录的开合：**委托**在这一层。
     // 两条路都要能用：实时挂载（mountThinkSegment）与重开面板后的历史重建
     //（renderConversation 用 innerHTML 生成，那种块**没有**自己的监听器）。
@@ -3696,7 +3696,7 @@ function openPanel(x, y, docked, restore) {
       } else if (plan.action === 'deny') {
         showCitationHint(plan.reason || '该引用的链接不被允许打开。');
       } else if (id) {
-        try { chrome.runtime.sendMessage({ type: 'openManager', focusId: id }); } catch (e) {}
+        try { chrome.runtime.sendMessage({ type: 'openManager', focusId: id }); } catch (e: any) {}
       } else {
         showCitationHint('该引用没有可打开的链接。');
       }
@@ -3722,23 +3722,23 @@ function openPanel(x, y, docked, restore) {
       '</div>' +
     '</div>';
   approvalSettingsEl = approvalSettings;
-  const autopilotEl = approvalSettings.querySelector('[data-autopilot]');
+  const autopilotEl: any = approvalSettings.querySelector('[data-autopilot]');
   autopilotEl.addEventListener('change', () => {
     const on = autopilotEl.checked;
-    approvalSettings.querySelectorAll('[data-policy]').forEach((x) => {
+    approvalSettings.querySelectorAll('[data-policy]').forEach((x: any) => {
       x.checked = on;
       x.dispatchEvent(new Event('change'));
     });
   });
-  const approvalToggle = approvalSettings.querySelector('.approval-settings-toggle');
-  const approvalPopover = approvalSettings.querySelector('.approval-settings-popover');
+  const approvalToggle: any = approvalSettings.querySelector('.approval-settings-toggle');
+  const approvalPopover: any = approvalSettings.querySelector('.approval-settings-popover');
   approvalPopoverEl = approvalPopover;
-  panel.addEventListener('click', (e) => {
+  panel.addEventListener('click', (e: any) => {
     if (!approvalSettings.contains(e.target)) closeApprovalPopover();
   });
   const refreshApprovalLabel = () => {
-    const names = { read: '读取', edit: '编辑', commands: '命令', browser: '浏览器', mcp: 'MCP' };
-    const on = [...approvalSettings.querySelectorAll('[data-policy]:checked')].map((x) => names[x.dataset.policy]);
+    const names: Record<string, string> = { read: '读取', edit: '编辑', commands: '命令', browser: '浏览器', mcp: 'MCP' };
+    const on = [...approvalSettings.querySelectorAll('[data-policy]:checked')].map((x: any) => names[x.dataset.policy]);
   approvalToggle.innerHTML = '自动批准：' + (on.length ? on.join('、') : '无') + ' <span>›</span>';
   };
   approvalToggle.addEventListener('click', () => {
@@ -3747,7 +3747,7 @@ function openPanel(x, y, docked, restore) {
     panel.classList.toggle('approval-open', opening);
     fitPanelHeight();
   });
-  getAISettings().then((s) => { const p = s.toolApprovalPolicy || { read: true }; approvalSettings.querySelectorAll('[data-policy]').forEach((x) => { x.checked = p[x.dataset.policy] === true; x.addEventListener('change', async () => { const policy = Object.fromEntries([...approvalSettings.querySelectorAll('[data-policy]')].map((y) => [y.dataset.policy, y.checked])); try { await updateAISettings({ toolApprovalPolicy: policy }); } catch (e) { warnExtDead(); } autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => policy[k] === true); refreshApprovalLabel(); }); }); autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => p[k] === true); refreshApprovalLabel(); }).catch(() => {});
+  getAISettings().then((s) => { const p = s.toolApprovalPolicy || { read: true }; approvalSettings.querySelectorAll('[data-policy]').forEach((x: any) => { x.checked = (p as any)[x.dataset.policy] === true; x.addEventListener('change', async () => { const policy = Object.fromEntries([...approvalSettings.querySelectorAll('[data-policy]')].map((y: any) => [y.dataset.policy, y.checked])); try { await updateAISettings({ toolApprovalPolicy: policy }); } catch (e: any) { warnExtDead(); } autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => (policy as any)[k] === true); refreshApprovalLabel(); }); }); autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => (p as any)[k] === true); refreshApprovalLabel(); }).catch(() => {});
 
   // API Key 缺失提示常驻在输入区上方：用户一打开面板就能看到，不必先发一条消息。
   apiKeyBanner = document.createElement('div');
@@ -3764,7 +3764,7 @@ function openPanel(x, y, docked, restore) {
   apiKeySettingsBtn.style.cssText =
     'border:1px solid #c98a00;color:#8a5a00;background:#fff;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:12px;';
   apiKeySettingsBtn.addEventListener('click', () => {
-    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e) {}
+    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e: any) {}
   });
   apiKeyBanner.appendChild(apiKeyText);
   apiKeyBanner.appendChild(apiKeySettingsBtn);
@@ -3775,7 +3775,7 @@ function openPanel(x, y, docked, restore) {
   planBar.className = 'agent-plan agent-plan-bar';
   planBar.style.display = 'none';
   // 点标题可手动展开 / 折叠。全部步骤完成后会自动折叠成一行。
-  planBar.addEventListener('click', (e) => {
+  planBar.addEventListener('click', (e: any) => {
     if (!e.target || !e.target.closest || !e.target.closest('.agent-plan-title')) return;
     // 当前是折叠态 → 用户要展开；当前是展开态 → 用户要折叠。
     planExpanded = planBar.classList.contains('collapsed');
@@ -3850,7 +3850,7 @@ function openPanel(x, y, docked, restore) {
   // 已选元素 chip（支持多个）+ 拾取模式开关。
   // 定位串交给 utils 的唯一实现（原先这里手写了一份，在"只有 name 没有 role"时会输出
   // 畸形的 `role=name="…"`，而"复制定位"按钮复制的正是它）。
-  const locatorText = (p) => formatElementLocator(p && p.locator, p && p.selector, p && p.tag);
+  const locatorText = (p: any) => formatElementLocator(p && p.locator, p && p.selector, p && p.tag);
   const renderPick = () => {
     pickBar.innerHTML = '';
     if (!pickedElements.length) {
@@ -3858,7 +3858,7 @@ function openPanel(x, y, docked, restore) {
       return;
     }
     pickBar.style.display = '';
-    pickedElements.forEach((p, idx) => {
+    pickedElements.forEach((p: any, idx: any) => {
       const src = p.source || {};
       const loc = src.file ? src.file + (src.line ? ':' + src.line : '') : '';
       const chip = document.createElement('span');
@@ -3908,11 +3908,11 @@ function openPanel(x, y, docked, restore) {
   };
   // 拾取通过后台广播到所有 frame（含跨域 iframe），结果由后台回传顶层。
   pickUi = {
-    setActive: (on) => {
+    setActive: (on: any) => {
       picking = !!on;
       pickBtn.classList.toggle('active', !!on);
     },
-    onPicked: (list) => {
+    onPicked: (list: any) => {
       pickedElements = Array.isArray(list) ? list : list ? [list] : [];
       renderPick();
       cmdInput.focus();
@@ -3920,14 +3920,14 @@ function openPanel(x, y, docked, restore) {
   };
   pickBtn.addEventListener('click', () => {
     if (picking) {
-      try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e) {}
+      try { chrome.runtime.sendMessage({ type: 'pick:cancel' }); } catch (e: any) {}
       pickUi.setActive(false);
       return;
     }
     pickUi.setActive(true);
     try {
       chrome.runtime.sendMessage({ type: 'pick:start' });
-    } catch (e) {
+    } catch (e: any) {
       pickUi.setActive(false);
     }
   });
@@ -3973,7 +3973,7 @@ function openPanel(x, y, docked, restore) {
    * @param {HTMLButtonElement} btn 触发按钮（反馈写在它身上）
    * @param {'brief'|'full'} mode
    */
-  const exportTranscript = (btn, mode) => {
+  const exportTranscript = (btn: any, mode: any) => {
     const label = btn.textContent;
     const restore = () => setTimeout(() => (btn.textContent = label), 1600);
     // 结构化导出：从对话数据模型生成，而不是 panelBody.textContent ——
@@ -3981,7 +3981,7 @@ function openPanel(x, y, docked, restore) {
     let text = '';
     try {
       text = buildTranscriptMarkdown(mode);
-    } catch (e) {
+    } catch (e: any) {
       text = '';
     }
     if (!text) {
@@ -4017,7 +4017,7 @@ function openPanel(x, y, docked, restore) {
 
   const resizeHandle = document.createElement('div');
   resizeHandle.className = 'resize-handle bottom-right';
-  const startResize = (e, origin) => {
+  const startResize = (e: any, origin: any) => {
     e.preventDefault();
     e.stopPropagation();
     panel._manualSize = true;
@@ -4076,7 +4076,7 @@ function openPanel(x, y, docked, restore) {
     width: panel.offsetWidth,
     height: panel.offsetHeight,
     writeSize: false,
-  });
+  } as any);
 
   function endStream() {
     // 先丢弃仍在排队的流式渲染：下面的重置会把 pendingContentEl / pendingNarration
@@ -4109,7 +4109,7 @@ function openPanel(x, y, docked, restore) {
     // 随后本页的迟到写入会把对方看到的内容覆盖掉。
     panelSessionSaveChain
       .catch(() => null)
-      .then(async (saved) => {
+      .then(async (saved: any) => {
         await releasePanelSessionLock();
         // 正式消息确认写入共享会话后，才允许后台关闭本次 run 的辅助页。
         // 这解决了“repositories 页先被关，导致回答只存在于已销毁面板”的竞态。
@@ -4150,7 +4150,7 @@ function openPanel(x, y, docked, restore) {
   // 折叠状态是三态的（见模块顶部 thinkExpandedManual 的注释）。
 
   /** 收到一段思维链增量。 */
-  function pushReasoning(text) {
+  function pushReasoning(text: any) {
     const piece = String(text || '');
     if (!piece) return;
     // 没有「进行中的段」就开一段新的 —— 定稿过的段已经置 null，因此新段必然另起一块。
@@ -4220,7 +4220,7 @@ function openPanel(x, y, docked, restore) {
 
   // 追加一个工具步骤卡片：先把已经流式输出的叙述段落固化成一条记录，
   // 再插入步骤，使后续叙述从新元素继续，形成“叙述 → 工具 → 叙述”的时间线。
-  function appendStep(step) {
+  function appendStep(step: any) {
     removeTypingEl();
     // 进入工具步骤：本次思考到此为止（该轮答案可能没有正文，只有工具调用）。
     finishReasoning();
@@ -4241,7 +4241,7 @@ function openPanel(x, y, docked, restore) {
   // 过程提示（意图、校验、限流等）原先只写 DOM，不进入 conversation.parts：
   // 发起页面板重开或跟随页切换到正式落盘消息时，这些步骤会凭空消失。
   // 这里统一“显示 + 入库”，确保即时与最终态一致。
-  function appendNoticePart(text, color, className) {
+  function appendNoticePart(text: any, color?: any, className?: any) {
     const value = String(text || '').trim();
     if (!value) return;
     const step = document.createElement('div');
@@ -4275,7 +4275,7 @@ function openPanel(x, y, docked, restore) {
     scheduleFollowedRunRefresh();
   }
 
-  async function interrupt(source) {
+  async function interrupt(source: any) {
     if (!streaming) {
       if (source === 'remote') return;
       await stopFollowedRun();
@@ -4292,7 +4292,7 @@ function openPanel(x, y, docked, restore) {
     if (!remote) {
       try {
         if (activeConn) activeConn.postMessage({ type: 'stop' });
-      } catch (e) {}
+      } catch (e: any) {}
     }
     const acc = pendingAcc;
     closePort();
@@ -4352,12 +4352,12 @@ function openPanel(x, y, docked, restore) {
    *
    * 幂等：同一轮重复调用不会重复入栈（重连过程中可能被走两次）。
    */
-  function commitInterruptedTurn(reasonText) {
+  function commitInterruptedTurn(reasonText: any) {
     const last = conversation.length ? conversation[conversation.length - 1] : null;
     if (last && last.role === 'assistant' && last.interrupted) return;
     commitPendingVerifyPass();
     const turn = buildInterruptedTurn(pendingParts, pendingNarration || pendingAcc, reasonText);
-    if (!turn.parts.length && !String(pendingNarration || pendingAcc || '').trim()) return;
+    if (!turn.parts!.length && !String(pendingNarration || pendingAcc || '').trim()) return;
     conversation.push(turn);
     saveConversation();
   }
@@ -4369,19 +4369,19 @@ function openPanel(x, y, docked, restore) {
   let portRetries = 0;
   let activeInstruction = '';
   let activeSelection = '';
-  let lastRunOpts = null;
-  let activeConn = null;
-  let readyWaiter = null;
+  let lastRunOpts: any = null;
+  let activeConn: any = null;
+  let readyWaiter: any = null;
 
   // 轮询「中断的会话是否已落盘」。见 onDisconnect 里的说明。
-  function waitSessionReady(timeoutMs) {
+  function waitSessionReady(timeoutMs: any) {
     return new Promise((resolve) => {
       const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 4000);
       const tick = () => {
         if (!port || !streaming) { resolve(false); return; }
         if (Date.now() > deadline) { resolve(false); return; }
-        readyWaiter = (ok) => { if (ok) resolve(true); else setTimeout(tick, 250); };
-        try { port.postMessage({ type: 'session-ready', runId: activeRunId }); } catch (e) { resolve(false); }
+        readyWaiter = (ok: any) => { if (ok) resolve(true); else setTimeout(tick, 250); };
+        try { port.postMessage({ type: 'session-ready', runId: activeRunId }); } catch (e: any) { resolve(false); }
       };
       tick();
     });
@@ -4407,7 +4407,7 @@ function openPanel(x, y, docked, restore) {
         ...(portRetries > 0 || (lastRunOpts && lastRunOpts.continuation) ? { continuation: true } : {}),
         ...(pickedElements.length ? { pickedElements } : {}),
       });
-    } catch (e) {
+    } catch (e: any) {
       // 端口已死（扩展被更新等）：如实告知，不要假装还在跑。
       removeTypingEl();
       showCitationHint('与扩展的连接已断开（扩展可能刚被更新），请刷新页面后重试。');
@@ -4415,7 +4415,7 @@ function openPanel(x, y, docked, restore) {
     }
   }
 
-  async function run(instruction, opts) {
+  async function run(instruction: any, opts?: any) {
     const runOptions = opts || {};
     // 整页刷新后自动续跑：沿用 SW 侧已持久化的 runId（见 maybeResumeRunAfterReload）。
     activeRunId = runOptions.presetRunId || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7));
@@ -4426,7 +4426,7 @@ function openPanel(x, y, docked, restore) {
     // 首屏恢复尚未完成时不能起跑：否则会用空 history 覆盖刚恢复的会话。
     try {
       if (conversationLoadPromise) await conversationLoadPromise;
-    } catch (e) {}
+    } catch (e: any) {}
     if (!panelSessionId) {
       showCitationHint('会话尚未恢复完成，请稍后重试。');
       endStream();
@@ -4478,8 +4478,8 @@ function openPanel(x, y, docked, restore) {
     lastRunOpts = runOptions;
     portRetries = 0;
     // 响应看门狗：避免“三个点一直转”无反馈。15s 提示等待，45s 仍未收到任何消息则报错结束。
-    let respTimer = null;
-    let respFailTimer = null;
+    let respTimer: any = null;
+    let respFailTimer: any = null;
     let respWarned = false;
     const clearRespTimers = () => {
       if (respTimer) { clearTimeout(respTimer); respTimer = null; }
@@ -4539,12 +4539,12 @@ function openPanel(x, y, docked, restore) {
      * 刷新接管会在两个时刻调用：刚打开面板时（query-run 的快照）和 reattach 成功时
      * （后台补发的最新快照）。后者会覆盖前者，保证快照与后续事件之间没有缺口。
      */
-    const applyResumeSnapshot = (snapshot, approvalConn) => {
+    const applyResumeSnapshot = (snapshot: any, approvalConn?: any) => {
       if (!snapshot || typeof snapshot !== 'object') return;
       pendingAcc = String(snapshot.content || '');
       pendingVerifyPass = null;
       pendingParts = Array.isArray(snapshot.parts)
-        ? snapshot.parts.map((p) => Object.assign({}, p))
+        ? snapshot.parts.map((p: any) => Object.assign({}, p))
         : [];
       pendingNarration = String(snapshot.narration || '');
       currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
@@ -4621,14 +4621,14 @@ function openPanel(x, y, docked, restore) {
     }
     try {
       port = chrome.runtime.connect({ name: 'ai-stream' });
-    } catch (e) {
+    } catch (e: any) {
       showCitationHint('扩展已更新，当前页面的助手已失效，请刷新页面后重试。');
       endStream();
       return;
     }
     const conn = port;
     activeConn = conn;
-    conn.onMessage.addListener((resp) => {
+    conn.onMessage.addListener((resp: any) => {
       if (resp.runId && resp.runId !== activeRunId) return;
       clearRespTimers();
       if (resp.type === 'reattached') {
@@ -4653,7 +4653,7 @@ function openPanel(x, y, docked, restore) {
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'tool-result') {
-        const resultPart = {
+        const resultPart: any = {
           type: 'tool-result',
           callId: resp.callId,
           name: resp.name,
@@ -4779,7 +4779,7 @@ function openPanel(x, y, docked, restore) {
       } else if (resp.type === 'skill') {
         const skills = Array.isArray(resp.skills) ? resp.skills : [];
         if (skills.length) {
-          appendNoticePart('🛠 启用技能：' + skills.map((s) => s.title || s.name).join('、'), '', 'agent-skill');
+          appendNoticePart('🛠 启用技能：' + skills.map((s: any) => s.title || s.name).join('、'), '', 'agent-skill');
           fitPanelHeight();
           pinToBottom();
         }
@@ -4839,9 +4839,9 @@ function openPanel(x, y, docked, restore) {
         // **必须跨整条消息算**：渲染时每一段文字（narration / text）都按位置对齐同一份
         // citations，若只重编号最终答复那一段，其余段落里的 [n] 仍是全局编号，
         // 会指到错误的来源（实测症状：「参考来源」列的东西与正文说的不是一回事）。
-        const textParts = pendingParts.filter((p) => (p.type === 'narration' || p.type === 'text') && p.text);
+        const textParts = pendingParts.filter((p: any) => (p.type === 'narration' || p.type === 'text') && p.text);
         const renumbered = renumberCitationsAcross(
-          textParts.map((p) => p.text).concat([lastResponse]),
+          textParts.map((p: any) => p.text).concat([lastResponse]),
           currentCitations
         );
         const finalText = renumbered.apply(lastResponse);
@@ -4890,7 +4890,7 @@ function openPanel(x, y, docked, restore) {
         if (lastResponse) pendingAiMsg.insertAdjacentHTML('beforeend', msgActionsHtml(true));
         commitPendingVerifyPass();
         // 整条消息的每一段都过同一张映射表，保证正文、工具结果与参考来源区三者一致。
-        const finalParts = dedupeAdjacentTextParts(pendingParts.map((p) => {
+        const finalParts = dedupeAdjacentTextParts(pendingParts.map((p: any) => {
           if (p.type === 'narration' || p.type === 'text') {
             return p.text
               ? Object.assign({}, p, { text: renumbered.apply(collapseImmediateRepeatedText(p.text)) })
@@ -4910,7 +4910,7 @@ function openPanel(x, y, docked, restore) {
         // 这时最终输出只存在于 conversation 里，必须**从对话重建一次** —— 否则回答写进已脱离的
         // 节点，用户看到的就是"跳转后模型输出没了、回退又出现"（实测反馈）。
         if (!pendingAiMsg || !pendingAiMsg.isConnected) {
-          try { renderConversation(); } catch (e) {}
+          try { renderConversation(); } catch (e: any) {}
         } else {
           renderSuggestionButtons(pendingAiMsg, finalText, run);
         }
@@ -4966,12 +4966,12 @@ function openPanel(x, y, docked, restore) {
       portRetries += 1;
       try {
         port = chrome.runtime.connect({ name: 'ai-stream' });
-      } catch (e) {
+      } catch (e: any) {
         endStream();
         return;
       }
       activeConn = port;
-      port.onMessage.addListener((resp) => {
+      port.onMessage.addListener((resp: any) => {
         if (resp.runId && resp.runId !== activeRunId) return;
         if (resp.type === 'session-ready') {
           if (readyWaiter) { const w = readyWaiter; readyWaiter = null; w(resp.ready === true); }
@@ -5000,7 +5000,7 @@ function openPanel(x, y, docked, restore) {
     // 长任务心跳：每 20s 发一次空消息，避免 MV3 service worker 因空闲被回收。
     clearInterval(keepAliveTimer);
     keepAliveTimer = setInterval(() => {
-      try { conn.postMessage({ type: 'keepalive' }); } catch (e) {}
+      try { conn.postMessage({ type: 'keepalive' }); } catch (e: any) {}
       renewPanelSessionLock();
     }, 20000);
     if (runOptions.reattach) {
@@ -5026,7 +5026,7 @@ function openPanel(x, y, docked, restore) {
     // 已选元素随本次消息发出后清空。
     if (pickedElements.length) {
       pickedElements = [];
-      try { renderPick(); } catch (e) {}
+      try { renderPick(); } catch (e: any) {}
     }
     // E2E 专用钩子：让测试能主动断开端口，从而验证「断线重连 + 用同一 runId 恢复」这条路径。
     // 为什么需要它：真实触发 MV3 worker 回收要等空闲超时，E2E 里不可控；
@@ -5040,7 +5040,7 @@ function openPanel(x, y, docked, restore) {
       // 注意：**必须由后台侧断开**。实测面板自己调用 port.disconnect() 不会触发
       // 它自己的 onDisconnect（本端主动断开不走该事件），因此那条路测不到重连。
       // 后台侧断开才是真实场景（MV3 worker 被回收）。见 background.js 的 e2e-drop-port。
-      try { if (port) port.postMessage({ type: 'e2e-drop-port' }); } catch (e) {}
+      try { if (port) port.postMessage({ type: 'e2e-drop-port' }); } catch (e: any) {}
       window.dispatchEvent(new CustomEvent('__RF_E2E__dropped'));
     });
     // 15 秒无任何回流 → 提示等待；45 秒仍无 → 报错结束，避免无限转圈。
@@ -5107,7 +5107,7 @@ function openPanel(x, y, docked, restore) {
   });
   // Esc 关闭提升到 document 级：原先只绑在输入框上，点过消息区或面板空白后按 Esc 毫无反应。
   // 拾取模式下交给拾取器处理；审批提示展示中不关闭，避免误关掉安全确认。
-  panelKeyHandler = (e) => {
+  panelKeyHandler = (e: any) => {
     if (e.key !== 'Escape') return;
     if (picking) return;
     // 最上层浮层优先消费 Esc。尤其是会话重命名/删除弹窗：
@@ -5135,7 +5135,7 @@ function openPanel(x, y, docked, restore) {
   cmdInput.focus();
 
   // 拖拽
-  head.addEventListener('mousedown', (e) => {
+  head.addEventListener('mousedown', (e: any) => {
     if (e.target.closest('button')) return;
     // 用视口坐标作起点，脱离 dock 底停靠（bottom）后立即固定到当前位置，保证后续平移基准正确。
     dragState = {
@@ -5189,7 +5189,7 @@ let observerAutoScroll = true;
  * 为什么需要：旧页面销毁后没有人再做 UI 收尾；若 run 在新面板 reattach 之前
  * 就结束了，只靠 loadConversation 会只剩用户消息，最终回答永远丢失。
  */
-function adoptFinishedRunSnapshot(snapshot) {
+function adoptFinishedRunSnapshot(snapshot: any) {
   if (!snapshot || snapshot.status === 'running' || !Array.isArray(snapshot.parts)) return false;
   const instruction = String(snapshot.instruction || '').trim();
   if (!instruction) return false;
@@ -5200,7 +5200,7 @@ function adoptFinishedRunSnapshot(snapshot) {
       break;
     }
   }
-  if (userIndex >= 0 && conversation.slice(userIndex + 1).some((m) => m && m.role === 'assistant' && !m.live)) {
+  if (userIndex >= 0 && conversation.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant' && !m.live)) {
     return false; // 已经有正式回复（例如旧页面在卸载前已落盘）
   }
   const msg = runStateToAssistantMessage(snapshot);
@@ -5227,21 +5227,21 @@ function maybeResumeRunAfterReload() {
     if (streaming) return;
     attempts += 1;
     if (attempts > MAX_ATTEMPTS) return;
-    let p = null;
+    let p: any = null;
     let handled = false;
     try {
       p = chrome.runtime.connect({ name: 'ai-stream' });
-      p.onMessage.addListener(async (resp) => {
+      p.onMessage.addListener(async (resp: any) => {
         if (handled || !resp || resp.type !== 'run-state') return;
         handled = true;
-        try { p.disconnect(); } catch (e) {}
+        try { p.disconnect(); } catch (e: any) {}
         if (!resp.resumable && resp.finished && resp.snapshot && !streaming) {
           try {
             if (conversationLoadPromise) await conversationLoadPromise;
-          } catch (e) {}
+          } catch (e: any) {}
           try {
             if (panelUiReadyPromise) await panelUiReadyPromise;
-          } catch (e) {}
+          } catch (e: any) {}
           if (!streaming) adoptFinishedRunSnapshot(resp.snapshot);
           return;
         }
@@ -5254,10 +5254,10 @@ function maybeResumeRunAfterReload() {
           // 用户看到的就是"跳转后模型输出不见了、回退又出现"（实测反馈）。
           try {
             if (conversationLoadPromise) await conversationLoadPromise;
-          } catch (e) {}
+          } catch (e: any) {}
           try {
             if (panelUiReadyPromise) await panelUiReadyPromise;
-          } catch (e) {}
+          } catch (e: any) {}
           if (streaming) return;
           // 面板全局关闭时，续跑仍要启动，但不能把其他标签页的面板重新拉开。
           const keepClosed = !panelUiOpen;
@@ -5290,7 +5290,7 @@ function maybeResumeRunAfterReload() {
         }
       });
       p.postMessage({ type: 'query-run' });
-    } catch (e) {
+    } catch (e: any) {
       try { if (p) p.disconnect(); } catch (e2) {}
     }
   };
@@ -5307,12 +5307,12 @@ export function initAssistant() {
       // 发起页刚落盘的最终回复回写成更短的版本。等正式消息收齐后 followedRunState
       // 会被 reset，此时再保存才是安全的。
       if (followedRunState || followedMessages.length) return;
-      try { saveConversation(); } catch (e) {}
+      try { saveConversation(); } catch (e: any) {}
       // 面板位置也顺手落一次（打开/拖拽/关闭时已经写过，这里是整页跳转的兜底；
       // 面板脱离文档时 persistPanelLayoutNow 会自行跳过，不会写坏存档）。
-      try { persistPanelLayoutNow(); } catch (e) {}
+      try { persistPanelLayoutNow(); } catch (e: any) {}
     });
-  } catch (e) {}
+  } catch (e: any) {}
 
   document.addEventListener('mousedown', (e) => {
     if (host && e.composedPath().includes(host)) return;
@@ -5444,7 +5444,7 @@ export function initAssistant() {
     lastText = text;
     clearCiteHighlight();
     pageText = pageContextEnabled ? extractPageText() : '';
-    const range = sel.getRangeAt(0);
+    const range = sel!.getRangeAt(0);
     const rect = range.getBoundingClientRect();
 
     if (panel) {
@@ -5465,13 +5465,13 @@ export function initAssistant() {
       if (areaName !== 'local' || !changes) return;
       if (changes.aiSettings) refreshApiKeyBanner();
       if (!changes[FAB_POSITION_KEY]) return;
-      const next = changes[FAB_POSITION_KEY].newValue;
+      const next: any = changes[FAB_POSITION_KEY].newValue;
       const ratio = normalizeFabRatio(next && next.ratio);
       if (ratio == null) return;
       fabCtl.setRatio(ratio);
       applySavedFabPosition();
     });
-  } catch (e) {}
+  } catch (e: any) {}
 
   // 拾取结果/取消由后台回传（跨域 iframe 内的命中也会经后台回到顶层）。
   try {
@@ -5515,7 +5515,7 @@ export function initAssistant() {
       }
       return false;
     });
-  } catch (e) {
+  } catch (e: any) {
     warnExtDead();
   }
 
@@ -5542,7 +5542,7 @@ export function initAssistant() {
   if (kbSnippet) {
     const snippet = decodeSnippet(kbSnippet);
     if (snippet) {
-      const attempt = (tries) => {
+      const attempt = (tries: any) => {
         if (findAndHighlightCitation(snippet)) return;
         if (tries > 0) setTimeout(() => attempt(tries - 1), 700);
       };

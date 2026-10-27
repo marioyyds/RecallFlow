@@ -23,7 +23,7 @@ let seq = 0;
 async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome({});
-  const mod = await import('../lib/page/chat.js?layout-guard=' + (seq += 1));
+  const mod = await import('../lib/page/chat.ts?layout-guard=' + (seq += 1));
   mod.initAssistant();
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
@@ -51,7 +51,7 @@ const totalReads = (c) => c.scrollHeight + c.offsetHeight + c.rect;
  * 把 el 的几何量换成**计数 getter**：既控住返回值，又统计被测代码读了几次。
  *
  * 默认返回"超大内容高度"是刻意的：正文高于可用高度 ⇒ fitPanelHeight 会判定面板已饱和，
- * 这正是复用快路径生效的前提（详见 lib/page/chat.js 里该函数头部的注释）。
+ * 这正是复用快路径生效的前提（详见 lib/page/chat.ts 里该函数头部的注释）。
  */
 function watchGeometry(el, counter, opts = {}) {
   const fake = {

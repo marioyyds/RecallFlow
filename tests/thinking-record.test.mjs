@@ -13,7 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const chatSrc = fs.readFileSync('lib/page/chat.js', 'utf8');
+const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
 const cssSrc = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
 const bundle = fs.readFileSync('content.js', 'utf8');
@@ -102,7 +102,7 @@ test('chat.js：正文/结束/进入工具步骤时都要给思考记录定稿',
 
 test('chat.js：思考记录的展开状态是**三态**，不是布尔', () => {
   // 与计划条同一个坑：若写成「布尔 + 初值」，「用户手动收起」会永远被下一次自动展开覆盖。
-  assert.match(chatSrc, /let thinkExpandedManual = null;/, '初值必须是 null（未表态）');
+  assert.match(chatSrc, /let thinkExpandedManual(?::[^=]+)? = null;/, '初值必须是 null（未表态）');
   assert.match(chatSrc, /thinkExpandedManual === null/, '自动开合必须先判断用户是否表过态');
   // 用户一旦点过，就不再自动改
   assert.match(chatSrc, /thinkExpandedManual = opening;/, '点击时应记录用户的选择');
@@ -175,7 +175,7 @@ test('chat.js：重建出来的思考块也要能点开（开合必须是委托�
 test('chat.js：被持久化截断的思考必须标明（丢东西要说明）', () => {
   // clipPart 会按 MAX_PART_TEXT_CHARS 裁掉超长思维链。若重建后当成完整全文展示，
   // 用户会以为模型只想到这儿 —— 那正是本仓库最忌的"静默丢失"。
-  assert.match(chatSrc, /function thinkLabelText\(done, len, truncated\)/, '文案要有唯一来源');
+  assert.match(chatSrc, /function thinkLabelText\(done[^)]*\)/, '文案要有唯一来源');
   assert.match(chatSrc, /保存时已截断/, '截断必须有一句可读的标注');
   const restore = chatSrc.slice(chatSrc.indexOf('function partHtml('));
   assert.match(restore.slice(0, 6000), /truncated: p\.textTruncated === true/, '重建时要把 parts 上的截断标记传进去');
@@ -256,7 +256,7 @@ test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（
 //     而 endStream 会清空 pendingParts ⇒ 这一轮**从未入库**。
 
 test('chat.js：点「停止」也要把思考与步骤入库（interrupt 必须带 parts）', () => {
-  const at = chatSrc.indexOf('async function interrupt(source)');
+  const at = chatSrc.indexOf('async function interrupt(');
   assert.ok(at >= 0);
   const body = chatSrc.slice(at, at + 2600);
   assert.match(body, /finishReasoning\(\);/, '停止前必须把**进行中**的那段思考定稿，否则它只活在 DOM 里');
@@ -296,7 +296,7 @@ test('chat.js：中断轮的"原因 + 已中断"说明必须可见（不能因�
 });
 
 test('chat.js：停止的那一轮也要把执行计划留下（否则重开后计划条回退到更早一轮）', () => {
-  const at = chatSrc.indexOf('async function interrupt(source)');
+  const at = chatSrc.indexOf('async function interrupt(');
   const body = chatSrc.slice(at, at + 2600);
   assert.match(body, /plan: lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
 });

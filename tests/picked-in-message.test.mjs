@@ -20,7 +20,7 @@ import {
   pickedSummaryHtml,
 } from '../lib/shared/utils.js';
 
-const chatSrc = fs.readFileSync('lib/page/chat.js', 'utf8');
+const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
 const agentSrc = fs.readFileSync('lib/assistant/agent.js', 'utf8');
 

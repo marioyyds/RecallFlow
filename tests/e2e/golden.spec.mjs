@@ -147,7 +147,7 @@ test('golden: 刷新时正在等审批 —— 新面板接管并恢复审批条'
 });
 // 回归：SPA 客户端导航会整体替换 DOM 树，面板宿主被移除后要能自动重建。
 // 这是真实站点实验室（GitHub Turbo 导航）暴露的产品缺陷 —— 修复前宿主引用仍指向已脱离的节点，
-// FAB 永久消失；修复后由低频保活轮询重建（见 lib/page/chat.js 的 watchHostKeepalive）。
+// FAB 永久消失；修复后由低频保活轮询重建（见 lib/page/chat.ts 的 watchHostKeepalive）。
 test('golden: SPA 导航移除宿主后自动重建（FAB 回来且可再开面板）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);

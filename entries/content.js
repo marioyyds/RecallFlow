@@ -14,7 +14,7 @@ import * as pageText from '../lib/page/page-text.ts';
 import * as commands from '../lib/page/commands.ts';
 import * as picker from '../lib/page/picker.ts';
 import * as debugCapture from '../lib/page/debug-capture.ts';
-import * as chat from '../lib/page/chat.js';
+import * as chat from '../lib/page/chat.ts';
 
 // 是否顶层文档。注意 `window.top === window` 在跨域 iframe 里会**抛异常**，
 // 而原先它没有任何保护 —— 异常会让整段初始化被跳过，表现为"某些页面下面板不出现"。

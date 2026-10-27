@@ -4,7 +4,7 @@ import fs from 'node:fs';
 
 import { PANEL_CSS } from '../lib/page/panel-css.ts';
 
-const chat = fs.readFileSync('lib/page/chat.js', 'utf8');
+const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
 
 test('RecallFlow 气泡支持纵向拖动，并保存归一化位置', () => {
   // ⚠ 这里只钉**接线**（事件是否还挂着、是否还走夹取与持久化）。
@@ -17,7 +17,7 @@ test('RecallFlow 气泡支持纵向拖动，并保存归一化位置', () => {
   assert.match(chat, /clampFabTop\(fabDragState\.origTop \+ dy\)/);
   assert.match(chat, /chrome\.storage\.onChanged\.addListener/);
   // 持久化与迁移的实现已随模块搬走，这里改为钉住"聊天面板确实委托给了它"。
-  assert.match(chat, /from '\.\/fab-position\.js'/, 'chat.js 应委托给 fab-position.js');
+  assert.match(chat, /from '\.\/fab-position\.(js|ts)'/, 'chat.js 应委托给 fab-position.js');
   assert.match(chat, /createFabController\(\{/, '应创建带依赖注入的控制器');
 });
 

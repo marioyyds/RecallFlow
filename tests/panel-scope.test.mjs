@@ -15,7 +15,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const SRC = 'lib/page/chat.js';
+const SRC = 'lib/page/chat.ts';
 // 只认「行首的空格/制表符」——**不能用 \s**：它会把换行也吃掉，
 // 于是 `^\s+function X` 能从上一行开始匹配到行首无缩进的 X，误报成"被缩进"。
 const FN_RE = /^([ \t]*)(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]+([A-Za-z0-9_$]+)/;

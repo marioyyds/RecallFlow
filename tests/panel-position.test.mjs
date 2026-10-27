@@ -1,4 +1,4 @@
-// 面板位置「关掉再开必须回到原处」的行为测试 —— 真 import lib/page/chat.js。
+// 面板位置「关掉再开必须回到原处」的行为测试 —— 真 import lib/page/chat.ts。
 //
 // 这是 TITA-9 的验收门禁。用户的原始反馈是「关闭面板对话框，它不能保存面板的位置状态」，
 // 而这个问题**不是某一行的错**，是三处判据口径不一致（见 lib/page/panel-layout.ts 顶部说明）：
@@ -21,7 +21,7 @@ let seq = 0;
 async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome();
-  const mod = await import('../lib/page/chat.js?case=pos' + (seq += 1));
+  const mod = await import('../lib/page/chat.ts?case=pos' + (seq += 1));
   mod.initAssistant();
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);

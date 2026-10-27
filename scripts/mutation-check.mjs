@@ -195,7 +195,7 @@ const TARGETS = [
   {
     // 面板 UI：这是 4900 行、长期零 import 的那个文件。目标是证明
     // tests/chat-panel-smoke.test.mjs 里那几条"真建 DOM"的断言不是摆样子。
-    file: 'lib/page/chat.js',
+    file: 'lib/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-panel-smoke.test.mjs',
     mutations: [
@@ -222,7 +222,7 @@ const TARGETS = [
   {
     // 工具审批条：它是用户唯一能看到「Agent 要动你的页面了」的地方，而且三条性质
     // 错了都**不会报错**（静默泄露 / 静默放行 / 用户点了拒绝却当成放行）。
-    file: 'lib/page/chat.js',
+    file: 'lib/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-approval-prompt.test.mjs',
     mutations: [
@@ -260,7 +260,7 @@ const TARGETS = [
   },
   {
     // 发送/停止按钮的状态派生：四种组合里三种写错都不报错，只会「用起来怪」。
-    file: 'lib/page/chat.js',
+    file: 'lib/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-run-controls.test.mjs',
     mutations: [
@@ -481,7 +481,7 @@ const TARGETS = [
   },
   {
     // 失败态的渲染：两条规则错了都不报错，只让用户丢东西（屏幕上丢半截回答 / 记录里丢正文）。
-    file: 'lib/page/chat.js',
+    file: 'lib/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-error-state.test.mjs',
     mutations: [
@@ -501,8 +501,9 @@ const TARGETS = [
         name: '「打开设置」发错消息类型（用户点不到设置页）',
         // 锚点用「监听器 + 里面的调用」两行：文件里另有一处同款调用，
         // 单看那一行不唯一，而变异脚本按**首次出现**替换 —— 不唯一就等于赌文件顺序。
-        from: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e) {}\n  });",
-        to: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openSettings' }); } catch (e) {}\n  });",
+        // TS 迁移（TITA-75）：catch 变量按 strict 补了 `: any`，锚点随之同步。
+        from: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (e: any) {}\n  });",
+        to: "  go.addEventListener('click', () => {\n    try { chrome.runtime.sendMessage({ type: 'openSettings' }); } catch (e: any) {}\n  });",
         expectFail: '打开设置页',
       },
     ],

@@ -6080,7 +6080,7 @@
     };
   }
 
-  // lib/page/chat.js
+  // lib/page/chat.ts
   function isExtContextAlive() {
     try {
       if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.id) return false;

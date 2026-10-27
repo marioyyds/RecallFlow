@@ -13,7 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const src = fs.readFileSync('lib/page/chat.js', 'utf8');
+const src = fs.readFileSync('lib/page/chat.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
 
 function indexOfLine(pattern, from = 0) {
@@ -57,7 +57,8 @@ test('计划条的展开状态必须是**三态**，且默认收起', () => {
   //
   // 现在的契约更进一步：**默认就是收起的一行**（不再依赖「全部完成」才收）——
   // 因为它先前用「限高 + 内层滚动条」处理步骤过多，那个方案已被否掉。
-  assert.match(src, /let planExpanded = null;/, '初值必须是「未表态」的 null，不能是 true');
+  // 类型标注是 TS 迁移（TITA-75）加的：允许可选的 `: T`，初值仍必须是 null。
+  assert.match(src, /let planExpanded(?::[^=]+)? = null;/, '初值必须是「未表态」的 null，不能是 true');
   const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
   assert.match(fn, /const collapsed = planExpanded !== true;/, '未表态时必须收起');
   // 点击处理器在 openPanel 里（不在 renderPlan 内），所以对全文断言。

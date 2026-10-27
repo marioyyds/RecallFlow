@@ -1,4 +1,4 @@
-// lib/page/chat.js 的**第一次真 import**。
+// lib/page/chat.ts 的**第一次真 import**。
 //
 // 背景：这个文件有 4900 行，12 个测试文件提到它，但此前**没有一个真的 import 过** ——
 // 全是 `readFileSync` + 正则。正则能钉住"某句话还在文件里"，却完全不知道代码跑起来会不会抛。
@@ -25,7 +25,7 @@ let seq = 0;
 async function boot(chromeOpts = {}) {
   const dom = installDomStub();
   const prevChrome = installChrome(chromeOpts);
-  const mod = await import('../lib/page/chat.js?case=' + (seq += 1));
+  const mod = await import('../lib/page/chat.ts?case=' + (seq += 1));
   mod.initAssistant();
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
