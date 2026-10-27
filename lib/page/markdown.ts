@@ -86,8 +86,8 @@ export function planCitationOpen(url: unknown, currentHref: unknown, snippet: un
   if (!raw) return { action: 'none' };
   let samePage = false;
   try {
-    const u = new URL(raw, String(currentHref || ''));
-    const cur = new URL(String(currentHref || ''));
+    const u = new URL(raw, currentHref as string);
+    const cur = new URL(currentHref as string);
     samePage = u.origin === cur.origin && u.pathname === cur.pathname;
   } catch (e) {
     samePage = false;
@@ -143,8 +143,7 @@ export function parseSuggestionOptions(text: unknown): Array<{ label: string; de
 // citations：可选，传入引用元数据数组后，[n] 会渲染为可点击的引用徽章
 // streaming：是否处于流式输出中（为 true 时末尾追加闪烁光标）
 export function renderMarkdown(md: unknown, citations?: unknown, streaming?: boolean): string {
-  const lines = String(md === undefined || md === null ? '' : md).split('\n');
-  const cites = (Array.isArray(citations) ? citations : []) as any[];
+  const lines = (md as string).split('\n');
   let html = '';
   let inCode = false;
   let codeBuf: string[] = [];
@@ -175,12 +174,12 @@ export function renderMarkdown(md: unknown, citations?: unknown, streaming?: boo
     });
     // 将 [n]（或 [标签n] 如 [K8s文档2]）渲染为可点击的引用徽章（仅当存在引用元数据时）。
     // 容错匹配「括号内以数字结尾」的形式，提取数字对齐全局引用编号。
-    if (cites.length) {
+    if (citations && (citations as any[]).length) {
       r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
         const idx = extractCiteNum(inner);
         if (idx === null) return match;
         // 按「位置」对齐参考来源区（body [n] → 来源区第 n 条），与重编号后的顺序完全一致。
-        const c = cites[idx - 1];
+        const c = (citations as any[])[idx - 1];
         if (!c) return match;
         const short = c.title.length > 16 ? c.title.slice(0, 16) + '…' : c.title;
         return (

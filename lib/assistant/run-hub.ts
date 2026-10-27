@@ -94,7 +94,7 @@ function flushNarration(state: RunState): void {
 function pushNotice(state: RunState, text: unknown, color?: unknown): void {
   const value = String(text || '').trim();
   if (!value) return;
-  state.parts.push({ type: 'notice', text: value, color: String(color || '') });
+  state.parts.push({ type: 'notice', text: value, color: (color as string) || '' });
 }
 
 function pushStepNotice(state: RunState, text: unknown, color?: unknown): void {

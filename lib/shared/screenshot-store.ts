@@ -189,7 +189,7 @@ export async function loadScreenshot(
   const key = shotStorageKey(wanted);
   try {
     const cur = await area.get([key, SHOT_KEY]);
-    const item = cur ? (cur[key] as ScreenshotRecord | undefined) : undefined;
+    const item = (cur && cur[key]) as ScreenshotRecord | undefined;
     if (item && item.dataUrl) return item;
     const archive = (Array.isArray(cur && cur[SHOT_KEY]) ? (cur[SHOT_KEY] as ScreenshotRecord[]) : []);
     return archive.find((entry) => entry && String(entry.id) === wanted && entry.dataUrl) || null;

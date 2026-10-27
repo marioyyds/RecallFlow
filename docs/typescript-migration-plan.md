@@ -346,6 +346,13 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 >    `tests/entries-build.test.mjs` 与 `--check` 守；`content.js` 的模式被完整复用。
 > 4. 已知代价：入口产物是提交进仓库的（合计约 1.9 MB 未压缩），改任一入口图内的模块要重建
 >    4 个大 bundle；`runner.js` 的两处 `getURL` 动态 import 因此改成静态 import（被打包内联）。
+> 5. **已知 E2E 抖动（不是本批回归）**：`stream-scroll: 对话区可聚焦：PageUp 能滚动正在流式输出的内容`
+>    在 head 与基线 `a856368` 上都会偶发红（基线 `-g PageUp --repeat-each=3` 为 1/3 红），
+>    归因为用例自身的时序抖动；本批**不修**，合并轮不要把它当回归。另一条
+>    `golden: 点单 — 四种控件各走对工具` 是两侧同名的既有稳定失败。
+> 6. **合并约定（写死，别临场判断）**：`content.js` 与 7 个入口产物**一律不接受 git 文本合并** ——
+>    冲突时先解源码、再 `node scripts/build-content.mjs` / `node scripts/build-entries.mjs` 重建，
+>    然后用 `git cat-file -s` / `compareEntry` 比字节，最后在合并树重跑门禁（L-04 / L-05）。
 
 **Batch 3 —— `lib/assistant/*`（53 个文件，14312 行，strict 错误 1172 条）**
 最大的一块，建议再拆：

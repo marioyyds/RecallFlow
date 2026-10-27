@@ -38,6 +38,9 @@ const STEPS = [
   // 进 STEPS 前已在坏样本上验证过它会红（见 TITA-74 交付评论 §5）。
   { name: '门禁：TypeScript 类型检查', cmd: process.execPath, args: ['node_modules/typescript/bin/tsc', '--noEmit'] },
   { name: '门禁：对 const 赋值', cmd: process.execPath, args: ['scripts/check-const-assign.mjs'] },
+  // TS 迁移期间 `.js` → `.ts` 是逐个改名的：同名双存会让 tests/source-path.mjs
+  // 静默读到旧副本（判据与背景见该脚本头注释，TITA-78 返工 N1）。
+  { name: '门禁：迁移目录同名 .js/.ts 双存', cmd: process.execPath, args: ['scripts/check-ts-duplicates.mjs'] },
   { name: '门禁：请求前缀稳定性', cmd: process.execPath, args: ['scripts/check-prefix-stability.mjs'] },
   { name: '门禁：变异测试（断言是否真有牙齿）', cmd: process.execPath, args: ['scripts/mutation-check.mjs'] },
   // 刷新测试数快照：必须放在单元测试**之后**，因为刚加/删的用例会改变总数。

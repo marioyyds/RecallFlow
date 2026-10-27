@@ -11871,7 +11871,7 @@ function flushNarration(state2) {
 function pushNotice(state2, text, color) {
   const value = String(text || "").trim();
   if (!value) return;
-  state2.parts.push({ type: "notice", text: value, color: String(color || "") });
+  state2.parts.push({ type: "notice", text: value, color: color || "" });
 }
 function pushStepNotice(state2, text, color) {
   endReasoning(state2);

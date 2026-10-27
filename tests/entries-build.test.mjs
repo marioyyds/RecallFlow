@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ENTRIES, buildAll, checkEntryArtifact, compareEntry } from '../scripts/build-entries.mjs';
+import { ENTRIES, buildAll, checkEntryArtifact, compareEntry, lfByteLength } from '../scripts/build-entries.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -137,15 +137,28 @@ test('比较器本身有牙：真有差异时必须指出第一处不同在第�
   assert.deepEqual(compareEntry('a\nb', 'a\nb\nc'), { line: 3, diskLines: 2, builtLines: 3 });
 });
 
-test('每个入口产物离体积预算都足够近（松到 3 倍就失去意义了）', () => {
-  for (const e of ENTRIES) {
-    const bytes = fs.statSync(path.join(ROOT, e.out)).size;
-    // 磁盘字节数是 CRLF 检出下的值，只用来判「预算有没有松得离谱」这个上界方向；
-    // 精确比较用 checkEntryArtifact（它比的是内存产物的 LF 字节）。
-    assert.ok(bytes <= e.budget, e.out + ' 实际 ' + bytes + ' > 预算 ' + e.budget + '：确认不是误引入大依赖');
+test('每个入口产物离体积预算都足够近（松到 3 倍就失去意义了）', async () => {
+  const results = await built();
+  for (const r of results) {
+    // 比**内存产物的 LF 字节**，不比盘上 `fs.statSync` 字节：
+    // `core.autocrlf=true` 的检出把 \n 变成 \r\n，盘上会凭空大一圈（L-19 / L-37 第二面），
+    // 那会让 Windows 本地全量门禁确定性假红。
+    const bytes = lfByteLength(r.text);
+    assert.ok(bytes <= r.entry.budget, r.entry.out + ' 实际 ' + bytes + ' > 预算 ' + r.entry.budget + '：确认不是误引入大依赖');
     assert.ok(
-      e.budget - bytes < 16 * 1024,
-      e.out + ' 的预算离实际太远（差 ' + Math.round((e.budget - bytes) / 1024) + ' KB）：收紧到实际之上 16KB 以内'
+      r.entry.budget - bytes < 16 * 1024,
+      r.entry.out + ' 的预算离实际太远（差 ' + Math.round((r.entry.budget - bytes) / 1024) + ' KB）：收紧到实际之上 16KB 以内'
     );
   }
+});
+
+test('体积断言按 LF 归一：CRLF 输入也绿（不是逐字节比盘上大小）', () => {
+  const budget = 1024;
+  // 造一份「LF 在预算内、转成 CRLF 后盘上超预算」的样本：这正是 autocrlf=true 检出的形态。
+  const built = 'x'.repeat(1000) + '\n'.repeat(20); // LF：1020 字节
+  const disk = built.replace(/\n/g, '\r\n'); // CRLF：1040 字节
+  assert.ok(Buffer.byteLength(disk, 'utf8') > budget, '前置：样本的盘上 raw 字节必须真的超预算，否则这条自检证明不了什么');
+  assert.ok(lfByteLength(built) <= budget, '内存产物本身必须在预算内');
+  assert.equal(lfByteLength(disk), lfByteLength(built), '行尾差异归一后必须相等（L-19）');
+  assert.ok(lfByteLength(disk) <= budget, 'CRLF 输入归一后也要在预算内 —— 否则 CRLF 检出会假红');
 });

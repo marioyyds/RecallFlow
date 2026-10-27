@@ -8,9 +8,11 @@
 // 也就是说，这类 bug 之前**没有任何一层能发现它**。这里补上那一层。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { findDuplicateTsJs } from '../scripts/check-ts-duplicates.mjs';
 
 import { findConstAssignments } from '../scripts/check-const-assign.mjs';
 
@@ -220,6 +222,28 @@ test('识别正则不能把除号误判成正则（否则会吃掉整行，造�
       ['m', 'n'],
       '除号不该吃掉后面的代码，实际：' + JSON.stringify(findings.map((f) => f.name))
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('迁移目录里不许同名 `.js` 与 `.ts` 双存（source-path 会静默读旧副本）', () => {
+  const findings = findDuplicateTsJs();
+  assert.deepEqual(
+    findings,
+    [],
+    '发现同名双存：\n  ' + findings.map((f) => f.js + '  ⇄  ' + f.ts).join('\n  ')
+  );
+});
+
+test('双存门禁本身有牙：合成的 a.js + a.ts 必须被抓到，单独的 .ts 不误报', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rf-ts-dup-'));
+  try {
+    mkdirSync(join(dir, 'lib'), { recursive: true });
+    writeFileSync(join(dir, 'lib', 'a.js'), 'export const a = 1;\n');
+    writeFileSync(join(dir, 'lib', 'a.ts'), 'export const a: number = 1;\n');
+    writeFileSync(join(dir, 'lib', 'b.ts'), 'export const b: number = 1;\n');
+    assert.deepEqual(findDuplicateTsJs(dir), [{ base: 'a', js: 'lib/a.js', ts: 'lib/a.ts' }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

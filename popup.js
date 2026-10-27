@@ -242,8 +242,7 @@ function fmtTime(ts) {
   return d.toLocaleDateString("zh-CN");
 }
 function esc(s) {
-  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  return String(s).replace(/[&<>"']/g, (c) => map[c]);
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 function platformColor(id) {
   return id === "other" ? "#95a5a6" : "#4a90d9";

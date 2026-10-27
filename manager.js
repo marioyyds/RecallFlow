@@ -209,8 +209,7 @@ function fmtTime(ts) {
   return d.toLocaleDateString("zh-CN");
 }
 function esc(s) {
-  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  return String(s).replace(/[&<>"']/g, (c) => map[c]);
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 var _toastTimer = null;
 function showToast(msg, opts) {
@@ -487,8 +486,7 @@ function sanitizeHref(raw) {
   return s;
 }
 function renderMarkdown(md, citations, streaming) {
-  const lines = String(md === void 0 || md === null ? "" : md).split("\n");
-  const cites = Array.isArray(citations) ? citations : [];
+  const lines = md.split("\n");
   let html = "";
   let inCode = false;
   let codeBuf = [];
@@ -507,11 +505,11 @@ function renderMarkdown(md, citations, streaming) {
       if (!href) return text;
       return '<a href="' + href.replace(/"/g, "&quot;") + '" target="_blank" rel="noopener noreferrer">' + text + "</a>";
     });
-    if (cites.length) {
+    if (citations && citations.length) {
       r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
         const idx = extractCiteNum(inner);
         if (idx === null) return match;
-        const c = cites[idx - 1];
+        const c = citations[idx - 1];
         if (!c) return match;
         const short = c.title.length > 16 ? c.title.slice(0, 16) + "\u2026" : c.title;
         return '<button class="cite-badge" data-cite-id="' + escAttr(c.id || "") + '" data-cite-source="' + escAttr(c.source || "kb") + '" data-cite-url="' + escAttr(c.url || "") + '" data-cite-snippet="' + escAttr(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr(short) + "</button>";

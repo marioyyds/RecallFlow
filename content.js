@@ -146,8 +146,7 @@
     }).join("\n");
   }
   function esc(s) {
-    const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-    return String(s).replace(/[&<>"']/g, (c) => map[c]);
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
   function formatInspectSummary(input) {
     const o = input || {};
@@ -4551,8 +4550,8 @@
     if (!raw) return { action: "none" };
     let samePage = false;
     try {
-      const u = new URL(raw, String(currentHref || ""));
-      const cur = new URL(String(currentHref || ""));
+      const u = new URL(raw, currentHref);
+      const cur = new URL(currentHref);
       samePage = u.origin === cur.origin && u.pathname === cur.pathname;
     } catch (e) {
       samePage = false;
@@ -4593,8 +4592,7 @@
     return out;
   }
   function renderMarkdown(md, citations, streaming2) {
-    const lines = String(md === void 0 || md === null ? "" : md).split("\n");
-    const cites = Array.isArray(citations) ? citations : [];
+    const lines = md.split("\n");
     let html = "";
     let inCode = false;
     let codeBuf = [];
@@ -4613,11 +4611,11 @@
         if (!href) return text;
         return '<a href="' + href.replace(/"/g, "&quot;") + '" target="_blank" rel="noopener noreferrer">' + text + "</a>";
       });
-      if (cites.length) {
+      if (citations && citations.length) {
         r = r.replace(/[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g, (match, inner) => {
           const idx = extractCiteNum(inner);
           if (idx === null) return match;
-          const c = cites[idx - 1];
+          const c = citations[idx - 1];
           if (!c) return match;
           const short = c.title.length > 16 ? c.title.slice(0, 16) + "\u2026" : c.title;
           return '<button class="cite-badge" data-cite-id="' + escAttr2(c.id || "") + '" data-cite-source="' + escAttr2(c.source || "kb") + '" data-cite-url="' + escAttr2(c.url || "") + '" data-cite-snippet="' + escAttr2(c.snippet || "") + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + escAttr2(c.title) + '"><span class="cite-idx">[' + idx + "]</span>" + escAttr2(short) + "</button>";
@@ -5607,7 +5605,7 @@
   function pushNotice(state, text, color) {
     const value = String(text || "").trim();
     if (!value) return;
-    state.parts.push({ type: "notice", text: value, color: String(color || "") });
+    state.parts.push({ type: "notice", text: value, color: color || "" });
   }
   function pushStepNotice(state, text, color) {
     endReasoning(state);
@@ -5863,7 +5861,7 @@
     const key = shotStorageKey(wanted);
     try {
       const cur = await area.get([key, SHOT_KEY]);
-      const item = cur ? cur[key] : void 0;
+      const item = cur && cur[key];
       if (item && item.dataUrl) return item;
       const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
       return archive.find((entry) => entry && String(entry.id) === wanted && entry.dataUrl) || null;

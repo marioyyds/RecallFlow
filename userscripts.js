@@ -29,8 +29,7 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
   "z-index"
 ]);
 function esc(s) {
-  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  return String(s).replace(/[&<>"']/g, (c) => map[c]);
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 var _toastTimer = null;
 function showToast(msg, opts) {

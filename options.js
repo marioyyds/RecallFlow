@@ -210,8 +210,7 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
   "z-index"
 ]);
 function esc(s) {
-  const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  return String(s).replace(/[&<>"']/g, (c) => map[c]);
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 function isCspEvalBlockError(message) {
   const s = String(message === void 0 || message === null ? "" : message);

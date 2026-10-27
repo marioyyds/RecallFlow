@@ -511,8 +511,8 @@ export function fmtTime(ts: unknown): string {
 }
 
 export function esc(s: unknown): string {
-  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  return String(s).replace(/[&<>"']/g, (c: string) => map[c]);
+  // 保留调用点内联对象：索引只靠类型断言通过，产物与改写前逐字节相同。
+  return String(s).replace(/[&<>"']/g, (c: string) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
 }
 
 export function platformColor(id: string) {

@@ -70,9 +70,23 @@ export async function buildEntry(entry) {
   return {
     entry,
     text,
-    bytes: Buffer.byteLength(text, 'utf8'),
+    bytes: lfByteLength(text),
     moduleCount: Object.keys(result.metafile.inputs || {}).length,
   };
+}
+
+/**
+ * 产物的「内容字节数」：先把行尾归一到 LF，再按 UTF-8 计字节。
+ *
+ * 体积预算必须用它，而不是 `fs.statSync(产物).size`：`core.autocrlf=true` 的检出
+ * 会把每个 `\n` 变成 `\r\n`，盘上体积凭空变大（L-19 同族），而预算棘轮盯的是内容。
+ * 内存产物本来就是 LF，所以这个函数对「构建结果」与「归一后的盘上内容」给出同一个数。
+ * @param {string} text
+ * @returns {number}
+ */
+export function lfByteLength(text) {
+  const lf = String(text === undefined || text === null ? '' : text).replace(/\r\n/g, '\n');
+  return Buffer.byteLength(lf, 'utf8');
 }
 
 /**
