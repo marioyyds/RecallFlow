@@ -784,7 +784,7 @@ function cmdInspectElement(params: any) {
         visibleCount,
         truncated,
         touchesMain,
-        main: main ? { selector: main.selector, textLength: main.textLength } : undefined,
+        main: main as any,
       }) +
       // 逐元素明细必须并进 result —— 页面命令走到模型的那条路只取 result 字符串，
       // 只放在 matches 字段里等于丢掉（见 formatInspectMatches 的注释）。
