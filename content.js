@@ -10293,7 +10293,7 @@
     }
   }
 
-  // entries/content.js
+  // entries/content.ts
   function detectTopFrame() {
     try {
       return window.top === window;

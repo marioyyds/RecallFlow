@@ -55,9 +55,11 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  */
 export const SIZE_BUDGET_BYTES = 444 * 1024;
 
-// 入口候选，按迁移顺序排：迁移期 `entries/content.js` 会先变成 `entries/content.ts`，
-// 两个都在时以 .ts 为准（旧文件留在原地当回滚手段，构建不会再读它）。
-const ENTRY_CANDIDATES = ['entries/content.ts', 'entries/content.js'];
+// 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
+// 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；
+// `resolveContentEntry` 的兜底仍返回 `.js` 路径，只为在"两个都不在"时
+// 让 esbuild 报出带真实路径的「找不到入口」，而不是由本脚本猜一个空产物。
+const ENTRY_CANDIDATES = ['entries/content.ts'];
 
 /**
  * 选出内容脚本入口（纯函数，便于直测）。
@@ -142,7 +144,7 @@ export async function buildContentBundle(opts = {}) {
     // iife 是唯一能直接被 manifest 当普通脚本注入的形态。
     platform: 'browser',
     target: ['chrome110'],
-    // 入口把 initContentScript 挂到 window.__rfContentInit（见 entries/content.js），
+    // 入口把 initContentScript 挂到 window.__rfContentInit（见 entries/content.ts），
     // 这里在产物末尾调用它。这一步不能省：忘了它，产物会"加载成功但什么都不做"
     //（面板不出现、消息无响应），而且不会报错 —— 正是本项目反复出现的那类静默失效。
     footer: { js: 'if (window.__rfContentInit) window.__rfContentInit();' },

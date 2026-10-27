@@ -16,6 +16,19 @@ import * as picker from '../lib/page/picker.ts';
 import * as debugCapture from '../lib/page/debug-capture.ts';
 import * as chat from '../lib/page/chat.ts';
 
+// 入口在 window 上挂的三样东西：本文件自己约定的全局槽位。
+// 声明集中在这里（而不是散落 `as any`）：面板侧（chat.ts）与构建产物的 footer 都依赖它们。
+declare global {
+  interface Window {
+    /** 防重复初始化：内容脚本被同一页面重复注入时只跑一次。 */
+    __kbAiLoaded?: boolean;
+    /** 打包后共享出去的 debug-capture 实例（面板侧抓控制台快照用）。 */
+    __rfDebugCapture?: any;
+    /** 入口函数挂载点，由 build-content.mjs 的 footer 在产物末尾调用。 */
+    __rfContentInit?: () => void;
+  }
+}
+
 // 是否顶层文档。注意 `window.top === window` 在跨域 iframe 里会**抛异常**，
 // 而原先它没有任何保护 —— 异常会让整段初始化被跳过，表现为"某些页面下面板不出现"。
 function detectTopFrame() {

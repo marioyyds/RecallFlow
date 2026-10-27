@@ -222,7 +222,7 @@ test('content.js 是打包产物：自包含、无运行时动态 import', () =>
   // 背景：此前 content.js 用 `import(chrome.runtime.getURL('lib/...'))` 加载依赖，
   // 那些模块**必须**写进 web_accessible_resources —— 于是任何一个网页都能枚举并读取
   // 扩展源码（含 run_javascript 的黑名单实现，等于公开了绕过地图）。
-  // 现在改为：entries/content.js 写静态 import，由 scripts/build-content.mjs 打成单文件。
+  // 现在改为：entries/content.ts 写静态 import，由 scripts/build-content.mjs 打成单文件。
   const bundle = readFileSync(new URL('../content.js', import.meta.url), 'utf8');
   assert.ok(bundle.length > 20000, 'content.js 看起来仍是未打包的入口（太小）：' + bundle.length);
   const dyn = bundle.match(/\bimport\s*\(/g) || [];
@@ -240,8 +240,8 @@ test('manifest 不再把 lib/ 暴露为 web_accessible_resources', () => {
   assert.ok(all.some((r) => r.includes('recallflow-mark.svg')), '面板 logo 等静态资源仍应可达');
 });
 
-test('entries/content.js 用静态 import（否则打不出自包含产物）', () => {
-  const src = readFileSync(new URL('../entries/content.js', import.meta.url), 'utf8');
+test('entries/content.ts 用静态 import（否则打不出自包含产物）', () => {
+  const src = readFileSync(new URL('../entries/content.ts', import.meta.url), 'utf8');
   assert.match(src, /import \* as pageText from/, '入口应使用静态 import，esbuild 才能解析依赖图');
   // 只检查**代码**，不检查注释：源文件里有大段说明解释"为什么不再用动态 import"，
   // 其中会原样引用那个写法 —— 直接对全文做正则会被自己的注释绊倒（实测踩过）。

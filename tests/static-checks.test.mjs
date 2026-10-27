@@ -133,9 +133,9 @@ test('扫描范围覆盖根目录文件与 .mjs（原先只有 lib/ 与 .js，�
   for (const expected of ['background.js', 'popup.js']) {
     assert.ok(files.includes(expected), '根目录文件应被扫描：' + expected);
   }
-  // content.js 现在是 scripts/build-content.mjs 的**构建产物**，源码在 entries/content.js。
+  // content.js 现在是 scripts/build-content.mjs 的**构建产物**，源码在 entries/content.ts。
   // 检查产物等于检查生成器，因此源码必须被扫描、产物必须被跳过（否则 3721 处假阳性）。
-  assert.ok(files.includes('entries/content.js'), '内容脚本源码应被扫描');
+  assert.ok(files.includes('entries/content.ts'), '内容脚本源码应被扫描');
   assert.ok(!files.includes('content.js'), '构建产物不应被扫描（会产生大量假阳性）');
   assert.ok(files.some((f) => f.endsWith('.mjs')), '应扫描 .mjs 文件（门禁脚本与测试都是 .mjs）');
   assert.ok(files.some((f) => f.startsWith('scripts/')), '应扫描 scripts/');

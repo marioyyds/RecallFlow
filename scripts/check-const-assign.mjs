@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 const ROOTS = ['.'];
 // 跳过依赖、忽略目录与**构建产物**；同时纳入 .mjs（本仓库的测试与门禁脚本都是 .mjs）。
 //
-// `content.js` 是 `scripts/build-content.mjs` 生成的打包产物（源码在 entries/content.js），
+// `content.js` 是 `scripts/build-content.mjs` 生成的打包产物（源码在 entries/content.ts），
 // 必须排除：① 检查产物等于检查生成器，源码才是改动的对象；
 // ② 产物里字符串/正则的长行会被本检查器的保守剥离策略误判 ——
 //    实测扫出 3721 处假阳性，把真正的信号淹没了。
