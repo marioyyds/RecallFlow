@@ -149,7 +149,7 @@ function findElementsByRoleName(role: any, name: any) {
   const wantRole = normName(role);
   const wantName = normName(name);
   const cands = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
-  const hits: any[] = [];
+  const hits = [];
   for (const el of cands) {
     // 用**元素收集**的排除名单，而不是正文抽取那份：后者含 button/input/select，
     // 会让 role/name 定位永远找不到原生控件（实测：页面只有 <button>提交</button> 时，
@@ -1126,7 +1126,7 @@ function cmdExtractTable(params: any) {
   }
 
   // 只取属于本表的行：嵌套表格的行 closest('table') 会指向内层表，必须排除。
-  let rows: any[] = [];
+  let rows = [];
   try {
     rows = Array.from<any>(table.querySelectorAll('tr')).filter((tr: any) => tr.closest('table') === table);
   } catch (e: any) {

@@ -60,8 +60,9 @@ export function countTestFilesAnyExt() {
 /** 运行测试并解析 node:test 的汇总行。仅在 --write / 默认模式调用。 */
 export function collectTestCount() {
   // ⚠ 迁移期必须带上 TS resolve hook，口径与 run-all-checks.mjs 完全一致：
-  // importer 里仍写 `.js` 的 specifier（chat.js / commands.js / picker.js / entries/content.ts
-  // 属于 Batch 1b，本批不动）要能解析到已改名的 `.ts`。
+  // importer 里仍写 `.js` 的 specifier 要能解析到已改名的 `.ts`。
+  // Batch 1b（TITA-75）之后 lib/page 的 chat / commands / picker 与 entries/content 都已是 `.ts`，
+  // 但仍有 `lib/shared/*`、`lib/assistant/*` 等存量 `.js` 被 `.ts` 侧引用，hook 继续需要。
   // 少了 `--import`，这 68 条依赖 chat.js 的用例会 ERR_MODULE_NOT_FOUND —— 那是**环境性**失败，
   // 却会被当成真实失败写进快照（TITA-74 实测：tests 1929 / pass 1861 / fail 68）。
   // Batch 5 收口（全部 specifier 改真实后缀 + 删掉 ts-resolve*）时，连同这里一起清掉。
