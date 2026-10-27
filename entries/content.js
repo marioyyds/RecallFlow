@@ -10,10 +10,10 @@
 // 现在改成：本文件写**静态 import**（可被 esbuild 顺着解析），由 `scripts/build-content.mjs`
 // 打成单文件 `content.js`（classic 脚本、自包含、无任何动态 import），manifest 只加载产物。
 // 产物是构建物 —— **不要手工编辑 content.js**，改这里然后重新构建。
-import * as pageText from '../lib/page/page-text.js';
-import * as commands from '../lib/page/commands.js';
+import * as pageText from '../lib/page/page-text.ts';
+import * as commands from '../lib/page/commands.ts';
 import * as picker from '../lib/page/picker.ts';
-import * as debugCapture from '../lib/page/debug-capture.js';
+import * as debugCapture from '../lib/page/debug-capture.ts';
 import * as chat from '../lib/page/chat.js';
 
 // 是否顶层文档。注意 `window.top === window` 在跨域 iframe 里会**抛异常**，

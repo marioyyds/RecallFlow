@@ -16,7 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const CMD_SRC = 'lib/page/commands.js';
+const CMD_SRC = 'lib/page/commands.ts';
 const SCHEMA_SRC = 'lib/assistant/tool-schemas.js';
 
 const cmdSrc = fs.readFileSync(CMD_SRC, 'utf8');

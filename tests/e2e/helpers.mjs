@@ -298,7 +298,7 @@ export async function openFixturePage(context, urlPath) {
  *
  * 为什么要这个 helper：`inspect_element({op:"text"})` 在内容脚本里做两件事 ——
  *   ① 取节点文本；② 在**被读的元素上**派发 `recallflow:element-read`
- *      （见 `lib/page/commands.js` 的 notifyElementsRead）。
+ *      （见 `lib/page/commands.ts` 的 notifyElementsRead）。
  * 而 `innerText` / `textContent` **不产生任何 DOM 变更**，页面无法用 MutationObserver
  * 察觉"被读了" —— 所以夹具里那些"从第一次读才开始走"的时序（如 `/pick` 的重新询价）
  * 必须由这条信号驱动。用例里若用裸 `textContent` 去读，就等于**漏掉了真实读路径的一半**。

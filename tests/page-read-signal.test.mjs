@@ -2,7 +2,7 @@
 //
 // ## 为什么需要它
 //
-// `lib/page/commands.js` 的文本读取路径会**在真的被读的元素上**派发一个不冒泡的
+// `lib/page/commands.ts` 的文本读取路径会**在真的被读的元素上**派发一个不冒泡的
 // `CustomEvent('recallflow:element-read')`（见 notifyElementsRead）——
 // 这是页面上"扩展读了我的元素"这件事**唯一**可观测的形态，夹具 `/pick` 的
 // 「第一次真的被读 → 重新询价时钟才开始走」就靠它，缺了它"过期数据"这个难点
@@ -24,7 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const CMD_SRC = fs.readFileSync('lib/page/commands.js', 'utf8');
+const CMD_SRC = fs.readFileSync('lib/page/commands.ts', 'utf8');
 const EVENT_NAME = 'recallflow:element-read';
 
 /** 取一个顶层函数的源码体（到下一个顶层 function 为止）。与 form-validity 的写法一致。 */
@@ -40,11 +40,11 @@ function fnBody(src, name) {
 // ---------------------------------------------------------------- 一、事件名只准出现一次
 //
 // 统计口径 = **字面量出现次数**（含注释）—— 注释里再写一遍也算：那说明"有人开始硬编码
-// 这个东西"的风险已经出现。为此 `lib/page/commands.js` 里连说明注释都**刻意不写**这个
+// 这个东西"的风险已经出现。为此 `lib/page/commands.ts` 里连说明注释都**刻意不写**这个
 // 字面量（改写成「这个读信号事件」），全文件只有派发那一处。
 const countEventName = (src) => src.split(EVENT_NAME).length - 1;
 
-test('事件名在 lib/page/commands.js 里**只出现一次**（唯一的活动定义点）', () => {
+test('事件名在 lib/page/commands.ts 里**只出现一次**（唯一的活动定义点）', () => {
   assert.equal(
     countEventName(CMD_SRC),
     1,
@@ -94,7 +94,7 @@ test('构建产物 content.js 里同一个事件名也**恰好一次**（证明 
 // ---------------------------------------------------------------- 五、行为测试
 //
 // 能不能行为测？能 —— 本仓库已有先例：tests/lookup-diagnostics.test.mjs 给最小的
-// window/document 替身之后 `await import('../lib/page/commands.js')`，再直接调导出函数。
+// window/document 替身之后 `await import('../lib/page/commands.ts')`，再直接调导出函数。
 // 这里照同一条路：`executePageCommand('get_text', …)` 是**读文本的真实入口**，
 // 它的返回文本与页面侧收到的事件都能被这个替身观察到。
 let fakeLog = [];
@@ -149,7 +149,7 @@ globalThis.CustomEvent = class CustomEvent {
   }
 };
 
-const { executePageCommand } = await import('../lib/page/commands.js');
+const { executePageCommand } = await import('../lib/page/commands.ts');
 
 test('读文本真的会在被读的元素上派发这个事件（且不冒泡）', async () => {
   TARGET = makeEl('最近一次查看：订单号 SO-8842 · 张伟 · 已复现');

@@ -24,7 +24,7 @@ import fs from 'node:fs';
 
 import { formatInvalidControls } from '../lib/shared/utils.js';
 
-const cmdSrc = fs.readFileSync('lib/page/commands.js', 'utf8');
+const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
 
 /** 取一个顶层函数的源码体（到下一个顶层 function 为止）。 */
 function fnBody(src, name) {

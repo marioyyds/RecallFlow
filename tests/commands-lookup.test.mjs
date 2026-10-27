@@ -1,4 +1,4 @@
-// `lib/page/commands.js` 里**定位与命名**那部分的纯逻辑测试。
+// `lib/page/commands.ts` 里**定位与命名**那部分的纯逻辑测试。
 //
 // 为什么从这里下手：commands.js 有 2108 行，覆盖率基线只有 21%，且此前
 // **零** import（全靠读源码做正则的静态断言）。它是"语义定位器"的实现所在 ——
@@ -20,7 +20,7 @@ globalThis.document = {
   },
 };
 
-const cmds = await import('../lib/page/commands.js');
+const cmds = await import('../lib/page/commands.ts');
 
 /** 造一个鸭子类型元素：足够 roleOf / accessibleName 使用。 */
 function el(tag, attrs = {}, extra = {}) {

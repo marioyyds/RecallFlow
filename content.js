@@ -1427,7 +1427,7 @@
     };
   }
 
-  // lib/page/commands.js
+  // lib/page/commands.ts
   var cmdStyleReverters = [];
   var cmdTimers = [];
   var undoStack = [];
@@ -2055,7 +2055,7 @@
         visibleCount,
         truncated,
         touchesMain,
-        main
+        main: main ? { selector: main.selector, textLength: main.textLength } : void 0
       }) + // 逐元素明细必须并进 result —— 页面命令走到模型的那条路只取 result 字符串，
       // 只放在 matches 字段里等于丢掉（见 formatInspectMatches 的注释）。
       (() => {

@@ -16,7 +16,7 @@ import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/utils.js
 import { INSPECT_OPS } from '../lib/assistant/page-command-tools.js';
 import { TOOL_REGISTRY } from '../lib/assistant/tools.js';
 
-const cmdSrc = fs.readFileSync('lib/page/commands.js', 'utf8');
+const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
 const schemaSrc = fs.readFileSync('lib/assistant/tool-schemas.js', 'utf8');
 
 const inspectTool = () => TOOL_REGISTRY.find((t) => t.name === 'inspect_element');
@@ -26,7 +26,9 @@ const inspectTool = () => TOOL_REGISTRY.find((t) => t.name === 'inspect_element'
 test('op=styles 已接到内容脚本的 read_styles 命令上', () => {
   assert.equal(INSPECT_OPS.styles, 'read_styles', 'INSPECT_OPS 里必须有 styles → read_styles');
   assert.match(cmdSrc, /case 'read_styles': return cmdReadStyles\(params\)/, '派发表里必须有 read_styles 分支');
-  assert.match(cmdSrc, /function cmdReadStyles\(params\)/, '必须有 cmdReadStyles 实现');
+  // 签名里的类型标注是 TS 迁移（TITA-75）加的：允许 `params` 后面带可选标注，
+  // 但函数名与参数名仍必须逐字对上 —— 这条门禁防的是"没有实现"，不是防类型。
+  assert.match(cmdSrc, /function cmdReadStyles\(params(?::[^)]*)?\)/, '必须有 cmdReadStyles 实现');
 });
 
 test('cmdReadStyles 复用 readElementState，不另写一套取值逻辑', () => {

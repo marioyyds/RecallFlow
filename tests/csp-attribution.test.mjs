@@ -31,7 +31,7 @@ const SURFACES = [
   'lib/assistant/skill-defs.js',
   'lib/assistant/code-access-tools.js',
   'lib/assistant/page-command-tools.js',
-  'lib/page/commands.js',
+  'lib/page/commands.ts',
   'README.md',
   // 中文 README 是 README.md 的逐节副本：文本搬走后不能因此逃出这道门禁。
   'README.zh-CN.md',

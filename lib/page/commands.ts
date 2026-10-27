@@ -1,24 +1,24 @@
 // 页面命令系统：结构化命令控制当前页面 DOM（高亮、滚动、改样式、点击、描边、读取）。
 // 通过 chrome.runtime 消息由后台 Agent 工具（page_command）或用户直接调用。
-import { normalizeCitationText, PAGE_TEXT_EXCLUDE, isElementCollectExcluded, buildPageCharMap, findRangeBySubstr, overlayElement, overlayColor, overlayRange, disposeOverlays } from './citation.js';
-import { getInteractiveElementByRef, getRefFingerprint, elementSelector, absoluteRect, findMainContent, isElementRendered, shadowDepth, ancestorPath, resolveElementRef } from './page-text.js';
-import { expandTableGrid, formatTableText } from '../shared/table.js';
+import { normalizeCitationText, PAGE_TEXT_EXCLUDE, isElementCollectExcluded, buildPageCharMap, findRangeBySubstr, overlayElement, overlayColor, overlayRange, disposeOverlays } from './citation.ts';
+import { getInteractiveElementByRef, getRefFingerprint, elementSelector, absoluteRect, findMainContent, isElementRendered, shadowDepth, ancestorPath, resolveElementRef } from './page-text.ts';
+import { expandTableGrid, formatTableText } from '../shared/table.ts';
 // 页面原文（含图表/数学/表情符号里的星形平面字符）一律用 sliceSafe 截断：
 // 按码元下标切会留下孤立代理，进请求体就会被服务端整单拒收（见 surrogates.js 的事故说明）。
 import { sliceSafe } from '../shared/surrogates.js';
 import { formatInspectSummary, formatInspectMatches, formatHighlightResult, DEFAULT_STYLE_PROPS, formatStylesSummary, formatSelectOptions, formatInvalidControls } from '../shared/utils.js';
 import { HIGHLIGHT_MAX_TEXTS } from '../shared/constants.js';
-import { waitForSettle } from './settle.js';
+import { waitForSettle } from './settle.ts';
 import { editableTextSummary } from '../shared/editable-text.js';
 
-let cmdStyleReverters = []; // set_style 的还原函数
-let cmdTimers = []; // outline / set_style 的定时器
+let cmdStyleReverters: any[] = []; // set_style 的还原函数
+let cmdTimers: any[] = []; // outline / set_style 的定时器
 
 // 动作撤销栈：每个可逆动作（输入/勾选/选择/改样式/滚动）压入一个还原闭包。
 // 页面导航会自然重置（内容脚本重载），因此无需持久化。
-const undoStack = [];
+const undoStack: any[] = [];
 const MAX_UNDO = 40;
-function pushUndo(fn) {
+function pushUndo(fn: any) {
   if (typeof fn !== 'function') return;
   undoStack.push(fn);
   if (undoStack.length > MAX_UNDO) undoStack.shift();
@@ -30,7 +30,7 @@ export function undoLast() {
   try {
     fn();
     return { ok: true, result: '已撤销上一步操作' };
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '撤销失败：' + (e && e.message ? e.message : String(e)) };
   }
 }
@@ -42,7 +42,7 @@ function clearCmdOverlays() {
 export function resetPageCommands() {
   clearCmdOverlays();
   cmdStyleReverters.forEach((fn) => {
-    try { fn(); } catch (e) {}
+    try { fn(); } catch (e: any) {}
   });
   cmdStyleReverters = [];
   cmdTimers.forEach((t) => clearTimeout(t));
@@ -50,28 +50,28 @@ export function resetPageCommands() {
 }
 
 // 递归查询：穿透同源 iframe 与开放 shadow DOM（跨源 iframe 会被 try/catch 跳过）。
-function queryAllInFrames(root, selector, into = []) {
+function queryAllInFrames(root: any, selector: any, into: any[] = []) {
   try {
     Array.prototype.push.apply(into, root.querySelectorAll(selector));
-  } catch (e) {}
+  } catch (e: any) {}
   try {
-    root.querySelectorAll('*').forEach((el) => {
+    root.querySelectorAll('*').forEach((el: any) => {
       if (el.shadowRoot) queryAllInFrames(el.shadowRoot, selector, into);
       if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
         const doc = el.contentDocument;
         if (doc && doc !== root) queryAllInFrames(doc, selector, into);
       }
     });
-  } catch (e) {}
+  } catch (e: any) {}
   return into;
 }
 
 // 按文本查找最具体（最深）的匹配元素，避免返回整个 body/大容器
-function findElementsByText(text, limit) {
+function findElementsByText(text: any, limit: any) {
   const q = normalizeCitationText(text);
   if (!q) return [];
   const cands = queryAllInFrames(document, 'p,h1,h2,h3,h4,h5,h6,li,td,th,dt,dd,span,a,div,blockquote,figcaption');
-  const hits = [];
+  const hits: any[] = [];
   for (const el of cands) {
     if (isElementCollectExcluded(el)) continue;
     if (normalizeCitationText(el.textContent).includes(q)) hits.push(el);
@@ -82,14 +82,14 @@ function findElementsByText(text, limit) {
 }
 
 // ---- Locator 抽象：ref → role+name → testid → text → css，逐级回退 ----
-function cssEscapeLocal(value) {
+function cssEscapeLocal(value: any) {
   const s = String(value || '');
   if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
   return s.replace(/[^a-zA-Z0-9_-]/g, (c) => '\\' + c);
 }
 
 // 隐式 role（无显式 role 属性时按标签/类型推断），与 AX 树的常见 role 对齐。
-export function roleOf(el) {
+export function roleOf(el: any) {
   const explicit = (el.getAttribute('role') || '').trim().toLowerCase();
   if (explicit) return explicit;
   const tag = el.tagName.toLowerCase();
@@ -114,19 +114,19 @@ export function roleOf(el) {
 }
 
 // 可访问名（accessible name）：aria-label → aria-labelledby → <label> → placeholder → title → alt → 文本。
-export function accessibleName(el) {
+export function accessibleName(el: any) {
   const aria = el.getAttribute('aria-label');
   if (aria && aria.trim()) return aria.trim();
   const labelledby = el.getAttribute('aria-labelledby');
   if (labelledby) {
     const parts = labelledby
       .split(/\s+/)
-      .map((id) => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; })
+      .map((id: any) => { const t = document.getElementById(id); return t ? t.textContent || '' : ''; })
       .filter(Boolean);
     if (parts.length) return parts.join(' ').replace(/\s+/g, ' ').trim();
   }
   if (el.labels && el.labels.length) {
-    const t = Array.from(el.labels).map((l) => l.textContent || '').join(' ').replace(/\s+/g, ' ').trim();
+    const t = Array.from<any>(el.labels).map((l: any) => l.textContent || '').join(' ').replace(/\s+/g, ' ').trim();
     if (t) return t;
   }
   for (const attr of ['placeholder', 'title', 'alt']) {
@@ -138,18 +138,18 @@ export function accessibleName(el) {
   return sliceSafe((el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim(), 0, 120);
 }
 
-function normName(s) {
+function normName(s: any) {
   return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 // 可交互候选的统一选择器：role/name 查找与「近似候选」诊断共用，保证两者看到同一批元素。
 const TARGET_CANDIDATE_SELECTOR = 'a,button,input,textarea,select,summary,option,[role],[contenteditable="true"]';
 
-function findElementsByRoleName(role, name) {
+function findElementsByRoleName(role: any, name: any) {
   const wantRole = normName(role);
   const wantName = normName(name);
   const cands = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
-  const hits = [];
+  const hits: any[] = [];
   for (const el of cands) {
     // 用**元素收集**的排除名单，而不是正文抽取那份：后者含 button/input/select，
     // 会让 role/name 定位永远找不到原生控件（实测：页面只有 <button>提交</button> 时，
@@ -168,7 +168,7 @@ function findElementsByRoleName(role, name) {
 }
 
 /** 两个名字的相似度：公共前缀长度 ×2 + 公共字符数。用于给「近似候选」排序。 */
-export function nameSimilarity(a, b) {
+export function nameSimilarity(a: any, b: any) {
   const x = normName(a);
   const y = normName(b);
   if (!x || !y) return 0;
@@ -191,7 +191,7 @@ export function nameSimilarity(a, b) {
  * 只要把「同 role 但名字不同」的候选连同它们的准确名字列出来，这类问题**一轮就能自纠**，
  * 而不是让模型在错误归因上继续消耗额度。
  */
-export function describeLookupMiss(params = {}, limit = 5) {
+export function describeLookupMiss(params: any = {}, limit = 5) {
   const wantRole = normName(params.role);
   const wantName = normName(params.name);
   if (!wantRole && !wantName) return '';
@@ -199,7 +199,7 @@ export function describeLookupMiss(params = {}, limit = 5) {
   try {
     const cands = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
     pool = cands.filter((el) => !isElementCollectExcluded(el) && isVisibleForAction(el));
-  } catch (e) {
+  } catch (e: any) {
     return '';
   }
   if (wantRole) pool = pool.filter((el) => roleOf(el) === wantRole);
@@ -219,7 +219,7 @@ export function describeLookupMiss(params = {}, limit = 5) {
     let sel = '';
     try {
       sel = elementSelector(x.el);
-    } catch (e) {}
+    } catch (e: any) {}
     return '  - ' + role + '「' + x.name.slice(0, 60) + '」' + (sel ? '  ' + sel : '');
   });
   return (
@@ -241,7 +241,7 @@ export function describeLookupMiss(params = {}, limit = 5) {
  * 停在「跟随系统」而无法复原 —— 它缺少「读回当前状态」的手段，只能靠猜。
  * 点击后把状态属性一并回报，"点了之后变成了什么"就不再需要猜。
  */
-export function describeTargetState(el) {
+export function describeTargetState(el: any) {
   if (!el) return '';
   const parts = [];
   for (const attr of ['aria-label', 'aria-pressed', 'aria-checked', 'aria-expanded', 'aria-selected', 'aria-disabled', 'title']) {
@@ -254,7 +254,7 @@ export function describeTargetState(el) {
 }
 
 /** 统一的定位失败信息：附上近似候选。 */
-function targetMissError(params) {
+function targetMissError(params: any) {
   if (params && params.ref) {
     if (getRefFingerprint(params.ref)) {
       return 'ref「' + params.ref + '」已失效：页面结构已变化（元素被替换/移除）。请重新 get_page_snapshot 获取新 ref，不要继续用旧 ref。';
@@ -265,7 +265,7 @@ function targetMissError(params) {
   return hint ? '未找到目标元素。' + hint : '未找到目标元素';
 }
 
-function findElementsByTestId(testid) {
+function findElementsByTestId(testid: any) {
   const q = String(testid || '');
   if (!q) return [];
   const esc = cssEscapeLocal(q);
@@ -274,13 +274,13 @@ function findElementsByTestId(testid) {
     .join(',');
   try {
     return queryAllInFrames(document, sel);
-  } catch (e) {
+  } catch (e: any) {
     return [];
   }
 }
 
 // 按 ref / role+name / testid / selector / text 解析目标元素列表
-function findElementsFor(params) {
+function findElementsFor(params: any) {
   let els = [];
   if (params.ref) {
     const el = getInteractiveElementByRef(params.ref);
@@ -292,7 +292,7 @@ function findElementsFor(params) {
   } else if (params.selector) {
     try {
       els = queryAllInFrames(document, params.selector);
-    } catch (e) {
+    } catch (e: any) {
       els = [];
     }
   } else if (params.text) {
@@ -307,18 +307,18 @@ function findElementsFor(params) {
 }
 
 // 把 ref/selector/text 解析为一个唯一 CSS 选择器（供主世界据此解析元素源码位置）。
-export function resolveElementSelector(params) {
+export function resolveElementSelector(params: any) {
   try {
     const els = findElementsFor(params || {});
     if (!els.length) return null;
     return elementSelector(els[0]);
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }
 
 // 解析目标元素并返回「唯一选择器 + 绝对视口坐标」，供后台用 CDP 按坐标做可信输入。
-export function resolveTargetInfo(params) {
+export function resolveTargetInfo(params: any) {
   try {
     const els = findElementsFor(params || {});
     if (!els.length) return { found: false, reason: targetMissError(params) };
@@ -341,7 +341,7 @@ export function resolveTargetInfo(params) {
       editable: Boolean(el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'INPUT'),
       label,
     };
-  } catch (e) {
+  } catch (e: any) {
     return { found: false, reason: e.message };
   }
 }
@@ -349,27 +349,27 @@ export function resolveTargetInfo(params) {
 // ---- 元素渲染态读取（供 MCP 的 verify_change 断言「改完代码后页面对不对」）----
 
 // 元素是否被渲染出可见布局。注意语义是「有布局且可见」，不要求落在当前视口内。
-function isRenderedForVerify(el) {
+function isRenderedForVerify(el: any) {
   try {
     const cs = window.getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
     if (Number(cs.opacity) === 0) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
-  } catch (e) {
+  } catch (e: any) {
     return false;
   }
 }
 
-function normalizeInnerText(el) {
+function normalizeInnerText(el: any) {
   return sliceSafe(String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim(), 0, 300);
 }
 
 // 读取单个元素的渲染态；styles 为需要额外读取的计算样式属性名列表。
-function readElementState(el, styles) {
+function readElementState(el: any, styles: any) {
   const rect = el.getBoundingClientRect();
   const cs = window.getComputedStyle(el);
-  const state = {
+  const state: any = {
     selector: elementSelector(el),
     tag: el.tagName.toLowerCase(),
     visible: isRenderedForVerify(el),
@@ -378,13 +378,13 @@ function readElementState(el, styles) {
   };
   if (typeof el.value === 'string') state.value = sliceSafe(el.value, 0, 300);
   if (Array.isArray(styles) && styles.length) {
-    const out = {};
+    const out: Record<string, string> = {};
     for (const p of styles.slice(0, 12)) {
       const prop = String(p || '').trim();
       if (!prop) continue;
       try {
         out[prop] = sliceSafe(String(cs.getPropertyValue(prop) || '').trim(), 0, 120);
-      } catch (e) {}
+      } catch (e: any) {}
     }
     state.styles = out;
   }
@@ -397,7 +397,7 @@ function readElementState(el, styles) {
  * 因此与 click_element / type_text 等工具使用同一套定位语义，HMR 后不会因换定位方式而失配。
  * @param {Array} targets - [{label, selector|ref|role+name|testid|text, index?, styles?}]
  */
-export function verifyTargets(targets) {
+export function verifyTargets(targets: any) {
   const list = Array.isArray(targets) ? targets.slice(0, 20) : [];
   return list.map((t, i) => {
     const src = t || {};
@@ -407,13 +407,13 @@ export function verifyTargets(targets) {
     let els = [];
     try {
       els = findElementsFor(locator);
-    } catch (e) {
+    } catch (e: any) {
       els = [];
     }
     const idxRaw = Number(src.index);
     const idx = Number.isInteger(idxRaw) && idxRaw >= 0 ? idxRaw : 0;
     const el = els[idx] || null;
-    const out = { index: i, label: String(src.label || '').trim(), count: els.length, found: Boolean(el) };
+    const out: any = { index: i, label: String(src.label || '').trim(), count: els.length, found: Boolean(el) };
     if (el) {
       Object.assign(out, readElementState(el, src.styles));
     } else if (!hasLocator) {
@@ -428,16 +428,16 @@ export function verifyTargets(targets) {
 }
 
 // 按文本精确定位 Range（复用引用定位的字符级匹配）
-function findRangeFor(params) {
+function findRangeFor(params: any) {
   if (!params.text) return null;
   try {
     return findRangeBySubstr(buildPageCharMap(), params.text);
-  } catch (e) {
+  } catch (e: any) {
     return null;
   }
 }
 
-function scrollRangeIntoView(range) {
+function scrollRangeIntoView(range: any) {
   const rect = range.getBoundingClientRect();
   if (rect && rect.height) {
     window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - window.innerHeight * 0.38), behavior: 'smooth' });
@@ -447,11 +447,11 @@ function scrollRangeIntoView(range) {
   }
 }
 
-function cmdHighlight(params) {
+function cmdHighlight(params: any) {
   const color = params.color || overlayColor();
   // 批量模式：一次调用高亮多个文本片段（texts 数组），避免逐条调用浪费 Agent 轮次。
   if (params.texts && Array.isArray(params.texts)) {
-    const requested = params.texts.map((t) => String(t).trim()).filter(Boolean);
+    const requested = params.texts.map((t: any) => String(t).trim()).filter(Boolean);
     // 单次上限是性能护栏（每条都要建字符映射 + 落一层浮层），但不能**默默**截断。
     // 原实现先 slice(0, 20) 再报 texts.length，于是传 25 条会返回
     // 「已高亮 20 / 20 处关键信息」—— 调用方以为 25 条全做了。
@@ -502,7 +502,7 @@ function cmdHighlight(params) {
   return { ok: false, error: 'highlight 需要 texts、text 或 selector 参数' };
 }
 
-function cmdScrollTo(params) {
+function cmdScrollTo(params: any) {
   const behavior = params.behavior === 'auto' ? 'auto' : 'smooth';
   const block = params.block || 'start';
   const beforeX = window.scrollX;
@@ -568,7 +568,7 @@ function cmdScrollTo(params) {
   return { ok: false, error: 'scroll_to 需要 ref/text/selector 或 top/left 参数' };
 }
 
-function cmdScrollBy(params) {
+function cmdScrollBy(params: any) {
   const beforeX = window.scrollX;
   const beforeY = window.scrollY;
   window.scrollBy({
@@ -580,7 +580,7 @@ function cmdScrollBy(params) {
   return { ok: true, result: '已滚动' };
 }
 
-function cmdOutline(params) {
+function cmdOutline(params: any) {
   const color = params.color || '#ff5722';
   const els = findElementsFor(params);
   if (!els.length) return { ok: false, error: targetMissError(params) };
@@ -596,7 +596,7 @@ function cmdOutline(params) {
   return { ok: true, result: '已描边 ' + els.length + ' 个元素' };
 }
 
-function cmdSetStyle(params) {
+function cmdSetStyle(params: any) {
   // hide 语法糖：隐藏是最高频用法，且比「从 DOM 移除」安全得多
   // （移除节点会让站点自身的状态跟踪失准：无限滚动、内容可见性、广告 SDK 都会报错）。
   const hide = params.hide;
@@ -610,17 +610,17 @@ function cmdSetStyle(params) {
   // 批量：一次处理多个选择器。没有批量参数时，「隐藏 N 个元素」= N 次工具调用，
   // 模型会倾向改用 run_javascript 写循环 —— 而循环里往往顺手 remove() 掉节点。
   const selectorList = Array.isArray(params.selectors)
-    ? params.selectors.map((s) => String(s === undefined || s === null ? '' : s).trim()).filter(Boolean).slice(0, 20)
+    ? params.selectors.map((s: any) => String(s === undefined || s === null ? '' : s).trim()).filter(Boolean).slice(0, 20)
     : [];
 
-  let els = [];
+  let els: any[] = [];
   const misses = [];
   if (selectorList.length) {
     for (const sel of selectorList) {
       let hit = [];
       try {
         hit = findElementsFor({ selector: sel });
-      } catch (e) {
+      } catch (e: any) {
         hit = [];
       }
       if (hit.length) els = els.concat(hit);
@@ -638,7 +638,7 @@ function cmdSetStyle(params) {
   const backups = els.map((el) => ({ el, old: el.style.cssText }));
   els.forEach((el) => {
     Object.keys(styles).forEach((k) => {
-      try { el.style[k] = styles[k]; } catch (e) {}
+      try { el.style[k] = styles[k]; } catch (e: any) {}
     });
   });
   const revert = () => backups.forEach((b) => { b.el.style.cssText = b.old; });
@@ -677,7 +677,7 @@ function cmdSetStyle(params) {
 //
 // 关键：`validationMessage` 是**浏览器语言**的（中英日随环境变），拿它做判据会脆；
 // 所以同时给出**与语言无关的约束名**（valueMissing / tooShort / typeMismatch …）。
-function collectInvalidControls(root) {
+function collectInvalidControls(root: any) {
   const out = [];
   const seenSel = new Set();
   // 扫描范围：元素自身 + 它内部的控件 + **它所在的那个表单**。
@@ -687,19 +687,19 @@ function collectInvalidControls(root) {
   // 只好连续 9 次 `get_attribute` 把 required/pattern/type 全读一遍自己推（31 次调用、2 次审批）。
   // 校验的作用域本来就是**表单**，所以被查元素在某个 form 里时，一并把那个 form 的
   // 未通过字段报出来 —— 这才是用户/模型真正想问的那个问题。
-  const roots = [];
-  const push = (el) => {
+  const roots: any[] = [];
+  const push = (el: any) => {
     if (el && roots.indexOf(el) === -1) roots.push(el);
   };
   push(root);
   try {
     if (root && root.closest) push(root.closest('form'));
-  } catch (e) {}
+  } catch (e: any) {}
   for (const scope of roots) {
     let nodes = [];
     try {
       nodes = Array.prototype.slice.call(scope.querySelectorAll('input, select, textarea'));
-    } catch (e) {
+    } catch (e: any) {
       nodes = [];
     }
     if (scope && /^(INPUT|SELECT|TEXTAREA)$/.test(String(scope.tagName || ''))) nodes.unshift(scope);
@@ -726,7 +726,7 @@ function collectInvalidControls(root) {
   return out;
 }
 
-function cmdInspectElement(params) {
+function cmdInspectElement(params: any) {
   // 命中总数必须在**截断之前**取。
   // 原实现先 slice(0, 8) 再把 matches.length 当作命中数报出去，于是任何命中 ≥8 个
   // 元素的选择器都恒返回「命中 8 个元素」—— 而调用方无法区分「正好 8 个」与
@@ -745,7 +745,7 @@ function cmdInspectElement(params) {
     if (mainSel) {
       try {
         containsMain = elementSelector(el) === mainSel || Boolean(el.querySelector(mainSel));
-      } catch (e) {
+      } catch (e: any) {
         containsMain = false;
       }
     }
@@ -784,7 +784,7 @@ function cmdInspectElement(params) {
         visibleCount,
         truncated,
         touchesMain,
-        main,
+        main: main ? { selector: main.selector, textLength: main.textLength } : undefined,
       }) +
       // 逐元素明细必须并进 result —— 页面命令走到模型的那条路只取 result 字符串，
       // 只放在 matches 字段里等于丢掉（见 formatInspectMatches 的注释）。
@@ -808,16 +808,16 @@ function cmdInspectElement(params) {
  * “给条件，返回候选清单”，并且把 ref / rect / role / name / customElement / shadowDepth
  * 一次交齐，后续动作可以直接用返回的 ref。
  */
-function cmdQueryElements(params) {
+function cmdQueryElements(params: any) {
   const p = params || {};
   const limit = Math.min(50, Math.max(1, Number(p.limit) || 20));
   const includeHidden = p.includeHidden === true;
   const seen = new Set();
-  const all = [];
+  const all: any[] = [];
   // 有多少命中因为「不可见」被筛掉。零命中时这是最有用的诊断：
   // 元素存在但被折叠/懒加载/透明，与「页面上根本没有它」是两种完全不同的下一步。
   let hiddenSkipped = 0;
-  const push = (el) => {
+  const push = (el: any) => {
     if (!el || seen.has(el)) return;
     if (isElementCollectExcluded(el)) return;
     if (!includeHidden && !isElementRendered(el)) {
@@ -829,7 +829,7 @@ function cmdQueryElements(params) {
   };
 
   if (p.selector) {
-    try { queryAllInFrames(document, p.selector).forEach(push); } catch (e) {}
+    try { queryAllInFrames(document, p.selector).forEach(push); } catch (e: any) {}
   } else if (p.role || p.name) {
     findElementsByRoleName(p.role, p.name).forEach(push);
     // custom element 未必有 role：按可访问名再补一轮，解决 xhs-publish-btn 这类目标。
@@ -841,7 +841,7 @@ function cmdQueryElements(params) {
           if (normName(accessibleName(el)).indexOf(normName(p.name)) === -1) return;
           push(el);
         });
-      } catch (e) {}
+      } catch (e: any) {}
     }
   } else if (p.testid) {
     findElementsByTestId(p.testid).forEach(push);
@@ -852,7 +852,7 @@ function cmdQueryElements(params) {
       // 不能边扫边按可见性丢：textContent 会把 display:none 子树里的文字也算进来，
       // 于是 body 这类可见容器会因为「内部有个隐藏按钮」而假命中（实测夹具：
       // 查「隐藏操作」只返回 body，零命中诊断就永远触发不了）。
-      const raw = [];
+      const raw: any[] = [];
       try {
         queryAllInFrames(document, '*').forEach((el) => {
           if (isElementCollectExcluded(el)) return;
@@ -860,21 +860,21 @@ function cmdQueryElements(params) {
           if (!text.includes(q)) return;
           raw.push(el);
         });
-      } catch (e) {}
-      const hiddenRaw = [];
-      const visibleRaw = [];
+      } catch (e: any) {}
+      const hiddenRaw: any[] = [];
+      const visibleRaw: any[] = [];
       for (const el of raw) {
         (isElementRendered(el) ? visibleRaw : hiddenRaw).push(el);
       }
-      const visibleTextHas = (el) => {
+      const visibleTextHas = (el: any) => {
         try {
           return normalizeCitationText(el.innerText).includes(q);
-        } catch (e) {
+        } catch (e: any) {
           return true; // 读不到 innerText 时不要凭猜测把候选丢掉
         }
       };
       const reclassifiedHidden = [];
-      const visibleMatches = [];
+      const visibleMatches: any[] = [];
       for (const el of visibleRaw) {
         // 只有「可见容器内部还有隐藏命中」才需要用渲染文本复核 —— innerText 会触发布局，
         // 不该对每个候选都读。这一步正是为了挡住 body/大容器的假命中。
@@ -963,7 +963,7 @@ function cmdQueryElements(params) {
       let bodyText = '';
       try {
         bodyText = normalizeCitationText(document.body ? document.body.innerText : '');
-      } catch (e) {}
+      } catch (e: any) {}
       const q = normalizeCitationText(p.text);
       reasons.push(
         q && bodyText.includes(q)
@@ -1027,7 +1027,7 @@ function cmdQueryElements(params) {
 //（`Array.from(s.options).map(...)`）—— 白花一次高危审批，CSP 严的页面还会直接失败。
 //
 // 返回里同时给结构化 items 与拼好的文本；**文本必须并进 result**（见 docs/tool-design.md §6）。
-function cmdReadOptions(params) {
+function cmdReadOptions(params: any) {
   const els = findElementsFor(params);
   if (!els.length) return { ok: false, error: targetMissError(params) };
   const el = els[0];
@@ -1068,12 +1068,12 @@ function cmdReadOptions(params) {
   };
 }
 
-function cmdReadStyles(params) {
+function cmdReadStyles(params: any) {
   const els = findElementsFor(params);
   if (!els.length) return { ok: false, error: targetMissError(params) };
   const wanted =
     Array.isArray(params.props) && params.props.length
-      ? params.props.map((p) => String(p === undefined || p === null ? '' : p).trim()).filter(Boolean).slice(0, 12)
+      ? params.props.map((p: any) => String(p === undefined || p === null ? '' : p).trim()).filter(Boolean).slice(0, 12)
       : DEFAULT_STYLE_PROPS.slice();
   const MAX_LISTED = 8;
   const listed = els.slice(0, MAX_LISTED);
@@ -1091,7 +1091,7 @@ function cmdReadStyles(params) {
 // 结构化提取 <table>：把合并单元格还原成矩形网格后再输出。
 // 朴素做法（逐行取 td 文本）在 rowspan/colspan 存在时必然整体错位。
 // 网格展开算法在 lib/shared/table.js（纯函数，有单测）。
-function cmdExtractTable(params) {
+function cmdExtractTable(params: any) {
   const p = params || {};
   let table = null;
   let total = 0;
@@ -1115,7 +1115,7 @@ function cmdExtractTable(params) {
       const idx = Math.max(0, Number(p.index) || 0);
       table = all[idx] || null;
     }
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '查找表格失败：' + ((e && e.message) || String(e)) };
   }
   if (!table) {
@@ -1126,16 +1126,16 @@ function cmdExtractTable(params) {
   }
 
   // 只取属于本表的行：嵌套表格的行 closest('table') 会指向内层表，必须排除。
-  let rows = [];
+  let rows: any[] = [];
   try {
-    rows = Array.from(table.querySelectorAll('tr')).filter((tr) => tr.closest('table') === table);
-  } catch (e) {
+    rows = Array.from<any>(table.querySelectorAll('tr')).filter((tr: any) => tr.closest('table') === table);
+  } catch (e: any) {
     rows = [];
   }
   const raw = rows.map((tr) =>
-    Array.from(tr.children || [])
-      .filter((c) => c.tagName === 'TD' || c.tagName === 'TH')
-      .map((c) => ({
+    Array.from<any>(tr.children || [])
+      .filter((c: any) => c.tagName === 'TD' || c.tagName === 'TH')
+      .map((c: any) => ({
         // innerText 对 display:none 的单元格返回空串，正是我们想要的（隐藏列不该进数据）
         text: (c.innerText || c.textContent || '').replace(/\s+/g, ' ').trim(),
         colspan: Number(c.getAttribute('colspan')) || 1,
@@ -1174,7 +1174,7 @@ function cmdExtractTable(params) {
   };
 }
 
-async function cmdClick(params) {
+async function cmdClick(params: any) {
   const els = findElementsFor(params);
   if (!els.length) return { ok: false, error: targetMissError(params) };
   const el = els[0];
@@ -1194,13 +1194,13 @@ async function cmdClick(params) {
         const navigated = location.href !== beforeHref ? '（页面已导航到 ' + location.href + '）' : '';
         return { ok: true, forced: true, selector: elementSelector(el), result: '目标元素被遮挡或暂不可交互，已改用程序化点击' + stateSuffix(el) + navigated };
       }
-    } catch (e) {}
+    } catch (e: any) {}
     return { ok: false, error: '目标元素不可操作（不可见、被遮挡或尚未就绪）：' + tag + ' ' + describeTargetState(el) };
   }
   const before = describeTargetState(el);
   try {
     dispatchRealisticClick(el);
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '点击失败：' + e.message };
   }
   // 点击后回报状态：三态开关 / 展开收起 / 勾选这类控件，光说「已点击」等于没说 ——
@@ -1235,7 +1235,7 @@ function nextPaint() {
   return waitForSettle();
 }
 
-function stateSuffix(el) {
+function stateSuffix(el: any) {
   const state = describeTargetState(el);
   if (!state) return '';
   // 元素可能已被点击导航掉：此时读不到状态，如实说而不是假装有。
@@ -1243,7 +1243,7 @@ function stateSuffix(el) {
   return '；点击后状态：' + state;
 }
 
-function cmdGetText(params) {
+function cmdGetText(params: any) {
   if (params.text) {
     const range = findRangeFor(params);
     if (range) return { ok: true, result: range.toString() };
@@ -1283,17 +1283,17 @@ function cmdGetText(params) {
  * 派发本身包在 try 里：页面里存在同名监听器却抛异常时，**不能**因此让"读文本"失败 ——
  * 读取类工具的结果与页面脚本的健壮性无关。
  */
-function notifyElementsRead(els) {
+function notifyElementsRead(els: any) {
   try {
     const list = Array.isArray(els) ? els : [els];
     for (const el of list) {
       if (!el || typeof el.dispatchEvent !== 'function') continue;
       el.dispatchEvent(new CustomEvent('recallflow:element-read', { bubbles: false, detail: { op: 'text' } }));
     }
-  } catch (e) { /* 页面监听器抛异常不影响读取结果 */ }
+  } catch (e: any) { /* 页面监听器抛异常不影响读取结果 */ }
 }
 
-function firstTarget(params, includeText = true) {
+function firstTarget(params: any, includeText = true) {
   const source = params || {};
   // ⚠ **必须把语义定位符一起转发**。
   //
@@ -1315,12 +1315,12 @@ function firstTarget(params, includeText = true) {
     selector: source.selector,
     index: source.index,
   };
-  if (includeText) target.text = source.text;
+  if (includeText) (target as any).text = source.text;
   const els = findElementsFor(target);
   return els.length ? els[0] : null;
 }
 
-function isVisibleForAction(el) {
+function isVisibleForAction(el: any) {
   if (!el || !el.isConnected) return false;
   const style = window.getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
@@ -1337,7 +1337,7 @@ function isVisibleForAction(el) {
 //   · `click_element` 看似能用，其实只是靠"被遮挡就改用程序化点击"的兜底，
 //     而且反馈里那句「被遮挡」是**假的** —— 它会把模型引向"有东西挡住了"这个错误方向。
 // `ShadowRoot` 上也有 `elementFromPoint`，逐层往下钻即可拿到真正的命中元素。
-function deepestElementAt(x, y) {
+function deepestElementAt(x: any, y: any) {
   let el = document.elementFromPoint(x, y);
   let guard = 0;
   // 最多下钻 10 层，防止异常结构造成死循环
@@ -1345,7 +1345,7 @@ function deepestElementAt(x, y) {
     let inner = null;
     try {
       inner = el.shadowRoot.elementFromPoint(x, y);
-    } catch (e) {
+    } catch (e: any) {
       inner = null;
     }
     if (!inner || inner === el) break;
@@ -1358,7 +1358,7 @@ function deepestElementAt(x, y) {
 // node 是否就是 el、或位于 el 的（穿透 shadow 边界的）子树里。
 // 为什么不能用 `el.contains(node)`：`contains` **不跨 shadow 边界**，
 // 于是"命中元素其实是 el 的 shadow 子节点"这种情况会被误判成遮挡。
-function isSelfOrShadowDescendant(node, el) {
+function isSelfOrShadowDescendant(node: any, el: any) {
   let n = node;
   let guard = 0;
   while (n && guard < 50) {
@@ -1370,7 +1370,7 @@ function isSelfOrShadowDescendant(node, el) {
   return false;
 }
 
-function isElementCovered(el) {
+function isElementCovered(el: any) {
   if (!el || !el.isConnected) return false;
   const rect = el.getBoundingClientRect();
   if (!rect.width || !rect.height) return false;
@@ -1382,7 +1382,7 @@ function isElementCovered(el) {
   return !isSelfOrShadowDescendant(top, el);
 }
 
-function isActionable(el) {
+function isActionable(el: any) {
   if (!el || !el.isConnected) return false;
   if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
   const style = window.getComputedStyle(el);
@@ -1391,11 +1391,11 @@ function isActionable(el) {
 }
 
 // 动作前准备：滚动到视口，并轮询等待元素可见、可用、不被遮挡。
-function ensureActionable(el, timeoutMs = 3000) {
+function ensureActionable(el: any, timeoutMs = 3000) {
   return new Promise((resolve) => {
     const started = Date.now();
     const scroll = () => {
-      try { el.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch (e) {}
+      try { el.scrollIntoView({ behavior: 'auto', block: 'center' }); } catch (e: any) {}
     };
     scroll();
     const check = () => {
@@ -1410,7 +1410,7 @@ function ensureActionable(el, timeoutMs = 3000) {
 
 // 派发完整的指针/鼠标事件序列，兼容只监听 pointerdown/mousedown 的框架；
 // 最后用 el.click() 触发浏览器默认行为（链接跳转、表单提交）。
-function dispatchRealisticClick(el) {
+function dispatchRealisticClick(el: any) {
   const rect = el.getBoundingClientRect();
   const opts = {
     bubbles: true,
@@ -1430,7 +1430,7 @@ function dispatchRealisticClick(el) {
   if (el.click) el.click();
 }
 
-function editableValue(el) {
+function editableValue(el: any) {
   if (!el) return null;
   // contenteditable 的 textContent 会把段落边界压成连续文本；innerText 保留换行。
   // 输入校验必须基于用户实际看到/编辑器实际读到的文本。
@@ -1439,7 +1439,7 @@ function editableValue(el) {
   return null;
 }
 
-function setNativeValue(el, value) {
+function setNativeValue(el: any, value: any) {
   if (el.isContentEditable) {
     el.textContent = value;
     return;
@@ -1450,16 +1450,16 @@ function setNativeValue(el, value) {
   else el.value = value;
 }
 
-function dispatchInputChange(el, text) {
+function dispatchInputChange(el: any, text: any) {
   try {
     el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, inputType: 'insertText', data: text }));
-  } catch (e) {
+  } catch (e: any) {
     el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   }
   el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
 }
 
-function selectEditableContents(el) {
+function selectEditableContents(el: any) {
   try {
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -1467,10 +1467,10 @@ function selectEditableContents(el) {
     if (!selection) return;
     selection.removeAllRanges();
     selection.addRange(range);
-  } catch (e) {}
+  } catch (e: any) {}
 }
 
-function placeCaretAtEnd(el) {
+function placeCaretAtEnd(el: any) {
   try {
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -1479,7 +1479,7 @@ function placeCaretAtEnd(el) {
     if (!selection) return;
     selection.removeAllRanges();
     selection.addRange(range);
-  } catch (e) {}
+  } catch (e: any) {}
 }
 
 /**
@@ -1490,12 +1490,12 @@ function placeCaretAtEnd(el) {
  * 优先用浏览器的编辑命令，让页面收到正常的 input/beforeinput；
  * 命令不可用时才退回 DOM 写入，并由调用方按回读结果判定是否真的成功。
  */
-function writeContentEditable(el, value, clearFirst) {
+function writeContentEditable(el: any, value: any, clearFirst: any) {
   el.focus();
   try {
     if (clearFirst === true) {
       selectEditableContents(el);
-      document.execCommand('delete', false, null);
+      document.execCommand('delete', false, null as any);
     } else {
       placeCaretAtEnd(el);
     }
@@ -1504,9 +1504,9 @@ function writeContentEditable(el, value, clearFirst) {
     for (let i = 0; i < lines.length; i++) {
       if (i > 0) {
         // 单次 insertText 在部分编辑器里会把 \n 规整成空格；逐段插入更可靠。
-        const para = document.execCommand('insertParagraph', false, null);
+        const para = document.execCommand('insertParagraph', false, null as any);
         if (!para) {
-          const br = document.execCommand('insertLineBreak', false, null);
+          const br = document.execCommand('insertLineBreak', false, null as any);
           if (!br) document.execCommand('insertText', false, '\n');
         }
       }
@@ -1516,7 +1516,7 @@ function writeContentEditable(el, value, clearFirst) {
       }
     }
     return 'execCommand-insertText';
-  } catch (e) {
+  } catch (e: any) {
     // 最后的兼容路径：不能保证编辑器状态，但至少保持旧的 DOM 写入能力；
     // 返回值会带上 strategy，且调用方会用回读结果做严格判定。
     el.textContent = String(value);
@@ -1525,7 +1525,7 @@ function writeContentEditable(el, value, clearFirst) {
   }
 }
 
-async function cmdTypeText(params) {
+async function cmdTypeText(params: any) {
   // includeText 走默认 true：type_text 的 schema 明确写着
   // 「value 是要输入的文本，text 是用于定位元素的文本片段，两者语义不同」，
   // 所以 text 是**定位符**，必须转发。原先传 false（那是 value/text 尚未拆分时的遗留），
@@ -1563,7 +1563,7 @@ async function cmdTypeText(params) {
       setNativeValue(el, next);
       dispatchInputChange(el, text);
     }
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '输入文本失败：' + e.message };
   }
   if (before !== next) {
@@ -1572,7 +1572,7 @@ async function cmdTypeText(params) {
         if (el.isContentEditable) writeContentEditable(el, before, true);
         else setNativeValue(el, before);
         dispatchInputChange(el, before);
-      } catch (e) {}
+      } catch (e: any) {}
     });
   }
   // 回读实际值。原先只声称「已清空并输入 N 个字符」，**不回读** —— 于是当最终值出现
@@ -1582,7 +1582,7 @@ async function cmdTypeText(params) {
   const after = editableValue(el) || '';
   const summary = editableTextSummary(next, after);
   const matched = summary.matchesIntent;
-  const clip = (s) => JSON.stringify(String(s).slice(0, 80));
+  const clip = (s: any) => JSON.stringify(String(s).slice(0, 80));
   const result = {
     ok: matched,
     changed: before !== next,
@@ -1622,23 +1622,23 @@ async function cmdTypeText(params) {
   return result;
 }
 
-function keyCodeFor(key) {
+function keyCodeFor(key: any) {
   const codes = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35, Space: 32 };
-  return codes[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+  return (codes as Record<string, number>)[key] || (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
 }
 
-function keyCodeName(key) {
+function keyCodeName(key: any) {
   if (key.length === 1 && /^[a-z]$/i.test(key)) return 'Key' + key.toUpperCase();
   if (key.length === 1 && /^\d$/.test(key)) return 'Digit' + key;
   return key;
 }
 
-function cmdPressKey(params) {
+function cmdPressKey(params: any) {
   const el = firstTarget(params, false) || (document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body);
   if (!el) return { ok: false, error: '没有可接收键盘事件的目标元素' };
   const key = String(params.key || '');
   if (!key) return { ok: false, error: 'key 不能为空' };
-  const modifiers = Array.isArray(params.modifiers) ? params.modifiers.map((x) => String(x).toUpperCase()) : [];
+  const modifiers = Array.isArray(params.modifiers) ? params.modifiers.map((x: any) => String(x).toUpperCase()) : [];
   const init = {
     key,
     code: keyCodeName(key),
@@ -1663,18 +1663,18 @@ function cmdPressKey(params) {
       if (el.form && key === 'Enter' && typeof el.form.requestSubmit === 'function') el.form.requestSubmit();
       else if ((el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') && el.click) el.click();
     }
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '键盘事件失败：' + e.message };
   }
   return { ok: true, eventDispatched: true, selector: el && el.tagName ? elementSelector(el) : undefined, result: '已向目标元素派发按键：' + key };
 }
 
-function cmdSelectOption(params) {
+function cmdSelectOption(params: any) {
   const el = firstTarget(params, false);
   if (!el) return { ok: false, error: '未找到 select 元素' };
   if (el.tagName !== 'SELECT') return { ok: false, error: '目标元素不是 select' };
   if (el.disabled) return { ok: false, error: 'select 元素不可用' };
-  const options = Array.from(el.options || []);
+  const options = Array.from<any>(el.options || []);
   let index = -1;
   if (params.index !== undefined && params.index !== null) index = Number(params.index);
   else if (params.value !== undefined) index = options.findIndex((o) => o.value === String(params.value));
@@ -1686,7 +1686,7 @@ function cmdSelectOption(params) {
     el.selectedIndex = index;
     el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: '选择 option 失败：' + e.message };
   }
   if (before !== el.selectedIndex) {
@@ -1695,7 +1695,7 @@ function cmdSelectOption(params) {
         el.selectedIndex = before;
         el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-      } catch (e) {}
+      } catch (e: any) {}
     });
   }
   return {
@@ -1709,7 +1709,7 @@ function cmdSelectOption(params) {
   };
 }
 
-function isCheckControl(el) {
+function isCheckControl(el: any) {
   if (!el) return false;
   const type = String(el.type || '').toLowerCase();
   const role = el.getAttribute('role');
@@ -1718,7 +1718,7 @@ function isCheckControl(el) {
 
 // 定位 checkbox/radio：优先 ref/selector/index；用 text 定位时，文本命中的往往是
 // 关联的 label/容器，自动解析到其绑定的 checkbox/radio 控件。
-function resolveCheckTarget(params) {
+function resolveCheckTarget(params: any) {
   let el = firstTarget(params, true);
   if (el && isCheckControl(el)) return el;
   if (el && params.text) {
@@ -1734,7 +1734,7 @@ function resolveCheckTarget(params) {
   return el;
 }
 
-function cmdCheckBox(params) {
+function cmdCheckBox(params: any) {
   const el = resolveCheckTarget(params);
   if (!el) return { ok: false, error: '未找到 checkbox 或 radio 元素' };
   const type = String(el.type || '').toLowerCase();
@@ -1746,17 +1746,17 @@ function cmdCheckBox(params) {
   const before = type ? Boolean(el.checked) : el.getAttribute('aria-checked') === 'true';
   if (type === 'radio' && !desired) return { ok: false, error: 'radio 不能切换为未选中' };
   if (before !== desired) {
-    try { el.click(); } catch (e) { return { ok: false, error: '切换选项失败：' + e.message }; }
+    try { el.click(); } catch (e: any) { return { ok: false, error: '切换选项失败：' + e.message }; }
   }
   const after = type ? Boolean(el.checked) : el.getAttribute('aria-checked') === 'true';
   // checkbox 可再次点击还原；radio 无法通过再次点击取消，故不记录撤销。
   if (before !== after && type !== 'radio') {
-    pushUndo(() => { try { el.click(); } catch (e) {} });
+    pushUndo(() => { try { el.click(); } catch (e: any) {} });
   }
   return { ok: true, changed: before !== after, alreadySatisfied: before === desired, checked: after, selector: elementSelector(el), result: after ? '已选中' : '已取消选中' };
 }
 
-function waitStateMatches(el, params, state) {
+function waitStateMatches(el: any, params: any, state: any) {
   if (state === 'attached') return Boolean(el && el.isConnected);
   if (state === 'detached') return !el || !el.isConnected;
   if (!el || !el.isConnected) return false;
@@ -1765,7 +1765,7 @@ function waitStateMatches(el, params, state) {
   return isVisibleForAction(el);
 }
 
-function cmdWaitForElement(params) {
+function cmdWaitForElement(params: any) {
   const state = ['attached', 'visible', 'enabled', 'text_contains', 'count', 'detached', 'url_contains'].includes(params.state) ? params.state : 'visible';
   if (state === 'url_contains') {
     if (!params.text) return Promise.resolve({ ok: false, matched: false, error: 'url_contains 需要 text 作为目标 URL 片段' });
@@ -1779,15 +1779,15 @@ function cmdWaitForElement(params) {
   return new Promise((resolve) => {
     const started = Date.now();
     let settled = false;
-    let interval;
-    let timeout;
-    let observer;
+    let interval: any;
+    let timeout: any;
+    let observer: any;
     const cleanup = () => {
       clearInterval(interval);
       clearTimeout(timeout);
       if (observer) observer.disconnect();
     };
-    const finish = (response) => {
+    const finish = (response: any) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -1848,7 +1848,7 @@ function cmdWaitForElement(params) {
   });
 }
 
-function cmdGetAttribute(params) {
+function cmdGetAttribute(params: any) {
   const el = firstTarget(params);
   if (!el) return { ok: false, error: targetMissError(params) };
   const attribute = String(params.attribute || '').trim().toLowerCase();
@@ -1867,7 +1867,7 @@ function cmdGetAttribute(params) {
   };
 }
 
-export async function executePageCommand(command, params) {
+export async function executePageCommand(command: any, params: any) {
   params = params || {};
   switch (command) {
     case 'highlight': return cmdHighlight(params);
@@ -1889,12 +1889,12 @@ export async function executePageCommand(command, params) {
 
 // 独立的浏览器 Agent 工具：参数丰富的表单/等待操作不塞进 page_command，
 // 便于统一注册表做权限控制和参数校验。
-export function typeText(params) { return cmdTypeText(params || {}); }
-export function pressKey(params) { return cmdPressKey(params || {}); }
-export function selectOption(params) { return cmdSelectOption(params || {}); }
-export function checkBox(params) { return cmdCheckBox(params || {}); }
-export function waitForElement(params) { return cmdWaitForElement(params || {}); }
-export function getAttribute(params) { return cmdGetAttribute(params || {}); }
+export function typeText(params: any) { return cmdTypeText(params || {}); }
+export function pressKey(params: any) { return cmdPressKey(params || {}); }
+export function selectOption(params: any) { return cmdSelectOption(params || {}); }
+export function checkBox(params: any) { return cmdCheckBox(params || {}); }
+export function waitForElement(params: any) { return cmdWaitForElement(params || {}); }
+export function getAttribute(params: any) { return cmdGetAttribute(params || {}); }
 
 // 受控的 JS 逃生舱：在内容脚本隔离世界里执行模型提供的代码，并用「白名单作用域」屏蔽
 // 高权限能力。注意：内容脚本隔离世界本身可访问 chrome.runtime / chrome.storage，因此必须
@@ -1926,7 +1926,7 @@ function buildSandboxArgs() {
   const safeWindow = new Proxy(realWindow, {
     get(target, prop) {
       if (typeof prop === 'string' && blocked.has(prop)) return undefined;
-      const v = target[prop];
+      const v = (target as any)[prop];
       return typeof v === 'function' ? v.bind(target) : v;
     },
     has(target, prop) {
@@ -1939,7 +1939,7 @@ function buildSandboxArgs() {
   const values = [];
   for (const name of SANDBOX_ALLOWED) {
     names.push(name);
-    values.push(name === 'window' ? safeWindow : globalThis[name]);
+    values.push(name === 'window' ? safeWindow : (globalThis as any)[name]);
   }
   for (const name of SANDBOX_BLOCKED) {
     names.push(name);
@@ -1948,7 +1948,7 @@ function buildSandboxArgs() {
   return { names, values, safeWindow };
 }
 
-async function cmdRunJs(params) {
+async function cmdRunJs(params: any) {
   const code = String((params && params.code) || '').trim();
   if (!code) return { ok: false, error: 'run_javascript 需要 code 参数' };
   if (code.length > 20000) return { ok: false, error: '代码过长（上限 20000 字符），请精简逻辑' };
@@ -1961,20 +1961,20 @@ async function cmdRunJs(params) {
     // 沙箱仍会被 MV3 扩展 CSP 拦截并自动降级到页面主世界，但契约本身必须正确。
     const fn = new Function(...names, 'return (async () => {\n' + code + '\n})();');
     value = fn.call(safeWindow, ...values);
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: 'JS 执行出错：' + (e && e.message ? e.message : String(e)) };
   }
   if (value && typeof value.then === 'function') {
     try {
       value = await value;
-    } catch (e) {
+    } catch (e: any) {
       return { ok: false, error: '异步 JS 执行出错：' + (e && e.message ? e.message : String(e)) };
     }
   }
   let serialized;
   try {
     serialized = JSON.stringify(value, null, 2);
-  } catch (e) {
+  } catch (e: any) {
     serialized = String(value);
   }
   if (serialized === undefined) serialized = 'undefined';
@@ -1982,4 +1982,4 @@ async function cmdRunJs(params) {
   return { ok: true, result: serialized };
 }
 
-export function runJs(params) { return cmdRunJs(params || {}); }
+export function runJs(params: any) { return cmdRunJs(params || {}); }

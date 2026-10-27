@@ -1711,7 +1711,7 @@ test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读
   //     （真模型 eval 实测：它滚 3400、三条页面判据全过，却因为回执里没有 `scrollTop=3480` 被判红）。
   //     这里要的仍然是"必须滚**容器**"这个难点：窗口滚不动它（基线③ 已经用 `window.scrollBy` 证明过）。
   await expect.poll(() => page.evaluate(() => window.__maxScrollTop), { timeout: 30_000 }).toBeGreaterThan(0);
-  //   ⚠ `已滚动容器` 来自 `lib/page/commands.js` 的容器滚动回执 —— 它证的是"滚动这个**动作**发生过"，
+  //   ⚠ `已滚动容器` 来自 `lib/page/commands.ts` 的容器滚动回执 —— 它证的是"滚动这个**动作**发生过"，
   //     与偏移量无关（`scrollTop=<n>` 那一半被刻意忽略）。
   await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已滚动容器');
 

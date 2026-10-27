@@ -56,7 +56,7 @@ globalThis.document = {
   body: { appendChild: () => {} },
 };
 
-const { describeLookupMiss, describeTargetState, nameSimilarity } = await import('../lib/page/commands.js');
+const { describeLookupMiss, describeTargetState, nameSimilarity } = await import('../lib/page/commands.ts');
 
 const THEME_BUTTONS = () => [
   fakeEl('button', { 'aria-label': '主题：跟随系统（点击切换）', text: '🌗' }),
@@ -140,7 +140,7 @@ test('describeTargetState: 无状态属性时返回空串（不硬凑）', () =>
 // 纯函数各自都测了、装配没测 —— 这个坑踩过一次（证据零件都对，装配时丢了动作回执）。
 // 这里断言两个命令确实把新信息**接进了返回值**，而不是躺在模块里没人用。
 
-const SRC = fs.readFileSync('lib/page/commands.js', 'utf8');
+const SRC = fs.readFileSync('lib/page/commands.ts', 'utf8');
 
 test('接线：点击成功后必须回报目标状态（否则三态开关无法复原）', () => {
   assert.match(SRC, /stateSuffix\(el\)/, '点击结果要带「点击后状态」');

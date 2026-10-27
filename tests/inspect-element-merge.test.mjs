@@ -27,9 +27,9 @@ test('inspect_element 的 op 枚举覆盖三个原工具，外加 styles / optio
   assert.deepEqual(byName.inspect_element.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
-test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"页面命令无响应"）', async () => {
+test('分派表必须与 lib/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
   // 这些命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
-  const cli = fs.readFileSync(new URL('../lib/page/commands.js', import.meta.url), 'utf8');
+  const cli = fs.readFileSync(new URL('../lib/page/commands.ts', import.meta.url), 'utf8');
   for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles', 'read_options', 'query_elements']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }

@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import { formatSelectOptions } from '../lib/shared/utils.js';
 import { INSPECT_OPS } from '../lib/assistant/page-command-tools.js';
 
-const cmdSrc = fs.readFileSync('lib/page/commands.js', 'utf8');
+const cmdSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
 const schemaSrc = fs.readFileSync('lib/assistant/tool-schemas.js', 'utf8');
 
 /** 取一个顶层函数的源码体（到下一个顶层 function 为止）。 */

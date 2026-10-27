@@ -631,7 +631,7 @@ test('元素收集的排除名单不得包含任何用户交互控件', () => {
 test('元素定位路径不得再用正文抽取名单做候选过滤', () => {
   // 上述缺陷的**具体成因**就是这一行：`el.closest(PAGE_TEXT_EXCLUDE)` 会把按钮挡在
   // role/name 匹配之前。这里确保它不会以任何形式回来。
-  for (const rel of ['../lib/page/commands.js', '../lib/page/page-text.ts']) {
+  for (const rel of ['../lib/page/commands.ts', '../lib/page/page-text.ts']) {
     const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
     const bad = src.match(/closest\(\s*PAGE_TEXT_EXCLUDE\s*\)/g) || [];
     assert.deepEqual(bad, [], rel + ' 里仍有 closest(PAGE_TEXT_EXCLUDE) 做元素过滤（应改用 isElementCollectExcluded）');

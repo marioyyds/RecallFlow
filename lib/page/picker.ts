@@ -16,7 +16,7 @@
 // 浮层尺寸只在文案变化时量一次。
 import { elementSelector } from './page-text.ts';
 import { getElementSource } from './debug-capture.ts';
-import { roleOf, accessibleName } from './commands.js';
+import { roleOf, accessibleName } from './commands.ts';
 
 /** 一个矩形（纯数值，便于在 node 里直测）。 */
 interface Box {

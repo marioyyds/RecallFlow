@@ -20,8 +20,8 @@ test('annotate 的 op 枚举与四个原工具一一对应', () => {
   assert.deepEqual(byName.annotate.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
-test('分派表必须与 lib/page/commands.js 的命令名一致（否则得到"页面命令无响应"）', async () => {
-  const cli = fs.readFileSync(new URL('../lib/page/commands.js', import.meta.url), 'utf8');
+test('分派表必须与 lib/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
+  const cli = fs.readFileSync(new URL('../lib/page/commands.ts', import.meta.url), 'utf8');
   for (const cmd of ['highlight', 'outline', 'set_style', 'clear_highlights']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }

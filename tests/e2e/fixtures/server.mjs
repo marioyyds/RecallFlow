@@ -2020,7 +2020,7 @@ function pickPage() {
     // ★★ 两种调用者必须分开（fromClient）：
     //      · fromClient = true：**agent 真的读了这个节点**。页面自己看不出"被读了"
     //        （innerText / textContent 不产生 DOM 变更），所以框架会在**被读的那个元素上**
-    //        派发 recallflow:element-read（见 lib/page/commands.js 的 notifyElementsRead），
+    //        派发 recallflow:element-read（见 lib/page/commands.ts 的 notifyElementsRead），
     //        这里就是那个监听器的落点；
     //      · fromClient = false：**页面自己写节点**引起的观察者回调（paintRaw() 摆缓存价、
     //        刷新定时器写实时价）。它是"页面重渲染"，不是"agent 读了一次"。
@@ -2177,7 +2177,7 @@ function pickPage() {
       //   · 节点被**页面自己**改写（paintRaw / 刷新定时器）⇒ observer 走 fromClient = false，
       //     只记一次"页面重渲染"，**不**启动刷新；
       //   · 节点被 **agent 读**⇒ 框架在**被读的那个元素上**派发 recallflow:element-read
-      //     （lib/page/commands.js 的 notifyElementsRead；读取类是 innerText/textContent，
+      //     （lib/page/commands.ts 的 notifyElementsRead；读取类是 innerText/textContent，
       //     **不产生任何 DOM 变更** ⇒ 页面无法用 MutationObserver 察觉"被读了"，
       //     所以必须有这个信号）。这里收到就按 fromClient = true 记一次读。
       //   没有这条，"agent 看到什么"与"页面写了什么"就分不开，"第一次读必然是缓存价"也无从保证。
