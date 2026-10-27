@@ -12,7 +12,7 @@
 // 产物是构建物 —— **不要手工编辑 content.js**，改这里然后重新构建。
 import * as pageText from '../lib/page/page-text.js';
 import * as commands from '../lib/page/commands.js';
-import * as picker from '../lib/page/picker.js';
+import * as picker from '../lib/page/picker.ts';
 import * as debugCapture from '../lib/page/debug-capture.js';
 import * as chat from '../lib/page/chat.js';
 

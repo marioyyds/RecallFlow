@@ -3160,7 +3160,7 @@
     return request({ kind: "element-source", selector }, null);
   }
 
-  // lib/page/picker.js
+  // lib/page/picker.ts
   var active = false;
   var overlayMargin = null;
   var overlayPadding = null;

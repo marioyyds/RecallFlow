@@ -14,19 +14,37 @@
 // 性能：mousemove 每秒可触发 60~120 次，因此与滚动无关的派生数据（盒模型尺寸、
 // role、文案）按元素缓存，悬停路径用 textContent 而非 innerText（后者会强制布局），
 // 浮层尺寸只在文案变化时量一次。
-import { elementSelector } from './page-text.js';
-import { getElementSource } from './debug-capture.js';
+import { elementSelector } from './page-text.ts';
+import { getElementSource } from './debug-capture.ts';
 import { roleOf, accessibleName } from './commands.js';
 
+/** 一个矩形（纯数值，便于在 node 里直测）。 */
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 缓存的盒模型尺寸：12 条边/内边距/外边距宽度，与滚动无关。 */
+interface BoxMetrics {
+  bt: number; br: number; bb: number; bl: number;
+  pt: number; pr: number; pb: number; pl: number;
+  mt: number; mr: number; mb: number; ml: number;
+}
+
 let active = false;
-let overlayMargin = null;
-let overlayPadding = null;
-let overlayContent = null;
-let tooltip = null;
-let currentEl = null;
-let selection = [];
-let onPickCb = null;
-let onCancelCb = null;
+// 浮层四件套：都是本模块自己 createElement 出来的 div，未创建时为 null。
+let overlayMargin: HTMLElement | null = null;
+let overlayPadding: HTMLElement | null = null;
+let overlayContent: HTMLElement | null = null;
+let tooltip: HTMLElement | null = null;
+// 拾取对象是页面里的任意元素（可能来自其他 frame 的 Element 接口实现），
+// 本批只给导出加类型，这里按 `any` 处理，留给 strict 轮收口。
+let currentEl: any = null;
+let selection: any[] = [];
+let onPickCb: ((items: any[]) => void) | null = null;
+let onCancelCb: (() => void) | null = null;
 let savedCursor = '';
 let lastX = 0;
 let lastY = 0;
@@ -34,8 +52,8 @@ let rafId = 0;
 // 悬停缓存：每次 mousemove 都重算 innerText / getComputedStyle / roleOf 是实打实的开销，
 // 而 mousemove 每秒可触发 60~120 次。这里只缓存「与滚动无关」的派生数据，
 // 矩形每帧重算（滚动会改变它），因此缓存不会失效。
-let hoverCache = new WeakMap();
-let cursorStyleEl = null;
+let hoverCache: WeakMap<any, any> = new WeakMap();
+let cursorStyleEl: HTMLStyleElement | null = null;
 let tooltipSize = { w: 0, h: 0 };
 // 一次性提示（如「该元素已在选区中」）：由 paint 合并进文案，移动鼠标后自动清除，
 // 否则会被紧接着的 paint 覆盖掉、用户看不到任何反馈。
@@ -43,7 +61,7 @@ let transientHint = '';
 
 // 跨 shadow 边界的父节点：parentElement 在 shadow root 边界返回 null，
 // 而 Web Component 里的按钮（如 <cs-card> 内部）恰恰需要跨过这一层才能吸附到宿主。
-function parentCrossingShadow(el) {
+function parentCrossingShadow(el: any) {
   if (!el) return null;
   if (el.parentElement) return el.parentElement;
   try {
@@ -66,7 +84,7 @@ function removeCursorStyle() {
   cursorStyleEl = null;
 }
 
-function isOwnNode(el) {
+function isOwnNode(el: any) {
   if (!el || el === overlayMargin || el === overlayPadding || el === overlayContent || el === tooltip) return true;
   try {
     return !!(el.closest && el.closest('#__kb-ai-host'));
@@ -78,7 +96,7 @@ function isOwnNode(el) {
 // DevTools 风格盒模型：内容(蓝) / 内边距(绿) / 外边距(橙) 三层叠加。
 function ensureOverlay() {
   if (overlayContent && overlayContent.isConnected) return;
-  const mk = (bg, extra) => {
+  const mk = (bg: string, extra?: string) => {
     const d = document.createElement('div');
     d.style.cssText =
       'position:fixed;z-index:2147483645;pointer-events:none;box-sizing:border-box;border-radius:2px;display:none;' +
@@ -106,7 +124,7 @@ function removeOverlay() {
   if (tooltip) { tooltip.remove(); tooltip = null; }
 }
 
-function setBox(node, box) {
+function setBox(node: HTMLElement | null, box: Box) {
   if (!node) return;
   node.style.display = '';
   node.style.left = box.x + 'px';
@@ -117,10 +135,10 @@ function setBox(node, box) {
 
 // 由 rect（border box）+ 缓存的盒模型尺寸推出四个盒子。
 // 尺寸（border/padding/margin 宽度）与滚动无关，可缓存；矩形每帧重算。
-function boxMetrics(el) {
+function boxMetrics(el: any) {
   let cs;
   try { cs = window.getComputedStyle(el); } catch (e) { cs = null; }
-  const num = (v) => (parseFloat(v) || 0);
+  const num = (v: any) => (parseFloat(v) || 0);
   return {
     bt: cs ? num(cs.borderTopWidth) : 0,
     br: cs ? num(cs.borderRightWidth) : 0,
@@ -137,7 +155,7 @@ function boxMetrics(el) {
   };
 }
 
-function boxesFrom(r, m) {
+function boxesFrom(r: { left: number; top: number; width: number; height: number }, m: BoxMetrics) {
   return {
     marginBox: { x: r.left - m.ml, y: r.top - m.mt, w: r.width + m.ml + m.mr, h: r.height + m.mt + m.mb },
     borderBox: { x: r.left, y: r.top, w: r.width, h: r.height },
@@ -146,7 +164,7 @@ function boxesFrom(r, m) {
   };
 }
 
-function elementAt(e) {
+function elementAt(e: any) {
   let el = null;
   try {
     const path = e.composedPath ? e.composedPath() : null;
@@ -167,7 +185,7 @@ const INTERACTIVE_ROLES = new Set([
   'menuitemradio', 'option', 'combobox', 'listbox', 'textbox', 'searchbox', 'spinbutton',
   'slider', 'treeitem', 'gridcell', 'row', 'columnheader',
 ]);
-function isInteractiveEl(el) {
+function isInteractiveEl(el: any) {
   if (!el || el.nodeType !== 1) return false;
   if (INTERACTIVE_TAGS.has(el.tagName.toLowerCase())) return true;
   try {
@@ -182,7 +200,7 @@ function isInteractiveEl(el) {
 
 // 把最内层元素吸附到最近的交互/语义祖先（避免点到 button 里的 span/svg 选错）；
 // 本身就是交互元素、或找不到祖先时保持原元素。想选更内层可用 ↓ 下钻。
-function resolvePickTarget(el) {
+function resolvePickTarget(el: any) {
   if (!el) return el;
   if (isInteractiveEl(el)) return el;
   let n = parentCrossingShadow(el);
@@ -197,13 +215,13 @@ function resolvePickTarget(el) {
 
 // 优先取「鼠标当前所在」的子元素（符合 DevTools 直觉），否则取第一个有可见盒子的子元素。
 // 同时下探开放 shadow root —— Web Component 的内容都在里面。
-function visibleChild(c) {
+function visibleChild(c: any) {
   if (!c || c.nodeType !== 1 || isOwnNode(c)) return null;
   const r = c.getBoundingClientRect();
   return r.width > 0 && r.height > 0 ? c : null;
 }
 
-function pickChild(el, x, y) {
+function pickChild(el: any, x: number | null, y: number | null) {
   if (!el) return null;
   // 1) 阴影根优先：宿主的可见内容通常在里面
   try {
@@ -235,7 +253,7 @@ function pickChild(el, x, y) {
   return null;
 }
 
-function ancestorPath(el) {
+function ancestorPath(el: any) {
   const out = [];
   let n = parentCrossingShadow(el);
   let depth = 0;
@@ -253,7 +271,7 @@ function ancestorPath(el) {
 // cheap=true 时用 textContent 而非 innerText：
 // innerText 会强制浏览器做一次布局，在 mousemove 高频路径上代价极高；
 // 只有真正要落库的「点击采集」才需要 innerText 的渲染后文本。
-function describe(el, cheap) {
+function describe(el: any, cheap?: boolean) {
   const tag = el.tagName ? el.tagName.toLowerCase() : '';
   const id = el.id ? '#' + el.id : '';
   const cls = el.classList && el.classList.length ? '.' + Array.from(el.classList).slice(0, 2).join('.') : '';
@@ -268,7 +286,7 @@ function describe(el, cheap) {
 }
 
 // 稳健定位链：role+name / testid / text / css，供 AI 优先用语义定位。
-function buildLocator(el) {
+function buildLocator(el: any) {
   let role = '';
   let name = '';
   try { role = roleOf(el) || ''; } catch (e) {}
@@ -281,10 +299,10 @@ function buildLocator(el) {
   return { role, name, testid, text, css };
 }
 
-function collect(el) {
+function collect(el: any) {
   const d = describe(el);
   const locator = buildLocator(el);
-  const attributes = {};
+  const attributes: Record<string, string> = {};
   for (const a of ['id', 'class', 'name', 'type', 'role', 'href', 'placeholder', 'aria-label', 'aria-expanded', 'data-testid']) {
     const v = el.getAttribute && el.getAttribute(a);
     if (v) attributes[a] = String(v).slice(0, 120);
@@ -305,7 +323,7 @@ function collect(el) {
 }
 
 // 与滚动无关的悬停信息，按元素缓存（mousemove 高频路径上只做一次）。
-function hoverInfo(el) {
+function hoverInfo(el: any) {
   let c = hoverCache.get(el);
   if (c) return c;
   const d = describe(el, true);
@@ -324,7 +342,7 @@ function hideOverlay() {
 }
 
 // 用缓存的浮层尺寸定位，避免每帧读 offsetWidth/offsetHeight（强制布局）。
-function placeTooltip(x, y) {
+function placeTooltip(x: number, y: number) {
   if (!tooltip) return;
   const tw = tooltipSize.w || 160;
   const th = tooltipSize.h || 22;
@@ -336,7 +354,7 @@ function placeTooltip(x, y) {
   tooltip.style.top = Math.max(4, ty) + 'px';
 }
 
-function paint(el, x, y) {
+function paint(el: any, x: number, y: number) {
   if (!overlayContent || !el) return;
   // 矩形每帧重算（滚动会改变它），其余派生数据走缓存。
   const r = el.getBoundingClientRect();
@@ -374,7 +392,7 @@ function schedulePaint() {
   });
 }
 
-function onMove(e) {
+function onMove(e: any) {
   if (!active) return;
   lastX = e.clientX;
   lastY = e.clientY;
@@ -394,14 +412,14 @@ function onScrollResize() {
 }
 
 // 阻止页面自身的按下副作用（有些框架在 mousedown 就触发动作，早于 click）。
-function onMouseDown(e) {
+function onMouseDown(e: any) {
   if (!active) return;
   if (e.button === 2) return; // 右键交给 contextmenu 处理，那里才能可靠地屏蔽浏览器菜单
   consumeKey(e);
 }
 
 // 右键 = 结束拾取（有选区则提交，无选区则取消），并屏蔽页面右键菜单。
-function onContextMenu(e) {
+function onContextMenu(e: any) {
   if (!active) return;
   consumeKey(e);
   if (selection.length) finishWith(selection);
@@ -412,7 +430,7 @@ function onContextMenu(e) {
 }
 
 // 交给 finishWith 的列表：并行取源码。
-async function finishWith(list) {
+async function finishWith(list: any) {
   const arr = (Array.isArray(list) ? list.filter(Boolean) : []).slice();
   stop();
   if (!arr.length) {
@@ -432,7 +450,7 @@ async function finishWith(list) {
   if (onPickCb) onPickCb(arr);
 }
 
-function onClick(e) {
+function onClick(e: any) {
   if (!active) return;
   consumeKey(e);
   const el = resolvePickTarget(elementAt(e) || currentEl);
@@ -451,13 +469,13 @@ function onClick(e) {
 }
 
 // 消费按键：阻止默认行为 + 阻止冒泡 + 阻止同节点后续监听（如面板的 Esc 关闭）。
-function consumeKey(e) {
+function consumeKey(e: any) {
   e.preventDefault();
   e.stopPropagation();
   if (e.stopImmediatePropagation) e.stopImmediatePropagation();
 }
 
-function onKey(e) {
+function onKey(e: any) {
   if (!active) return;
   if (e.key === 'Escape') {
     consumeKey(e);
@@ -508,7 +526,7 @@ export function isPickerActive() {
   return active;
 }
 
-export function startPicker(onPick, onCancel) {
+export function startPicker(onPick?: ((items: any[]) => void) | null, onCancel?: (() => void) | null) {
   if (active) stop();
   ensureOverlay();
   active = true;

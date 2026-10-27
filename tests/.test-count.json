@@ -1,7 +1,7 @@
 {
   "tests": 1953,
-  "pass": 1953,
-  "fail": 0,
+  "pass": 1941,
+  "fail": 12,
   "files": {
     "total": 169,
     "behavior": 139,

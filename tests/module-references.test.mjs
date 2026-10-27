@@ -29,7 +29,7 @@ const ALLOWED = {
   // 同上，用 chrome.scripting.executeScript 以**路径**注入（见 lib/userscript/manager.js）。
   'lib/userscript/runner.js': '由 executeScript 以路径注入的裸脚本，不是 ES 模块',
   // 这两个只经 entries/content.js 静态导入（内容脚本打包入口），页面侧行为由 E2E 覆盖。
-  'lib/page/picker.js': '内容脚本侧，仅经 entries/content.js 导入；行为由 E2E 的拾取用例覆盖',
+  'lib/page/picker.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 的拾取用例覆盖',
   'lib/page/debug-capture.ts': '内容脚本侧，仅经 entries/content.js 导入；行为由 E2E 覆盖',
   // service worker 入口 background.js 才 import 它，而测试从不 import 入口（会真起 chrome API）。
   'lib/shared/idb-kv.js': '只被 background.js 导入；入口不能 import（会摸真 chrome API）',
