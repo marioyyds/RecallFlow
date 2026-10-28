@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createTabRunRegistry } from '../lib/assistant/run-registry.ts';
+import { createTabRunRegistry } from '../lib/application/agent/run-registry.ts';
 
 function controller() {
   const c = new AbortController();

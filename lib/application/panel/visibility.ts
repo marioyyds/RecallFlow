@@ -1,3 +1,4 @@
+/** 面板可见性的应用层状态机。 */
 export type PanelVisibilityScope = 'global' | 'membership';
 
 export interface PanelUiSnapshot {

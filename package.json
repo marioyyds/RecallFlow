@@ -11,6 +11,7 @@
     "test:watch": "node --test --watch \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",
     "check:const": "node scripts/check-const-assign.mjs",
     "check:prefix": "node scripts/check-prefix-stability.mjs",
+    "check:arch": "node scripts/check-architecture.mjs",
     "check:mutation": "node scripts/mutation-check.mjs",
     "check:types": "tsc --noEmit",
     "build:content": "node scripts/build-content.mjs",

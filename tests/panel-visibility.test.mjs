@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createPanelVisibilityController } from '../lib/page/panel-visibility.ts';
+import { createPanelVisibilityController } from '../lib/application/panel/visibility.ts';
 
 function fixture({ mounted = false, responses = [] } = {}) {
   let controller = null;

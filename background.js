@@ -621,164 +621,8 @@ async function getAISettings() {
   return merged;
 }
 
-// lib/assistant/context.ts
-var CJK_RE = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
-function estimateTokens(text) {
-  const s = String(text || "");
-  if (!s) return 0;
-  const cjk = (s.match(CJK_RE) || []).length;
-  const rest = s.length - cjk;
-  return Math.ceil(cjk + rest / 4);
-}
-function estimateMessagesTokens(messages) {
-  let n = 0;
-  for (const m of Array.isArray(messages) ? messages : []) {
-    if (typeof m.content === "string") n += estimateTokens(m.content);
-    if (Array.isArray(m.tool_calls)) {
-      for (const tc of m.tool_calls) n += estimateTokens(tc && tc.function && tc.function.arguments);
-    }
-    n += 4;
-  }
-  return n;
-}
-function flattenHistoryContent(content, visionEnabled) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) {
-    if (content == null) return "";
-    try {
-      return typeof content === "object" ? JSON.stringify(content) : String(content);
-    } catch (e) {
-      return "";
-    }
-  }
-  const texts = [];
-  let images = 0;
-  for (const part of content) {
-    if (!part) continue;
-    if (typeof part === "string") {
-      texts.push(part);
-      continue;
-    }
-    const type = String(part.type || "");
-    if (type === "text" || typeof part.text === "string") {
-      if (part.text) texts.push(String(part.text));
-      continue;
-    }
-    if (type === "image_url" || type === "image" || part.image_url) {
-      images += 1;
-      continue;
-    }
-    texts.push("[" + (type || "\u672A\u77E5\u90E8\u4EF6") + "]");
-  }
-  let text = texts.join("\n");
-  if (images > 0) {
-    const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
-    text += (text ? "\n" : "") + (enabled ? "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5386\u53F2\u56DE\u653E**\u4E0D\u4F1A\u91CD\u4F20**\u8FD9\u4E9B\u56FE\u7247\uFF0C\u6B64\u5904\u53EA\u4FDD\u7559\u6587\u5B57\u5360\u4F4D \u2014\u2014 \u53EA\u6709**\u672C\u6B21\u65B0\u589E**\u7684\u622A\u56FE\u624D\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\u3002\uFF09" : "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5F53\u524D**\u672A\u628A\u56FE\u7247\u4F20\u7ED9\u6A21\u578B**\uFF0C\u4EC5\u4FDD\u7559\u6B64\u6587\u5B57\u8BF4\u660E\u3002\uFF09");
-  }
-  return text;
-}
-var HISTORY_MAX_CHARS = 3e3;
-var HISTORY_SUMMARY_MAX_CHARS = 400;
-function formatHistoryTruncationNotice(totalChars, limitChars) {
-  return "\n\u27E8\u2026\u672C\u6761\u5386\u53F2\u5DF2\u622A\u65AD\uFF1A\u539F\u6587\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u6B64\u5904\u53EA\u9001\u5165\u524D " + limitChars + " \u5B57\u7B26\uFF1B**\u88AB\u622A\u6389\u7684\u90E8\u5206\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u5386\u53F2\u6D88\u606F\u4E0D\u8FDB\u6682\u5B58\uFF0C\u65E0\u6CD5\u7528 expand_result \u53D6\u56DE\uFF09\uFF0C\u9700\u8981\u5176\u7EC6\u8282\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\uFF0C\u6216\u6539\u7528\u5DE5\u5177\u91CD\u65B0\u8BFB\u53D6\u9875\u9762\u3002\u27E9";
-}
-var HISTORY_TRUNC_RE = /\n⟨…本条历史已截断：[\s\S]*⟩$/;
-function formatTailKeptTruncationNotice(totalChars, limitChars) {
-  return "\u27E8\u2026\u672C\u6761\u6D88\u606F\u8FC7\u957F\uFF0C\u53EA\u4FDD\u7559\u672B\u5C3E\uFF1A\u539F\u6587\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4ECE\u7B2C " + (totalChars - limitChars + 1) + " \u4E2A\u5B57\u7B26\u8D77\uFF1B**\u88AB\u622A\u6389\u7684\u524D\u534A\u6BB5\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u843D\u76D8\u5FEB\u7167\u4E0D\u4FDD\u5B58\u5B83\uFF09\u27E9\n";
-}
-function stripHistoryTruncationNotice(text) {
-  return String(text === void 0 || text === null ? "" : text).replace(HISTORY_TRUNC_RE, "");
-}
-function isDuplicateInstruction(lastContent, instruction) {
-  const instr = String(instruction === void 0 || instruction === null ? "" : instruction).trim();
-  if (!instr) return false;
-  const last = stripHistoryTruncationNotice(lastContent).trim();
-  if (!last) return false;
-  return last === instr || last.length >= HISTORY_MAX_CHARS && instr.startsWith(last);
-}
-function normalizeHistory(history, options = {}) {
-  const maxMessages = Number.isFinite(options.maxMessages) ? options.maxMessages : 10;
-  const maxChars = Number.isFinite(options.maxChars) ? options.maxChars : HISTORY_MAX_CHARS;
-  const maxTokens = Number.isFinite(options.maxTokens) ? options.maxTokens : 8e3;
-  const notice = options.noticeOnTruncation === true;
-  const src = Array.isArray(history) ? history : [];
-  const picked = [];
-  let tokens = 0;
-  let dropped = false;
-  for (let i = src.length - 1; i >= 0; i--) {
-    const h = src[i];
-    if (!h || h.role !== "user" && h.role !== "assistant") continue;
-    const text = flattenHistoryContent(h.content, options.visionEnabled);
-    if (!text.trim()) continue;
-    if (picked.length >= maxMessages) {
-      dropped = true;
-      break;
-    }
-    const t = estimateTokens(text);
-    if (picked.length && tokens + t > maxTokens) {
-      dropped = true;
-      break;
-    }
-    picked.push(Object.assign({}, h, { content: text }));
-    tokens += t;
-  }
-  picked.reverse();
-  const out = picked.map((h) => {
-    let content = sliceSafe(h.content, 0, maxChars);
-    if (h.content.length > maxChars) content = content + formatHistoryTruncationNotice(h.content.length, maxChars);
-    if (h.role === "assistant" && typeof h.toolSummary === "string" && h.toolSummary.trim()) {
-      const summary = sliceSafe(h.toolSummary, 0, HISTORY_SUMMARY_MAX_CHARS);
-      content += "\n\uFF08\u4E0A\u4E00\u8F6E\u6267\u884C\u6458\u8981\uFF1A" + summary + (h.toolSummary.length > HISTORY_SUMMARY_MAX_CHARS ? "\u27E8\u2026\u6458\u8981\u5DF2\u622A\u65AD\uFF0C\u5171 " + h.toolSummary.length + " \u5B57\u7B26\u27E9" : "") + "\uFF09";
-    }
-    return { role: h.role, content };
-  });
-  if (notice && dropped && out.length) {
-    out.unshift({ role: "user", content: "\uFF08\u66F4\u65E9\u7684\u5BF9\u8BDD\u56E0\u957F\u5EA6\u5DF2\u7701\u7565\uFF0C\u4EE5\u4E0B\u4E3A\u6700\u8FD1\u4E0A\u4E0B\u6587\u3002\uFF09" });
-  }
-  return out;
-}
-var COLLAPSE_MARK = "\u3010\u5DF2\u6298\u53E0\u3011";
-var ID_NOTICE_RE = /\n…（结果共[^）]*id=(res-[A-Za-z0-9_-]+)[^）]*）\s*$/;
-var ID_ONLY_RE = /id=(res-[A-Za-z0-9_-]+)/;
-function buildCollapsed(content, headLen = 300, tailLen = 150) {
-  const text = String(content);
-  const noticeMatch = text.match(ID_NOTICE_RE);
-  const resultId = noticeMatch ? noticeMatch[1] : (text.match(ID_ONLY_RE) || [])[1] || "";
-  const body = noticeMatch ? text.slice(0, noticeMatch.index) : text;
-  if (body.length <= headLen + tailLen + 40) return text;
-  const head = sliceSafe(body, 0, headLen);
-  const tail = sliceSafe(body, -tailLen);
-  const notice = "\n" + COLLAPSE_MARK + "\u5171 " + body.length + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4FDD\u7559\u5F00\u5934\u4E0E\u7ED3\u5C3E" + (resultId ? "\uFF1B**\u5168\u6587\u672A\u4E22\u5931**\uFF0Cid=" + resultId + '\uFF0C\u53EF\u7528 expand_result(id="' + resultId + '") \u5206\u6BB5\u53D6\u56DE' : (
-    // ⚠ 没有 id 就**取不回中段**：只有被 agent 截断的大结果才会进 resultStore，
-    // 快照 / 页面读取这类结果不进 ⇒ expand_result 找不到它。
-    // 所以必须说清"这一段哪里去了、该怎么办"：模型看不到中段时，
-    // 它会以为页面里就是没这些东西（实测踩过：日历格子的标签在 JSON 中段，
-    // 折叠后就再也看不到，而模型并不知道自己被折叠了）✗
-    "\uFF1B**\u4E2D\u6BB5\u5185\u5BB9\u5DF2\u7701\u7565\u4E14\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u5FEB\u7167/\u9875\u9762\u8BFB\u53D6\u7C7B\u7ED3\u679C\u4E0D\u8FDB\u6682\u5B58\uFF09\uFF0C\u9700\u8981\u65F6\u8BF7**\u91CD\u65B0\u8C03\u7528**\u4EA7\u751F\u5B83\u7684\u5DE5\u5177\uFF08\u53EF\u5148\u7528\u53C2\u6570\u7F29\u5C0F\u8303\u56F4\uFF0C\u5982 maxElements / maxText / \u6EDA\u52A8\u5230\u76EE\u6807\u518D\u8BFB\uFF09"
-  )) + "\n";
-  return head + notice + tail;
-}
-function collapseOldToolResults(messages, keepFull = 6, maxLen = 300, tailLen = 150) {
-  const idx = [];
-  for (let i = 0; i < messages.length; i++) {
-    if (messages[i] && messages[i].role === "tool") idx.push(i);
-  }
-  const old = idx.slice(0, Math.max(0, idx.length - keepFull));
-  let collapsed = 0;
-  for (const i of old) {
-    const m = messages[i];
-    if (typeof m.content !== "string" || m.content.length <= maxLen) continue;
-    if (m.content.indexOf(COLLAPSE_MARK) !== -1) continue;
-    const next = buildCollapsed(m.content, maxLen, tailLen);
-    if (next === m.content || next.length >= m.content.length) continue;
-    m.content = next;
-    collapsed += 1;
-  }
-  return collapsed;
-}
-
 // lib/shared/rag.ts
-var CJK_RE2 = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
+var CJK_RE = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
 function tokenizeQuery(query) {
   const raw = String(query || "").toLowerCase();
   const segments = raw.split(/[\s,，。;；:：!！?？、/\\()[\]{}<>"'`~#@$%^&*+=|]+/).filter((s) => s.length);
@@ -786,7 +630,7 @@ function tokenizeQuery(query) {
   for (const seg of segments) {
     if (seg.length <= 4) {
       tokens.push(seg);
-      if (CJK_RE2.test(seg) && seg.length > 2) {
+      if (CJK_RE.test(seg) && seg.length > 2) {
         for (let i = 0; i < seg.length - 1; i++) tokens.push(seg.slice(i, i + 2));
       }
     } else {
@@ -861,7 +705,7 @@ function buildCitations(relevantItems, isOverview) {
     isOverview: !!isOverview
   }));
 }
-function buildAiMessages(action, payload, settings, book) {
+function buildAiMessages(action, payload, settings, book, normalizeHistory2) {
   const text = String(payload.text || "");
   if (action === "translate") {
     const t = payload.targetLang || settings.targetLang || "\u4E2D\u6587";
@@ -919,7 +763,7 @@ function buildAiMessages(action, payload, settings, book) {
   if (action === "command") {
     const instruction = payload.question || payload.command || "";
     const page = payload.page || "";
-    const history = normalizeHistory(payload.history, { maxMessages: 10, maxChars: 3e3, maxTokens: 8e3, noticeOnTruncation: true });
+    const history = normalizeHistory2(payload.history, { maxMessages: 10, maxChars: 3e3, maxTokens: 8e3, noticeOnTruncation: true });
     let ctx = "";
     let citations = null;
     if (settings.ragEnabled) {
@@ -8168,6 +8012,162 @@ function buildSystemPrompt(intent, instruction = "", toolNames = [], skills = []
   return [lines.join("\n"), skillCatalog].filter(Boolean).join("\n\n");
 }
 
+// lib/assistant/context.ts
+var CJK_RE2 = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
+function estimateTokens(text) {
+  const s = String(text || "");
+  if (!s) return 0;
+  const cjk = (s.match(CJK_RE2) || []).length;
+  const rest = s.length - cjk;
+  return Math.ceil(cjk + rest / 4);
+}
+function estimateMessagesTokens(messages) {
+  let n = 0;
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (typeof m.content === "string") n += estimateTokens(m.content);
+    if (Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) n += estimateTokens(tc && tc.function && tc.function.arguments);
+    }
+    n += 4;
+  }
+  return n;
+}
+function flattenHistoryContent(content, visionEnabled) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) {
+    if (content == null) return "";
+    try {
+      return typeof content === "object" ? JSON.stringify(content) : String(content);
+    } catch (e) {
+      return "";
+    }
+  }
+  const texts = [];
+  let images = 0;
+  for (const part of content) {
+    if (!part) continue;
+    if (typeof part === "string") {
+      texts.push(part);
+      continue;
+    }
+    const type = String(part.type || "");
+    if (type === "text" || typeof part.text === "string") {
+      if (part.text) texts.push(String(part.text));
+      continue;
+    }
+    if (type === "image_url" || type === "image" || part.image_url) {
+      images += 1;
+      continue;
+    }
+    texts.push("[" + (type || "\u672A\u77E5\u90E8\u4EF6") + "]");
+  }
+  let text = texts.join("\n");
+  if (images > 0) {
+    const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
+    text += (text ? "\n" : "") + (enabled ? "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5386\u53F2\u56DE\u653E**\u4E0D\u4F1A\u91CD\u4F20**\u8FD9\u4E9B\u56FE\u7247\uFF0C\u6B64\u5904\u53EA\u4FDD\u7559\u6587\u5B57\u5360\u4F4D \u2014\u2014 \u53EA\u6709**\u672C\u6B21\u65B0\u589E**\u7684\u622A\u56FE\u624D\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\u3002\uFF09" : "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5F53\u524D**\u672A\u628A\u56FE\u7247\u4F20\u7ED9\u6A21\u578B**\uFF0C\u4EC5\u4FDD\u7559\u6B64\u6587\u5B57\u8BF4\u660E\u3002\uFF09");
+  }
+  return text;
+}
+var HISTORY_MAX_CHARS = 3e3;
+var HISTORY_SUMMARY_MAX_CHARS = 400;
+function formatHistoryTruncationNotice(totalChars, limitChars) {
+  return "\n\u27E8\u2026\u672C\u6761\u5386\u53F2\u5DF2\u622A\u65AD\uFF1A\u539F\u6587\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u6B64\u5904\u53EA\u9001\u5165\u524D " + limitChars + " \u5B57\u7B26\uFF1B**\u88AB\u622A\u6389\u7684\u90E8\u5206\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u5386\u53F2\u6D88\u606F\u4E0D\u8FDB\u6682\u5B58\uFF0C\u65E0\u6CD5\u7528 expand_result \u53D6\u56DE\uFF09\uFF0C\u9700\u8981\u5176\u7EC6\u8282\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\uFF0C\u6216\u6539\u7528\u5DE5\u5177\u91CD\u65B0\u8BFB\u53D6\u9875\u9762\u3002\u27E9";
+}
+var HISTORY_TRUNC_RE = /\n⟨…本条历史已截断：[\s\S]*⟩$/;
+function formatTailKeptTruncationNotice(totalChars, limitChars) {
+  return "\u27E8\u2026\u672C\u6761\u6D88\u606F\u8FC7\u957F\uFF0C\u53EA\u4FDD\u7559\u672B\u5C3E\uFF1A\u539F\u6587\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4ECE\u7B2C " + (totalChars - limitChars + 1) + " \u4E2A\u5B57\u7B26\u8D77\uFF1B**\u88AB\u622A\u6389\u7684\u524D\u534A\u6BB5\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u843D\u76D8\u5FEB\u7167\u4E0D\u4FDD\u5B58\u5B83\uFF09\u27E9\n";
+}
+function stripHistoryTruncationNotice(text) {
+  return String(text === void 0 || text === null ? "" : text).replace(HISTORY_TRUNC_RE, "");
+}
+function isDuplicateInstruction(lastContent, instruction) {
+  const instr = String(instruction === void 0 || instruction === null ? "" : instruction).trim();
+  if (!instr) return false;
+  const last = stripHistoryTruncationNotice(lastContent).trim();
+  if (!last) return false;
+  return last === instr || last.length >= HISTORY_MAX_CHARS && instr.startsWith(last);
+}
+function normalizeHistory(history, options = {}) {
+  const maxMessages = Number.isFinite(options.maxMessages) ? options.maxMessages : 10;
+  const maxChars = Number.isFinite(options.maxChars) ? options.maxChars : HISTORY_MAX_CHARS;
+  const maxTokens = Number.isFinite(options.maxTokens) ? options.maxTokens : 8e3;
+  const notice = options.noticeOnTruncation === true;
+  const src = Array.isArray(history) ? history : [];
+  const picked = [];
+  let tokens = 0;
+  let dropped = false;
+  for (let i = src.length - 1; i >= 0; i--) {
+    const h = src[i];
+    if (!h || h.role !== "user" && h.role !== "assistant") continue;
+    const text = flattenHistoryContent(h.content, options.visionEnabled);
+    if (!text.trim()) continue;
+    if (picked.length >= maxMessages) {
+      dropped = true;
+      break;
+    }
+    const t = estimateTokens(text);
+    if (picked.length && tokens + t > maxTokens) {
+      dropped = true;
+      break;
+    }
+    picked.push(Object.assign({}, h, { content: text }));
+    tokens += t;
+  }
+  picked.reverse();
+  const out = picked.map((h) => {
+    let content = sliceSafe(h.content, 0, maxChars);
+    if (h.content.length > maxChars) content = content + formatHistoryTruncationNotice(h.content.length, maxChars);
+    if (h.role === "assistant" && typeof h.toolSummary === "string" && h.toolSummary.trim()) {
+      const summary = sliceSafe(h.toolSummary, 0, HISTORY_SUMMARY_MAX_CHARS);
+      content += "\n\uFF08\u4E0A\u4E00\u8F6E\u6267\u884C\u6458\u8981\uFF1A" + summary + (h.toolSummary.length > HISTORY_SUMMARY_MAX_CHARS ? "\u27E8\u2026\u6458\u8981\u5DF2\u622A\u65AD\uFF0C\u5171 " + h.toolSummary.length + " \u5B57\u7B26\u27E9" : "") + "\uFF09";
+    }
+    return { role: h.role, content };
+  });
+  if (notice && dropped && out.length) {
+    out.unshift({ role: "user", content: "\uFF08\u66F4\u65E9\u7684\u5BF9\u8BDD\u56E0\u957F\u5EA6\u5DF2\u7701\u7565\uFF0C\u4EE5\u4E0B\u4E3A\u6700\u8FD1\u4E0A\u4E0B\u6587\u3002\uFF09" });
+  }
+  return out;
+}
+var COLLAPSE_MARK = "\u3010\u5DF2\u6298\u53E0\u3011";
+var ID_NOTICE_RE = /\n…（结果共[^）]*id=(res-[A-Za-z0-9_-]+)[^）]*）\s*$/;
+var ID_ONLY_RE = /id=(res-[A-Za-z0-9_-]+)/;
+function buildCollapsed(content, headLen = 300, tailLen = 150) {
+  const text = String(content);
+  const noticeMatch = text.match(ID_NOTICE_RE);
+  const resultId = noticeMatch ? noticeMatch[1] : (text.match(ID_ONLY_RE) || [])[1] || "";
+  const body = noticeMatch ? text.slice(0, noticeMatch.index) : text;
+  if (body.length <= headLen + tailLen + 40) return text;
+  const head = sliceSafe(body, 0, headLen);
+  const tail = sliceSafe(body, -tailLen);
+  const notice = "\n" + COLLAPSE_MARK + "\u5171 " + body.length + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4FDD\u7559\u5F00\u5934\u4E0E\u7ED3\u5C3E" + (resultId ? "\uFF1B**\u5168\u6587\u672A\u4E22\u5931**\uFF0Cid=" + resultId + '\uFF0C\u53EF\u7528 expand_result(id="' + resultId + '") \u5206\u6BB5\u53D6\u56DE' : (
+    // ⚠ 没有 id 就**取不回中段**：只有被 agent 截断的大结果才会进 resultStore，
+    // 快照 / 页面读取这类结果不进 ⇒ expand_result 找不到它。
+    // 所以必须说清"这一段哪里去了、该怎么办"：模型看不到中段时，
+    // 它会以为页面里就是没这些东西（实测踩过：日历格子的标签在 JSON 中段，
+    // 折叠后就再也看不到，而模型并不知道自己被折叠了）✗
+    "\uFF1B**\u4E2D\u6BB5\u5185\u5BB9\u5DF2\u7701\u7565\u4E14\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u5FEB\u7167/\u9875\u9762\u8BFB\u53D6\u7C7B\u7ED3\u679C\u4E0D\u8FDB\u6682\u5B58\uFF09\uFF0C\u9700\u8981\u65F6\u8BF7**\u91CD\u65B0\u8C03\u7528**\u4EA7\u751F\u5B83\u7684\u5DE5\u5177\uFF08\u53EF\u5148\u7528\u53C2\u6570\u7F29\u5C0F\u8303\u56F4\uFF0C\u5982 maxElements / maxText / \u6EDA\u52A8\u5230\u76EE\u6807\u518D\u8BFB\uFF09"
+  )) + "\n";
+  return head + notice + tail;
+}
+function collapseOldToolResults(messages, keepFull = 6, maxLen = 300, tailLen = 150) {
+  const idx = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i] && messages[i].role === "tool") idx.push(i);
+  }
+  const old = idx.slice(0, Math.max(0, idx.length - keepFull));
+  let collapsed = 0;
+  for (const i of old) {
+    const m = messages[i];
+    if (typeof m.content !== "string" || m.content.length <= maxLen) continue;
+    if (m.content.indexOf(COLLAPSE_MARK) !== -1) continue;
+    const next = buildCollapsed(m.content, maxLen, tailLen);
+    if (next === m.content || next.length >= m.content.length) continue;
+    m.content = next;
+    collapsed += 1;
+  }
+  return collapsed;
+}
+
 // lib/assistant/prefix-watch.ts
 function fingerprintMessage(m) {
   if (!m || typeof m !== "object") return "";
@@ -8785,7 +8785,7 @@ function buildInitialMessagesPure(input = {}) {
   return messages;
 }
 
-// lib/assistant/agent-run-context.ts
+// lib/application/agent/run-context.ts
 function arrayCopy(value) {
   return Array.isArray(value) ? value.slice() : [];
 }
@@ -12280,7 +12280,7 @@ var RunChannel = class {
   }
 };
 
-// lib/assistant/run-registry.ts
+// lib/application/agent/run-registry.ts
 var TabRunRegistryState = class {
   controllers = /* @__PURE__ */ new Map();
   tabRecords = /* @__PURE__ */ new Map();
@@ -12706,7 +12706,7 @@ async function handleAi(request) {
     };
   }
   const book = await getBook();
-  const messages = buildAiMessages(request.action, request, settings, book);
+  const messages = buildAiMessages(request.action, request, settings, book, normalizeHistory);
   if (!messages) {
     return { ok: false, error: "\u672A\u77E5\u64CD\u4F5C\uFF1A" + request.action };
   }
@@ -13470,7 +13470,7 @@ chrome.runtime.onConnect.addListener((port) => {
         }
         return;
       }
-      const messages = buildAiMessages(payload.action, payload, settings, book);
+      const messages = buildAiMessages(payload.action, payload, settings, book, normalizeHistory);
       if (!messages) {
         port.postMessage({ type: "error", error: "\u672A\u77E5\u64CD\u4F5C\uFF1A" + payload.action });
         return;

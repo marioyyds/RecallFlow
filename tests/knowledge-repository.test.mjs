@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createKnowledgeRepository } from '../lib/shared/knowledge-repository.ts';
+import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
 
 function item(id, patch = {}) {
   return {

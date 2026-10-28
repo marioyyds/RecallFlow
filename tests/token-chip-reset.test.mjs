@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
+import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
 
 let seq = 0;
 
@@ -98,7 +99,7 @@ async function boot(backend) {
   const prevChrome = installChrome();
   globalThis.chrome.runtime.sendMessage = (msg, cb) => backend.send(msg, cb);
   const mod = await import('../lib/page/chat.ts?case=' + (seq += 1));
-  mod.initAssistant();
+  mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const shadow = () => {
     const host = dom.document.documentElement.querySelector('#__kb-ai-host');
     return host ? host.shadowRoot : null;

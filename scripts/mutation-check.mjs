@@ -222,7 +222,7 @@ const TARGETS = [
   {
     // 工具审批条：它是用户唯一能看到「Agent 要动你的页面了」的地方，而且三条性质
     // 错了都**不会报错**（静默泄露 / 静默放行 / 用户点了拒绝却当成放行）。
-    file: 'lib/page/chat.ts',
+    file: 'lib/ui/panel/approval-view.ts',
     mode: 'inplace',
     test: 'tests/chat-approval-prompt.test.mjs',
     mutations: [
@@ -252,7 +252,7 @@ const TARGETS = [
       },
       {
         name: '代码块不做 HTML 转义（innerHTML 拼接 ⇒ 页面内 XSS）',
-        from: "'</div><pre class=\"tool-approval-code\">' + escHtml(view.longText) + '</pre>'",
+        from: "'</div><pre class=\"tool-approval-code\">' + esc(view.longText) + '</pre>'",
         to: "'</div><pre class=\"tool-approval-code\">' + view.longText + '</pre>'",
         expectFail: '尖括号',
       },

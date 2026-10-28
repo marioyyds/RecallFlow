@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createPanelStreamState } from '../lib/page/panel-stream-state.ts';
+import { createPanelStreamState } from '../lib/application/panel/stream-state.ts';
 
 test('chunk 累积正文与当前叙述段', () => {
   const state = createPanelStreamState();

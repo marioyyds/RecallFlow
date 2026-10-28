@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
+import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
 
 let seq = 0;
 
@@ -26,7 +27,7 @@ async function boot(chromeOpts = {}) {
   const dom = installDomStub();
   const prevChrome = installChrome(chromeOpts);
   const mod = await import('../lib/page/chat.ts?case=' + (seq += 1));
-  mod.initAssistant();
+  mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
   const panel = () => {

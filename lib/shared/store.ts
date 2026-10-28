@@ -13,6 +13,9 @@ import {
   OLD_STATUS_MIGRATION,
 } from './constants.ts';
 import { cleanTitle, markdownExcerpt } from './utils.ts';
+import type { KnowledgeBook, KnowledgeItem } from '../domain/knowledge/model.ts';
+
+export type { KnowledgeBook, KnowledgeItem } from '../domain/knowledge/model.ts';
 
 const DB_NAME = 'recallflow-knowledge';
 const DB_VERSION = 1;
@@ -22,28 +25,6 @@ const STORE_META = 'meta';
 const MIGRATION_META_KEY = 'chrome-storage-v2';
 const STORAGE_BACKUP_KEY = 'knowledgeBasePreIndexedDB';
 const CHANGE_CHANNEL = 'recallflow-knowledge-change';
-
-/**
- * 知识库条目（entries store 的 record）：列表/排序只读这一层，
- * 正文放在 documents store。字段全部来自用户输入或旧 storage 数据，
- * 因此入参侧一律按 unknown 收窄，落库前在这里定形。
- */
-export interface KnowledgeItem {
-  id: string;
-  type: string;
-  title: string;
-  url: string;
-  platform: string;
-  platformName: string;
-  status: number | string;
-  note: string;
-  tags: string[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** 按条目 id 索引的知识库快照。 */
-export type KnowledgeBook = Record<string, KnowledgeItem>;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 let migrationPromise: Promise<void> | null = null;

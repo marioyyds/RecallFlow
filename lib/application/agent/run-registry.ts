@@ -1,3 +1,4 @@
+/** Service Worker 的运行注册表。 */
 export interface RunControllerLike extends AbortController {
   __rfFinished?: boolean;
 }

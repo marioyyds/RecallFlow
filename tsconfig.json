@@ -69,7 +69,7 @@
   // Batch 1a（TITA-74）加 `lib/page/**`；Batch 2（TITA-78）加 `lib/assistant/**`、
   // `lib/userscript/**`、`entries/**`；Batch 4（TITA-84）加 `lib/backend/**`、`lib/bridge/**`。
   // Batch 6 时 `lib/` 与 `entries/` 下的源码已全部是 `.ts`。
-  "include": ["entries/**/*", "lib/shared/**/*", "lib/page/**/*", "lib/assistant/**/*", "lib/userscript/**/*", "lib/backend/**/*", "lib/bridge/**/*"],
+  "include": ["entries/**/*", "lib/domain/**/*", "lib/application/**/*", "lib/adapters/**/*", "lib/ui/**/*", "lib/shared/**/*", "lib/page/**/*", "lib/assistant/**/*", "lib/userscript/**/*", "lib/backend/**/*", "lib/bridge/**/*"],
   // node_modules：见文件顶部 ⚠；后两项是 esbuild 产物，与源码同名但不是源码
   // （`lib/page/debug-hook.js` 由 debug-hook.ts 生成，`lib/userscript/runner.js` 由
   // entries/userscript-runner.ts 生成，清单在 scripts/build-entries.mjs 的 ENTRIES）。

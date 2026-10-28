@@ -1,27 +1,18 @@
 // RAG 检索与 AI 消息构建：把知识库条目转化为上下文与引用元数据
 import { STAR_LEVELS } from './constants.ts';
 import { typeInfo } from './utils.ts';
-import { normalizeHistory } from '../assistant/context.ts';
-import type { KnowledgeItem } from './store.ts';
+import type { CitationMeta, KnowledgeBook, KnowledgeItem } from '../domain/knowledge/model.ts';
 
-/** 知识库形数据：id → 条目。调用方传的是 store.getBook() 的结果。 */
-export type KnowledgeBook = Record<string, KnowledgeItem>;
-
-/** buildCitations() 的返回项（前端引用卡片直读）。 */
-export interface CitationMeta {
-  index: number;
-  source: string;
-  id: string;
-  title: string;
-  type: string;
-  url: string;
-  snippet: string;
-  isOverview: boolean;
-}
+export type { CitationMeta, KnowledgeBook, KnowledgeItem } from '../domain/knowledge/model.ts';
 
 type AiMessage = { role: string; content: string };
 /** 消息数组允许挂非标准字段 _citations（供调用方取引用元数据）。 */
 type AiMessages = AiMessage[] & { _citations?: CitationMeta[] | null };
+
+export type HistoryNormalizer = (
+  history: any[] | null | undefined,
+  options?: Record<string, unknown>
+) => any[];
 
 // 含 CJK（中日韩汉字/假名）即视为"没有词边界"的文本。
 // 中文查询不能指望用户写出逐字连续的片段，所以要用滑窗切分。
@@ -161,7 +152,13 @@ export function buildCitations(relevantItems: KnowledgeItem[] | null | undefined
   }));
 }
 
-export function buildAiMessages(action: unknown, payload: Record<string, any>, settings: Record<string, any>, book: KnowledgeBook): AiMessages | null {
+export function buildAiMessages(
+  action: unknown,
+  payload: Record<string, any>,
+  settings: Record<string, any>,
+  book: KnowledgeBook,
+  normalizeHistory: HistoryNormalizer
+): AiMessages | null {
   const text = String(payload.text || '');
 
   if (action === 'translate') {

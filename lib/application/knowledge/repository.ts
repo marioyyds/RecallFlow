@@ -6,7 +6,7 @@ import {
   type KnowledgeBook,
   type KnowledgeItem,
   type KnowledgeUpsertInput,
-} from './store.ts';
+} from '../../shared/store.ts';
 
 type KnowledgeListener = (book: Readonly<KnowledgeBook>) => void;
 

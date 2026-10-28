@@ -8,7 +8,7 @@
 //
 // 纪律：这里只写**真实形状**。不要为了少改代码写 `[key: string]: any`，
 // 也不要用 `unknown` + 到处 `as` 冒充（那是把明面上的 any 换成更隐蔽的洞）。
-import type { KnowledgeBook, CitationMeta } from '../shared/rag.ts';
+import type { KnowledgeBook, CitationMeta } from '../domain/knowledge/model.ts';
 
 /** Agent 预算（`settings.agentBudget` 与 `createBudget` 的产物）。 */
 export interface AgentBudget {

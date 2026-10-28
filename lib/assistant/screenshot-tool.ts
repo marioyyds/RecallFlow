@@ -40,7 +40,7 @@ import {
   MAX_SHOT_STORE_CHARS,
 } from '../shared/screenshot-store.ts';
 import type { Caught } from './errors.ts';
-import type { ScreenshotDeps, ScreenshotLadderInput, ScreenshotLadderResult, ScreenshotLadderStep } from './tool-deps.ts';
+import type { ScreenshotDeps, ScreenshotLadderInput, ScreenshotLadderResult, ScreenshotLadderStep } from './screenshot-types.ts';
 
 /** `Page.getLayoutMetrics` 回执里用到的两组尺寸。 */
 interface LayoutMetricsLike {

@@ -11,11 +11,11 @@ import {
   fmtTime,
   esc,
   markdownExcerpt,
-  sortItems,
   parseTags,
   bindStarKeyboard,
 } from '../lib/shared/utils.ts';
-import { createKnowledgeRepository } from '../lib/shared/knowledge-repository.ts';
+import { sortItems } from '../lib/domain/knowledge/query.ts';
+import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
 import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 import { renderMarkdown } from '../lib/page/markdown.ts';

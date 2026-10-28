@@ -6080,7 +6080,7 @@
     };
   }
 
-  // lib/page/panel-visibility.ts
+  // lib/application/panel/visibility.ts
   function asRecord(value) {
     return value && typeof value === "object" ? value : null;
   }
@@ -6184,7 +6184,7 @@
     return new PanelVisibilityState(deps);
   }
 
-  // lib/page/panel-run-session.ts
+  // lib/application/panel/run-session.ts
   var PanelRunSessionState = class {
     running = false;
     currentRunId = "";
@@ -6257,7 +6257,7 @@
     return new PanelRunSessionState();
   }
 
-  // lib/page/panel-stream-state.ts
+  // lib/application/panel/stream-state.ts
   var PanelStreamAccumulator = class {
     contentValue = "";
     narrationValue = "";
@@ -6351,6 +6351,55 @@
     return new PanelStreamAccumulator();
   }
 
+  // lib/application/ports/runtime.ts
+  var UNAVAILABLE_RUNTIME_PORT = {
+    async request() {
+      return { ok: false, error: "\u6269\u5C55 Runtime \u5C1A\u672A\u6CE8\u5165" };
+    }
+  };
+
+  // lib/ui/panel/approval-view.ts
+  var APPROVAL_LONG_TEXT_FIELD = {
+    run_javascript: "code",
+    save_skill: "content"
+  };
+  function describeApprovalRequest(name, args, risk, allowSession) {
+    const toolArgs = args && typeof args === "object" ? args : {};
+    const longField = APPROVAL_LONG_TEXT_FIELD[name];
+    const longText = longField ? String(toolArgs[longField] || "") : "";
+    const shownArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
+    return {
+      riskLabel: risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C",
+      argsJson: Object.keys(shownArgs).length ? JSON.stringify(shownArgs) : "",
+      longText,
+      longLabel: !longText ? "" : name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801",
+      showSession: allowSession !== false
+    };
+  }
+  function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession, afterRender = () => {
+  }) {
+    if (!box || !conn) return false;
+    const view = describeApprovalRequest(name, args, risk, allowSession);
+    const codeBlock = view.longLabel ? '<div class="tool-approval-label">' + esc(view.longLabel) + '</div><pre class="tool-approval-code">' + esc(view.longText) + "</pre>" : "";
+    const sessionBtn = view.showSession ? '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>' : "";
+    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + esc(name) + '</span><span class="tool-approval-risk">' + esc(view.riskLabel) + "</span></div>" + (view.argsJson ? '<div class="tool-approval-detail">' + esc(view.argsJson) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
+    box.style.display = "";
+    const decide = (decision) => {
+      try {
+        conn.postMessage({ type: "tool-approval", callId, decision });
+      } catch (error) {
+      }
+      box.style.display = "none";
+      box.innerHTML = "";
+    };
+    box.querySelector(".tool-approve").addEventListener("click", () => decide("once"));
+    const sessionEl = box.querySelector(".tool-approve-session");
+    if (sessionEl) sessionEl.addEventListener("click", () => decide("session"));
+    box.querySelector(".tool-reject").addEventListener("click", () => decide("reject"));
+    afterRender();
+    return true;
+  }
+
   // lib/page/chat.ts
   function isExtContextAlive() {
     try {
@@ -6439,6 +6488,7 @@
   });
   var runSession = createPanelRunSession();
   var streamState = createPanelStreamState();
+  var runtimePort = UNAVAILABLE_RUNTIME_PORT;
   var followedRunState = null;
   var followedRunId = "";
   var followedCursor = 0;
@@ -7346,44 +7396,11 @@
     if (panel) panel.classList.remove("approval-open");
     fitPanelHeight();
   }
-  var APPROVAL_LONG_TEXT_FIELD = { run_javascript: "code", save_skill: "content" };
-  function describeApprovalRequest(name, args, risk, allowSession) {
-    const toolArgs = args && typeof args === "object" ? args : {};
-    const longField = APPROVAL_LONG_TEXT_FIELD[name];
-    const longText = longField ? String(toolArgs[longField] || "") : "";
-    const shownArgs = name === "type_text" ? { ...toolArgs, value: "[\u8F93\u5165\u5185\u5BB9\u5DF2\u9690\u85CF]" } : longText ? { ...toolArgs, [longField]: "[\u5B8C\u6574\u5185\u5BB9\u89C1\u4E0B\u65B9]" } : toolArgs;
-    return {
-      riskLabel: risk === "high" ? "\u9AD8\u98CE\u9669" : risk === "medium" ? "\u9700\u786E\u8BA4" : "\u5916\u90E8\u64CD\u4F5C",
-      // 没有参数时给空串：渲染层据此决定要不要出那一行（空 JSON `{}` 对用户毫无信息）。
-      argsJson: Object.keys(shownArgs).length ? JSON.stringify(shownArgs) : "",
-      longText,
-      longLabel: !longText ? "" : name === "save_skill" ? "\u5C06\u8981\u4FDD\u5B58\u7684\u6280\u80FD\u6B63\u6587\uFF08\u4F1A\u8FDB\u5165\u4ECA\u540E\u7684\u7CFB\u7EDF\u63D0\u793A\uFF09" : "\u5C06\u8981\u6267\u884C\u7684\u5B8C\u6574\u4EE3\u7801",
-      // allowSession === false 表示「只能一次一次批准」，不给批量放行的按钮。
-      showSession: allowSession !== false
-    };
-  }
-  function renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession) {
-    if (!box || !conn) return false;
-    const view = describeApprovalRequest(name, args, risk, allowSession);
-    const codeBlock = view.longLabel ? '<div class="tool-approval-label">' + escHtml(view.longLabel) + '</div><pre class="tool-approval-code">' + escHtml(view.longText) + "</pre>" : "";
-    const sessionBtn = view.showSession ? '<button class="tool-approve-session" aria-label="\u672C\u4EFB\u52A1\u5185\u5141\u8BB8\u6B64\u5DE5\u5177">\u672C\u4EFB\u52A1\u5185\u5141\u8BB8</button>' : "";
-    box.innerHTML = '<div class="tool-approval-title">\u6267\u884C\u524D\u9700\u8981\u4F60\u7684\u786E\u8BA4</div><div class="tool-approval-summary">Agent \u8BF7\u6C42\u8C03\u7528 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + escHtml(view.riskLabel) + "</span></div>" + (view.argsJson ? '<div class="tool-approval-detail">' + escHtml(view.argsJson) + "</div>" : "") + codeBlock + '<div class="tool-approval-actions"><button class="tool-approve" aria-label="\u4EC5\u5141\u8BB8\u672C\u6B21\u5DE5\u5177\u8C03\u7528">\u5141\u8BB8\u4E00\u6B21</button>' + sessionBtn + '<button class="tool-reject" aria-label="\u62D2\u7EDD\u5DE5\u5177\u8C03\u7528">\u62D2\u7EDD</button></div>';
-    box.style.display = "";
-    const decide = (decision) => {
-      try {
-        conn.postMessage({ type: "tool-approval", callId, decision });
-      } catch (e) {
-      }
-      box.style.display = "none";
-      box.innerHTML = "";
-    };
-    box.querySelector(".tool-approve").addEventListener("click", () => decide("once"));
-    const sessionEl = box.querySelector(".tool-approve-session");
-    if (sessionEl) sessionEl.addEventListener("click", () => decide("session"));
-    box.querySelector(".tool-reject").addEventListener("click", () => decide("reject"));
-    fitPanelHeight();
-    pinToBottom();
-    return true;
+  function renderApprovalPrompt2(box, conn, callId, name, args, risk, allowSession) {
+    return renderApprovalPrompt(box, conn, callId, name, args, risk, allowSession, () => {
+      fitPanelHeight();
+      pinToBottom();
+    });
   }
   var activeSendFn = null;
   function renderSuggestionButtons(container, text, sendFn) {
@@ -8011,23 +8028,10 @@
     return serializeCompleteConversationMessages(conversation);
   }
   function sendPanelMessage(type, payload) {
-    return new Promise((resolve) => {
-      if (!isExtContextAlive()) {
-        resolve({ ok: false, error: "\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5" });
-        return;
-      }
-      try {
-        chrome.runtime.sendMessage(Object.assign({ type }, payload || {}), (resp) => {
-          if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: chrome.runtime.lastError.message || "\u4E0E\u6269\u5C55\u540E\u53F0\u901A\u4FE1\u5931\u8D25" });
-          } else {
-            resolve(resp || { ok: false, error: "\u6269\u5C55\u540E\u53F0\u65E0\u54CD\u5E94" });
-          }
-        });
-      } catch (e) {
-        resolve({ ok: false, error: e && e.message ? e.message : String(e) });
-      }
-    });
+    if (!isExtContextAlive()) {
+      return Promise.resolve({ ok: false, error: "\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5" });
+    }
+    return runtimePort.request(Object.assign({ type }, payload || {}));
   }
   function sessionTimeText(ts) {
     const n = Number(ts) || 0;
@@ -9681,7 +9685,7 @@
         updateRunControlState();
         if (snapshot.approval && approvalConn) {
           const approval = snapshot.approval;
-          renderApprovalPrompt(
+          renderApprovalPrompt2(
             approvalArea,
             approvalConn,
             approval.callId,
@@ -9741,7 +9745,7 @@
             toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3))
           );
           if (resp.requiresApproval) {
-            renderApprovalPrompt(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
+            renderApprovalPrompt2(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
           }
           fitPanelHeight();
           pinToBottom();
@@ -10274,7 +10278,8 @@
     };
     tick();
   }
-  function initAssistant() {
+  function initAssistant(options = {}) {
+    if (options.runtime) runtimePort = options.runtime;
     try {
       window.addEventListener("pagehide", () => {
         if (followedRunState || followedMessages.length) return;
@@ -10483,6 +10488,39 @@
     }
   }
 
+  // lib/adapters/chrome/runtime.ts
+  var ChromeRuntimeAdapter = class {
+    api;
+    constructor(api = chrome) {
+      this.api = api;
+    }
+    request(message) {
+      return new Promise((resolve) => {
+        try {
+          this.api.runtime.sendMessage(message, (response) => {
+            const error = this.api.runtime.lastError;
+            if (error) {
+              resolve({
+                ok: false,
+                error: error.message || "\u4E0E\u6269\u5C55\u540E\u53F0\u901A\u4FE1\u5931\u8D25"
+              });
+              return;
+            }
+            resolve(response || { ok: false, error: "\u6269\u5C55\u540E\u53F0\u65E0\u54CD\u5E94" });
+          });
+        } catch (error) {
+          resolve({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      });
+    }
+  };
+  function createChromeRuntimeAdapter(api = chrome) {
+    return new ChromeRuntimeAdapter(api);
+  }
+
   // entries/content.ts
   function detectTopFrame() {
     try {
@@ -10606,7 +10644,7 @@
       }
       return false;
     });
-    if (isTopFrame) initAssistant();
+    if (isTopFrame) initAssistant({ runtime: createChromeRuntimeAdapter() });
   }
   window.__rfContentInit = initContentScript;
 })();

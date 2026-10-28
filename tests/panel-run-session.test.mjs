@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createPanelRunSession } from '../lib/page/panel-run-session.ts';
+import { createPanelRunSession } from '../lib/application/panel/run-session.ts';
 
 function fakePort() {
   const messages = [];

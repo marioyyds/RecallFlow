@@ -98,31 +98,6 @@ function markdownExcerpt(text, maxChars = 160) {
   if (!s) return "";
   return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
 }
-function sortItems(list, sortBy2) {
-  const arr = list.slice();
-  const status = (item) => {
-    const value = Number(item.status);
-    return Number.isFinite(value) ? value : 0;
-  };
-  switch (sortBy2) {
-    case "created":
-      arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      break;
-    case "star-desc":
-      arr.sort(
-        (a, b) => status(b) - status(a) || (b.updatedAt || 0) - (a.updatedAt || 0)
-      );
-      break;
-    case "star-asc":
-      arr.sort(
-        (a, b) => status(a) - status(b) || (b.updatedAt || 0) - (a.updatedAt || 0)
-      );
-      break;
-    default:
-      arr.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }
-  return arr;
-}
 function starBarHtml(n, interactive) {
   const level = Math.max(1, Math.min(3, Number(n) || 1));
   const group = interactive ? ' role="radiogroup" aria-label="\u91CD\u8981\u7A0B\u5EA6"' : "";
@@ -239,6 +214,33 @@ function showToast(msg, opts) {
   el.classList.add("show");
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
+}
+
+// lib/domain/knowledge/query.ts
+function sortItems(list, sortBy2) {
+  const arr = list.slice();
+  const status = (item) => {
+    const value = Number(item.status);
+    return Number.isFinite(value) ? value : 0;
+  };
+  switch (sortBy2) {
+    case "created":
+      arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      break;
+    case "star-desc":
+      arr.sort(
+        (a, b) => status(b) - status(a) || (b.updatedAt || 0) - (a.updatedAt || 0)
+      );
+      break;
+    case "star-asc":
+      arr.sort(
+        (a, b) => status(a) - status(b) || (b.updatedAt || 0) - (a.updatedAt || 0)
+      );
+      break;
+    default:
+      arr.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+  return arr;
 }
 
 // lib/shared/store.ts
@@ -471,7 +473,7 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   return item;
 }
 
-// lib/shared/knowledge-repository.ts
+// lib/application/knowledge/repository.ts
 var defaultStore = {
   getBook,
   setBook,

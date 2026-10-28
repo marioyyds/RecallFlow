@@ -7,6 +7,7 @@ import { runAgentStream } from '../lib/assistant/agent.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
 import { initTargetManager } from '../lib/assistant/target-manager.ts';
 import { logError, isOperableUrl } from '../lib/shared/utils.ts';
+import { normalizeHistory } from '../lib/assistant/context.ts';
 import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.ts';
 import { sanitizeMessages } from '../lib/shared/surrogates.ts';
 import { loadAgentSession } from '../lib/assistant/session-store.ts';
@@ -18,7 +19,7 @@ import {
 } from '../lib/shared/panel-sessions.ts';
 import { RunStreamHub } from '../lib/assistant/run-hub.ts';
 import { RunChannel } from '../lib/assistant/run-channel.ts';
-import { createTabRunRegistry, type RunControllerLike, type RunRecordLike } from '../lib/assistant/run-registry.ts';
+import { createTabRunRegistry, type RunControllerLike, type RunRecordLike } from '../lib/application/agent/run-registry.ts';
 import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.ts';
 import { removeSessionScreenshots } from '../lib/shared/screenshot-store.ts';
 import {
@@ -362,7 +363,7 @@ async function handleAi(request: Dyn) {
   }
 
   const book = await getBook();
-  const messages = buildAiMessages(request.action, request, settings, book);
+  const messages = buildAiMessages(request.action, request, settings, book, normalizeHistory);
   if (!messages) {
     return { ok: false, error: '未知操作：' + request.action };
   }
@@ -1222,7 +1223,7 @@ chrome.runtime.onConnect.addListener((port) => {
         }
         return;
       }
-      const messages = buildAiMessages(payload.action, payload, settings, book);
+      const messages = buildAiMessages(payload.action, payload, settings, book, normalizeHistory);
       if (!messages) {
         port.postMessage({ type: 'error', error: '未知操作：' + payload.action });
         return;

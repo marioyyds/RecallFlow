@@ -9,16 +9,28 @@
 import * as cdp from '../backend/cdp.ts';
 import { getTrace, listTraces } from './trace.ts';
 import { handleDialog, getDownloads } from './target-manager.ts';
-import { saveScreenshot } from './screenshot-tool.ts';
 import { readBounded, decodeBuffer, extractHtmlTitle, searchWeb, isAbortLikeError, describeFetchError } from './net-parse.ts';
 import { listScripts as listUserscripts, searchScripts, installFromUrl, runUserscriptOnTab } from '../userscript/manager.ts';
 import { getUserscriptSettings } from '../userscript/settings.ts';
-import { screenshotAttempts, formatScreenshotSummary, typeInfo, trimElementsToBudget, formatVisibilityReport, formatCurrentPageResult } from '../shared/utils.ts';
+import { formatScreenshotSummary, typeInfo, trimElementsToBudget, formatVisibilityReport, formatCurrentPageResult } from '../shared/utils.ts';
 import { getBook, upsertItem, deleteItem } from '../shared/store.ts';
 import { buildRagContext, buildCitations, type KnowledgeBook } from '../shared/rag.ts';
 import { sliceSafe } from '../shared/surrogates.ts';
 import type { RunCtx, PageSnapshotLike, ToolResult, ActionVerification, MacroRecord, RecalledTrace, TraceStep, SkillLike } from './types.ts';
 import type { Caught } from './errors.ts';
+import type {
+  ScreenshotDeps,
+  ScreenshotLadderInput,
+  ScreenshotLadderResult,
+  ScreenshotLadderStep,
+} from './screenshot-types.ts';
+
+export type {
+  ScreenshotDeps,
+  ScreenshotLadderInput,
+  ScreenshotLadderResult,
+  ScreenshotLadderStep,
+} from './screenshot-types.ts';
 
 /** 页面元素解析结果（`kbResolveTarget` 的 found 回执）。 */
 export interface ResolvedTarget extends ToolResult {
@@ -136,45 +148,6 @@ export interface RunStateDeps {
   ctx: RunCtx;
   getTrace: typeof getTrace;
   listTraces: typeof listTraces;
-}
-
-/** 截图单工具族的依赖（`take_screenshot` 走 `takeScreenshot`）。 */
-export interface ScreenshotDeps {
-  ctx: RunCtx;
-  args: Record<string, unknown>;
-  cdp: typeof cdp;
-  cdpAllowed: CdpAllowed;
-  screenshotAttempts: typeof screenshotAttempts;
-  saveScreenshot: typeof saveScreenshot;
-  chrome: typeof chrome;
-  /** 面板侧只传 meta（与既有调用一致；第二个参数由实现自身兜底）。 */
-  formatScreenshotSummary: (meta: unknown, visionEnabled?: unknown) => string;
-  screenshotBudgetMs?: number;
-}
-
-/** 截图降质阶梯的一档（`screenshotAttempts` 的产物）。 */
-export interface ScreenshotLadderStep {
-  format: string;
-  quality?: number;
-}
-
-/** 截图阶梯（`captureWithLadder`）的输入（面板侧与桥接侧共用）。 */
-export interface ScreenshotLadderInput {
-  cdp: typeof cdp;
-  tabId: number;
-  ladder: ScreenshotLadderStep[];
-  budgetMs: number;
-  fullPage: boolean;
-}
-
-/** 截图阶梯的产物。 */
-export interface ScreenshotLadderResult {
-  data: string;
-  used: ScreenshotLadderStep;
-  usedIndex: number;
-  degraded: boolean;
-  timedOut: boolean;
-  deadline: number;
 }
 
 /** 联网抓取与搜索族（fetch_webpage / web_search）。 */

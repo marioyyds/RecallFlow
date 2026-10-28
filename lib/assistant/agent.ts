@@ -25,7 +25,7 @@ import { resolveCodeExecutionApproval } from '../shared/settings.ts';
 // 定位串的唯一实现（原先这里与 chat.js 各写一份，且其中一份有 bug —— 见该函数注释）。
 import { formatElementLocator } from '../shared/utils.ts';
 import { buildInitialMessagesPure } from './initial-messages.ts';
-import { createAgentRunContext } from './agent-run-context.ts';
+import { createAgentRunContext } from '../application/agent/run-context.ts';
 import { visionMessagesFor } from './vision.ts';
 // ⚠ 分两行导入：`vision-wiring.test.mjs` 会**钉住上面那一行的原文**
 //（`import { visionMessagesFor } from './vision.ts'`）—— 把新名字并进同一行会让那条门禁红 ✗。

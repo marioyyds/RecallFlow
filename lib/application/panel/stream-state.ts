@@ -1,3 +1,4 @@
+/** 面板流式回答的纯应用状态。 */
 export interface PanelStreamSnapshot {
   content?: unknown;
   narration?: unknown;

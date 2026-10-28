@@ -77,9 +77,14 @@ import {
   FAB_POSITION_KEY,
   normalizeFabRatio as normFabRatio,
 } from './fab-position.ts';
-import { createPanelVisibilityController } from './panel-visibility.ts';
-import { createPanelRunSession } from './panel-run-session.ts';
-import { createPanelStreamState } from './panel-stream-state.ts';
+import { createPanelVisibilityController } from '../application/panel/visibility.ts';
+import { createPanelRunSession } from '../application/panel/run-session.ts';
+import { createPanelStreamState } from '../application/panel/stream-state.ts';
+import { UNAVAILABLE_RUNTIME_PORT, type RuntimePort } from '../application/ports/runtime.ts';
+import {
+  describeApprovalRequest as describeApprovalRequestView,
+  renderApprovalPrompt as renderApprovalPromptView,
+} from '../ui/panel/approval-view.ts';
 
 
 /**
@@ -179,6 +184,7 @@ const panelVisibility = createPanelVisibilityController({
 });
 const runSession = createPanelRunSession();
 const streamState = createPanelStreamState();
+let runtimePort: RuntimePort = UNAVAILABLE_RUNTIME_PORT;
 // 跟随另一个标签页的运行流。状态归约与 SW 使用同一份纯函数。
 let followedRunState: any = null;
 let followedRunId = '';
@@ -1627,76 +1633,15 @@ function closeApprovalPopover() {
  * 渲染工具审批条。抽出来是因为它有两个入口：
  *   ① 正常流式 tool-call 事件；② 刷新 reattach 后的快照（审批可能正等着用户点）。
  */
-// 有两个工具的参数里含**用户必须逐字看到**的长文本：
-//   · run_javascript.code  —— 将要执行的代码；
-//   · save_skill.content   —— 将要保存下来、进入今后系统提示的技能正文。
-const APPROVAL_LONG_TEXT_FIELD = { run_javascript: 'code', save_skill: 'content' };
-
-/**
- * 「这条审批要展示什么」—— 纯函数，不碰 DOM。
- *
- * 单独抽出来是因为这里有三条**只有断言才能守住**的性质，而它们错了都不会报错：
- *   ① `type_text` 的 `value` 必须遮蔽 —— 否则用户输入的密码/证件号直接显示在屏幕上；
- *   ② `run_javascript` 的代码必须**整段**出现 —— 用户批准的正是这段代码，
- *      省略等于让用户批准一段自己没看见的东西；
- *   ③ 同一段长文本不能在参数区再完整出现一次 —— 重复会把真正的参数挤出可视区。
- * 导出以便直测（此前这一段只有 E2E 覆盖）。
- */
 export function describeApprovalRequest(name: any, args: any, risk: any, allowSession: any) {
-  const toolArgs = args && typeof args === 'object' ? args : {};
-  const longField = (APPROVAL_LONG_TEXT_FIELD as Record<string, string>)[name];
-  const longText = longField ? String(toolArgs[longField] || '') : '';
-  const shownArgs = name === 'type_text'
-    ? { ...toolArgs, value: '[输入内容已隐藏]' }
-    : longText
-      ? { ...toolArgs, [longField]: '[完整内容见下方]' }
-      : toolArgs;
-  return {
-    riskLabel: risk === 'high' ? '高风险' : risk === 'medium' ? '需确认' : '外部操作',
-    // 没有参数时给空串：渲染层据此决定要不要出那一行（空 JSON `{}` 对用户毫无信息）。
-    argsJson: Object.keys(shownArgs).length ? JSON.stringify(shownArgs) : '',
-    longText,
-    longLabel: !longText
-      ? ''
-      : name === 'save_skill'
-        ? '将要保存的技能正文（会进入今后的系统提示）'
-        : '将要执行的完整代码',
-    // allowSession === false 表示「只能一次一次批准」，不给批量放行的按钮。
-    showSession: allowSession !== false,
-  };
+  return describeApprovalRequestView(name, args, risk, allowSession);
 }
 
 export function renderApprovalPrompt(box: any, conn: any, callId: any, name: any, args: any, risk: any, allowSession: any) {
-  if (!box || !conn) return false;
-  const view = describeApprovalRequest(name, args, risk, allowSession);
-  const codeBlock = view.longLabel
-    ? '<div class="tool-approval-label">' + escHtml(view.longLabel) +
-      '</div><pre class="tool-approval-code">' + escHtml(view.longText) + '</pre>'
-    : '';
-  const sessionBtn = view.showSession
-    ? '<button class="tool-approve-session" aria-label="本任务内允许此工具">本任务内允许</button>'
-    : '';
-  box.innerHTML =
-    '<div class="tool-approval-title">执行前需要你的确认</div>' +
-    '<div class="tool-approval-summary">Agent 请求调用 <span class="tool-approval-tool">' + escHtml(name) + '</span><span class="tool-approval-risk">' + escHtml(view.riskLabel) + '</span></div>' +
-    (view.argsJson ? '<div class="tool-approval-detail">' + escHtml(view.argsJson) + '</div>' : '') +
-    codeBlock +
-    '<div class="tool-approval-actions"><button class="tool-approve" aria-label="仅允许本次工具调用">允许一次</button>' + sessionBtn + '<button class="tool-reject" aria-label="拒绝工具调用">拒绝</button></div>';
-  box.style.display = '';
-  const decide = (decision: any) => {
-    try {
-      conn.postMessage({ type: 'tool-approval', callId, decision });
-    } catch (e: any) {}
-    box.style.display = 'none';
-    box.innerHTML = '';
-  };
-  box.querySelector('.tool-approve').addEventListener('click', () => decide('once'));
-  const sessionEl = box.querySelector('.tool-approve-session');
-  if (sessionEl) sessionEl.addEventListener('click', () => decide('session'));
-  box.querySelector('.tool-reject').addEventListener('click', () => decide('reject'));
-  fitPanelHeight();
-  pinToBottom();
-  return true;
+  return renderApprovalPromptView(box, conn, callId, name, args, risk, allowSession, () => {
+    fitPanelHeight();
+    pinToBottom();
+  });
 }
 
 // 当前面板的发送函数（openPanel 里绑定 run），供 renderSuggestionButtons 触发「继续」。
@@ -2535,23 +2480,10 @@ function serializeConversation() {
 }
 
 function sendPanelMessage(type: any, payload?: any): Promise<any> {
-  return new Promise((resolve) => {
-    if (!isExtContextAlive()) {
-      resolve({ ok: false, error: '扩展已更新，请刷新页面后重试' });
-      return;
-    }
-    try {
-      chrome.runtime.sendMessage(Object.assign({ type }, payload || {}), (resp) => {
-        if (chrome.runtime.lastError) {
-          resolve({ ok: false, error: chrome.runtime.lastError.message || '与扩展后台通信失败' });
-        } else {
-          resolve(resp || { ok: false, error: '扩展后台无响应' });
-        }
-      });
-    } catch (e: any) {
-      resolve({ ok: false, error: e && e.message ? e.message : String(e) });
-    }
-  });
+  if (!isExtContextAlive()) {
+    return Promise.resolve({ ok: false, error: '扩展已更新，请刷新页面后重试' });
+  }
+  return runtimePort.request(Object.assign({ type }, payload || {}));
 }
 
 function sessionTimeText(ts: any) {
@@ -5214,7 +5146,8 @@ function maybeResumeRunAfterReload() {
 }
 
 // ---- 事件绑定与初始化 ----
-export function initAssistant() {
+export function initAssistant(options: { runtime?: RuntimePort } = {}) {
+  if (options.runtime) runtimePort = options.runtime;
   // 页面即将卸载（整页跳转 / 返回）前把对话落盘：这是用户消息"进对话即落盘"之外的
   // 一道兜底，盖住"刚发完立刻跳转"这类极小窗口。sendMessage 是尽力而为，不阻塞卸载。
   try {

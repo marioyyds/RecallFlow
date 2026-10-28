@@ -15,6 +15,7 @@ import * as commands from '../lib/page/commands.ts';
 import * as picker from '../lib/page/picker.ts';
 import * as debugCapture from '../lib/page/debug-capture.ts';
 import * as chat from '../lib/page/chat.ts';
+import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
 
 // 入口在 window 上挂的三样东西：本文件自己约定的全局槽位。
 // 声明集中在这里（而不是散落 `as any`）：面板侧（chat.ts）与构建产物的 footer 都依赖它们。
@@ -163,7 +164,7 @@ export function initContentScript() {
 
   // 助手 UI 只在顶层文档初始化；子框架（含跨域 iframe）只保留消息处理，
   // 供后台按 frameId 在对应框架内执行页面命令（跨域 iframe 打通的关键）。
-  if (isTopFrame) chat.initAssistant();
+  if (isTopFrame) chat.initAssistant({ runtime: createChromeRuntimeAdapter() });
 }
 
 // 打包产物是 iife，模块导出不会自动执行。这里用**副作用**把入口挂到一个约定变量上，

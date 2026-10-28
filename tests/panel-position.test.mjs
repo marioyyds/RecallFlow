@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
+import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
 
 const POS_KEY = 'recallflow-panel-pos';
 const SIZE_KEY = 'recallflow-panel-size';
@@ -22,7 +23,7 @@ async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome();
   const mod = await import('../lib/page/chat.ts?case=pos' + (seq += 1));
-  mod.initAssistant();
+  mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
   const panel = () => {

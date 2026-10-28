@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createAgentRunContext } from '../lib/assistant/agent-run-context.ts';
+import { createAgentRunContext } from '../lib/application/agent/run-context.ts';
 
 const settings = { model: 'test', apiKey: 'x' };
 const budget = {

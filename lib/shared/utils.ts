@@ -4,13 +4,6 @@ import { ITEM_TYPES, PLATFORMS, STAR_LEVELS } from './constants.ts';
 // 半个字符进请求体就会被服务端整单拒收（见 surrogates.js 的事故说明）。
 import { sliceSafe } from './surrogates.ts';
 
-/** 列表排序用到的最小条目形状（调用方传的是知识库条目，这里只声明被读的字段）。 */
-export interface SortableItem {
-  createdAt?: number;
-  updatedAt?: number;
-  status?: number | string;
-}
-
 /**
  * 防抖函数
  * @param {Function} fn - 要执行的函数
@@ -159,36 +152,6 @@ export function markdownExcerpt(text: unknown, maxChars = 160) {
   s = s.replace(/\s+/g, ' ').trim();
   if (!s) return '';
   return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + '…' : s;
-}
-
-export function sortItems<T extends SortableItem>(list: T[], sortBy: string): T[] {
-  const arr = list.slice();
-  const status = (item: SortableItem) => {
-    const value = Number(item.status);
-    return Number.isFinite(value) ? value : 0;
-  };
-  switch (sortBy) {
-    case 'created':
-      arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      break;
-    case 'star-desc':
-      arr.sort(
-        (a, b) =>
-          status(b) - status(a) ||
-          (b.updatedAt || 0) - (a.updatedAt || 0)
-      );
-      break;
-    case 'star-asc':
-      arr.sort(
-        (a, b) =>
-          status(a) - status(b) ||
-          (b.updatedAt || 0) - (a.updatedAt || 0)
-      );
-      break;
-    default:
-      arr.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }
-  return arr;
 }
 
 export function starBarHtml(n: number | string, interactive?: boolean) {

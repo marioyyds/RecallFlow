@@ -1,3 +1,4 @@
+/** 单页面面板 run 的应用层生命周期。 */
 export interface PanelRunPort {
   postMessage(message: unknown): unknown;
   disconnect(): void;
