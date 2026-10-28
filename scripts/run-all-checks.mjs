@@ -10,10 +10,17 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+// 跑前/跑后行尾快照的落点：放系统临时目录，不污染仓库（也不受 .gitignore 影响）。
+const EOL_SNAPSHOT = path.join(os.tmpdir(), 'rf-worktree-eol-run.json');
+
 const STEPS = [
+  // 工作树行尾基线：**必须第一步**。它把「跑之前就脏的检出」记下来，最后一步再比一次，
+  // 只报新增项 —— 否则 CRLF 检出的整文件差异会被算到门禁头上（TITA-90 的误归因）。
+  { name: '门禁：工作树行尾基线（跑前快照）', cmd: process.execPath, args: ['scripts/check-worktree-eol.mjs', '--snapshot', EOL_SNAPSHOT] },
   {
     name: '单元测试（含 MCP）',
     cmd: process.execPath,
@@ -38,6 +45,9 @@ const STEPS = [
   // 刷新测试数快照：必须放在单元测试**之后**，因为刚加/删的用例会改变总数。
   // 这样「文档里的数字」永远由实测产出，而不是靠人记得改。
   { name: '刷新测试数快照（写 tests/.test-count.json）', cmd: process.execPath, args: ['scripts/test-count.mjs', '--write'] },
+  // 工作树行尾复核：跑完必须**没有新增**行尾差异 / 新增改动。
+  // 这条替代了「靠人记得跑前跑后各看一眼 git status」的旧做法（TITA-90 必修项）。
+  { name: '门禁：工作树行尾复核（跑完不许改脏）', cmd: process.execPath, args: ['scripts/check-worktree-eol.mjs', '--compare', EOL_SNAPSHOT] },
 ];
 
 const results = [];

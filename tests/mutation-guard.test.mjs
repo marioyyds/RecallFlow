@@ -139,6 +139,42 @@ test('自愈：to 是通用片段时，旧备份绝不能覆盖比它更新的�
   assert.equal(fs.readFileSync(file, 'utf8'), newer, '新加的代码必须原样保留');
 });
 
+test('自愈：行尾形态变过的旧备份**不许**写回（否则 LF 检出会被改成 CRLF）', () => {
+  // TITA-90 实测出来的第二面：判据原先先用 norm() 归一行尾再比，于是
+  // 「备份来自 CRLF 检出、当前文件已按 LF 重新检出」也会被判成「还停在变异态」，
+  // restoreBackup 把 CRLF 字节写回 LF 检出 —— 跑完门禁后 `git status` 出现
+  // 整文件行尾差异（+N/−N），与「检出状态本来就脏」无法区分。
+  // 判据必须逐字节：行尾不同 ⇒ 不还原，只报告。
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  // 备份是 CRLF 时代留下的原始字节
+  const originalCrlf = 'if (x) {\r\n  return false;\r\n}\r\n';
+  writeBackup(file, originalCrlf, '  return true;', '  return false;');
+  // 当前文件是 LF 检出 + 变异（与备份内容等价，但行尾不同）
+  const mutatedLf = 'if (x) {\n  return true;\n}\n';
+  fs.writeFileSync(file, mutatedLf, 'utf8');
+
+  const { restored, skipped } = recoverLeftovers([file]);
+  assert.deepEqual(restored, [], '行尾形态不同的备份不能写回');
+  assert.deepEqual(skipped, [file], '要报出来让人看一眼');
+  assert.equal(fs.readFileSync(file, 'utf8'), mutatedLf, '绝不允许把 LF 源文件改成 CRLF');
+  assert.equal(fs.existsSync(file + BACKUP_SUFFIX), false, '判不了也要清掉备份，避免每次启动重复喊');
+});
+
+test('自愈：反向同样成立（CRLF 检出 + LF 备份）也不许改行尾', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'src.js');
+  const originalLf = 'if (x) {\n  return false;\n}\n';
+  writeBackup(file, originalLf, '  return true;', '  return false;');
+  const mutatedCrlf = 'if (x) {\r\n  return true;\r\n}\r\n';
+  fs.writeFileSync(file, mutatedCrlf, 'utf8');
+
+  const { restored, skipped } = recoverLeftovers([file]);
+  assert.deepEqual(restored, []);
+  assert.deepEqual(skipped, [file]);
+  assert.equal(fs.readFileSync(file, 'utf8'), mutatedCrlf, '绝不允许把 CRLF 源文件改成 LF');
+});
+
 test('自愈：停在变异态（精确匹配）仍能还原 —— 收紧判据不能把自愈本身废掉', () => {
   const dir = tmpDir();
   const file = path.join(dir, 'src.js');

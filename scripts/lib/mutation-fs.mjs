@@ -205,12 +205,23 @@ export function recoverLeftovers(absFiles) {
     // 覆盖掉比它更新的源码，而门禁还"通过"（收尾核对 after === raw 看到的正是旧备份的内容）。
     // 本仓库真实发生过：一段刚加的功能被悄悄回退，事后只能靠肉眼发现。
     // 精确重建虽然多读一次备份，但它是这里唯一不会误伤人工改动的判据。
-    const norm = (s) => String(s).replace(/\r\n/g, '\n');
+    //
+    // 第二版收紧（TITA-90，L-19 家族）：**比较必须逐字节**，不能先归一行尾再比。
+    // 归一行尾后再比，会把「备份来自 CRLF 检出、当前文件已按 LF 重新检出」判成
+    // 「还停在变异态」，于是 restoreBackup 把 CRLF 字节写回 LF 检出 —— 一次跑完门禁后
+    // `git status` 多出 N 个"整文件行尾差异"的源文件（症状与运行前就脏的 EOL 检出完全一样，
+    // 事后无法区分是谁造成的）。所以按**备份自己的行尾**重建变异版本，再与当前文件原文
+    // 逐字节比；行尾形态变过的备份一律不动源文件（宁可让人看见，也不覆盖一份已重检出的源码）。
+    const backupEol = original.includes('\r\n') ? '\r\n' : '\n';
+    const toEol = (text, eol) => (eol === '\n' ? text : text.replace(/\n/g, eol));
     const canTell =
       meta &&
       typeof meta.from === 'string' && meta.from &&
       typeof meta.to === 'string' && meta.to;
-    const isMutated = Boolean(canTell) && norm(current) === norm(original).replace(meta.from, meta.to);
+    const mutatedFromBackup = canTell
+      ? toEol(String(original).replace(/\r\n/g, '\n').replace(meta.from, meta.to), backupEol)
+      : '';
+    const isMutated = Boolean(canTell) && current === mutatedFromBackup;
     if (isMutated) {
       if (restoreBackup(abs)) restored.push(abs);
     } else {
