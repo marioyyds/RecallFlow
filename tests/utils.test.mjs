@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, markdownExcerpt, normalizeUrl, detectPlatform, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.ts';
+import { esc, cleanTitle, parseTags, markdownExcerpt, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.ts';
+import { normalizeUrl, detectPlatform } from '../lib/shared/url.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 
 test('esc escapes html special chars', () => {

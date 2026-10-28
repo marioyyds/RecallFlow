@@ -11,15 +11,11 @@ import {
   tagsHtml,
   fmtTime,
   bindStarKeyboard,
-  isFileUrl,
-  isOperableUrl,
-  normalizeUrl,
   cleanTitle,
-  detectPlatform,
-  detectType,
   platformColor,
   parseTags,
 } from '../lib/shared/utils.ts';
+import { detectPlatform, detectType, isFileUrl, isOperableUrl, normalizeUrl } from '../lib/shared/url.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
 import type { TabSummary } from '../lib/application/ports/tabs.ts';

@@ -138,32 +138,6 @@ function logError(context, error) {
 function typeInfo(id) {
   return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
-function isWebUrl(u) {
-  return /^https?:/i.test(u);
-}
-function isFileUrl(u) {
-  return /^file:\/\//i.test(String(u || ""));
-}
-function isOperableUrl(u) {
-  return isWebUrl(u) || isFileUrl(u);
-}
-function siteKeyOf(u) {
-  const s = String(u || "");
-  if (isFileUrl(s)) {
-    try {
-      const pathname = new URL(s).pathname;
-      const cut = pathname.lastIndexOf("/");
-      return "file://" + (cut >= 0 ? pathname.slice(0, cut + 1) : "/");
-    } catch (e) {
-      return s;
-    }
-  }
-  try {
-    return new URL(s).origin;
-  } catch (e) {
-    return "";
-  }
-}
 function cleanTitle(title) {
   let t = (title || "").trim();
   t = t.replace(
@@ -2664,6 +2638,34 @@ async function handleJavaScriptDialog(tabId, accept, promptText) {
     ...typeof promptText === "string" ? { promptText } : {}
   });
   return { ok: true };
+}
+
+// lib/shared/url.ts
+function isWebUrl(url) {
+  return /^https?:/i.test(url);
+}
+function isFileUrl(url) {
+  return /^file:\/\//i.test(String(url || ""));
+}
+function isOperableUrl(url) {
+  return isWebUrl(url) || isFileUrl(url);
+}
+function siteKeyOf(url) {
+  const value = String(url || "");
+  if (isFileUrl(value)) {
+    try {
+      const pathname = new URL(value).pathname;
+      const cut = pathname.lastIndexOf("/");
+      return "file://" + (cut >= 0 ? pathname.slice(0, cut + 1) : "/");
+    } catch (error) {
+      return value;
+    }
+  }
+  try {
+    return new URL(value).origin;
+  } catch (error) {
+    return "";
+  }
 }
 
 // lib/assistant/site-memory.ts

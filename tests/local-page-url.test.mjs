@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isFileUrl, isWebUrl, isOperableUrl, siteKeyOf } from '../lib/shared/utils.ts';
+import { isFileUrl, isWebUrl, isOperableUrl, siteKeyOf } from '../lib/shared/url.ts';
 
 test('isFileUrl：只认 file://（大小写不敏感）', () => {
   assert.equal(isFileUrl('file:///C:/docs/a.html'), true);

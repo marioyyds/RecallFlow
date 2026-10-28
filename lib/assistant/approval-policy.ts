@@ -7,7 +7,7 @@
 // 判定规则是**安全边界**，不该和"编排循环"耦合在同一个文件里。
 import { getToolMetadata } from './tools.ts';
 import { resolveCodeExecutionApproval } from '../shared/settings.ts';
-import { siteKeyOf } from '../shared/utils.ts';
+import { siteKeyOf } from '../shared/url.ts';
 
 /**
  * risk → 审批类别（UI 里那 5 个勾选项）的**显式**映射。

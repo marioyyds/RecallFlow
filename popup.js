@@ -75,34 +75,6 @@ function typeInfo(id) {
 function starColor(n) {
   return (STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).color;
 }
-function normalizeUrl(u) {
-  try {
-    const x = new URL(u);
-    x.hash = "";
-    return x.href;
-  } catch (e) {
-    return u;
-  }
-}
-function detectPlatform(u) {
-  for (const p of PLATFORMS) {
-    if (p.match.test(u)) return { id: p.id, name: p.name };
-  }
-  return { id: "other", name: "\u5176\u4ED6\u5E73\u53F0" };
-}
-function detectType(url) {
-  if (url && detectPlatform(url).id !== "other") return "wrong";
-  return "article";
-}
-function isWebUrl(u) {
-  return /^https?:/i.test(u);
-}
-function isFileUrl(u) {
-  return /^file:\/\//i.test(String(u || ""));
-}
-function isOperableUrl(u) {
-  return isWebUrl(u) || isFileUrl(u);
-}
 function cleanTitle(title) {
   let t = (title || "").trim();
   t = t.replace(
@@ -250,6 +222,36 @@ function showToast(msg, opts) {
   el.classList.add("show");
   if (_toastTimer) clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
+}
+
+// lib/shared/url.ts
+function normalizeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.href;
+  } catch (error) {
+    return url;
+  }
+}
+function detectPlatform(url) {
+  for (const platform2 of PLATFORMS) {
+    if (platform2.match.test(url)) return { id: platform2.id, name: platform2.name };
+  }
+  return { id: "other", name: "\u5176\u4ED6\u5E73\u53F0" };
+}
+function detectType(url) {
+  if (url && detectPlatform(url).id !== "other") return "wrong";
+  return "article";
+}
+function isWebUrl(url) {
+  return /^https?:/i.test(url);
+}
+function isFileUrl(url) {
+  return /^file:\/\//i.test(String(url || ""));
+}
+function isOperableUrl(url) {
+  return isWebUrl(url) || isFileUrl(url);
 }
 
 // lib/domain/knowledge/query.ts

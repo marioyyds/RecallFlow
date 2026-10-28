@@ -1,6 +1,6 @@
 // 宏（可回放的动作序列）存储：把一次成功的多步操作按域名保存，之后无需 LLM 往返即可回放。
 // 步骤只保存可稳定重放的字段（selector / text / key / url 等），不含易失的 ref。
-import { siteKeyOf } from '../shared/utils.ts';
+import { siteKeyOf } from '../shared/url.ts';
 const KEY = 'recallflow.macros.v1';
 const MAX_PER_ORIGIN = 20;
 const MAX_ORIGINS = 50;

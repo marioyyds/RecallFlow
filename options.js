@@ -150,26 +150,6 @@ function rangeSafe(text, start, end) {
 function typeInfo(id) {
   return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
-function isFileUrl(u) {
-  return /^file:\/\//i.test(String(u || ""));
-}
-function siteKeyOf(u) {
-  const s = String(u || "");
-  if (isFileUrl(s)) {
-    try {
-      const pathname = new URL(s).pathname;
-      const cut = pathname.lastIndexOf("/");
-      return "file://" + (cut >= 0 ? pathname.slice(0, cut + 1) : "/");
-    } catch (e) {
-      return s;
-    }
-  }
-  try {
-    return new URL(s).origin;
-  } catch (e) {
-    return "";
-  }
-}
 function cleanTitle(title) {
   let t = (title || "").trim();
   t = t.replace(
@@ -2270,6 +2250,28 @@ async function handleJavaScriptDialog(tabId, accept, promptText) {
     ...typeof promptText === "string" ? { promptText } : {}
   });
   return { ok: true };
+}
+
+// lib/shared/url.ts
+function isFileUrl(url) {
+  return /^file:\/\//i.test(String(url || ""));
+}
+function siteKeyOf(url) {
+  const value = String(url || "");
+  if (isFileUrl(value)) {
+    try {
+      const pathname = new URL(value).pathname;
+      const cut = pathname.lastIndexOf("/");
+      return "file://" + (cut >= 0 ? pathname.slice(0, cut + 1) : "/");
+    } catch (error) {
+      return value;
+    }
+  }
+  try {
+    return new URL(value).origin;
+  } catch (error) {
+    return "";
+  }
 }
 
 // lib/assistant/site-memory.ts

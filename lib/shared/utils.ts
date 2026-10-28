@@ -1,5 +1,5 @@
 // 通用工具与展示助手（HTML 渲染、文本处理、toast）
-import { ITEM_TYPES, PLATFORMS, STAR_LEVELS } from './constants.ts';
+import { ITEM_TYPES, STAR_LEVELS } from './constants.ts';
 // 页面原文（元素标签/文案/上下文）一律用 sliceSafe：按码元下标切会切裂代理对，
 // 半个字符进请求体就会被服务端整单拒收（见 surrogates.js 的事故说明）。
 import { sliceSafe } from './surrogates.ts';
@@ -37,81 +37,6 @@ export function typeColor(id: string) {
 
 export function starColor(n: number | string) {
   return (STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).color;
-}
-
-export function normalizeUrl(u: string) {
-  try {
-    const x = new URL(u);
-    x.hash = '';
-    return x.href;
-  } catch (e) {
-    return u;
-  }
-}
-
-export function detectPlatform(u: string) {
-  for (const p of PLATFORMS) {
-    if (p.match.test(u)) return { id: p.id, name: p.name };
-  }
-  return { id: 'other', name: '其他平台' };
-}
-
-export function detectType(url: string) {
-  if (url && detectPlatform(url).id !== 'other') return 'wrong';
-  return 'article';
-}
-
-export function isWebUrl(u: string) {
-  return /^https?:/i.test(u);
-}
-
-/**
- * 本地文件页（`file://`）。
- *
- * 为什么单独有一个判定：本地页在扩展里是"能操作、但能力要收窄"的一类 ——
- * 它没有 origin（`URL.origin === 'null'`）、`fetch` 走不到、也不该被 agent 主动打开。
- * 把这些判断散落在各处，就会出现"面板能开、收录说页面不可用"这类前后不一致。
- */
-export function isFileUrl(u: string) {
-  return /^file:\/\//i.test(String(u || ''));
-}
-
-/**
- * 扩展可以在上面工作的页面：普通网页 + 用户自己打开的本地文件。
- *
- * ⚠ 这**不是**"允许 agent 打开任意 URL"的开关 —— `open_tab` / `fetch_webpage` 仍然只收
- * http(s)（见 lib/assistant/tab-tools.js）。两者语义不同：
- * 这里回答"用户此刻正看着的页面，我们能不能注入 UI / 读它"，
- * 那边的回答是"agent 能不能主动去拿一个新页面"，后者放开等于允许逐个探测磁盘文件。
- */
-export function isOperableUrl(u: string) {
-  return isWebUrl(u) || isFileUrl(u);
-}
-
-/**
- * 站点键：给"按站点记忆"的特性（站点记忆 / 宏 / 站点信任）做归组。
- *
- * 为什么不直接用 `URL.origin`：`file:///C:/a/x.html` 的 origin 是字符串 `'null'`，
- * 于是**所有本地文件会被归成同一个"站点"** —— A 文件里学到的选择器会污染 B 文件，
- * 信任一个本地页等于信任整块磁盘。本地页改用「目录」当键：同一个目录下的文件算一个站点，
- * 不同目录互不影响（这与用户对"同一批本地文档"的直觉一致，也让信任范围可解释）。
- */
-export function siteKeyOf(u: string) {
-  const s = String(u || '');
-  if (isFileUrl(s)) {
-    try {
-      const pathname = new URL(s).pathname; // 例如 /C:/docs/a.html
-      const cut = pathname.lastIndexOf('/');
-      return 'file://' + (cut >= 0 ? pathname.slice(0, cut + 1) : '/');
-    } catch (e) {
-      return s;
-    }
-  }
-  try {
-    return new URL(s).origin;
-  } catch (e) {
-    return '';
-  }
 }
 
 export function cleanTitle(title: string | null | undefined) {

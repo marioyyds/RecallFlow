@@ -10,7 +10,7 @@
 //   · `trust_site` 会直接影响 `toolNeedsApproval` 的结果（信任站点 → 写操作免确认）；
 //   · 但它**不能**覆盖 `alwaysRequireApproval`（用户脚本 / 技能写入仍每次确认）——
 //     那句话就写在返回文案里，是给模型与用户看的承诺。
-import { siteKeyOf } from '../shared/utils.ts';
+import { siteKeyOf } from '../shared/url.ts';
 import type { Caught } from './errors.ts';
 import type { PermissionDeps } from './tool-deps.ts';
 
