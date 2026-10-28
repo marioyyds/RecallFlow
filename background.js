@@ -4631,11 +4631,11 @@ async function openTab(deps, args) {
     }
     const openedCount = Number(ctx.openedTabCount || 0);
     if (openedCount >= Number(ctx.maxOpenedTabs || 5)) {
-      const summary = await deps.listOpenedTabsSummary(ctx).catch(() => "");
+      const summary2 = await deps.listOpenedTabsSummary(ctx).catch(() => "");
       return {
         ok: false,
         blocked: true,
-        result: "\u672C\u4EFB\u52A1\u5DF2\u65B0\u5EFA " + openedCount + " \u4E2A\u6807\u7B7E\u9875\uFF0C\u8FBE\u5230\u4E0A\u9650\uFF08" + (ctx.maxOpenedTabs || 5) + "\uFF09\uFF0C\u7981\u6B62\u7EE7\u7EED\u65B0\u5EFA\u3002" + (summary ? "\n\u5F53\u524D\u5DF2\u6253\u5F00\u7684\u6807\u7B7E\u9875\uFF1A\n" + summary : "") + "\u8BF7\u6539\u7528 switch_tab \u590D\u7528\u4E0A\u9762\u7684\u6807\u7B7E\u9875\uFF08tabId\uFF09\uFF0C\u6216\u6539\u7528 fetch_webpage \u76F4\u63A5\u6293\u53D6\u5185\u5BB9\uFF1B\u4E0D\u8981\u518D\u8C03\u7528 open_tab\u3002"
+        result: "\u672C\u4EFB\u52A1\u5DF2\u65B0\u5EFA " + openedCount + " \u4E2A\u6807\u7B7E\u9875\uFF0C\u8FBE\u5230\u4E0A\u9650\uFF08" + (ctx.maxOpenedTabs || 5) + "\uFF09\uFF0C\u7981\u6B62\u7EE7\u7EED\u65B0\u5EFA\u3002" + (summary2 ? "\n\u5F53\u524D\u5DF2\u6253\u5F00\u7684\u6807\u7B7E\u9875\uFF1A\n" + summary2 : "") + "\u8BF7\u6539\u7528 switch_tab \u590D\u7528\u4E0A\u9762\u7684\u6807\u7B7E\u9875\uFF08tabId\uFF09\uFF0C\u6216\u6539\u7528 fetch_webpage \u76F4\u63A5\u6293\u53D6\u5185\u5BB9\uFF1B\u4E0D\u8981\u518D\u8C03\u7528 open_tab\u3002"
       };
     }
     const budget = tabSwitchBudget(ctx);
@@ -4760,8 +4760,8 @@ async function getRunTrace(deps, args) {
     if (e.phase === "error") return t + " [error] " + (e.error || "");
     return t + " [" + e.phase + "]";
   });
-  const summary = formatRunMetrics(summarizeRunTrace(rec.entries));
-  return { ok: true, result: "\u8FD0\u884C\u8F68\u8FF9 " + rec.runId + "\uFF08" + lines.length + " \u6761\uFF09\uFF1A\n" + lines.join("\n") + "\n\n" + summary };
+  const summary2 = formatRunMetrics(summarizeRunTrace(rec.entries));
+  return { ok: true, result: "\u8FD0\u884C\u8F68\u8FF9 " + rec.runId + "\uFF08" + lines.length + " \u6761\uFF09\uFF1A\n" + lines.join("\n") + "\n\n" + summary2 };
 }
 async function handleRunStateTool(name, args, deps) {
   if (name === "update_plan") return updatePlan(deps.ctx, args);
@@ -5073,8 +5073,8 @@ async function typeText(deps, args) {
       await deps.cdp.insertText(deps.ctx.tabId, text);
     }
     const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
-    const summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
-    const verified = actualValue !== null && actualValue !== void 0 && summary.matchesIntent;
+    const summary2 = editableTextSummary(expected, actualValue == null ? "" : actualValue);
+    const verified = actualValue !== null && actualValue !== void 0 && summary2.matchesIntent;
     if (verified) deps.rememberTarget(deps.ctx, target);
     const before = deps.ctx.lastSnapshot || null;
     const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1e3, frameId: isSubframe ? typeFrame : void 0 }).catch(() => null);
@@ -5085,15 +5085,15 @@ async function typeText(deps, args) {
       cdp: true,
       strategy,
       matchesIntent: verified,
-      expectedLength: summary.expectedLength,
-      actualLength: summary.actualLength,
-      firstDifference: summary.firstDifference,
+      expectedLength: summary2.expectedLength,
+      actualLength: summary2.actualLength,
+      firstDifference: summary2.firstDifference,
       pageSnapshot: after,
       verification: deps.buildActionVerification(
         deps.observedChange(before, after),
         verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary2.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary2.actualLength + " \u5B57\u7B26") + (summary2.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary2.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;
@@ -5278,12 +5278,12 @@ function detectAuthChallenge(input) {
   const mcpEndpoint = isMcpEndpoint(currentUrl) || isMcpEndpoint(beforeUrl) || statusHasAuth && MCP_HINT_RE.test(haystack);
   const bareApiDenied = statusHasAuth && !snapshot && !resultText.trim();
   if (mcpEndpoint || bareApiDenied) {
-    const summary2 = mcpEndpoint ? "\u8FD9\u662F MCP \u670D\u52A1\u7AEF\u70B9\uFF08\u4E0D\u662F\u7F51\u9875\uFF09\uFF1A401/403 \u901A\u5E38\u662F\u7F3A\u5C11\u6216\u9519\u8BEF\u7684 Bearer Token\u3002" : "\u8BE5\u5730\u5740\u8FD4\u56DE 401/403 \u4E14\u6CA1\u6709\u53EF\u6253\u5F00\u7684\u7F51\u9875\u767B\u5F55\u9875\uFF1A\u8FD9\u662F\u670D\u52A1\u7AEF\u70B9\uFF0C\u901A\u5E38\u662F\u51ED\u636E\u7F3A\u5931\u6216\u9519\u8BEF\u3002";
-    const message2 = mcpEndpoint ? summary2 + " \u8BF7\u76F4\u63A5\u7528\u5DF2\u914D\u7F6E\u7684 MCP \u5DE5\u5177\uFF08\u5DE5\u5177\u540D\u5F62\u5982 `mcp__<serverId>__<\u5DE5\u5177\u540D>`\uFF09\u8C03\u7528\u8BE5\u80FD\u529B\uFF1B\u82E5\u5DE5\u5177\u6CA1\u52A0\u8F7D\uFF0C\u5230\u8BBE\u7F6E\u9875\u300CMCP \u670D\u52A1\u5668\u300D\u68C0\u67E5\u8FD9\u53F0\u670D\u52A1\u5668\u7684\u5730\u5740\u4E0E Authorization\uFF08Bearer Token\uFF09\u3002\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740 \u2014\u2014 \u5B83\u53EA\u4F1A\u518D\u62FF\u5230\u4E00\u6B21 401/403\u3002" : summary2 + " \u8BF7\u5728\u8BBE\u7F6E\u9875/\u8BF7\u6C42\u5934\u91CC\u4FEE\u6B63\u51ED\u636E\u540E\u91CD\u8BD5\uFF0C\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740\u3002";
+    const summary3 = mcpEndpoint ? "\u8FD9\u662F MCP \u670D\u52A1\u7AEF\u70B9\uFF08\u4E0D\u662F\u7F51\u9875\uFF09\uFF1A401/403 \u901A\u5E38\u662F\u7F3A\u5C11\u6216\u9519\u8BEF\u7684 Bearer Token\u3002" : "\u8BE5\u5730\u5740\u8FD4\u56DE 401/403 \u4E14\u6CA1\u6709\u53EF\u6253\u5F00\u7684\u7F51\u9875\u767B\u5F55\u9875\uFF1A\u8FD9\u662F\u670D\u52A1\u7AEF\u70B9\uFF0C\u901A\u5E38\u662F\u51ED\u636E\u7F3A\u5931\u6216\u9519\u8BEF\u3002";
+    const message2 = mcpEndpoint ? summary3 + " \u8BF7\u76F4\u63A5\u7528\u5DF2\u914D\u7F6E\u7684 MCP \u5DE5\u5177\uFF08\u5DE5\u5177\u540D\u5F62\u5982 `mcp__<serverId>__<\u5DE5\u5177\u540D>`\uFF09\u8C03\u7528\u8BE5\u80FD\u529B\uFF1B\u82E5\u5DE5\u5177\u6CA1\u52A0\u8F7D\uFF0C\u5230\u8BBE\u7F6E\u9875\u300CMCP \u670D\u52A1\u5668\u300D\u68C0\u67E5\u8FD9\u53F0\u670D\u52A1\u5668\u7684\u5730\u5740\u4E0E Authorization\uFF08Bearer Token\uFF09\u3002\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740 \u2014\u2014 \u5B83\u53EA\u4F1A\u518D\u62FF\u5230\u4E00\u6B21 401/403\u3002" : summary3 + " \u8BF7\u5728\u8BBE\u7F6E\u9875/\u8BF7\u6C42\u5934\u91CC\u4FEE\u6B63\u51ED\u636E\u540E\u91CD\u8BD5\uFF0C\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740\u3002";
     return {
       required: true,
       reason: "mcp-token-required",
-      summary: summary2,
+      summary: summary3,
       message: message2,
       currentUrl,
       loginUrl: "",
@@ -5294,7 +5294,7 @@ function detectAuthChallenge(input) {
   }
   const permissionDenied = denyCopy || statusCode === 403 || /(无权限|没有权限|权限不足|permission\s+denied|access\s+denied|forbidden)/i.test(resultText);
   const reason = permissionDenied ? "permission-denied" : "login-required";
-  const summary = permissionDenied ? "\u64CD\u4F5C\u88AB\u6743\u9650\u9650\u5236\uFF1A\u5F53\u524D\u767B\u5F55\u72B6\u6001\u6216\u8D26\u53F7\u6743\u9650\u4E0D\u8DB3\uFF0C\u9700\u8981\u767B\u5F55 / \u6388\u6743\u540E\u91CD\u8BD5\u3002" : "\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A\uFF1A\u5F53\u524D\u9875\u9762\u9700\u8981\u5148\u767B\u5F55\u540E\u624D\u80FD\u7EE7\u7EED\u3002";
+  const summary2 = permissionDenied ? "\u64CD\u4F5C\u88AB\u6743\u9650\u9650\u5236\uFF1A\u5F53\u524D\u767B\u5F55\u72B6\u6001\u6216\u8D26\u53F7\u6743\u9650\u4E0D\u8DB3\uFF0C\u9700\u8981\u767B\u5F55 / \u6388\u6743\u540E\u91CD\u8BD5\u3002" : "\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A\uFF1A\u5F53\u524D\u9875\u9762\u9700\u8981\u5148\u767B\u5F55\u540E\u624D\u80FD\u7EE7\u7EED\u3002";
   let loginUrl = "";
   let loginUrlSource = "";
   if (authPath) {
@@ -5307,11 +5307,11 @@ function detectAuthChallenge(input) {
     loginUrl = fallbackLoginUrl(currentUrl || beforeUrl);
     loginUrlSource = loginUrl ? "site-fallback" : "";
   }
-  const message = loginUrl ? summary + " \u767B\u5F55 / \u6388\u6743\u5165\u53E3\uFF1A" + loginUrl : summary;
+  const message = loginUrl ? summary2 + " \u767B\u5F55 / \u6388\u6743\u5165\u53E3\uFF1A" + loginUrl : summary2;
   return {
     required: true,
     reason,
-    summary,
+    summary: summary2,
     message,
     currentUrl,
     loginUrl,
@@ -6744,8 +6744,8 @@ async function installSkillFromSkillHub(identifier) {
     let generative = false;
     if (!skill) {
       generative = true;
-      const summary = (hit.summary || hit.description || hit.description_zh || "").toString();
-      const description = sliceSafe((hit.description_zh || hit.description || summary || "").toString(), 0, 300);
+      const summary2 = (hit.summary || hit.description || hit.description_zh || "").toString();
+      const description = sliceSafe((hit.description_zh || hit.description || summary2 || "").toString(), 0, 300);
       skill = {
         name,
         displayName: hit.displayName || hit.name,
@@ -6754,7 +6754,7 @@ async function installSkillFromSkillHub(identifier) {
         category: hit.category || "",
         tags: Array.isArray(hit.tags) ? hit.tags : [],
         skill_type: "prompt-template",
-        content: "# " + (hit.displayName || hit.name) + "\uFF08SkillHub \u5B89\u88C5\uFF09\n\n\u6765\u6E90\uFF1ASkillHub\uFF08" + (hit.namespace ? hit.namespace.canonicalName : "") + "\uFF09\n\u4E3B\u9875\uFF1A" + (hit.homepage || "") + "\n\n\u7528\u9014\uFF1A" + summary + "\n\n\u8BF4\u660E\uFF1A\u672C\u6280\u80FD\u7531 RecallFlow \u57FA\u4E8E SkillHub \u68C0\u7D22\u5143\u6570\u636E\u81EA\u52A8\u5B89\u88C5\uFF0C\u5185\u5BB9\u4E3A\u6458\u8981\u800C\u975E\u4E0A\u6E38\u9010\u5B57 SKILL.md\u3002\u5982\u9700\u5B8C\u6574\u64CD\u4F5C\u6307\u5F15\uFF0C\u8BF7\u8BBF\u95EE\u4E0A\u8FF0\u4E3B\u9875\uFF0C\u6216\u5728\u8BE5\u9875\u9762\u590D\u5236 SKILL.md \u540E\u7528\u300C\u5BFC\u5165\u300D\u529F\u80FD\u5B89\u88C5\u3002"
+        content: "# " + (hit.displayName || hit.name) + "\uFF08SkillHub \u5B89\u88C5\uFF09\n\n\u6765\u6E90\uFF1ASkillHub\uFF08" + (hit.namespace ? hit.namespace.canonicalName : "") + "\uFF09\n\u4E3B\u9875\uFF1A" + (hit.homepage || "") + "\n\n\u7528\u9014\uFF1A" + summary2 + "\n\n\u8BF4\u660E\uFF1A\u672C\u6280\u80FD\u7531 RecallFlow \u57FA\u4E8E SkillHub \u68C0\u7D22\u5143\u6570\u636E\u81EA\u52A8\u5B89\u88C5\uFF0C\u5185\u5BB9\u4E3A\u6458\u8981\u800C\u975E\u4E0A\u6E38\u9010\u5B57 SKILL.md\u3002\u5982\u9700\u5B8C\u6574\u64CD\u4F5C\u6307\u5F15\uFF0C\u8BF7\u8BBF\u95EE\u4E0A\u8FF0\u4E3B\u9875\uFF0C\u6216\u5728\u8BE5\u9875\u9762\u590D\u5236 SKILL.md \u540E\u7528\u300C\u5BFC\u5165\u300D\u529F\u80FD\u5B89\u88C5\u3002"
       };
     } else {
       skill.displayName = skill.displayName || hit.displayName || hit.name;
@@ -8120,8 +8120,8 @@ function normalizeHistory(history, options = {}) {
     let content = sliceSafe(h.content, 0, maxChars);
     if (h.content.length > maxChars) content = content + formatHistoryTruncationNotice(h.content.length, maxChars);
     if (h.role === "assistant" && typeof h.toolSummary === "string" && h.toolSummary.trim()) {
-      const summary = sliceSafe(h.toolSummary, 0, HISTORY_SUMMARY_MAX_CHARS);
-      content += "\n\uFF08\u4E0A\u4E00\u8F6E\u6267\u884C\u6458\u8981\uFF1A" + summary + (h.toolSummary.length > HISTORY_SUMMARY_MAX_CHARS ? "\u27E8\u2026\u6458\u8981\u5DF2\u622A\u65AD\uFF0C\u5171 " + h.toolSummary.length + " \u5B57\u7B26\u27E9" : "") + "\uFF09";
+      const summary2 = sliceSafe(h.toolSummary, 0, HISTORY_SUMMARY_MAX_CHARS);
+      content += "\n\uFF08\u4E0A\u4E00\u8F6E\u6267\u884C\u6458\u8981\uFF1A" + summary2 + (h.toolSummary.length > HISTORY_SUMMARY_MAX_CHARS ? "\u27E8\u2026\u6458\u8981\u5DF2\u622A\u65AD\uFF0C\u5171 " + h.toolSummary.length + " \u5B57\u7B26\u27E9" : "") + "\uFF09";
     }
     return { role: h.role, content };
   });
@@ -8600,145 +8600,6 @@ function buildDeterministicReflection(result) {
   return parts.join("\n");
 }
 
-// lib/assistant/evidence.ts
-var EVIDENCE_BUDGET = 3600;
-var SNIPPET_PAD = 130;
-var HEAD_CHARS = 420;
-var TAIL_CHARS = 420;
-var MAX_TOKENS = 30;
-var MAX_HITS_PER_TOKEN = 2;
-var MAX_TOKEN_FREQUENCY = 20;
-var MIN_TOKEN_LEN = 3;
-var TOKEN_PATTERNS = [
-  /[0-9a-f]{7,40}/gi,
-  // 提交哈希
-  /[A-Za-z_][A-Za-z0-9_.-]{5,}/g,
-  // 标识符 / 文件名 / 函数名
-  /\d{2,}(?:\.\d+)?/g,
-  // 多位数字（单个数字噪声太大）
-  /[\u4e00-\u9fff]{6,}/g
-  // 中文片段（模型引用原文时用得上）
-];
-function extractClaimTokens(claim) {
-  const text = String(claim === void 0 || claim === null ? "" : claim);
-  if (!text) return [];
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const re of TOKEN_PATTERNS) {
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      const tok = m[0];
-      if (tok.length < MIN_TOKEN_LEN) continue;
-      const key = tok.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(tok);
-      if (out.length >= MAX_TOKENS * 4) break;
-    }
-  }
-  return out.slice(0, MAX_TOKENS * 4);
-}
-function mergeRanges(ranges, gap = 40) {
-  const list = ranges.slice().sort((a, b) => a.start - b.start);
-  const out = [];
-  for (const r of list) {
-    const last = out[out.length - 1];
-    if (last && r.start - last.end <= gap) {
-      last.end = Math.max(last.end, r.end);
-    } else {
-      out.push({ start: r.start, end: r.end });
-    }
-  }
-  return out;
-}
-function selectEvidence(input = {}) {
-  const fullText = String(input.fullText === void 0 || input.fullText === null ? "" : input.fullText);
-  const fallback = String(input.fallback === void 0 || input.fallback === null ? "" : input.fallback);
-  const claim = String(input.claim === void 0 || input.claim === null ? "" : input.claim);
-  const budget = Math.max(400, Number(input.budget) || EVIDENCE_BUDGET);
-  if (!fullText) {
-    const text = fallback.slice(0, budget);
-    return {
-      text,
-      coverage: text ? "\uFF08\u8BC1\u636E\u4E3A\u5DE5\u5177\u7ED3\u679C\u7684**\u5F00\u5934\u7247\u6BB5**\uFF0C\u672A\u505A\u76F8\u5173\u6027\u62BD\u53D6\uFF1B\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728\uFF09" : "",
-      hitTokens: [],
-      missedTokens: []
-    };
-  }
-  const tokens = extractClaimTokens(claim).filter((t) => {
-    let count = 0;
-    let at = fullText.indexOf(t);
-    while (at !== -1 && count <= MAX_TOKEN_FREQUENCY) {
-      count += 1;
-      at = fullText.indexOf(t, at + t.length);
-    }
-    return count <= MAX_TOKEN_FREQUENCY;
-  });
-  const hitTokens = [];
-  const missedTokens = [];
-  const ranges = [];
-  for (const tok of tokens) {
-    let at = fullText.indexOf(tok);
-    let hits = 0;
-    if (at === -1) {
-      missedTokens.push(tok);
-      continue;
-    }
-    hitTokens.push(tok);
-    while (at !== -1 && hits < MAX_HITS_PER_TOKEN) {
-      ranges.push({ start: Math.max(0, at - SNIPPET_PAD), end: Math.min(fullText.length, at + tok.length + SNIPPET_PAD) });
-      hits += 1;
-      at = fullText.indexOf(tok, at + tok.length);
-    }
-  }
-  const head = { start: 0, end: Math.min(fullText.length, HEAD_CHARS) };
-  const tail = { start: Math.max(0, fullText.length - TAIL_CHARS), end: fullText.length };
-  const merged = mergeRanges([head, ...ranges, tail]);
-  const headRange = merged[0];
-  const hasTail = merged.length > 1;
-  const tailRange = hasTail ? merged[merged.length - 1] : null;
-  const midRanges = merged.slice(1, hasTail ? merged.length - 1 : 1);
-  const picked = [];
-  let used = 0;
-  const push = (start, text, truncated) => {
-    if (!text) return;
-    picked.push({ start, text, truncated });
-    used += text.length;
-  };
-  const headText = fullText.slice(headRange.start, headRange.end);
-  push(headRange.start, headText.slice(0, budget), headText.length > budget);
-  if (tailRange) {
-    const tailText = fullText.slice(tailRange.start, tailRange.end);
-    const room = budget - used;
-    if (tailText.length <= room) {
-      push(tailRange.start, tailText, false);
-    } else if (room >= 80) {
-      const cut = tailText.slice(tailText.length - room);
-      push(tailRange.end - cut.length, cut, true);
-    }
-  }
-  for (const r of midRanges) {
-    const room = budget - used;
-    if (room < 80) break;
-    const piece = fullText.slice(r.start, r.end);
-    if (piece.length <= room) push(r.start, piece, false);
-    else push(r.start, piece.slice(0, room), true);
-  }
-  picked.sort((a, b) => a.start - b.start);
-  const shown = picked.reduce((n, p) => n + p.text.length, 0);
-  const body = picked.map((p, i) => {
-    const lead = p.start > 0 ? "\u2026" : "";
-    if (p.truncated) return lead + p.text + "\u2026\uFF08\u672C\u6BB5\u5DF2\u622A\u65AD\uFF09";
-    const reachesEnd = p.start + p.text.length >= fullText.length;
-    const isLast = i === picked.length - 1;
-    return lead + p.text + (isLast && reachesEnd ? "" : "\u2026");
-  }).join("\n");
-  const ratio = Math.min(100, Math.round(shown / fullText.length * 100));
-  const coverage = "\uFF08\u4EE5\u4E0A " + shown + " \u5B57\u53D6\u81EA " + fullText.length + " \u5B57\u6B63\u6587\uFF08\u7EA6 " + ratio + "%\uFF09\uFF0C\u6309\u7ED3\u8BBA\u91CC\u51FA\u73B0\u7684\u5177\u4F53\u4E8B\u5B9E\u5B9A\u4F4D\u7247\u6BB5" + (missedTokens.length ? "\uFF1B\u5176\u4E2D " + missedTokens.length + " \u4E2A\u5177\u4F53\u4E8B\u5B9E\u5728\u6B63\u6587\u4E2D\u672A\u627E\u5230" : "") + "\u3002**\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728**\uFF0C\u56E0\u6B64\u4E0D\u80FD\u4EC5\u51ED\u300C\u8BC1\u636E\u91CC\u6CA1\u6709 X\u300D\u5224\u5B9A X \u662F\u7F16\u9020\u7684\u3002\uFF09";
-  return { text: body, coverage, hitTokens, missedTokens };
-}
-
 // lib/assistant/initial-messages.ts
 var UNTRUSTED_BEGIN = "<<<RECALLFLOW_UNTRUSTED_DATA>>>";
 var UNTRUSTED_END = "<<<END_RECALLFLOW_UNTRUSTED_DATA>>>";
@@ -8887,6 +8748,323 @@ function visionMessagesFor(screenshots, options = {}) {
   return msg ? [msg] : [];
 }
 
+// lib/application/agent/budget.ts
+var AGENT_BUDGET_DEFAULTS = Object.freeze({
+  repeatThresholds: [3, 5, 8],
+  failThresholds: [2, 3, 5],
+  noProgressThresholds: [3, 5, 8],
+  excludeTools: ["update_plan"],
+  maxOpenedTabs: 6,
+  maxTabSwitches: 6,
+  toolTimeoutMs: 15e3,
+  maxTotalTokens: 6e6,
+  maxVerifications: 2,
+  maxNoProgressRounds: 12
+});
+function getBudget(payload = {}, settings = {}, intent) {
+  const source = payload.agentBudget || settings.agentBudget || {};
+  const budget = Object.fromEntries(Object.entries(AGENT_BUDGET_DEFAULTS).map(([key, value]) => {
+    const n = Number(source[key]);
+    return [key, Number.isFinite(n) && n > 0 ? Math.floor(n) : value];
+  }));
+  if (source.maxOpenedTabs === void 0 || source.maxOpenedTabs === null || source.maxOpenedTabs === "") {
+    budget.maxOpenedTabs = intent === INTENTS.BROWSER ? 8 : intent === INTENTS.RESEARCH ? 6 : 4;
+  }
+  return budget;
+}
+function tokenBudgetExceeded(totalTokens, budget) {
+  const cap = Number(budget && budget.maxTotalTokens);
+  if (!Number.isFinite(cap) || cap <= 0) return false;
+  const used = Number(totalTokens);
+  if (!Number.isFinite(used) || used <= 0) return false;
+  return used >= cap;
+}
+
+// lib/application/agent/intent-policy.ts
+function promoteToResearch(tools, messages, instruction, allSkills, promptExtras) {
+  const researchInfo = resolveIntent(INTENTS.RESEARCH);
+  for (const name of researchInfo.allowedTools) {
+    if (tools.some((t) => t.function && t.function.name === name)) continue;
+    const def = TOOL_REGISTRY.find((t) => t.name === name);
+    if (def) tools.push(def.openai);
+  }
+  const names = tools.map((t) => t.function && t.function.name).filter(Boolean);
+  const newPrompt = buildSystemPrompt(INTENTS.RESEARCH, instruction, names, allSkills);
+  const content = promptExtras ? newPrompt + promptExtras : newPrompt;
+  messages.push({ role: "system", content });
+  return content;
+}
+
+// lib/application/agent/history-policy.ts
+var SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
+var SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;
+function sanitizeToolPairing(list) {
+  const source = Array.isArray(list) ? list : [];
+  const isCallAssistant = (m) => m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+  let out = source;
+  let resultIds = new Set(out.filter((m) => m && m.role === "tool" && m.tool_call_id).map((m) => m.tool_call_id));
+  out = out.filter((m) => !isCallAssistant(m) || m.tool_calls.every((tc) => tc && resultIds.has(tc.id)));
+  const providerIds = /* @__PURE__ */ new Set();
+  for (const m of out) if (isCallAssistant(m)) {
+    for (const tc of m.tool_calls) if (tc && tc.id) providerIds.add(tc.id);
+  }
+  out = out.filter((m) => !(m && m.role === "tool" && !providerIds.has(m.tool_call_id)));
+  return out;
+}
+function compactSessionMessages(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  const system = source.find((message) => message && message.role === "system");
+  const rest = source.filter((message) => message !== system);
+  const tail = sanitizeToolPairing(rest.slice(-SESSION_MAX_TAIL_MESSAGES));
+  const notices = [];
+  const droppedMessages = rest.length - Math.min(rest.length, SESSION_MAX_TAIL_MESSAGES);
+  if (droppedMessages > 0) {
+    notices.push({
+      role: "user",
+      content: "\u27E8\u2026\u66F4\u65E9\u7684 " + droppedMessages + " \u6761\u6D88\u606F\u672A\u968F\u5FEB\u7167\u4FDD\u5B58\uFF08\u843D\u76D8\u4E0A\u9650 " + SESSION_MAX_TAIL_MESSAGES + " \u6761\uFF09\uFF1B**\u8FD9\u4E9B\u6D88\u606F\u53D6\u4E0D\u56DE\u539F\u6587**\uFF0C\u9700\u8981\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\u4E0A\u4E0B\u6587\u3002\u27E9"
+    });
+  }
+  const compacted = tail.map((message) => {
+    const copy = { role: message.role };
+    if (typeof message.content === "string") {
+      copy.content = message.content.length > SESSION_MESSAGE_MAX_CHARS ? formatTailKeptTruncationNotice(message.content.length, SESSION_MESSAGE_MAX_CHARS) + message.content.slice(-SESSION_MESSAGE_MAX_CHARS) : message.content;
+    } else if (message.content !== void 0) copy.content = message.content;
+    if (Array.isArray(message.tool_calls)) copy.tool_calls = message.tool_calls.slice(-8);
+    if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
+    return copy;
+  });
+  return system ? [system, ...notices, ...compacted] : [...notices, ...compacted];
+}
+
+// lib/assistant/evidence.ts
+var EVIDENCE_BUDGET = 3600;
+var SNIPPET_PAD = 130;
+var HEAD_CHARS = 420;
+var TAIL_CHARS = 420;
+var MAX_TOKENS = 30;
+var MAX_HITS_PER_TOKEN = 2;
+var MAX_TOKEN_FREQUENCY = 20;
+var MIN_TOKEN_LEN = 3;
+var TOKEN_PATTERNS = [
+  /[0-9a-f]{7,40}/gi,
+  // 提交哈希
+  /[A-Za-z_][A-Za-z0-9_.-]{5,}/g,
+  // 标识符 / 文件名 / 函数名
+  /\d{2,}(?:\.\d+)?/g,
+  // 多位数字（单个数字噪声太大）
+  /[\u4e00-\u9fff]{6,}/g
+  // 中文片段（模型引用原文时用得上）
+];
+function extractClaimTokens(claim) {
+  const text = String(claim === void 0 || claim === null ? "" : claim);
+  if (!text) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const re of TOKEN_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const tok = m[0];
+      if (tok.length < MIN_TOKEN_LEN) continue;
+      const key = tok.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(tok);
+      if (out.length >= MAX_TOKENS * 4) break;
+    }
+  }
+  return out.slice(0, MAX_TOKENS * 4);
+}
+function mergeRanges(ranges, gap = 40) {
+  const list = ranges.slice().sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const r of list) {
+    const last = out[out.length - 1];
+    if (last && r.start - last.end <= gap) {
+      last.end = Math.max(last.end, r.end);
+    } else {
+      out.push({ start: r.start, end: r.end });
+    }
+  }
+  return out;
+}
+function selectEvidence(input = {}) {
+  const fullText = String(input.fullText === void 0 || input.fullText === null ? "" : input.fullText);
+  const fallback = String(input.fallback === void 0 || input.fallback === null ? "" : input.fallback);
+  const claim = String(input.claim === void 0 || input.claim === null ? "" : input.claim);
+  const budget = Math.max(400, Number(input.budget) || EVIDENCE_BUDGET);
+  if (!fullText) {
+    const text = fallback.slice(0, budget);
+    return {
+      text,
+      coverage: text ? "\uFF08\u8BC1\u636E\u4E3A\u5DE5\u5177\u7ED3\u679C\u7684**\u5F00\u5934\u7247\u6BB5**\uFF0C\u672A\u505A\u76F8\u5173\u6027\u62BD\u53D6\uFF1B\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728\uFF09" : "",
+      hitTokens: [],
+      missedTokens: []
+    };
+  }
+  const tokens = extractClaimTokens(claim).filter((t) => {
+    let count = 0;
+    let at = fullText.indexOf(t);
+    while (at !== -1 && count <= MAX_TOKEN_FREQUENCY) {
+      count += 1;
+      at = fullText.indexOf(t, at + t.length);
+    }
+    return count <= MAX_TOKEN_FREQUENCY;
+  });
+  const hitTokens = [];
+  const missedTokens = [];
+  const ranges = [];
+  for (const tok of tokens) {
+    let at = fullText.indexOf(tok);
+    let hits = 0;
+    if (at === -1) {
+      missedTokens.push(tok);
+      continue;
+    }
+    hitTokens.push(tok);
+    while (at !== -1 && hits < MAX_HITS_PER_TOKEN) {
+      ranges.push({ start: Math.max(0, at - SNIPPET_PAD), end: Math.min(fullText.length, at + tok.length + SNIPPET_PAD) });
+      hits += 1;
+      at = fullText.indexOf(tok, at + tok.length);
+    }
+  }
+  const head = { start: 0, end: Math.min(fullText.length, HEAD_CHARS) };
+  const tail = { start: Math.max(0, fullText.length - TAIL_CHARS), end: fullText.length };
+  const merged = mergeRanges([head, ...ranges, tail]);
+  const headRange = merged[0];
+  const hasTail = merged.length > 1;
+  const tailRange = hasTail ? merged[merged.length - 1] : null;
+  const midRanges = merged.slice(1, hasTail ? merged.length - 1 : 1);
+  const picked = [];
+  let used = 0;
+  const push = (start, text, truncated) => {
+    if (!text) return;
+    picked.push({ start, text, truncated });
+    used += text.length;
+  };
+  const headText = fullText.slice(headRange.start, headRange.end);
+  push(headRange.start, headText.slice(0, budget), headText.length > budget);
+  if (tailRange) {
+    const tailText = fullText.slice(tailRange.start, tailRange.end);
+    const room = budget - used;
+    if (tailText.length <= room) {
+      push(tailRange.start, tailText, false);
+    } else if (room >= 80) {
+      const cut = tailText.slice(tailText.length - room);
+      push(tailRange.end - cut.length, cut, true);
+    }
+  }
+  for (const r of midRanges) {
+    const room = budget - used;
+    if (room < 80) break;
+    const piece = fullText.slice(r.start, r.end);
+    if (piece.length <= room) push(r.start, piece, false);
+    else push(r.start, piece.slice(0, room), true);
+  }
+  picked.sort((a, b) => a.start - b.start);
+  const shown = picked.reduce((n, p) => n + p.text.length, 0);
+  const body = picked.map((p, i) => {
+    const lead = p.start > 0 ? "\u2026" : "";
+    if (p.truncated) return lead + p.text + "\u2026\uFF08\u672C\u6BB5\u5DF2\u622A\u65AD\uFF09";
+    const reachesEnd = p.start + p.text.length >= fullText.length;
+    const isLast = i === picked.length - 1;
+    return lead + p.text + (isLast && reachesEnd ? "" : "\u2026");
+  }).join("\n");
+  const ratio = Math.min(100, Math.round(shown / fullText.length * 100));
+  const coverage = "\uFF08\u4EE5\u4E0A " + shown + " \u5B57\u53D6\u81EA " + fullText.length + " \u5B57\u6B63\u6587\uFF08\u7EA6 " + ratio + "%\uFF09\uFF0C\u6309\u7ED3\u8BBA\u91CC\u51FA\u73B0\u7684\u5177\u4F53\u4E8B\u5B9E\u5B9A\u4F4D\u7247\u6BB5" + (missedTokens.length ? "\uFF1B\u5176\u4E2D " + missedTokens.length + " \u4E2A\u5177\u4F53\u4E8B\u5B9E\u5728\u6B63\u6587\u4E2D\u672A\u627E\u5230" : "") + "\u3002**\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728**\uFF0C\u56E0\u6B64\u4E0D\u80FD\u4EC5\u51ED\u300C\u8BC1\u636E\u91CC\u6CA1\u6709 X\u300D\u5224\u5B9A X \u662F\u7F16\u9020\u7684\u3002\uFF09";
+  return { text: body, coverage, hitTokens, missedTokens };
+}
+
+// lib/application/agent/verification-policy.ts
+var EVIDENCE_READ_TOOLS = /* @__PURE__ */ new Set([
+  "read_current_page",
+  "get_page_snapshot",
+  "inspect_element",
+  "get_ax_snapshot",
+  "expand_result",
+  "fetch_webpage"
+]);
+var EVIDENCE_RECEIPT_CHARS = 1800;
+function changesState(metadata) {
+  if (!metadata) return true;
+  return metadata.readOnly !== true && metadata.mutatesState !== false;
+}
+function evaluateLiveness(input = {}) {
+  const iter = Number(input.iter);
+  const cap = Number(input.maxNoProgressRounds);
+  const base = Number.isFinite(Number(input.lastProgressIter)) ? Number(input.lastProgressIter) : 0;
+  const safeIter = Number.isFinite(iter) && iter > 0 ? iter : 0;
+  const noProgressRounds = Math.max(0, safeIter - base);
+  if (!Number.isFinite(cap) || cap <= 0) return { stalled: false, reason: "", noProgressRounds };
+  if (noProgressRounds >= cap) return { stalled: true, reason: "noProgress", noProgressRounds };
+  return { stalled: false, reason: "", noProgressRounds };
+}
+function evidenceAfter(prev, tc, res, summarizeArgs) {
+  const text = res && typeof res.result === "string" ? res.result : "";
+  if (!text) return prev;
+  if (EVIDENCE_READ_TOOLS.has(tc.name)) return sliceSafe(text, 0, 3e3);
+  let metadata = null;
+  try {
+    metadata = getToolMetadata(tc.name);
+  } catch (e) {
+    metadata = null;
+  }
+  if (metadata && metadata.readOnly === true) return prev;
+  return "\u3010\u6700\u8FD1\u4E00\u6B21\u9875\u9762\u52A8\u4F5C\u3011" + tc.name + (res.ok === false ? "\uFF08\u6267\u884C\u5931\u8D25\uFF09" : "\uFF08\u5DF2\u6267\u884C\u6210\u529F\uFF09") + "\n\u53C2\u6570\uFF1A" + summarizeArgs(tc.args) + "\n\u8FD4\u56DE\uFF1A" + text.slice(0, 2e3) + "\n\uFF08\u5907\u6CE8\uFF1A\u82E5\u540C\u65F6\u63D0\u4F9B\u4E86\u9875\u9762\u5FEB\u7167\uFF0C\u90A3\u4EFD\u5FEB\u7167\u662F\u5728\u672C\u52A8\u4F5C\u4E4B\u524D\u91C7\u96C6\u7684\u3002\uFF09";
+}
+function resolveVerifyIntent(intent, promotedToResearch) {
+  return promotedToResearch ? INTENTS.RESEARCH : intent;
+}
+function classifyTaskKind(ranToolNames) {
+  const names = [...new Set((Array.isArray(ranToolNames) ? ranToolNames : []).filter(Boolean))];
+  if (!names.length) return "mutation";
+  const allReadOnly = names.every((nm) => {
+    try {
+      return !changesState(getToolMetadata(nm));
+    } catch (e) {
+      return false;
+    }
+  });
+  return allReadOnly ? "read" : "mutation";
+}
+function shouldVerifyCompletion(intent, toolCallCount, settings) {
+  if (!settings || settings.verifierEnabled === false) return false;
+  if (!settings.apiKey) return false;
+  if (!toolCallCount) return false;
+  return intent === INTENTS.BROWSER || intent === INTENTS.RESEARCH;
+}
+function buildVerificationEvidence(ctx, claim) {
+  const parts = [];
+  if (ctx.lastSnapshot) parts.push(compactSnapshotSummary(ctx.lastSnapshot));
+  const receipt = String(ctx.lastEvidence || "").slice(0, EVIDENCE_RECEIPT_CHARS);
+  if (receipt) parts.push("\u3010\u6700\u8FD1\u4E00\u6B21\u52A8\u4F5C\u7684\u56DE\u6267\u3011\n" + receipt);
+  const picked = selectEvidence({
+    fullText: ctx.lastReadFullText,
+    fallback: ctx.lastEvidence,
+    claim: String(claim || "")
+  });
+  if (picked.text) parts.push("\u3010\u9875\u9762\u76F8\u5173\u7247\u6BB5\u3011\n" + picked.text);
+  if (picked.coverage) parts.push(picked.coverage);
+  return parts.join("\n\n");
+}
+function verifyEvidenceSignature(claim, ctx) {
+  const c = ctx || {};
+  return [
+    String(claim || ""),
+    String(c.lastEvidence || ""),
+    String(c.lastSnapshot && c.lastSnapshot.fingerprint || ""),
+    String((c.lastReadFullText || "").length)
+  ].join("\0");
+}
+function classifyVerifyOutcome(verdict, error) {
+  if (error) {
+    if (error.name === "AbortError") return { kind: "interrupt" };
+    return { kind: "fail-open" };
+  }
+  if (!verdict) return { kind: "fail-open" };
+  return { kind: "verdict", verdict };
+}
+
 // lib/assistant/approval-policy.ts
 var APPROVAL_CATEGORY_BY_RISK = Object.freeze({
   read: "read",
@@ -8921,48 +9099,6 @@ function toolNeedsApproval(name, settings = {}, pageUrl = "") {
 }
 
 // lib/assistant/agent.ts
-var AGENT_BUDGET_DEFAULTS = Object.freeze({
-  // **没有轮数上限、没有工具数上限、没有任务时长上限**（对齐 DSH：dsh-agent-loop 里
-  // 既没有 maxTurns 也没有 maxToolCalls，唯一的限制常量是并发度）。
-  // 结束条件只有：complete_task / 模型给出最终回答 / 用户中断 / 成本兜底 maxTotalTokens。
-  //
-  // 原先的三道进度墙（maxModelTurns=30、maxToolCalls=40、maxDurationMs=180s）已移除：
-  // 它们惩罚的是「任务确实很长」而不是「任务失控」。实测一次正常的「24 类工具冒烟测试」
-  // 被工具墙硬停，用户被迫连说两次「继续」—— 每次「继续」都要重新建立上下文，更贵。
-  //
-  // 守卫侧的阈值：**只提醒、不否决**（详见 tool-guard.js）。
-  repeatThresholds: [3, 5, 8],
-  failThresholds: [2, 3, 5],
-  noProgressThresholds: [3, 5, 8],
-  excludeTools: ["update_plan"],
-  maxOpenedTabs: 6,
-  // 标签页切换上限：只限制**真实前台切换**，同一页的 switch_tab 是 no-op。
-  // 用户明确反馈过模型 A→B→A 反复跳转会让页面不停闪动；6 次足够覆盖正常的
-  // 「来源页 → 目标页 → 返回补充信息」流程，也能拦住失控循环。
-  maxTabSwitches: 6,
-  // 单个工具调用的超时（对齐 DSH 的 tool-call-timeout-policy：限制单点而非整体）。
-  toolTimeoutMs: 15e3,
-  // 唯一保留的总量限制，而且是**成本**维度而非进度维度。
-  // 保留它的理由：DSH 敢完全不设上限，是因为它有一整套替代品（压缩 / 溢出到可恢复路径 /
-  // 委派给 subagent），且有用户在旁边随时打断；RecallFlow 的面板在后台跑，缺这个外部止损器。
-  // 注意 totalTokens 累加的是**每次请求的用量**，而每轮都重发整段上下文，因此它超线性增长 ——
-  // 不能用「单轮用量」估上限。按实测推导（CJK 1 token/字）：browser_task 每轮光工具定义约
-  // 8.3k tokens；取 6M ≈ 正常峰值（数十万）的十几倍，只有真正的失控才会撞上。
-  // 设为 0 表示不限制。
-  maxTotalTokens: 6e6,
-  // 完成前最多触发几次「独立校验未通过 → 反思重试」。
-  maxVerifications: 2,
-  // **唯一的存活兜底**：连续多少轮没有产生任何可观察进展就收尾。
-  //
-  // 为什么必须有它：移除三道进度墙之后，结束条件只剩 complete_task / 最终回答 /
-  // 用户中断 / 6M token 成本闸门。守卫按设计只提醒不否决（tool-guard.js），
-  // 于是一个陷入循环的 run 只能靠把 600 万 token 烧完才停 —— 而面板在后台跑，
-  // 用户看不到也拦不住。这是「不设进度墙」的哲学里唯一没被搬过来的配套件。
-  //
-  // 与 DSH 的差别：DSH 不设上限是因为旁边有人随时能打断，且有压缩/溢出/委派等替代品；
-  // 这里的定位是**外部止损器**，不是进度墙 —— 它有进展就永远不触发。
-  maxNoProgressRounds: 12
-});
 var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage",
   "web_search",
@@ -8974,76 +9110,6 @@ var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "click_element"
 ]);
 var CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
-function promoteToResearch(tools, messages, instruction, allSkills, promptExtras) {
-  const researchInfo = resolveIntent(INTENTS.RESEARCH);
-  for (const name of researchInfo.allowedTools) {
-    if (tools.some((t) => t.function && t.function.name === name)) continue;
-    const def = TOOL_REGISTRY.find((t) => t.name === name);
-    if (def) tools.push(def.openai);
-  }
-  const names = tools.map((t) => t.function && t.function.name).filter(Boolean);
-  const newPrompt = buildSystemPrompt(INTENTS.RESEARCH, instruction, names, allSkills);
-  const content = promptExtras ? newPrompt + promptExtras : newPrompt;
-  messages.push({ role: "system", content });
-  return content;
-}
-function getBudget(payload = {}, settings = {}, intent) {
-  const source = payload.agentBudget || settings.agentBudget || {};
-  const budget = Object.fromEntries(Object.entries(AGENT_BUDGET_DEFAULTS).map(([key, value]) => {
-    const n = Number(source[key]);
-    return [key, Number.isFinite(n) && n > 0 ? Math.floor(n) : value];
-  }));
-  if (source.maxOpenedTabs === void 0 || source.maxOpenedTabs === null || source.maxOpenedTabs === "") {
-    budget.maxOpenedTabs = intent === INTENTS.BROWSER ? 8 : intent === INTENTS.RESEARCH ? 6 : 4;
-  }
-  return budget;
-}
-function tokenBudgetExceeded(totalTokens, budget) {
-  const cap = Number(budget && budget.maxTotalTokens);
-  if (!Number.isFinite(cap) || cap <= 0) return false;
-  const used = Number(totalTokens);
-  if (!Number.isFinite(used) || used <= 0) return false;
-  return used >= cap;
-}
-function sanitizeToolPairing(list) {
-  const source = Array.isArray(list) ? list : [];
-  const isCallAssistant = (m) => m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
-  let out = source;
-  let resultIds = new Set(out.filter((m) => m && m.role === "tool" && m.tool_call_id).map((m) => m.tool_call_id));
-  out = out.filter((m) => !isCallAssistant(m) || m.tool_calls.every((tc) => tc && resultIds.has(tc.id)));
-  const providerIds = /* @__PURE__ */ new Set();
-  for (const m of out) if (isCallAssistant(m)) {
-    for (const tc of m.tool_calls) if (tc && tc.id) providerIds.add(tc.id);
-  }
-  out = out.filter((m) => !(m && m.role === "tool" && !providerIds.has(m.tool_call_id)));
-  return out;
-}
-var SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
-var SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;
-function compactSessionMessages(messages) {
-  const source = Array.isArray(messages) ? messages : [];
-  const system = source.find((message) => message && message.role === "system");
-  const rest = source.filter((message) => message !== system);
-  const tail = sanitizeToolPairing(rest.slice(-SESSION_MAX_TAIL_MESSAGES));
-  const notices = [];
-  const droppedMessages = rest.length - Math.min(rest.length, SESSION_MAX_TAIL_MESSAGES);
-  if (droppedMessages > 0) {
-    notices.push({
-      role: "user",
-      content: "\u27E8\u2026\u66F4\u65E9\u7684 " + droppedMessages + " \u6761\u6D88\u606F\u672A\u968F\u5FEB\u7167\u4FDD\u5B58\uFF08\u843D\u76D8\u4E0A\u9650 " + SESSION_MAX_TAIL_MESSAGES + " \u6761\uFF09\uFF1B**\u8FD9\u4E9B\u6D88\u606F\u53D6\u4E0D\u56DE\u539F\u6587**\uFF0C\u9700\u8981\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\u4E0A\u4E0B\u6587\u3002\u27E9"
-    });
-  }
-  const compacted = tail.map((message) => {
-    const copy = { role: message.role };
-    if (typeof message.content === "string") {
-      copy.content = message.content.length > SESSION_MESSAGE_MAX_CHARS ? formatTailKeptTruncationNotice(message.content.length, SESSION_MESSAGE_MAX_CHARS) + message.content.slice(-SESSION_MESSAGE_MAX_CHARS) : message.content;
-    } else if (message.content !== void 0) copy.content = message.content;
-    if (Array.isArray(message.tool_calls)) copy.tool_calls = message.tool_calls.slice(-8);
-    if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
-    return copy;
-  });
-  return system ? [system, ...notices, ...compacted] : [...notices, ...compacted];
-}
 function buildInitialMessages(instruction, selectedText, page, pageUrl, history, emit, systemPrompt, pickedElements) {
   let normalized = normalizeHistory(history, {
     maxMessages: 10,
@@ -9138,16 +9204,6 @@ async function readLiveApprovalSettings(base, loader) {
     return snapshot;
   }
 }
-function evaluateLiveness(input = {}) {
-  const iter = Number(input.iter);
-  const cap = Number(input.maxNoProgressRounds);
-  const base = Number.isFinite(Number(input.lastProgressIter)) ? Number(input.lastProgressIter) : 0;
-  const safeIter = Number.isFinite(iter) && iter > 0 ? iter : 0;
-  const noProgressRounds = Math.max(0, safeIter - base);
-  if (!Number.isFinite(cap) || cap <= 0) return { stalled: false, reason: "", noProgressRounds };
-  if (noProgressRounds >= cap) return { stalled: true, reason: "noProgress", noProgressRounds };
-  return { stalled: false, reason: "", noProgressRounds };
-}
 function toolResultProgress(res) {
   if (!res || typeof res !== "object") return false;
   if (Number.isInteger(Number(res.targetTabId))) return true;
@@ -9165,83 +9221,9 @@ function resultProgressByChange(store, name, res) {
   store.set(name, fp);
   return prev !== void 0 && prev !== fp;
 }
-var EVIDENCE_READ_TOOLS = /* @__PURE__ */ new Set([
-  "read_current_page",
-  "get_page_snapshot",
-  // inspect_element 是 C-4 合并后的元素检查入口（原 get_element_text / inspect_element / extract_table 三者）。
-  // 名单里必须保留它，否则「划出关键信息」这类任务的完成校验会重新丢掉文本证据。
-  "inspect_element",
-  "get_ax_snapshot",
-  // expand_result 也必须算：它读出的正是「模型实际看到的内容」。
-  // 原先不在名单里，于是模型展开了长文的后半段，完成校验却对此一无所知 ——
-  // 证据和模型看到的东西对不上，这是长页面任务被误否的直接原因之一。
-  "expand_result",
-  // fetch_webpage 也一样：它抓到的是「这一轮真正读到的资料」，研究类任务的结论全都建立在它上面。
-  // ⚠ 它现在标了 readOnly（见 tool-metadata.js），而下面那段「只读动作不记回执」的早返回会把它整个丢掉 ——
-  // 所以必须挂在这里：**先按内容取证据，再按 readOnly 决定要不要回执**。
-  "fetch_webpage"
-]);
-function evidenceAfter(prev, tc, res, summarizeArgs) {
-  const text = res && typeof res.result === "string" ? res.result : "";
-  if (!text) return prev;
-  if (EVIDENCE_READ_TOOLS.has(tc.name)) return sliceSafe(text, 0, 3e3);
-  let metadata = null;
-  try {
-    metadata = getToolMetadata(tc.name);
-  } catch (e) {
-    metadata = null;
-  }
-  if (metadata && metadata.readOnly === true) return prev;
-  return "\u3010\u6700\u8FD1\u4E00\u6B21\u9875\u9762\u52A8\u4F5C\u3011" + tc.name + (res.ok === false ? "\uFF08\u6267\u884C\u5931\u8D25\uFF09" : "\uFF08\u5DF2\u6267\u884C\u6210\u529F\uFF09") + "\n\u53C2\u6570\uFF1A" + summarizeArgs(tc.args) + "\n\u8FD4\u56DE\uFF1A" + text.slice(0, 2e3) + "\n\uFF08\u5907\u6CE8\uFF1A\u82E5\u540C\u65F6\u63D0\u4F9B\u4E86\u9875\u9762\u5FEB\u7167\uFF0C\u90A3\u4EFD\u5FEB\u7167\u662F\u5728\u672C\u52A8\u4F5C\u4E4B\u524D\u91C7\u96C6\u7684\u3002\uFF09";
-}
-function resolveVerifyIntent(intent, promotedToResearch) {
-  return promotedToResearch ? INTENTS.RESEARCH : intent;
-}
-function changesState(md) {
+function changesState2(md) {
   if (!md) return true;
   return md.readOnly !== true && md.mutatesState !== false;
-}
-function classifyTaskKind(ranToolNames) {
-  const names = [...new Set((Array.isArray(ranToolNames) ? ranToolNames : []).filter(Boolean))];
-  if (!names.length) return "mutation";
-  const allReadOnly = names.every((nm) => {
-    try {
-      return !changesState(getToolMetadata(nm));
-    } catch (e) {
-      return false;
-    }
-  });
-  return allReadOnly ? "read" : "mutation";
-}
-function shouldVerifyCompletion(intent, toolCallCount, settings) {
-  if (!settings || settings.verifierEnabled === false) return false;
-  if (!settings.apiKey) return false;
-  if (!toolCallCount) return false;
-  return intent === INTENTS.BROWSER || intent === INTENTS.RESEARCH;
-}
-var EVIDENCE_RECEIPT_CHARS = 1800;
-function buildVerificationEvidence(ctx, claim) {
-  const parts = [];
-  if (ctx.lastSnapshot) parts.push(compactSnapshotSummary(ctx.lastSnapshot));
-  const receipt = String(ctx.lastEvidence || "").slice(0, EVIDENCE_RECEIPT_CHARS);
-  if (receipt) parts.push("\u3010\u6700\u8FD1\u4E00\u6B21\u52A8\u4F5C\u7684\u56DE\u6267\u3011\n" + receipt);
-  const picked = selectEvidence({
-    fullText: ctx.lastReadFullText,
-    fallback: ctx.lastEvidence,
-    claim: String(claim || "")
-  });
-  if (picked.text) parts.push("\u3010\u9875\u9762\u76F8\u5173\u7247\u6BB5\u3011\n" + picked.text);
-  if (picked.coverage) parts.push(picked.coverage);
-  return parts.join("\n\n");
-}
-function verifyEvidenceSignature(claim, ctx) {
-  const c = ctx || {};
-  return [
-    String(claim || ""),
-    String(c.lastEvidence || ""),
-    String(c.lastSnapshot && c.lastSnapshot.fingerprint || ""),
-    String((c.lastReadFullText || "").length)
-  ].join("\0");
 }
 async function runCompletionVerification(settings, instruction, res, ctx, signal, taskKind) {
   return verifyCompletion(
@@ -9256,14 +9238,6 @@ async function runCompletionVerification(settings, instruction, res, ctx, signal
     },
     signal
   );
-}
-function classifyVerifyOutcome(verdict, error) {
-  if (error) {
-    if (error.name === "AbortError") return { kind: "interrupt" };
-    return { kind: "fail-open" };
-  }
-  if (!verdict) return { kind: "fail-open" };
-  return { kind: "verdict", verdict };
 }
 async function closeAuxTabs(ctx) {
   try {
@@ -10242,7 +10216,7 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
             const evidenceForCheck = [ctx.lastSnapshot ? compactSnapshotSummary(ctx.lastSnapshot) : "", ctx.lastEvidence || ""].join("\n");
             const mutatingRun = [...new Set(ranToolNames)].filter((nm) => {
               try {
-                return changesState(getToolMetadata(nm));
+                return changesState2(getToolMetadata(nm));
               } catch (e) {
                 return false;
               }
@@ -10330,8 +10304,8 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
               trace({ phase: "verify", ok: true, reason: verdict.reason });
             }
           }
-          const summary = String(res.result || "\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002");
-          if (!step.assistantMessage.content) emit({ type: "chunk", text: summary });
+          const summary2 = String(res.result || "\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002");
+          if (!step.assistantMessage.content) emit({ type: "chunk", text: summary2 });
           const pendingTabs2 = await closeAuxTabs(ctx).catch(() => []);
           emitTabsClosePending(ctx, pendingTabs2, emit);
           emitState(RUN_STATUS.COMPLETED, { tool: tc.name });
@@ -10375,7 +10349,7 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
     if (finalClaim.trim() && shouldVerifyCompletion(resolveVerifyIntent(intent, promotedToResearch), toolCallCount, settings) && deterministicFails < Number(budget.maxVerifications || 0)) {
       const mutatingRunFinal = [...new Set(ranToolNames)].filter((nm) => {
         try {
-          return changesState(getToolMetadata(nm));
+          return changesState2(getToolMetadata(nm));
         } catch (e) {
           return false;
         }
@@ -10441,6 +10415,221 @@ var AgentRunner = class {
 function createAgentRunner(stream) {
   return new AgentRunner(stream);
 }
+
+// lib/application/background/panel-router.ts
+function summary(state2) {
+  const value = state2 || {};
+  return {
+    sessions: Array.isArray(value.sessions) ? value.sessions : [],
+    activeId: String(value.activeId || ""),
+    seq: Number(value.seq) || 0
+  };
+}
+var PanelMessageRouter = class {
+  ports;
+  constructor(ports) {
+    this.ports = ports;
+  }
+  matches(message) {
+    const type = String(message && message.type || "");
+    return type === "panel:open-active" || type === "panel:ui:get" || type === "panel:ui:set" || /^panel:(state|get|create|save|activate|rename|delete|lock|unlock)$/.test(type);
+  }
+  async handle(message, source) {
+    const type = String(message.type || "");
+    if (type === "panel:open-active") {
+      const requested = Number(message.tabId);
+      const tabId = Number.isInteger(requested) && requested > 0 ? requested : source.tabId;
+      if (tabId == null || !Number.isInteger(tabId) || tabId <= 0) {
+        return { ok: false, error: "\u7F3A\u5C11\u76EE\u6807\u6807\u7B7E\u9875" };
+      }
+      await this.ports.ensureSessions();
+      const result2 = await this.ports.store.setUi({ open: true, tabId, scope: "global" });
+      this.ports.broadcastUi(result2.ui, null);
+      return { ok: true, ui: result2.ui };
+    }
+    if (type === "panel:ui:get") {
+      return { ok: true, ui: await this.ports.store.getUi() };
+    }
+    if (type === "panel:ui:set") {
+      const result2 = await this.ports.store.setUi({
+        open: message.open === true,
+        tabId: source.tabId,
+        scope: message.scope === "membership" ? "membership" : "global"
+      });
+      if (result2.changed) this.ports.broadcastUi(result2.ui, source.tabId);
+      return { ok: true, ui: result2.ui };
+    }
+    await this.ports.ensureSessions();
+    const store = this.ports.store;
+    let result;
+    if (type === "panel:state") {
+      return Object.assign({ ok: true }, summary(await store.list()));
+    }
+    if (type === "panel:get") {
+      const state2 = await store.get(message.id);
+      return {
+        ok: true,
+        session: state2.session || null,
+        activeId: state2.activeId || "",
+        sessions: state2.sessions || []
+      };
+    }
+    if (type === "panel:create") {
+      result = await store.create({
+        title: message.title,
+        messages: Array.isArray(message.messages) ? message.messages : [],
+        handoffId: message.handoffId,
+        origin: source.url || message.origin || ""
+      });
+    } else if (type === "panel:save") {
+      result = await store.save({
+        id: message.id,
+        messages: message.messages,
+        baseSeq: message.baseSeq,
+        allowShrink: message.allowShrink === true,
+        title: message.title,
+        handoffId: message.handoffId,
+        lastRunId: message.lastRunId,
+        origin: message.origin,
+        tabId: source.tabId
+      });
+    } else if (type === "panel:activate") {
+      result = await store.activate(message.id);
+    } else if (type === "panel:rename") {
+      result = await store.rename(message.id, message.title);
+    } else if (type === "panel:delete") {
+      result = await store.remove(message.id);
+      if (result && result.ok) {
+        await this.ports.removeScreenshots(String(message.id || "")).catch(() => {
+        });
+      }
+    } else if (type === "panel:lock") {
+      result = await store.lock({
+        id: message.id,
+        runId: message.runId,
+        tabId: source.tabId,
+        takeover: message.takeover === true
+      });
+      const previous = result && result.ok && message.takeover === true && result.lock ? result.lock.previous : null;
+      if (previous && Number(previous.tabId)) {
+        this.ports.sendToTab(Number(previous.tabId), {
+          type: "panel:lock-lost",
+          id: String(message.id || ""),
+          runId: String(previous.runId || "")
+        });
+      }
+    } else if (type === "panel:unlock") {
+      result = await store.unlock({ id: message.id, runId: message.runId });
+      if (result && result.ok) {
+        const state2 = await store.list();
+        result.sessions = state2.sessions || [];
+        result.activeId = state2.activeId || "";
+      }
+    }
+    const response = Object.assign({ ok: true }, result || {});
+    if (result && result.ok && Array.isArray(result.sessions)) {
+      this.ports.broadcastSessions(result, source.tabId);
+    }
+    return response;
+  }
+};
+
+// lib/application/background/automation-router.ts
+var AutomationMessageRouter = class {
+  ports;
+  constructor(ports) {
+    this.ports = ports;
+  }
+  matches(message) {
+    const type = String(message && message.type || "");
+    return type === "pageCommand" || type === "pick:start" || type === "pick:result" || type === "pick:cancel" || type.startsWith("userscript:");
+  }
+  handle(message, source) {
+    if (!this.matches(message)) return null;
+    const type = String(message.type || "");
+    if (type === "pick:start") return this.handlePickStart(source);
+    if (type === "pick:result") return this.handlePickResult(message, source);
+    if (type === "pick:cancel") {
+      if (source.tabId != null) this.ports.sendToTab(source.tabId, { type: "kbPickCancel" });
+      return Promise.resolve({ ok: true });
+    }
+    if (type === "pageCommand") return this.handlePageCommand(message);
+    return this.handleUserscript(message);
+  }
+  async handlePickStart(source) {
+    if (source.tabId != null) this.ports.sendToTab(source.tabId, { type: "kbPickStart" });
+    return { ok: true };
+  }
+  async handlePickResult(message, source) {
+    const picked = Array.isArray(message.pickedList) ? message.pickedList : message.picked ? [message.picked] : [];
+    if (picked.length) {
+      const timestamp = Date.now();
+      const base = { tabId: source.tabId, pageUrl: source.url, ts: timestamp };
+      await this.ports.setLocal({
+        "recallflow.lastPicked": Object.assign({}, picked[0], base),
+        "recallflow.lastPickedList": picked.map((item) => Object.assign({}, item, base))
+      });
+    }
+    if (source.tabId != null) {
+      this.ports.sendToTab(source.tabId, { type: "kbPickCancel" });
+      this.ports.sendToTab(source.tabId, { type: "kbPickResult", pickedList: picked });
+    }
+    return { ok: true };
+  }
+  async handlePageCommand(message) {
+    const tabs = await this.ports.queryTabs({ active: true, currentWindow: true });
+    const tab = tabs[0];
+    if (!tab || !tab.id) return { ok: false, error: "\u65E0\u6D3B\u52A8\u6807\u7B7E\u9875" };
+    const response = await this.ports.requestTab(tab.id, {
+      type: "kbPageCommand",
+      command: message.command,
+      params: message.params || {}
+    });
+    return response || { ok: false, error: "\u9875\u9762\u547D\u4EE4\u65E0\u54CD\u5E94" };
+  }
+  async handleUserscript(message) {
+    const scripts = this.ports.userscripts;
+    switch (message.type) {
+      case "userscript:list":
+        return { ok: true, scripts: await scripts.list() };
+      case "userscript:install":
+        return scripts.install(message.url);
+      case "userscript:preview":
+        return scripts.preview(message.url);
+      case "userscript:installCode":
+        return scripts.installCode(message.code, message.label);
+      case "userscript:previewCode":
+        return scripts.previewCode(message.code);
+      case "userscript:update":
+        return scripts.update(message.id);
+      case "userscript:updateAll":
+        return Object.assign({ ok: true }, await scripts.updateAll());
+      case "userscript:toggle":
+        return scripts.setEnabled(message.id, message.enabled);
+      case "userscript:uninstall":
+        return scripts.uninstall(message.id);
+      case "userscript:search":
+        return { ok: true, list: await scripts.search(message.q) };
+      case "userscript:runOnTab": {
+        const tabs = await this.ports.queryTabs({ currentWindow: true });
+        const webTabs = tabs.filter((tab2) => tab2.url && this.ports.isOperableUrl(tab2.url));
+        const tab = webTabs.find((item) => item.active) || webTabs[0];
+        if (!tab || !tab.id) return { ok: false, error: "\u6CA1\u6709\u53EF\u8FD0\u884C\u7684\u7F51\u9875\u6807\u7B7E\u9875" };
+        return await scripts.runOnTab(tab.id, message.id) || { ok: false, error: "\u811A\u672C\u6267\u884C\u65E0\u54CD\u5E94" };
+      }
+      case "userscript:xhr":
+        return scripts.xhr(message.details);
+      case "userscript:openTab":
+        await this.ports.createTab({ url: message.url, active: message.active !== false });
+        return { ok: true };
+      case "userscript:notify":
+        await this.ports.notify({ title: message.title || "RecallFlow", text: message.text || "" });
+        return { ok: true };
+      default:
+        return { ok: false, error: "\u672A\u77E5\u7528\u6237\u811A\u672C\u6D88\u606F\uFF1A" + message.type };
+    }
+  }
+};
 
 // lib/shared/handoff.ts
 var ID_PREFIX = "RF-";
@@ -12734,6 +12923,65 @@ function broadcastPanelUi(ui, sourceTabId) {
     }
   });
 }
+var panelMessageRouter = new PanelMessageRouter({
+  store: panelSessions,
+  ensureSessions: ensurePanelSessions,
+  broadcastSessions: broadcastPanelSessions,
+  broadcastUi: broadcastPanelUi,
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  removeScreenshots: (sessionId) => removeSessionScreenshots(chrome, sessionId)
+});
+function chromeCallback(register) {
+  return new Promise((resolve) => register(resolve));
+}
+var automationMessageRouter = new AutomationMessageRouter({
+  queryTabs(query) {
+    return chromeCallback((done) => chrome.tabs.query(query, (tabs) => done(tabs || [])));
+  },
+  requestTab(tabId, message) {
+    return chromeCallback((done) => {
+      chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
+        done(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : response);
+      });
+    });
+  },
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  createTab(options) {
+    return chromeCallback((done) => chrome.tabs.create(options, () => done()));
+  },
+  setLocal(items) {
+    return chromeCallback((done) => chrome.storage.local.set(items, () => done()));
+  },
+  notify(options) {
+    return chromeCallback((done) => {
+      chrome.notifications.create({
+        type: "basic",
+        iconUrl: chrome.runtime.getURL("docs/assets/icon-128.png"),
+        title: options.title,
+        message: options.text
+      }, () => done());
+    });
+  },
+  isOperableUrl,
+  userscripts: {
+    list: listScripts,
+    install: installFromUrl,
+    preview: previewScript,
+    installCode: installFromCode,
+    previewCode,
+    update: updateScript,
+    updateAll: updateAllScripts,
+    setEnabled: setScriptEnabled,
+    uninstall: uninstallScript,
+    search: searchScripts,
+    runOnTab: runUserscriptOnTab,
+    xhr: userscriptXhr
+  }
+});
 var runSubscriptions = /* @__PURE__ */ new Map();
 var pendingRunCleanup = /* @__PURE__ */ new Map();
 function registerRunCleanup(runId, event) {
@@ -12893,6 +13141,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (msg && panelMessageRouter.matches(msg)) {
+    panelMessageRouter.handle(msg, { tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null, url: sender.tab && sender.tab.url }).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+  const automationReply = msg ? automationMessageRouter.handle(msg, {
+    tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null,
+    url: sender.tab && sender.tab.url || ""
+  }) : null;
+  if (automationReply) {
+    automationReply.then(sendResponse).catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
+  }
   if (msg && msg.type === "panel:run:committed") {
     finalizeRunCleanup(msg.runId);
     sendResponse({ ok: true });
@@ -12933,132 +13193,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return false;
   }
-  if (msg && msg.type === "panel:open-active") {
-    const requestedTabId = Number(msg.tabId);
-    const targetTabId = Number.isInteger(requestedTabId) && requestedTabId > 0 ? requestedTabId : sender.tab && sender.tab.id;
-    if (targetTabId == null || !Number.isInteger(targetTabId) || targetTabId <= 0) {
-      sendResponse({ ok: false, error: "\u7F3A\u5C11\u76EE\u6807\u6807\u7B7E\u9875" });
-      return false;
-    }
-    (async () => {
-      await ensurePanelSessions();
-      const result = await panelSessions.setUi({ open: true, tabId: targetTabId, scope: "global" });
-      broadcastPanelUi(result.ui, null);
-      sendResponse({ ok: true, ui: result.ui });
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
-  }
-  if (msg && (msg.type === "panel:ui:get" || msg.type === "panel:ui:set")) {
-    const sourceTabId = sender.tab && sender.tab.id;
-    (async () => {
-      if (msg.type === "panel:ui:get") {
-        const ui = await panelSessions.getUi();
-        sendResponse({ ok: true, ui });
-        return;
-      }
-      const result = await panelSessions.setUi({
-        open: msg.open === true,
-        tabId: sourceTabId,
-        scope: msg.scope === "membership" ? "membership" : "global"
-      });
-      sendResponse({ ok: true, ui: result.ui });
-      if (result.changed) {
-        try {
-          broadcastPanelUi(result.ui, sourceTabId);
-        } catch (e) {
-        }
-      }
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
-  }
-  if (msg && /^panel:(state|get|create|save|activate|rename|delete|lock|unlock)$/.test(String(msg.type || ""))) {
-    const sourceTabId = sender.tab && sender.tab.id;
-    const reply = (body) => sendResponse(Object.assign({ ok: true }, body || {}));
-    (async () => {
-      await ensurePanelSessions();
-      let result;
-      if (msg.type === "panel:state") {
-        result = await panelSessions.list();
-        reply(panelSummary(result));
-        return;
-      }
-      if (msg.type === "panel:get") {
-        result = await panelSessions.get(msg.id);
-        reply({
-          session: result.session || null,
-          activeId: result.activeId || "",
-          sessions: result.sessions || []
-        });
-        return;
-      }
-      if (msg.type === "panel:create") {
-        const origin = sender.tab && sender.tab.url || msg.origin || "";
-        result = await panelSessions.create({
-          title: msg.title,
-          messages: Array.isArray(msg.messages) ? msg.messages : [],
-          handoffId: msg.handoffId,
-          origin
-        });
-      } else if (msg.type === "panel:save") {
-        result = await panelSessions.save({
-          id: msg.id,
-          messages: msg.messages,
-          baseSeq: msg.baseSeq,
-          allowShrink: msg.allowShrink === true,
-          title: msg.title,
-          handoffId: msg.handoffId,
-          lastRunId: msg.lastRunId,
-          origin: msg.origin,
-          tabId: sourceTabId
-        });
-      } else if (msg.type === "panel:activate") {
-        result = await panelSessions.activate(msg.id);
-      } else if (msg.type === "panel:rename") {
-        result = await panelSessions.rename(msg.id, msg.title);
-      } else if (msg.type === "panel:delete") {
-        result = await panelSessions.remove(msg.id);
-        if (result && result.ok) await removeSessionScreenshots(chrome, msg.id).catch(() => {
-        });
-      } else if (msg.type === "panel:lock") {
-        result = await panelSessions.lock({
-          id: msg.id,
-          runId: msg.runId,
-          tabId: sourceTabId,
-          takeover: msg.takeover === true
-        });
-        if (result && result.ok && msg.takeover === true && result.lock && result.lock.previous) {
-          const oldTabId = Number(result.lock.previous.tabId);
-          const oldRunId = String(result.lock.previous.runId || "");
-          if (oldTabId) {
-            chrome.tabs.sendMessage(
-              oldTabId,
-              { type: "panel:lock-lost", id: String(msg.id || ""), runId: oldRunId },
-              { frameId: 0 },
-              () => void chrome.runtime.lastError
-            );
-          }
-        }
-      } else if (msg.type === "panel:unlock") {
-        result = await panelSessions.unlock({ id: msg.id, runId: msg.runId });
-        if (result && result.ok) {
-          const state2 = await panelSessions.list();
-          result.sessions = state2.sessions || [];
-          result.activeId = state2.activeId || "";
-        }
-      }
-      reply(result || { ok: false, error: "\u672A\u77E5\u4F1A\u8BDD\u64CD\u4F5C" });
-      if (result && result.ok && Array.isArray(result.sessions)) {
-        broadcastPanelSessions(result, sourceTabId);
-      }
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
-  }
   if (msg && msg.type === "conv:save") {
     const tabId = sender.tab && sender.tab.id;
     if (tabId != null && Array.isArray(msg.conversation)) {
@@ -13090,129 +13224,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "handoff:list") {
     listHandoffs(msg.limit).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
-  }
-  if (msg && msg.type === "pick:start") {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: "kbPickStart" }, () => void chrome.runtime.lastError);
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "pick:result") {
-    const tabId = sender.tab && sender.tab.id;
-    const list = Array.isArray(msg.pickedList) ? msg.pickedList : msg.picked ? [msg.picked] : [];
-    const pageUrl = sender.tab && sender.tab.url || "";
-    const ts = Date.now();
-    if (list.length) {
-      try {
-        chrome.storage.local.set({
-          "recallflow.lastPicked": Object.assign({}, list[0], { tabId, pageUrl, ts }),
-          "recallflow.lastPickedList": list.map((p) => Object.assign({}, p, { tabId, pageUrl, ts }))
-        });
-      } catch (e) {
-      }
-    }
-    if (tabId != null) {
-      chrome.tabs.sendMessage(tabId, { type: "kbPickCancel" }, () => void chrome.runtime.lastError);
-      chrome.tabs.sendMessage(tabId, { type: "kbPickResult", pickedList: list }, { frameId: 0 }, () => void chrome.runtime.lastError);
-    }
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "pick:cancel") {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: "kbPickCancel" }, () => void chrome.runtime.lastError);
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "pageCommand") {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs && tabs[0];
-      if (!tab || !tab.id) {
-        sendResponse({ ok: false, error: "\u65E0\u6D3B\u52A8\u6807\u7B7E\u9875" });
-        return;
-      }
-      chrome.tabs.sendMessage(tab.id, { type: "kbPageCommand", command: msg.command, params: msg.params || {} }, { frameId: 0 }, (res) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-        } else {
-          sendResponse(res || { ok: false, error: "\u9875\u9762\u547D\u4EE4\u65E0\u54CD\u5E94" });
-        }
-      });
-    });
-    return true;
-  }
-  if (msg && msg.type === "userscript:list") {
-    listScripts().then((scripts) => sendResponse({ ok: true, scripts })).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:install") {
-    installFromUrl(msg.url).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:preview") {
-    previewScript(msg.url).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:installCode") {
-    installFromCode(msg.code, msg.label).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:previewCode") {
-    previewCode(msg.code).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:update") {
-    updateScript(msg.id).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:updateAll") {
-    updateAllScripts().then((r) => sendResponse({ ok: true, ...r })).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:toggle") {
-    setScriptEnabled(msg.id, msg.enabled).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:uninstall") {
-    uninstallScript(msg.id).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:search") {
-    searchScripts(msg.q).then((list) => sendResponse({ ok: true, list })).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:runOnTab") {
-    chrome.tabs.query({ currentWindow: true }, (tabs) => {
-      const webTabs = (tabs || []).filter((t) => t.url && isOperableUrl(t.url));
-      const tab = webTabs.find((t) => t.active) || webTabs[0];
-      if (!tab || !tab.id) {
-        sendResponse({ ok: false, error: "\u6CA1\u6709\u53EF\u8FD0\u884C\u7684\u7F51\u9875\u6807\u7B7E\u9875" });
-        return;
-      }
-      runUserscriptOnTab(tab.id, msg.id).then((r) => sendResponse(r || { ok: false, error: "\u811A\u672C\u6267\u884C\u65E0\u54CD\u5E94" })).catch((e) => sendResponse({ ok: false, error: e.message }));
-    });
-    return true;
-  }
-  if (msg && msg.type === "userscript:xhr") {
-    userscriptXhr(msg.details).then((r) => sendResponse(r)).catch((e) => sendResponse({ error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "userscript:openTab") {
-    chrome.tabs.create({ url: msg.url, active: msg.active !== false });
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "userscript:notify") {
-    chrome.notifications.create({
-      type: "basic",
-      // 通知图标同样只接受位图（与 manifest 的 icons 一个道理）：
-      // 指向 .svg 时通知会静默地不出图，而不是报错。
-      iconUrl: chrome.runtime.getURL("docs/assets/icon-128.png"),
-      title: msg.title || "RecallFlow",
-      message: msg.text || ""
-    });
-    sendResponse({ ok: true });
-    return false;
   }
 });
 async function requestPersistentHistoryStorage() {

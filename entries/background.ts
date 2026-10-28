@@ -5,6 +5,8 @@ import { buildAiMessages } from '../lib/shared/rag.ts';
 import { callDeepSeek } from '../lib/assistant/llm.ts';
 import { runAgentStream } from '../lib/assistant/agent.ts';
 import { createAgentRunner } from '../lib/application/agent/runner.ts';
+import { PanelMessageRouter } from '../lib/application/background/panel-router.ts';
+import { AutomationMessageRouter } from '../lib/application/background/automation-router.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
 import { initTargetManager } from '../lib/assistant/target-manager.ts';
 import { logError } from '../lib/shared/utils.ts';
@@ -236,6 +238,68 @@ function broadcastPanelUi(ui: Dyn, sourceTabId: number | null | undefined) {
   });
 }
 
+const panelMessageRouter = new PanelMessageRouter({
+  store: panelSessions,
+  ensureSessions: ensurePanelSessions,
+  broadcastSessions: broadcastPanelSessions,
+  broadcastUi: broadcastPanelUi,
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  removeScreenshots: (sessionId) => removeSessionScreenshots(chrome, sessionId),
+});
+
+function chromeCallback<T>(register: (done: (value: T) => void) => void): Promise<T> {
+  return new Promise<T>((resolve) => register(resolve));
+}
+
+const automationMessageRouter = new AutomationMessageRouter({
+  queryTabs(query) {
+    return chromeCallback((done) => chrome.tabs.query(query, (tabs) => done(tabs || [])));
+  },
+  requestTab(tabId, message) {
+    return chromeCallback((done) => {
+      chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
+        done(chrome.runtime.lastError ? { ok: false, error: chrome.runtime.lastError.message } : response);
+      });
+    });
+  },
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  createTab(options) {
+    return chromeCallback<void>((done) => chrome.tabs.create(options as chrome.tabs.CreateProperties, () => done()));
+  },
+  setLocal(items) {
+    return chromeCallback<void>((done) => chrome.storage.local.set(items, () => done()));
+  },
+  notify(options) {
+    return chromeCallback<void>((done) => {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('docs/assets/icon-128.png'),
+        title: options.title,
+        message: options.text,
+      }, () => done());
+    });
+  },
+  isOperableUrl,
+  userscripts: {
+    list: listScripts,
+    install: installFromUrl,
+    preview: previewScript,
+    installCode: installFromCode,
+    previewCode,
+    update: updateScript,
+    updateAll: updateAllScripts,
+    setEnabled: setScriptEnabled,
+    uninstall: uninstallScript,
+    search: searchScripts,
+    runOnTab: runUserscriptOnTab,
+    xhr: userscriptXhr,
+  },
+});
+
 // tabId -> 当前订阅的 sessionId。跟随页只在面板打开/会话切换时登记一次，
 // SW 按 session 定向广播，避免把每个 token 发给所有网页。
 const runSubscriptions = new Map<number, string>();
@@ -414,6 +478,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return false;
   }
+  if (msg && panelMessageRouter.matches(msg)) {
+    panelMessageRouter
+      .handle(msg, { tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null, url: sender.tab && sender.tab.url })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
+  }
+  const automationReply = msg
+    ? automationMessageRouter.handle(msg, {
+        tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null,
+        url: (sender.tab && sender.tab.url) || '',
+      })
+    : null;
+  if (automationReply) {
+    automationReply
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
+  }
   // 发起页确认最终 assistant 消息已写入共享会话。此时才允许清理本次 run 的辅助页，
   // 避免“页先关、最后一条回复还没落盘”。
   if (msg && msg.type === 'panel:run:committed') {
@@ -457,144 +540,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       snapshot: selfOwned ? null : snapshot,
     });
     return false;
-  }
-  // ---- 面板开合状态（全浏览器同步）----
-  if (msg && msg.type === 'panel:open-active') {
-    // popup 作为独立标签页打开时，sender.tab 指向 popup 自己；显式传入的
-    // tabId 才是用户正在浏览的网页。优先使用显式值，避免 popup 关闭时
-    // 把唯一的面板成员一起删掉。
-    const requestedTabId = Number(msg.tabId);
-    const targetTabId = Number.isInteger(requestedTabId) && requestedTabId > 0
-      ? requestedTabId
-      : sender.tab && sender.tab.id;
-    if (targetTabId == null || !Number.isInteger(targetTabId) || targetTabId <= 0) {
-      sendResponse({ ok: false, error: '缺少目标标签页' });
-      return false;
-    }
-    (async () => {
-      await ensurePanelSessions();
-      const result = await panelSessions.setUi({ open: true, tabId: targetTabId, scope: 'global' });
-      broadcastPanelUi(result.ui, null);
-      sendResponse({ ok: true, ui: result.ui });
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
-  }
-  if (msg && (msg.type === 'panel:ui:get' || msg.type === 'panel:ui:set')) {
-    const sourceTabId = sender.tab && sender.tab.id;
-    (async () => {
-      if (msg.type === 'panel:ui:get') {
-        const ui = await panelSessions.getUi();
-        sendResponse({ ok: true, ui });
-        return;
-      }
-      const result = await panelSessions.setUi({
-        open: msg.open === true,
-        tabId: sourceTabId,
-        scope: msg.scope === 'membership' ? 'membership' : 'global',
-      });
-      sendResponse({ ok: true, ui: result.ui });
-      if (result.changed) {
-        try {
-          broadcastPanelUi(result.ui, sourceTabId);
-        } catch (e) {}
-      }
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
-  }
-  // ---- 面板会话（整个浏览器共享，可新建 / 切换 / 查看历史）----
-  //
-  // 所有写操作都在 Service Worker 里串行执行（PanelSessionStore 内部队列），
-  // 内容脚本只负责发消息与渲染，绝不直接写 storage.session。
-  if (msg && /^panel:(state|get|create|save|activate|rename|delete|lock|unlock)$/.test(String(msg.type || ''))) {
-    const sourceTabId = sender.tab && sender.tab.id;
-    const reply = (body: Dyn) => sendResponse(Object.assign({ ok: true }, body || {}));
-    (async () => {
-      await ensurePanelSessions();
-      // 下面每个分支都会赋值；显式带上 `| undefined` 是为了让「对 const 赋值」门禁
-      // 能把它识别成 **let**（`let x!: T` 的 `!` 不在该门禁的声明正则里 —— 那样同名
-      // 的内层 `const result` 会被当成唯一声明，赋值就被误报成「对 const 赋值」）。
-      let result: Dyn | undefined;
-      if (msg.type === 'panel:state') {
-        result = await panelSessions.list();
-        reply(panelSummary(result));
-        return;
-      }
-      if (msg.type === 'panel:get') {
-        result = await panelSessions.get(msg.id);
-        reply({
-          session: result.session || null,
-          activeId: result.activeId || '',
-          sessions: result.sessions || [],
-        });
-        return;
-      }
-      if (msg.type === 'panel:create') {
-        const origin = (sender.tab && sender.tab.url) || msg.origin || '';
-        result = await panelSessions.create({
-          title: msg.title,
-          messages: Array.isArray(msg.messages) ? msg.messages : [],
-          handoffId: msg.handoffId,
-          origin,
-        });
-      } else if (msg.type === 'panel:save') {
-        result = await panelSessions.save({
-          id: msg.id,
-          messages: msg.messages,
-          baseSeq: msg.baseSeq,
-          allowShrink: msg.allowShrink === true,
-          title: msg.title,
-          handoffId: msg.handoffId,
-          lastRunId: msg.lastRunId,
-          origin: msg.origin,
-          tabId: sourceTabId,
-        });
-      } else if (msg.type === 'panel:activate') {
-        result = await panelSessions.activate(msg.id);
-      } else if (msg.type === 'panel:rename') {
-        result = await panelSessions.rename(msg.id, msg.title);
-      } else if (msg.type === 'panel:delete') {
-        result = await panelSessions.remove(msg.id);
-        if (result && result.ok) await removeSessionScreenshots(chrome, msg.id).catch(() => {});
-      } else if (msg.type === 'panel:lock') {
-        result = await panelSessions.lock({
-          id: msg.id,
-          runId: msg.runId,
-          tabId: sourceTabId,
-          takeover: msg.takeover === true,
-        });
-        // 接管时通知原标签页停止本轮，避免两个标签页并发操作同一会话。
-        if (result && result.ok && msg.takeover === true && result.lock && result.lock.previous) {
-          const oldTabId = Number(result.lock.previous.tabId);
-          const oldRunId = String(result.lock.previous.runId || '');
-          if (oldTabId) {
-            chrome.tabs.sendMessage(
-              oldTabId,
-              { type: 'panel:lock-lost', id: String(msg.id || ''), runId: oldRunId },
-              { frameId: 0 },
-              () => void chrome.runtime.lastError
-            );
-          }
-        }
-      } else if (msg.type === 'panel:unlock') {
-        result = await panelSessions.unlock({ id: msg.id, runId: msg.runId });
-        if (result && result.ok) {
-          const state = await panelSessions.list();
-          result.sessions = state.sessions || [];
-          result.activeId = state.activeId || '';
-        }
-      }
-      reply(result || { ok: false, error: '未知会话操作' });
-      if (result && result.ok && Array.isArray(result.sessions)) {
-        broadcastPanelSessions(result, sourceTabId);
-      }
-    })().catch((e) => {
-      sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
-    });
-    return true;
   }
   if (msg && msg.type === 'conv:save') {
     const tabId = sender.tab && sender.tab.id;
@@ -641,154 +586,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .then((r) => sendResponse(r))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
-  }
-  // 元素拾取（跨域 iframe）：顶层发起 → 广播到所有 frame 进入拾取；任一 frame 命中/取消 → 全体停止。
-  if (msg && msg.type === 'pick:start') {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: 'kbPickStart' }, () => void chrome.runtime.lastError);
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'pick:result') {
-    const tabId = sender.tab && sender.tab.id;
-    const list = Array.isArray(msg.pickedList) ? msg.pickedList : msg.picked ? [msg.picked] : [];
-    const pageUrl = (sender.tab && sender.tab.url) || '';
-    const ts = Date.now();
-    if (list.length) {
-      try {
-        chrome.storage.local.set({
-          'recallflow.lastPicked': Object.assign({}, list[0], { tabId, pageUrl, ts }),
-          'recallflow.lastPickedList': list.map((p: Dyn) => Object.assign({}, p, { tabId, pageUrl, ts })),
-        });
-      } catch (e) {}
-    }
-    if (tabId != null) {
-      chrome.tabs.sendMessage(tabId, { type: 'kbPickCancel' }, () => void chrome.runtime.lastError);
-      chrome.tabs.sendMessage(tabId, { type: 'kbPickResult', pickedList: list }, { frameId: 0 }, () => void chrome.runtime.lastError);
-    }
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'pick:cancel') {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null) chrome.tabs.sendMessage(tabId, { type: 'kbPickCancel' }, () => void chrome.runtime.lastError);
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'pageCommand') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs && tabs[0];
-      if (!tab || !tab.id) {
-        sendResponse({ ok: false, error: '无活动标签页' });
-        return;
-      }
-      chrome.tabs.sendMessage(tab.id, { type: 'kbPageCommand', command: msg.command, params: msg.params || {} }, { frameId: 0 }, (res) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-        } else {
-          sendResponse(res || { ok: false, error: '页面命令无响应' });
-        }
-      });
-    });
-    return true;
-  }
-  if (msg && msg.type === 'userscript:list') {
-    listScripts()
-      .then((scripts) => sendResponse({ ok: true, scripts }))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:install') {
-    installFromUrl(msg.url)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:preview') {
-    previewScript(msg.url)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:installCode') {
-    installFromCode(msg.code, msg.label)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:previewCode') {
-    previewCode(msg.code)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:update') {
-    updateScript(msg.id)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:updateAll') {
-    updateAllScripts()
-      .then((r) => sendResponse({ ok: true, ...r }))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:toggle') {
-    setScriptEnabled(msg.id, msg.enabled)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:uninstall') {
-    uninstallScript(msg.id)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:search') {
-    searchScripts(msg.q)
-      .then((list) => sendResponse({ ok: true, list }))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:runOnTab') {
-    chrome.tabs.query({ currentWindow: true }, (tabs) => {
-      // 优先当前激活的普通网页；若当前页是扩展页面（如脚本中心），回退到最近浏览的网页。
-      const webTabs = (tabs || []).filter((t) => t.url && isOperableUrl(t.url));
-      const tab = webTabs.find((t) => t.active) || webTabs[0];
-      if (!tab || !tab.id) {
-        sendResponse({ ok: false, error: '没有可运行的网页标签页' });
-        return;
-      }
-      runUserscriptOnTab(tab.id, msg.id)
-        .then((r) => sendResponse(r || { ok: false, error: '脚本执行无响应' }))
-        .catch((e) => sendResponse({ ok: false, error: e.message }));
-    });
-    return true;
-  }
-  if (msg && msg.type === 'userscript:xhr') {
-    userscriptXhr(msg.details)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'userscript:openTab') {
-    chrome.tabs.create({ url: msg.url, active: msg.active !== false });
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'userscript:notify') {
-    chrome.notifications.create({
-      type: 'basic',
-      // 通知图标同样只接受位图（与 manifest 的 icons 一个道理）：
-      // 指向 .svg 时通知会静默地不出图，而不是报错。
-      iconUrl: chrome.runtime.getURL('docs/assets/icon-128.png'),
-      title: msg.title || 'RecallFlow',
-      message: msg.text || '',
-    });
-    sendResponse({ ok: true });
-    return false;
   }
 });
 
