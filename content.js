@@ -383,10 +383,10 @@
     }
     return null;
   }
-  function makeOverlay(rect, color, outline) {
+  function makeOverlay(rect, color, outline2) {
     const d = document.createElement("div");
-    const fill = outline ? "" : "background-color:" + normalizeFillColor(color) + ";";
-    d.style.cssText = "position:fixed;left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" + (outline ? "border:2px solid " + color + ";background:transparent;" : fill) + "border-radius:2px;pointer-events:none;z-index:2147483646;";
+    const fill = outline2 ? "" : "background-color:" + normalizeFillColor(color) + ";";
+    d.style.cssText = "position:fixed;left:" + rect.left + "px;top:" + rect.top + "px;width:" + rect.width + "px;height:" + rect.height + "px;" + (outline2 ? "border:2px solid " + color + ";background:transparent;" : fill) + "border-radius:2px;pointer-events:none;z-index:2147483646;";
     document.body.appendChild(d);
     return d;
   }
@@ -481,10 +481,10 @@
     liveOverlays.push(item);
     return item.els;
   }
-  function overlayElement(el, color, outline, owner) {
+  function overlayElement(el, color, outline2, owner) {
     const item = {
       color: color || overlayColor(),
-      outline: outline === true,
+      outline: outline2 === true,
       owner: owner || "default",
       buildRects: () => {
         if (!el || !el.isConnected) return [];
@@ -1231,6 +1231,62 @@
     return el ? refFor(el) : null;
   }
 
+  // lib/page/command-session.ts
+  var PageCommandSession = class {
+    undoStack = [];
+    styleReverters = [];
+    timers = [];
+    maxUndo;
+    constructor(maxUndo = 40) {
+      this.maxUndo = maxUndo;
+    }
+    pushUndo(revert) {
+      if (typeof revert !== "function") return;
+      this.undoStack.push(revert);
+      if (this.undoStack.length > this.maxUndo) this.undoStack.shift();
+    }
+    undo() {
+      const revert = this.undoStack.pop();
+      if (!revert) {
+        return {
+          ok: false,
+          error: "\u6CA1\u6709\u53EF\u64A4\u9500\u7684\u64CD\u4F5C\uFF08\u4EC5\u8F93\u5165/\u52FE\u9009/\u9009\u62E9/\u6539\u6837\u5F0F/\u6EDA\u52A8\u53EF\u64A4\u9500\uFF09"
+        };
+      }
+      try {
+        revert();
+        return { ok: true, result: "\u5DF2\u64A4\u9500\u4E0A\u4E00\u6B65\u64CD\u4F5C" };
+      } catch (error) {
+        return {
+          ok: false,
+          error: "\u64A4\u9500\u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error))
+        };
+      }
+    }
+    addStyleReverter(revert) {
+      this.styleReverters.push(revert);
+    }
+    addTimer(timer) {
+      this.timers.push(timer);
+    }
+    reset() {
+      try {
+        disposeOverlays("cmd");
+      } catch {
+      }
+      for (const revert of this.styleReverters) {
+        try {
+          revert();
+        } catch {
+        }
+      }
+      this.styleReverters = [];
+      for (const timer of this.timers) clearTimeout(timer);
+      this.timers = [];
+    }
+  };
+  var pageCommandSession = new PageCommandSession();
+
   // lib/shared/table.ts
   function expandTableGrid(rows, options = {}) {
     const maxRows = Math.max(1, Number(options.maxRows) || 200);
@@ -1315,300 +1371,11 @@
     return lines.join("\n");
   }
 
-  // lib/page/settle.ts
-  var SETTLE_DEFAULTS = Object.freeze({
-    /** 静默窗口：连续这么久没有 DOM 变更就认为稳定 */
-    quietMs: 180,
-    /** 硬上限：无论如何不超过这个时间，避免挂死 */
-    maxMs: 1200,
-    /** rAF 不可用时的退避步长 */
-    fallbackStepMs: 50
-  });
-  function normalizeSettleOptions(opts = {}) {
-    const pick = (v, d) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n > 0 ? n : d;
-    };
-    const quietMs = pick(opts.quietMs, SETTLE_DEFAULTS.quietMs);
-    const maxMs = Math.max(pick(opts.maxMs, SETTLE_DEFAULTS.maxMs), quietMs);
-    return { quietMs, maxMs, fallbackStepMs: pick(opts.fallbackStepMs, SETTLE_DEFAULTS.fallbackStepMs) };
-  }
-  function waitForSettle(env = {}, options = {}) {
-    const { quietMs, maxMs, fallbackStepMs } = normalizeSettleOptions(options);
-    const doc = env.doc || (typeof document !== "undefined" ? document : null);
-    const raf = env.raf || (typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : null);
-    const now = env.now || (() => Date.now());
-    const setTimeoutFn = env.setTimeoutFn || setTimeout;
-    const clearTimeoutFn = env.clearTimeoutFn || clearTimeout;
-    const start = now();
-    let mutations = 0;
-    let observer = null;
-    let rafId2 = null;
-    let quietTimer = null;
-    let maxTimer = null;
-    let done = false;
-    let resolveFn = null;
-    const finish = (reason) => {
-      if (done) return;
-      done = true;
-      if (observer) {
-        try {
-          observer.disconnect();
-        } catch (e) {
-        }
-      }
-      if (rafId2 !== null && typeof cancelAnimationFrame === "function") {
-        try {
-          cancelAnimationFrame(rafId2);
-        } catch (e) {
-        }
-      }
-      if (quietTimer) clearTimeoutFn(quietTimer);
-      if (maxTimer) clearTimeoutFn(maxTimer);
-      if (resolveFn) resolveFn({ settled: reason !== "timeout", reason, elapsedMs: now() - start, mutations });
-    };
-    return new Promise((resolve) => {
-      resolveFn = resolve;
-      if (!doc || typeof doc !== "object" || typeof MutationObserver === "undefined") {
-        const timer = setTimeoutFn(() => finish("no-observer"), doc ? quietMs : fallbackStepMs);
-        quietTimer = timer;
-        return;
-      }
-      try {
-        observer = new MutationObserver(() => {
-          mutations++;
-          if (quietTimer) clearTimeoutFn(quietTimer);
-          quietTimer = setTimeoutFn(() => finish("quiet"), quietMs);
-        });
-        observer.observe(doc.documentElement || doc, {
-          childList: true,
-          subtree: true,
-          attributes: true,
-          characterData: true
-        });
-      } catch (e) {
-        observer = null;
-      }
-      quietTimer = setTimeoutFn(() => finish("quiet"), quietMs);
-      maxTimer = setTimeoutFn(() => finish("timeout"), maxMs);
-      if (typeof raf === "function") {
-        const tick = () => {
-          if (done) return;
-          rafId2 = raf(tick);
-        };
-        rafId2 = raf(tick);
-      }
-    });
-  }
-
-  // lib/shared/editable-text.ts
-  function normalizeEditableText(value) {
-    return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
-  }
-  function firstEditableDifference(expected, actual) {
-    const a = normalizeEditableText(expected);
-    const b = normalizeEditableText(actual);
-    const n = Math.min(a.length, b.length);
-    let i = 0;
-    while (i < n && a[i] === b[i]) i += 1;
-    return {
-      index: i >= a.length && i >= b.length ? -1 : i,
-      expected: a.slice(Math.max(0, i - 24), i + 48),
-      actual: b.slice(Math.max(0, i - 24), i + 48)
-    };
-  }
-  function editableTextSummary(expected, actual) {
-    const diff = firstEditableDifference(expected, actual);
-    return {
-      matchesIntent: diff.index === -1,
-      expectedLength: normalizeEditableText(expected).length,
-      actualLength: normalizeEditableText(actual).length,
-      firstDifference: diff
-    };
-  }
-
-  // lib/application/page/run-js.ts
-  var SANDBOX_ALLOWED = [
-    "window",
-    "document",
-    "location",
-    "navigator",
-    "JSON",
-    "Math",
-    "Date",
-    "Number",
-    "String",
-    "Boolean",
-    "Array",
-    "Object",
-    "Promise",
-    "Map",
-    "Set",
-    "WeakMap",
-    "WeakSet",
-    "RegExp",
-    "Error",
-    "TypeError",
-    "RangeError",
-    "SyntaxError",
-    "console",
-    "setTimeout",
-    "clearTimeout",
-    "setInterval",
-    "clearInterval",
-    "requestAnimationFrame",
-    "cancelAnimationFrame",
-    "parseInt",
-    "parseFloat",
-    "isNaN",
-    "isFinite",
-    "encodeURIComponent",
-    "decodeURIComponent",
-    "encodeURI",
-    "decodeURI",
-    "URL",
-    "URLSearchParams",
-    "TextEncoder",
-    "TextDecoder",
-    "atob",
-    "btoa",
-    "structuredClone",
-    "getComputedStyle",
-    "performance",
-    "Node",
-    "NodeFilter",
-    "Element",
-    "HTMLElement",
-    "Event",
-    "CustomEvent",
-    "MouseEvent",
-    "KeyboardEvent",
-    "MutationObserver",
-    "IntersectionObserver",
-    "ResizeObserver",
-    "DOMParser",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var SANDBOX_BLOCKED = [
-    "chrome",
-    "browser",
-    "globalThis",
-    "self",
-    "top",
-    "parent",
-    "frames",
-    "fetch",
-    "XMLHttpRequest",
-    "WebSocket",
-    "EventSource",
-    "Worker",
-    "SharedWorker",
-    "BroadcastChannel",
-    "localStorage",
-    "sessionStorage",
-    "indexedDB",
-    "caches",
-    "importScripts",
-    "eval",
-    "Function"
-  ];
-  function buildSandboxArgs() {
-    const blocked = new Set(SANDBOX_BLOCKED);
-    const realWindow = globalThis;
-    const safeWindow = new Proxy(realWindow, {
-      get(target, prop) {
-        if (typeof prop === "string" && blocked.has(prop)) return void 0;
-        const value = target[prop];
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-      has(target, prop) {
-        return !(typeof prop === "string" && blocked.has(prop));
-      }
-    });
-    const names = [];
-    const values = [];
-    for (const name of SANDBOX_ALLOWED) {
-      names.push(name);
-      values.push(name === "window" ? safeWindow : globalThis[name]);
-    }
-    for (const name of SANDBOX_BLOCKED) {
-      names.push(name);
-      values.push(void 0);
-    }
-    return { names, values, safeWindow };
-  }
-  async function runJs(params) {
-    const input = params || {};
-    const code = String(input.code || "").trim();
-    if (!code) return { ok: false, error: "run_javascript \u9700\u8981 code \u53C2\u6570" };
-    if (code.length > 2e4) return { ok: false, error: "\u4EE3\u7801\u8FC7\u957F\uFF08\u4E0A\u9650 20000 \u5B57\u7B26\uFF09\uFF0C\u8BF7\u7CBE\u7B80\u903B\u8F91" };
-    let value;
-    try {
-      const { names, values, safeWindow } = buildSandboxArgs();
-      const fn = new Function(...names, "return (async () => {\n" + code + "\n})();");
-      value = fn.call(safeWindow, ...values);
-    } catch (error) {
-      return { ok: false, error: "JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
-    }
-    if (value && typeof value.then === "function") {
-      try {
-        value = await value;
-      } catch (error) {
-        return { ok: false, error: "\u5F02\u6B65 JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
-      }
-    }
-    let serialized;
-    try {
-      serialized = JSON.stringify(value, null, 2);
-    } catch (error) {
-      serialized = String(value);
-    }
-    if (serialized === void 0) serialized = "undefined";
-    if (serialized.length > 2e3) serialized = serialized.slice(0, 2e3) + "\n\u2026\uFF08\u7ED3\u679C\u8FC7\u957F\u5DF2\u622A\u65AD\uFF09";
-    return { ok: true, result: serialized };
-  }
-
-  // lib/page/commands.ts
-  var cmdStyleReverters = [];
-  var cmdTimers = [];
-  var undoStack = [];
-  var MAX_UNDO = 40;
-  function pushUndo(fn) {
-    if (typeof fn !== "function") return;
-    undoStack.push(fn);
-    if (undoStack.length > MAX_UNDO) undoStack.shift();
-  }
-  function undoLast() {
-    const fn = undoStack.pop();
-    if (!fn) return { ok: false, error: "\u6CA1\u6709\u53EF\u64A4\u9500\u7684\u64CD\u4F5C\uFF08\u4EC5\u8F93\u5165/\u52FE\u9009/\u9009\u62E9/\u6539\u6837\u5F0F/\u6EDA\u52A8\u53EF\u64A4\u9500\uFF09" };
-    try {
-      fn();
-      return { ok: true, result: "\u5DF2\u64A4\u9500\u4E0A\u4E00\u6B65\u64CD\u4F5C" };
-    } catch (e) {
-      return { ok: false, error: "\u64A4\u9500\u5931\u8D25\uFF1A" + (e && e.message ? e.message : String(e)) };
-    }
-  }
-  function clearCmdOverlays() {
-    disposeOverlays("cmd");
-  }
-  function resetPageCommands() {
-    clearCmdOverlays();
-    cmdStyleReverters.forEach((fn) => {
-      try {
-        fn();
-      } catch (e) {
-      }
-    });
-    cmdStyleReverters = [];
-    cmdTimers.forEach((t) => clearTimeout(t));
-    cmdTimers = [];
-  }
+  // lib/page/command-locator.ts
   function queryAllInFrames(root, selector, into = []) {
     try {
       Array.prototype.push.apply(into, root.querySelectorAll(selector));
-    } catch (e) {
+    } catch {
     }
     try {
       root.querySelectorAll("*").forEach((el) => {
@@ -1618,26 +1385,44 @@
           if (doc && doc !== root) queryAllInFrames(doc, selector, into);
         }
       });
-    } catch (e) {
+    } catch {
     }
     return into;
   }
-  function findElementsByText(text, limit) {
-    const q = normalizeCitationText(text);
-    if (!q) return [];
-    const cands = queryAllInFrames(document, "p,h1,h2,h3,h4,h5,h6,li,td,th,dt,dd,span,a,div,blockquote,figcaption");
-    const hits = [];
-    for (const el of cands) {
-      if (isElementCollectExcluded(el)) continue;
-      if (normalizeCitationText(el.textContent).includes(q)) hits.push(el);
+  function isVisibleForAction(el) {
+    if (!el || !el.isConnected) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function findRangeFor(params) {
+    if (!params.text) return null;
+    try {
+      return findRangeBySubstr(buildPageCharMap(), params.text);
+    } catch {
+      return null;
     }
-    const deepest = hits.filter((el) => !hits.some((o) => o !== el && el.contains(o)));
+  }
+  function findElementsByText(text, limit) {
+    const query = normalizeCitationText(text);
+    if (!query) return [];
+    const candidates = queryAllInFrames(
+      document,
+      "p,h1,h2,h3,h4,h5,h6,li,td,th,dt,dd,span,a,div,blockquote,figcaption"
+    );
+    const hits = [];
+    for (const el of candidates) {
+      if (isElementCollectExcluded(el)) continue;
+      if (normalizeCitationText(el.textContent).includes(query)) hits.push(el);
+    }
+    const deepest = hits.filter((el) => !hits.some((other) => other !== el && el.contains(other)));
     return deepest.slice(0, limit || 10);
   }
   function cssEscapeLocal(value) {
-    const s = String(value || "");
-    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(s);
-    return s.replace(/[^a-zA-Z0-9_-]/g, (c) => "\\" + c);
+    const text = String(value || "");
+    if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(text);
+    return text.replace(/[^a-zA-Z0-9_-]/g, (char) => "\\" + char);
   }
   function roleOf(el) {
     const explicit = (el.getAttribute("role") || "").trim().toLowerCase();
@@ -1651,13 +1436,13 @@
     if (tag === "summary") return "button";
     if (/^h[1-6]$/.test(tag)) return "heading";
     if (tag === "input") {
-      const t = (el.getAttribute("type") || "text").toLowerCase();
-      if (t === "checkbox") return "checkbox";
-      if (t === "radio") return "radio";
-      if (t === "submit" || t === "button" || t === "reset" || t === "file") return "button";
-      if (t === "search") return "searchbox";
-      if (t === "range") return "slider";
-      if (t === "number") return "spinbutton";
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      if (type === "checkbox") return "checkbox";
+      if (type === "radio") return "radio";
+      if (type === "submit" || type === "button" || type === "reset" || type === "file") return "button";
+      if (type === "search") return "searchbox";
+      if (type === "range") return "slider";
+      if (type === "number") return "spinbutton";
       return "textbox";
     }
     return "";
@@ -1668,53 +1453,55 @@
     const labelledby = el.getAttribute("aria-labelledby");
     if (labelledby) {
       const parts = labelledby.split(/\s+/).map((id) => {
-        const t = document.getElementById(id);
-        return t ? t.textContent || "" : "";
+        const target = document.getElementById(id);
+        return target ? target.textContent || "" : "";
       }).filter(Boolean);
       if (parts.length) return parts.join(" ").replace(/\s+/g, " ").trim();
     }
     if (el.labels && el.labels.length) {
-      const t = Array.from(el.labels).map((l) => l.textContent || "").join(" ").replace(/\s+/g, " ").trim();
-      if (t) return t;
+      const label = Array.from(el.labels).map((item) => item.textContent || "").join(" ").replace(/\s+/g, " ").trim();
+      if (label) return label;
     }
-    for (const attr of ["placeholder", "title", "alt"]) {
-      const v = el.getAttribute(attr);
-      if (v && v.trim()) return v.trim();
+    for (const attribute of ["placeholder", "title", "alt"]) {
+      const value = el.getAttribute(attribute);
+      if (value && value.trim()) return value.trim();
     }
     const type = (el.getAttribute("type") || "").toLowerCase();
-    if (el.tagName === "INPUT" && (type === "submit" || type === "button" || type === "reset") && el.value) return String(el.value).trim();
+    if (el.tagName === "INPUT" && (type === "submit" || type === "button" || type === "reset") && el.value) {
+      return String(el.value).trim();
+    }
     return sliceSafe((el.innerText || el.textContent || "").replace(/\s+/g, " ").trim(), 0, 120);
   }
-  function normName(s) {
-    return String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  function normName(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   }
   var TARGET_CANDIDATE_SELECTOR = 'a,button,input,textarea,select,summary,option,[role],[contenteditable="true"]';
   function findElementsByRoleName(role, name) {
     const wantRole = normName(role);
     const wantName = normName(name);
-    const cands = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
+    const candidates = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
     const hits = [];
-    for (const el of cands) {
+    for (const el of candidates) {
       if (isElementCollectExcluded(el)) continue;
       if (!isVisibleForAction(el)) continue;
       if (wantRole && roleOf(el) !== wantRole) continue;
       if (wantName) {
-        const an = normName(accessibleName(el));
-        if (!an || an.indexOf(wantName) === -1) continue;
+        const accessible = normName(accessibleName(el));
+        if (!accessible || accessible.indexOf(wantName) === -1) continue;
       }
       hits.push(el);
     }
     return hits;
   }
   function nameSimilarity(a, b) {
-    const x = normName(a);
-    const y = normName(b);
-    if (!x || !y) return 0;
+    const left = normName(a);
+    const right = normName(b);
+    if (!left || !right) return 0;
     let prefix = 0;
-    while (prefix < x.length && prefix < y.length && x[prefix] === y[prefix]) prefix++;
-    const setB = new Set(y);
+    while (prefix < left.length && prefix < right.length && left[prefix] === right[prefix]) prefix++;
+    const rightChars = new Set(right);
     let shared = 0;
-    for (const ch of new Set(x)) if (setB.has(ch)) shared++;
+    for (const character of new Set(left)) if (rightChars.has(character)) shared++;
     return prefix * 2 + shared;
   }
   function describeLookupMiss(params = {}, limit = 5) {
@@ -1723,35 +1510,50 @@
     if (!wantRole && !wantName) return "";
     let pool;
     try {
-      const cands = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
-      pool = cands.filter((el) => !isElementCollectExcluded(el) && isVisibleForAction(el));
-    } catch (e) {
+      const candidates = queryAllInFrames(document, TARGET_CANDIDATE_SELECTOR);
+      pool = candidates.filter((el) => !isElementCollectExcluded(el) && isVisibleForAction(el));
+    } catch {
       return "";
     }
     if (wantRole) pool = pool.filter((el) => roleOf(el) === wantRole);
-    const described = pool.map((el) => ({ el, name: String(accessibleName(el) || "").replace(/\s+/g, " ").trim() })).filter((x) => x.name);
+    const described = pool.map((el) => ({
+      el,
+      name: String(accessibleName(el) || "").replace(/\s+/g, " ").trim()
+    })).filter((item) => item.name);
     if (!described.length) {
       return wantRole && !pool.length ? "\u9875\u9762\u4E0A\u6CA1\u6709 role=" + params.role + " \u7684\u53EF\u4EA4\u4E92\u5143\u7D20\u3002" : "";
     }
     const sorted = wantName ? described.slice().sort((a, b) => nameSimilarity(b.name, params.name) - nameSimilarity(a.name, params.name)) : described;
     const shown = sorted.slice(0, limit);
-    const lines = shown.map((x) => {
-      const role = roleOf(x.el) || x.el.tagName.toLowerCase();
-      let sel = "";
+    const lines = shown.map((item) => {
+      const role = roleOf(item.el) || item.el.tagName.toLowerCase();
+      let selector = "";
       try {
-        sel = elementSelector(x.el);
-      } catch (e) {
+        selector = elementSelector(item.el);
+      } catch {
       }
-      return "  - " + role + "\u300C" + x.name.slice(0, 60) + "\u300D" + (sel ? "  " + sel : "");
+      return "  - " + role + "\u300C" + item.name.slice(0, 60) + "\u300D" + (selector ? "  " + selector : "");
     });
     return "\u9875\u9762\u4E0A\u6709 " + described.length + " \u4E2A\u76F8\u8FD1\u7684\u53EF\u4EA4\u4E92\u5143\u7D20" + (wantRole ? "\uFF08role=" + params.role + "\uFF09" : "") + "\uFF0C\u4F46\u6CA1\u6709\u4E00\u4E2A\u5339\u914D\u8FD9\u4E2A\u540D\u5B57\uFF1A\n" + lines.join("\n") + (sorted.length > shown.length ? "\n  \u2026\u8FD8\u6709 " + (sorted.length - shown.length) + " \u4E2A" : "") + "\n\u82E5\u5176\u4E2D\u67D0\u4E2A\u5C31\u662F\u76EE\u6807\uFF0C\u8BF7\u7167\u6284\u5B83\u7684\u51C6\u786E role/name\uFF08\u6216\u76F4\u63A5\u7528 selector / ref \u5B9A\u4F4D\uFF09\u3002";
   }
   function describeTargetState(el) {
     if (!el) return "";
     const parts = [];
-    for (const attr of ["aria-label", "aria-pressed", "aria-checked", "aria-expanded", "aria-selected", "aria-disabled", "title"]) {
-      const v = el.getAttribute && el.getAttribute(attr);
-      if (v !== null && v !== void 0 && String(v).trim()) parts.push(attr + "=" + JSON.stringify(sliceSafe(String(v).replace(/\s+/g, " ").trim(), 0, 60)));
+    for (const attribute of [
+      "aria-label",
+      "aria-pressed",
+      "aria-checked",
+      "aria-expanded",
+      "aria-selected",
+      "aria-disabled",
+      "title"
+    ]) {
+      const value = el.getAttribute && el.getAttribute(attribute);
+      if (value !== null && value !== void 0 && String(value).trim()) {
+        parts.push(
+          attribute + "=" + JSON.stringify(sliceSafe(String(value).replace(/\s+/g, " ").trim(), 0, 60))
+        );
+      }
     }
     const text = String(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
     if (text && text.length <= 80) parts.push("text=" + JSON.stringify(text));
@@ -1768,54 +1570,54 @@
     return hint ? "\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20\u3002" + hint : "\u672A\u627E\u5230\u76EE\u6807\u5143\u7D20";
   }
   function findElementsByTestId(testid) {
-    const q = String(testid || "");
-    if (!q) return [];
-    const esc2 = cssEscapeLocal(q);
-    const sel = ["data-testid", "data-test-id", "data-test", "data-cy", "data-name"].map((a) => "[" + a + '="' + esc2 + '"]').join(",");
+    const query = String(testid || "");
+    if (!query) return [];
+    const escaped = cssEscapeLocal(query);
+    const selector = ["data-testid", "data-test-id", "data-test", "data-cy", "data-name"].map((attribute) => "[" + attribute + '="' + escaped + '"]').join(",");
     try {
-      return queryAllInFrames(document, sel);
-    } catch (e) {
+      return queryAllInFrames(document, selector);
+    } catch {
       return [];
     }
   }
   function findElementsFor(params) {
-    let els = [];
+    let elements = [];
     if (params.ref) {
       const el = getInteractiveElementByRef(params.ref);
-      els = el ? [el] : [];
+      elements = el ? [el] : [];
     } else if (params.role || params.name) {
-      els = findElementsByRoleName(params.role, params.name);
+      elements = findElementsByRoleName(params.role, params.name);
     } else if (params.testid) {
-      els = findElementsByTestId(params.testid);
+      elements = findElementsByTestId(params.testid);
     } else if (params.selector) {
       try {
-        els = queryAllInFrames(document, params.selector);
-      } catch (e) {
-        els = [];
+        elements = queryAllInFrames(document, params.selector);
+      } catch {
+        elements = [];
       }
     } else if (params.text) {
-      els = findElementsByText(params.text, 10);
+      elements = findElementsByText(params.text, 10);
     }
     if (params.index !== void 0 && params.index !== null) {
-      const i = Number(params.index);
-      return Number.isInteger(i) && i >= 0 && i < els.length ? [els[i]] : [];
+      const index = Number(params.index);
+      return Number.isInteger(index) && index >= 0 && index < elements.length ? [elements[index]] : [];
     }
-    return els;
+    return elements;
   }
   function resolveElementSelector(params) {
     try {
-      const els = findElementsFor(params || {});
-      if (!els.length) return null;
-      return elementSelector(els[0]);
-    } catch (e) {
+      const elements = findElementsFor(params || {});
+      if (!elements.length) return null;
+      return elementSelector(elements[0]);
+    } catch {
       return null;
     }
   }
   function resolveTargetInfo(params) {
     try {
-      const els = findElementsFor(params || {});
-      if (!els.length) return { found: false, reason: targetMissError(params) };
-      const el = els[0];
+      const elements = findElementsFor(params || {});
+      if (!elements.length) return { found: false, reason: targetMissError(params) };
+      const el = elements[0];
       const label = sliceSafe(
         String(
           el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.innerText || el.textContent || el.getAttribute("name") || ""
@@ -1833,10 +1635,12 @@
         editable: Boolean(el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "INPUT"),
         label
       };
-    } catch (e) {
-      return { found: false, reason: e.message };
+    } catch (error) {
+      return { found: false, reason: error instanceof Error ? error.message : String(error) };
     }
   }
+
+  // lib/page/command-read.ts
   function isRenderedForVerify(el) {
     try {
       const cs = window.getComputedStyle(el);
@@ -1901,202 +1705,6 @@
       }
       return out;
     });
-  }
-  function findRangeFor(params) {
-    if (!params.text) return null;
-    try {
-      return findRangeBySubstr(buildPageCharMap(), params.text);
-    } catch (e) {
-      return null;
-    }
-  }
-  function scrollRangeIntoView(range) {
-    const rect = range.getBoundingClientRect();
-    if (rect && rect.height) {
-      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - window.innerHeight * 0.38), behavior: "smooth" });
-    } else {
-      const el = range.startContainer.parentElement;
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }
-  function cmdHighlight(params) {
-    const color = params.color || overlayColor();
-    if (params.texts && Array.isArray(params.texts)) {
-      const requested = params.texts.map((t) => String(t).trim()).filter(Boolean);
-      const texts = requested.slice(0, HIGHLIGHT_MAX_TEXTS);
-      if (!texts.length) return { ok: false, error: "texts \u6570\u7EC4\u4E3A\u7A7A\u6216\u5168\u90E8\u4E3A\u7A7A\u4E32" };
-      const map = buildPageCharMap();
-      let hit = 0;
-      const misses = [];
-      for (const t of texts) {
-        const range = findRangeBySubstr(map, t);
-        if (range) {
-          overlayRange(range, color, "cmd");
-          hit += 1;
-        } else {
-          misses.push(t);
-        }
-      }
-      if (!hit) return { ok: false, error: "\u672A\u5728\u9875\u9762\u4E2D\u627E\u5230\u4EFB\u4F55\u5F85\u9AD8\u4EAE\u6587\u672C" };
-      return {
-        ok: true,
-        hit,
-        attempted: texts.length,
-        requested: requested.length,
-        result: formatHighlightResult({
-          hit,
-          attempted: texts.length,
-          requested: requested.length,
-          misses,
-          limit: HIGHLIGHT_MAX_TEXTS
-        })
-      };
-    }
-    if (params.text) {
-      const range = findRangeFor(params);
-      if (!range) return { ok: false, error: "\u672A\u5728\u9875\u9762\u4E2D\u627E\u5230\u6587\u672C\uFF1A" + params.text };
-      overlayRange(range, color, "cmd");
-      return { ok: true, result: "\u5DF2\u9AD8\u4EAE\u6587\u672C" };
-    }
-    if (params.selector) {
-      const els = findElementsFor(params);
-      if (!els.length) return { ok: false, error: "\u672A\u627E\u5230\u9009\u62E9\u5668\u5339\u914D\u5143\u7D20\uFF1A" + params.selector };
-      els.forEach((el) => overlayElement(el, color, false, "cmd"));
-      return { ok: true, result: "\u5DF2\u9AD8\u4EAE " + els.length + " \u4E2A\u5143\u7D20" };
-    }
-    return { ok: false, error: "highlight \u9700\u8981 texts\u3001text \u6216 selector \u53C2\u6570" };
-  }
-  function cmdScrollTo(params) {
-    const behavior = params.behavior === "auto" ? "auto" : "smooth";
-    const block = params.block || "start";
-    const beforeX = window.scrollX;
-    const beforeY = window.scrollY;
-    const pushScrollUndo = () => pushUndo(() => window.scrollTo(beforeX, beforeY));
-    if (params.ref || params.text || params.selector) {
-      const offY = Number(params.y) || 0;
-      const offX = Number(params.x) || 0;
-      if (offY || offX) {
-        const target = params.ref || params.selector ? findElementsFor(params)[0] : null;
-        const range = !target && params.text ? findRangeFor(params) : null;
-        const box = target || range && (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
-        if (!box) {
-          return { ok: false, error: targetMissError(params) + "\uFF08\u53EF\u5148 get_page_snapshot \u83B7\u53D6 ref\uFF0C\u6216\u6539\u7528 role/name \u5B9A\u4F4D\uFF09" };
-        }
-        const prevTop = box.scrollTop;
-        const prevLeft = box.scrollLeft;
-        box.scrollTop = prevTop + offY;
-        box.scrollLeft = prevLeft + offX;
-        pushUndo(() => {
-          box.scrollTop = prevTop;
-          box.scrollLeft = prevLeft;
-        });
-        const moved = Math.round(box.scrollTop) !== Math.round(prevTop) || Math.round(box.scrollLeft) !== Math.round(prevLeft);
-        return {
-          ok: true,
-          selector: elementSelector(box),
-          result: "\u5DF2\u6EDA\u52A8\u5BB9\u5668\uFF08\u504F\u79FB y=" + offY + " x=" + offX + "\uFF09\u2192 scrollTop=" + Math.round(box.scrollTop) + " scrollLeft=" + Math.round(box.scrollLeft) + (moved ? "" : "\uFF08\u4F4D\u7F6E\u6CA1\u53D8\uFF1A\u8BE5\u5143\u7D20\u53EF\u80FD\u672C\u6765\u5C31\u4E0D\u53EF\u6EDA\u52A8\uFF0C\u6216\u5DF2\u7ECF\u5230\u8FB9\u754C\uFF09")
-        };
-      }
-      if (params.text) {
-        const range = findRangeFor(params);
-        if (range) {
-          scrollRangeIntoView(range);
-          pushScrollUndo();
-          return { ok: true, result: "\u5DF2\u6EDA\u52A8\u5230\u76EE\u6807\u6587\u672C" };
-        }
-      }
-      const els = findElementsFor(params);
-      if (!els.length) return { ok: false, error: targetMissError(params) + "\uFF08\u53EF\u5148 get_page_snapshot \u83B7\u53D6 ref\uFF0C\u6216\u6539\u7528 role/name \u5B9A\u4F4D\uFF09" };
-      els[0].scrollIntoView({ behavior, block });
-      pushScrollUndo();
-      return { ok: true, selector: elementSelector(els[0]), result: "\u5DF2\u6EDA\u52A8\u5230\u76EE\u6807\u5143\u7D20" };
-    }
-    if (typeof params.top === "number" || typeof params.left === "number") {
-      window.scrollTo({ top: Number(params.top) || 0, left: Number(params.left) || 0, behavior });
-      pushScrollUndo();
-      return { ok: true, result: "\u5DF2\u6EDA\u52A8\u5230\u6307\u5B9A\u4F4D\u7F6E" };
-    }
-    return { ok: false, error: "scroll_to \u9700\u8981 ref/text/selector \u6216 top/left \u53C2\u6570" };
-  }
-  function cmdScrollBy(params) {
-    const beforeX = window.scrollX;
-    const beforeY = window.scrollY;
-    window.scrollBy({
-      top: Number(params.y) || 0,
-      left: Number(params.x) || 0,
-      behavior: params.behavior === "auto" ? "auto" : "smooth"
-    });
-    pushUndo(() => window.scrollTo(beforeX, beforeY));
-    return { ok: true, result: "\u5DF2\u6EDA\u52A8" };
-  }
-  function cmdOutline(params) {
-    const color = params.color || "#ff5722";
-    const els = findElementsFor(params);
-    if (!els.length) return { ok: false, error: targetMissError(params) };
-    const owner = "cmd-outline-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-    els.forEach((el) => overlayElement(el, color, true, owner));
-    els[0].scrollIntoView({ behavior: "smooth", block: "center" });
-    const dur = Math.max(0, Number(params.duration) || 1500);
-    const t = setTimeout(() => {
-      disposeOverlays(owner);
-    }, dur);
-    cmdTimers.push(t);
-    return { ok: true, result: "\u5DF2\u63CF\u8FB9 " + els.length + " \u4E2A\u5143\u7D20" };
-  }
-  function cmdSetStyle(params) {
-    const hide = params.hide;
-    let styles = params.styles;
-    if (hide === true) styles = { display: "none" };
-    else if (hide === false) styles = { display: "" };
-    if (!styles || typeof styles !== "object" || Array.isArray(styles)) {
-      return { ok: false, error: "set_style \u9700\u8981 styles \u5BF9\u8C61\uFF0C\u6216\u76F4\u63A5\u7528 hide:true \u9690\u85CF / hide:false \u8FD8\u539F" };
-    }
-    const selectorList = Array.isArray(params.selectors) ? params.selectors.map((s) => String(s === void 0 || s === null ? "" : s).trim()).filter(Boolean).slice(0, 20) : [];
-    let els = [];
-    const misses = [];
-    if (selectorList.length) {
-      for (const sel of selectorList) {
-        let hit = [];
-        try {
-          hit = findElementsFor({ selector: sel });
-        } catch (e) {
-          hit = [];
-        }
-        if (hit.length) els = els.concat(hit);
-        else misses.push(sel);
-      }
-      els = Array.from(new Set(els));
-      if (!els.length) {
-        return { ok: false, error: "\u672A\u627E\u5230\u4EFB\u4F55\u76EE\u6807\u5143\u7D20\uFF08\u5168\u90E8\u672A\u547D\u4E2D\uFF1A" + misses.join("\u3001") + "\uFF09" };
-      }
-    } else {
-      els = findElementsFor(params);
-      if (!els.length) return { ok: false, error: targetMissError(params) };
-    }
-    const backups = els.map((el) => ({ el, old: el.style.cssText }));
-    els.forEach((el) => {
-      Object.keys(styles).forEach((k) => {
-        try {
-          el.style[k] = styles[k];
-        } catch (e) {
-        }
-      });
-    });
-    const revert = () => backups.forEach((b) => {
-      b.el.style.cssText = b.old;
-    });
-    pushUndo(revert);
-    const verb = hide === true ? "\u9690\u85CF" : hide === false ? "\u8FD8\u539F" : "\u4FEE\u6539";
-    const missNote = misses.length ? "\uFF1B\u672A\u547D\u4E2D " + misses.length + " \u4E2A\u9009\u62E9\u5668\uFF1A" + misses.map((m) => m.slice(0, 24)).join("\u3001") : "";
-    const tail = "\uFF08" + (Number(params.duration) > 0 ? Number(params.duration) + "ms \u540E\u8FD8\u539F" : "clear_highlights \u8FD8\u539F") + "\uFF09";
-    const summary = "\u5DF2" + verb + " " + els.length + " \u4E2A\u5143\u7D20" + missNote + tail;
-    const dur = Number(params.duration);
-    if (dur > 0) {
-      cmdTimers.push(setTimeout(revert, dur));
-      return { ok: true, result: summary, changed: true, alreadySatisfied: false };
-    }
-    cmdStyleReverters.push(revert);
-    return { ok: true, result: summary, changed: true, alreadySatisfied: false };
   }
   function collectInvalidControls(root) {
     const out = [];
@@ -2495,6 +2103,352 @@
       "\n" + markdown
     };
   }
+  function cmdGetText(params) {
+    if (params.text) {
+      const range = findRangeFor(params);
+      if (range) return { ok: true, result: range.toString() };
+      return { ok: false, error: "\u672A\u627E\u5230\u6587\u672C\uFF1A" + params.text };
+    }
+    const els = findElementsFor(params);
+    if (!els.length) return { ok: false, error: targetMissError(params) };
+    const text = els.map((el) => (el.innerText || el.textContent || "").trim()).filter(Boolean).join("\n---\n").slice(0, 4e3);
+    notifyElementsRead(els);
+    return { ok: true, result: text || "\uFF08\u7A7A\u5185\u5BB9\uFF09" };
+  }
+  function notifyElementsRead(els) {
+    try {
+      const list = Array.isArray(els) ? els : [els];
+      for (const el of list) {
+        if (!el || typeof el.dispatchEvent !== "function") continue;
+        el.dispatchEvent(new CustomEvent("recallflow:element-read", { bubbles: false, detail: { op: "text" } }));
+      }
+    } catch (e) {
+    }
+  }
+  var inspectElement = cmdInspectElement;
+  var queryElements = cmdQueryElements;
+  var readOptions = cmdReadOptions;
+  var readStyles = cmdReadStyles;
+  var extractTable = cmdExtractTable;
+  var readText = cmdGetText;
+
+  // lib/page/command-overlays.ts
+  function scrollRangeIntoView(range) {
+    const rect = range.getBoundingClientRect();
+    if (rect && rect.height) {
+      window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - window.innerHeight * 0.38), behavior: "smooth" });
+    } else {
+      const el = range.startContainer.parentElement;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+  function cmdHighlight(params) {
+    const color = params.color || overlayColor();
+    if (params.texts && Array.isArray(params.texts)) {
+      const requested = params.texts.map((t) => String(t).trim()).filter(Boolean);
+      const texts = requested.slice(0, HIGHLIGHT_MAX_TEXTS);
+      if (!texts.length) return { ok: false, error: "texts \u6570\u7EC4\u4E3A\u7A7A\u6216\u5168\u90E8\u4E3A\u7A7A\u4E32" };
+      const map = buildPageCharMap();
+      let hit = 0;
+      const misses = [];
+      for (const t of texts) {
+        const range = findRangeBySubstr(map, t);
+        if (range) {
+          overlayRange(range, color, "cmd");
+          hit += 1;
+        } else {
+          misses.push(t);
+        }
+      }
+      if (!hit) return { ok: false, error: "\u672A\u5728\u9875\u9762\u4E2D\u627E\u5230\u4EFB\u4F55\u5F85\u9AD8\u4EAE\u6587\u672C" };
+      return {
+        ok: true,
+        hit,
+        attempted: texts.length,
+        requested: requested.length,
+        result: formatHighlightResult({
+          hit,
+          attempted: texts.length,
+          requested: requested.length,
+          misses,
+          limit: HIGHLIGHT_MAX_TEXTS
+        })
+      };
+    }
+    if (params.text) {
+      const range = findRangeFor(params);
+      if (!range) return { ok: false, error: "\u672A\u5728\u9875\u9762\u4E2D\u627E\u5230\u6587\u672C\uFF1A" + params.text };
+      overlayRange(range, color, "cmd");
+      return { ok: true, result: "\u5DF2\u9AD8\u4EAE\u6587\u672C" };
+    }
+    if (params.selector) {
+      const els = findElementsFor(params);
+      if (!els.length) return { ok: false, error: "\u672A\u627E\u5230\u9009\u62E9\u5668\u5339\u914D\u5143\u7D20\uFF1A" + params.selector };
+      els.forEach((el) => overlayElement(el, color, false, "cmd"));
+      return { ok: true, result: "\u5DF2\u9AD8\u4EAE " + els.length + " \u4E2A\u5143\u7D20" };
+    }
+    return { ok: false, error: "highlight \u9700\u8981 texts\u3001text \u6216 selector \u53C2\u6570" };
+  }
+  function cmdScrollTo(params) {
+    const behavior = params.behavior === "auto" ? "auto" : "smooth";
+    const block = params.block || "start";
+    const beforeX = window.scrollX;
+    const beforeY = window.scrollY;
+    const pushScrollUndo = () => pageCommandSession.pushUndo(() => window.scrollTo(beforeX, beforeY));
+    if (params.ref || params.text || params.selector) {
+      const offY = Number(params.y) || 0;
+      const offX = Number(params.x) || 0;
+      if (offY || offX) {
+        const target = params.ref || params.selector ? findElementsFor(params)[0] : null;
+        const range = !target && params.text ? findRangeFor(params) : null;
+        const box = target || range && (range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement);
+        if (!box) {
+          return { ok: false, error: targetMissError(params) + "\uFF08\u53EF\u5148 get_page_snapshot \u83B7\u53D6 ref\uFF0C\u6216\u6539\u7528 role/name \u5B9A\u4F4D\uFF09" };
+        }
+        const prevTop = box.scrollTop;
+        const prevLeft = box.scrollLeft;
+        box.scrollTop = prevTop + offY;
+        box.scrollLeft = prevLeft + offX;
+        pageCommandSession.pushUndo(() => {
+          box.scrollTop = prevTop;
+          box.scrollLeft = prevLeft;
+        });
+        const moved = Math.round(box.scrollTop) !== Math.round(prevTop) || Math.round(box.scrollLeft) !== Math.round(prevLeft);
+        return {
+          ok: true,
+          selector: elementSelector(box),
+          result: "\u5DF2\u6EDA\u52A8\u5BB9\u5668\uFF08\u504F\u79FB y=" + offY + " x=" + offX + "\uFF09\u2192 scrollTop=" + Math.round(box.scrollTop) + " scrollLeft=" + Math.round(box.scrollLeft) + (moved ? "" : "\uFF08\u4F4D\u7F6E\u6CA1\u53D8\uFF1A\u8BE5\u5143\u7D20\u53EF\u80FD\u672C\u6765\u5C31\u4E0D\u53EF\u6EDA\u52A8\uFF0C\u6216\u5DF2\u7ECF\u5230\u8FB9\u754C\uFF09")
+        };
+      }
+      if (params.text) {
+        const range = findRangeFor(params);
+        if (range) {
+          scrollRangeIntoView(range);
+          pushScrollUndo();
+          return { ok: true, result: "\u5DF2\u6EDA\u52A8\u5230\u76EE\u6807\u6587\u672C" };
+        }
+      }
+      const els = findElementsFor(params);
+      if (!els.length) return { ok: false, error: targetMissError(params) + "\uFF08\u53EF\u5148 get_page_snapshot \u83B7\u53D6 ref\uFF0C\u6216\u6539\u7528 role/name \u5B9A\u4F4D\uFF09" };
+      els[0].scrollIntoView({ behavior, block });
+      pushScrollUndo();
+      return { ok: true, selector: elementSelector(els[0]), result: "\u5DF2\u6EDA\u52A8\u5230\u76EE\u6807\u5143\u7D20" };
+    }
+    if (typeof params.top === "number" || typeof params.left === "number") {
+      window.scrollTo({ top: Number(params.top) || 0, left: Number(params.left) || 0, behavior });
+      pushScrollUndo();
+      return { ok: true, result: "\u5DF2\u6EDA\u52A8\u5230\u6307\u5B9A\u4F4D\u7F6E" };
+    }
+    return { ok: false, error: "scroll_to \u9700\u8981 ref/text/selector \u6216 top/left \u53C2\u6570" };
+  }
+  function cmdScrollBy(params) {
+    const beforeX = window.scrollX;
+    const beforeY = window.scrollY;
+    window.scrollBy({
+      top: Number(params.y) || 0,
+      left: Number(params.x) || 0,
+      behavior: params.behavior === "auto" ? "auto" : "smooth"
+    });
+    pageCommandSession.pushUndo(() => window.scrollTo(beforeX, beforeY));
+    return { ok: true, result: "\u5DF2\u6EDA\u52A8" };
+  }
+  function cmdOutline(params) {
+    const color = params.color || "#ff5722";
+    const els = findElementsFor(params);
+    if (!els.length) return { ok: false, error: targetMissError(params) };
+    const owner = "cmd-outline-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+    els.forEach((el) => overlayElement(el, color, true, owner));
+    els[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    const dur = Math.max(0, Number(params.duration) || 1500);
+    const t = setTimeout(() => {
+      disposeOverlays(owner);
+    }, dur);
+    pageCommandSession.addTimer(t);
+    return { ok: true, result: "\u5DF2\u63CF\u8FB9 " + els.length + " \u4E2A\u5143\u7D20" };
+  }
+  function cmdSetStyle(params) {
+    const hide = params.hide;
+    let styles = params.styles;
+    if (hide === true) styles = { display: "none" };
+    else if (hide === false) styles = { display: "" };
+    if (!styles || typeof styles !== "object" || Array.isArray(styles)) {
+      return { ok: false, error: "set_style \u9700\u8981 styles \u5BF9\u8C61\uFF0C\u6216\u76F4\u63A5\u7528 hide:true \u9690\u85CF / hide:false \u8FD8\u539F" };
+    }
+    const selectorList = Array.isArray(params.selectors) ? params.selectors.map((s) => String(s === void 0 || s === null ? "" : s).trim()).filter(Boolean).slice(0, 20) : [];
+    let els = [];
+    const misses = [];
+    if (selectorList.length) {
+      for (const sel of selectorList) {
+        let hit = [];
+        try {
+          hit = findElementsFor({ selector: sel });
+        } catch (e) {
+          hit = [];
+        }
+        if (hit.length) els = els.concat(hit);
+        else misses.push(sel);
+      }
+      els = Array.from(new Set(els));
+      if (!els.length) {
+        return { ok: false, error: "\u672A\u627E\u5230\u4EFB\u4F55\u76EE\u6807\u5143\u7D20\uFF08\u5168\u90E8\u672A\u547D\u4E2D\uFF1A" + misses.join("\u3001") + "\uFF09" };
+      }
+    } else {
+      els = findElementsFor(params);
+      if (!els.length) return { ok: false, error: targetMissError(params) };
+    }
+    const backups = els.map((el) => ({ el, old: el.style.cssText }));
+    els.forEach((el) => {
+      Object.keys(styles).forEach((k) => {
+        try {
+          el.style[k] = styles[k];
+        } catch (e) {
+        }
+      });
+    });
+    const revert = () => backups.forEach((b) => {
+      b.el.style.cssText = b.old;
+    });
+    pageCommandSession.pushUndo(revert);
+    const verb = hide === true ? "\u9690\u85CF" : hide === false ? "\u8FD8\u539F" : "\u4FEE\u6539";
+    const missNote = misses.length ? "\uFF1B\u672A\u547D\u4E2D " + misses.length + " \u4E2A\u9009\u62E9\u5668\uFF1A" + misses.map((m) => m.slice(0, 24)).join("\u3001") : "";
+    const tail = "\uFF08" + (Number(params.duration) > 0 ? Number(params.duration) + "ms \u540E\u8FD8\u539F" : "clear_highlights \u8FD8\u539F") + "\uFF09";
+    const summary = "\u5DF2" + verb + " " + els.length + " \u4E2A\u5143\u7D20" + missNote + tail;
+    const dur = Number(params.duration);
+    if (dur > 0) {
+      pageCommandSession.addTimer(setTimeout(revert, dur));
+      return { ok: true, result: summary, changed: true, alreadySatisfied: false };
+    }
+    pageCommandSession.addStyleReverter(revert);
+    return { ok: true, result: summary, changed: true, alreadySatisfied: false };
+  }
+  var highlight = cmdHighlight;
+  var scrollTo = cmdScrollTo;
+  var scrollBy = cmdScrollBy;
+  var outline = cmdOutline;
+  var setStyle = cmdSetStyle;
+
+  // lib/page/settle.ts
+  var SETTLE_DEFAULTS = Object.freeze({
+    /** 静默窗口：连续这么久没有 DOM 变更就认为稳定 */
+    quietMs: 180,
+    /** 硬上限：无论如何不超过这个时间，避免挂死 */
+    maxMs: 1200,
+    /** rAF 不可用时的退避步长 */
+    fallbackStepMs: 50
+  });
+  function normalizeSettleOptions(opts = {}) {
+    const pick = (v, d) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : d;
+    };
+    const quietMs = pick(opts.quietMs, SETTLE_DEFAULTS.quietMs);
+    const maxMs = Math.max(pick(opts.maxMs, SETTLE_DEFAULTS.maxMs), quietMs);
+    return { quietMs, maxMs, fallbackStepMs: pick(opts.fallbackStepMs, SETTLE_DEFAULTS.fallbackStepMs) };
+  }
+  function waitForSettle(env = {}, options = {}) {
+    const { quietMs, maxMs, fallbackStepMs } = normalizeSettleOptions(options);
+    const doc = env.doc || (typeof document !== "undefined" ? document : null);
+    const raf = env.raf || (typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : null);
+    const now = env.now || (() => Date.now());
+    const setTimeoutFn = env.setTimeoutFn || setTimeout;
+    const clearTimeoutFn = env.clearTimeoutFn || clearTimeout;
+    const start = now();
+    let mutations = 0;
+    let observer = null;
+    let rafId2 = null;
+    let quietTimer = null;
+    let maxTimer = null;
+    let done = false;
+    let resolveFn = null;
+    const finish = (reason) => {
+      if (done) return;
+      done = true;
+      if (observer) {
+        try {
+          observer.disconnect();
+        } catch (e) {
+        }
+      }
+      if (rafId2 !== null && typeof cancelAnimationFrame === "function") {
+        try {
+          cancelAnimationFrame(rafId2);
+        } catch (e) {
+        }
+      }
+      if (quietTimer) clearTimeoutFn(quietTimer);
+      if (maxTimer) clearTimeoutFn(maxTimer);
+      if (resolveFn) resolveFn({ settled: reason !== "timeout", reason, elapsedMs: now() - start, mutations });
+    };
+    return new Promise((resolve) => {
+      resolveFn = resolve;
+      if (!doc || typeof doc !== "object" || typeof MutationObserver === "undefined") {
+        const timer = setTimeoutFn(() => finish("no-observer"), doc ? quietMs : fallbackStepMs);
+        quietTimer = timer;
+        return;
+      }
+      try {
+        observer = new MutationObserver(() => {
+          mutations++;
+          if (quietTimer) clearTimeoutFn(quietTimer);
+          quietTimer = setTimeoutFn(() => finish("quiet"), quietMs);
+        });
+        observer.observe(doc.documentElement || doc, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: true
+        });
+      } catch (e) {
+        observer = null;
+      }
+      quietTimer = setTimeoutFn(() => finish("quiet"), quietMs);
+      maxTimer = setTimeoutFn(() => finish("timeout"), maxMs);
+      if (typeof raf === "function") {
+        const tick = () => {
+          if (done) return;
+          rafId2 = raf(tick);
+        };
+        rafId2 = raf(tick);
+      }
+    });
+  }
+
+  // lib/shared/editable-text.ts
+  function normalizeEditableText(value) {
+    return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
+  }
+  function firstEditableDifference(expected, actual) {
+    const a = normalizeEditableText(expected);
+    const b = normalizeEditableText(actual);
+    const n = Math.min(a.length, b.length);
+    let i = 0;
+    while (i < n && a[i] === b[i]) i += 1;
+    return {
+      index: i >= a.length && i >= b.length ? -1 : i,
+      expected: a.slice(Math.max(0, i - 24), i + 48),
+      actual: b.slice(Math.max(0, i - 24), i + 48)
+    };
+  }
+  function editableTextSummary(expected, actual) {
+    const diff = firstEditableDifference(expected, actual);
+    return {
+      matchesIntent: diff.index === -1,
+      expectedLength: normalizeEditableText(expected).length,
+      actualLength: normalizeEditableText(actual).length,
+      firstDifference: diff
+    };
+  }
+
+  // lib/page/command-actions.ts
+  function nextPaint() {
+    return waitForSettle();
+  }
+  function stateSuffix(el) {
+    const state = describeTargetState(el);
+    if (!state) return "";
+    if (!el.isConnected) return "\uFF08\u8BE5\u5143\u7D20\u5DF2\u4E0D\u5728\u9875\u9762\u4E0A\uFF09";
+    return "\uFF1B\u70B9\u51FB\u540E\u72B6\u6001\uFF1A" + state;
+  }
   async function cmdClick(params) {
     const els = findElementsFor(params);
     if (!els.length) return { ok: false, error: targetMissError(params) };
@@ -2536,37 +2490,6 @@
       result: "\u5DF2\u70B9\u51FB\u5143\u7D20 " + tag + stateSuffix(el) + changed + navigated
     };
   }
-  function nextPaint() {
-    return waitForSettle();
-  }
-  function stateSuffix(el) {
-    const state = describeTargetState(el);
-    if (!state) return "";
-    if (!el.isConnected) return "\uFF08\u8BE5\u5143\u7D20\u5DF2\u4E0D\u5728\u9875\u9762\u4E0A\uFF09";
-    return "\uFF1B\u70B9\u51FB\u540E\u72B6\u6001\uFF1A" + state;
-  }
-  function cmdGetText(params) {
-    if (params.text) {
-      const range = findRangeFor(params);
-      if (range) return { ok: true, result: range.toString() };
-      return { ok: false, error: "\u672A\u627E\u5230\u6587\u672C\uFF1A" + params.text };
-    }
-    const els = findElementsFor(params);
-    if (!els.length) return { ok: false, error: targetMissError(params) };
-    const text = els.map((el) => (el.innerText || el.textContent || "").trim()).filter(Boolean).join("\n---\n").slice(0, 4e3);
-    notifyElementsRead(els);
-    return { ok: true, result: text || "\uFF08\u7A7A\u5185\u5BB9\uFF09" };
-  }
-  function notifyElementsRead(els) {
-    try {
-      const list = Array.isArray(els) ? els : [els];
-      for (const el of list) {
-        if (!el || typeof el.dispatchEvent !== "function") continue;
-        el.dispatchEvent(new CustomEvent("recallflow:element-read", { bubbles: false, detail: { op: "text" } }));
-      }
-    } catch (e) {
-    }
-  }
   function firstTarget(params, includeText = true) {
     const source = params || {};
     const target = {
@@ -2580,13 +2503,6 @@
     if (includeText) target.text = source.text;
     const els = findElementsFor(target);
     return els.length ? els[0] : null;
-  }
-  function isVisibleForAction(el) {
-    if (!el || !el.isConnected) return false;
-    const style = window.getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
   }
   function deepestElementAt(x, y) {
     let el = document.elementFromPoint(x, y);
@@ -2776,7 +2692,7 @@
       return { ok: false, error: "\u8F93\u5165\u6587\u672C\u5931\u8D25\uFF1A" + e.message };
     }
     if (before !== next) {
-      pushUndo(() => {
+      pageCommandSession.pushUndo(() => {
         try {
           if (el.isContentEditable) writeContentEditable(el, before, true);
           else setNativeValue(el, before);
@@ -2872,7 +2788,7 @@
       return { ok: false, error: "\u9009\u62E9 option \u5931\u8D25\uFF1A" + e.message };
     }
     if (before !== el.selectedIndex) {
-      pushUndo(() => {
+      pageCommandSession.pushUndo(() => {
         try {
           el.selectedIndex = before;
           el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
@@ -2932,7 +2848,7 @@
     }
     const after = type ? Boolean(el.checked) : el.getAttribute("aria-checked") === "true";
     if (before !== after && type !== "radio") {
-      pushUndo(() => {
+      pageCommandSession.pushUndo(() => {
         try {
           el.click();
         } catch (e) {
@@ -3045,58 +2961,204 @@
       result: sensitive ? "\u5C5E\u6027\u5B58\u5728\uFF0C\u4F46\u654F\u611F\u503C\u5DF2\u9690\u85CF" : raw === null ? "\u5C5E\u6027\u4E0D\u5B58\u5728\uFF1A" + attribute : attribute + " = " + value
     };
   }
+  var typeText = cmdTypeText;
+  var pressKey = cmdPressKey;
+  var selectOption = cmdSelectOption;
+  var checkBox = cmdCheckBox;
+  var waitForElement = cmdWaitForElement;
+  var getAttribute = cmdGetAttribute;
+  var click = cmdClick;
+
+  // lib/application/page/run-js.ts
+  var SANDBOX_ALLOWED = [
+    "window",
+    "document",
+    "location",
+    "navigator",
+    "JSON",
+    "Math",
+    "Date",
+    "Number",
+    "String",
+    "Boolean",
+    "Array",
+    "Object",
+    "Promise",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "RegExp",
+    "Error",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+    "console",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "parseInt",
+    "parseFloat",
+    "isNaN",
+    "isFinite",
+    "encodeURIComponent",
+    "decodeURIComponent",
+    "encodeURI",
+    "decodeURI",
+    "URL",
+    "URLSearchParams",
+    "TextEncoder",
+    "TextDecoder",
+    "atob",
+    "btoa",
+    "structuredClone",
+    "getComputedStyle",
+    "performance",
+    "Node",
+    "NodeFilter",
+    "Element",
+    "HTMLElement",
+    "Event",
+    "CustomEvent",
+    "MouseEvent",
+    "KeyboardEvent",
+    "MutationObserver",
+    "IntersectionObserver",
+    "ResizeObserver",
+    "DOMParser",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var SANDBOX_BLOCKED = [
+    "chrome",
+    "browser",
+    "globalThis",
+    "self",
+    "top",
+    "parent",
+    "frames",
+    "fetch",
+    "XMLHttpRequest",
+    "WebSocket",
+    "EventSource",
+    "Worker",
+    "SharedWorker",
+    "BroadcastChannel",
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "caches",
+    "importScripts",
+    "eval",
+    "Function"
+  ];
+  function buildSandboxArgs() {
+    const blocked = new Set(SANDBOX_BLOCKED);
+    const realWindow = globalThis;
+    const safeWindow = new Proxy(realWindow, {
+      get(target, prop) {
+        if (typeof prop === "string" && blocked.has(prop)) return void 0;
+        const value = target[prop];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      has(target, prop) {
+        return !(typeof prop === "string" && blocked.has(prop));
+      }
+    });
+    const names = [];
+    const values = [];
+    for (const name of SANDBOX_ALLOWED) {
+      names.push(name);
+      values.push(name === "window" ? safeWindow : globalThis[name]);
+    }
+    for (const name of SANDBOX_BLOCKED) {
+      names.push(name);
+      values.push(void 0);
+    }
+    return { names, values, safeWindow };
+  }
+  async function runJs(params) {
+    const input = params || {};
+    const code = String(input.code || "").trim();
+    if (!code) return { ok: false, error: "run_javascript \u9700\u8981 code \u53C2\u6570" };
+    if (code.length > 2e4) return { ok: false, error: "\u4EE3\u7801\u8FC7\u957F\uFF08\u4E0A\u9650 20000 \u5B57\u7B26\uFF09\uFF0C\u8BF7\u7CBE\u7B80\u903B\u8F91" };
+    let value;
+    try {
+      const { names, values, safeWindow } = buildSandboxArgs();
+      const fn = new Function(...names, "return (async () => {\n" + code + "\n})();");
+      value = fn.call(safeWindow, ...values);
+    } catch (error) {
+      return { ok: false, error: "JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
+    }
+    if (value && typeof value.then === "function") {
+      try {
+        value = await value;
+      } catch (error) {
+        return { ok: false, error: "\u5F02\u6B65 JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
+      }
+    }
+    let serialized;
+    try {
+      serialized = JSON.stringify(value, null, 2);
+    } catch (error) {
+      serialized = String(value);
+    }
+    if (serialized === void 0) serialized = "undefined";
+    if (serialized.length > 2e3) serialized = serialized.slice(0, 2e3) + "\n\u2026\uFF08\u7ED3\u679C\u8FC7\u957F\u5DF2\u622A\u65AD\uFF09";
+    return { ok: true, result: serialized };
+  }
+
+  // lib/page/commands.ts
+  function undoLast() {
+    return pageCommandSession.undo();
+  }
+  function resetPageCommands() {
+    pageCommandSession.reset();
+  }
   async function executePageCommand(command, params) {
     params = params || {};
     switch (command) {
       case "highlight":
-        return cmdHighlight(params);
+        return highlight(params);
       case "clear_highlights":
         resetPageCommands();
         return { ok: true, result: "\u5DF2\u6E05\u9664\u9875\u9762\u9AD8\u4EAE\u4E0E\u6837\u5F0F" };
       case "scroll_to":
-        return cmdScrollTo(params);
+        return scrollTo(params);
       case "scroll_by":
-        return cmdScrollBy(params);
+        return scrollBy(params);
       case "outline":
-        return cmdOutline(params);
+        return outline(params);
       case "set_style":
-        return cmdSetStyle(params);
+        return setStyle(params);
       case "click":
-        return cmdClick(params);
+        return click(params);
       case "get_text":
-        return cmdGetText(params);
+        return readText(params);
       case "inspect_element":
-        return cmdInspectElement(params);
+        return inspectElement(params);
       case "read_styles":
-        return cmdReadStyles(params);
+        return readStyles(params);
       case "read_options":
-        return cmdReadOptions(params);
+        return readOptions(params);
       case "extract_table":
-        return cmdExtractTable(params);
+        return extractTable(params);
       case "query_elements":
-        return cmdQueryElements(params);
+        return queryElements(params);
       default:
         return { ok: false, error: "\u672A\u77E5\u9875\u9762\u547D\u4EE4\uFF1A" + command };
     }
   }
-  function typeText(params) {
-    return cmdTypeText(params || {});
-  }
-  function pressKey(params) {
-    return cmdPressKey(params || {});
-  }
-  function selectOption(params) {
-    return cmdSelectOption(params || {});
-  }
-  function checkBox(params) {
-    return cmdCheckBox(params || {});
-  }
-  function waitForElement(params) {
-    return cmdWaitForElement(params || {});
-  }
-  function getAttribute(params) {
-    return cmdGetAttribute(params || {});
-  }
+  var typeText2 = typeText;
+  var pressKey2 = pressKey;
+  var selectOption2 = selectOption;
+  var checkBox2 = checkBox;
+  var waitForElement2 = waitForElement;
+  var getAttribute2 = getAttribute;
 
   // lib/page/debug-capture.ts
   var debug_capture_exports = {};
@@ -10613,27 +10675,27 @@
         return false;
       }
       if (msg && msg.type === "kbTypeText") {
-        Promise.resolve(typeText(msg.params || {})).then(sendResponse);
+        Promise.resolve(typeText2(msg.params || {})).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbPressKey") {
-        Promise.resolve(pressKey(msg.params || {})).then(sendResponse);
+        Promise.resolve(pressKey2(msg.params || {})).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbSelectOption") {
-        Promise.resolve(selectOption(msg.params || {})).then(sendResponse);
+        Promise.resolve(selectOption2(msg.params || {})).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbCheckBox") {
-        Promise.resolve(checkBox(msg.params || {})).then(sendResponse);
+        Promise.resolve(checkBox2(msg.params || {})).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbWaitForElement") {
-        waitForElement(msg.params || {}).then(sendResponse);
+        waitForElement2(msg.params || {}).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbGetAttribute") {
-        Promise.resolve(getAttribute(msg.params || {})).then(sendResponse);
+        Promise.resolve(getAttribute2(msg.params || {})).then(sendResponse);
         return true;
       }
       if (msg && msg.type === "kbRunJavaScript") {

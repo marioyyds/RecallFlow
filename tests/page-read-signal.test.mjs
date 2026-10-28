@@ -24,7 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const CMD_SRC = fs.readFileSync('lib/page/commands.ts', 'utf8');
+const CMD_SRC = fs.readFileSync('lib/page/command-read.ts', 'utf8');
 const EVENT_NAME = 'recallflow:element-read';
 
 /** 取一个顶层函数的源码体（到下一个顶层 function 为止）。与 form-validity 的写法一致。 */
@@ -44,7 +44,7 @@ function fnBody(src, name) {
 // 字面量（改写成「这个读信号事件」），全文件只有派发那一处。
 const countEventName = (src) => src.split(EVENT_NAME).length - 1;
 
-test('事件名在 lib/page/commands.ts 里**只出现一次**（唯一的活动定义点）', () => {
+test('事件名在 command-read.ts 里**只出现一次**（唯一的活动定义点）', () => {
   assert.equal(
     countEventName(CMD_SRC),
     1,
