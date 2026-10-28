@@ -10,6 +10,7 @@ import { formatInspectSummary, formatInspectMatches, formatHighlightResult, DEFA
 import { HIGHLIGHT_MAX_TEXTS } from '../shared/constants.ts';
 import { waitForSettle } from './settle.ts';
 import { editableTextSummary } from '../shared/editable-text.ts';
+export { runJs } from '../application/page/run-js.ts';
 
 let cmdStyleReverters: any[] = []; // set_style 的还原函数
 let cmdTimers: any[] = []; // outline / set_style 的定时器
@@ -1896,90 +1897,3 @@ export function checkBox(params: any) { return cmdCheckBox(params || {}); }
 export function waitForElement(params: any) { return cmdWaitForElement(params || {}); }
 export function getAttribute(params: any) { return cmdGetAttribute(params || {}); }
 
-// 受控的 JS 逃生舱：在内容脚本隔离世界里执行模型提供的代码，并用「白名单作用域」屏蔽
-// 高权限能力。注意：内容脚本隔离世界本身可访问 chrome.runtime / chrome.storage，因此必须
-// 显式屏蔽，不能只依赖 world 隔离。这里能挡住直接引用 chrome.*（含 window.chrome）与
-// fetch/XHR/storage 等，但无法完全阻止通过函数构造器（如 (function(){}).constructor）绕过；
-// 因此该工具仍强制逐次审批，不因本隔离而放松。
-// 代码体是一个函数体，最后应通过 return 返回结果（或返回 Promise）。
-const SANDBOX_ALLOWED = [
-  'window', 'document', 'location', 'navigator', 'JSON', 'Math', 'Date', 'Number', 'String',
-  'Boolean', 'Array', 'Object', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'RegExp',
-  'Error', 'TypeError', 'RangeError', 'SyntaxError', 'console', 'setTimeout', 'clearTimeout',
-  'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'parseInt',
-  'parseFloat', 'isNaN', 'isFinite', 'encodeURIComponent', 'decodeURIComponent', 'encodeURI',
-  'decodeURI', 'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder', 'atob', 'btoa',
-  'structuredClone', 'getComputedStyle', 'performance', 'Node', 'NodeFilter', 'Element',
-  'HTMLElement', 'Event', 'CustomEvent', 'MouseEvent', 'KeyboardEvent', 'MutationObserver',
-  'IntersectionObserver', 'ResizeObserver', 'DOMParser', 'undefined', 'NaN', 'Infinity',
-];
-const SANDBOX_BLOCKED = [
-  'chrome', 'browser', 'globalThis', 'self', 'top', 'parent', 'frames', 'fetch',
-  'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'BroadcastChannel',
-  'localStorage', 'sessionStorage', 'indexedDB', 'caches', 'importScripts', 'eval', 'Function',
-];
-function buildSandboxArgs() {
-  const blocked = new Set(SANDBOX_BLOCKED);
-  const realWindow = globalThis;
-  // window 也走代理：屏蔽 window.chrome / window.fetch 等；函数方法绑定到真实 window，
-  // 避免调用 window 方法时触发 "Illegal invocation"。
-  const safeWindow = new Proxy(realWindow, {
-    get(target, prop) {
-      if (typeof prop === 'string' && blocked.has(prop)) return undefined;
-      const v = (target as any)[prop];
-      return typeof v === 'function' ? v.bind(target) : v;
-    },
-    has(target, prop) {
-      return !(typeof prop === 'string' && blocked.has(prop));
-    },
-  });
-  // 把允许/屏蔽的名字都作为函数形参传入：形参会 shadow 掉同名全局，从而在不解构
-  // 全局对象的前提下完成白名单隔离（比 with(proxy) 更不易被外部变量解析绕过）。
-  const names = [];
-  const values = [];
-  for (const name of SANDBOX_ALLOWED) {
-    names.push(name);
-    values.push(name === 'window' ? safeWindow : (globalThis as any)[name]);
-  }
-  for (const name of SANDBOX_BLOCKED) {
-    names.push(name);
-    values.push(undefined);
-  }
-  return { names, values, safeWindow };
-}
-
-async function cmdRunJs(params: any) {
-  const code = String((params && params.code) || '').trim();
-  if (!code) return { ok: false, error: 'run_javascript 需要 code 参数' };
-  if (code.length > 20000) return { ok: false, error: '代码过长（上限 20000 字符），请精简逻辑' };
-  let value;
-  try {
-    // 代码体作为函数体注入（可用 return 返回结果）；形参白名单隔离高权限全局，
-    // this 绑定到 safeWindow，避免通过 this.chrome 绕过。
-    const { names, values, safeWindow } = buildSandboxArgs();
-    // 同样包一层 async：允许 `await`，并保持 `return` 语义。
-    // 沙箱仍会被 MV3 扩展 CSP 拦截并自动降级到页面主世界，但契约本身必须正确。
-    const fn = new Function(...names, 'return (async () => {\n' + code + '\n})();');
-    value = fn.call(safeWindow, ...values);
-  } catch (e: any) {
-    return { ok: false, error: 'JS 执行出错：' + (e && e.message ? e.message : String(e)) };
-  }
-  if (value && typeof value.then === 'function') {
-    try {
-      value = await value;
-    } catch (e: any) {
-      return { ok: false, error: '异步 JS 执行出错：' + (e && e.message ? e.message : String(e)) };
-    }
-  }
-  let serialized;
-  try {
-    serialized = JSON.stringify(value, null, 2);
-  } catch (e: any) {
-    serialized = String(value);
-  }
-  if (serialized === undefined) serialized = 'undefined';
-  if (serialized.length > 2000) serialized = serialized.slice(0, 2000) + '\n…（结果过长已截断）';
-  return { ok: true, result: serialized };
-}
-
-export function runJs(params: any) { return cmdRunJs(params || {}); }

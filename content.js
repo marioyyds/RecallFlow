@@ -1427,6 +1427,149 @@
     };
   }
 
+  // lib/application/page/run-js.ts
+  var SANDBOX_ALLOWED = [
+    "window",
+    "document",
+    "location",
+    "navigator",
+    "JSON",
+    "Math",
+    "Date",
+    "Number",
+    "String",
+    "Boolean",
+    "Array",
+    "Object",
+    "Promise",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "RegExp",
+    "Error",
+    "TypeError",
+    "RangeError",
+    "SyntaxError",
+    "console",
+    "setTimeout",
+    "clearTimeout",
+    "setInterval",
+    "clearInterval",
+    "requestAnimationFrame",
+    "cancelAnimationFrame",
+    "parseInt",
+    "parseFloat",
+    "isNaN",
+    "isFinite",
+    "encodeURIComponent",
+    "decodeURIComponent",
+    "encodeURI",
+    "decodeURI",
+    "URL",
+    "URLSearchParams",
+    "TextEncoder",
+    "TextDecoder",
+    "atob",
+    "btoa",
+    "structuredClone",
+    "getComputedStyle",
+    "performance",
+    "Node",
+    "NodeFilter",
+    "Element",
+    "HTMLElement",
+    "Event",
+    "CustomEvent",
+    "MouseEvent",
+    "KeyboardEvent",
+    "MutationObserver",
+    "IntersectionObserver",
+    "ResizeObserver",
+    "DOMParser",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var SANDBOX_BLOCKED = [
+    "chrome",
+    "browser",
+    "globalThis",
+    "self",
+    "top",
+    "parent",
+    "frames",
+    "fetch",
+    "XMLHttpRequest",
+    "WebSocket",
+    "EventSource",
+    "Worker",
+    "SharedWorker",
+    "BroadcastChannel",
+    "localStorage",
+    "sessionStorage",
+    "indexedDB",
+    "caches",
+    "importScripts",
+    "eval",
+    "Function"
+  ];
+  function buildSandboxArgs() {
+    const blocked = new Set(SANDBOX_BLOCKED);
+    const realWindow = globalThis;
+    const safeWindow = new Proxy(realWindow, {
+      get(target, prop) {
+        if (typeof prop === "string" && blocked.has(prop)) return void 0;
+        const value = target[prop];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      has(target, prop) {
+        return !(typeof prop === "string" && blocked.has(prop));
+      }
+    });
+    const names = [];
+    const values = [];
+    for (const name of SANDBOX_ALLOWED) {
+      names.push(name);
+      values.push(name === "window" ? safeWindow : globalThis[name]);
+    }
+    for (const name of SANDBOX_BLOCKED) {
+      names.push(name);
+      values.push(void 0);
+    }
+    return { names, values, safeWindow };
+  }
+  async function runJs(params) {
+    const input = params || {};
+    const code = String(input.code || "").trim();
+    if (!code) return { ok: false, error: "run_javascript \u9700\u8981 code \u53C2\u6570" };
+    if (code.length > 2e4) return { ok: false, error: "\u4EE3\u7801\u8FC7\u957F\uFF08\u4E0A\u9650 20000 \u5B57\u7B26\uFF09\uFF0C\u8BF7\u7CBE\u7B80\u903B\u8F91" };
+    let value;
+    try {
+      const { names, values, safeWindow } = buildSandboxArgs();
+      const fn = new Function(...names, "return (async () => {\n" + code + "\n})();");
+      value = fn.call(safeWindow, ...values);
+    } catch (error) {
+      return { ok: false, error: "JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
+    }
+    if (value && typeof value.then === "function") {
+      try {
+        value = await value;
+      } catch (error) {
+        return { ok: false, error: "\u5F02\u6B65 JS \u6267\u884C\u51FA\u9519\uFF1A" + (error?.message ? error.message : String(error)) };
+      }
+    }
+    let serialized;
+    try {
+      serialized = JSON.stringify(value, null, 2);
+    } catch (error) {
+      serialized = String(value);
+    }
+    if (serialized === void 0) serialized = "undefined";
+    if (serialized.length > 2e3) serialized = serialized.slice(0, 2e3) + "\n\u2026\uFF08\u7ED3\u679C\u8FC7\u957F\u5DF2\u622A\u65AD\uFF09";
+    return { ok: true, result: serialized };
+  }
+
   // lib/page/commands.ts
   var cmdStyleReverters = [];
   var cmdTimers = [];
@@ -2953,149 +3096,6 @@
   }
   function getAttribute(params) {
     return cmdGetAttribute(params || {});
-  }
-  var SANDBOX_ALLOWED = [
-    "window",
-    "document",
-    "location",
-    "navigator",
-    "JSON",
-    "Math",
-    "Date",
-    "Number",
-    "String",
-    "Boolean",
-    "Array",
-    "Object",
-    "Promise",
-    "Map",
-    "Set",
-    "WeakMap",
-    "WeakSet",
-    "RegExp",
-    "Error",
-    "TypeError",
-    "RangeError",
-    "SyntaxError",
-    "console",
-    "setTimeout",
-    "clearTimeout",
-    "setInterval",
-    "clearInterval",
-    "requestAnimationFrame",
-    "cancelAnimationFrame",
-    "parseInt",
-    "parseFloat",
-    "isNaN",
-    "isFinite",
-    "encodeURIComponent",
-    "decodeURIComponent",
-    "encodeURI",
-    "decodeURI",
-    "URL",
-    "URLSearchParams",
-    "TextEncoder",
-    "TextDecoder",
-    "atob",
-    "btoa",
-    "structuredClone",
-    "getComputedStyle",
-    "performance",
-    "Node",
-    "NodeFilter",
-    "Element",
-    "HTMLElement",
-    "Event",
-    "CustomEvent",
-    "MouseEvent",
-    "KeyboardEvent",
-    "MutationObserver",
-    "IntersectionObserver",
-    "ResizeObserver",
-    "DOMParser",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var SANDBOX_BLOCKED = [
-    "chrome",
-    "browser",
-    "globalThis",
-    "self",
-    "top",
-    "parent",
-    "frames",
-    "fetch",
-    "XMLHttpRequest",
-    "WebSocket",
-    "EventSource",
-    "Worker",
-    "SharedWorker",
-    "BroadcastChannel",
-    "localStorage",
-    "sessionStorage",
-    "indexedDB",
-    "caches",
-    "importScripts",
-    "eval",
-    "Function"
-  ];
-  function buildSandboxArgs() {
-    const blocked = new Set(SANDBOX_BLOCKED);
-    const realWindow = globalThis;
-    const safeWindow = new Proxy(realWindow, {
-      get(target, prop) {
-        if (typeof prop === "string" && blocked.has(prop)) return void 0;
-        const v = target[prop];
-        return typeof v === "function" ? v.bind(target) : v;
-      },
-      has(target, prop) {
-        return !(typeof prop === "string" && blocked.has(prop));
-      }
-    });
-    const names = [];
-    const values = [];
-    for (const name of SANDBOX_ALLOWED) {
-      names.push(name);
-      values.push(name === "window" ? safeWindow : globalThis[name]);
-    }
-    for (const name of SANDBOX_BLOCKED) {
-      names.push(name);
-      values.push(void 0);
-    }
-    return { names, values, safeWindow };
-  }
-  async function cmdRunJs(params) {
-    const code = String(params && params.code || "").trim();
-    if (!code) return { ok: false, error: "run_javascript \u9700\u8981 code \u53C2\u6570" };
-    if (code.length > 2e4) return { ok: false, error: "\u4EE3\u7801\u8FC7\u957F\uFF08\u4E0A\u9650 20000 \u5B57\u7B26\uFF09\uFF0C\u8BF7\u7CBE\u7B80\u903B\u8F91" };
-    let value;
-    try {
-      const { names, values, safeWindow } = buildSandboxArgs();
-      const fn = new Function(...names, "return (async () => {\n" + code + "\n})();");
-      value = fn.call(safeWindow, ...values);
-    } catch (e) {
-      return { ok: false, error: "JS \u6267\u884C\u51FA\u9519\uFF1A" + (e && e.message ? e.message : String(e)) };
-    }
-    if (value && typeof value.then === "function") {
-      try {
-        value = await value;
-      } catch (e) {
-        return { ok: false, error: "\u5F02\u6B65 JS \u6267\u884C\u51FA\u9519\uFF1A" + (e && e.message ? e.message : String(e)) };
-      }
-    }
-    let serialized;
-    try {
-      serialized = JSON.stringify(value, null, 2);
-    } catch (e) {
-      serialized = String(value);
-    }
-    if (serialized === void 0) serialized = "undefined";
-    if (serialized.length > 2e3) serialized = serialized.slice(0, 2e3) + "\n\u2026\uFF08\u7ED3\u679C\u8FC7\u957F\u5DF2\u622A\u65AD\uFF09";
-    return { ok: true, result: serialized };
-  }
-  function runJs(params) {
-    return cmdRunJs(params || {});
   }
 
   // lib/page/debug-capture.ts
