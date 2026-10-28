@@ -21,6 +21,19 @@ import {
 import { createFrameScheduler } from './render-scheduler.ts';
 import { createLruCache } from '../shared/lru.ts';
 import { createExportGuard, HOST_ID } from './save-clean.ts';
+import { PanelThemeController } from '../ui/panel/theme-controller.ts';
+import { PanelProgressController, stateLabel } from '../ui/panel/progress-controller.ts';
+import { PanelScreenshotView } from '../ui/panel/screenshot-view.ts';
+import {
+  argHint,
+  msgActionsHtml,
+  sessionTimeText,
+  summarizeToolParts,
+  thinkLabelText,
+  userActionsHtml,
+} from '../ui/panel/conversation-format.ts';
+import { computeRunControls } from '../application/panel/run-controls.ts';
+export { computeRunControls } from '../application/panel/run-controls.ts';
 
 // 扩展被重新加载/停用后，旧内容脚本的 chrome.* 调用会抛 "Extension context invalidated"。
 // 用它做防御性判断，避免未捕获异常刷屏。
@@ -210,28 +223,6 @@ let followStatusTimer: any = null;
 let stopBtn: any = null;
 let sendBtn: any = null;
 
-// 「当前该把发送/停止按钮画成什么样」—— 纯函数，不碰 DOM。
-//
-// 单独抽出来是因为这条判断的两个输入（本页是否在流式输出、跟随的那个 run 是什么状态）
-// 来自两条完全不同的通道，而它们的组合**只有四种情况里有三种是错的**：
-// 跟随页在跑时若漏掉显示停止按钮，用户就只能眼睁睁看着一个停不下来的任务；
-// 运行中若忘记禁掉发送，用户会往同一个会话里塞第二条指令。
-// 这些错了都不会报错，只会「用起来怪」。导出以便直测。
-export function computeRunControls(input: any) {
-  const src = input || {};
-  const followingRunning = Boolean(src.followed && src.followed.status === 'running');
-  const running = Boolean(src.streaming || followingRunning);
-  // 只有跟随的 run 会带 stopping 标记：本页自己在跑时，停止请求由流的中断来体现。
-  const stopping = Boolean(followingRunning && src.followed.stopping);
-  return {
-    showStop: running,
-    // 停止中必须**禁点**：否则用户连点几次，会把同一个中断请求反复发出去。
-    stopDisabled: stopping,
-    stopText: stopping ? '停止中…' : '■ 停止',
-    sendDisabled: running,
-  };
-}
-
 /**
  * 运行状态的单一渲染入口：发送按钮、停止按钮、进度条都从这里取状态。
  * owner 页（streaming）和跟随页（followedRunState）必须表现一致，
@@ -322,120 +313,10 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
   });
 }
 
-// ---- 面板主题 ----
-// 深色主题此前是死代码：CSS 里约 50 条 .panel.dark 规则，但全仓库没有任何地方加上 dark 类
-// （panel.className 一直硬编码为 'panel'）。这里把它接上：默认跟随系统，可手动覆盖。
-const THEME_KEY = 'recallflow-panel-theme';
-let themeBtn: any = null;
-
-function savedThemeOverride() {
-  try {
-    return localStorage.getItem(THEME_KEY) || '';
-  } catch (e: any) {
-    return '';
-  }
-}
-function preferredTheme() {
-  const saved = savedThemeOverride();
-  if (saved === 'dark' || saved === 'light') return saved;
-  try {
-    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  } catch (e: any) {
-    return 'light';
-  }
-}
-function applyTheme() {
-  if (!panel) return;
-  const mode = preferredTheme();
-  panel.classList.toggle('dark', mode === 'dark');
-  if (themeBtn) {
-    const override = savedThemeOverride();
-    const label = override
-      ? '主题：' + (mode === 'dark' ? '深色' : '浅色') + '（点击切换）'
-      : '主题：跟随系统（点击切换）';
-    themeBtn.textContent = override ? (mode === 'dark' ? '🌙' : '☀️') : '🌗';
-    themeBtn.title = label;
-    themeBtn.setAttribute('aria-label', label);
-  }
-}
-function cycleTheme() {
-  const cur = savedThemeOverride();
-  const next = cur === '' ? 'dark' : cur === 'dark' ? 'light' : '';
-  try {
-    if (next) localStorage.setItem(THEME_KEY, next);
-    else localStorage.removeItem(THEME_KEY);
-  } catch (e: any) {}
-  applyTheme();
-}
-try {
-  const mq = matchMedia('(prefers-color-scheme: dark)');
-  const onSys = () => {
-    if (!savedThemeOverride()) applyTheme();
-  };
-  if (mq.addEventListener) mq.addEventListener('change', onSys);
-  else if (mq.addListener) mq.addListener(onSys);
-} catch (e: any) {}
-
-// ---- 进度与耗时 ----
-// Agent 每轮都会发 agent-state 事件，但前端此前没有任何处理器 ——
-// 长任务只剩一行行工具往下滚，用户无从知道「第几步、多久了、是不是卡住了」。
-let progressEl: any = null;
-let progressMsgEl: any = null;
-let progressTimeEl: any = null;
-let progressTimer: any = null;
-let runStartedAt = 0;
-// 只保存「原始事实」，文案每帧从零拼装 ——
-// 曾经把上一帧的完整文案当兜底值拼进来，结果累积成「第 4/32 步 · 第 3/32 步 · 第 3/32 步 · …」。
-let progressState = '';
-let progressStep = 0;
-let progressMax = 0;
+const themeController = new PanelThemeController();
+themeController.init();
+const progressController = new PanelProgressController();
 let panelKeyHandler: any = null;
-
-// 状态取值来自 agent-state.js 的 RUN_STATUS。
-const STATE_LABELS = {
-  created: '准备中',
-  planning: '规划步骤',
-  waiting_approval: '等待你确认',
-  executing: '执行动作',
-  observing: '查看结果',
-  stopping: '停止中',
-  paused: '已暂停',
-  completed: '已完成',
-  failed: '执行失败',
-  cancelled: '已取消',
-  timeout: '已达上限',
-};
-function stateLabel(status: any) {
-  const key = String(status || '').toLowerCase();
-  return (STATE_LABELS as Record<string, string>)[key] || '';
-}
-function renderProgress() {
-  if (progressTimeEl) {
-    progressTimeEl.textContent = runStartedAt ? '已用时 ' + Math.round((Date.now() - runStartedAt) / 1000) + 's' : '';
-  }
-  if (progressMsgEl) progressMsgEl.textContent = composeProgressText(progressStep, progressMax, progressState);
-}
-function startProgress() {
-  runStartedAt = Date.now();
-  progressState = '';
-  progressStep = 0;
-  progressMax = 0;
-  if (progressEl) progressEl.classList.add('on');
-  renderProgress();
-  if (progressTimer) clearInterval(progressTimer);
-  progressTimer = setInterval(renderProgress, 1000);
-}
-function stopProgress() {
-  if (progressTimer) {
-    clearInterval(progressTimer);
-    progressTimer = null;
-  }
-  if (progressEl) progressEl.classList.remove('on');
-  runStartedAt = 0;
-  progressState = '';
-  progressStep = 0;
-  progressMax = 0;
-}
 let keepAliveTimer: any = null;
 let usageEl: any = null;
 /**
@@ -823,7 +704,7 @@ function removePanel(options?: any) {
     document.removeEventListener('keydown', panelKeyHandler, true);
     panelKeyHandler = null;
   }
-  shotLightboxOpen = false; // 放大层随面板一起移除，标记必须复位，否则下次 Esc 关不掉面板
+  screenshotView.lightboxOpen = false; // 放大层随面板一起移除，标记必须复位，否则下次 Esc 关不掉面板
   clearCiteHighlight();
   if (panel) {
     // 所有关闭方式（标题栏 ✕ / Esc / FAB / 快捷键 / 跨标签页同步 / SPA 移除前）都经过这里。
@@ -1143,138 +1024,19 @@ function isPinnedForFollow() {
   );
 }
 
-// ---- 轻量语法高亮 ----
-// AI 回复底部操作栏（元宝风格：复制等）
-function msgActionsHtml(isLast: any) {
-  return (
-    '<div class="msg-actions"><button class="act-copy" title="复制回答内容">⧉ 复制</button>' +
-    (isLast ? '<button class="act-regen" title="按上一条指令重新生成">⟳ 重新生成</button>' : '') +
-    '</div>'
-  );
-}
-
-// ---- 工具步骤渲染：默认一行摘要，点开看完整参数/结果 ----
-
-// 摘要里只显示「最能说明这一步在做什么」的参数，避免摘要行过长。
-function argHint(args: any) {
-  if (!args || typeof args !== 'object') return '';
-  if (typeof args.query === 'string') return args.query;
-  if (typeof args.id === 'string') return args.id;
-  if (typeof args.selector === 'string') return args.selector;
-  if (Array.isArray(args.selectors) && args.selectors.length) {
-    const head = args.selectors.slice(0, 3).join('、');
-    return args.selectors.length > 3 ? head + ' 等 ' + args.selectors.length + ' 个' : head;
-  }
-  if (typeof args.text === 'string') return args.text;
-  // type_text 的负载是 value；不写这一条时，步骤行会退化成「ref、clearFirst」这种键名提示。
-  if (typeof args.value === 'string') return args.value;
-  if (typeof args.urls === 'object' && args.urls) return '';
-  if (typeof args.url === 'string') return args.url;
-  if (typeof args.code === 'string') return args.code.replace(/\s+/g, ' ').slice(0, 60);
-  const keys = Object.keys(args).filter((k) => args[k] !== undefined && args[k] !== '');
-  return keys.length ? keys.slice(0, 3).join('、') : '';
-}
-
-// ---- 截图渲染 ----
-// base64 仍只缓存在内存里，会话正文（pendingParts / messages）只保存截图元数据，
-// 每张图几百 KB 不塞进会话。图片本体由 shared/screenshot-store.js 按 id 单独落盘，
-// 于是切换会话、刷新页面或在另一个标签页跟随同一会话时都能按 id 取回。
-//
-// 容量必须受限：内容脚本的生命周期等于页面生命周期，而每张截图是几百 KB ——
-// 原先是个只写不删的 Map，长时间自动化会话里内存只涨不落。
-// 用 LRU 而不是 FIFO：正在看的那张往往会被反复读取，不该先被淘汰。
-const SHOT_CACHE_MAX = 30;
-const shotCache = createLruCache(SHOT_CACHE_MAX);
-// 正在从共享存储加载 / 已确认不存在的截图 id。前者防止重复读，
-// 后者防止一次渲染就给同一张缺失图反复发起 storage 请求。
-const shotPending = new Set();
-const shotMissing = new Set();
-let shotLightboxOpen = false;
-
-function shotCapText(meta: any) {
-  const m = meta || {};
-  const parts = [];
-  if (m.label) parts.push(String(m.label));
-  if (m.width && m.height) parts.push(m.width + '×' + m.height);
-  if (m.bytes) parts.push(Math.round(Number(m.bytes) / 1024) + 'KB');
-  return parts.join(' · ');
-}
-
-function hydrateScreenshot(id: any) {
-  const wanted = String(id || '');
-  if (!wanted || shotCache.get(wanted) || shotPending.has(wanted) || shotMissing.has(wanted)) return;
-  shotPending.add(wanted);
-  loadScreenshot(typeof chrome !== 'undefined' ? chrome : null, wanted)
-    .then((shot) => {
-      if (shot && shot.dataUrl) shotCache.set(wanted, shot.dataUrl);
-      else shotMissing.add(wanted);
-    })
-    .catch(() => shotMissing.add(wanted))
-    .finally(() => {
-      shotPending.delete(wanted);
-      // 静态会话需要重绘一次才能把占位符换成图片；发起页流式期间图片本来就在缓存里，
-      // 这里不会触发额外重绘。
-      if (!runSession.isRunning && panelBody) {
-        try {
-          renderConversation();
-          fitPanelHeight();
-          pinToBottom();
-        } catch (e: any) {}
-      }
-    });
-}
-
-function screenshotHtml(meta: any) {
-  const m = meta || {};
-  const id = String(m.id || '');
-  const url = id ? shotCache.get(id) : '';
-  if (!url) {
-    const missing = id && shotMissing.has(id);
-    if (id && !missing) hydrateScreenshot(id);
-    return (
-      '<div class="agent-shot gone">🖼 截图' +
-      (m.label ? '（' + escHtml(String(m.label)) + '）' : '') +
-      '：' +
-      (!id ? '缺少截图标识，无法从共享存储恢复' : missing ? '共享存档已过期或已被清理' : '正在从共享会话加载图片…') +
-      '</div>'
-    );
-  }
-  return (
-    '<div class="agent-shot"><img src="' +
-    escHtml(url) +
-    '" alt="' +
-    escHtml(String(m.label || '页面截图')) +
-    '" loading="lazy"><span class="agent-shot-cap">🖼 ' +
-    escHtml(shotCapText(m)) +
-    ' · 点击放大</span></div>'
-  );
-}
-
-function screenshotElement(meta: any) {
-  const wrap = document.createElement('div');
-  wrap.innerHTML = screenshotHtml(meta);
-  return wrap.firstElementChild;
-}
-
-function openShotLightbox(url: any) {
-  if (!url || !panel) return;
-  const box = document.createElement('div');
-  box.className = 'shot-lightbox';
-  const img = document.createElement('img');
-  img.src = url;
-  box.appendChild(img);
-  const close = () => {
-    box.remove();
-    shotLightboxOpen = false;
-  };
-  box.addEventListener('click', close);
-  shotLightboxOpen = true;
-  panel.appendChild(box);
-}
-
-function userActionsHtml(index: any) {
-  return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="撤销这条指令及其后续对话">↶ 撤销</button><button class="act-user-copy" title="复制这条指令">⧉ 复制</button></div>';
-}
+const screenshotView = new PanelScreenshotView({
+  load: (id) => loadScreenshot(typeof chrome !== 'undefined' ? chrome : null, id),
+  escape: escHtml,
+  getPanel: () => panel,
+  canRepaint: () => !runSession.isRunning && Boolean(panelBody),
+  onRepaint: () => {
+    try {
+      renderConversation();
+      fitPanelHeight();
+      pinToBottom();
+    } catch {}
+  },
+});
 
 let layoutTimer: any = null;
 
@@ -1348,29 +1110,6 @@ function renderDecisionButtonsIfPresent() {
     renderSuggestionButtons(panelBody, last.content, panel._sendFn || activeSendFn);
     fitPanelHeight();
   }
-}
-
-// 流式中面板被关闭后重新打开：恢复「正在生成的回复」UI。
-// 流式状态（pendingNarration/pendingAcc/pendingParts/flowEl 等）都在模块级变量里，
-// 不因面板 DOM 重建而丢失，重新挂接元素即可让后续 chunk/end 继续写进新面板。
-//
-// ⚠ 下面两个思考记录的挂载函数**必须留在模块顶层**：
-// 它们被本函数（模块级）调用，而 openPanel 内部的函数在模块级不可见。
-// 这个坑真实发生过一次 —— 当时把 mountThinkSegment 写在 openPanel 里，
-// 于是「流式中重开面板」这条路一走到就 ReferenceError，而
-// ① 接线门禁是源码正则（看不到作用域）② E2E 从没在流式中重开过面板 —— 两边都没抓到。
-// 现在有 tests/panel-scope.test.mjs 专门盯「模块级函数不得调用更深层的函数」。
-
-/**
- * 思考块的标题文案（**唯一来源**：实时刷新与标记生成共用，避免两处文案漂移）。
- *
- * 「保存时已截断」不是装饰：持久化会按 `MAX_PART_TEXT_CHARS` 裁掉超长思维链
- *（见 lib/page/transcript.js 的 clipPart），若重开面板后把它当成完整全文显示，
- * 用户会以为模型只想到这儿 —— 本仓库硬纪律：丢东西必须说明。
- */
-function thinkLabelText(done: any, len: any, truncated: any) {
-  if (!done) return '思考中…';
-  return '已思考（' + len + ' 字' + (truncated ? '，保存时已截断' : '') + '）';
 }
 
 /** 按段状态刷新思考记录的标题（进行中 / 已思考 + 字数）。 */
@@ -1518,11 +1257,11 @@ function restoreStreamingUI() {
   typingEl = streamState.narration ? null : contentEl;
   pendingAiMsg._raw = streamState.content;
   // 重开面板时把进度条也恢复上（保留原计时，不重置已用时）。
-  if (progressEl) {
-    if (!runStartedAt) runStartedAt = Date.now();
-    progressEl.classList.add('on');
-    renderProgress();
-    if (!progressTimer) progressTimer = setInterval(renderProgress, 1000);
+  if (progressController.el) {
+    if (!progressController.startedAt) progressController.startedAt = Date.now();
+    progressController.el.classList.add('on');
+    progressController.render();
+    if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1000);
   }
   // 注意：这里**不要**去动「■ 停止」/「发送」的按钮状态 ——
   // 本函数跑在 openPanel 里**早于**那两个按钮的创建（见 openPanel 中创建它们的注释），
@@ -1879,7 +1618,7 @@ function partHtml(p: any, citations: any) {
     );
     return html + authChallengeHtml(p.authChallenge);
   }
-  if (p.type === 'screenshot') return screenshotHtml(p);
+  if (p.type === 'screenshot') return screenshotView.html(p);
   if (p.type === 'thinking' && p.text) {
     // 思考记录必须能在重开面板后重建；历史段按定稿态，live 段保持 run 动画。
     return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
@@ -2157,14 +1896,14 @@ function renderFollowedRun() {
   });
   if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? 'tokens ' + followedRunState.tokens : '';
   if (followedRunState && followedRunState.status === 'running') {
-    if (progressEl) {
-      progressEl.classList.add('on');
-      runStartedAt = Number(followedRunState.startedAt) || Date.now();
-      progressState = stateLabel(followedRunState.progress && followedRunState.progress.state) || '跟随运行';
-      progressStep = Number(followedRunState.progress && followedRunState.progress.step) || 0;
-      progressMax = Number(followedRunState.progress && followedRunState.progress.max) || 0;
-      if (!progressTimer) progressTimer = setInterval(renderProgress, 1000);
-      renderProgress();
+    if (progressController.el) {
+      progressController.el.classList.add('on');
+      progressController.startedAt = Number(followedRunState.startedAt) || Date.now();
+      progressController.state = stateLabel(followedRunState.progress && followedRunState.progress.state) || '跟随运行';
+      progressController.step = Number(followedRunState.progress && followedRunState.progress.step) || 0;
+      progressController.max = Number(followedRunState.progress && followedRunState.progress.max) || 0;
+      if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1000);
+      progressController.render();
     }
   }
   updateRunControlState();
@@ -2214,7 +1953,7 @@ function resetFollowedRun(options?: any) {
   followedLiveReady = false;
   followedDom = null;
   if (!runSession.isRunning) {
-    stopProgress();
+    progressController.stop();
   }
   updateRunControlState();
   if (opts.render) {
@@ -2359,18 +2098,6 @@ function renderPlan(plan: any) {
   fitPanelHeight();
   pinToBottom();
 }
-
-// 对话持久化（按 tab，存 chrome.storage.session）：SPA 跳转 / 刷新后仍保留上下文。
-// 把一轮里的工具执行轨迹压成一行摘要，随 assistant 消息一起保存，
-// 使「继续上一步」时模型能看到做过什么（见 context.js normalizeHistory）。
-function summarizeToolParts(parts: any) {
-  const done = (Array.isArray(parts) ? parts : []).filter((p) => p && p.type === 'tool-result');
-  if (!done.length) return '';
-  return done
-    .slice(-6)
-    .map((p) => p.name + (p.status === 'failed' ? '（失败）' : '') + '：' + String(p.result || '').replace(/\s+/g, ' ').trim().slice(0, 120))
-    .join('；');
-}
 // ---- 结构化导出 ----
 // 具体格式与理由见 lib/page/transcript.js（纯函数，便于单测）。
 // 这里只负责把页面上的实时值喂进去，不再自己拼 markdown。
@@ -2419,14 +2146,6 @@ function sendPanelMessage(type: any, payload?: any): Promise<any> {
     return Promise.resolve({ ok: false, error: '扩展已更新，请刷新页面后重试' });
   }
   return runtimePort.request(Object.assign({ type }, payload || {}));
-}
-
-function sessionTimeText(ts: any) {
-  const n = Number(ts) || 0;
-  if (!n) return '';
-  const d = new Date(n);
-  const pad = (v: any) => String(v).padStart(2, '0');
-  return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
 function applyPanelSessionSummaries(state: any) {
@@ -3178,7 +2897,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   const dockedIntent = restore ? null : docked === true;
 
   panel = document.createElement('div');
-  panel.className = 'panel' + (preferredTheme() === 'dark' ? ' dark' : '');
+  panel.className = 'panel' + (themeController.preferred() === 'dark' ? ' dark' : '');
   // 面板语义上是一个非模态对话框：声明角色，消息区用 aria-live 让流式输出可被读屏播报。
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'false');
@@ -3278,16 +2997,16 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     });
   });
   // 主题切换：跟随系统 ↔ 深色 ↔ 浅色 循环（深色主题样式早已写好，此前从未被接上）。
-  themeBtn = document.createElement('button');
-  themeBtn.className = 'theme';
-  themeBtn.addEventListener('click', cycleTheme);
-  applyTheme();
+  themeController.button = document.createElement('button');
+  themeController.button.className = 'theme';
+  themeController.button.addEventListener('click', () => themeController.cycle());
+  themeController.apply();
   head.appendChild(logo);
   head.appendChild(title);
   head.appendChild(usageChip);
   head.appendChild(panelSessionBtnEl);
   head.appendChild(handoffBtn);
-  head.appendChild(themeBtn);
+  head.appendChild(themeController.button);
   head.appendChild(close);
   panel.appendChild(head);
   shadow.addEventListener('mousedown', (e: any) => {
@@ -3297,18 +3016,18 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   });
 
   // 进度条：显示「第几步 / 正在做什么 / 已用时」，长任务不再黑箱。
-  progressEl = document.createElement('div');
-  progressEl.className = 'p-progress';
+  progressController.el = document.createElement('div');
+  progressController.el.className = 'p-progress';
   const ppDot = document.createElement('span');
   ppDot.className = 'pp-dot';
-  progressMsgEl = document.createElement('span');
-  progressMsgEl.className = 'pp-msg';
-  progressTimeEl = document.createElement('span');
-  progressTimeEl.className = 'pp-time';
-  progressEl.appendChild(ppDot);
-  progressEl.appendChild(progressMsgEl);
-  progressEl.appendChild(progressTimeEl);
-  panel.appendChild(progressEl);
+  progressController.messageEl = document.createElement('span');
+  progressController.messageEl.className = 'pp-msg';
+  progressController.timeEl = document.createElement('span');
+  progressController.timeEl.className = 'pp-time';
+  progressController.el.appendChild(ppDot);
+  progressController.el.appendChild(progressController.messageEl);
+  progressController.el.appendChild(progressController.timeEl);
+  panel.appendChild(progressController.el);
 
   panelBody = document.createElement('div');
   resetPanelFitCache();
@@ -3438,7 +3157,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     // 截图放大：data URL 直接内联展示，避免 window.open 弹窗拦截与 blob 生命周期问题。
     const shotImg = e.target.closest('.agent-shot img');
     if (shotImg) {
-      openShotLightbox(shotImg.getAttribute('src') || '');
+      screenshotView.openLightbox(shotImg.getAttribute('src') || '');
       return;
     }
     // 重新生成：截断到最后一条用户消息之前，用同一条指令再跑一次。
@@ -3888,7 +3607,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     const endedRunId = runSession.runId;
     const endedSessionId = panelSessionId;
     runSession.finish();
-    stopProgress();
+    progressController.stop();
     updateRunControlState();
     pendingAiMsg = null;
     pendingContentEl = null;
@@ -4358,13 +4077,13 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       pendingContentEl = contentEl;
       pendingAiMsg._raw = streamState.content;
       // 进度条接着刷新前的计时与步骤走，不要从 0 重新开始。
-      runStartedAt = Number(snapshot.startedAt) || runStartedAt || Date.now();
+      progressController.startedAt = Number(snapshot.startedAt) || progressController.startedAt || Date.now();
       const p = snapshot.progress || {};
-      progressState = stateLabel(p.state) || '继续运行';
-      progressStep = Number(p.step) || 0;
-      progressMax = Number(p.max) || 0;
-      if (progressEl) progressEl.classList.add('on');
-      renderProgress();
+      progressController.state = stateLabel(p.state) || '继续运行';
+      progressController.step = Number(p.step) || 0;
+      progressController.max = Number(p.max) || 0;
+      if (progressController.el) progressController.el.classList.add('on');
+      progressController.render();
       updateRunControlState();
       // 刷新时可能正卡在审批上：把审批条也画回来，否则新页面看不到"等确认"。
       if (snapshot.approval && approvalConn) {
@@ -4393,7 +4112,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       resetReasoning();
     }
     runSession.setRunning(true);
-    startProgress();
+    progressController.start();
     if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
     updateRunControlState();
 
@@ -4475,19 +4194,19 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         // 不是 status —— 写错会导致状态标签永远取不到，只剩步数。
         const st = resp.state || resp.status;
         const label = stateLabel(st);
-        if (label) progressState = label;
+        if (label) progressController.state = label;
         const step = Number(resp.step);
-        if (Number.isFinite(step) && step > 0) progressStep = step;
+        if (Number.isFinite(step) && step > 0) progressController.step = step;
         const max = Number(resp.maxSteps);
-        if (Number.isFinite(max) && max > 0) progressMax = max;
-        renderProgress();
+        if (Number.isFinite(max) && max > 0) progressController.max = max;
+        progressController.render();
       } else if (resp.type === 'screenshot') {
         // 图片给用户看：渲染成缩略图，点击放大。base64 只留在内存缓存里，
         // 不写进 pendingParts（否则会话持久化会背着几百 KB 的图到处走）；
         // 图片本体已按 id 共享落盘，其它标签页/历史会话会按需取回。
-        if (resp.id && resp.dataUrl) shotCache.set(resp.id, resp.dataUrl);
+        if (resp.id && resp.dataUrl) screenshotView.cache.set(resp.id, resp.dataUrl);
         streamState.appendPart({ type: 'screenshot', id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
-        appendStep(screenshotElement(resp));
+        appendStep(screenshotView.element(resp));
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'stuck-warning') {
@@ -4909,7 +4628,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       closeApprovalPopover();
       return;
     }
-    if (shotLightboxOpen) return; // 放大看截图时 Esc 只关图，不关面板
+    if (screenshotView.lightboxOpen) return; // 放大看截图时 Esc 只关图，不关面板
     if (approvalArea && approvalArea.style.display !== 'none') return;
     e.preventDefault();
     e.stopPropagation();

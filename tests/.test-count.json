@@ -1,10 +1,10 @@
 {
-  "tests": 2015,
-  "pass": 2015,
+  "tests": 2025,
+  "pass": 2025,
   "fail": 0,
   "files": {
-    "total": 182,
-    "behavior": 151,
-    "static": 31
+    "total": 186,
+    "behavior": 156,
+    "static": 30
   }
 }

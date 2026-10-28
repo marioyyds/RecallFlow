@@ -1,4 +1,5 @@
 import type { RuntimePort } from '../../application/ports/runtime.ts';
+import type { GenericRuntimeMessage } from '../../application/contracts/messages.ts';
 
 export interface ChromeRuntimeLike {
   runtime: {
@@ -19,7 +20,7 @@ export class ChromeRuntimeAdapter implements RuntimePort {
     this.api = api;
   }
 
-  request<T = Record<string, unknown>>(message: Record<string, unknown>): Promise<T> {
+  request<T = Record<string, unknown>>(message: GenericRuntimeMessage): Promise<T> {
     return new Promise<T>((resolve) => {
       try {
         this.api.runtime.sendMessage(message, (response) => {

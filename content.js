@@ -4379,6 +4379,262 @@
     return { suspend, restore, isSuspended, install, uninstall };
   }
 
+  // lib/ui/panel/theme-controller.ts
+  var THEME_KEY = "recallflow-panel-theme";
+  var PanelThemeController = class {
+    panel = null;
+    button = null;
+    environment;
+    constructor(environment) {
+      this.environment = environment || {
+        storage: localStorage,
+        prefersDark() {
+          try {
+            return matchMedia("(prefers-color-scheme: dark)").matches;
+          } catch {
+            return false;
+          }
+        },
+        watchSystem(listener) {
+          try {
+            const media = matchMedia("(prefers-color-scheme: dark)");
+            if (media.addEventListener) media.addEventListener("change", listener);
+            else if (media.addListener) media.addListener(listener);
+          } catch {
+          }
+        }
+      };
+    }
+    init() {
+      this.environment.watchSystem(() => {
+        if (!this.savedOverride()) this.apply();
+      });
+    }
+    savedOverride() {
+      try {
+        const value = this.environment.storage.getItem(THEME_KEY);
+        return value === "dark" || value === "light" ? value : "";
+      } catch {
+        return "";
+      }
+    }
+    preferred() {
+      const saved = this.savedOverride();
+      if (saved) return saved;
+      return this.environment.prefersDark() ? "dark" : "light";
+    }
+    apply() {
+      if (!this.panel) return;
+      const mode = this.preferred();
+      this.panel.classList.toggle("dark", mode === "dark");
+      if (!this.button) return;
+      const override = this.savedOverride();
+      const label = override ? "\u4E3B\u9898\uFF1A" + (mode === "dark" ? "\u6DF1\u8272" : "\u6D45\u8272") + "\uFF08\u70B9\u51FB\u5207\u6362\uFF09" : "\u4E3B\u9898\uFF1A\u8DDF\u968F\u7CFB\u7EDF\uFF08\u70B9\u51FB\u5207\u6362\uFF09";
+      this.button.textContent = override ? mode === "dark" ? "\u{1F319}" : "\u2600\uFE0F" : "\u{1F317}";
+      this.button.title = label;
+      this.button.setAttribute("aria-label", label);
+    }
+    cycle() {
+      const current = this.savedOverride();
+      const next = current === "" ? "dark" : current === "dark" ? "light" : "";
+      try {
+        if (next) this.environment.storage.setItem(THEME_KEY, next);
+        else this.environment.storage.removeItem(THEME_KEY);
+      } catch {
+      }
+      this.apply();
+    }
+  };
+
+  // lib/ui/panel/progress-controller.ts
+  var STATE_LABELS = {
+    created: "\u51C6\u5907\u4E2D",
+    planning: "\u89C4\u5212\u6B65\u9AA4",
+    waiting_approval: "\u7B49\u5F85\u4F60\u786E\u8BA4",
+    executing: "\u6267\u884C\u52A8\u4F5C",
+    observing: "\u67E5\u770B\u7ED3\u679C",
+    stopping: "\u505C\u6B62\u4E2D",
+    paused: "\u5DF2\u6682\u505C",
+    completed: "\u5DF2\u5B8C\u6210",
+    failed: "\u6267\u884C\u5931\u8D25",
+    cancelled: "\u5DF2\u53D6\u6D88",
+    timeout: "\u5DF2\u8FBE\u4E0A\u9650"
+  };
+  function stateLabel(status) {
+    return STATE_LABELS[String(status || "").toLowerCase()] || "";
+  }
+  var PanelProgressController = class {
+    el = null;
+    messageEl = null;
+    timeEl = null;
+    timer = null;
+    startedAt = 0;
+    state = "";
+    step = 0;
+    max = 0;
+    update(input = {}) {
+      if (input.state !== void 0) this.state = String(input.state || "");
+      if (input.step !== void 0) this.step = Number(input.step) || 0;
+      if (input.max !== void 0) this.max = Number(input.max) || 0;
+      if (input.startedAt !== void 0) this.startedAt = Number(input.startedAt) || 0;
+      this.render();
+    }
+    render() {
+      if (this.timeEl) {
+        this.timeEl.textContent = this.startedAt ? "\u5DF2\u7528\u65F6 " + Math.round((Date.now() - this.startedAt) / 1e3) + "s" : "";
+      }
+      if (this.messageEl) this.messageEl.textContent = composeProgressText(this.step, this.max, this.state);
+    }
+    start() {
+      this.startedAt = Date.now();
+      this.state = "";
+      this.step = 0;
+      this.max = 0;
+      if (this.el) this.el.classList.add("on");
+      this.render();
+      this.stopTimer();
+      this.timer = setInterval(() => this.render(), 1e3);
+    }
+    resume(startedAt) {
+      if (!this.startedAt) this.startedAt = Number(startedAt) || Date.now();
+      if (this.el) this.el.classList.add("on");
+      this.render();
+      if (!this.timer) this.timer = setInterval(() => this.render(), 1e3);
+    }
+    stopTimer() {
+      if (!this.timer) return;
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    stop() {
+      this.stopTimer();
+      if (this.el) this.el.classList.remove("on");
+      this.startedAt = 0;
+      this.state = "";
+      this.step = 0;
+      this.max = 0;
+    }
+  };
+
+  // lib/ui/panel/screenshot-view.ts
+  var PanelScreenshotView = class {
+    cache;
+    lightboxOpen = false;
+    pending = /* @__PURE__ */ new Set();
+    missingIds = /* @__PURE__ */ new Set();
+    ports;
+    constructor(ports) {
+      this.ports = ports;
+      this.cache = createLruCache(ports.cacheSize || 30);
+    }
+    caption(meta) {
+      const value = meta || {};
+      const parts = [];
+      if (value.label) parts.push(String(value.label));
+      if (value.width && value.height) parts.push(value.width + "\xD7" + value.height);
+      if (value.bytes) parts.push(Math.round(Number(value.bytes) / 1024) + "KB");
+      return parts.join(" \xB7 ");
+    }
+    hydrate(id) {
+      if (!id || this.cache.get(id) || this.pending.has(id) || this.missingIds.has(id)) return;
+      this.pending.add(id);
+      this.ports.load(id).then((shot) => {
+        if (shot && shot.dataUrl) this.cache.set(id, shot.dataUrl);
+        else this.missingIds.add(id);
+      }).catch(() => this.missingIds.add(id)).finally(() => {
+        this.pending.delete(id);
+        if (this.ports.canRepaint()) this.ports.onRepaint();
+      });
+    }
+    html(meta) {
+      const value = meta || {};
+      const id = String(value.id || "");
+      const url = id ? this.cache.get(id) : "";
+      if (!url) {
+        const missing = id && this.missingIds.has(id);
+        if (id && !missing) this.hydrate(id);
+        return '<div class="agent-shot gone">\u{1F5BC} \u622A\u56FE' + (value.label ? "\uFF08" + this.ports.escape(String(value.label)) + "\uFF09" : "") + "\uFF1A" + (!id ? "\u7F3A\u5C11\u622A\u56FE\u6807\u8BC6\uFF0C\u65E0\u6CD5\u4ECE\u5171\u4EAB\u5B58\u50A8\u6062\u590D" : missing ? "\u5171\u4EAB\u5B58\u6863\u5DF2\u8FC7\u671F\u6216\u5DF2\u88AB\u6E05\u7406" : "\u6B63\u5728\u4ECE\u5171\u4EAB\u4F1A\u8BDD\u52A0\u8F7D\u56FE\u7247\u2026") + "</div>";
+      }
+      return '<div class="agent-shot"><img src="' + this.ports.escape(url) + '" alt="' + this.ports.escape(String(value.label || "\u9875\u9762\u622A\u56FE")) + '" loading="lazy"><span class="agent-shot-cap">\u{1F5BC} ' + this.ports.escape(this.caption(value)) + " \xB7 \u70B9\u51FB\u653E\u5927</span></div>";
+    }
+    element(meta) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = this.html(meta);
+      return wrap.firstElementChild;
+    }
+    openLightbox(url) {
+      const panel2 = this.ports.getPanel();
+      if (!url || !panel2) return;
+      const box = document.createElement("div");
+      box.className = "shot-lightbox";
+      const image = document.createElement("img");
+      image.src = String(url);
+      box.appendChild(image);
+      box.addEventListener("click", () => {
+        box.remove();
+        this.lightboxOpen = false;
+      });
+      this.lightboxOpen = true;
+      panel2.appendChild(box);
+    }
+  };
+
+  // lib/ui/panel/conversation-format.ts
+  function msgActionsHtml(isLast) {
+    return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>";
+  }
+  function argHint(args) {
+    if (!args || typeof args !== "object") return "";
+    if (typeof args.query === "string") return args.query;
+    if (typeof args.id === "string") return args.id;
+    if (typeof args.selector === "string") return args.selector;
+    if (Array.isArray(args.selectors) && args.selectors.length) {
+      const head = args.selectors.slice(0, 3).join("\u3001");
+      return args.selectors.length > 3 ? head + " \u7B49 " + args.selectors.length + " \u4E2A" : head;
+    }
+    if (typeof args.text === "string") return args.text;
+    if (typeof args.value === "string") return args.value;
+    if (typeof args.urls === "object" && args.urls) return "";
+    if (typeof args.url === "string") return args.url;
+    if (typeof args.code === "string") return args.code.replace(/\s+/g, " ").slice(0, 60);
+    const keys = Object.keys(args).filter((k) => args[k] !== void 0 && args[k] !== "");
+    return keys.length ? keys.slice(0, 3).join("\u3001") : "";
+  }
+  function userActionsHtml(index) {
+    return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="\u64A4\u9500\u8FD9\u6761\u6307\u4EE4\u53CA\u5176\u540E\u7EED\u5BF9\u8BDD">\u21B6 \u64A4\u9500</button><button class="act-user-copy" title="\u590D\u5236\u8FD9\u6761\u6307\u4EE4">\u29C9 \u590D\u5236</button></div>';
+  }
+  function thinkLabelText(done, len, truncated) {
+    if (!done) return "\u601D\u8003\u4E2D\u2026";
+    return "\u5DF2\u601D\u8003\uFF08" + len + " \u5B57" + (truncated ? "\uFF0C\u4FDD\u5B58\u65F6\u5DF2\u622A\u65AD" : "") + "\uFF09";
+  }
+  function sessionTimeText(ts) {
+    const n = Number(ts) || 0;
+    if (!n) return "";
+    const d = new Date(n);
+    const pad = (v) => String(v).padStart(2, "0");
+    return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  function summarizeToolParts(parts) {
+    const done = (Array.isArray(parts) ? parts : []).filter((p) => p && p.type === "tool-result");
+    if (!done.length) return "";
+    return done.slice(-6).map((p) => p.name + (p.status === "failed" ? "\uFF08\u5931\u8D25\uFF09" : "") + "\uFF1A" + String(p.result || "").replace(/\s+/g, " ").trim().slice(0, 120)).join("\uFF1B");
+  }
+
+  // lib/application/panel/run-controls.ts
+  function computeRunControls(input) {
+    const src = input || {};
+    const followingRunning = Boolean(src.followed && src.followed.status === "running");
+    const running = Boolean(src.streaming || followingRunning);
+    const stopping = Boolean(followingRunning && src.followed.stopping);
+    return {
+      showStop: running,
+      // 停止中必须**禁点**：否则用户连点几次，会把同一个中断请求反复发出去。
+      stopDisabled: stopping,
+      stopText: stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62",
+      sendDisabled: running
+    };
+  }
+
   // lib/shared/handoff.ts
   var ID_PREFIX = "RF-";
   var ID_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -6603,19 +6859,6 @@
   var followStatusTimer = null;
   var stopBtn = null;
   var sendBtn = null;
-  function computeRunControls(input) {
-    const src = input || {};
-    const followingRunning = Boolean(src.followed && src.followed.status === "running");
-    const running = Boolean(src.streaming || followingRunning);
-    const stopping = Boolean(followingRunning && src.followed.stopping);
-    return {
-      showStop: running,
-      // 停止中必须**禁点**：否则用户连点几次，会把同一个中断请求反复发出去。
-      stopDisabled: stopping,
-      stopText: stopping ? "\u505C\u6B62\u4E2D\u2026" : "\u25A0 \u505C\u6B62",
-      sendDisabled: running
-    };
-  }
   function updateRunControlState() {
     const control = computeRunControls({ streaming: runSession.isRunning, followed: followedRunState });
     if (stopBtn) {
@@ -6647,108 +6890,10 @@
       pinToBottom();
     });
   }
-  var THEME_KEY = "recallflow-panel-theme";
-  var themeBtn = null;
-  function savedThemeOverride() {
-    try {
-      return localStorage.getItem(THEME_KEY) || "";
-    } catch (e) {
-      return "";
-    }
-  }
-  function preferredTheme() {
-    const saved = savedThemeOverride();
-    if (saved === "dark" || saved === "light") return saved;
-    try {
-      return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    } catch (e) {
-      return "light";
-    }
-  }
-  function applyTheme() {
-    if (!panel) return;
-    const mode = preferredTheme();
-    panel.classList.toggle("dark", mode === "dark");
-    if (themeBtn) {
-      const override = savedThemeOverride();
-      const label = override ? "\u4E3B\u9898\uFF1A" + (mode === "dark" ? "\u6DF1\u8272" : "\u6D45\u8272") + "\uFF08\u70B9\u51FB\u5207\u6362\uFF09" : "\u4E3B\u9898\uFF1A\u8DDF\u968F\u7CFB\u7EDF\uFF08\u70B9\u51FB\u5207\u6362\uFF09";
-      themeBtn.textContent = override ? mode === "dark" ? "\u{1F319}" : "\u2600\uFE0F" : "\u{1F317}";
-      themeBtn.title = label;
-      themeBtn.setAttribute("aria-label", label);
-    }
-  }
-  function cycleTheme() {
-    const cur = savedThemeOverride();
-    const next = cur === "" ? "dark" : cur === "dark" ? "light" : "";
-    try {
-      if (next) localStorage.setItem(THEME_KEY, next);
-      else localStorage.removeItem(THEME_KEY);
-    } catch (e) {
-    }
-    applyTheme();
-  }
-  try {
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const onSys = () => {
-      if (!savedThemeOverride()) applyTheme();
-    };
-    if (mq.addEventListener) mq.addEventListener("change", onSys);
-    else if (mq.addListener) mq.addListener(onSys);
-  } catch (e) {
-  }
-  var progressEl = null;
-  var progressMsgEl = null;
-  var progressTimeEl = null;
-  var progressTimer = null;
-  var runStartedAt = 0;
-  var progressState = "";
-  var progressStep = 0;
-  var progressMax = 0;
+  var themeController = new PanelThemeController();
+  themeController.init();
+  var progressController = new PanelProgressController();
   var panelKeyHandler = null;
-  var STATE_LABELS = {
-    created: "\u51C6\u5907\u4E2D",
-    planning: "\u89C4\u5212\u6B65\u9AA4",
-    waiting_approval: "\u7B49\u5F85\u4F60\u786E\u8BA4",
-    executing: "\u6267\u884C\u52A8\u4F5C",
-    observing: "\u67E5\u770B\u7ED3\u679C",
-    stopping: "\u505C\u6B62\u4E2D",
-    paused: "\u5DF2\u6682\u505C",
-    completed: "\u5DF2\u5B8C\u6210",
-    failed: "\u6267\u884C\u5931\u8D25",
-    cancelled: "\u5DF2\u53D6\u6D88",
-    timeout: "\u5DF2\u8FBE\u4E0A\u9650"
-  };
-  function stateLabel(status) {
-    const key = String(status || "").toLowerCase();
-    return STATE_LABELS[key] || "";
-  }
-  function renderProgress() {
-    if (progressTimeEl) {
-      progressTimeEl.textContent = runStartedAt ? "\u5DF2\u7528\u65F6 " + Math.round((Date.now() - runStartedAt) / 1e3) + "s" : "";
-    }
-    if (progressMsgEl) progressMsgEl.textContent = composeProgressText(progressStep, progressMax, progressState);
-  }
-  function startProgress() {
-    runStartedAt = Date.now();
-    progressState = "";
-    progressStep = 0;
-    progressMax = 0;
-    if (progressEl) progressEl.classList.add("on");
-    renderProgress();
-    if (progressTimer) clearInterval(progressTimer);
-    progressTimer = setInterval(renderProgress, 1e3);
-  }
-  function stopProgress() {
-    if (progressTimer) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-    }
-    if (progressEl) progressEl.classList.remove("on");
-    runStartedAt = 0;
-    progressState = "";
-    progressStep = 0;
-    progressMax = 0;
-  }
   var keepAliveTimer = null;
   var usageEl = null;
   function resetUsageChip() {
@@ -7042,7 +7187,7 @@
       document.removeEventListener("keydown", panelKeyHandler, true);
       panelKeyHandler = null;
     }
-    shotLightboxOpen = false;
+    screenshotView.lightboxOpen = false;
     clearCiteHighlight();
     if (panel) {
       persistPanelLayoutNow();
@@ -7196,92 +7341,20 @@
     if (!panelBody) return false;
     return !!observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
   }
-  function msgActionsHtml(isLast) {
-    return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>";
-  }
-  function argHint(args) {
-    if (!args || typeof args !== "object") return "";
-    if (typeof args.query === "string") return args.query;
-    if (typeof args.id === "string") return args.id;
-    if (typeof args.selector === "string") return args.selector;
-    if (Array.isArray(args.selectors) && args.selectors.length) {
-      const head = args.selectors.slice(0, 3).join("\u3001");
-      return args.selectors.length > 3 ? head + " \u7B49 " + args.selectors.length + " \u4E2A" : head;
-    }
-    if (typeof args.text === "string") return args.text;
-    if (typeof args.value === "string") return args.value;
-    if (typeof args.urls === "object" && args.urls) return "";
-    if (typeof args.url === "string") return args.url;
-    if (typeof args.code === "string") return args.code.replace(/\s+/g, " ").slice(0, 60);
-    const keys = Object.keys(args).filter((k) => args[k] !== void 0 && args[k] !== "");
-    return keys.length ? keys.slice(0, 3).join("\u3001") : "";
-  }
-  var SHOT_CACHE_MAX = 30;
-  var shotCache = createLruCache(SHOT_CACHE_MAX);
-  var shotPending = /* @__PURE__ */ new Set();
-  var shotMissing = /* @__PURE__ */ new Set();
-  var shotLightboxOpen = false;
-  function shotCapText(meta) {
-    const m = meta || {};
-    const parts = [];
-    if (m.label) parts.push(String(m.label));
-    if (m.width && m.height) parts.push(m.width + "\xD7" + m.height);
-    if (m.bytes) parts.push(Math.round(Number(m.bytes) / 1024) + "KB");
-    return parts.join(" \xB7 ");
-  }
-  function hydrateScreenshot(id) {
-    const wanted = String(id || "");
-    if (!wanted || shotCache.get(wanted) || shotPending.has(wanted) || shotMissing.has(wanted)) return;
-    shotPending.add(wanted);
-    loadScreenshot(typeof chrome !== "undefined" ? chrome : null, wanted).then((shot) => {
-      if (shot && shot.dataUrl) shotCache.set(wanted, shot.dataUrl);
-      else shotMissing.add(wanted);
-    }).catch(() => shotMissing.add(wanted)).finally(() => {
-      shotPending.delete(wanted);
-      if (!runSession.isRunning && panelBody) {
-        try {
-          renderConversation();
-          fitPanelHeight();
-          pinToBottom();
-        } catch (e) {
-        }
+  var screenshotView = new PanelScreenshotView({
+    load: (id) => loadScreenshot(typeof chrome !== "undefined" ? chrome : null, id),
+    escape: escHtml,
+    getPanel: () => panel,
+    canRepaint: () => !runSession.isRunning && Boolean(panelBody),
+    onRepaint: () => {
+      try {
+        renderConversation();
+        fitPanelHeight();
+        pinToBottom();
+      } catch {
       }
-    });
-  }
-  function screenshotHtml(meta) {
-    const m = meta || {};
-    const id = String(m.id || "");
-    const url = id ? shotCache.get(id) : "";
-    if (!url) {
-      const missing = id && shotMissing.has(id);
-      if (id && !missing) hydrateScreenshot(id);
-      return '<div class="agent-shot gone">\u{1F5BC} \u622A\u56FE' + (m.label ? "\uFF08" + escHtml(String(m.label)) + "\uFF09" : "") + "\uFF1A" + (!id ? "\u7F3A\u5C11\u622A\u56FE\u6807\u8BC6\uFF0C\u65E0\u6CD5\u4ECE\u5171\u4EAB\u5B58\u50A8\u6062\u590D" : missing ? "\u5171\u4EAB\u5B58\u6863\u5DF2\u8FC7\u671F\u6216\u5DF2\u88AB\u6E05\u7406" : "\u6B63\u5728\u4ECE\u5171\u4EAB\u4F1A\u8BDD\u52A0\u8F7D\u56FE\u7247\u2026") + "</div>";
     }
-    return '<div class="agent-shot"><img src="' + escHtml(url) + '" alt="' + escHtml(String(m.label || "\u9875\u9762\u622A\u56FE")) + '" loading="lazy"><span class="agent-shot-cap">\u{1F5BC} ' + escHtml(shotCapText(m)) + " \xB7 \u70B9\u51FB\u653E\u5927</span></div>";
-  }
-  function screenshotElement(meta) {
-    const wrap = document.createElement("div");
-    wrap.innerHTML = screenshotHtml(meta);
-    return wrap.firstElementChild;
-  }
-  function openShotLightbox(url) {
-    if (!url || !panel) return;
-    const box = document.createElement("div");
-    box.className = "shot-lightbox";
-    const img = document.createElement("img");
-    img.src = url;
-    box.appendChild(img);
-    const close = () => {
-      box.remove();
-      shotLightboxOpen = false;
-    };
-    box.addEventListener("click", close);
-    shotLightboxOpen = true;
-    panel.appendChild(box);
-  }
-  function userActionsHtml(index) {
-    return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="\u64A4\u9500\u8FD9\u6761\u6307\u4EE4\u53CA\u5176\u540E\u7EED\u5BF9\u8BDD">\u21B6 \u64A4\u9500</button><button class="act-user-copy" title="\u590D\u5236\u8FD9\u6761\u6307\u4EE4">\u29C9 \u590D\u5236</button></div>';
-  }
+  });
   var layoutTimer = null;
   function persistPanelLayoutThrottled() {
     if (layoutTimer || !panel) return;
@@ -7337,10 +7410,6 @@
       renderSuggestionButtons(panelBody, last.content, panel._sendFn || activeSendFn);
       fitPanelHeight();
     }
-  }
-  function thinkLabelText(done, len, truncated) {
-    if (!done) return "\u601D\u8003\u4E2D\u2026";
-    return "\u5DF2\u601D\u8003\uFF08" + len + " \u5B57" + (truncated ? "\uFF0C\u4FDD\u5B58\u65F6\u5DF2\u622A\u65AD" : "") + "\uFF09";
   }
   function refreshThinkHead(seg) {
     if (!seg || !seg.block) return;
@@ -7424,11 +7493,11 @@
     }
     typingEl = streamState.narration ? null : contentEl;
     pendingAiMsg._raw = streamState.content;
-    if (progressEl) {
-      if (!runStartedAt) runStartedAt = Date.now();
-      progressEl.classList.add("on");
-      renderProgress();
-      if (!progressTimer) progressTimer = setInterval(renderProgress, 1e3);
+    if (progressController.el) {
+      if (!progressController.startedAt) progressController.startedAt = Date.now();
+      progressController.el.classList.add("on");
+      progressController.render();
+      if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1e3);
     }
     fitPanelHeight();
     pinToBottom();
@@ -7667,7 +7736,7 @@
       );
       return html + authChallengeHtml(p.authChallenge);
     }
-    if (p.type === "screenshot") return screenshotHtml(p);
+    if (p.type === "screenshot") return screenshotView.html(p);
     if (p.type === "thinking" && p.text) {
       return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
     }
@@ -7890,14 +7959,14 @@
     });
     if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
     if (followedRunState && followedRunState.status === "running") {
-      if (progressEl) {
-        progressEl.classList.add("on");
-        runStartedAt = Number(followedRunState.startedAt) || Date.now();
-        progressState = stateLabel(followedRunState.progress && followedRunState.progress.state) || "\u8DDF\u968F\u8FD0\u884C";
-        progressStep = Number(followedRunState.progress && followedRunState.progress.step) || 0;
-        progressMax = Number(followedRunState.progress && followedRunState.progress.max) || 0;
-        if (!progressTimer) progressTimer = setInterval(renderProgress, 1e3);
-        renderProgress();
+      if (progressController.el) {
+        progressController.el.classList.add("on");
+        progressController.startedAt = Number(followedRunState.startedAt) || Date.now();
+        progressController.state = stateLabel(followedRunState.progress && followedRunState.progress.state) || "\u8DDF\u968F\u8FD0\u884C";
+        progressController.step = Number(followedRunState.progress && followedRunState.progress.step) || 0;
+        progressController.max = Number(followedRunState.progress && followedRunState.progress.max) || 0;
+        if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1e3);
+        progressController.render();
       }
     }
     updateRunControlState();
@@ -7943,7 +8012,7 @@
     followedLiveReady = false;
     followedDom = null;
     if (!runSession.isRunning) {
-      stopProgress();
+      progressController.stop();
     }
     updateRunControlState();
     if (opts.render) {
@@ -8065,11 +8134,6 @@
     fitPanelHeight();
     pinToBottom();
   }
-  function summarizeToolParts(parts) {
-    const done = (Array.isArray(parts) ? parts : []).filter((p) => p && p.type === "tool-result");
-    if (!done.length) return "";
-    return done.slice(-6).map((p) => p.name + (p.status === "failed" ? "\uFF08\u5931\u8D25\uFF09" : "") + "\uFF1A" + String(p.result || "").replace(/\s+/g, " ").trim().slice(0, 120)).join("\uFF1B");
-  }
   function messagesForExport() {
     const list = Array.isArray(conversation) ? conversation.slice() : [];
     const partial = buildPartialTurn(streamState.parts, streamState.responseText);
@@ -8096,13 +8160,6 @@
       return Promise.resolve({ ok: false, error: "\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5" });
     }
     return runtimePort.request(Object.assign({ type }, payload || {}));
-  }
-  function sessionTimeText(ts) {
-    const n = Number(ts) || 0;
-    if (!n) return "";
-    const d = new Date(n);
-    const pad = (v) => String(v).padStart(2, "0");
-    return pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
   function applyPanelSessionSummaries(state) {
     if (!state) return;
@@ -8777,7 +8834,7 @@
     const layout = readPanelLayout(localStorage);
     const dockedIntent = restore ? null : docked === true;
     panel = document.createElement("div");
-    panel.className = "panel" + (preferredTheme() === "dark" ? " dark" : "");
+    panel.className = "panel" + (themeController.preferred() === "dark" ? " dark" : "");
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "false");
     panel.setAttribute("aria-label", "RecallFlow \u6D4F\u89C8\u5668\u52A9\u624B");
@@ -8865,16 +8922,16 @@
         }, 1800);
       });
     });
-    themeBtn = document.createElement("button");
-    themeBtn.className = "theme";
-    themeBtn.addEventListener("click", cycleTheme);
-    applyTheme();
+    themeController.button = document.createElement("button");
+    themeController.button.className = "theme";
+    themeController.button.addEventListener("click", () => themeController.cycle());
+    themeController.apply();
     head.appendChild(logo);
     head.appendChild(title);
     head.appendChild(usageChip);
     head.appendChild(panelSessionBtnEl);
     head.appendChild(handoffBtn);
-    head.appendChild(themeBtn);
+    head.appendChild(themeController.button);
     head.appendChild(close);
     panel.appendChild(head);
     shadow.addEventListener("mousedown", (e) => {
@@ -8882,18 +8939,18 @@
         closeSessionMenu();
       }
     });
-    progressEl = document.createElement("div");
-    progressEl.className = "p-progress";
+    progressController.el = document.createElement("div");
+    progressController.el.className = "p-progress";
     const ppDot = document.createElement("span");
     ppDot.className = "pp-dot";
-    progressMsgEl = document.createElement("span");
-    progressMsgEl.className = "pp-msg";
-    progressTimeEl = document.createElement("span");
-    progressTimeEl.className = "pp-time";
-    progressEl.appendChild(ppDot);
-    progressEl.appendChild(progressMsgEl);
-    progressEl.appendChild(progressTimeEl);
-    panel.appendChild(progressEl);
+    progressController.messageEl = document.createElement("span");
+    progressController.messageEl.className = "pp-msg";
+    progressController.timeEl = document.createElement("span");
+    progressController.timeEl.className = "pp-time";
+    progressController.el.appendChild(ppDot);
+    progressController.el.appendChild(progressController.messageEl);
+    progressController.el.appendChild(progressController.timeEl);
+    panel.appendChild(progressController.el);
     panelBody = document.createElement("div");
     resetPanelFitCache();
     panelBody.className = "p-body";
@@ -8989,7 +9046,7 @@
       }
       const shotImg = e.target.closest(".agent-shot img");
       if (shotImg) {
-        openShotLightbox(shotImg.getAttribute("src") || "");
+        screenshotView.openLightbox(shotImg.getAttribute("src") || "");
         return;
       }
       const regen = e.target.closest(".act-regen");
@@ -9381,7 +9438,7 @@
       const endedRunId = runSession.runId;
       const endedSessionId = panelSessionId;
       runSession.finish();
-      stopProgress();
+      progressController.stop();
       updateRunControlState();
       pendingAiMsg = null;
       pendingContentEl = null;
@@ -9739,13 +9796,13 @@
         pendingAiMsg = aiMsg;
         pendingContentEl = contentEl;
         pendingAiMsg._raw = streamState.content;
-        runStartedAt = Number(snapshot.startedAt) || runStartedAt || Date.now();
+        progressController.startedAt = Number(snapshot.startedAt) || progressController.startedAt || Date.now();
         const p = snapshot.progress || {};
-        progressState = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
-        progressStep = Number(p.step) || 0;
-        progressMax = Number(p.max) || 0;
-        if (progressEl) progressEl.classList.add("on");
-        renderProgress();
+        progressController.state = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
+        progressController.step = Number(p.step) || 0;
+        progressController.max = Number(p.max) || 0;
+        if (progressController.el) progressController.el.classList.add("on");
+        progressController.render();
         updateRunControlState();
         if (snapshot.approval && approvalConn) {
           const approval = snapshot.approval;
@@ -9771,7 +9828,7 @@
         resetReasoning();
       }
       runSession.setRunning(true);
-      startProgress();
+      progressController.start();
       if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
       updateRunControlState();
       if (!isExtContextAlive()) {
@@ -9847,16 +9904,16 @@
         } else if (resp.type === "agent-state") {
           const st = resp.state || resp.status;
           const label = stateLabel(st);
-          if (label) progressState = label;
+          if (label) progressController.state = label;
           const step = Number(resp.step);
-          if (Number.isFinite(step) && step > 0) progressStep = step;
+          if (Number.isFinite(step) && step > 0) progressController.step = step;
           const max = Number(resp.maxSteps);
-          if (Number.isFinite(max) && max > 0) progressMax = max;
-          renderProgress();
+          if (Number.isFinite(max) && max > 0) progressController.max = max;
+          progressController.render();
         } else if (resp.type === "screenshot") {
-          if (resp.id && resp.dataUrl) shotCache.set(resp.id, resp.dataUrl);
+          if (resp.id && resp.dataUrl) screenshotView.cache.set(resp.id, resp.dataUrl);
           streamState.appendPart({ type: "screenshot", id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
-          appendStep(screenshotElement(resp));
+          appendStep(screenshotView.element(resp));
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "stuck-warning") {
@@ -10196,7 +10253,7 @@
         closeApprovalPopover();
         return;
       }
-      if (shotLightboxOpen) return;
+      if (screenshotView.lightboxOpen) return;
       if (approvalArea && approvalArea.style.display !== "none") return;
       e.preventDefault();
       e.stopPropagation();

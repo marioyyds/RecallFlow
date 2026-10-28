@@ -103,7 +103,7 @@ test('完成校验的证据名单必须认得合并后的名字', () => {
   // agent.js 的 EVIDENCE_READ_TOOLS 里原先写的是 get_element_text。
   // 改名后若不同步，「划出关键信息」这类任务的完成校验会重新丢掉文本证据
   //（那正是当初把 get_element_text 加进名单要修的问题）。
-  const agent = fs.readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
+  const agent = fs.readFileSync(new URL('../lib/application/agent/verification-policy.ts', import.meta.url), 'utf8');
   const block = agent.slice(agent.indexOf('const EVIDENCE_READ_TOOLS'), agent.indexOf('const EVIDENCE_READ_TOOLS') + 400);
   assert.match(block, /'inspect_element'/, '证据名单应包含 inspect_element');
   assert.ok(!/'get_element_text'/.test(block), '证据名单不得再引用已消失的 get_element_text');

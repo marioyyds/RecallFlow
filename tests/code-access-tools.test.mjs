@@ -108,7 +108,7 @@ test('同一 tab 确认 CSP 拦截后，后续调用直接走页面主世界（�
 });
 
 test('沙箱执行体也包成 async IIFE（源码级门禁）', () => {
-  const src = fs.readFileSync('lib/page/commands.ts', 'utf8');
+  const src = fs.readFileSync('lib/application/page/run-js.ts', 'utf8');
   assert.match(src, /return \(async \(\) => \{/);
 });
 

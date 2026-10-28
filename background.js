@@ -8222,33 +8222,6 @@ function formatPrefixReport(diff) {
   return "prefix changed at " + diff.reason + "\uFF1A" + diff.detail + "\uFF08" + diff.prevLength + " \u2192 " + diff.nextLength + " \u6761\uFF09";
 }
 
-// lib/assistant/parallel-tools.ts
-var DEFAULT_MAX_BATCH = 4;
-function planParallelGroups(toolCalls, opts = {}) {
-  const isParallelSafe = typeof opts.isParallelSafe === "function" ? opts.isParallelSafe : () => false;
-  const shouldSkip = typeof opts.shouldSkip === "function" ? opts.shouldSkip : () => false;
-  const maxBatch = Math.max(2, Number(opts.maxBatch) || DEFAULT_MAX_BATCH);
-  const calls = Array.isArray(toolCalls) ? toolCalls : [];
-  const groups = [];
-  let run = [];
-  const flushRun = () => {
-    for (let i = 0; i < run.length; i += maxBatch) {
-      const chunk = run.slice(i, i + maxBatch);
-      if (chunk.length >= 2) groups.push(chunk);
-    }
-    run = [];
-  };
-  calls.forEach((tc, index) => {
-    const name = tc && tc.name;
-    const args = tc && tc.args || {};
-    const eligible = Boolean(name) && !shouldSkip(name, args, index) && isParallelSafe(name, args, index);
-    if (eligible) run.push(index);
-    else flushRun();
-  });
-  flushRun();
-  return groups;
-}
-
 // lib/assistant/context-tuning.ts
 var CONTEXT_TUNING = Object.freeze({
   // ---- 历史折叠 ----
@@ -8748,6 +8721,399 @@ function visionMessagesFor(screenshots, options = {}) {
   return msg ? [msg] : [];
 }
 
+// lib/application/agent/stream-step.ts
+function buildPartialStep(contentAcc, toolAcc) {
+  const content = String(contentAcc || "");
+  const raw = Array.isArray(toolAcc) ? toolAcc : [];
+  const toolCalls = [];
+  for (const t of raw) {
+    if (!t || !t.name) continue;
+    let args;
+    try {
+      args = t.args ? JSON.parse(t.args) : {};
+    } catch (e) {
+      continue;
+    }
+    if (!args || typeof args !== "object" || Array.isArray(args)) continue;
+    toolCalls.push({
+      id: t.id || "partial-" + toolCalls.length,
+      type: "function",
+      function: { name: String(t.name), arguments: JSON.stringify(args) }
+    });
+  }
+  if (!content && !toolCalls.length) return null;
+  const assistantMessage = { role: "assistant", content };
+  if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
+  return { assistantMessage };
+}
+async function readErrorDetail(resp) {
+  let raw = "";
+  try {
+    raw = await resp.text();
+  } catch (e) {
+    raw = "";
+  }
+  const text = String(raw === void 0 || raw === null ? "" : raw).trim();
+  if (!text) return { detail: "", parsed: false };
+  try {
+    const j = JSON.parse(text);
+    const msg = j && j.error && j.error.message ? j.error.message : JSON.stringify(j);
+    return { detail: String(msg), parsed: true };
+  } catch (e) {
+    return { detail: text, parsed: false };
+  }
+}
+function isBodyParseRejection(status, parsed, detail) {
+  if (status !== 400 || parsed) return false;
+  return /parse the request body|invalid ?json|unexpected (?:end of|token|character)|hex escape|surrogate/i.test(
+    String(detail || "")
+  );
+}
+async function streamAgentStep(port, settings, messages, signal, tools, emit, toolChoice) {
+  const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+  const body = { model: settings.model, messages, temperature: 0.3, stream: true, stream_options: { include_usage: true } };
+  const cleaned = sanitizeMessages(messages);
+  if (cleaned.count) {
+    console.log("[RecallFlow] \u51FA\u7AD9\u524D\u6E05\u7406\u975E\u6CD5 Unicode\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF1A" + cleaned.count + " \u5904");
+    if (typeof emit === "function") {
+      emit({ type: "verify", ok: null, reason: "\u8BF7\u6C42\u4F53\u91CC\u53D1\u73B0\u975E\u6CD5\u5B57\u7B26\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\u540E\u7EE7\u7EED\uFF08\u5171 " + cleaned.count + " \u5904\uFF09\u3002" });
+    }
+  }
+  if (tools && tools.length) {
+    body.tools = tools;
+    body.tool_choice = toolChoice || "auto";
+  }
+  console.log("[RecallFlow] LLM fetch start:", settings.model, "msgs=" + messages.length);
+  const timeoutMs = Number(settings.requestTimeoutMs) > 0 ? Number(settings.requestTimeoutMs) : 6e4;
+  const timeoutCtrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const abortFromOutside = () => {
+    if (timeoutCtrl) timeoutCtrl.abort();
+  };
+  const cleanup = () => {
+    if (signal && timeoutCtrl) signal.removeEventListener("abort", abortFromOutside);
+  };
+  if (signal && timeoutCtrl) {
+    if (signal.aborted) timeoutCtrl.abort();
+    else signal.addEventListener("abort", abortFromOutside);
+  }
+  const MAX_RETRIES = 2;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let resp;
+  let requestStartAt = Date.now();
+  try {
+    for (let attempt = 0; ; attempt++) {
+      let timedOut = false;
+      const timer = timeoutCtrl ? setTimeout(() => {
+        timedOut = true;
+        timeoutCtrl.abort();
+      }, timeoutMs) : null;
+      requestStartAt = Date.now();
+      try {
+        resp = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + settings.apiKey
+          },
+          body: JSON.stringify(body),
+          signal: timeoutCtrl ? timeoutCtrl.signal : signal
+        });
+        if (timer) clearTimeout(timer);
+        console.log("[RecallFlow] LLM fetch done:", resp.status);
+      } catch (e) {
+        if (timer) clearTimeout(timer);
+        if (timedOut) {
+          cleanup();
+          return { error: "\u6A21\u578B\u8BF7\u6C42\u8D85\u65F6\uFF08" + Math.round(timeoutMs / 1e3) + " \u79D2\uFF09\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u6216 API \u670D\u52A1\u540E\u91CD\u8BD5\u3002" };
+        }
+        if (e && e.name === "AbortError") throw e;
+        if (attempt < MAX_RETRIES && isRetryableError(e)) {
+          console.log("[RecallFlow] LLM fetch retry " + (attempt + 1) + ":", e && e.message);
+          await sleep(500 * Math.pow(2, attempt));
+          continue;
+        }
+        throw e;
+      }
+      if (resp.ok) break;
+      const info = await readErrorDetail(resp);
+      let detail = info.detail;
+      const bodyParseRejected = isBodyParseRejection(resp.status, info.parsed, info.detail);
+      if (resp.status === 400) {
+        const roles = (Array.isArray(messages) ? messages : []).map((m) => {
+          if (!m || !m.role) return "?";
+          return m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length ? "asst(tc)" : m.role;
+        }).join(",");
+        detail += (detail ? " " : "") + "[\u8BF7\u6C42\u5F62\u72B6\uFF1Amodel=" + body.model + " messages=" + (Array.isArray(messages) ? messages.length : 0) + " roles=" + roles.slice(-400) + " tools=" + (body.tools && body.tools.length || 0) + " tool_choice=" + (body.tool_choice || "-") + " stream=" + body.stream + "]";
+        if (bodyParseRejected) {
+          detail += "\uFF08\u670D\u52A1\u7AEF\u5728\u3010\u89E3\u6790\u8BF7\u6C42\u4F53\u3011\u9636\u6BB5\u5C31\u62D2\u7EDD\u4E86\uFF0C\u4E0A\u9762\u90A3\u53E5\u539F\u8BDD\u91CC\u7684\u5B57\u6BB5\u8DEF\u5F84\u5C31\u662F\u51FA\u9519\u4F4D\u7F6E\uFF1B" + (cleaned.count ? "\u672C\u6B21\u53D1\u9001\u524D\u5DF2\u6E05\u7406 " + cleaned.count + " \u5904\u5B64\u7ACB\u4EE3\u7406\uFF0C\u4ECD\u88AB\u62D2 \u21D2 \u539F\u56E0\u5728\u522B\u5904\u3002" : "\u672C\u6B21\u53D1\u9001\u524D\u672A\u53D1\u73B0\u5B64\u7ACB\u4EE3\u7406 \u21D2 \u539F\u56E0\u5728\u522B\u5904\uFF0C\u8BF7\u6309\u5B57\u6BB5\u8DEF\u5F84\u6392\u67E5\u3002") + "\uFF09";
+        }
+      }
+      const err = new Error("DeepSeek \u8BF7\u6C42\u5931\u8D25 (" + resp.status + "): " + detail);
+      err.status = resp.status;
+      err.bodyParseRejected = bodyParseRejected;
+      if (attempt < MAX_RETRIES && isRetryableError(err)) {
+        console.log("[RecallFlow] LLM retry after status " + resp.status + " (attempt " + (attempt + 1) + ")");
+        await sleep(500 * Math.pow(2, attempt));
+        continue;
+      }
+      cleanup();
+      return { error: err.message };
+    }
+  } catch (e) {
+    cleanup();
+    throw e;
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let contentAcc = "";
+  let usage = null;
+  let reasoningAcc = "";
+  const toolAcc = [];
+  const headersAt = Date.now();
+  const streamStartAt = headersAt;
+  let firstTokenAt = 0;
+  const ensureTool = (i) => {
+    while (toolAcc.length <= i) toolAcc.push({ index: toolAcc.length, id: "", name: "", args: "" });
+    return toolAcc[i];
+  };
+  while (true) {
+    let chunk;
+    try {
+      chunk = await reader.read();
+    } catch (e) {
+      if (e && (e.name === "AbortError" || signal?.aborted)) {
+        const partialErr = new DOMException("\u4EFB\u52A1\u5DF2\u53D6\u6D88", "AbortError");
+        partialErr.partial = buildPartialStep(contentAcc, toolAcc);
+        cleanup();
+        throw partialErr;
+      }
+      cleanup();
+      throw e;
+    }
+    const { done, value } = chunk;
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === "[DONE]") continue;
+      let json;
+      try {
+        json = JSON.parse(data);
+      } catch (e) {
+        continue;
+      }
+      if (json.usage) usage = json.usage;
+      const choice = json.choices && json.choices[0];
+      if (!choice) continue;
+      const delta = choice.delta || {};
+      if (!firstTokenAt && (delta.content || delta.reasoning_content || delta.tool_calls || choice.finish_reason)) {
+        firstTokenAt = Date.now();
+      }
+      if (delta.reasoning_content) {
+        reasoningAcc += delta.reasoning_content;
+        (emit || ((event) => port.postMessage(event)))({ type: "reasoning", text: delta.reasoning_content });
+      }
+      if (delta.content) {
+        contentAcc += delta.content;
+        (emit || ((event) => port.postMessage(event)))({ type: "chunk", text: delta.content });
+      }
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const t = ensureTool(tc.index || 0);
+          if (tc.id) t.id = tc.id;
+          if (tc.function) {
+            if (tc.function.name) t.name = tc.function.name;
+            if (tc.function.arguments) t.args += tc.function.arguments;
+          }
+        }
+      }
+    }
+  }
+  const toolCalls = toolAcc.filter((t) => t.name || t.id).map((t) => ({ id: t.id, name: t.name, args: parseToolArgs(t.args) }));
+  const assistantMessage = { role: "assistant", content: contentAcc };
+  if (toolCalls.length) {
+    assistantMessage.tool_calls = toolCalls.map((t) => ({
+      id: t.id,
+      type: "function",
+      function: { name: t.name, arguments: JSON.stringify(t.args) }
+    }));
+  }
+  cleanup();
+  const streamEndAt = Date.now();
+  const timing = {
+    ttfbMs: headersAt - requestStartAt,
+    prefillMs: (firstTokenAt || streamEndAt) - headersAt,
+    decodeMs: firstTokenAt ? streamEndAt - firstTokenAt : 0,
+    totalMs: streamEndAt - requestStartAt
+  };
+  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc };
+}
+
+// lib/assistant/approval-policy.ts
+var APPROVAL_CATEGORY_BY_RISK = Object.freeze({
+  read: "read",
+  page: "commands",
+  write: "edit",
+  destructive: "edit",
+  browser: "browser",
+  network: "browser",
+  external: "mcp"
+});
+var RISK_WITHOUT_CATEGORY = Object.freeze(["high"]);
+function resolveApprovalCategory(risk) {
+  if (typeof risk !== "string") return null;
+  const hit = APPROVAL_CATEGORY_BY_RISK[risk];
+  return typeof hit === "string" ? hit : null;
+}
+function toolNeedsApproval(name, settings = {}, pageUrl = "") {
+  const meta = getToolMetadata(name);
+  if (meta.requiresApproval !== true) return false;
+  if (meta.alwaysRequireApproval === true) {
+    return resolveCodeExecutionApproval(settings) !== "auto";
+  }
+  if (pageUrl) {
+    const origin = siteKeyOf(pageUrl);
+    const trusted = Array.isArray(settings.trustedSites) ? settings.trustedSites : [];
+    if (origin && trusted.includes(origin)) return false;
+  }
+  const category = resolveApprovalCategory(meta.risk);
+  if (!category) return true;
+  const p = settings.toolApprovalPolicy || {};
+  return p[category] !== true;
+}
+
+// lib/assistant/parallel-tools.ts
+var DEFAULT_MAX_BATCH = 4;
+function planParallelGroups(toolCalls, opts = {}) {
+  const isParallelSafe = typeof opts.isParallelSafe === "function" ? opts.isParallelSafe : () => false;
+  const shouldSkip = typeof opts.shouldSkip === "function" ? opts.shouldSkip : () => false;
+  const maxBatch = Math.max(2, Number(opts.maxBatch) || DEFAULT_MAX_BATCH);
+  const calls = Array.isArray(toolCalls) ? toolCalls : [];
+  const groups = [];
+  let run = [];
+  const flushRun = () => {
+    for (let i = 0; i < run.length; i += maxBatch) {
+      const chunk = run.slice(i, i + maxBatch);
+      if (chunk.length >= 2) groups.push(chunk);
+    }
+    run = [];
+  };
+  calls.forEach((tc, index) => {
+    const name = tc && tc.name;
+    const args = tc && tc.args || {};
+    const eligible = Boolean(name) && !shouldSkip(name, args, index) && isParallelSafe(name, args, index);
+    if (eligible) run.push(index);
+    else flushRun();
+  });
+  flushRun();
+  return groups;
+}
+
+// lib/application/agent/tool-execution.ts
+function withTimeout2(task, timeoutMs, signal, toolName) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
+      fn(value);
+    };
+    const onAbort = () => finish(reject, new DOMException("\u4EFB\u52A1\u5DF2\u53D6\u6D88", "AbortError"));
+    timer = setTimeout(() => {
+      const err = new Error("\u5DE5\u5177\u6267\u884C\u8D85\u65F6");
+      err.rfToolTimeout = true;
+      err.timeoutMs = timeoutMs;
+      err.toolName = String(toolName || "");
+      finish(reject, err);
+    }, timeoutMs);
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve().then(task).then((v) => finish(resolve, v), (e) => finish(reject, e));
+  });
+}
+async function readLiveApprovalSettings(base, loader) {
+  const get = typeof loader === "function" ? loader : getAISettings;
+  const snapshot = base && typeof base === "object" ? base : {};
+  try {
+    const s = await get() || {};
+    return Object.assign({}, snapshot, {
+      toolApproval: s.toolApproval,
+      toolApprovalPolicy: s.toolApprovalPolicy || {},
+      trustedSites: Array.isArray(s.trustedSites) ? s.trustedSites : [],
+      codeExecutionApproval: s.codeExecutionApproval
+    });
+  } catch (e) {
+    return snapshot;
+  }
+}
+async function runParallelBatch(toolCalls, o) {
+  const precomputed = /* @__PURE__ */ new Map();
+  if (!o.enabled) return precomputed;
+  const calls = Array.isArray(toolCalls) ? toolCalls : [];
+  const limit = calls.length;
+  if (limit < 2) return precomputed;
+  o.approvalSettings = await readLiveApprovalSettings(o.settings);
+  const groups = planParallelGroups(calls.slice(0, limit), {
+    isParallelSafe: (name) => getToolMetadata(name).parallelSafe === true,
+    shouldSkip: (name, args) => {
+      if (o.disabledTools.has(name)) return true;
+      if (!validateToolCall(name, args).ok) return true;
+      return o.approvalSettings.toolApproval !== false && toolNeedsApproval(name, o.approvalSettings, o.ctx.pageUrl) && !o.sessionApprovedTools.has(name);
+    }
+  });
+  if (!groups.length) return precomputed;
+  for (const group of groups) {
+    for (const i of group) {
+      const tc = calls[i];
+      o.emit({
+        type: "tool-call",
+        callId: o.callIds[i],
+        name: tc.name,
+        args: tc.args,
+        requiresApproval: false,
+        risk: getToolMetadata(tc.name).risk
+      });
+    }
+    o.emitState(RUN_STATUS.EXECUTING);
+    const toolsInGroup = group.map((i) => calls[i].name);
+    o.trace({ phase: "parallel-batch", iter: o.iter, size: group.length, tools: toolsInGroup });
+    const wallStart = Date.now();
+    const settled = await Promise.all(
+      group.map(async (i) => {
+        const tc = calls[i];
+        const metadata = getToolMetadata(tc.name);
+        const t0 = Date.now();
+        const beforeUrl = o.ctx.pageUrl;
+        try {
+          const res = await withTimeout2(
+            () => executeAnyTool(tc.name, tc.args, o.ctx),
+            metadata.timeoutMs || o.budget.toolTimeoutMs,
+            o.signal
+          );
+          return { index: i, res, ms: Date.now() - t0, beforeUrl };
+        } catch (e) {
+          return {
+            index: i,
+            res: { result: e && e.name === "AbortError" ? "\u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002" : e.message, ok: false },
+            ms: Date.now() - t0,
+            beforeUrl
+          };
+        }
+      })
+    );
+    for (const item of settled) precomputed.set(item.index, item);
+    o.trace({ phase: "parallel-batch-done", iter: o.iter, size: group.length, wallMs: Date.now() - wallStart, tools: toolsInGroup });
+  }
+  return precomputed;
+}
+
 // lib/application/agent/budget.ts
 var AGENT_BUDGET_DEFAULTS = Object.freeze({
   repeatThresholds: [3, 5, 8],
@@ -8985,9 +9351,9 @@ var EVIDENCE_READ_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage"
 ]);
 var EVIDENCE_RECEIPT_CHARS = 1800;
-function changesState(metadata) {
-  if (!metadata) return true;
-  return metadata.readOnly !== true && metadata.mutatesState !== false;
+function changesState(md) {
+  if (!md) return true;
+  return md.readOnly !== true && md.mutatesState !== false;
 }
 function evaluateLiveness(input = {}) {
   const iter = Number(input.iter);
@@ -9065,39 +9431,6 @@ function classifyVerifyOutcome(verdict, error) {
   return { kind: "verdict", verdict };
 }
 
-// lib/assistant/approval-policy.ts
-var APPROVAL_CATEGORY_BY_RISK = Object.freeze({
-  read: "read",
-  page: "commands",
-  write: "edit",
-  destructive: "edit",
-  browser: "browser",
-  network: "browser",
-  external: "mcp"
-});
-var RISK_WITHOUT_CATEGORY = Object.freeze(["high"]);
-function resolveApprovalCategory(risk) {
-  if (typeof risk !== "string") return null;
-  const hit = APPROVAL_CATEGORY_BY_RISK[risk];
-  return typeof hit === "string" ? hit : null;
-}
-function toolNeedsApproval(name, settings = {}, pageUrl = "") {
-  const meta = getToolMetadata(name);
-  if (meta.requiresApproval !== true) return false;
-  if (meta.alwaysRequireApproval === true) {
-    return resolveCodeExecutionApproval(settings) !== "auto";
-  }
-  if (pageUrl) {
-    const origin = siteKeyOf(pageUrl);
-    const trusted = Array.isArray(settings.trustedSites) ? settings.trustedSites : [];
-    if (origin && trusted.includes(origin)) return false;
-  }
-  const category = resolveApprovalCategory(meta.risk);
-  if (!category) return true;
-  const p = settings.toolApprovalPolicy || {};
-  return p[category] !== true;
-}
-
 // lib/assistant/agent.ts
 var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage",
@@ -9150,29 +9483,6 @@ function buildInitialMessages(instruction, selectedText, page, pageUrl, history,
   });
   return { messages, pageCitations: [] };
 }
-function withTimeout2(task, timeoutMs, signal, toolName) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer = null;
-    const finish = (fn, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (signal) signal.removeEventListener("abort", onAbort);
-      fn(value);
-    };
-    const onAbort = () => finish(reject, new DOMException("\u4EFB\u52A1\u5DF2\u53D6\u6D88", "AbortError"));
-    timer = setTimeout(() => {
-      const err = new Error("\u5DE5\u5177\u6267\u884C\u8D85\u65F6");
-      err.rfToolTimeout = true;
-      err.timeoutMs = timeoutMs;
-      err.toolName = String(toolName || "");
-      finish(reject, err);
-    }, timeoutMs);
-    if (signal) signal.addEventListener("abort", onAbort, { once: true });
-    Promise.resolve().then(task).then((v) => finish(resolve, v), (e) => finish(reject, e));
-  });
-}
 function describeToolFailure(e, toolName) {
   const name = String(toolName || "");
   if (e && e.name === "AbortError") return "\u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002";
@@ -9188,21 +9498,6 @@ function describeToolFailure(e, toolName) {
 }
 function formatTruncationNotice(totalChars, id) {
   return "\n\u2026\uFF08\u7ED3\u679C\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF1B\u5B8C\u6574\u5185\u5BB9 id=" + id + '\uFF0C\u53EF\u7528 expand_result(id="' + id + '") \u5206\u6BB5\u8BFB\u53D6\uFF09';
-}
-async function readLiveApprovalSettings(base, loader) {
-  const get = typeof loader === "function" ? loader : getAISettings;
-  const snapshot = base && typeof base === "object" ? base : {};
-  try {
-    const s = await get() || {};
-    return Object.assign({}, snapshot, {
-      toolApproval: s.toolApproval,
-      toolApprovalPolicy: s.toolApprovalPolicy || {},
-      trustedSites: Array.isArray(s.trustedSites) ? s.trustedSites : [],
-      codeExecutionApproval: s.codeExecutionApproval
-    });
-  } catch (e) {
-    return snapshot;
-  }
 }
 function toolResultProgress(res) {
   if (!res || typeof res !== "object") return false;
@@ -9327,297 +9622,6 @@ function waitForToolApproval(port, callId, name, args, signal, runId, allowSessi
       finish(false);
     }
   });
-}
-function buildPartialStep(contentAcc, toolAcc) {
-  const content = String(contentAcc || "");
-  const raw = Array.isArray(toolAcc) ? toolAcc : [];
-  const toolCalls = [];
-  for (const t of raw) {
-    if (!t || !t.name) continue;
-    let args;
-    try {
-      args = t.args ? JSON.parse(t.args) : {};
-    } catch (e) {
-      continue;
-    }
-    if (!args || typeof args !== "object" || Array.isArray(args)) continue;
-    toolCalls.push({
-      id: t.id || "partial-" + toolCalls.length,
-      type: "function",
-      function: { name: String(t.name), arguments: JSON.stringify(args) }
-    });
-  }
-  if (!content && !toolCalls.length) return null;
-  const assistantMessage = { role: "assistant", content };
-  if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
-  return { assistantMessage };
-}
-async function readErrorDetail(resp) {
-  let raw = "";
-  try {
-    raw = await resp.text();
-  } catch (e) {
-    raw = "";
-  }
-  const text = String(raw === void 0 || raw === null ? "" : raw).trim();
-  if (!text) return { detail: "", parsed: false };
-  try {
-    const j = JSON.parse(text);
-    const msg = j && j.error && j.error.message ? j.error.message : JSON.stringify(j);
-    return { detail: String(msg), parsed: true };
-  } catch (e) {
-    return { detail: text, parsed: false };
-  }
-}
-function isBodyParseRejection(status, parsed, detail) {
-  if (status !== 400 || parsed) return false;
-  return /parse the request body|invalid ?json|unexpected (?:end of|token|character)|hex escape|surrogate/i.test(
-    String(detail || "")
-  );
-}
-async function streamAgentStep(port, settings, messages, signal, tools, emit, toolChoice) {
-  const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
-  const body = { model: settings.model, messages, temperature: 0.3, stream: true, stream_options: { include_usage: true } };
-  const cleaned = sanitizeMessages(messages);
-  if (cleaned.count) {
-    console.log("[RecallFlow] \u51FA\u7AD9\u524D\u6E05\u7406\u975E\u6CD5 Unicode\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF1A" + cleaned.count + " \u5904");
-    if (typeof emit === "function") {
-      emit({ type: "verify", ok: null, reason: "\u8BF7\u6C42\u4F53\u91CC\u53D1\u73B0\u975E\u6CD5\u5B57\u7B26\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\u540E\u7EE7\u7EED\uFF08\u5171 " + cleaned.count + " \u5904\uFF09\u3002" });
-    }
-  }
-  if (tools && tools.length) {
-    body.tools = tools;
-    body.tool_choice = toolChoice || "auto";
-  }
-  console.log("[RecallFlow] LLM fetch start:", settings.model, "msgs=" + messages.length);
-  const timeoutMs = Number(settings.requestTimeoutMs) > 0 ? Number(settings.requestTimeoutMs) : 6e4;
-  const timeoutCtrl = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const abortFromOutside = () => {
-    if (timeoutCtrl) timeoutCtrl.abort();
-  };
-  const cleanup = () => {
-    if (signal && timeoutCtrl) signal.removeEventListener("abort", abortFromOutside);
-  };
-  if (signal && timeoutCtrl) {
-    if (signal.aborted) timeoutCtrl.abort();
-    else signal.addEventListener("abort", abortFromOutside);
-  }
-  const MAX_RETRIES = 2;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  let resp;
-  let requestStartAt = Date.now();
-  try {
-    for (let attempt = 0; ; attempt++) {
-      let timedOut = false;
-      const timer = timeoutCtrl ? setTimeout(() => {
-        timedOut = true;
-        timeoutCtrl.abort();
-      }, timeoutMs) : null;
-      requestStartAt = Date.now();
-      try {
-        resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: "Bearer " + settings.apiKey
-          },
-          body: JSON.stringify(body),
-          signal: timeoutCtrl ? timeoutCtrl.signal : signal
-        });
-        if (timer) clearTimeout(timer);
-        console.log("[RecallFlow] LLM fetch done:", resp.status);
-      } catch (e) {
-        if (timer) clearTimeout(timer);
-        if (timedOut) {
-          cleanup();
-          return { error: "\u6A21\u578B\u8BF7\u6C42\u8D85\u65F6\uFF08" + Math.round(timeoutMs / 1e3) + " \u79D2\uFF09\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u6216 API \u670D\u52A1\u540E\u91CD\u8BD5\u3002" };
-        }
-        if (e && e.name === "AbortError") throw e;
-        if (attempt < MAX_RETRIES && isRetryableError(e)) {
-          console.log("[RecallFlow] LLM fetch retry " + (attempt + 1) + ":", e && e.message);
-          await sleep(500 * Math.pow(2, attempt));
-          continue;
-        }
-        throw e;
-      }
-      if (resp.ok) break;
-      const info = await readErrorDetail(resp);
-      let detail = info.detail;
-      const bodyParseRejected = isBodyParseRejection(resp.status, info.parsed, info.detail);
-      if (resp.status === 400) {
-        const roles = (Array.isArray(messages) ? messages : []).map((m) => {
-          if (!m || !m.role) return "?";
-          return m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length ? "asst(tc)" : m.role;
-        }).join(",");
-        detail += (detail ? " " : "") + "[\u8BF7\u6C42\u5F62\u72B6\uFF1Amodel=" + body.model + " messages=" + (Array.isArray(messages) ? messages.length : 0) + " roles=" + roles.slice(-400) + " tools=" + (body.tools && body.tools.length || 0) + " tool_choice=" + (body.tool_choice || "-") + " stream=" + body.stream + "]";
-        if (bodyParseRejected) {
-          detail += "\uFF08\u670D\u52A1\u7AEF\u5728\u3010\u89E3\u6790\u8BF7\u6C42\u4F53\u3011\u9636\u6BB5\u5C31\u62D2\u7EDD\u4E86\uFF0C\u4E0A\u9762\u90A3\u53E5\u539F\u8BDD\u91CC\u7684\u5B57\u6BB5\u8DEF\u5F84\u5C31\u662F\u51FA\u9519\u4F4D\u7F6E\uFF1B" + (cleaned.count ? "\u672C\u6B21\u53D1\u9001\u524D\u5DF2\u6E05\u7406 " + cleaned.count + " \u5904\u5B64\u7ACB\u4EE3\u7406\uFF0C\u4ECD\u88AB\u62D2 \u21D2 \u539F\u56E0\u5728\u522B\u5904\u3002" : "\u672C\u6B21\u53D1\u9001\u524D\u672A\u53D1\u73B0\u5B64\u7ACB\u4EE3\u7406 \u21D2 \u539F\u56E0\u5728\u522B\u5904\uFF0C\u8BF7\u6309\u5B57\u6BB5\u8DEF\u5F84\u6392\u67E5\u3002") + "\uFF09";
-        }
-      }
-      const err = new Error("DeepSeek \u8BF7\u6C42\u5931\u8D25 (" + resp.status + "): " + detail);
-      err.status = resp.status;
-      err.bodyParseRejected = bodyParseRejected;
-      if (attempt < MAX_RETRIES && isRetryableError(err)) {
-        console.log("[RecallFlow] LLM retry after status " + resp.status + " (attempt " + (attempt + 1) + ")");
-        await sleep(500 * Math.pow(2, attempt));
-        continue;
-      }
-      cleanup();
-      return { error: err.message };
-    }
-  } catch (e) {
-    cleanup();
-    throw e;
-  }
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let contentAcc = "";
-  let usage = null;
-  let reasoningAcc = "";
-  const toolAcc = [];
-  const headersAt = Date.now();
-  const streamStartAt = headersAt;
-  let firstTokenAt = 0;
-  const ensureTool = (i) => {
-    while (toolAcc.length <= i) toolAcc.push({ index: toolAcc.length, id: "", name: "", args: "" });
-    return toolAcc[i];
-  };
-  while (true) {
-    let chunk;
-    try {
-      chunk = await reader.read();
-    } catch (e) {
-      if (e && (e.name === "AbortError" || signal?.aborted)) {
-        const partialErr = new DOMException("\u4EFB\u52A1\u5DF2\u53D6\u6D88", "AbortError");
-        partialErr.partial = buildPartialStep(contentAcc, toolAcc);
-        cleanup();
-        throw partialErr;
-      }
-      cleanup();
-      throw e;
-    }
-    const { done, value } = chunk;
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop();
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const data = trimmed.slice(5).trim();
-      if (data === "[DONE]") continue;
-      let json;
-      try {
-        json = JSON.parse(data);
-      } catch (e) {
-        continue;
-      }
-      if (json.usage) usage = json.usage;
-      const choice = json.choices && json.choices[0];
-      if (!choice) continue;
-      const delta = choice.delta || {};
-      if (!firstTokenAt && (delta.content || delta.reasoning_content || delta.tool_calls || choice.finish_reason)) {
-        firstTokenAt = Date.now();
-      }
-      if (delta.reasoning_content) {
-        reasoningAcc += delta.reasoning_content;
-        (emit || ((event) => port.postMessage(event)))({ type: "reasoning", text: delta.reasoning_content });
-      }
-      if (delta.content) {
-        contentAcc += delta.content;
-        (emit || ((event) => port.postMessage(event)))({ type: "chunk", text: delta.content });
-      }
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const t = ensureTool(tc.index || 0);
-          if (tc.id) t.id = tc.id;
-          if (tc.function) {
-            if (tc.function.name) t.name = tc.function.name;
-            if (tc.function.arguments) t.args += tc.function.arguments;
-          }
-        }
-      }
-    }
-  }
-  const toolCalls = toolAcc.filter((t) => t.name || t.id).map((t) => ({ id: t.id, name: t.name, args: parseToolArgs(t.args) }));
-  const assistantMessage = { role: "assistant", content: contentAcc };
-  if (toolCalls.length) {
-    assistantMessage.tool_calls = toolCalls.map((t) => ({
-      id: t.id,
-      type: "function",
-      function: { name: t.name, arguments: JSON.stringify(t.args) }
-    }));
-  }
-  cleanup();
-  const streamEndAt = Date.now();
-  const timing = {
-    ttfbMs: headersAt - requestStartAt,
-    prefillMs: (firstTokenAt || streamEndAt) - headersAt,
-    decodeMs: firstTokenAt ? streamEndAt - firstTokenAt : 0,
-    totalMs: streamEndAt - requestStartAt
-  };
-  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc };
-}
-async function runParallelBatch(toolCalls, o) {
-  const precomputed = /* @__PURE__ */ new Map();
-  if (!o.enabled) return precomputed;
-  const calls = Array.isArray(toolCalls) ? toolCalls : [];
-  const limit = calls.length;
-  if (limit < 2) return precomputed;
-  o.approvalSettings = await readLiveApprovalSettings(o.settings);
-  const groups = planParallelGroups(calls.slice(0, limit), {
-    isParallelSafe: (name) => getToolMetadata(name).parallelSafe === true,
-    shouldSkip: (name, args) => {
-      if (o.disabledTools.has(name)) return true;
-      if (!validateToolCall(name, args).ok) return true;
-      return o.approvalSettings.toolApproval !== false && toolNeedsApproval(name, o.approvalSettings, o.ctx.pageUrl) && !o.sessionApprovedTools.has(name);
-    }
-  });
-  if (!groups.length) return precomputed;
-  for (const group of groups) {
-    for (const i of group) {
-      const tc = calls[i];
-      o.emit({
-        type: "tool-call",
-        callId: o.callIds[i],
-        name: tc.name,
-        args: tc.args,
-        requiresApproval: false,
-        risk: getToolMetadata(tc.name).risk
-      });
-    }
-    o.emitState(RUN_STATUS.EXECUTING);
-    const toolsInGroup = group.map((i) => calls[i].name);
-    o.trace({ phase: "parallel-batch", iter: o.iter, size: group.length, tools: toolsInGroup });
-    const wallStart = Date.now();
-    const settled = await Promise.all(
-      group.map(async (i) => {
-        const tc = calls[i];
-        const metadata = getToolMetadata(tc.name);
-        const t0 = Date.now();
-        const beforeUrl = o.ctx.pageUrl;
-        try {
-          const res = await withTimeout2(
-            () => executeAnyTool(tc.name, tc.args, o.ctx),
-            metadata.timeoutMs || o.budget.toolTimeoutMs,
-            o.signal
-          );
-          return { index: i, res, ms: Date.now() - t0, beforeUrl };
-        } catch (e) {
-          return {
-            index: i,
-            res: { result: e && e.name === "AbortError" ? "\u4EFB\u52A1\u5DF2\u53D6\u6D88\u3002" : e.message, ok: false },
-            ms: Date.now() - t0,
-            beforeUrl
-          };
-        }
-      })
-    );
-    for (const item of settled) precomputed.set(item.index, item);
-    o.trace({ phase: "parallel-batch-done", iter: o.iter, size: group.length, wallMs: Date.now() - wallStart, tools: toolsInGroup });
-  }
-  return precomputed;
 }
 async function runAgentStream(port, payload, settings, book, signal, tabId, observeEvent) {
   const runId = payload.runId || "run-" + Date.now().toString(36);
@@ -10630,6 +10634,465 @@ var AutomationMessageRouter = class {
     }
   }
 };
+
+// lib/assistant/run-channel.ts
+var RunChannel = class {
+  constructor() {
+    this.port = null;
+    this.portListener = null;
+    this.listeners = /* @__PURE__ */ new Set();
+    this.paused = false;
+    this.queued = [];
+    const listeners = this.listeners;
+    this.onMessage = {
+      addListener: (fn) => {
+        if (typeof fn === "function") listeners.add(fn);
+      },
+      removeListener: (fn) => {
+        listeners.delete(fn);
+      }
+    };
+  }
+  /** 当前是否挂在某个页面的 port 上。 */
+  isAttached() {
+    return Boolean(this.port);
+  }
+  /**
+   * 挂到新 port。`paused:true` 用于 reattach：先发送快照，再 `resume()` 放行
+   * attach 之后产生的事件，避免快照与实时事件交错。
+   */
+  attach(port, options) {
+    if (!port) return false;
+    const opts = options || {};
+    this.detach();
+    this.port = port;
+    this.paused = opts.paused === true;
+    this.portListener = (message) => this.emit(message);
+    try {
+      port.onMessage.addListener(this.portListener);
+    } catch (e) {
+      this.port = null;
+      this.portListener = null;
+      return false;
+    }
+    return true;
+  }
+  /** 摘掉终端。传入 port 时只在它仍是当前终端时生效（防止旧 port 的迟到 disconnect 摘掉新 port）。 */
+  detach(port) {
+    if (port && this.port !== port) return;
+    if (this.port && this.portListener) {
+      try {
+        this.port.onMessage.removeListener(this.portListener);
+      } catch (e) {
+      }
+    }
+    this.port = null;
+    this.portListener = null;
+    this.paused = false;
+    this.queued = [];
+  }
+  /** 发给当前页面；没有终端时直接丢弃（runHub 快照仍是权威）。 */
+  postMessage(message) {
+    if (this.paused) {
+      this.queued.push(message);
+      return;
+    }
+    if (!this.port) return;
+    try {
+      this.port.postMessage(message);
+    } catch (e) {
+    }
+  }
+  /** 放行 paused 期间积压的事件（按到达顺序）。 */
+  resume() {
+    this.paused = false;
+    const pending = this.queued.splice(0);
+    for (const message of pending) this.postMessage(message);
+  }
+  /** 把页面发来的消息交给 run 内部监听器（waitForToolApproval 等）。 */
+  emit(message) {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(message);
+      } catch (e) {
+      }
+    }
+  }
+};
+
+// lib/application/background/ai-stream-router.ts
+function handleAiStreamConnection(port, deps) {
+  const {
+    runRegistry: runRegistry2,
+    runHub: runHub2,
+    agentRunner: agentRunner2,
+    runLifecycle: runLifecycle2,
+    runStats: runStats2,
+    registerRunCleanup: registerRunCleanup2,
+    clearRunAbortTimer: clearRunAbortTimer2,
+    requestRunStop: requestRunStop2,
+    scheduleAbortIfNoReattach: scheduleAbortIfNoReattach2,
+    loadAgentSession: loadAgentSession2,
+    getAISettings: getAISettings2,
+    getBook: getBook2,
+    buildAiMessages: buildAiMessages2,
+    normalizeHistory: normalizeHistory2,
+    logError: logError2
+  } = deps;
+  if (port.name !== "ai-stream") return;
+  if (port.name !== "ai-stream") return;
+  const senderTabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
+  let controller = null;
+  let attachedRunId = "";
+  const ensureController = () => {
+    if (!controller) {
+      controller = new AbortController();
+      if (senderTabId) runRegistry2.setController(senderTabId, controller);
+    }
+    return controller;
+  };
+  port.onDisconnect.addListener(() => {
+    if (attachedRunId) {
+      const channel = runRegistry2.channelFor(attachedRunId);
+      if (channel) channel.detach(port);
+      const rec = runRegistry2.runFor(senderTabId);
+      if (rec && String(rec.runId || "") === attachedRunId) {
+        scheduleAbortIfNoReattach2(attachedRunId, senderTabId);
+        return;
+      }
+    }
+    if (controller && !controller.__rfFinished) {
+      try {
+        runStats2.aborts += 1;
+        controller.abort();
+      } catch (e) {
+      }
+    }
+  });
+  port.onMessage.addListener(async (payload) => {
+    let aborted = false;
+    try {
+      if (payload && payload.type === "stop") {
+        const tr = runRegistry2.runFor(senderTabId);
+        const stopped = requestRunStop2({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
+        if (!stopped.ok && controller && !controller.__rfFinished) {
+          try {
+            runStats2.aborts += 1;
+            controller.abort();
+          } catch (e) {
+          }
+        }
+        return;
+      }
+      if (payload && payload.type === "query-run") {
+        const tr = runRegistry2.runFor(senderTabId);
+        const reply = (m) => {
+          try {
+            port.postMessage(Object.assign({ type: "run-state" }, m));
+          } catch (e) {
+          }
+        };
+        if (!tr || !tr.resumable || !tr.runId) {
+          reply({ runId: "", resumable: false, live: false, pending: false, instruction: "" });
+          return;
+        }
+        const liveSnapshot = runHub2.snapshot(tr.runId);
+        const liveChannel = runRegistry2.channelFor(tr.runId);
+        if (liveChannel && liveSnapshot && liveSnapshot.status === "running") {
+          reply({
+            runId: String(tr.runId),
+            resumable: true,
+            live: true,
+            pending: false,
+            instruction: liveSnapshot.instruction || "",
+            snapshot: liveSnapshot
+          });
+          return;
+        }
+        try {
+          const s = await loadAgentSession2(tr.runId);
+          if (!s) {
+            reply({ runId: "", resumable: false, live: false, pending: true, instruction: "" });
+            return;
+          }
+          const instruction = String(s.instruction || "");
+          const dead = ["completed", "failed", "cancelled", "timeout"].includes(s.status);
+          const snapshot = runHub2.snapshot(tr.runId);
+          reply({
+            runId: instruction && !dead ? tr.runId : "",
+            resumable: Boolean(instruction) && !dead,
+            live: false,
+            finished: Boolean(dead || !instruction),
+            pending: false,
+            instruction,
+            snapshot: snapshot || null
+          });
+        } catch (e) {
+          reply({ runId: "", resumable: false, live: false, pending: false, instruction: "" });
+        }
+        return;
+      }
+      if (payload && payload.type === "reattach") {
+        const runId = String(payload.runId || "");
+        const channel = runId ? runRegistry2.channelFor(runId) : null;
+        const snapshot = runId ? runHub2.snapshot(runId) : null;
+        const attachFailed = (reason) => {
+          try {
+            port.postMessage({ type: "reattach-failed", runId, reason, snapshot });
+          } catch (e) {
+          }
+        };
+        if (!runId || !channel || !snapshot || snapshot.status !== "running") {
+          attachFailed(snapshot ? "\u8BE5\u4EFB\u52A1\u5DF2\u7ED3\u675F" : "\u6CA1\u6709\u53EF\u63A5\u7BA1\u7684\u8FD0\u884C");
+          return;
+        }
+        clearRunAbortTimer2(runId);
+        attachedRunId = runId;
+        runStats2.reattaches += 1;
+        if (!channel.attach(port, { paused: true })) {
+          attachFailed("\u65E0\u6CD5\u7ED1\u5B9A\u9875\u9762\u8FDE\u63A5");
+          return;
+        }
+        try {
+          port.postMessage({
+            type: "reattached",
+            runId,
+            sessionId: snapshot.sessionId,
+            snapshot
+          });
+        } catch (e) {
+          attachFailed("\u9875\u9762\u8FDE\u63A5\u5DF2\u65AD\u5F00");
+          return;
+        }
+        channel.resume();
+        return;
+      }
+      if (payload && payload.type === "tool-approval") return;
+      if (payload && payload.type === "keepalive") return;
+      if (payload && payload.type === "e2e-drop-port") {
+        try {
+          runStats2.aborts += 1;
+          if (controller) controller.abort();
+        } catch (e) {
+        }
+        setTimeout(() => {
+          try {
+            port.disconnect();
+          } catch (e) {
+          }
+        }, 120);
+        return;
+      }
+      if (payload && payload.type === "session-ready") {
+        let ready = false;
+        try {
+          ready = Boolean(await loadAgentSession2(String(payload.runId || "")));
+        } catch (e) {
+          ready = false;
+        }
+        try {
+          port.postMessage({ type: "session-ready", ready });
+        } catch (e) {
+        }
+        return;
+      }
+      const settings = await getAISettings2();
+      if (!settings.apiKey) {
+        port.postMessage({ type: "error", needSetup: true, error: "\u5C1A\u672A\u914D\u7F6E API Key\uFF0C\u8BF7\u70B9\u51FB\u63D2\u4EF6\u56FE\u6807 \u2192 \u8BBE\u7F6E\u9875\u586B\u5199\u3002" });
+        return;
+      }
+      const book = await getBook2();
+      if (payload.action === "agent") {
+        const tabId = port.sender && port.sender.tab && port.sender.tab.id;
+        const runId = payload.runId || "run-" + Date.now().toString(36);
+        payload.runId = runId;
+        const sessionId = String(payload.sessionId || "");
+        const liveSnapshot = runHub2.snapshot(runId);
+        const existingChannel = runRegistry2.channelFor(runId);
+        if (existingChannel && liveSnapshot && liveSnapshot.status === "running") {
+          clearRunAbortTimer2(runId);
+          runStats2.reattaches += 1;
+          attachedRunId = String(runId);
+          if (existingChannel.attach(port, { paused: true })) {
+            try {
+              port.postMessage({
+                type: "reattached",
+                runId,
+                sessionId: liveSnapshot.sessionId || sessionId,
+                snapshot: liveSnapshot
+              });
+            } catch (e) {
+            }
+            existingChannel.resume();
+          }
+          return;
+        }
+        console.log("[RecallFlow] agent run start:", (payload.question || "").slice(0, 40), "tabId=" + tabId, "session=" + sessionId);
+        runStats2.starts += 1;
+        const channel = existingChannel || new RunChannel();
+        runRegistry2.setChannel(runId, channel);
+        const runController = ensureController();
+        if (!channel.attach(port, {})) {
+          port.postMessage({ type: "error", error: "\u65E0\u6CD5\u7ED1\u5B9A Agent \u8F93\u51FA\u901A\u9053\u3002" });
+          return;
+        }
+        attachedRunId = String(runId);
+        if (tabId) {
+          runRegistry2.setRun(tabId, {
+            runId,
+            resumable: true,
+            sessionId,
+            channel,
+            controller: runController
+          });
+        }
+        if (sessionId) {
+          runHub2.begin({
+            runId,
+            sessionId,
+            ownerTabId: tabId,
+            instruction: payload.question || payload.text || ""
+          });
+        }
+        try {
+          await agentRunner2.run({
+            port: channel,
+            payload,
+            settings,
+            book,
+            signal: runController.signal,
+            tabId,
+            observeEvent: (event) => {
+              if (event && event.type === "tabs-close-pending") registerRunCleanup2(runId, event);
+              if (sessionId) {
+                try {
+                  runHub2.push(runId, event);
+                } catch (e) {
+                  runStats2.hubErrors = (runStats2.hubErrors || 0) + 1;
+                  runStats2.lastHubError = String(e?.message || e);
+                }
+              }
+            }
+          });
+          console.log("[RecallFlow] agent run finished");
+          if (sessionId) runHub2.finish(runId, runController.signal.aborted ? "cancelled" : "completed");
+          runController.__rfFinished = true;
+          clearRunAbortTimer2(runId);
+          runRegistry2.deleteChannel(runId);
+          attachedRunId = "";
+        } catch (e) {
+          const detail = e?.stack || String(e);
+          console.error("[RecallFlow] agent run error:", detail);
+          try {
+            port.postMessage({ type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
+          } catch (err) {
+          }
+          try {
+            port.postMessage({ type: "end" });
+          } catch (err) {
+          }
+          if (sessionId) {
+            runHub2.push(runId, { type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
+            runHub2.push(runId, { type: "end" });
+            runHub2.finish(runId, runController.signal.aborted ? "cancelled" : "failed");
+          }
+          runController.__rfFinished = true;
+          clearRunAbortTimer2(runId);
+          runRegistry2.deleteChannel(runId);
+          attachedRunId = "";
+        }
+        return;
+      }
+      const messages = buildAiMessages2(payload.action, payload, settings, book, normalizeHistory2);
+      if (!messages) {
+        port.postMessage({ type: "error", error: "\u672A\u77E5\u64CD\u4F5C\uFF1A" + payload.action });
+        return;
+      }
+      if (messages._citations && messages._citations.length) {
+        port.postMessage({ type: "citations", citations: messages._citations });
+      }
+      const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
+      try {
+        sanitizeMessages(messages);
+      } catch (e) {
+      }
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + settings.apiKey
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          messages,
+          temperature: 0.3,
+          stream: true
+        }),
+        // 非 agent 分支没有 ensureController()，这里保留原有行为（null 时照旧抛错），
+        // 类型迁移批不改语义；见交付评论的「已知遗留」。
+        signal: controller.signal
+      });
+      if (!resp.ok) {
+        let detail = "";
+        try {
+          const j = await resp.json();
+          detail = j.error && j.error.message ? j.error.message : JSON.stringify(j);
+        } catch (e) {
+          detail = await resp.text();
+        }
+        port.postMessage({ type: "error", error: "DeepSeek \u8BF7\u6C42\u5931\u8D25 (" + resp.status + "): " + detail });
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices && json.choices[0] && json.choices[0].delta;
+            if (delta && delta.content) {
+              port.postMessage({ type: "chunk", text: delta.content });
+            }
+          } catch (e) {
+            logError2("Failed to parse SSE chunk", { data, error: e.message });
+          }
+        }
+      }
+      if (buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed.startsWith("data:")) {
+          const data = trimmed.slice(5).trim();
+          if (data !== "[DONE]") {
+            try {
+              const json = JSON.parse(data);
+              const delta = json.choices && json.choices[0] && json.choices[0].delta;
+              if (delta && delta.content) {
+                port.postMessage({ type: "chunk", text: delta.content });
+              }
+            } catch (e) {
+              logError2("Failed to parse final SSE chunk", { data, error: e.message });
+            }
+          }
+        }
+      }
+      aborted = Boolean(controller && controller.signal.aborted);
+      if (!aborted) port.postMessage({ type: "end" });
+    } catch (e) {
+      if (aborted) return;
+      port.postMessage({ type: "error", error: e.message });
+    }
+  });
+}
 
 // lib/shared/handoff.ts
 var ID_PREFIX = "RF-";
@@ -12408,91 +12871,6 @@ var RunStreamHub = class {
   }
 };
 
-// lib/assistant/run-channel.ts
-var RunChannel = class {
-  constructor() {
-    this.port = null;
-    this.portListener = null;
-    this.listeners = /* @__PURE__ */ new Set();
-    this.paused = false;
-    this.queued = [];
-    const listeners = this.listeners;
-    this.onMessage = {
-      addListener: (fn) => {
-        if (typeof fn === "function") listeners.add(fn);
-      },
-      removeListener: (fn) => {
-        listeners.delete(fn);
-      }
-    };
-  }
-  /** 当前是否挂在某个页面的 port 上。 */
-  isAttached() {
-    return Boolean(this.port);
-  }
-  /**
-   * 挂到新 port。`paused:true` 用于 reattach：先发送快照，再 `resume()` 放行
-   * attach 之后产生的事件，避免快照与实时事件交错。
-   */
-  attach(port, options) {
-    if (!port) return false;
-    const opts = options || {};
-    this.detach();
-    this.port = port;
-    this.paused = opts.paused === true;
-    this.portListener = (message) => this.emit(message);
-    try {
-      port.onMessage.addListener(this.portListener);
-    } catch (e) {
-      this.port = null;
-      this.portListener = null;
-      return false;
-    }
-    return true;
-  }
-  /** 摘掉终端。传入 port 时只在它仍是当前终端时生效（防止旧 port 的迟到 disconnect 摘掉新 port）。 */
-  detach(port) {
-    if (port && this.port !== port) return;
-    if (this.port && this.portListener) {
-      try {
-        this.port.onMessage.removeListener(this.portListener);
-      } catch (e) {
-      }
-    }
-    this.port = null;
-    this.portListener = null;
-    this.paused = false;
-    this.queued = [];
-  }
-  /** 发给当前页面；没有终端时直接丢弃（runHub 快照仍是权威）。 */
-  postMessage(message) {
-    if (this.paused) {
-      this.queued.push(message);
-      return;
-    }
-    if (!this.port) return;
-    try {
-      this.port.postMessage(message);
-    } catch (e) {
-    }
-  }
-  /** 放行 paused 期间积压的事件（按到达顺序）。 */
-  resume() {
-    this.paused = false;
-    const pending = this.queued.splice(0);
-    for (const message of pending) this.postMessage(message);
-  }
-  /** 把页面发来的消息交给 run 内部监听器（waitForToolApproval 等）。 */
-  emit(message) {
-    for (const listener of [...this.listeners]) {
-      try {
-        listener(message);
-      } catch (e) {
-      }
-    }
-  }
-};
-
 // lib/application/agent/run-registry.ts
 var TabRunRegistryState = class {
   controllers = /* @__PURE__ */ new Map();
@@ -12770,6 +13148,58 @@ function createIndexedDbKeyValueStore(options) {
   return { get, set, remove };
 }
 
+// lib/adapters/chrome/storage.ts
+var ChromeStorageAdapter = class {
+  area;
+  api;
+  constructor(area3, api = {}) {
+    this.area = area3;
+    this.api = api;
+  }
+  get(keys = null) {
+    return new Promise((resolve, reject) => {
+      try {
+        this.area.get(keys, (items) => {
+          const error = this.api.runtime?.lastError;
+          if (error) reject(new Error(error.message || "\u8BFB\u53D6\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+          else resolve(items || {});
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  set(items) {
+    return new Promise((resolve, reject) => {
+      try {
+        this.area.set(items, () => {
+          const error = this.api.runtime?.lastError;
+          if (error) reject(new Error(error.message || "\u5199\u5165\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+          else resolve();
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+  remove(keys) {
+    return new Promise((resolve, reject) => {
+      try {
+        this.area.remove(keys, () => {
+          const error = this.api.runtime?.lastError;
+          if (error) reject(new Error(error.message || "\u5220\u9664\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+          else resolve();
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+};
+function createChromeStorageAdapter(area3, api = typeof chrome !== "undefined" ? chrome : {}) {
+  return new ChromeStorageAdapter(area3, api);
+}
+
 // entries/background.ts
 var agentRunner = createAgentRunner(runAgentStream);
 var persistentPanelStorage = createIndexedDbKeyValueStore({
@@ -12777,6 +13207,8 @@ var persistentPanelStorage = createIndexedDbKeyValueStore({
   storeName: "panel-kv",
   version: 1
 });
+var chromeSessionStorage = createChromeStorageAdapter(chrome.storage.session, chrome);
+var chromeLocalStorage = createChromeStorageAdapter(chrome.storage.local, chrome);
 function isPersistentPanelKey(key) {
   const k = String(key || "");
   return k === PSESS_INDEX_KEY || k === PSESS_ACTIVE_KEY || k.startsWith(PSESS_SESSION_PREFIX);
@@ -12792,7 +13224,7 @@ var panelStorage = {
   async get(keys) {
     if (keys == null) {
       const [sessionData, persistentData] = await Promise.all([
-        chrome.storage.session.get(null),
+        chromeSessionStorage.get(null),
         persistentPanelStorage.get(null).catch(() => ({}))
       ]);
       return Object.assign({}, sessionData || {}, persistentData || {});
@@ -12803,10 +13235,10 @@ var panelStorage = {
       try {
         Object.assign(out, await persistentPanelStorage.get(parts.persistent));
       } catch (e) {
-        Object.assign(out, await chrome.storage.session.get(parts.persistent));
+        Object.assign(out, await chromeSessionStorage.get(parts.persistent));
       }
     }
-    if (parts.session.length) Object.assign(out, await chrome.storage.session.get(parts.session));
+    if (parts.session.length) Object.assign(out, await chromeSessionStorage.get(parts.session));
     return out;
   },
   async set(items) {
@@ -12820,11 +13252,11 @@ var panelStorage = {
     if (Object.keys(persistent).length) {
       jobs.push(
         persistentPanelStorage.set(persistent).catch(async () => {
-          await chrome.storage.session.set(persistent);
+          await chromeSessionStorage.set(persistent);
         })
       );
     }
-    if (Object.keys(session).length) jobs.push(chrome.storage.session.set(session));
+    if (Object.keys(session).length) jobs.push(chromeSessionStorage.set(session));
     await Promise.all(jobs);
   },
   async remove(keys) {
@@ -12832,7 +13264,7 @@ var panelStorage = {
     const jobs = [];
     if (parts.persistent.length) jobs.push(persistentPanelStorage.remove(parts.persistent).catch(() => {
     }));
-    if (parts.session.length) jobs.push(chrome.storage.session.remove(parts.session));
+    if (parts.session.length) jobs.push(chromeSessionStorage.remove(parts.session));
     await Promise.all(jobs);
   }
 };
@@ -12852,13 +13284,13 @@ async function migratePanelStorageToIdb() {
   try {
     const existing = await persistentPanelStorage.get(PSESS_INDEX_KEY);
     if (existing && existing[PSESS_INDEX_KEY]) return;
-    const all = await chrome.storage.session.get(null);
+    const all = await chromeSessionStorage.get(null);
     const persistentKeys = Object.keys(all || {}).filter(isPersistentPanelKey);
     if (!persistentKeys.length) return;
     const items = {};
     for (const key of persistentKeys) items[key] = all[key];
     await persistentPanelStorage.set(items);
-    await chrome.storage.session.remove(persistentKeys);
+    await chromeSessionStorage.remove(persistentKeys);
   } catch (e) {
     console.warn("[RecallFlow] IndexedDB \u4F1A\u8BDD\u8FC1\u79FB\u5931\u8D25\uFF0C\u6682\u7528 session storage:", e?.message);
   }
@@ -12868,7 +13300,7 @@ async function ensurePanelSessions() {
   if (!panelBootstrapPromise) {
     panelBootstrapPromise = (async () => {
       await migratePanelStorageToIdb();
-      const all = await chrome.storage.session.get(null);
+      const all = await chromeSessionStorage.get(null);
       const legacyEntries = Object.keys(all || {}).filter((key) => /^recallflow\.conv\.\d+$/.test(key)).map((key) => ({
         key,
         conversation: all[key] && all[key].conversation || [],
@@ -12877,7 +13309,7 @@ async function ensurePanelSessions() {
       const state2 = await panelSessions.bootstrap({ legacyEntries });
       if (state2 && Array.isArray(state2.migratedKeys) && state2.migratedKeys.length) {
         try {
-          await chrome.storage.session.remove(state2.migratedKeys);
+          await chromeSessionStorage.remove(state2.migratedKeys);
         } catch (e) {
         }
       }
@@ -12954,7 +13386,7 @@ var automationMessageRouter = new AutomationMessageRouter({
     return chromeCallback((done) => chrome.tabs.create(options, () => done()));
   },
   setLocal(items) {
-    return chromeCallback((done) => chrome.storage.local.set(items, () => done()));
+    return chromeLocalStorage.set(items);
   },
   notify(options) {
     return chromeCallback((done) => {
@@ -13197,7 +13629,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab && sender.tab.id;
     if (tabId != null && Array.isArray(msg.conversation)) {
       try {
-        chrome.storage.session.set({ ["recallflow.conv." + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
+        chromeSessionStorage.set({ ["recallflow.conv." + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
       } catch (e) {
       }
     }
@@ -13210,7 +13642,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ conversation: [] });
       return false;
     }
-    chrome.storage.session.get("recallflow.conv." + tabId).then((d) => sendResponse({ conversation: (d["recallflow.conv." + tabId] || {}).conversation || [] })).catch(() => sendResponse({ conversation: [] }));
+    chromeSessionStorage.get("recallflow.conv." + tabId).then((d) => sendResponse({ conversation: (d["recallflow.conv." + tabId] || {}).conversation || [] })).catch(() => sendResponse({ conversation: [] }));
     return true;
   }
   if (msg && msg.type === "handoff:save") {
@@ -13259,7 +13691,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }).catch(() => {
   });
   try {
-    chrome.storage.session.remove("recallflow.conv." + tabId);
+    chromeSessionStorage.remove("recallflow.conv." + tabId);
   } catch (e) {
   }
 });
@@ -13289,359 +13721,26 @@ function scheduleAbortIfNoReattach(runId, tabId) {
 function requestRunStop(params, requesterTabId) {
   return runLifecycle.requestStop(params || {}, requesterTabId);
 }
+var aiStreamDependencies = {
+  runRegistry,
+  runHub,
+  agentRunner,
+  runLifecycle,
+  runStats,
+  registerRunCleanup,
+  clearRunAbortTimer,
+  requestRunStop,
+  scheduleAbortIfNoReattach,
+  loadAgentSession,
+  getAISettings,
+  getBook,
+  buildAiMessages,
+  normalizeHistory,
+  logError
+};
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "ai-stream") return;
-  const senderTabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
-  let controller = null;
-  let attachedRunId = "";
-  const ensureController = () => {
-    if (!controller) {
-      controller = new AbortController();
-      if (senderTabId) runRegistry.setController(senderTabId, controller);
-    }
-    return controller;
-  };
-  port.onDisconnect.addListener(() => {
-    if (attachedRunId) {
-      const channel = runRegistry.channelFor(attachedRunId);
-      if (channel) channel.detach(port);
-      const rec = runRegistry.runFor(senderTabId);
-      if (rec && String(rec.runId || "") === attachedRunId) {
-        scheduleAbortIfNoReattach(attachedRunId, senderTabId);
-        return;
-      }
-    }
-    if (controller && !controller.__rfFinished) {
-      try {
-        runStats.aborts += 1;
-        controller.abort();
-      } catch (e) {
-      }
-    }
-  });
-  port.onMessage.addListener(async (payload) => {
-    let aborted = false;
-    try {
-      if (payload && payload.type === "stop") {
-        const tr = runRegistry.runFor(senderTabId);
-        const stopped = requestRunStop({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
-        if (!stopped.ok && controller && !controller.__rfFinished) {
-          try {
-            runStats.aborts += 1;
-            controller.abort();
-          } catch (e) {
-          }
-        }
-        return;
-      }
-      if (payload && payload.type === "query-run") {
-        const tr = runRegistry.runFor(senderTabId);
-        const reply = (m) => {
-          try {
-            port.postMessage(Object.assign({ type: "run-state" }, m));
-          } catch (e) {
-          }
-        };
-        if (!tr || !tr.resumable || !tr.runId) {
-          reply({ runId: "", resumable: false, live: false, pending: false, instruction: "" });
-          return;
-        }
-        const liveSnapshot = runHub.snapshot(tr.runId);
-        const liveChannel = runRegistry.channelFor(tr.runId);
-        if (liveChannel && liveSnapshot && liveSnapshot.status === "running") {
-          reply({
-            runId: String(tr.runId),
-            resumable: true,
-            live: true,
-            pending: false,
-            instruction: liveSnapshot.instruction || "",
-            snapshot: liveSnapshot
-          });
-          return;
-        }
-        try {
-          const s = await loadAgentSession(tr.runId);
-          if (!s) {
-            reply({ runId: "", resumable: false, live: false, pending: true, instruction: "" });
-            return;
-          }
-          const instruction = String(s.instruction || "");
-          const dead = ["completed", "failed", "cancelled", "timeout"].includes(s.status);
-          const snapshot = runHub.snapshot(tr.runId);
-          reply({
-            runId: instruction && !dead ? tr.runId : "",
-            resumable: Boolean(instruction) && !dead,
-            live: false,
-            finished: Boolean(dead || !instruction),
-            pending: false,
-            instruction,
-            snapshot: snapshot || null
-          });
-        } catch (e) {
-          reply({ runId: "", resumable: false, live: false, pending: false, instruction: "" });
-        }
-        return;
-      }
-      if (payload && payload.type === "reattach") {
-        const runId = String(payload.runId || "");
-        const channel = runId ? runRegistry.channelFor(runId) : null;
-        const snapshot = runId ? runHub.snapshot(runId) : null;
-        const attachFailed = (reason) => {
-          try {
-            port.postMessage({ type: "reattach-failed", runId, reason, snapshot });
-          } catch (e) {
-          }
-        };
-        if (!runId || !channel || !snapshot || snapshot.status !== "running") {
-          attachFailed(snapshot ? "\u8BE5\u4EFB\u52A1\u5DF2\u7ED3\u675F" : "\u6CA1\u6709\u53EF\u63A5\u7BA1\u7684\u8FD0\u884C");
-          return;
-        }
-        clearRunAbortTimer(runId);
-        attachedRunId = runId;
-        runStats.reattaches += 1;
-        if (!channel.attach(port, { paused: true })) {
-          attachFailed("\u65E0\u6CD5\u7ED1\u5B9A\u9875\u9762\u8FDE\u63A5");
-          return;
-        }
-        try {
-          port.postMessage({
-            type: "reattached",
-            runId,
-            sessionId: snapshot.sessionId,
-            snapshot
-          });
-        } catch (e) {
-          attachFailed("\u9875\u9762\u8FDE\u63A5\u5DF2\u65AD\u5F00");
-          return;
-        }
-        channel.resume();
-        return;
-      }
-      if (payload && payload.type === "tool-approval") return;
-      if (payload && payload.type === "keepalive") return;
-      if (payload && payload.type === "e2e-drop-port") {
-        try {
-          runStats.aborts += 1;
-          if (controller) controller.abort();
-        } catch (e) {
-        }
-        setTimeout(() => {
-          try {
-            port.disconnect();
-          } catch (e) {
-          }
-        }, 120);
-        return;
-      }
-      if (payload && payload.type === "session-ready") {
-        let ready = false;
-        try {
-          ready = Boolean(await loadAgentSession(String(payload.runId || "")));
-        } catch (e) {
-          ready = false;
-        }
-        try {
-          port.postMessage({ type: "session-ready", ready });
-        } catch (e) {
-        }
-        return;
-      }
-      const settings = await getAISettings();
-      if (!settings.apiKey) {
-        port.postMessage({ type: "error", needSetup: true, error: "\u5C1A\u672A\u914D\u7F6E API Key\uFF0C\u8BF7\u70B9\u51FB\u63D2\u4EF6\u56FE\u6807 \u2192 \u8BBE\u7F6E\u9875\u586B\u5199\u3002" });
-        return;
-      }
-      const book = await getBook();
-      if (payload.action === "agent") {
-        const tabId = port.sender && port.sender.tab && port.sender.tab.id;
-        const runId = payload.runId || "run-" + Date.now().toString(36);
-        payload.runId = runId;
-        const sessionId = String(payload.sessionId || "");
-        const liveSnapshot = runHub.snapshot(runId);
-        const existingChannel = runRegistry.channelFor(runId);
-        if (existingChannel && liveSnapshot && liveSnapshot.status === "running") {
-          clearRunAbortTimer(runId);
-          runStats.reattaches += 1;
-          attachedRunId = String(runId);
-          if (existingChannel.attach(port, { paused: true })) {
-            try {
-              port.postMessage({
-                type: "reattached",
-                runId,
-                sessionId: liveSnapshot.sessionId || sessionId,
-                snapshot: liveSnapshot
-              });
-            } catch (e) {
-            }
-            existingChannel.resume();
-          }
-          return;
-        }
-        console.log("[RecallFlow] agent run start:", (payload.question || "").slice(0, 40), "tabId=" + tabId, "session=" + sessionId);
-        runStats.starts += 1;
-        const channel = existingChannel || new RunChannel();
-        runRegistry.setChannel(runId, channel);
-        const runController = ensureController();
-        if (!channel.attach(port, {})) {
-          port.postMessage({ type: "error", error: "\u65E0\u6CD5\u7ED1\u5B9A Agent \u8F93\u51FA\u901A\u9053\u3002" });
-          return;
-        }
-        attachedRunId = String(runId);
-        if (tabId) {
-          runRegistry.setRun(tabId, {
-            runId,
-            resumable: true,
-            sessionId,
-            channel,
-            controller: runController
-          });
-        }
-        if (sessionId) {
-          runHub.begin({
-            runId,
-            sessionId,
-            ownerTabId: tabId,
-            instruction: payload.question || payload.text || ""
-          });
-        }
-        try {
-          await agentRunner.run({
-            port: channel,
-            payload,
-            settings,
-            book,
-            signal: runController.signal,
-            tabId,
-            observeEvent: (event) => {
-              if (event && event.type === "tabs-close-pending") registerRunCleanup(runId, event);
-              if (sessionId) {
-                try {
-                  runHub.push(runId, event);
-                } catch (e) {
-                  runStats.hubErrors = (runStats.hubErrors || 0) + 1;
-                  runStats.lastHubError = String(e?.message || e);
-                }
-              }
-            }
-          });
-          console.log("[RecallFlow] agent run finished");
-          if (sessionId) runHub.finish(runId, runController.signal.aborted ? "cancelled" : "completed");
-          runController.__rfFinished = true;
-          clearRunAbortTimer(runId);
-          runRegistry.deleteChannel(runId);
-          attachedRunId = "";
-        } catch (e) {
-          const detail = e?.stack || String(e);
-          console.error("[RecallFlow] agent run error:", detail);
-          try {
-            port.postMessage({ type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
-          } catch (err) {
-          }
-          try {
-            port.postMessage({ type: "end" });
-          } catch (err) {
-          }
-          if (sessionId) {
-            runHub.push(runId, { type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
-            runHub.push(runId, { type: "end" });
-            runHub.finish(runId, runController.signal.aborted ? "cancelled" : "failed");
-          }
-          runController.__rfFinished = true;
-          clearRunAbortTimer(runId);
-          runRegistry.deleteChannel(runId);
-          attachedRunId = "";
-        }
-        return;
-      }
-      const messages = buildAiMessages(payload.action, payload, settings, book, normalizeHistory);
-      if (!messages) {
-        port.postMessage({ type: "error", error: "\u672A\u77E5\u64CD\u4F5C\uFF1A" + payload.action });
-        return;
-      }
-      if (messages._citations && messages._citations.length) {
-        port.postMessage({ type: "citations", citations: messages._citations });
-      }
-      const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
-      try {
-        sanitizeMessages(messages);
-      } catch (e) {
-      }
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + settings.apiKey
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          messages,
-          temperature: 0.3,
-          stream: true
-        }),
-        // 非 agent 分支没有 ensureController()，这里保留原有行为（null 时照旧抛错），
-        // 类型迁移批不改语义；见交付评论的「已知遗留」。
-        signal: controller.signal
-      });
-      if (!resp.ok) {
-        let detail = "";
-        try {
-          const j = await resp.json();
-          detail = j.error && j.error.message ? j.error.message : JSON.stringify(j);
-        } catch (e) {
-          detail = await resp.text();
-        }
-        port.postMessage({ type: "error", error: "DeepSeek \u8BF7\u6C42\u5931\u8D25 (" + resp.status + "): " + detail });
-        return;
-      }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-          const data = trimmed.slice(5).trim();
-          if (data === "[DONE]") continue;
-          try {
-            const json = JSON.parse(data);
-            const delta = json.choices && json.choices[0] && json.choices[0].delta;
-            if (delta && delta.content) {
-              port.postMessage({ type: "chunk", text: delta.content });
-            }
-          } catch (e) {
-            logError("Failed to parse SSE chunk", { data, error: e.message });
-          }
-        }
-      }
-      if (buffer.trim()) {
-        const trimmed = buffer.trim();
-        if (trimmed.startsWith("data:")) {
-          const data = trimmed.slice(5).trim();
-          if (data !== "[DONE]") {
-            try {
-              const json = JSON.parse(data);
-              const delta = json.choices && json.choices[0] && json.choices[0].delta;
-              if (delta && delta.content) {
-                port.postMessage({ type: "chunk", text: delta.content });
-              }
-            } catch (e) {
-              logError("Failed to parse final SSE chunk", { data, error: e.message });
-            }
-          }
-        }
-      }
-      aborted = Boolean(controller && controller.signal.aborted);
-      if (!aborted) port.postMessage({ type: "end" });
-    } catch (e) {
-      if (aborted) return;
-      port.postMessage({ type: "error", error: e.message });
-    }
-  });
+  handleAiStreamConnection(port, aiStreamDependencies);
 });
 startMcpRelay();
 initTargetManager();

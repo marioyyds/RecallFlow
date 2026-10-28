@@ -245,9 +245,9 @@ test('④ 出站消毒：历史里的孤立代理在发送前被清掉，且历�
 test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片点都用安全切片', () => {
   const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
   const paths = [
-    ['lib/assistant/agent.ts', read('lib/assistant/agent.ts')],
+    ['lib/application/agent/stream-step.ts', read('lib/application/agent/stream-step.ts')],
     ['lib/assistant/llm.ts', read('lib/assistant/llm.ts')],
-    ['entries/background.ts', read('entries/background.ts')],
+    ['lib/application/background/ai-stream-router.ts', read('lib/application/background/ai-stream-router.ts')],
   ];
   for (const [name, src] of paths) {
     // 迁移期：specifier 可能是 `.js` 或 `.ts`（模块改名后 import 侧跟着改），两种都认。

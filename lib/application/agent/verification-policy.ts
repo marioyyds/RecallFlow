@@ -15,9 +15,9 @@ export const EVIDENCE_READ_TOOLS = new Set([
 
 const EVIDENCE_RECEIPT_CHARS = 1800;
 
-function changesState(metadata: any) {
-  if (!metadata) return true;
-  return metadata.readOnly !== true && metadata.mutatesState !== false;
+function changesState(md: any) {
+  if (!md) return true;
+  return md.readOnly !== true && md.mutatesState !== false;
 }
 
 /**

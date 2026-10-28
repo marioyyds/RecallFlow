@@ -193,7 +193,7 @@ const TARGETS = [
     ],
   },
   {
-    // 面板 UI：这是 4900 行、长期零 import 的那个文件。目标是证明
+    // 面板 UI：这是长期零 import 的那个文件。目标是证明
     // tests/chat-panel-smoke.test.mjs 里那几条"真建 DOM"的断言不是摆样子。
     file: 'lib/page/chat.ts',
     mode: 'inplace',
@@ -260,7 +260,7 @@ const TARGETS = [
   },
   {
     // 发送/停止按钮的状态派生：四种组合里三种写错都不报错，只会「用起来怪」。
-    file: 'lib/page/chat.ts',
+    file: 'lib/application/panel/run-controls.ts',
     mode: 'inplace',
     test: 'tests/chat-run-controls.test.mjs',
     mutations: [
@@ -376,7 +376,7 @@ const TARGETS = [
     // 完成校验的结局分派（classifyVerifyOutcome）：把「中断」误读成「校验器故障」的后果是
     // 用户按了停止、记录里却写着任务已完成（详见 tests/llm-abort-retry.test.mjs）。
     // 单独一个 target 是因为它属于另一个测试文件（变异脚本一次只跑一个目标测试）。
-    file: 'lib/assistant/agent.ts',
+    file: 'lib/application/agent/verification-policy.ts',
     mode: 'inplace',
     test: 'tests/llm-abort-retry.test.mjs',
     mutations: [
@@ -392,7 +392,7 @@ const TARGETS = [
   {
     // 存活看门狗：判定"任务是不是卡死了"，它决定要不要强制收尾。
     // 阈值边界（>= 还是 >）差一格，表现为"卡死任务多跑一轮或少跑一轮"，极难肉眼发现。
-    file: 'lib/assistant/agent.ts',
+    file: 'lib/application/agent/verification-policy.ts',
     mode: 'inplace',
     test: 'tests/silent-failure-regressions.test.mjs',
     mutations: [
@@ -455,7 +455,7 @@ const TARGETS = [
   {
     // 任务性质分派（classifyTaskKind）：它决定完成校验问哪一种问题。
     // 判成 mutation 而实际是纯读取，研究类任务会在长页面上被反复判未达成。
-    file: 'lib/assistant/agent.ts',
+    file: 'lib/application/agent/verification-policy.ts',
     mode: 'inplace',
     test: 'tests/completion-evidence.test.mjs',
     mutations: [

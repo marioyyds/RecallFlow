@@ -58,7 +58,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-export const SIZE_BUDGET_BYTES = 452 * 1024;
+// 2026-10-29: +2KB for extracted panel theme/progress/screenshot controllers and
+// command collaborators. They replace module-level state in chat.ts/commands.ts
+// without adding a dependency; this keeps a ~1KB guard above the measured 453KB.
+export const SIZE_BUDGET_BYTES = 454 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

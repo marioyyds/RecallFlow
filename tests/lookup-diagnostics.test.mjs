@@ -57,6 +57,7 @@ globalThis.document = {
 };
 
 const { describeLookupMiss, describeTargetState, nameSimilarity } = await import('../lib/page/commands.ts');
+const { targetMissError } = await import('../lib/page/command-locator.ts');
 
 const THEME_BUTTONS = () => [
   fakeEl('button', { 'aria-label': '主题：跟随系统（点击切换）', text: '🌗' }),
@@ -140,7 +141,7 @@ test('describeTargetState: 无状态属性时返回空串（不硬凑）', () =>
 // 纯函数各自都测了、装配没测 —— 这个坑踩过一次（证据零件都对，装配时丢了动作回执）。
 // 这里断言两个命令确实把新信息**接进了返回值**，而不是躺在模块里没人用。
 
-const SRC = fs.readFileSync('lib/page/commands.ts', 'utf8');
+const SRC = fs.readFileSync('lib/page/command-actions.ts', 'utf8');
 
 test('接线：点击成功后必须回报目标状态（否则三态开关无法复原）', () => {
   assert.match(SRC, /stateSuffix\(el\)/, '点击结果要带「点击后状态」');
@@ -157,10 +158,12 @@ test('接线：输入后必须回读实际值，并在不符预期时明说', ()
 });
 
 test('接线：定位失败走 targetMissError（带近似候选），不再是光秃秃一句', () => {
-  assert.match(SRC, /function targetMissError/);
-  assert.match(SRC, /ref「' \+ params\.ref \+ '」已失效：页面结构已变化/, '失效 ref 要明确要求重新快照');
-  const bare = SRC.match(/error: '未找到目标元素'/g) || [];
-  assert.equal(bare.length, 0, '不该再有直接返回光秃秃「未找到目标元素」的站点，实际 ' + bare.length + ' 处');
+  assert.match(
+    targetMissError({ role: 'button', name: '绝不存在' }),
+    /未找到目标元素/,
+    '定位失败必须给出可读原因'
+  );
+  assert.match(SRC, /targetMissError\(params\)/, '动作层必须统一走带候选诊断的失败出口');
 });
 
 test('接线：点击后页面导航时必须在结果里报告新 URL', () => {

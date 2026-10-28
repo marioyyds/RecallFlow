@@ -10,6 +10,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 import { VERIFIER_SYSTEM } from '../lib/assistant/verifier.ts';
+import {
+  EVIDENCE_READ_TOOLS,
+  buildVerificationEvidence,
+} from '../lib/application/agent/verification-policy.ts';
 
 // ---------------------------------------------------------------- 提示词判据
 
@@ -54,8 +58,6 @@ test('提示词保留「不要因为 Agent 说完成就采信」', () => {
 
 const src = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
-const policySrc = fs.readFileSync('lib/application/agent/verification-policy.ts', 'utf8');
-const policyLines = policySrc.split('\n').map((l) => l.replace(/\r$/, ''));
 
 function indexOfLine(pattern, from = 0) {
   const i = lines.findIndex((l, idx) => idx >= from && l.includes(pattern));
@@ -68,17 +70,8 @@ function sliceBetween(startMarker, endMarker) {
   return lines.slice(s, e).join('\n');
 }
 
-function slicePolicyBetween(startMarker, endMarker) {
-  const s = policyLines.findIndex((line) => line.includes(startMarker));
-  assert.notEqual(s, -1, '找不到：' + startMarker);
-  const e = policyLines.findIndex((line, idx) => idx > s && line.includes(endMarker));
-  assert.notEqual(e, -1, '找不到：' + endMarker);
-  return policyLines.slice(s, e).join('\n');
-}
-
 test('expand_result 必须算作读类证据（模型读到的内容不能被排除）', () => {
-  const block = slicePolicyBetween('const EVIDENCE_READ_TOOLS', ']');
-  assert.match(block, /expand_result/, 'expand_result 读出的正是模型看到的内容，不纳入就会「证据与所见对不上」');
+  assert.ok(EVIDENCE_READ_TOOLS.has('expand_result'), 'expand_result 读出的正是模型看到的内容，不纳入就会「证据与所见对不上」');
 });
 
 test('读类工具要单独留存**全文**（截断之前的原始结果）', () => {
@@ -98,18 +91,25 @@ test('留存全文必须发生在截断之前', () => {
 });
 
 test('完成校验改用按事实定位片段，而不是固定窗口', () => {
-  const fn = slicePolicyBetween('export function buildVerificationEvidence', 'export function verifyEvidenceSignature');
-  assert.match(fn, /selectEvidence\(/, '必须走 selectEvidence');
-  assert.match(fn, /fullText: ctx\.lastReadFullText/, '要把全文交给证据选择');
-  assert.ok(!/lastEvidence\)\.slice\(0, 2500\)/.test(fn), '不应再退回到固定窗口截断');
-  assert.match(fn, /coverage/, '覆盖率标注必须一并给出（否则校验方会高估证据完整度）');
+  const evidence = buildVerificationEvidence(
+    {
+      lastEvidence: '动作回执',
+      lastReadFullText: '页首 ' + '填充'.repeat(5000) + ' 关键事实 NEEDLE-1234 页尾',
+    },
+    '结论依据 NEEDLE-1234'
+  );
+  assert.match(evidence, /NEEDLE-1234/, '必须按结论里的事实定位片段');
+  assert.match(evidence, /片段|覆盖/, '覆盖率标注必须一并给出（否则校验方会高估证据完整度）');
 });
 
 test('证据必须**同时**含动作回执与页面片段（曾经只用后者，回执被挤掉）', () => {
-  const fn = slicePolicyBetween('export function buildVerificationEvidence', 'export function verifyEvidenceSignature');
-  assert.match(fn, /ctx\.lastEvidence/, '动作回执必须进证据 —— 它回答「刚刚做了什么」');
-  assert.match(fn, /selectEvidence\(/, '页面片段也必须进证据 —— 它回答「结论与页面是否一致」');
-  assert.match(fn, /最近一次动作的回执/, '两份证据要标注来源，否则校验方分不清哪句是页面原文');
+  const evidence = buildVerificationEvidence(
+    { lastEvidence: 'annotate 已执行', lastReadFullText: '页面事实 NEEDLE-1234' },
+    '依据 NEEDLE-1234'
+  );
+  assert.match(evidence, /annotate 已执行/, '动作回执必须进证据 —— 它回答「刚刚做了什么」');
+  assert.match(evidence, /页面事实 NEEDLE-1234/, '页面片段也必须进证据 —— 它回答「结论与页面是否一致」');
+  assert.match(evidence, /最近一次动作的回执/, '两份证据要标注来源，否则校验方分不清哪句是页面原文');
 });
 
 test('校验调用的入口走 buildVerificationEvidence', () => {

@@ -12,9 +12,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { thinkLabelText } from '../lib/ui/panel/conversation-format.ts';
 
 const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
-const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+const agentSrc = fs.readFileSync('lib/application/agent/stream-step.ts', 'utf8');
 const cssSrc = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
 const bundle = fs.readFileSync('content.js', 'utf8');
 
@@ -175,8 +176,7 @@ test('chat.js：重建出来的思考块也要能点开（开合必须是委托�
 test('chat.js：被持久化截断的思考必须标明（丢东西要说明）', () => {
   // clipPart 会按 MAX_PART_TEXT_CHARS 裁掉超长思维链。若重建后当成完整全文展示，
   // 用户会以为模型只想到这儿 —— 那正是本仓库最忌的"静默丢失"。
-  assert.match(chatSrc, /function thinkLabelText\(done: any, len: any, truncated: any\)/, '文案要有唯一来源');
-  assert.match(chatSrc, /保存时已截断/, '截断必须有一句可读的标注');
+  assert.match(thinkLabelText(true, 100, true), /保存时已截断/, '截断必须有一句可读的标注');
   const restore = chatSrc.slice(chatSrc.indexOf('function partHtml('));
   assert.match(restore.slice(0, 6000), /truncated: p\.textTruncated === true/, '重建时要把 parts 上的截断标记传进去');
 });
@@ -335,12 +335,6 @@ test('chat.js：流式重开时「停止 / 发送」的初值必须跟着 stream
   // 派生逻辑抽成纯函数 computeRunControls 之后，盯着渲染函数逐字匹配只会逼后来者
   // 把代码写成某个形状；而这条用例真正要守的性质（owner 与跟随页共用同一个入口）
   // 现在由 tests/chat-run-controls.test.mjs 的**行为**断言直接钉住（6 条 + 4 个变异算子）。
-  const stateAt = chatSrc.indexOf('export function computeRunControls(');
-  assert.ok(stateAt >= 0, '应有统一的运行控件状态入口');
-  const stateBody = chatSrc.slice(stateAt, chatSrc.indexOf('\n}', stateAt) + 2);
-  assert.match(stateBody, /src\.streaming \|\| followingRunning/, '运行态必须同时覆盖 owner 与跟随页');
-  assert.match(stateBody, /showStop: running/, '停止按钮要由运行态决定');
-  assert.match(stateBody, /sendDisabled: running/, '"发送"同样由运行态决定');
   // 统一入口必须真的被渲染函数调用 —— 否则它可以是个没人用的死函数，上面几条就白守了
   const renderAt = chatSrc.indexOf('function updateRunControlState(');
   assert.ok(renderAt >= 0);

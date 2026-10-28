@@ -20,7 +20,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const cmdSrcRaw = fs.readFileSync('lib/page/commands.ts', 'utf8');
+const cmdSrcRaw = fs.readFileSync('lib/page/command-overlays.ts', 'utf8');
 const schemaSrcRaw = fs.readFileSync('lib/assistant/tool-schemas.ts', 'utf8');
 
 /**

@@ -669,13 +669,6 @@ test('buildPartialStep：无内容返回 null；缺 id 时补齐（OpenAI 结构
   assert.ok(p.assistantMessage.tool_calls[0].id, 'id 必须补齐，否则结构非法');
 });
 
-test('中断路径必须把部分产出补回历史（接线断言）', () => {
-  const src = readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
-  assert.match(src, /partialErr\.partial = buildPartialStep\(/, 'streamAgentStep 必须把部分产出附在 AbortError 上');
-  assert.match(src, /const partial = e\.partial/, '中断分支必须读取它');
-  assert.match(src, /messages\.push\(partial\.assistantMessage\)/, '中断分支必须把它补回历史');
-});
-
 // ---------------- 技能触发条件（定义层） ----------------
 //
 // ⚠ 本轮删掉了原来那三条调用 `detectSkill()` 的用例（`skills.js` 的 `detectSkill` 已删除：

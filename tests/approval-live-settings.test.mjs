@@ -101,19 +101,6 @@ test('串行路径：审批判断前必须现读，且判断用的是现读结�
   assert.ok(!/approvalSettings = await readLiveApprovalSettings/.test(bad), '朴素写法不含现读，应判不合格');
 });
 
-test('并行预执行路径：审批判断必须用现读结果，而不是 o.settings', () => {
-  // 这条路更要紧：它决定"这个调用能不能先跑掉"。
-  // 若沿用快照而用户中途把某类别改回「需要确认」，这里会以为无需审批而**直接执行**。
-  const at = agentSrc.indexOf('shouldSkip: (');
-  assert.ok(at > -1, '应能找到并行路径的 shouldSkip');
-  const body = agentSrc.slice(at, at + 700);
-  assert.match(body, /toolNeedsApproval\(name, o\.approvalSettings,/, 'shouldSkip 必须用 o.approvalSettings');
-  assert.ok(!/toolNeedsApproval\(name, o\.settings,/.test(body), '不得再直接用 o.settings 判断审批');
-  // 并且它必须在那之前被赋值（现读）
-  const assignAt = agentSrc.indexOf('o.approvalSettings = await readLiveApprovalSettings(o.settings)');
-  assert.ok(assignAt > -1 && assignAt < at, 'o.approvalSettings 必须在 planParallelGroups 之前赋值');
-});
-
 test('代码执行审批的会话放行也读现读结果（同一个坑的第三个入口）', () => {
   const at = agentSrc.indexOf('const allowSession =');
   assert.ok(at > -1);

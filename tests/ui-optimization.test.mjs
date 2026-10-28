@@ -17,7 +17,7 @@ const skills = fs.readFileSync('entries/skills-page.ts', 'utf8');
 const skillsHtml = fs.readFileSync('skills.html', 'utf8');
 const popupHtml = fs.readFileSync('popup.html', 'utf8');
 const popup = fs.readFileSync('entries/popup.ts', 'utf8');
-const background = fs.readFileSync('entries/background.ts', 'utf8');
+const panelRouter = fs.readFileSync('lib/application/background/panel-router.ts', 'utf8');
 const managerHtml = fs.readFileSync('manager.html', 'utf8');
 
 test('对话输入框：输入法组词阶段的 Enter 不得发送消息', () => {
@@ -83,9 +83,9 @@ test('技能页：有搜索、来源/分类筛选，卡片正文按需展开', (
 
 test('Popup：助手入口使用显式网页 tabId，避免 popup 关闭时删掉面板成员', () => {
   assert.match(popup, /panel:open-active/);
-  assert.match(background, /msg\.type === 'panel:open-active'/);
-  assert.match(background, /const requestedTabId = Number\(msg\.tabId\)/);
-  assert.match(background, /broadcastPanelUi\(result\.ui, null\)/);
+  assert.match(panelRouter, /type === 'panel:open-active'/);
+  assert.match(panelRouter, /const requested = Number\(message\.tabId\)/);
+  assert.match(panelRouter, /broadcastUi\(result\.ui, null\)/);
 });
 
 test('Popup：最近收录只展示固定条数，并引导到知识库查看全部', () => {

@@ -29,7 +29,7 @@ function sliceBetween(startMarker, endMarker) {
 }
 
 test('计划渲染到输入框上方的计划条，而不是助手消息里', () => {
-  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   assert.match(fn, /planBar/, 'renderPlan 应写入 planBar');
   assert.ok(!/pendingAiMsg/.test(fn), 'renderPlan 不应再往助手消息里插计划');
 });
@@ -59,21 +59,21 @@ test('计划条的展开状态必须是**三态**，且默认收起', () => {
   // 因为它先前用「限高 + 内层滚动条」处理步骤过多，那个方案已被否掉。
   // 类型标注是 TS 迁移（TITA-75）加的：允许可选的 `: T`，初值仍必须是 null。
   assert.match(src, /let planExpanded(?::[^=]+)? = null;/, '初值必须是「未表态」的 null，不能是 true');
-  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   assert.match(fn, /const collapsed = planExpanded !== true;/, '未表态时必须收起');
   // 点击处理器在 openPanel 里（不在 renderPlan 内），所以对全文断言。
   assert.match(src, /planExpanded = planBar\.classList\.contains\('collapsed'\);/, '点击切换要写回显式选择');
 });
 
 test('计划条只在「完成 ↔ 进行中」切换时回到默认，不打断用户的展开', () => {
-  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   // 若写成 `if (!allDone) planExpanded = null;`，用户展开后每一次计划更新都会把它收回去。
   assert.match(fn, /if \(allDone !== planWasAllDone\) planExpanded = null;/, '只在状态切换时归零');
   assert.ok(!/if \(!allDone\) planExpanded = null;/.test(fn), '不该每次未完成都强制归零');
 });
 
 test('计划条：收起那一行必须带上「进度 + 当前步骤」（信息量不能因收起而丢）', () => {
-  const fn = sliceBetween('function renderPlan', 'function summarizeToolParts');
+  const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   assert.match(fn, /doneCount \+\s*'\/' \+\s*total/, '要显示进度');
   assert.match(fn, /current \? ' · ▶ ' \+/, '要显示当前正在做的那一步');
   assert.match(fn, /步已完成/, '全部完成时给出完成文案');

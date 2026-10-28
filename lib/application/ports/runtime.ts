@@ -1,5 +1,7 @@
+import type { GenericRuntimeMessage } from '../contracts/messages.ts';
+
 export interface RuntimePort {
-  request<T = Record<string, unknown>>(message: Record<string, unknown>): Promise<T>;
+  request<T = Record<string, unknown>>(message: GenericRuntimeMessage): Promise<T>;
 }
 
 export const UNAVAILABLE_RUNTIME_PORT: RuntimePort = {
