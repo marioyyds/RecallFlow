@@ -90,10 +90,10 @@ export function parseSearchResults(html: string, engine: string) {
  * 于是不同内核给出的文案不一样（实测 Chrome：`signal is aborted without reason`）。
  * 只认 `e.name === 'AbortError'` 会漏掉一部分，只认文案又会绑死某个内核 —— 两者都认。
  */
-export function isAbortLikeError(e: { name?: string; message?: string } | null | undefined) {
+export function isAbortLikeError(e: unknown) {
   if (!e) return false;
-  if (e.name === 'AbortError') return true;
-  return /signal is aborted|user aborted|operation was aborted|aborted without reason/i.test(String(e.message || ''));
+  if ((e as { name?: string }).name === 'AbortError') return true;
+  return /signal is aborted|user aborted|operation was aborted|aborted without reason/i.test(String((e as { message?: string }).message || ''));
 }
 
 /**
@@ -107,7 +107,7 @@ export function isAbortLikeError(e: { name?: string; message?: string } | null |
  * 并写进了给用户的报告 —— 而真相是**15 秒没响应、我们根本没拿到任何内容**，
  * 所以那时它**无从判断**页面类型。**错误归因比没有归因更糟。**
  */
-export function describeFetchError(e: { name?: string; message?: string } | null | undefined, url: string, timeoutMs: number) {
+export function describeFetchError(e: unknown, url: string, timeoutMs: number) {
   const u = String(url || '');
   if (isAbortLikeError(e)) {
     const secs = Math.round((Number(timeoutMs) || 15000) / 1000);
@@ -118,7 +118,7 @@ export function describeFetchError(e: { name?: string; message?: string } | null
       '或换用其它来源。同一 URL 稍后仍可重试。'
     );
   }
-  const raw = e && e.message ? e.message : e === undefined || e === null ? '未知错误' : String(e);
+  const raw = e && (e as { message?: string }).message ? (e as { message?: string }).message : e === undefined || e === null ? '未知错误' : String(e);
   return (
     '抓取网页失败：' + raw + '。请改用 open_tab 打开读取，或换用其它来源；不要反复重试该 URL。' +
     '（若为目标站跨域，请将其域名加入 manifest.json 的 host_permissions；或改用 MCP fetch 服务器以突破浏览器跨域限制）'

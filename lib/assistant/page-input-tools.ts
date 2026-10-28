@@ -69,7 +69,7 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
     const text = String(args.value == null ? '' : args.value);
-    const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, Number(typeFrame));
+    const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
     const expected = args.clearFirst === true ? text : String(beforeValue == null ? '' : beforeValue) + text;
     if (args.clearFirst === true) await deps.cdp.pressKey(deps.ctx.tabId, 'a', ['CTRL']);
     let strategy = 'cdp-insertText';
@@ -85,12 +85,12 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
     } else {
       await deps.cdp.insertText(deps.ctx.tabId, text);
     }
-    const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, Number(typeFrame));
+    const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
     const summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
     const verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
     if (verified) deps.rememberTarget(deps.ctx, target);
     const before = deps.ctx.lastSnapshot || null;
-    const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1000, frameId: isSubframe && typeFrame ? typeFrame : undefined }).catch(() => null);
+    const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1000, frameId: isSubframe ? (typeFrame as number) : undefined }).catch(() => null);
     const result = {
       ok: verified,
       partial: !verified,

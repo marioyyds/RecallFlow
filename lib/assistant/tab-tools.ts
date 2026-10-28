@@ -154,7 +154,7 @@ export async function openTab(deps: TabDeps, args: Record<string, unknown>) {
     if (!forceNew) {
       const existing = await deps.chrome.tabs.query({ url }).catch(() => []);
       const hit = Array.isArray(existing) && existing.find((t) => t.id && /^https?:/i.test(t.url || ''));
-      if (hit && hit.id) {
+      if (hit) {
         const alreadyActive = Number(ctx.tabId) === Number(hit.id) && hit.active !== false;
         const budget = tabSwitchBudget(ctx);
         let activated = false;
@@ -164,21 +164,21 @@ export async function openTab(deps: TabDeps, args: Record<string, unknown>) {
           if (budget.exhausted) {
             switchSuppressed = true;
           } else {
-            await deps.chrome.tabs.update(hit.id, { active: true });
+            await deps.chrome.tabs.update(hit.id as number, { active: true });
             countTabSwitch(ctx);
             activated = true;
           }
         }
-        const snapshot = await deps.waitForTabReady(hit.id, 5000);
-        const current = await deps.chrome.tabs.get(hit.id).catch(() => hit);
+        const snapshot = await deps.waitForTabReady(hit.id as number, 5000);
+        const current = await deps.chrome.tabs.get(hit.id as number).catch(() => hit);
         const targetTab = {
           tabId: hit.id,
           windowId: current.windowId || hit.windowId,
           title: current.title || hit.title || '',
-          url: String(current.url || hit.url || url),
+          url: current.url || hit.url || url,
           ready: Boolean(snapshot),
         };
-        deps.bindSessionTab(hit.id);
+        deps.bindSessionTab(hit.id as number);
         return {
           ok: true,
           reused: true,
@@ -229,7 +229,7 @@ export async function openTab(deps: TabDeps, args: Record<string, unknown>) {
       tabId: t.id,
       windowId: current.windowId || t.windowId,
       title: current.title || t.title || '',
-      url: String(current.url || t.url || (args && args.url) || ''),
+      url: current.url || t.url || ((args && args.url) as string) || '',
       ready: Boolean(snapshot),
     };
     return {

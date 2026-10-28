@@ -22,7 +22,7 @@ export async function readConsole(sendTabMessage: SendTabMessage, tabId: number,
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: '暂无 console 记录。' };
-    const text = entries.map((e) => '[' + String(e.level) + '] ' + String(e.text) + (e.stack ? '\n' + String(e.stack) : '')).join('\n');
+    const text = entries.map((e) => '[' + (e.level as string) + '] ' + (e.text as string) + (e.stack ? '\n' + (e.stack as string) : '')).join('\n');
     return { ok: true, result: '最近 console 记录（' + entries.length + ' 条）：\n' + text };
   } catch (e) {
     return { ok: false, result: '读取 console 失败：' + (e as Caught).message };
@@ -44,8 +44,8 @@ export async function readNetwork(sendTabMessage: SendTabMessage, tabId: number,
     if (!entries.length) return { ok: true, result: '暂无网络请求记录。' };
     const text = entries
       .map((e) => {
-        const head = (e.method || 'GET') + ' ' + (e.error ? 'ERR' : (e.status || '')) + ' ' + String(e.url) + (e.ms != null ? ' (' + e.ms + 'ms)' : '') + (e.error ? ' — ' + e.error : '');
-        const init = e.initiator ? String(e.initiator).split('\n').slice(0, 2).join(' ') : '';
+        const head = (e.method || 'GET') + ' ' + (e.error ? 'ERR' : (e.status || '')) + ' ' + (e.url as string) + (e.ms != null ? ' (' + e.ms + 'ms)' : '') + (e.error ? ' — ' + e.error : '');
+        const init = e.initiator ? (e.initiator as string).split('\n').slice(0, 2).join(' ') : '';
         return head + (init ? '\n  发起于: ' + init : '');
       })
       .join('\n');

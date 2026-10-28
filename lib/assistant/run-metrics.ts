@@ -20,7 +20,7 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
   const complete = (list.find((e) => e && e.phase === 'complete') || {}) as TraceRecordEntry;
 
   const byTool: Record<string, number> = {};
-  for (const t of tools) byTool[String(t.name)] = (byTool[String(t.name)] || 0) + 1;
+  for (const t of tools) byTool[t.name as string] = (byTool[t.name as string] || 0) + 1;
 
   const hit = cache.reduce((n, e) => n + num(e.hit), 0);
   const miss = cache.reduce((n, e) => n + num(e.miss), 0);

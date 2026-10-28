@@ -56,9 +56,8 @@ export function planFrameBatches(targets: unknown) {
   const groups = new Map<number, Array<{ at: number; target: Record<string, unknown> }>>();
   list.forEach((t, i) => {
     const frameId = frameIdFromArgs(t) || 0;
-    const bucket = groups.get(frameId);
-    if (bucket) bucket.push({ at: i, target: localTargetArgs(t) });
-    else groups.set(frameId, [{ at: i, target: localTargetArgs(t) }]);
+    if (!groups.has(frameId)) groups.set(frameId, []);
+    groups.get(frameId)!.push({ at: i, target: localTargetArgs(t) });
   });
   return Array.from(groups.entries()).map(([frameId, items]) => ({ frameId, items }));
 }

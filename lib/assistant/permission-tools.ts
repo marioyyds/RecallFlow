@@ -38,7 +38,7 @@ export async function handleDialogTool(deps: PermissionDeps, args: Record<string
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '处理对话框需要 CDP（请在设置中开启）。' };
   try {
-    await deps.handleDialog(ctx.tabId, args.accept !== false, typeof args.promptText === 'string' ? args.promptText : undefined);
+    await deps.handleDialog(ctx.tabId, args.accept !== false, args.promptText as string | undefined);
     return { ok: true, result: (args.accept !== false ? '已接受' : '已取消') + '页面对话框。' };
   } catch (e) {
     return { ok: false, result: '处理对话框失败：' + deps.summarizeCdpError(e as Caught) };

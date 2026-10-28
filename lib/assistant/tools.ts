@@ -374,9 +374,9 @@ async function evaluateInPageWorld(ctx: RunCtx, args: Record<string, unknown>) {
 // 解析目标元素为「唯一选择器 + 绝对视口坐标」，供 CDP 按坐标做可信输入。
 async function resolveTarget(tabId: number, params: Record<string, unknown> | undefined): Promise<ResolvedTarget | null> {
   if (!tabId) return null;
-  const frameId = frameIdFromArgs(params || {});
+  const frameId = frameIdFromArgs(params as Record<string, unknown>);
   try {
-    const res = await sendTabMessage(tabId, { type: 'kbResolveTarget', params: localTargetArgs(params || {}) }, frameId);
+    const res = await sendTabMessage(tabId, { type: 'kbResolveTarget', params: localTargetArgs(params as Record<string, unknown>) }, frameId);
     return res && res.found && res.rect ? (res as ResolvedTarget) : null;
   } catch (e) {
     return null;
@@ -816,7 +816,7 @@ async function installSkillFromSkillHub(identifier: unknown) {
     // 超时要与真正的安装失败分开说：前者是网络/服务慢，重试可能就成了；
     // 后者是技能本身或数据的问题。原先一律说「安装失败：<原始 abort 文案>」，
     // 模型会以为技能有问题而放弃 —— 实测（会话 RF-V6T7C5）就是这么被报成缺陷的。
-    if (isAbortLikeError(e as { name?: string; message?: string } | null | undefined)) {
+    if (isAbortLikeError(e)) {
       return {
         ok: false,
         result:

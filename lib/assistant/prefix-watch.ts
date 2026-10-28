@@ -33,7 +33,7 @@ function headOf(m: ChatMessage) {
   if (!m || typeof m !== 'object') return '';
   let text = typeof m.content === 'string' ? m.content : m.content === undefined ? '' : JSON.stringify(m.content);
   if (!text && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-    text = 'tool_calls:' + (m.tool_calls || []).map((tc: ToolCall) => (tc && tc.function && tc.function.name) || '?').join(',');
+    text = 'tool_calls:' + (m.tool_calls as ToolCall[]).map((tc) => (tc && tc.function && tc.function.name) || '?').join(',');
   }
   return String(text || '').replace(/\s+/g, ' ').slice(0, 48);
 }

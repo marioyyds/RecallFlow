@@ -91,7 +91,7 @@ export function knowledgeGet(deps: KnowledgeDeps, args: Record<string, unknown>)
   if (!it) return { result: '未找到该条目（id: ' + args.id + '）。' };
   // 星级缺失时回落到可读文案：原实现会输出 `星级：undefined`（缺 status 的条目，
   // 例如早期导入的数据），而这段文本是直接给模型看的。
-  const star = (deps.starLevels[it.status] || { name: '' }).name || it.status || '未设置';
+  const star = (deps.starLevels[it.status] || ({} as { name?: string })).name || it.status || '未设置';
   return {
     result:
       `标题：${it.title}\n类型：${deps.typeInfo(it.type).name}\n` +

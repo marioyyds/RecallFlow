@@ -262,11 +262,11 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
           '⚠ 页面存在未处理的对话框：' +
           dialogs
             .map((d) => {
-              const base = String(d.type) + '：' + String(d.message);
+              const base = (d.type as string) + '：' + (d.message as string);
               // prompt 要把**默认值**一并给出：默认值常常就是要不要保留它的判断依据，
               // 而只 accept 不传 promptText 会原样接受默认值（可能并不是用户要的）。
               return d.type === 'prompt' && d.defaultPrompt !== undefined && d.defaultPrompt !== ''
-                ? base + '（默认值："' + String(d.defaultPrompt) + '"）'
+                ? base + '（默认值："' + (d.defaultPrompt as string) + '"）'
                 : base;
             })
             .join('；') +
@@ -337,7 +337,7 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
           perFrameCapabilities.push({ frameId: Number(f.frameId), capabilities: s.capabilities });
         }
         if (s && Array.isArray(s.elements) && s.elements.length) {
-          elements = elements.concat(prefixFrameRefs(s, Number(f.frameId))?.elements || []);
+          elements = elements.concat(prefixFrameRefs(s, f.frameId as number)!.elements!);
         }
       }
       const capped = elements.slice(0, maxElements);

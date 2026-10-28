@@ -131,8 +131,8 @@ export async function fetchWebpage(deps: FetchDeps, args: Record<string, unknown
     // 超时/中止是**暂时性**失败，**不得**记入 ctx.failedUrls —— 那是「请勿重试」的永久名单
     // （见上面的分支），一旦记进去，同一 URL 在本任务后续轮次会被直接拒绝，
     // 而它可能只是慢了一次。只有确定性失败（状态码、内容类型、跨域）才永久拉黑。
-    if (!deps.isAbortLikeError(e as { name?: string; message?: string } | null | undefined)) ctx.failedUrls.push(norm);
-    return { ok: false, result: deps.describeFetchError(e as { name?: string; message?: string } | null | undefined, u, 15000) };
+    if (!deps.isAbortLikeError(e)) ctx.failedUrls.push(norm);
+    return { ok: false, result: deps.describeFetchError(e, u, 15000) };
   } finally {
     // fetch 抛错（例如 Illegal invocation）时也要清掉计时器；
     // 否则 Service Worker 里会留下一个 15 秒后才触发的悬挂定时器，测试进程也会被拖住。
