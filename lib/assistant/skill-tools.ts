@@ -45,7 +45,9 @@ export const COMMON_OPERATING_DISCIPLINE = [
 ].join('\n');
 
 /** load_skill：按需返回某技能的完整使用说明。 */
-export async function loadSkill(deps: any, args: Record<string, unknown>) {
+import type { SkillDeps } from './tool-deps.ts';
+
+export async function loadSkill(deps: SkillDeps, args: Record<string, unknown>) {
   // 进阶版 A：按需把技能的完整使用说明返回给模型（不预先注入，省 token、由模型自选）。
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: '缺少技能 name 参数。' };
@@ -80,7 +82,7 @@ export async function loadSkill(deps: any, args: Record<string, unknown>) {
 }
 
 /** install_skill：从 SkillHub 安装技能。 */
-export async function installSkill(deps: any, args: Record<string, unknown>) {
+export async function installSkill(deps: SkillDeps, args: Record<string, unknown>) {
   const identifier = String((args && (args.identifier || args.url)) || '').trim();
   if (!identifier) return { ok: false, result: '缺少技能 identifier 参数。' };
   return await deps.installSkillFromSkillHub(identifier);
@@ -147,7 +149,7 @@ function toStringList(value: any, limit: any) {
 }
 
 /** save_skill：新增或覆盖一个自定义技能。 */
-export async function saveSkill(deps: any, args: Record<string, unknown>) {
+export async function saveSkill(deps: SkillDeps, args: Record<string, unknown>) {
   const a = args || {};
   const name = normalizeSkillName(a.name);
   if (!name) {
@@ -226,7 +228,7 @@ export async function saveSkill(deps: any, args: Record<string, unknown>) {
 export const SKILL_TOOLS = new Set(['load_skill', 'install_skill', 'save_skill']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleSkillTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleSkillTool(name: string, args: Record<string, unknown>, deps: SkillDeps) {
   if (name === 'load_skill') return await loadSkill(deps, args);
   if (name === 'install_skill') return await installSkill(deps, args);
   if (name === 'save_skill') return await saveSkill(deps, args);

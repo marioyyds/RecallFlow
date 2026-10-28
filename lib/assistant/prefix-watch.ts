@@ -1,3 +1,4 @@
+import type { ChatMessage, MessageSnapshot, PrefixDiff, ToolCall } from './types.ts';
 // 请求前缀哨兵（运行时）：逐轮比对出站消息，任何「历史中部被改写」都会当场现形。
 //
 // 为什么需要它 —— 静态门禁（scripts/check-prefix-stability.mjs）只做词法检查，
@@ -22,23 +23,23 @@ import { canonicalize } from './tool-guard.ts';
  * （例如把某个状态塞进消息对象）就会静默破坏前缀，而哨兵看不见。
  * 键序无关是必要的：键序变化不影响请求内容，不应误报。
  */
-export function fingerprintMessage(m: any) {
+export function fingerprintMessage(m: ChatMessage) {
   if (!m || typeof m !== 'object') return '';
   return canonicalize(m);
 }
 
 /** 便于日志定位的短标签：角色 + 内容开头。 */
-function headOf(m: any) {
+function headOf(m: ChatMessage) {
   if (!m || typeof m !== 'object') return '';
   let text = typeof m.content === 'string' ? m.content : m.content === undefined ? '' : JSON.stringify(m.content);
   if (!text && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-    text = 'tool_calls:' + m.tool_calls.map((tc: any) => (tc && tc.function && tc.function.name) || '?').join(',');
+    text = 'tool_calls:' + (m.tool_calls || []).map((tc: ToolCall) => (tc && tc.function && tc.function.name) || '?').join(',');
   }
   return String(text || '').replace(/\s+/g, ' ').slice(0, 48);
 }
 
 /** 把一轮出站消息压成快照：只留指纹与短标签，避免长期持有整段历史。 */
-export function snapshotMessages(messages: any) {
+export function snapshotMessages(messages: ChatMessage[]) {
   return (Array.isArray(messages) ? messages : []).map((m) => ({
     fp: fingerprintMessage(m),
     role: (m && m.role) || '',
@@ -50,7 +51,7 @@ export function snapshotMessages(messages: any) {
  * 比较两次出站快照。stable=true 表示「新一轮以旧一轮为前缀，只在末尾追加」。
  * @returns {{stable:boolean, reason:string, divergeAt:number, prevLength:number, nextLength:number, detail:string}}
  */
-export function diffSnapshots(prev: any, next: any) {
+export function diffSnapshots(prev: MessageSnapshot | null, next: MessageSnapshot | null) {
   const a = Array.isArray(prev) ? prev : [];
   const b = Array.isArray(next) ? next : [];
   // 注意：base 必须最先展开。写成 { ...divergeAt: i, ...base } 会让 base 里的
@@ -90,7 +91,7 @@ export function diffSnapshots(prev: any, next: any) {
 }
 
 /** 用于日志/trace 的一行摘要。 */
-export function formatPrefixReport(diff: any) {
+export function formatPrefixReport(diff: PrefixDiff | null) {
   if (!diff || diff.stable) return 'prefix append-only（+' + ((diff && diff.nextLength - diff.prevLength) || 0) + ' 条）';
   return 'prefix changed at ' + diff.reason + '：' + diff.detail + '（' + diff.prevLength + ' → ' + diff.nextLength + ' 条）';
 }

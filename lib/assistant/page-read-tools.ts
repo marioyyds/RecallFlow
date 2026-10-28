@@ -18,6 +18,13 @@
 // 而走 deps 会让**所有**既有调用方（含本仓库两条既有测试）都得补这个依赖，破坏面大于收益。
 import { describeContentScriptUnreachable } from '../shared/utils.ts';
 import type { Caught } from './errors.ts';
+import type {
+  PageSnapshotLike,
+  FrameInfo,
+  CapabilityBucketLike,
+  SnapshotElementLike,
+} from './types.ts';
+import type { PageReadDeps } from './tool-deps.ts';
 
 /**
  * 枚举标签页内的所有框架（含跨域 iframe）。
@@ -25,30 +32,30 @@ import type { Caught } from './errors.ts';
  * 用 `chrome.scripting.executeScript` 而不是内容脚本消息：这样才能一次拿到
  * **所有框架**（含跨域）的 href/title，而内容脚本只能报自己所在的那一个。
  */
-export async function listFramesRaw(deps: any, tabId: number) {
+export async function listFramesRaw(deps: PageReadDeps, tabId: number): Promise<FrameInfo[]> {
   try {
     const results = await deps.chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       func: () => ({ href: location.href, title: document.title || '', isTop: window.top === window }),
     });
-    return (results || []).map((r: any) => Object.assign({ frameId: r.frameId }, r.result || {}));
+    return (results || []).map((r) => Object.assign({ frameId: r.frameId }, r.result || {}));
   } catch (e) {
     return [];
   }
 }
 
 /** 给某框架快照的元素 ref 加 f<frameId>: 前缀，使跨框架 ref 全局唯一、可路由。 */
-export function prefixFrameRefs(snapshot: any, frameId: number) {
+export function prefixFrameRefs(snapshot: PageSnapshotLike | null | undefined, frameId: number): PageSnapshotLike | null | undefined {
   if (!snapshot || !Number.isInteger(Number(frameId)) || Number(frameId) === 0) return snapshot;
   const fid = Number(frameId);
-  const elements = (snapshot.elements || []).map((e: any) => Object.assign({}, e, { ref: 'f' + fid + ':' + e.ref, frameId: fid }));
+  const elements = (snapshot.elements || []).map((e) => Object.assign({}, e, { ref: 'f' + fid + ':' + e.ref, frameId: fid }));
   return Object.assign({}, snapshot, { elements, frameId: fid });
 }
 
 const CAPABILITY_SAMPLE_LIMIT = 4;
 
 /** 是否跨源。解析失败按跨源处理（宁可多带一次，也不要漏掉框架能力）。 */
-export function isCrossOriginFrame(topUrl: any, frameUrl: any) {
+export function isCrossOriginFrame(topUrl: unknown, frameUrl: unknown) {
   try {
     return new URL(String(frameUrl)).origin !== new URL(String(topUrl)).origin;
   } catch (e) {
@@ -67,13 +74,16 @@ export function isCrossOriginFrame(topUrl: any, frameUrl: any) {
  * 各个子框架的首条样本。否则顶层一类组件很多时，子框架条目永远被挤掉，
  * 合计 counts 里却把它算进去了 —— 那会让模型以为"这些都属于顶层"。
  */
-export function mergeFrameCapabilities(top: any, perFrame: any) {
-  const out: Record<string, any> = {};
+export function mergeFrameCapabilities(
+  top: Record<string, CapabilityBucketLike> | null | undefined,
+  perFrame: Array<{ frameId?: number; capabilities?: Record<string, CapabilityBucketLike> }> | null | undefined
+): Record<string, CapabilityBucketLike> | undefined {
+  const out: Record<string, CapabilityBucketLike> = {};
   for (const kind of ['customElements', 'shadowHosts', 'editables', 'scrollContainers']) {
     const topBucket = top && top[kind];
     let count = topBucket ? Number(topBucket.count) || 0 : 0;
     const topSamples = topBucket && Array.isArray(topBucket.samples) ? topBucket.samples.slice(0, 2) : [];
-    const childSamples = [];
+    const childSamples: SnapshotElementLike[] = [];
     for (const frame of Array.isArray(perFrame) ? perFrame : []) {
       const bucket = frame && frame.capabilities && frame.capabilities[kind];
       if (!bucket) continue;
@@ -96,20 +106,20 @@ export function mergeFrameCapabilities(top: any, perFrame: any) {
  * 只列**样本选择器**，且每类最多一条提示：这段会跟在整份 JSON 后面，
  * 目的是防模型漏看，不是再抄一遍清单。
  */
-export function formatCapabilityHint(capabilities: any) {
+export function formatCapabilityHint(capabilities: Record<string, CapabilityBucketLike> | null | undefined) {
   if (!capabilities || typeof capabilities !== 'object') return '';
   const lines = [];
   let hasFrameSample = false;
-  const scopeOf = (sample: any) => {
+  const scopeOf = (sample: SnapshotElementLike | null | undefined) => {
     if (!sample || sample.frameId == null) return '';
     hasFrameSample = true;
     return 'frame ' + sample.frameId + ' · ';
   };
   // 优先展示子框架样本：否则顶层样本会把"合计 count 里有框架条目"这件事藏起来，
   // 模型也就不会去做 get_page_snapshot({frameId}) 这一步。
-  const pickSample = (bucket: any) => {
+  const pickSample = (bucket: CapabilityBucketLike | null | undefined) => {
     const list = bucket && Array.isArray(bucket.samples) ? bucket.samples : [];
-    return list.find((s: any) => s && s.frameId != null) || list[0] || null;
+    return list.find((s) => s && s.frameId != null) || list[0] || null;
   };
   const custom = capabilities.customElements;
   if (custom && custom.count) {
@@ -117,11 +127,11 @@ export function formatCapabilityHint(capabilities: any) {
     // 它本身也就是一个可直接传回 selector 的合法选择器。
     const list = Array.isArray(custom.samples) ? custom.samples : [];
     const picked = list.slice(0, 1);
-    const frameSample = list.find((s: any) => s && s.frameId != null);
+    const frameSample = list.find((s) => s && s.frameId != null);
     if (frameSample && picked.indexOf(frameSample) === -1) picked.push(frameSample);
     else if (list[1]) picked.push(list[1]);
     const sel = picked
-      .map((s: any) => scopeOf(s) + ((s && s.tag) || (s && s.selector) || ''))
+      .map((s) => scopeOf(s) + ((s && s.tag) || (s && s.selector) || ''))
       .filter(Boolean)
       .join('、');
     lines.push(
@@ -169,7 +179,7 @@ export function formatCapabilityHint(capabilities: any) {
 }
 
 /** read_current_page：读正文（或核查若干文案是否可见）。 */
-export async function readCurrentPage(deps: any, args: Record<string, unknown>) {
+export async function readCurrentPage(deps: PageReadDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const tabId = ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
@@ -184,10 +194,10 @@ export async function readCurrentPage(deps: any, args: Record<string, unknown>) 
     const pr = pageResponse || {};
     const text = pr.text ? pr.text : '';
     const visReport = deps.formatVisibilityReport(pr.visibility);
-    const checkTexts = Array.isArray(args.checkTexts) ? args.checkTexts : [];
+    const checkTexts: unknown[] = Array.isArray(args.checkTexts) ? args.checkTexts : [];
     // 核查模式：调用方传了 checkTexts，说明它只想知道「这几段文案还在不在、可不可见」。
     // 此时不返回正文、也不登记引用（详见 formatCurrentPageResult 的注释）。
-    if (checkTexts.filter((t: any) => String(t == null ? '' : t).trim()).length && visReport) {
+    if (checkTexts.filter((t) => String(t == null ? '' : t).trim()).length && visReport) {
       return {
         ok: true,
         result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true }),
@@ -212,7 +222,7 @@ export async function readCurrentPage(deps: any, args: Record<string, unknown>) 
     const urlForTitle = String(pageResponse.url || ctx.pageUrl || '');
     const citations = is404
       ? []
-      : chunks.map((c: any, i: any) => ({
+      : chunks.map((c, i) => ({
           index: i + 1,
           source: 'page',
           title: deps.citationTitleFor(pageResponse.title, urlForTitle),
@@ -235,7 +245,7 @@ export async function readCurrentPage(deps: any, args: Record<string, unknown>) 
 }
 
 /** get_page_snapshot：读结构化 DOM 快照（可指定框架 / 合并所有框架）。 */
-export async function getPageSnapshotTool(deps: any, args: Record<string, unknown>) {
+export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const tabId = ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
@@ -243,7 +253,7 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
   if (deps.cdpAllowed(ctx)) {
     const dialogs = deps.getPendingDialogs(tabId);
     if (dialogs.length) {
-      const hasPrompt = dialogs.some((d: any) => d && d.type === 'prompt');
+      const hasPrompt = dialogs.some((d) => d && d.type === 'prompt');
       return {
         ok: true,
         hadEffect: false,
@@ -251,12 +261,12 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
         result:
           '⚠ 页面存在未处理的对话框：' +
           dialogs
-            .map((d: any) => {
-              const base = d.type + '：' + d.message;
+            .map((d) => {
+              const base = String(d.type) + '：' + String(d.message);
               // prompt 要把**默认值**一并给出：默认值常常就是要不要保留它的判断依据，
               // 而只 accept 不传 promptText 会原样接受默认值（可能并不是用户要的）。
               return d.type === 'prompt' && d.defaultPrompt !== undefined && d.defaultPrompt !== ''
-                ? base + '（默认值："' + d.defaultPrompt + '"）'
+                ? base + '（默认值："' + String(d.defaultPrompt) + '"）'
                 : base;
             })
             .join('；') +
@@ -312,7 +322,7 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
       const maxElements = Math.min(150, Math.max(1, Number(args.maxElements) || 60));
       let elements = (snapshot.elements || []).slice();
       const frames = await listFramesRaw(deps, tabId);
-      const childFrames = frames.filter((f: any) => Number(f.frameId) !== 0);
+      const childFrames = frames.filter((f) => Number(f.frameId) !== 0);
       const readFrameIds = [];
       const failedFrameIds = [];
       const perFrameCapabilities = [];
@@ -327,7 +337,7 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
           perFrameCapabilities.push({ frameId: Number(f.frameId), capabilities: s.capabilities });
         }
         if (s && Array.isArray(s.elements) && s.elements.length) {
-          elements = elements.concat(prefixFrameRefs(s, f.frameId).elements);
+          elements = elements.concat(prefixFrameRefs(s, Number(f.frameId))?.elements || []);
         }
       }
       const capped = elements.slice(0, maxElements);
@@ -344,7 +354,7 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
           shown: trimmed.elements.length,
           omittedBySize: (snapshot.counts && snapshot.counts.omittedBySize ? snapshot.counts.omittedBySize : 0) + trimmed.omittedBySize,
         }),
-        frames: frames.map((f: any) => ({ frameId: f.frameId, url: f.href, title: f.title, isTop: !!f.isTop })),
+        frames: frames.map((f) => ({ frameId: f.frameId, url: f.href, title: f.title, isTop: !!f.isTop })),
         frameRead: {
           read: readFrameIds,
           failed: failedFrameIds,
@@ -383,13 +393,13 @@ export async function getPageSnapshotTool(deps: any, args: Record<string, unknow
 }
 
 /** list_frames：列出页面内所有框架及 frameId。 */
-export async function listFrames(deps: any) {
+export async function listFrames(deps: PageReadDeps) {
   const tabId = deps.ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   const frames = await listFramesRaw(deps, tabId);
   if (!frames.length) return { ok: false, result: '未获取到页面框架信息（可能无内容脚本权限）。' };
   const text = frames
-    .map((f: any) => (f.isTop ? '[顶层 frameId=0] ' : '[frameId=' + f.frameId + '] ') + (f.title || '') + '｜' + f.href)
+    .map((f) => (f.isTop ? '[顶层 frameId=0] ' : '[frameId=' + f.frameId + '] ') + (f.title || '') + '｜' + f.href)
     .join('\n');
   return {
     ok: true,
@@ -404,7 +414,7 @@ export async function listFrames(deps: any) {
 export const PAGE_READ_TOOLS = new Set(['read_current_page', 'get_page_snapshot', 'list_frames']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePageReadTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handlePageReadTool(name: string, args: Record<string, unknown>, deps: PageReadDeps) {
   if (name === 'read_current_page') return await readCurrentPage(deps, args);
   if (name === 'get_page_snapshot') return await getPageSnapshotTool(deps, args);
   if (name === 'list_frames') return await listFrames(deps);

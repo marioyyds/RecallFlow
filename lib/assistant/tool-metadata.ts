@@ -1,3 +1,4 @@
+import type { ToolMetadataEntry } from './types.ts';
 // 每个内置工具的权限与路由元数据：{ risk, readOnly, requiresApproval, route, ... }。
 //
 // Agent 编排器据此决定是否需要用户确认；这与 Vercel AI 的 tool 定义思路一致，
@@ -27,7 +28,7 @@
 // sendTabMessage 也是一问一答。风险全在**共享状态**上，所以判定标准是 a/b/c 而不是"只读"。
 // ---------------------------------------------------------------------------
 
-export const TOOL_METADATA: Record<string, any> = {
+export const TOOL_METADATA: Record<string, ToolMetadataEntry> = {
   // C-4 合并第 4 档：只读三件套（search/list/get）→ knowledge_read({ op })。
   // 三者权限完全一致（read/readOnly/parallelSafe），因此合并**不改变任何权限语义**。
   // 写（add_entry）与删（remove_entry）**刻意保持独立** —— 见 lib/assistant/knowledge.js 文件头。

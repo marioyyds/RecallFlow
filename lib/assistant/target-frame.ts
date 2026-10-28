@@ -10,7 +10,7 @@
 // includeFrames 产出）；顶层框架的 ref 不带前缀，frameId 视为 0。
 
 /** 拆出 ref 的框架前缀。无前缀时 frameId 为 null（表示"未在 ref 中指定"）。 */
-export function parseRef(ref: any) {
+export function parseRef(ref: unknown) {
   const m = String(ref || '').match(/^f(\d+):(.*)$/);
   if (m) return { frameId: Number(m[1]), ref: m[2] };
   return { frameId: null, ref: String(ref || '') };
@@ -51,13 +51,14 @@ export function localTargetArgs(args: Record<string, unknown>) {
  * 为什么必须分组：跨源 iframe 的 DOM 无法从顶层读取（queryAllInFrames 会跳过），
  * 只能把消息投递到对应框架、由该框架自己的内容脚本解析。
  */
-export function planFrameBatches(targets: any) {
-  const list = Array.isArray(targets) ? targets : [];
-  const groups = new Map();
+export function planFrameBatches(targets: unknown) {
+  const list: Array<Record<string, unknown>> = Array.isArray(targets) ? targets : [];
+  const groups = new Map<number, Array<{ at: number; target: Record<string, unknown> }>>();
   list.forEach((t, i) => {
     const frameId = frameIdFromArgs(t) || 0;
-    if (!groups.has(frameId)) groups.set(frameId, []);
-    groups.get(frameId).push({ at: i, target: localTargetArgs(t) });
+    const bucket = groups.get(frameId);
+    if (bucket) bucket.push({ at: i, target: localTargetArgs(t) });
+    else groups.set(frameId, [{ at: i, target: localTargetArgs(t) }]);
   });
   return Array.from(groups.entries()).map(([frameId, items]) => ({ frameId, items }));
 }

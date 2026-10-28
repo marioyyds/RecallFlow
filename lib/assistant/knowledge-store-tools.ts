@@ -17,7 +17,9 @@
 // **搬运原则：不重写行为。** 实现从 tools.js 原样搬来，闭包依赖改为显式注入。
 
 /** knowledge_read：只读检索/列表/取单条（实现在 ./knowledge.js）。 */
-export async function knowledgeReadTool(deps: any, args: Record<string, unknown>) {
+import type { KnowledgeStoreDeps } from './tool-deps.ts';
+
+export async function knowledgeReadTool(deps: KnowledgeStoreDeps, args: Record<string, unknown>) {
   return deps.knowledgeRead(
     { book: deps.ctx.book, buildRagContext: deps.buildRagContext, buildCitations: deps.buildCitations, typeInfo: deps.typeInfo, starLevels: deps.STAR_LEVELS },
     args
@@ -25,7 +27,7 @@ export async function knowledgeReadTool(deps: any, args: Record<string, unknown>
 }
 
 /** add_entry：新增/覆盖一条知识库条目（写）。 */
-export async function addEntry(deps: any, args: Record<string, unknown>) {
+export async function addEntry(deps: KnowledgeStoreDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   // 有 url 就用 url 当 id（同一 URL 视为同一条，天然去重）；否则生成一个临时 id。
   const id = args.id || args.url || 'kb:' + Date.now() + ':' + Math.random().toString(36).slice(2, 8);
@@ -44,7 +46,7 @@ export async function addEntry(deps: any, args: Record<string, unknown>) {
 }
 
 /** remove_entry：删除一条条目（不可逆）。 */
-export async function removeEntry(deps: any, args: Record<string, unknown>) {
+export async function removeEntry(deps: KnowledgeStoreDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   // 先查再删：不存在时**不报错**，而是说明"无需删除"（重复删除不是故障）。
   if (!ctx.book[args.id as string]) return { result: '未找到该条目，无需删除。' };
@@ -57,7 +59,7 @@ export async function removeEntry(deps: any, args: Record<string, unknown>) {
 export const KNOWLEDGE_STORE_TOOLS = new Set(['knowledge_read', 'add_entry', 'remove_entry']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleKnowledgeStoreTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleKnowledgeStoreTool(name: string, args: Record<string, unknown>, deps: KnowledgeStoreDeps) {
   if (name === 'knowledge_read') return await knowledgeReadTool(deps, args);
   if (name === 'add_entry') return await addEntry(deps, args);
   if (name === 'remove_entry') return await removeEntry(deps, args);

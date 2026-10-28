@@ -1,3 +1,4 @@
+import type { ChatMessage } from './types.ts';
 // 上下文与 token 管理：粗估 token、折叠较早的工具结果、控制发给模型的消息规模。
 //
 // ⚠ 本模块**读**视觉开关：历史回放里那句"图片没传给模型"是模型可见文本，
@@ -17,7 +18,7 @@ export function estimateTokens(text: string) {
   return Math.ceil(cjk + rest / 4);
 }
 
-export function estimateMessagesTokens(messages: any) {
+export function estimateMessagesTokens(messages: ChatMessage[] | null | undefined) {
   let n = 0;
   for (const m of Array.isArray(messages) ? messages : []) {
     if (typeof m.content === 'string') n += estimateTokens(m.content);
@@ -52,7 +53,7 @@ export function estimateMessagesTokens(messages: any) {
  * @param {*} content 一条历史的 content（字符串 / 部件数组 / 其它）
  * @param {boolean} [visionEnabled] 覆盖开关（测试用；生产不传，取模块常量）
  */
-export function flattenHistoryContent(content: any, visionEnabled: any) {
+export function flattenHistoryContent(content: unknown, visionEnabled: boolean | undefined) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) {
     if (content == null) return '';
@@ -109,7 +110,7 @@ export const HISTORY_SUMMARY_MAX_CHARS = 400;
  * 原实现靠 `last.length === 3000` 这个**字面量**判断，一旦这里开始追加通知，
  * 那个判断就会静默失效 ⇒ 指令重复一次。所以两处必须共用同一份形态。
  */
-export function formatHistoryTruncationNotice(totalChars: any, limitChars: any) {
+export function formatHistoryTruncationNotice(totalChars: number, limitChars: number) {
   return (
     '\n⟨…本条历史已截断：原文共 ' + totalChars + ' 字符，此处只送入前 ' + limitChars +
     ' 字符；**被截掉的部分取不回原文**（历史消息不进暂存，无法用 expand_result 取回），' +
@@ -127,7 +128,7 @@ export const HISTORY_TRUNC_RE = /\n⟨…本条历史已截断：[\s\S]*⟩$/;
  * 而落盘快照（`agent.js` 的 `compactSessionMessages`）留尾 —— 说明必须放在**前面**，
  * 否则读者看到的仍然是一段没有开头的文本。原文同样**没有**留存任何副本。
  */
-export function formatTailKeptTruncationNotice(totalChars: any, limitChars: any) {
+export function formatTailKeptTruncationNotice(totalChars: number, limitChars: number) {
   return (
     '⟨…本条消息过长，只保留末尾：原文共 ' + totalChars + ' 字符，此处从第 ' +
     (totalChars - limitChars + 1) + ' 个字符起；**被截掉的前半段取不回原文**（落盘快照不保存它）⟩\n'
@@ -159,7 +160,7 @@ export function stripHistoryTruncationNotice(text: string) {
  * 本轮的 A5 收口给截断历史追加了说明 ⇒ 那个等式会静默失效（指令重复一次，没有任何报错）。
  * 现在两处共用同一形态：先剥掉通知，再拿 `HISTORY_MAX_CHARS` 比长度。
  */
-export function isDuplicateInstruction(lastContent: any, instruction: string) {
+export function isDuplicateInstruction(lastContent: string, instruction: string) {
   const instr = String(instruction === undefined || instruction === null ? '' : instruction).trim();
   if (!instr) return false;
   const last = stripHistoryTruncationNotice(lastContent).trim();
@@ -180,10 +181,19 @@ export function isDuplicateInstruction(lastContent: any, instruction: string) {
 //   （见 agent.js 的 buildInitialMessages 与 shared/rag.js —— 现在两处都显式传 true）。
 // - options.visionEnabled 只给测试用（覆盖视觉开关，决定"图片有没有传下去"那句文案的档位）；
 //   生产不传 ⇒ 与 `VISION_ENABLED` 的实际取值一致。
-export function normalizeHistory(history: any, options: Record<string, any> = {}) {
-  const maxMessages = Number.isFinite(options.maxMessages) ? options.maxMessages : 10;
-  const maxChars = Number.isFinite(options.maxChars) ? options.maxChars : HISTORY_MAX_CHARS;
-  const maxTokens = Number.isFinite(options.maxTokens) ? options.maxTokens : 8000;
+export function normalizeHistory(
+  history: ChatMessage[] | null | undefined,
+  options: {
+    visionEnabled?: boolean;
+    maxMessages?: number;
+    maxChars?: number;
+    maxTokens?: number;
+    noticeOnTruncation?: boolean;
+  } = {}
+) {
+  const maxMessages = (Number.isFinite(options.maxMessages) ? options.maxMessages : 10) as number;
+  const maxChars = (Number.isFinite(options.maxChars) ? options.maxChars : HISTORY_MAX_CHARS) as number;
+  const maxTokens = (Number.isFinite(options.maxTokens) ? options.maxTokens : 8000) as number;
   const notice = options.noticeOnTruncation === true;
   const src = Array.isArray(history) ? history : [];
   const picked = [];
@@ -260,7 +270,7 @@ const ID_NOTICE_RE = /\n…（结果共[^）]*id=(res-[A-Za-z0-9_-]+)[^）]*）\
 const ID_ONLY_RE = /id=(res-[A-Za-z0-9_-]+)/;
 
 /** 折叠一段工具结果：保留头 + 尾，并保住可恢复的 id。纯函数，便于直测。 */
-export function buildCollapsed(content: any, headLen = 300, tailLen = 150) {
+export function buildCollapsed(content: string, headLen = 300, tailLen = 150) {
   const text = String(content);
   const noticeMatch = text.match(ID_NOTICE_RE);
   // 变量名刻意不叫 id：check-const-assign 的剥离器不认识正则字面量，
@@ -293,7 +303,7 @@ export function buildCollapsed(content: any, headLen = 300, tailLen = 150) {
   return head + notice + tail;
 }
 
-export function collapseOldToolResults(messages: any, keepFull = 6, maxLen = 300, tailLen = 150) {
+export function collapseOldToolResults(messages: ChatMessage[], keepFull = 6, maxLen = 300, tailLen = 150) {
   const idx = [];
   for (let i = 0; i < messages.length; i++) {
     if (messages[i] && messages[i].role === 'tool') idx.push(i);

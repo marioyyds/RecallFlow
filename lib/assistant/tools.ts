@@ -64,6 +64,26 @@ import { handlePageCommandTool } from './page-command-tools.ts';
 // C-1 拆分：知识库存储族（knowledge_read / add_entry / remove_entry）。
 import { handleKnowledgeStoreTool } from './knowledge-store-tools.ts';
 import type { Caught } from './errors.ts';
+import type { RunCtx, ToolCallContext, ToolResult, PageSnapshotLike, PlanStep, TraceStep } from './types.ts';
+import type {
+  ResolvedTarget,
+  SendTabMessage,
+  PageReadDeps,
+  PageInputDeps,
+  CdpInputDeps,
+  CodeAccessDeps,
+  PermissionDeps,
+  RunStateDeps,
+  ScreenshotDeps,
+  FetchDeps,
+  PageCommandDeps,
+  TabDeps,
+  UserscriptDeps,
+  SkillDeps,
+  KnowledgeStoreDeps,
+  MacroDeps,
+  DiagnosticsDeps,
+} from './tool-deps.ts';
 
 export const TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
@@ -106,7 +126,7 @@ export function getToolDefinition(name: string) {
 // → `knowledge_read({op})`，见 lib/assistant/knowledge.js 的搬运说明）。合并后旧名照样会被
 // `validateSkillTools` 判为"不是可用工具"，警告里给不出迁移方向 —— 而内置技能里就曾有一份
 // 写着旧名的文案（`clip-to-knowledge`，已修）⇒ 把它也收进本表，警告才能指向真正的入口。
-export const TOOL_RENAME_MAP: Record<string, any> = Object.freeze({
+export const TOOL_RENAME_MAP: Record<string, string> = Object.freeze({
   scroll_to_element: 'scroll_page',
   search_knowledge_base: 'knowledge_read',
   list_knowledge_base: 'knowledge_read',
@@ -114,15 +134,15 @@ export const TOOL_RENAME_MAP: Record<string, any> = Object.freeze({
 });
 
 // 校验技能声明的依赖工具是否全部存在；返回警告列表（含旧名→新名的迁移提示）。
-export function validateSkillTools(skill: any) {
+export function validateSkillTools(skill: { tools?: unknown; x?: { tools?: unknown } } | null | undefined) {
   if (!skill) return [];
-  const declared = Array.isArray(skill.tools)
+  const declared: unknown[] = Array.isArray(skill.tools)
     ? skill.tools
     : skill.x && Array.isArray(skill.x.tools)
       ? skill.x.tools
       : [];
   const existing = new Set(TOOL_REGISTRY.map((t) => t.name));
-  const warnings = [];
+  const warnings: string[] = [];
   for (const tn of declared) {
     if (typeof tn !== 'string' || !tn) continue;
     if (existing.has(tn)) continue;
@@ -211,7 +231,7 @@ export function validateToolCall(name: string, args: Record<string, unknown>) {
 export { buildActionVerification, observedChange, verifyPageAction, snapshotChanged } from './page-action-verify.ts';
 
 // 向指定标签页（可选指定 frameId，用于跨域 iframe）发送消息。
-function sendTabMessage(tabId: number, message: any, frameId?: number | null) {
+function sendTabMessage(tabId: number, message: unknown, frameId?: number | null) {
   // 默认发往顶层框架（frameId=0）；否则无 frameId 时消息会广播到所有框架，
   // 响应可能来自子框架，导致顶层快照/命令错乱。
   // 目标框架没有内容脚本时，桥接层会补注入 content.js 并重试一次。
@@ -242,7 +262,7 @@ export async function collectPageDiagnostics(tabId: number) {
 // 结构化读取元素的框架源码位置（供 MCP 的 get_element_source 使用）。
 // 返回原始 source 对象而非格式化文本 —— 此前 MCP 只能拿到「元素源码位置：…」字符串，
 // 必须按文案反解，扩展一改措辞就会静默失效（字符串耦合）。
-export async function collectElementSource(tabId: number, params: any) {
+export async function collectElementSource(tabId: number, params: Record<string, unknown> | undefined) {
   if (!tabId) return { found: false, reason: '无法定位标签页' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetElementSource', params: params || {} });
@@ -269,8 +289,8 @@ export async function collectElementSource(tabId: number, params: any) {
 
 // 结构化读取一批目标元素的渲染态（供 MCP 的 verify_change 做断言）。
 // 与 collectPageDiagnostics 一样返回结构化数据，不走会被拍平丢信息的文本通路。
-export async function verifyPageTargets(tabId: number, targets: any) {
-  const list = Array.isArray(targets) ? targets : [];
+export async function verifyPageTargets(tabId: number, targets: unknown) {
+  const list: Array<Record<string, unknown>> = Array.isArray(targets) ? targets : [];
   if (!tabId) return { found: false, targets: [], reason: '无法定位标签页' };
   const slots = new Array(list.length).fill(null);
   const batches = planFrameBatches(list);
@@ -302,7 +322,7 @@ export async function verifyPageTargets(tabId: number, targets: any) {
 // parseRef / frameIdFromArgs / localTargetArgs 已移到 ./target-frame.js（并在文件顶部再导出）。
 
 // CDP（chrome.debugger）是否可用于本次任务。
-function cdpAllowed(ctx: any) {
+function cdpAllowed(ctx: RunCtx | null | undefined) {
   return Boolean(ctx && ctx.settings && ctx.settings.cdpEnabled !== false && cdp.isCdpAvailable());
 }
 
@@ -324,7 +344,7 @@ export function buildPageWorldExpression(code: string) {
   return '(async () => {\n' + String(code === undefined || code === null ? '' : code) + '\n})()';
 }
 
-async function evaluateInPageWorld(ctx: any, args: Record<string, unknown>) {
+async function evaluateInPageWorld(ctx: RunCtx, args: Record<string, unknown>) {
   if (!cdpAllowed(ctx)) return { ok: false, result: '页面世界执行需要 CDP（请在设置中开启）。' };
   try {
     const jsFrame = frameIdFromArgs(args);
@@ -345,19 +365,19 @@ async function evaluateInPageWorld(ctx: any, args: Record<string, unknown>) {
     if (serialized.length > 2000) serialized = sliceSafe(serialized, 0, 2000) + '\n…（结果过长已截断）';
     return { ok: true, cdp: true, result: serialized };
   } catch (e) {
-    return { ok: false, result: '页面世界执行失败：' + summarizeCdpError(e) };
+    return { ok: false, result: '页面世界执行失败：' + summarizeCdpError(e as Caught) };
   }
 }
 
 // listFramesRaw 与 prefixFrameRefs 已随页面读取族移到 ./page-read-tools.js。
 
 // 解析目标元素为「唯一选择器 + 绝对视口坐标」，供 CDP 按坐标做可信输入。
-async function resolveTarget(tabId: number, params: any) {
+async function resolveTarget(tabId: number, params: Record<string, unknown> | undefined): Promise<ResolvedTarget | null> {
   if (!tabId) return null;
-  const frameId = frameIdFromArgs(params);
+  const frameId = frameIdFromArgs(params || {});
   try {
-    const res = await sendTabMessage(tabId, { type: 'kbResolveTarget', params: localTargetArgs(params) }, frameId);
-    return res && res.found && res.rect ? res : null;
+    const res = await sendTabMessage(tabId, { type: 'kbResolveTarget', params: localTargetArgs(params || {}) }, frameId);
+    return res && res.found && res.rect ? (res as ResolvedTarget) : null;
   } catch (e) {
     return null;
   }
@@ -368,7 +388,7 @@ async function resolveTarget(tabId: number, params: any) {
 // toolError 已移到 ./tool-results.js（并在文件顶部再导出）。
 
 // 把成功定位的元素记入站点记忆（供后续任务直接复用选择器）。
-function rememberTarget(ctx: any, target: any) {
+function rememberTarget(ctx: RunCtx, target: ResolvedTarget) {
   if (!ctx || !ctx.settings || ctx.settings.siteMemoryEnabled === false) return;
   if (!target || !target.selector) return;
   rememberElement(ctx.pageUrl, target).catch(() => {});
@@ -378,7 +398,7 @@ function rememberTarget(ctx: any, target: any) {
 // 定义在 ./macros.js（**唯一来源**）：记录时（recordTraceStep）与回放时（macro op=run）
 // 必须用同一份白名单 —— 两处各写一份就会漂移，而漂移的后果是回放能执行记录时不允许的工具。
 
-export function recordTraceStep(ctx: any, name: string, args: Record<string, unknown>, res: any) {
+export function recordTraceStep(ctx: RunCtx, name: string, args: Record<string, unknown>, res: ToolResult | null | undefined) {
   if (!ctx || !Array.isArray(ctx.trace)) return;
   if (!REPLAYABLE_TOOLS.has(name)) return;
   if (!res || res.ok === false) return;
@@ -418,7 +438,7 @@ export function recordTraceStep(ctx: any, name: string, args: Record<string, unk
 }
 
 // 记录 Agent 本次任务新打开/接管过的标签页，供任务结束后清理（保留最后使用的 tab）。
-function trackOpenedTab(ctx: any, tabId: number) {
+function trackOpenedTab(ctx: RunCtx, tabId: number) {
   if (!ctx || !Number.isInteger(Number(tabId))) return;
   if (!Array.isArray(ctx.openedTabs)) ctx.openedTabs = [];
   if (!ctx.openedTabs.includes(tabId)) ctx.openedTabs.push(tabId);
@@ -426,33 +446,33 @@ function trackOpenedTab(ctx: any, tabId: number) {
 
 // 隔离浏览：研究/知识库/对话类任务在专用 Agent 窗口（最小化）里打开标签页，
 // 与用户主窗口完全隔离，不抢焦点、不弄乱用户标签。首次打开时创建一次并复用。
-async function ensureAgentWindow(ctx: any) {
+async function ensureAgentWindow(ctx: RunCtx): Promise<number> {
   if (Number.isInteger(ctx.agentWindowId)) {
     try {
-      await chrome.windows.get(ctx.agentWindowId);
-      return ctx.agentWindowId;
+      await chrome.windows.get(ctx.agentWindowId as number);
+      return ctx.agentWindowId as number;
     } catch (e) {
       ctx.agentWindowId = null;
     }
   }
-  const win: any = await chrome.windows.create({ url: 'about:blank', state: 'minimized', focused: false });
-  ctx.agentWindowId = win.id;
-  return win.id;
+  const win = await chrome.windows.create({ url: 'about:blank', state: 'minimized', focused: false });
+  ctx.agentWindowId = (win as chrome.windows.Window).id as number;
+  return (win as chrome.windows.Window).id as number;
 }
 
 // 任务结束时关闭 Agent 隔离窗口。
-export async function closeAgentWindow(ctx: any) {
-  if (ctx && Number.isInteger(ctx.agentWindowId)) {
+export async function closeAgentWindow(ctx: ToolCallContext | null | undefined) {
+  if (ctx && Number.isInteger((ctx as { agentWindowId?: number | null }).agentWindowId)) {
     try {
-      await chrome.windows.remove(ctx.agentWindowId);
+      await chrome.windows.remove((ctx as { agentWindowId?: number | null }).agentWindowId as number);
     } catch (e) {}
-    ctx.agentWindowId = null;
+    (ctx as { agentWindowId?: number | null }).agentWindowId = null;
   }
 }
 
 // 生成本任务已打开标签页的摘要（tabId + 标题 + URL），供预算触顶时引导模型复用。
-async function listOpenedTabsSummary(ctx: any) {
-  const ids = (Array.isArray(ctx.openedTabs) ? ctx.openedTabs : []).filter((id: any) => Number.isInteger(Number(id)));
+async function listOpenedTabsSummary(ctx: RunCtx) {
+  const ids = (Array.isArray(ctx.openedTabs) ? ctx.openedTabs : []).filter((id) => Number.isInteger(Number(id)));
   if (!ids.length) return '';
   const lines = [];
   for (const id of ids) {
@@ -470,10 +490,10 @@ async function bindSessionTab(tabId: number) {
   } catch (e) {}
 }
 
-async function getPageSnapshot(tabId: number, options: Record<string, any> = {}) {
+async function getPageSnapshot(tabId: number, options: Record<string, unknown> = {}): Promise<PageSnapshotLike | null> {
   if (!tabId) return null;
-  const snapshot = await sendTabMessage(tabId, { type: 'kbGetPageSnapshot', options }, options.frameId);
-  return snapshot && snapshot.version ? snapshot : null;
+  const snapshot = await sendTabMessage(tabId, { type: 'kbGetPageSnapshot', options }, options.frameId as number | undefined);
+  return snapshot && snapshot.version ? (snapshot as PageSnapshotLike) : null;
 }
 
 async function waitForTabReady(tabId: number, timeoutMs = 8000) {
@@ -491,10 +511,15 @@ async function waitForTabReady(tabId: number, timeoutMs = 8000) {
 
 // compactSnapshotSummary 已移到 ./tool-results.js（并在文件顶部再导出）。
 
-async function executeContentAction(tabId: number, action: any, message: any, options: Record<string, any> = {}) {
+async function executeContentAction(
+  tabId: number,
+  action: string,
+  message: Record<string, unknown> | undefined,
+  options: { verify?: boolean; frameId?: number; delayMs?: number } = {}
+) {
   if (!tabId) return toolError('NO_TARGET', '无法定位当前标签页（可能不在前台页面）。');
-  const frameId = options.frameId != null ? options.frameId : frameIdFromArgs(message && message.params);
-  const msg = Object.assign({}, message, { params: localTargetArgs(message && message.params) });
+  const frameId = options.frameId != null ? options.frameId : frameIdFromArgs((message && message.params) as Record<string, unknown>);
+  const msg = Object.assign({}, message, { params: localTargetArgs((message && message.params) as Record<string, unknown>) });
   const shouldVerify = options.verify !== false;
   const before = shouldVerify ? await getPageSnapshot(tabId, { maxElements: 50, maxText: 1600, frameId }).catch(() => null) : null;
   const response = await sendTabMessage(tabId, msg, frameId);
@@ -536,7 +561,7 @@ function pageToolCommand(name: string) {
 
 
 // 统一执行页面动作：动作前后快照验证、点击后新标签页自动发现与绑定、返回紧凑页面摘要。
-async function executePageTool(tabId: number, command: string, args: Record<string, unknown>, ctx: any) {
+async function executePageTool(tabId: number, command: string, args: Record<string, unknown>, ctx: RunCtx) {
   if (!tabId) return toolError('NO_TARGET', '无法定位当前标签页（可能不在前台页面）。');
   try {
     const frameId = frameIdFromArgs(args);
@@ -684,7 +709,7 @@ async function fetchRealSkillMd(apiBase: any, slug: any, ns: any, signal: AbortS
   }
 }
 
-async function installSkillFromSkillHub(identifier: any) {
+async function installSkillFromSkillHub(identifier: unknown) {
   const raw = String(identifier || '').trim();
   if (!raw) return { ok: false, result: '缺少技能 identifier 参数（应为 @namespace/slug 或技能页 URL 或关键词）。' };
   let ns: any = null;
@@ -791,7 +816,7 @@ async function installSkillFromSkillHub(identifier: any) {
     // 超时要与真正的安装失败分开说：前者是网络/服务慢，重试可能就成了；
     // 后者是技能本身或数据的问题。原先一律说「安装失败：<原始 abort 文案>」，
     // 模型会以为技能有问题而放弃 —— 实测（会话 RF-V6T7C5）就是这么被报成缺陷的。
-    if (isAbortLikeError(e)) {
+    if (isAbortLikeError(e as { name?: string; message?: string } | null | undefined)) {
       return {
         ok: false,
         result:
@@ -821,14 +846,21 @@ async function installSkillFromSkillHub(identifier: any) {
 //   · 重名 → **模块加载时直接抛错**（不是运行到那一步才发现）；
 //   · 漏分支 → tests/final-families.test.mjs 断言「注册表 == TOOL_REGISTRY」；
 //   · 漏 return → handler 是**被 return 调用**的，没有"调用了却没返回"的写法。
-const TOOL_HANDLERS = new Map();
+/** 一个族的统一入口：按 name 分派；不属于本族时返回 null。 */
+type ToolHandler = (
+  name: string,
+  args: Record<string, unknown>,
+  ctx: RunCtx
+) => Promise<ToolResult | null> | ToolResult | null;
+
+const TOOL_HANDLERS = new Map<string, ToolHandler>();
 
 /**
  * 注册一族工具。
  *
  * 重名是**编程错误**，没有合理回退可退 —— 与其在运行时静默走错分支，不如加载时立刻炸出来。
  */
-function registerHandlers(names: any, run: any) {
+function registerHandlers(names: string[], run: ToolHandler) {
   for (const n of names) {
     if (TOOL_HANDLERS.has(n)) {
       throw new Error('工具重复注册：' + n + '（同一工具名有两个 handler，分派有歧义）');
@@ -838,7 +870,7 @@ function registerHandlers(names: any, run: any) {
 }
 
 // —— 知识库存储族（只读 / 写 / 删是三类权限，刻意各自独立，见 ./knowledge-store-tools.js 头注释）
-registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleKnowledgeStoreTool(name, args, {
     ctx,
     knowledgeRead,
@@ -853,7 +885,7 @@ registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: string,
   }));
 
 // —— 页面读取族（Agent 的"眼睛"）
-registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handlePageReadTool(name, args, {
     ctx,
     chrome,
@@ -869,11 +901,11 @@ registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (nam
   }));
 
 // —— 诊断（C-4 第 3 档合并：read_console / read_network / list_downloads → read_diagnostics）
-registerHandlers(['read_diagnostics'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['read_diagnostics'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   readDiagnostics({ sendTabMessage, tabId: ctx.tabId, getDownloads }, args));
 
 // —— 页面输入命令族
-registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_for_element', 'get_attribute'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_for_element', 'get_attribute'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handlePageInputTool(name, args, {
     ctx,
     cdp,
@@ -890,7 +922,7 @@ registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_
   }));
 
 // —— 标签页族
-registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleTabTool(name, args, {
     chrome,
     ctx,
@@ -902,7 +934,7 @@ registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: string, args: R
   }));
 
 // —— 联网抓取与搜索族
-registerHandlers(['fetch_webpage', 'web_search'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['fetch_webpage', 'web_search'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleFetchTool(name, args, {
     ctx,
     // 原生 fetch 是 WebIDL 方法，this 必须是全局对象。作为 deps.fetchImpl(...) 调用时
@@ -919,7 +951,7 @@ registerHandlers(['fetch_webpage', 'web_search'], (name: string, args: Record<st
 
 // —— CDP 输入族
 // ⚠ click_element 的"只在内容脚本**报错**时升级 CDP"是**有意保留**的决定，见 ./cdp-input-tools.js 头注释。
-registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleCdpInputTool(name, args, {
     ctx,
     cdp,
@@ -938,11 +970,11 @@ registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 
 // —— 页面命令（内容脚本）族
 // 注意：同属一族 ≠ 可以合并成一个工具。面向模型的边界由 C-4 判据决定
 //（执行路径 + 权限类别），见 ./page-command-tools.js 头注释。
-registerHandlers(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
 
 // —— 截图（单工具族）
-registerHandlers(['take_screenshot'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['take_screenshot'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   takeScreenshot({
     ctx,
     args,
@@ -953,15 +985,15 @@ registerHandlers(['take_screenshot'], (name: string, args: Record<string, unknow
     // 归档函数现在需要注入 chrome（它已随截图族移到 ./screenshot-tool.js）。
     // 漏传的后果是**静默不落盘**：返回仍 ok:true，但图片永远取不回来。
     chrome,
-    formatScreenshotSummary,
+    formatScreenshotSummary: formatScreenshotSummary as (meta: unknown) => string,
   }));
 
 // —— 页面内代码与结构访问族
-registerHandlers(['run_javascript', 'get_ax_snapshot'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['run_javascript', 'get_ax_snapshot'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleCodeAccessTool(name, args, { ctx, cdp, cdpAllowed, executeContentAction, evaluateInPageWorld, isCspEvalBlockError, summarizeCdpError }));
 
 // —— 用户脚本族（安装受用户设置约束）
-registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleUserscriptTool(name, args, {
     ctx,
     listUserscripts,
@@ -975,7 +1007,7 @@ registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript'
 // save_skill 是**写**操作（它写的正文会进入今后的系统提示）⇒ 自己的审批闸门，
 // 因此它是独立工具，而不是并入 `skill({op})` —— 见 docs/tool-merge-plan.md 第 6 档的结论：
 // `toolNeedsApproval(name, settings, pageUrl)` 拿不到 args，按 op 分级审批在当前架构下表达不了。
-registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleSkillTool(name, args, {
     getMergedSkills,
     getDefaultSkills,
@@ -988,7 +1020,7 @@ registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: string, a
 
 // —— 宏（C-4 第 5 档合并）
 // **op=run 的执行期白名单与 op=save 的审批必须分别保留**（见 ./macros.js 文件头注释）。
-registerHandlers(['macro'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['macro'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   macroTool(
     {
       pageUrl: ctx.pageUrl,
@@ -1006,13 +1038,13 @@ registerHandlers(['macro'], (name: string, args: Record<string, unknown>, ctx: a
   ));
 
 // —— 权限 / 会话状态族（改的是"放行规则与待决状态"，不是页面）
-registerHandlers(['trust_site', 'handle_dialog'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['trust_site', 'handle_dialog'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handlePermissionTool(name, args, { ctx, chrome, cdpAllowed, handleDialog, summarizeCdpError }));
 
 // —— 运行状态族
 // 三个工具名都要**显式列出**：只写 update_plan 也能跑（handleRunStateTool 会按 name 分派），
 // 但那样注册表就不等于 TOOL_REGISTRY，门禁无法核对。
-registerHandlers(['update_plan', 'expand_result', 'get_run_trace'], (name: string, args: Record<string, unknown>, ctx: any) =>
+registerHandlers(['update_plan', 'expand_result', 'get_run_trace'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handleRunStateTool(name, args, { ctx, getTrace, listTraces }));
 
 // —— 完成信号
@@ -1027,13 +1059,15 @@ registerHandlers(['complete_task'], (name: string, args: Record<string, unknown>
  *
  * 这里只做三件事：补齐 args、查表、交给该族的 handler。**没有任何工具逻辑**。
  */
-export async function executeTool(name: string, args: Record<string, unknown>, ctx: any) {
+export async function executeTool(name: string, args: Record<string, unknown>, ctx: ToolCallContext) {
   args = args || {};
   const run = TOOL_HANDLERS.get(name);
   // 未知工具同样要 `ok:false`：它是**失败**，不是"调用成功但内容是这样"。
   // 漏掉它会让下游（失败摘除 / 卡死检测 / 完成校验 / 模型自我纠错）以为这次调用是好的。
   if (!run) return { ok: false, result: '未知工具：' + name };
-  return await run(name, args, ctx);
+  // 桥接层（lib/bridge/relay.ts，本批禁改）在无面板会话路径上传入**部分上下文**；
+  // 工具族按需读取字段，缺字段的运行时行为与本批之前完全一致。
+  return await run(name, args, ctx as RunCtx);
 }
 
 /**
@@ -1046,7 +1080,7 @@ export function registeredToolNames() {
   return [...TOOL_HANDLERS.keys()];
 }
 
-export function parseToolArgs(s: any) {
+export function parseToolArgs(s: string) {
   try {
     return JSON.parse(s);
   } catch (e) {
@@ -1078,7 +1112,7 @@ function decodeNumericEntity(code: number) {
   }
 }
 
-export function splitIntoChunks(text: string, size: any, max: any) {
+export function splitIntoChunks(text: string, size: number, max: number) {
   const s = String(text || '').trim();
   if (!s) return [];
   const paras = s.split(/\n+/).map((p) => p.trim()).filter(Boolean);

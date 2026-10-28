@@ -1,4 +1,6 @@
 import type { Caught } from './errors.ts';
+import type { RunCtx, PageSnapshotLike } from './types.ts';
+import type { TabDeps } from './tool-deps.ts';
 // 标签页族（list_tabs / switch_tab / open_tab）—— 从 tools.js 的巨型 switch 里拆出的第一族。
 //
 // 为什么要拆：`executeTool` 曾是一个 1000+ 行的 switch，所有工具族（标签页、抓取、页面命令、
@@ -19,18 +21,18 @@ import type { Caught } from './errors.ts';
 
 const DEFAULT_MAX_TAB_SWITCHES = 6;
 
-function tabSwitchBudget(ctx: any) {
+function tabSwitchBudget(ctx: RunCtx) {
   const used = Math.max(0, Number(ctx && ctx.tabSwitchCount) || 0);
   const max = Math.max(1, Number(ctx && ctx.maxTabSwitches) || DEFAULT_MAX_TAB_SWITCHES);
   return { used, max, exhausted: used >= max };
 }
 
-function countTabSwitch(ctx: any) {
+function countTabSwitch(ctx: RunCtx) {
   if (!ctx) return;
   ctx.tabSwitchCount = Math.max(0, Number(ctx.tabSwitchCount) || 0) + 1;
 }
 
-function tabSwitchLimitMessage(used: any, max: any) {
+function tabSwitchLimitMessage(used: number, max: number) {
   return (
     '本任务已切换标签页 ' + used + ' 次（上限 ' + max + '），为减少对用户的打扰，不再继续切换。' +
     '请留在当前页完成；需要另一页的数据时，优先使用已读到的快照/工具结果或 fetch_webpage，不要来回切换。'
@@ -38,11 +40,11 @@ function tabSwitchLimitMessage(used: any, max: any) {
 }
 
 /** 列出当前窗口的标签页（原 list_tabs）。 */
-export async function listTabs(deps: any) {
+export async function listTabs(deps: TabDeps) {
   try {
     const tabs = await deps.chrome.tabs.query({ currentWindow: true });
-    const visibleTabs = tabs.filter((t: any) => t.url);
-    const tabInfo = visibleTabs.map((t: any) => ({
+    const visibleTabs = tabs.filter((t) => t.url);
+    const tabInfo = visibleTabs.map((t) => ({
       tabId: t.id,
       windowId: t.windowId,
       title: t.title || '',
@@ -50,8 +52,8 @@ export async function listTabs(deps: any) {
       active: Boolean(t.active),
     }));
     const text = visibleTabs
-      .filter((t: any) => t.url)
-      .map((t: any, i: any) => `[${i + 1}] tabId=${t.id} ${t.active ? '（当前）' : ''} ${t.title || ''}｜${t.url}`)
+      .filter((t) => t.url)
+      .map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? '（当前）' : ''} ${t.title || ''}｜${t.url}`)
       .join('\n');
     return { ok: true, tabs: tabInfo, result: '当前窗口标签页：\n' + (text || '（无）') };
   } catch (e) {
@@ -60,7 +62,7 @@ export async function listTabs(deps: any) {
 }
 
 /** 切换活动标签页并等它就绪（原 switch_tab）。 */
-export async function switchTab(deps: any, args: Record<string, unknown>) {
+export async function switchTab(deps: TabDeps, args: Record<string, unknown>) {
   const tabId = Number(args && args.tabId);
   if (!Number.isInteger(tabId) || tabId <= 0) return { ok: false, result: 'tabId 必须是有效的标签页 ID' };
   const currentId = Number(deps.ctx && deps.ctx.tabId);
@@ -127,7 +129,7 @@ export async function switchTab(deps: any, args: Record<string, unknown>) {
  *   · 达到"累计新建数"上限时**软拒绝**（列出已开标签页 + 引导复用/抓取），
  *     而不是硬失败 —— 硬失败会让模型反复重试开页，白烧预算。
  */
-export async function openTab(deps: any, args: Record<string, unknown>) {
+export async function openTab(deps: TabDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   try {
     const url = String((args && args.url) || '');
@@ -152,7 +154,7 @@ export async function openTab(deps: any, args: Record<string, unknown>) {
     if (!forceNew) {
       const existing = await deps.chrome.tabs.query({ url }).catch(() => []);
       const hit = Array.isArray(existing) && existing.find((t) => t.id && /^https?:/i.test(t.url || ''));
-      if (hit) {
+      if (hit && hit.id) {
         const alreadyActive = Number(ctx.tabId) === Number(hit.id) && hit.active !== false;
         const budget = tabSwitchBudget(ctx);
         let activated = false;
@@ -173,7 +175,7 @@ export async function openTab(deps: any, args: Record<string, unknown>) {
           tabId: hit.id,
           windowId: current.windowId || hit.windowId,
           title: current.title || hit.title || '',
-          url: current.url || hit.url || url,
+          url: String(current.url || hit.url || url),
           ready: Boolean(snapshot),
         };
         deps.bindSessionTab(hit.id);
@@ -227,7 +229,7 @@ export async function openTab(deps: any, args: Record<string, unknown>) {
       tabId: t.id,
       windowId: current.windowId || t.windowId,
       title: current.title || t.title || '',
-      url: (current.url || t.url || (args && args.url) || ''),
+      url: String(current.url || t.url || (args && args.url) || ''),
       ready: Boolean(snapshot),
     };
     return {
@@ -251,7 +253,7 @@ export async function openTab(deps: any, args: Record<string, unknown>) {
 export const TAB_TOOLS = new Set(['list_tabs', 'switch_tab', 'open_tab']);
 
 /** 统一入口（由 executeTool 分派）。返回 null 表示"不属于本族"。 */
-export async function handleTabTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleTabTool(name: string, args: Record<string, unknown>, deps: TabDeps) {
   if (name === 'list_tabs') return await listTabs(deps);
   if (name === 'switch_tab') return await switchTab(deps, args);
   if (name === 'open_tab') return await openTab(deps, args);

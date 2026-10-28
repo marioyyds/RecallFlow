@@ -20,7 +20,9 @@ import { detectAuthChallenge, authChallengeNotice } from './auth-challenge.ts';
 import type { Caught } from './errors.ts';
 
 /** fetch_webpage：抓取单页正文（原实现）。 */
-export async function fetchWebpage(deps: any, args: Record<string, unknown>) {
+import type { FetchDeps } from './tool-deps.ts';
+
+export async function fetchWebpage(deps: FetchDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   // 失败要如实上报 ok:false（触发失败摘除机制，避免反复重试空耗预算）；
   // 失败 URL 记入 ctx.failedUrls，同一 URL 重试时直接拒绝。
@@ -129,8 +131,8 @@ export async function fetchWebpage(deps: any, args: Record<string, unknown>) {
     // 超时/中止是**暂时性**失败，**不得**记入 ctx.failedUrls —— 那是「请勿重试」的永久名单
     // （见上面的分支），一旦记进去，同一 URL 在本任务后续轮次会被直接拒绝，
     // 而它可能只是慢了一次。只有确定性失败（状态码、内容类型、跨域）才永久拉黑。
-    if (!deps.isAbortLikeError(e)) ctx.failedUrls.push(norm);
-    return { ok: false, result: deps.describeFetchError(e, u, 15000) };
+    if (!deps.isAbortLikeError(e as { name?: string; message?: string } | null | undefined)) ctx.failedUrls.push(norm);
+    return { ok: false, result: deps.describeFetchError(e as { name?: string; message?: string } | null | undefined, u, 15000) };
   } finally {
     // fetch 抛错（例如 Illegal invocation）时也要清掉计时器；
     // 否则 Service Worker 里会留下一个 15 秒后才触发的悬挂定时器，测试进程也会被拖住。
@@ -139,7 +141,7 @@ export async function fetchWebpage(deps: any, args: Record<string, unknown>) {
 }
 
 /** web_search：联网搜索（原实现）。 */
-export async function webSearch(deps: any, args: Record<string, unknown>) {
+export async function webSearch(deps: FetchDeps, args: Record<string, unknown>) {
   const q = String(args.query || '').trim();
   if (!q) return { ok: false, result: '请提供搜索关键词 query。' };
   const maxResults = Math.min(10, Math.max(1, Number(args.maxResults) || 6));
@@ -165,7 +167,7 @@ export async function webSearch(deps: any, args: Record<string, unknown>) {
 export const FETCH_TOOLS = new Set(['fetch_webpage', 'web_search']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleFetchTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleFetchTool(name: string, args: Record<string, unknown>, deps: FetchDeps) {
   if (name === 'fetch_webpage') return await fetchWebpage(deps, args);
   if (name === 'web_search') return await webSearch(deps, args);
   return null;

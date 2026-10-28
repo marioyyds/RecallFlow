@@ -18,6 +18,9 @@
 // 判据是"能力/审批前置条件是否一致"。
 
 /** 合法的 op 取值。显式列出，便于报错时给出可用选项。 */
+import type { KnowledgeItem } from '../shared/store.ts';
+import type { KnowledgeDeps } from './tool-deps.ts';
+
 export const KNOWLEDGE_READ_OPS = ['search', 'list', 'get'];
 
 /**
@@ -25,7 +28,7 @@ export const KNOWLEDGE_READ_OPS = ['search', 'list', 'get'];
  *
  * @param {object} deps { book, buildRagContext, buildCitations, typeInfo }
  */
-export function knowledgeRead(deps: any, args: Record<string, unknown>) {
+export function knowledgeRead(deps: KnowledgeDeps, args: Record<string, unknown>) {
   const op = String((args && args.op) || '').trim();
   if (!op) {
     return { ok: false, result: 'knowledge_read 需要 op 参数，取值：' + KNOWLEDGE_READ_OPS.join(' / ') + '。' };
@@ -47,14 +50,14 @@ export function knowledgeRead(deps: any, args: Record<string, unknown>) {
 // 名字/ID 这类**要被原样照抄**的值，就必须给出无歧义的边界。
 
 /** 检索（原 search_knowledge_base）。 */
-export function knowledgeSearch(deps: any, args: Record<string, unknown>) {
+export function knowledgeSearch(deps: KnowledgeDeps, args: Record<string, unknown>) {
   const limit = Number(args.limit) || 5;
   const relevant = deps.buildRagContext(deps.book, args.query || '', limit);
   if (!relevant.length) return { result: '未检索到相关知识库条目。' };
   const citations = deps.buildCitations(relevant, false);
   const text = relevant
     .map(
-      (it: any, i: any) =>
+      (it, i) =>
         `[${i + 1}] id="${it.id}" 标题：${it.title}｜类型：${deps.typeInfo(it.type).name}` +
         `${it.note ? '｜内容：' + it.note : ''}${it.url ? '｜链接：' + it.url : ''}`
     )
@@ -63,7 +66,8 @@ export function knowledgeSearch(deps: any, args: Record<string, unknown>) {
 }
 
 /** 列出（原 list_knowledge_base）。 */
-export function knowledgeList(deps: any, args: Record<string, unknown>) {  let items: any[] = Object.values(deps.book);
+export function knowledgeList(deps: KnowledgeDeps, args: Record<string, unknown>) {
+  let items: KnowledgeItem[] = Object.values(deps.book);
   if (args.type) items = items.filter((it) => it.type === args.type);
   items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const limit = Number(args.limit) || 20;
@@ -82,12 +86,12 @@ export function knowledgeList(deps: any, args: Record<string, unknown>) {  let i
 }
 
 /** 看单条（原 get_entry）。 */
-export function knowledgeGet(deps: any, args: Record<string, unknown>) {
+export function knowledgeGet(deps: KnowledgeDeps, args: Record<string, unknown>) {
   const it = deps.book[args.id as string];
   if (!it) return { result: '未找到该条目（id: ' + args.id + '）。' };
   // 星级缺失时回落到可读文案：原实现会输出 `星级：undefined`（缺 status 的条目，
   // 例如早期导入的数据），而这段文本是直接给模型看的。
-  const star = (deps.starLevels[it.status] || {}).name || it.status || '未设置';
+  const star = (deps.starLevels[it.status] || { name: '' }).name || it.status || '未设置';
   return {
     result:
       `标题：${it.title}\n类型：${deps.typeInfo(it.type).name}\n` +

@@ -40,6 +40,15 @@ import {
   MAX_SHOT_STORE_CHARS,
 } from '../shared/screenshot-store.ts';
 import type { Caught } from './errors.ts';
+import type { ScreenshotDeps, ScreenshotLadderInput, ScreenshotLadderResult, ScreenshotLadderStep } from './tool-deps.ts';
+
+/** `Page.getLayoutMetrics` 回执里用到的两组尺寸。 */
+interface LayoutMetricsLike {
+  cssContentSize?: { clientWidth?: number; clientHeight?: number; width?: number; height?: number };
+  contentSize?: { clientWidth?: number; clientHeight?: number; width?: number; height?: number };
+  cssVisualViewport?: { clientWidth?: number; clientHeight?: number; width?: number; height?: number };
+  visualViewport?: { clientWidth?: number; clientHeight?: number; width?: number; height?: number };
+}
 
 export { saveScreenshot, SHOT_KEY, MAX_SHOTS, MAX_SHOT_STORE_CHARS };
 
@@ -55,8 +64,8 @@ export { saveScreenshot, SHOT_KEY, MAX_SHOTS, MAX_SHOT_STORE_CHARS };
  * @param {object} deps { cdp, tabId, ladder, budgetMs, fullPage }
  * @returns {Promise<{data: string, used: object, usedIndex: number, degraded: boolean, timedOut: boolean}>}
  */
-export async function captureWithLadder(deps: any) {
-  const ladder = Array.isArray(deps.ladder) && deps.ladder.length ? deps.ladder : [{ format: 'jpeg', quality: 72 }];
+export async function captureWithLadder(deps: ScreenshotLadderInput): Promise<ScreenshotLadderResult> {
+  const ladder: ScreenshotLadderStep[] = Array.isArray(deps.ladder) && deps.ladder.length ? deps.ladder : [{ format: 'jpeg', quality: 72 }];
   const budgetMs = Number(deps.budgetMs) > 0 ? Number(deps.budgetMs) : DEFAULT_SCREENSHOT_BUDGET_MS;
   const deadline = Date.now() + budgetMs;
   let data = '';
@@ -94,7 +103,7 @@ export async function captureWithLadder(deps: any) {
  *
  * @param {object} deps { ctx, args, cdp, cdpAllowed, screenshotAttempts, saveScreenshot, formatScreenshotSummary }
  */
-export async function takeScreenshot(deps: any) {
+export async function takeScreenshot(deps: ScreenshotDeps) {
   const ctx = deps.ctx;
   const args = deps.args || {};
   // 截图走 CDP，不经内容脚本。图片体积只能靠 format/quality 控制
@@ -135,7 +144,7 @@ export async function takeScreenshot(deps: any) {
     // ⚠ 用的是阶梯留下的同一份 deadline（captureWithLadder 返回它）—— 各自算一份的话，
     // 两处预算会漂移，而这里一旦引用不到 deadline 就会**静默吞掉尺寸**（try/catch 兜着）。
     const remainForMetrics = Math.max(400, shot.deadline - Date.now());
-    const m = await deps.cdp.command(ctx.tabId, 'Page.getLayoutMetrics', {}, { timeoutMs: remainForMetrics });
+    const m = (await deps.cdp.command(ctx.tabId, 'Page.getLayoutMetrics', {}, { timeoutMs: remainForMetrics })) as LayoutMetricsLike;
     const box = args.fullPage === true ? (m.cssContentSize || m.contentSize) : (m.cssVisualViewport || m.visualViewport);
     if (box) {
       width = Math.round(box.clientWidth || box.width || 0);

@@ -1,4 +1,6 @@
 import type { Caught } from './errors.ts';
+import type { TraceStep } from './types.ts';
+import type { MacroDeps } from './tool-deps.ts';
 // 宏类工具（save_macro / list_macros / run_macro）→ 收敛为 macro(op)。
 //
 // C-4 合并第 5 档（见 docs/tool-merge-plan.md）。选它是因为：三个 handler 都很短（15–22 行）、
@@ -39,10 +41,10 @@ export const REPLAYABLE_TOOLS = new Set([
  *
  * @param {object} deps { pageUrl, trace, saveMacro, recallTrace? }
  */
-export async function macroSave(deps: any, args: Record<string, unknown>) {
+export async function macroSave(deps: MacroDeps, args: Record<string, unknown>) {
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: 'macro(op="save") 需要 name。' };
-  let trace = Array.isArray(deps.trace) ? deps.trace : [];
+  let trace: TraceStep[] = Array.isArray(deps.trace) ? deps.trace : [];
   let fromPreviousRun = false;
   let previousAgeMs = 0;
   let previousDropped = 0;
@@ -62,7 +64,7 @@ export async function macroSave(deps: any, args: Record<string, unknown>) {
   // 任何能写该键的一方都能塞进任意工具名，而宏一旦落库就会被反复回放。
   // 回放期 `macroRun` 还有第二道同样的检查；两道都保留（理由见文件头：曾有真实提权）。
   const beforeFilter = trace.length;
-  trace = trace.filter((s: any) => s && typeof s.tool === 'string' && s.args && typeof s.args === 'object' && REPLAYABLE_TOOLS.has(s.tool));
+  trace = trace.filter((s) => s && typeof s.tool === 'string' && s.args && typeof s.args === 'object' && REPLAYABLE_TOOLS.has(s.tool));
   const skipped = beforeFilter - trace.length;
   if (!trace.length) {
     // 报错必须给"下一步怎么做"，而不是只说"没有"（同文件 macroRun 的报错纪律）。
@@ -97,14 +99,14 @@ export async function macroSave(deps: any, args: Record<string, unknown>) {
 }
 
 /** 列出当前站点已保存的宏。 */
-export async function macroList(deps: any) {
+export async function macroList(deps: MacroDeps) {
   const macros = await deps.listMacros(deps.pageUrl);
   if (!macros.length) return { ok: true, result: '当前站点还没有保存的宏。' };
   const text = macros
     // 名字必须**显式引号标出**：原先写成 `名字：描述（N 步）`，而名字与描述都用 `：`
     // 分隔，名字里本身也可能含 `：`，于是边界真的有歧义。实测（会话 RF-EGPWWF）
     // agent 依次试了整行、试了描述，第三次才对 —— 两次调用纯属浪费。
-    .map((m: any, i: any) => '[' + (i + 1) + '] name="' + m.name + '"' + (m.description ? ' — ' + m.description : '') + '（' + m.steps.length + ' 步）')
+    .map((m, i) => '[' + (i + 1) + '] name="' + m.name + '"' + (m.description ? ' — ' + m.description : '') + '（' + m.steps.length + ' 步）')
     .join('\n');
   return { ok: true, result: '当前站点已保存的宏（回放时请照抄 name 的值）：\n' + text };
 }
@@ -115,16 +117,16 @@ export async function macroList(deps: any) {
  * @param {object} deps { pageUrl, ctx, getMacro, listMacros, bumpMacroHits, executeTool, validateToolCall }
  *   `ctx` 会被就地更新（tabId/pageUrl/pageTitle）——宏中途开新标签页后，后续步骤要在新页上执行。
  */
-export async function macroRun(deps: any, args: Record<string, unknown>) {
+export async function macroRun(deps: MacroDeps, args: Record<string, unknown>) {
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: 'macro(op="run") 需要 name。' };
   const macro = await deps.getMacro(deps.pageUrl, name);
   if (!macro) {
     // 报错必须给出**可用候选**。「可用 list 查看」等于把活推回给调用方 ——
     // 它刚刚就是看着列表试错的（实测连错两次）。这里直接列出准确的 name。
-    let names = [];
+    let names: Array<string | undefined> = [];
     try {
-      names = (await deps.listMacros(deps.pageUrl)).map((m: any) => m.name);
+      names = (await deps.listMacros(deps.pageUrl)).map((m) => m.name);
     } catch (e) {}
     return {
       ok: false,
@@ -168,7 +170,7 @@ export async function macroRun(deps: any, args: Record<string, unknown>) {
       r = { ok: false, result: e && (e as Caught).message ? (e as Caught).message : String(e) };
     }
     const failed = r && r.ok === false;
-    log.push('[' + (i + 1) + '/' + steps.length + '] ' + s.tool + (failed ? ' ✗ ' + String(r.result || '').slice(0, 120) : ' ✓'));
+    log.push('[' + (i + 1) + '/' + steps.length + '] ' + s.tool + (failed ? ' ✗ ' + String(r!.result || '').slice(0, 120) : ' ✓'));
     // 宏中途可能开新标签页：把 ctx 就地切过去，后续步骤才在正确的页上执行。
     if (r && Number.isInteger(Number(r.targetTabId))) {
       ctx.tabId = Number(r.targetTabId);
@@ -187,7 +189,7 @@ export async function macroRun(deps: any, args: Record<string, unknown>) {
 export const MACRO_OPS = ['save', 'list', 'run'];
 
 /** 统一入口：macro({ op, name?, description? })。op 必填。 */
-export async function macroTool(deps: any, args: Record<string, unknown>) {
+export async function macroTool(deps: MacroDeps, args: Record<string, unknown>) {
   const op = String((args && args.op) || '').trim();
   if (!op) return { ok: false, result: 'macro 需要 op 参数，取值：' + MACRO_OPS.join(' / ') + '。' };
   if (op === 'save') return await macroSave(deps, args);

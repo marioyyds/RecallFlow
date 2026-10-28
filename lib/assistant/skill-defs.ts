@@ -26,7 +26,7 @@ import { VISION_ENABLED, VISION_UNAVAILABLE_SKILL_COPY, VISION_ENABLED_SKILL_COP
  * 「知识库往返」「知识库检索回退」两条剧本加载 —— 所以"没有自己的剧本"说的是**验收覆盖**，
  * 不是"没人会用它"。
  */
-export const ORPHAN_SKILL_REASONS: Record<string, any> = Object.freeze({
+export const ORPHAN_SKILL_REASONS: Record<string, string> = Object.freeze({
   'agent-browser':
     '通用底座类技能（讲 agent-browser 的用法与边界），没有单一页面形态可造夹具；其纪律由各剧本间接覆盖。',
   'clip-to-knowledge':

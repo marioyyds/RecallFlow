@@ -16,7 +16,7 @@
 // ⚠ 抽的时候**一个数值都没改**：这是纯搬家，行为必须完全一致。
 // （仓库的纪律：搬运式重构不得改变对外契约 —— 见 registry-fingerprint.test.mjs。）
 
-export const CONTEXT_TUNING: Record<string, any> = Object.freeze({
+export const CONTEXT_TUNING: Record<string, number> = Object.freeze({
   // ---- 历史折叠 ----
   // 按 **token 估算**而不是字符数：中英文密度差约 4 倍，同样 6 万字符，
   // 英文约 1.5 万 token 尚可接受，中文却接近 6 万 token —— 按字符数设阈值对中文形同虚设。

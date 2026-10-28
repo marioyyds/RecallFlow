@@ -23,12 +23,14 @@
 // 失败翻译器是纯函数，直接 import（不走 deps 注入，避免打断既有调用方）。
 import { describeContentScriptUnreachable } from '../shared/utils.ts';
 import type { Caught } from './errors.ts';
+import type { RunCtx } from './types.ts';
+import type { CodeAccessDeps } from './tool-deps.ts';
 
 // 同一 tab 一旦确认沙箱被扩展 CSP 拦住，后续调用直接走页面主世界：
 // 这不是页面级差异，重复尝试只会制造同一条警告并浪费一次消息往返。
-const pageWorldPreferred = new Set();
+const pageWorldPreferred = new Set<string>();
 
-function tabKey(ctx: any) {
+function tabKey(ctx: RunCtx) {
   return ctx && ctx.tabId != null ? String(ctx.tabId) : '';
 }
 
@@ -37,7 +39,7 @@ export function __resetPageWorldPreferenceForTests() {
 }
 
 /** run_javascript：先沙箱、被 CSP 拒则自动改用页面主世界。 */
-export async function runJavascript(deps: any, args: Record<string, unknown>) {
+export async function runJavascript(deps: CodeAccessDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   // engine='page'：用 CDP Runtime.evaluate 在页面主世界执行（可访问页面自身 JS 状态，
   // 且不受页面 CSP 限制）；默认走内容脚本受限沙箱（无 chrome.*）。
@@ -107,6 +109,24 @@ export async function runJavascript(deps: any, args: Record<string, unknown>) {
 }
 
 /** 可访问性树里值得暴露给模型的角色（其余是布局/文本节点，塞进来只会占 token）。 */
+/** AX 树节点（CDP `Accessibility.getFullAXTree` 回执的简化形状）。 */
+interface AxNodeLike {
+  ignored?: boolean;
+  role?: { value?: string } | null;
+  name?: { value?: string } | null;
+  backendDOMNodeId?: number;
+}
+
+/** 从 AX 树里挑出来的一条交互节点。 */
+interface AxPick {
+  role: string;
+  name: string;
+  locator: { role: string; name: string };
+  backendDOMNodeId?: number;
+  x?: number;
+  y?: number;
+}
+
 export const INTERACTIVE_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox', 'listbox',
   'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch', 'slider',
@@ -119,17 +139,25 @@ export const INTERACTIVE_ROLES = new Set([
  * AX 树由浏览器生成，DOM 侧的 #__kb-ai-host 排除规则不会自动作用于它；
  * 小红书实操里 AX 前 7 个节点全是助手面板按钮，直接挤占了页面元素预算。
  */
-async function collectAssistantPanelNodeIds(cdp: any, tabId: number) {
-  if (!cdp || typeof cdp.command !== 'function') return new Set();
+/** DOM.describeNode 回执里的节点形状（CDP 协议的子树）。 */
+interface DomNodeLike {
+  backendNodeId?: number;
+  children?: DomNodeLike[];
+  shadowRoots?: DomNodeLike[];
+  contentDocument?: DomNodeLike;
+}
+
+async function collectAssistantPanelNodeIds(cdp: CodeAccessDeps['cdp'], tabId: number) {
+  if (!cdp || typeof cdp.command !== 'function') return new Set<number>();
   try {
-    const doc = await cdp.command(tabId, 'DOM.getDocument', { depth: 0 });
+    const doc = (await cdp.command(tabId, 'DOM.getDocument', { depth: 0 })) as { root?: { nodeId?: number } } | null;
     const rootId = doc && doc.root && doc.root.nodeId;
-    if (!rootId) return new Set();
-    const hit = await cdp.command(tabId, 'DOM.querySelector', { nodeId: rootId, selector: '#__kb-ai-host' });
-    if (!hit || !hit.nodeId) return new Set();
-    const desc = await cdp.command(tabId, 'DOM.describeNode', { nodeId: hit.nodeId, depth: -1, pierce: true });
-    const ids = new Set();
-    const walk = (node: any) => {
+    if (!rootId) return new Set<number>();
+    const hit = (await cdp.command(tabId, 'DOM.querySelector', { nodeId: rootId, selector: '#__kb-ai-host' })) as { nodeId?: number } | null;
+    if (!hit || !hit.nodeId) return new Set<number>();
+    const desc = (await cdp.command(tabId, 'DOM.describeNode', { nodeId: hit.nodeId, depth: -1, pierce: true })) as { node?: DomNodeLike } | null;
+    const ids = new Set<number>();
+    const walk = (node: DomNodeLike | null | undefined) => {
       if (!node) return;
       if (node.backendNodeId) ids.add(node.backendNodeId);
       for (const child of node.children || []) walk(child);
@@ -139,12 +167,12 @@ async function collectAssistantPanelNodeIds(cdp: any, tabId: number) {
     walk(desc && desc.node);
     return ids;
   } catch (e) {
-    return new Set();
+    return new Set<number>();
   }
 }
 
 /** get_ax_snapshot：读可访问性树里的可交互节点（含 role/名称/坐标）。 */
-export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
+export async function getAxSnapshot(deps: CodeAccessDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '可访问性树快照需要 CDP（请在设置中开启）。' };
   try {
@@ -153,8 +181,8 @@ export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
       collectAssistantPanelNodeIds(deps.cdp, ctx.tabId),
     ]);
     const limit = Math.min(120, Math.max(1, Number(args.limit) || 60));
-    const picked = [];
-    for (const n of nodes) {
+    const picked: AxPick[] = [];
+    for (const n of nodes as AxNodeLike[]) {
       if (!n || n.ignored) continue;
       if (n.backendDOMNodeId && excluded.has(n.backendDOMNodeId)) continue;
       const role = n.role && n.role.value;
@@ -163,11 +191,11 @@ export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
       picked.push({ role, name, locator: { role, name }, backendDOMNodeId: n.backendDOMNodeId });
       if (picked.length >= limit) break;
     }
-    const withBox = [];
+    const withBox: AxPick[] = [];
     for (const p of picked) {
       if (!p.backendDOMNodeId) { withBox.push(p); continue; }
       try {
-        const box = await deps.cdp.getBoxModel(ctx.tabId, p.backendDOMNodeId);
+        const box = (await deps.cdp.getBoxModel(ctx.tabId, p.backendDOMNodeId)) as { content?: number[] } | null;
         const q = box && box.content;
         if (q && q.length >= 8) {
           const cx = Math.round((q[0] + q[2] + q[4] + q[6]) / 4);
@@ -180,7 +208,7 @@ export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
         withBox.push(p);
       }
     }
-    const lines = withBox.map((p: any, i) => '[' + (i + 1) + '] ' + p.role + '「' + p.name + '」' + (p.x != null ? ' 坐标(' + p.x + ',' + p.y + ')' : ''));
+    const lines = withBox.map((p, i) => '[' + (i + 1) + '] ' + p.role + '「' + p.name + '」' + (p.x != null ? ' 坐标(' + p.x + ',' + p.y + ')' : ''));
     return {
       ok: true,
       ax: withBox,
@@ -189,7 +217,7 @@ export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
         '\n用法：优先用 role+name 定位（如 click_element({role:"button",name:"登录"})），比坐标更稳；canvas/虚拟列表等无 DOM 场景再用坐标 click_at。',
     };
   } catch (e) {
-    return { ok: false, result: '读取可访问性树失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: '读取可访问性树失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
@@ -197,7 +225,7 @@ export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
 export const CODE_ACCESS_TOOLS = new Set(['run_javascript', 'get_ax_snapshot']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleCodeAccessTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleCodeAccessTool(name: string, args: Record<string, unknown>, deps: CodeAccessDeps) {
   if (name === 'run_javascript') return await runJavascript(deps, args);
   if (name === 'get_ax_snapshot') return await getAxSnapshot(deps, args);
   return null;

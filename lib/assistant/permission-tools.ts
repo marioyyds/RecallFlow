@@ -11,9 +11,11 @@
 //   · 但它**不能**覆盖 `alwaysRequireApproval`（用户脚本 / 技能写入仍每次确认）——
 //     那句话就写在返回文案里，是给模型与用户看的承诺。
 import { siteKeyOf } from '../shared/utils.ts';
+import type { Caught } from './errors.ts';
+import type { PermissionDeps } from './tool-deps.ts';
 
 /** 把当前站点加入信任列表（原 trust_site）。 */
-export async function trustSite(deps: any) {
+export async function trustSite(deps: PermissionDeps) {
   const ctx = deps.ctx;
   // 与 toolNeedsApproval 用**同一个**站点键：否则本地页会出现
   // "trust_site 说信任了 'null'、审批时却按目录去查"这种永不生效的信任。
@@ -32,14 +34,14 @@ export async function trustSite(deps: any) {
 }
 
 /** 回应页面对话框（原 handle_dialog）。 */
-export async function handleDialogTool(deps: any, args: Record<string, unknown>) {
+export async function handleDialogTool(deps: PermissionDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '处理对话框需要 CDP（请在设置中开启）。' };
   try {
-    await deps.handleDialog(ctx.tabId, args.accept !== false, args.promptText);
+    await deps.handleDialog(ctx.tabId, args.accept !== false, typeof args.promptText === 'string' ? args.promptText : undefined);
     return { ok: true, result: (args.accept !== false ? '已接受' : '已取消') + '页面对话框。' };
   } catch (e) {
-    return { ok: false, result: '处理对话框失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: '处理对话框失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
@@ -47,7 +49,7 @@ export async function handleDialogTool(deps: any, args: Record<string, unknown>)
 export const PERMISSION_TOOLS = new Set(['trust_site', 'handle_dialog']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePermissionTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handlePermissionTool(name: string, args: Record<string, unknown>, deps: PermissionDeps) {
   if (name === 'trust_site') return await trustSite(deps);
   if (name === 'handle_dialog') return await handleDialogTool(deps, args);
   return null;

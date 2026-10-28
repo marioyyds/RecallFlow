@@ -13,7 +13,9 @@
 //      具体原因（匹配不上、脚本报错等），直接把它当结果会把可读原因吞掉。
 
 /** 列出已安装的用户脚本（原 list_userscripts）。 */
-export async function listUserscriptsTool(deps: any) {
+import type { UserscriptDeps } from './tool-deps.ts';
+
+export async function listUserscriptsTool(deps: UserscriptDeps) {
   const scripts = await deps.listUserscripts();
   const text = scripts.length
     ? scripts
@@ -28,8 +30,8 @@ export async function listUserscriptsTool(deps: any) {
 }
 
 /** 在 GreasyFork 上搜索用户脚本（原 search_userscripts）。 */
-export async function searchUserscripts(deps: any, args: Record<string, unknown>) {
-  const list = await deps.searchScripts(args.query);
+export async function searchUserscripts(deps: UserscriptDeps, args: Record<string, unknown>) {
+  const list = await deps.searchScripts(args.query as string);
   return {
     ok: true,
     result: list.length
@@ -47,12 +49,12 @@ export async function searchUserscripts(deps: any, args: Record<string, unknown>
  * 先查用户设置：`agentCanInstall` 为假时**直接拒绝**，并且要明确告诉用户
  * "是你自己在设置里关的、去哪里打开"—— 而不是含糊地说"安装失败"。
  */
-export async function installUserscript(deps: any, args: Record<string, unknown>) {
+export async function installUserscript(deps: UserscriptDeps, args: Record<string, unknown>) {
   const usSettings = await deps.getUserscriptSettings();
   if (!usSettings.agentCanInstall) {
     return { ok: false, result: '用户已在设置中关闭“允许 Agent 安装脚本”，请打开设置页开启后再试。' };
   }
-  const r = await deps.installFromUrl(args.url);
+  const r = await deps.installFromUrl(args.url as string);
   return {
     ok: true,
     result:
@@ -63,8 +65,8 @@ export async function installUserscript(deps: any, args: Record<string, unknown>
 }
 
 /** 在当前标签页执行指定用户脚本（原 run_userscript）。 */
-export async function runUserscript(deps: any, args: Record<string, unknown>) {
-  const r = await deps.runUserscriptOnTab(deps.ctx.tabId, args.scriptId);
+export async function runUserscript(deps: UserscriptDeps, args: Record<string, unknown>) {
+  const r = await deps.runUserscriptOnTab(deps.ctx.tabId, args.scriptId as string);
   return r.ok ? { ok: true, result: r.result } : { ok: false, result: r.error };
 }
 
@@ -72,7 +74,7 @@ export async function runUserscript(deps: any, args: Record<string, unknown>) {
 export const USERSCRIPT_TOOLS = new Set(['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleUserscriptTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleUserscriptTool(name: string, args: Record<string, unknown>, deps: UserscriptDeps) {
   if (name === 'list_userscripts') return await listUserscriptsTool(deps);
   if (name === 'search_userscripts') return await searchUserscripts(deps, args);
   if (name === 'install_userscript') return await installUserscript(deps, args);

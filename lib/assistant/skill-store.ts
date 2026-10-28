@@ -1,3 +1,4 @@
+import type { SkillLike } from './types.ts';
 // 技能持久化：内置技能来自 skill-defs.js（只读），用户自定义技能存于 chrome.storage.local。
 // 数据采用 SkillHub 标准 SKILL.md 形态（frontmatter 字段 + content 正文），
 // RecallFlow 专有触发条件放在 x.recallflow-* 扩展字段。
@@ -64,7 +65,7 @@ function genId() {
   return 'custom-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-export async function addUserSkill(skill: any) {
+export async function addUserSkill(skill: SkillLike) {
   const list = await getUserSkills();
   const item = toStorageShape({ ...skill, name: skill.name || genId() });
   list.push(item);
@@ -72,7 +73,7 @@ export async function addUserSkill(skill: any) {
   return item;
 }
 
-export async function updateUserSkill(id: any, patch: any) {
+export async function updateUserSkill(id: string, patch: Partial<SkillLike>) {
   const list = await getUserSkills();
   const idx = list.findIndex((s) => s.name === id);
   if (idx < 0) return null;
@@ -81,7 +82,7 @@ export async function updateUserSkill(id: any, patch: any) {
   return list[idx];
 }
 
-export async function removeUserSkill(id: any) {
+export async function removeUserSkill(id: string) {
   const list = await getUserSkills();
   const next = list.filter((s) => s.name !== id);
   await saveUserSkills(next);

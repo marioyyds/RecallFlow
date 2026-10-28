@@ -9,6 +9,8 @@
 //（7 处 CDP 路径），导致卡死检测永远认为在推进、完成校验失去意义。
 // 把语义集中到一处以后，"什么情况下可以声称 verified"这件事只有一个答案。
 //
+import type { ActionVerification, PageSnapshotLike, ToolResult } from './types.ts';
+
 // 三态语义（与 buildActionVerification 一致）：
 //   executed    动作已派发（不表示产生了页面变化）
 //   changed     是否观测到页面变化
@@ -16,7 +18,7 @@
 //   unobservable 无法观测时**不得**声称已验证
 
 /** 不可观测的结论（如视觉标注层不计入内容指纹）。 */
-export function buildActionVerification(observed: any, reason: string) {
+export function buildActionVerification(observed: string, reason: string): ActionVerification {
   const text = String(reason || '');
   if (observed === 'changed') return { executed: true, verified: true, changed: true, reason: text };
   if (observed === 'unchanged') return { executed: true, verified: true, changed: false, reason: text };
@@ -27,14 +29,14 @@ export function buildActionVerification(observed: any, reason: string) {
  * 比较前后两次页面快照的指纹，得出「是否观测到变化」。
  * 快照自带 fingerprint（由 page-text.js 计算），因此这是零额外成本的判断。
  */
-export function observedChange(before: any, after: any) {
+export function observedChange(before: PageSnapshotLike | null | undefined, after: PageSnapshotLike | null | undefined) {
   if (!after || typeof after.fingerprint !== 'string') return 'unobservable';
   if (!before || typeof before.fingerprint !== 'string') return 'unobservable';
   return before.fingerprint === after.fingerprint ? 'unchanged' : 'changed';
 }
 
 /** 前后快照是否发生可观察变化（URL / 内容指纹 / 滚动位置）。 */
-export function snapshotChanged(before: any, after: any, command: string) {
+export function snapshotChanged(before: PageSnapshotLike | null | undefined, after: PageSnapshotLike | null | undefined, command: string) {
   if (!before || !after) return false;
   if (before.url !== after.url) return true;
   if (before.fingerprint && after.fingerprint && before.fingerprint !== after.fingerprint) return true;
@@ -56,7 +58,7 @@ export function snapshotChanged(before: any, after: any, command: string) {
  * 因此这些命令**无法**通过内容指纹验证 —— 它们的 verified 来自"动作已派发"这一事实，
  * 而不是来自"观测到了变化"。这是有意的取舍，不是漏洞；但**不得**用它去声称 changed。
  */
-export function verifyPageAction(command: string, before: any, after: any, response: any) {
+export function verifyPageAction(command: string, before: PageSnapshotLike | null | undefined, after: PageSnapshotLike | null | undefined, response: ToolResult | null | undefined): ActionVerification {
   const executed = Boolean(response && response.ok !== false);
   const urlChanged = Boolean(before && after && before.url !== after.url);
   const contentChanged = Boolean(before && after && before.fingerprint !== after.fingerprint);

@@ -1,3 +1,4 @@
+import type { ScreenshotResult } from './types.ts';
 // 视觉（多模态）消息装配 —— **纯函数**，全部经过 `VISION_ENABLED` 开关。
 //
 // ## 为什么要有这个模块
@@ -53,12 +54,12 @@ export const TOKENS_PER_IMAGE = 600;
 export const MAX_IMAGES_PER_TASK = 3;
 
 /** 已经送过 `sentCount` 张图时，这一张还该不该**真送**？ */
-export function shouldSendImage(sentCount: any, cap = MAX_IMAGES_PER_TASK) {
+export function shouldSendImage(sentCount: number, cap = MAX_IMAGES_PER_TASK) {
   return (Number(sentCount) || 0) < (Number(cap) || 0);
 }
 
 /** 达到上界时的**纯文字**说明（不假装送过图，也不说"看不到图"这种与开关状态矛盾的话 ✗）。 */
-export function imageCapNote(sentCount: any, label: string, cap = MAX_IMAGES_PER_TASK) {
+export function imageCapNote(sentCount: number, label: string, cap = MAX_IMAGES_PER_TASK) {
   const n = Number(sentCount) || 0;
   const c = Number(cap) || 0;
   const what = label ? `（${label}）` : '';
@@ -88,7 +89,7 @@ export function imageCapNote(sentCount: any, label: string, cap = MAX_IMAGES_PER
  * ⇒ 生产实际生效的**只有本常量**。**不要**对外宣称"预算可调/可在设置里改"。
  * 要让它真正可配，需要：① 设置项 → ② 赋值到 `ctx.visionBudget` → ③ 一条门禁断言设置真的生效。
  */
-export const DEFAULT_VISION_BUDGET: Record<string, any> = Object.freeze({
+export const DEFAULT_VISION_BUDGET: Record<string, number> = Object.freeze({
   maxImages: 2,
   maxBase64Chars: 2_000_000,
 });
@@ -98,7 +99,7 @@ export const DEFAULT_VISION_BUDGET: Record<string, any> = Object.freeze({
  *
  * @returns {{picked: Array, skippedCount: number, note: string}}
  */
-export function selectScreenshotsForVision(screenshots: any, budget: Record<string, any> = {}) {
+export function selectScreenshotsForVision(screenshots: ScreenshotResult[], budget: Record<string, number> = {}) {
   const maxImages = Number.isFinite(budget.maxImages) ? budget.maxImages : DEFAULT_VISION_BUDGET.maxImages;
   const maxBase64Chars = Number.isFinite(budget.maxBase64Chars) ? budget.maxBase64Chars : DEFAULT_VISION_BUDGET.maxBase64Chars;
   const list = Array.isArray(screenshots) ? screenshots.filter((s) => s && s.dataUrl) : [];
@@ -124,7 +125,7 @@ export function selectScreenshotsForVision(screenshots: any, budget: Record<stri
  * 为什么是 user 消息而不是 tool 消息：工具消息只能是文本 ✗
  * 而图片必须作为内容部件出现 ⇒ 追加一条 user 消息是唯一干净的落点 ✓
  */
-export function buildScreenshotMessage(screenshots: any, note = '') {
+export function buildScreenshotMessage(screenshots: ScreenshotResult[], note = '') {
   const list = Array.isArray(screenshots) ? screenshots.filter((s) => s && s.dataUrl) : [];
   if (!list.length) return null;
   const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
@@ -156,7 +157,7 @@ export function buildScreenshotMessage(screenshots: any, note = '') {
  *
  * @returns {Array} 要追加到 messages 末尾的消息（可能为空）
  */
-export function visionMessagesFor(screenshots: any, options: Record<string, any> = {}) {
+export function visionMessagesFor(screenshots: ScreenshotResult[], options: { budget?: Record<string, number>; visionEnabled?: boolean } = {}) {
   const enabled = typeof options.visionEnabled === 'boolean' ? options.visionEnabled : VISION_ENABLED;
   if (!enabled) return [];
   // ⚠ `options.budget` 为 undefined 时 `selectScreenshotsForVision` 会自行套默认值，
@@ -175,6 +176,6 @@ export function visionMessagesFor(screenshots: any, options: Record<string, any>
 }
 
 /** 估算这批截图会占多少 token（供调用方打印/记账）。 */
-export function estimateVisionTokens(count: any) {
+export function estimateVisionTokens(count: number) {
   return Math.max(0, Number(count) || 0) * TOKENS_PER_IMAGE;
 }

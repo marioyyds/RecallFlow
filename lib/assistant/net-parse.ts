@@ -31,7 +31,7 @@ export function extractHtmlTitle(html: string) {
 }
 
 /** 还原搜索引擎重定向链接为真实 URL（DuckDuckGo uddg 参数 / Bing u=base64url）。 */
-export function resolveSearchUrl(href: any, engine: any) {
+export function resolveSearchUrl(href: string, engine: string) {
   try {
     if (engine === 'ddg') {
       const u = new URL(href, 'https://duckduckgo.com');
@@ -55,7 +55,7 @@ export function resolveSearchUrl(href: any, engine: any) {
 }
 
 /** 把搜索结果的 HTML 解析成 {title,url,snippet} 列表（按引擎选择器差异处理）。 */
-export function parseSearchResults(html: string, engine: any) {
+export function parseSearchResults(html: string, engine: string) {
   const out = [];
   const src = String(html || '');
   if (engine === 'bing') {
@@ -90,7 +90,7 @@ export function parseSearchResults(html: string, engine: any) {
  * 于是不同内核给出的文案不一样（实测 Chrome：`signal is aborted without reason`）。
  * 只认 `e.name === 'AbortError'` 会漏掉一部分，只认文案又会绑死某个内核 —— 两者都认。
  */
-export function isAbortLikeError(e: any) {
+export function isAbortLikeError(e: { name?: string; message?: string } | null | undefined) {
   if (!e) return false;
   if (e.name === 'AbortError') return true;
   return /signal is aborted|user aborted|operation was aborted|aborted without reason/i.test(String(e.message || ''));
@@ -107,7 +107,7 @@ export function isAbortLikeError(e: any) {
  * 并写进了给用户的报告 —— 而真相是**15 秒没响应、我们根本没拿到任何内容**，
  * 所以那时它**无从判断**页面类型。**错误归因比没有归因更糟。**
  */
-export function describeFetchError(e: any, url: string, timeoutMs: number) {
+export function describeFetchError(e: { name?: string; message?: string } | null | undefined, url: string, timeoutMs: number) {
   const u = String(url || '');
   if (isAbortLikeError(e)) {
     const secs = Math.round((Number(timeoutMs) || 15000) / 1000);
@@ -136,7 +136,7 @@ export function describeFetchError(e: any, url: string, timeoutMs: number) {
  *
  * 回落到**可识别的 URL 尾段**（README.md / www.csdn.net），实在没有才用占位。
  */
-export function citationTitleFor(pageTitle: any, url: string) {
+export function citationTitleFor(pageTitle: unknown, url: string) {
   const t = stripHtmlTags(String(pageTitle || '').trim());
   if (t) return t;
   const u = String(url || '');
@@ -149,10 +149,10 @@ export function citationTitleFor(pageTitle: any, url: string) {
   }
 }
 
-/** 读取响应体，限制字节上限（避免超大页面把内存打满）。 */export async function readBounded(body: any, maxBytes: any) {
+/** 读取响应体，限制字节上限（避免超大页面把内存打满）。 */export async function readBounded(body: ReadableStream<Uint8Array> | null, maxBytes: number) {
   const chunks = [];
   let total = 0;
-  const reader = body.getReader();
+  const reader = body!.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -183,7 +183,7 @@ export function citationTitleFor(pageTitle: any, url: string) {
  * 对 TextDecoder 实例调用 .decode() 而抛错、被 catch 吞掉，导致**搜索结果恒为空**。
  * 这个坑实测踩过两次，tests/silent-failure-regressions.test.mjs 有专门的回归断言。
  */
-export function decodeBuffer(buf: any, contentType: any) {
+export function decodeBuffer(buf: Uint8Array, contentType: string) {
   const charset = ((contentType || '').match(/charset=([\w-]+)/i) || [])[1];
   try {
     return new TextDecoder((charset || 'utf-8').trim().toLowerCase());
@@ -197,7 +197,7 @@ export function decodeBuffer(buf: any, contentType: any) {
  *
  * 注意：本函数会被 withTimeout(toolTimeoutMs=15s) 包裹，各引擎超时必须加起来 < 15s。
  */
-export async function searchWeb(query: any, maxResults = 6) {
+export async function searchWeb(query: string, maxResults = 6) {
   const q = encodeURIComponent(query);
   const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' };
   const engines = [

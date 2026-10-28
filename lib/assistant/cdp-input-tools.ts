@@ -9,6 +9,9 @@
 // ⚠⚠ 本模块里有一条**极易被"顺手优化"破坏**的设计决定，见 `clickElement` 上方注释。
 //     它关系到"会不会对用户的真实页面多点一次"——请先读完再改。
 
+import type { Caught } from './errors.ts';
+import type { CdpInputDeps } from './tool-deps.ts';
+
 /**
  * click_element：先走内容脚本合成点击，**失败才**升级 CDP 可信点击。
  *
@@ -26,7 +29,7 @@
  * 子框架（frameId≠0）需把框架内坐标换算为顶层坐标（`resolveFrameClickPoint`），
  * 换算不可靠时**退回内容脚本结果，绝不在错误坐标上点击**。
  */
-export async function clickElement(deps: any, args: Record<string, unknown>) {
+export async function clickElement(deps: CdpInputDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, 'click', args, ctx);
   const target = await deps.resolveTarget(ctx.tabId, args);
@@ -64,14 +67,14 @@ export async function clickElement(deps: any, args: Record<string, unknown>) {
 }
 
 /** click_at：按视口坐标直接派发可信点击（合成点击无效的顽固站点用它）。 */
-export async function clickAt(deps: any, args: Record<string, unknown>) {
+export async function clickAt(deps: CdpInputDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const x = Number(args.x);
   const y = Number(args.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, result: 'click_at 需要数值坐标 x、y。' };
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: 'click_at 需要 CDP 输入层（请在设置中开启「浏览器级输入」，且需 Chromium 内核浏览器）。' };
   try {
-    await deps.cdp.clickAt(ctx.tabId, x, y, { button: args.button || 'left', clickCount: args.double ? 2 : 1 });
+    await deps.cdp.clickAt(ctx.tabId, x, y, { button: (args.button as string) || 'left', clickCount: args.double ? 2 : 1 });
     const before = ctx.lastSnapshot || null;
     const after = await deps.getPageSnapshot(ctx.tabId, { maxElements: 40, maxText: 1200 }).catch(() => null);
     return {
@@ -83,12 +86,12 @@ export async function clickAt(deps: any, args: Record<string, unknown>) {
       result: '已在坐标 (' + x + ',' + y + ') 点击' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
   } catch (e) {
-    return { ok: false, result: 'CDP 点击失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: 'CDP 点击失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
 /** hover_element：把鼠标移到目标元素上。 */
-export async function hoverElement(deps: any, args: Record<string, unknown>) {
+export async function hoverElement(deps: CdpInputDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '悬停需要 CDP 输入层（请在设置中开启）。' };
   const target = await deps.resolveTarget(ctx.tabId, args);
@@ -109,12 +112,12 @@ export async function hoverElement(deps: any, args: Record<string, unknown>) {
       result: '已悬停到元素（坐标 ' + target.rect.centerX + ',' + target.rect.centerY + '）' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
   } catch (e) {
-    return { ok: false, result: '悬停失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: '悬停失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
 /** drag_element：从起点拖到终点。需要能**同时**定位两端。 */
-export async function dragElement(deps: any, args: Record<string, unknown>) {
+export async function dragElement(deps: CdpInputDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '拖拽需要 CDP 输入层（请在设置中开启）。' };
   const from = await deps.resolveTarget(ctx.tabId, { ref: args.fromRef, selector: args.fromSelector, text: args.fromText });
@@ -133,15 +136,15 @@ export async function dragElement(deps: any, args: Record<string, unknown>) {
       result: '已从 (' + from.rect.centerX + ',' + from.rect.centerY + ') 拖拽到 (' + to.rect.centerX + ',' + to.rect.centerY + ')' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
   } catch (e) {
-    return { ok: false, result: '拖拽失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: '拖拽失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
 /** upload_file：把本地文件设置到 file input 上。 */
-export async function uploadFile(deps: any, args: Record<string, unknown>) {
+export async function uploadFile(deps: CdpInputDeps, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '文件上传需要 CDP（请在设置中开启）。' };
-  const files = Array.isArray(args.files) ? args.files.filter(Boolean) : args.files ? [args.files] : [];
+  const files = (Array.isArray(args.files) ? args.files.filter(Boolean) : args.files ? [args.files] : []) as string[];
   if (!files.length) return { ok: false, result: 'upload_file 需要 files（本地文件的绝对路径数组）。' };
   const target = await deps.resolveTarget(ctx.tabId, args);
   if (!target) return { ok: false, result: '未找到 file input 元素。' };
@@ -157,7 +160,7 @@ export async function uploadFile(deps: any, args: Record<string, unknown>) {
       result: '已向文件输入框设置 ' + files.length + ' 个文件：' + files.join('、'),
     };
   } catch (e) {
-    return { ok: false, result: '文件上传失败：' + deps.summarizeCdpError(e) };
+    return { ok: false, result: '文件上传失败：' + deps.summarizeCdpError(e as Caught) };
   }
 }
 
@@ -165,7 +168,7 @@ export async function uploadFile(deps: any, args: Record<string, unknown>) {
 export const CDP_INPUT_TOOLS = new Set(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleCdpInputTool(name: string, args: Record<string, unknown>, deps: any) {
+export async function handleCdpInputTool(name: string, args: Record<string, unknown>, deps: CdpInputDeps) {
   if (name === 'click_element') return await clickElement(deps, args);
   if (name === 'click_at') return await clickAt(deps, args);
   if (name === 'hover_element') return await hoverElement(deps, args);

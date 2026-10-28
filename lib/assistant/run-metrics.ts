@@ -4,21 +4,23 @@
 // "这一轮用了多少工具 / 绕了多少路 / 缓存命中多少 / 耗时拆成几段"只有聚合后才有意义，
 // 而"用数据改进编排"（见 docs/testing-live-sites-plan.md 的 T3）的第一步就是先有可信的基线。
 
-const num = (v: any) => Number.isFinite(Number(v)) ? Number(v) : 0;
+import type { RunMetricsSummary, TraceRecordEntry } from './types.ts';
+
+const num = (v: unknown) => Number.isFinite(Number(v)) ? Number(v) : 0;
 
 /**
  * 把 trace entries 聚合成指标对象。
  * @param {Array} entries trace 条目（rec.entries）
  */
-export function summarizeRunTrace(entries: any) {
-  const list = Array.isArray(entries) ? entries : [];
+export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined): RunMetricsSummary {
+  const list: TraceRecordEntry[] = Array.isArray(entries) ? entries : [];
   const tools = list.filter((e) => e && e.phase === 'tool');
   const turns = list.filter((e) => e && e.phase === 'turn-timing');
   const cache = list.filter((e) => e && e.phase === 'cache');
-  const complete = list.find((e) => e && e.phase === 'complete') || {};
+  const complete = (list.find((e) => e && e.phase === 'complete') || {}) as TraceRecordEntry;
 
-  const byTool: Record<string, any> = {};
-  for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
+  const byTool: Record<string, number> = {};
+  for (const t of tools) byTool[String(t.name)] = (byTool[String(t.name)] || 0) + 1;
 
   const hit = cache.reduce((n, e) => n + num(e.hit), 0);
   const miss = cache.reduce((n, e) => n + num(e.miss), 0);
@@ -43,7 +45,7 @@ export function summarizeRunTrace(entries: any) {
 }
 
 /** 把指标对象格式化成给模型/人读的几行摘要。 */
-export function formatRunMetrics(m: any) {
+export function formatRunMetrics(m: RunMetricsSummary): string {
   const sec = (ms: number) => (Math.round(ms / 100) / 10).toFixed(1) + 's';
   const lines = [
     '指标摘要：',
@@ -52,7 +54,7 @@ export function formatRunMetrics(m: any) {
     '耗时 ' + sec(m.totalMs) + '（prefill ' + sec(m.prefillMs) + ' / decode ' + sec(m.decodeMs) + '）',
     '累计 token ' + m.totalTokens + (m.cache.ratio == null ? '' : ' / 前缀缓存命中率 ' + m.cache.ratio + '%'),
   ];
-  const by = (Object.entries(m.byTool || {}) as [string, any][])
+  const by = (Object.entries(m.byTool || {}) as [string, number][])
     .sort((a, b) => b[1] - a[1])
     .map(([k, n]) => k + '×' + n);
   if (by.length) lines.push('按工具：' + by.join('、'));

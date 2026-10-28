@@ -1,4 +1,5 @@
 import type { Caught } from './errors.ts';
+import type { DiagnosticsDeps, SendTabMessage } from './tool-deps.ts';
 // 诊断类工具（read_console / read_network / list_downloads）→ 收敛为 read_diagnostics(kind)。
 //
 // C-4 合并第 3 档（见 docs/tool-merge-plan.md）：三个工具都是"读环境事实"，权限完全一致（全是 read），
@@ -12,16 +13,16 @@ import type { Caught } from './errors.ts';
 // 不会触发新下载。
 
 /** 读取 console 记录（原 read_console 的实现）。 */
-export async function readConsole(sendTabMessage: any, tabId: number, args: Record<string, unknown>) {
+export async function readConsole(sendTabMessage: SendTabMessage, tabId: number, args: Record<string, unknown>) {
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetConsole' });
     let entries = (res && res.entries) || [];
-    if (args.level) entries = entries.filter((e: any) => e.level === args.level);
+    if (args.level) entries = entries.filter((e) => e.level === args.level);
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: '暂无 console 记录。' };
-    const text = entries.map((e: any) => '[' + e.level + '] ' + e.text + (e.stack ? '\n' + e.stack : '')).join('\n');
+    const text = entries.map((e) => '[' + String(e.level) + '] ' + String(e.text) + (e.stack ? '\n' + String(e.stack) : '')).join('\n');
     return { ok: true, result: '最近 console 记录（' + entries.length + ' 条）：\n' + text };
   } catch (e) {
     return { ok: false, result: '读取 console 失败：' + (e as Caught).message };
@@ -29,22 +30,22 @@ export async function readConsole(sendTabMessage: any, tabId: number, args: Reco
 }
 
 /** 读取网络请求记录（原 read_network 的实现）。 */
-export async function readNetwork(sendTabMessage: any, tabId: number, args: Record<string, unknown>) {
+export async function readNetwork(sendTabMessage: SendTabMessage, tabId: number, args: Record<string, unknown>) {
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetNetwork' });
     let entries = (res && res.entries) || [];
     if (args.filter) {
       const f = String(args.filter);
-      entries = entries.filter((e: any) => String(e.url || '').includes(f));
+      entries = entries.filter((e) => String(e.url || '').includes(f));
     }
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: '暂无网络请求记录。' };
     const text = entries
-      .map((e: any) => {
-        const head = (e.method || 'GET') + ' ' + (e.error ? 'ERR' : (e.status || '')) + ' ' + e.url + (e.ms != null ? ' (' + e.ms + 'ms)' : '') + (e.error ? ' — ' + e.error : '');
-        const init = e.initiator ? e.initiator.split('\n').slice(0, 2).join(' ') : '';
+      .map((e) => {
+        const head = (e.method || 'GET') + ' ' + (e.error ? 'ERR' : (e.status || '')) + ' ' + String(e.url) + (e.ms != null ? ' (' + e.ms + 'ms)' : '') + (e.error ? ' — ' + e.error : '');
+        const init = e.initiator ? String(e.initiator).split('\n').slice(0, 2).join(' ') : '';
         return head + (init ? '\n  发起于: ' + init : '');
       })
       .join('\n');
@@ -55,12 +56,12 @@ export async function readNetwork(sendTabMessage: any, tabId: number, args: Reco
 }
 
 /** 列出本任务已捕获的下载（原 list_downloads 的实现）。 */
-export function listDownloads(getDownloads: any, tabId: number) {
+export function listDownloads(getDownloads: DiagnosticsDeps['getDownloads'], tabId: number) {
   const list = getDownloads(tabId);
   if (!list.length) return { ok: true, result: '本任务暂未捕获到下载。' };
   return {
     ok: true,
-    result: '捕获到的下载：\n' + list.map((d: any, i: any) => '[' + (i + 1) + '] ' + (d.suggestedFilename || '') + ' ← ' + d.url).join('\n'),
+    result: '捕获到的下载：\n' + list.map((d, i) => '[' + (i + 1) + '] ' + (d.suggestedFilename || '') + ' ← ' + d.url).join('\n'),
   };
 }
 
@@ -73,7 +74,7 @@ export const DIAGNOSTIC_KINDS = ['console', 'network', 'downloads'];
  * `kind` 是**必填**（schema 里 required）。缺省时返回明确的错误而不是猜一个默认值 ——
  * 猜默认会让"想看网络却拿到 console"这种错误静默发生，模型只会以为"没有网络请求"。
  */
-export async function readDiagnostics(deps: any, args: Record<string, unknown>) {
+export async function readDiagnostics(deps: DiagnosticsDeps, args: Record<string, unknown>) {
   const kind = String((args && args.kind) || '').trim();
   if (!kind) {
     return { ok: false, result: 'read_diagnostics 需要 kind 参数，取值：' + DIAGNOSTIC_KINDS.join(' / ') + '。' };

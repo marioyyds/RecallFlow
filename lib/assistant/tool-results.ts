@@ -11,6 +11,8 @@
 // 页面文本（尤其数学/表情密集的页面）充满星形平面字符，按码元下标截断会切裂代理对，
 // 进而让整个请求体在服务端解析阶段被拒（见 surrogates.js 的事故说明）。
 import { sliceSafe } from '../shared/surrogates.ts';
+import type { Caught } from './errors.ts';
+import type { PageSnapshotLike, ToolResult } from './types.ts';
 
 /**
  * 由 CDP 抛出的错误生成简短原因。
@@ -18,7 +20,7 @@ import { sliceSafe } from '../shared/surrogates.ts';
  * 去掉开头的 `Xxx.：` 前缀（例如 `Page.captureScreenshot：...`）：
  * 那部分对使用者没有信息量，留着只会淹掉真正的原因。
  */
-export function summarizeCdpError(e: any) {
+export function summarizeCdpError(e: Caught | null | undefined) {
   const msg = e && e.message ? e.message : String(e);
   return msg.replace(/^[A-Za-z.]+：/, '');
 }
@@ -29,7 +31,7 @@ export function summarizeCdpError(e: any) {
  * `extra` 会被并入返回值（例如带上 selector、available 等诊断字段）——
  * 因此必须返回**新对象**，不能就地改 extra（调用方常复用同一字面量）。
  */
-export function toolError(code: string, message: any, extra?: any) {
+export function toolError(code: string, message: string, extra?: Record<string, unknown>): ToolResult {
   return Object.assign({ ok: false, code, result: message }, extra || {});
 }
 
@@ -41,14 +43,14 @@ export function toolError(code: string, message: any, extra?: any) {
  * 模型会据此断言"该元素可见/存在"，而真实页面上它可能是 `display:none` ——
  * 这类误判会直接变成错误结论（要判断可见性必须用元素快照的 visibility 字段）。
  */
-export function compactSnapshotSummary(snapshot: any) {
+export function compactSnapshotSummary(snapshot: PageSnapshotLike | null | undefined) {
   if (!snapshot || typeof snapshot !== 'object') return '';
   const title = String(snapshot.title || '');
   const url = String(snapshot.url || '');
   const elements = Array.isArray(snapshot.elements)
     ? snapshot.elements
         .slice(0, 8)
-        .map((e: any) => {
+        .map((e) => {
           const label = e.label || e.placeholder || '';
           return e.ref + (label ? '：' + sliceSafe(String(label), 0, 24) : '');
         })

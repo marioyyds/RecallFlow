@@ -1,3 +1,4 @@
+import type { SkillLike } from './types.ts';
 // 最小化 SKILL.md 解析/序列化（仅支持 SkillHub 用到的 frontmatter 子集，不引入外部依赖）。
 // 标准形态：---<yaml frontmatter>---\n<markdown 正文>
 // 我们把 RecallFlow 专有的触发条件放在 x-recallflow-* 扩展字段（符合 SkillHub 的 x- 前缀约定）。
@@ -64,7 +65,7 @@ export function parseSkillMd(text: string) {
 }
 
 // 序列化技能对象 -> 标准 SKILL.md 文本
-export function serializeSkillMd(skill: any) {
+export function serializeSkillMd(skill: SkillLike) {
   const lines = ['---'];
   const add = (k: any, v: any) => {
     if (v === undefined || v === null || v === '') return;
@@ -114,7 +115,7 @@ export function mdToSkill(text: string) {
 }
 
 // 供运行期使用：把内部标准技能对象编译为带正则关键词的运行结构
-export function toRuntimeSkill(skill: any, builtin = false) {
+export function toRuntimeSkill(skill: SkillLike, builtin = false) {
   const x = skill.x || {};
   const keywordStrings = Array.isArray(x.keywords) ? x.keywords.map(String) : [];
   return {

@@ -2,7 +2,16 @@
 // （JS 对话框 / 下载 / 文件选择），让 Agent 对弹窗、下载、对话框有统一入口。
 import * as cdp from '../backend/cdp.ts';
 
-const state = new Map(); // tabId -> { dialogs: [], downloads: [], fileChoosers: [] }
+/** CDP 事件原样保留的字段（形状由 Chrome 协议决定，扩展侧只读不做静态校验）。 */
+type CdpEventRecord = Record<string, unknown>;
+
+interface TargetBucket {
+  dialogs: CdpEventRecord[];
+  downloads: CdpEventRecord[];
+  fileChoosers: CdpEventRecord[];
+}
+
+const state = new Map<number, TargetBucket>(); // tabId -> { dialogs, downloads, fileChoosers }
 let listening = false;
 
 function bucket(tabId: number) {
@@ -52,15 +61,15 @@ export function clearFileChoosers(tabId: number) {
 }
 
 // 处理（接受/取消）当前页面的 JS 对话框（alert/confirm/prompt）。
-export async function handleDialog(tabId: number, accept: any, promptText: any) {
+export async function handleDialog(tabId: number, accept: unknown, promptText?: string) {
   await cdp.handleJavaScriptDialog(tabId, accept !== false, promptText);
   clearDialogs(tabId);
   return { ok: true };
 }
 
 // 允许当前标签页下载到指定目录（缺省为浏览器默认下载目录）。
-export async function allowDownloads(tabId: number, downloadPath: any) {
-  const params: any = { behavior: 'allow', eventsEnabled: true };
+export async function allowDownloads(tabId: number, downloadPath: string | undefined) {
+  const params: { behavior: string; eventsEnabled: boolean; downloadPath?: string } = { behavior: 'allow', eventsEnabled: true };
   if (downloadPath) params.downloadPath = downloadPath;
   try {
     await cdp.command(tabId, 'Browser.setDownloadBehavior', params);
