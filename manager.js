@@ -629,6 +629,39 @@ function createKnowledgeRepository(store = defaultStore) {
   return new KnowledgeRepositoryImpl(store);
 }
 
+// lib/adapters/chrome/tabs.ts
+var ChromeTabsAdapter = class {
+  api;
+  constructor(api = chrome) {
+    this.api = api;
+  }
+  query(queryInfo) {
+    return new Promise((resolve) => {
+      try {
+        this.api.tabs.query(queryInfo, (tabs) => {
+          resolve(this.api.runtime.lastError ? [] : tabs || []);
+        });
+      } catch (error) {
+        resolve([]);
+      }
+    });
+  }
+  open(url) {
+    return new Promise((resolve) => {
+      try {
+        this.api.tabs.create({ url }, (tab) => {
+          resolve(this.api.runtime.lastError ? void 0 : tab?.id);
+        });
+      } catch (error) {
+        resolve(void 0);
+      }
+    });
+  }
+};
+function createChromeTabsAdapter(api = chrome) {
+  return new ChromeTabsAdapter(api);
+}
+
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
@@ -874,6 +907,7 @@ function pageTokens(currentPage2, totalPages) {
 
 // entries/manager.ts
 var knowledge = createKnowledgeRepository();
+var tabsPort = createChromeTabsAdapter();
 var $ = (id) => document.getElementById(id);
 var closestEl = (target, selector) => target ? target.closest(selector) : null;
 var currentType = "all";
@@ -1310,7 +1344,7 @@ $("doc-overlay").addEventListener("click", (e) => {
 });
 $("doc-open").addEventListener("click", () => {
   const item = knowledge.get(docItemId);
-  if (item && item.url) chrome.tabs.create({ url: item.url });
+  if (item && item.url) void tabsPort.open(item.url);
 });
 $("doc-edit").addEventListener("click", () => {
   const id = docItemId;
@@ -1393,7 +1427,7 @@ $("list").addEventListener("click", async (e) => {
   }
   const item = knowledge.get(id);
   if (closestEl(e.target, ".item-title") && item) {
-    if (item.url) chrome.tabs.create({ url: item.url });
+    if (item.url) void tabsPort.open(item.url);
     else if (item.note) openDocument(id);
   }
 });

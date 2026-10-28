@@ -4,6 +4,7 @@ import { getAISettings } from '../lib/shared/settings.ts';
 import { buildAiMessages } from '../lib/shared/rag.ts';
 import { callDeepSeek } from '../lib/assistant/llm.ts';
 import { runAgentStream } from '../lib/assistant/agent.ts';
+import { createAgentRunner } from '../lib/application/agent/runner.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
 import { initTargetManager } from '../lib/assistant/target-manager.ts';
 import { logError, isOperableUrl } from '../lib/shared/utils.ts';
@@ -20,6 +21,7 @@ import {
 import { RunStreamHub } from '../lib/assistant/run-hub.ts';
 import { RunChannel } from '../lib/assistant/run-channel.ts';
 import { createTabRunRegistry, type RunControllerLike, type RunRecordLike } from '../lib/application/agent/run-registry.ts';
+import { RunLifecycleService } from '../lib/application/agent/run-lifecycle.ts';
 import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.ts';
 import { removeSessionScreenshots } from '../lib/shared/screenshot-store.ts';
 import {
@@ -47,6 +49,8 @@ import {
  * 字面量就是 chrome.storage 的契约（JSON 文档），不是放弃类型。
  */
 type Dyn = Record<string, any>;
+
+const agentRunner = createAgentRunner(runAgentStream);
 
 /** AbortController 上额外挂的运行标记（run 收尾后置 true，防止重复 abort）。 */
 type RunController = RunControllerLike;
@@ -806,20 +810,7 @@ chrome.runtime.onInstalled.addListener(() => {
 // 标签页关闭时清理其对话持久化数据。
 chrome.tabs.onRemoved.addListener((tabId) => {
   runSubscriptions.delete(tabId);
-  const runRec = runRegistry.runFor(tabId);
-  if (runRec && runRec.runId) {
-    clearRunAbortTimer(runRec.runId);
-    runRegistry.deleteChannel(runRec.runId);
-  }
-  const c = runRegistry.controllerFor(tabId);
-  if (c) {
-    try {
-      runStats.aborts += 1;
-      c.abort();
-    } catch (e) {}
-    runRegistry.deleteController(tabId);
-  }
-  runRegistry.deleteRun(tabId);
+  runLifecycle.cleanupTab(tabId);
   panelSessions
     .releaseTabLocks(tabId)
     .then(async (r) => {
@@ -843,15 +834,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // controller / 最近 run / 输出通道 / reattach 宽限定时器必须一起维护。
 const runRegistry = createTabRunRegistry();
 const REATTACH_GRACE_MS = 8000;
-// 运行生命周期计数（只读诊断；E2E 用它证明刷新走的是 reattach，而不是 abort+续跑）。
-const runStats: {
-  starts: number;
-  reattaches: number;
-  aborts: number;
-  hubDeltas: number;
-  hubErrors?: number;
-  lastHubError?: string;
-} = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0 };
+const runLifecycle = new RunLifecycleService(runRegistry, runHub, {
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+}, REATTACH_GRACE_MS);
+const runStats = runLifecycle.stats;
 try {
   // 只有 E2E 显式置 `__rfDebugStats=true` 时才暴露数据；生产环境读不到运行统计。
   Object.defineProperty(globalThis, '__rfRunStats', {
@@ -863,7 +851,7 @@ try {
 } catch (e) {}
 
 function clearRunAbortTimer(runId: unknown) {
-  runRegistry.clearAbortTimer(runId);
+  runLifecycle.clearAbortTimer(runId);
 }
 
 /**
@@ -871,19 +859,7 @@ function clearRunAbortTimer(runId: unknown) {
  * 不会有新 port，宽限到期再 abort 并落盘 interrupted，走原来的续跑路径。
  */
 function scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefined) {
-  const id = String(runId || '');
-  runRegistry.scheduleAbort(id, REATTACH_GRACE_MS, () => {
-    const rec = runRegistry.runFor(tabId);
-    if (!rec || String(rec.runId || '') !== id) return;
-    const channel = runRegistry.channelFor(id);
-    if (channel && channel.isAttached()) return;
-    try {
-      if (rec.controller && !rec.controller.__rfFinished) {
-        runStats.aborts += 1;
-        rec.controller.abort();
-      }
-    } catch (e) {}
-  });
+  runLifecycle.scheduleAbortIfNoReattach(runId, tabId);
 }
 
 /**
@@ -891,65 +867,7 @@ function scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefi
  * 返回失败时调用方应刷新会话，而不是继续显示「运行中」。
  */
 function requestRunStop(params: Dyn, requesterTabId: number | null | undefined) {
-  const p = params || {};
-  const wantedRunId = String(p.runId || '');
-  const wantedSessionId = String(p.sessionId || '');
-  let owner: { tabId: number; rec: Dyn } | null = null;
-  for (const [tabId, rec] of runRegistry.runs) {
-    if (!rec) continue;
-    if (wantedRunId && String(rec.runId || '') !== wantedRunId) continue;
-    if (!wantedRunId && wantedSessionId && String(rec.sessionId || '') !== wantedSessionId) continue;
-    owner = { tabId: Number(tabId), rec };
-    break;
-  }
-  if (!owner && wantedSessionId) {
-    const snap = runHub.findBySession(wantedSessionId);
-    if (snap && snap.ownerTabId != null) {
-      const tabId = Number(snap.ownerTabId);
-      owner = { tabId, rec: runRegistry.runFor(tabId) || {} };
-    }
-  }
-  const runId = String((owner && owner.rec && owner.rec.runId) || wantedRunId);
-  const snapshot = runId ? runHub.snapshot(runId) : null;
-  if (!snapshot || snapshot.status !== 'running') {
-    return { ok: false, code: 'not-running', error: '该任务已结束，无需停止' };
-  }
-  if (!owner) return { ok: false, code: 'owner-missing', error: '找不到任务所属标签页' };
-  const controller = runRegistry.controllerFor(owner.tabId);
-  if (!controller || controller.signal.aborted) {
-    return { ok: false, code: 'already-stopping', error: '该任务已在停止中' };
-  }
-
-  if (owner.rec && typeof owner.rec === 'object') {
-    runRegistry.updateRun(owner.tabId, owner.rec, { resumable: false });
-  }
-  clearRunAbortTimer(runId);
-  // 先广播「停止中」，再 abort：abort 后的收尾可能很快，不能让跟随页错过中间状态。
-  runHub.push(runId, {
-    type: 'stop-requested',
-    byTabId: requesterTabId == null ? null : Number(requesterTabId),
-  });
-  try {
-    runStats.aborts += 1;
-    controller.abort();
-  } catch (e) {}
-
-  // runHub 的 delta 本来就不发给 owner（owner 有自己的 port）。跟随页发起停止时，
-  // 必须显式通知 owner 收尾，否则 owner 的停止按钮会一直停在「运行中」。
-  if (requesterTabId != null && Number(requesterTabId) !== owner.tabId) {
-    chrome.tabs.sendMessage(
-      owner.tabId,
-      {
-        type: 'run:stopped',
-        runId,
-        sessionId: snapshot.sessionId || wantedSessionId,
-        remote: true,
-      },
-      { frameId: 0 },
-      () => void chrome.runtime.lastError
-    );
-  }
-  return { ok: true, runId, sessionId: snapshot.sessionId || wantedSessionId, ownerTabId: owner.tabId };
+  return runLifecycle.requestStop(params || {}, requesterTabId);
 }
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -1179,14 +1097,14 @@ chrome.runtime.onConnect.addListener((port) => {
           });
         }
         try {
-          await runAgentStream(
-            channel,
+          await agentRunner.run({
+            port: channel,
             payload,
             settings,
             book,
-            runController.signal,
+            signal: runController.signal,
             tabId,
-            (event: Dyn) => {
+            observeEvent: (event: Dyn) => {
               if (event && event.type === 'tabs-close-pending') registerRunCleanup(runId, event);
               if (sessionId) {
                 try {
@@ -1196,8 +1114,8 @@ chrome.runtime.onConnect.addListener((port) => {
                   runStats.lastHubError = String((e as Error | null)?.message || e);
                 }
               }
-            }
-          );
+            },
+          });
           console.log('[RecallFlow] agent run finished');
           // abort 既可能是用户停止，也可能是页面刷新/端口断开；不能一律报 completed。
           if (sessionId) runHub.finish(runId, runController.signal.aborted ? 'cancelled' : 'completed');

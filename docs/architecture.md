@@ -31,8 +31,11 @@ Domain ─→ no Chrome, DOM, storage, or framework code
 - `application/panel/run-session.ts`：面板运行 ID、端口和停止生命周期。
 - `application/panel/stream-state.ts`：流式正文、parts 与校验提示。
 - `application/agent/run-registry.ts`：Service Worker 的 run/controller/channel 注册表。
+- `application/agent/run-lifecycle.ts`：停止、abort 宽限与标签页清理。
+- `application/agent/runner.ts`：Agent 运行用例的稳定入口。
 - `application/agent/run-context.ts`：新任务与恢复任务的上下文构造。
 - `application/ports/runtime.ts` / `adapters/chrome/runtime.ts`：Runtime Port 与 Chrome 实现。
+- `application/ports/tabs.ts` / `adapters/chrome/tabs.ts`：Tabs Port 与 Chrome 实现。
 - `domain/knowledge/model.ts`、`domain/knowledge/query.ts`：知识库领域契约与查询规则。
 
 ## 架构门禁

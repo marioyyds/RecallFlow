@@ -10418,6 +10418,28 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
   emit({ type: "end" });
 }
 
+// lib/application/agent/runner.ts
+var AgentRunner = class {
+  stream;
+  constructor(stream) {
+    this.stream = stream;
+  }
+  run(request) {
+    return this.stream(
+      request.port,
+      request.payload,
+      request.settings,
+      request.book,
+      request.signal,
+      request.tabId,
+      request.observeEvent
+    );
+  }
+};
+function createAgentRunner(stream) {
+  return new AgentRunner(stream);
+}
+
 // lib/shared/handoff.ts
 var ID_PREFIX = "RF-";
 var ID_RE = /^RF-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/;
@@ -12343,6 +12365,129 @@ function createTabRunRegistry() {
   return new TabRunRegistryState();
 }
 
+// lib/application/agent/run-lifecycle.ts
+var RunLifecycleService = class {
+  stats = {
+    starts: 0,
+    reattaches: 0,
+    aborts: 0,
+    hubDeltas: 0
+  };
+  registry;
+  hub;
+  ports;
+  graceMs;
+  constructor(registry, hub, ports, graceMs = 8e3) {
+    this.registry = registry;
+    this.hub = hub;
+    this.ports = ports;
+    this.graceMs = graceMs;
+  }
+  clearAbortTimer(runId) {
+    this.registry.clearAbortTimer(runId);
+  }
+  scheduleAbortIfNoReattach(runId, tabId) {
+    const id = String(runId || "");
+    this.registry.scheduleAbort(id, this.graceMs, () => {
+      const record = this.registry.runFor(tabId);
+      if (!record || String(record.runId || "") !== id) return;
+      const channel = this.registry.channelFor(id);
+      if (channel && channel.isAttached()) return;
+      const controller = record.controller;
+      if (controller && !controller.__rfFinished) {
+        this.stats.aborts += 1;
+        try {
+          controller.abort();
+        } catch (error) {
+        }
+      }
+    });
+  }
+  requestStop(params, requesterTabId) {
+    const wantedRunId = String(params.runId || "");
+    const wantedSessionId = String(params.sessionId || "");
+    let owner = null;
+    for (const [tabId, record] of this.registry.runs) {
+      if (!record) continue;
+      if (wantedRunId && String(record.runId || "") !== wantedRunId) continue;
+      if (!wantedRunId && wantedSessionId && String(record.sessionId || "") !== wantedSessionId) continue;
+      owner = { tabId: Number(tabId), record };
+      break;
+    }
+    if (!owner && wantedSessionId) {
+      const snapshot2 = this.hub.findBySession(wantedSessionId);
+      if (snapshot2 && snapshot2.ownerTabId != null) {
+        const tabId = Number(snapshot2.ownerTabId);
+        owner = { tabId, record: this.registry.runFor(tabId) || {} };
+      }
+    }
+    const runId = String(owner?.record.runId || wantedRunId);
+    const snapshot = runId ? this.hub.snapshot(runId) : null;
+    if (!snapshot || snapshot.status !== "running") {
+      return { ok: false, code: "not-running", error: "\u8BE5\u4EFB\u52A1\u5DF2\u7ED3\u675F\uFF0C\u65E0\u9700\u505C\u6B62" };
+    }
+    if (!owner) return { ok: false, code: "owner-missing", error: "\u627E\u4E0D\u5230\u4EFB\u52A1\u6240\u5C5E\u6807\u7B7E\u9875" };
+    const controller = this.registry.controllerFor(owner.tabId);
+    if (!controller || controller.signal.aborted) {
+      return { ok: false, code: "already-stopping", error: "\u8BE5\u4EFB\u52A1\u5DF2\u5728\u505C\u6B62\u4E2D" };
+    }
+    this.registry.updateRun(owner.tabId, owner.record, { resumable: false });
+    this.clearAbortTimer(runId);
+    this.hub.push(runId, {
+      type: "stop-requested",
+      byTabId: requesterTabId == null ? null : Number(requesterTabId)
+    });
+    this.stats.aborts += 1;
+    try {
+      controller.abort();
+    } catch (error) {
+    }
+    if (requesterTabId != null && Number(requesterTabId) !== owner.tabId) {
+      this.ports.sendToTab(owner.tabId, {
+        type: "run:stopped",
+        runId,
+        sessionId: snapshot.sessionId || wantedSessionId,
+        remote: true
+      });
+    }
+    return {
+      ok: true,
+      runId,
+      sessionId: snapshot.sessionId || wantedSessionId,
+      ownerTabId: owner.tabId
+    };
+  }
+  cleanupTab(tabId) {
+    const record = this.registry.runFor(tabId);
+    if (record?.runId) {
+      this.clearAbortTimer(record.runId);
+      this.registry.deleteChannel(record.runId);
+    }
+    const controller = this.registry.controllerFor(tabId);
+    if (controller && !controller.__rfFinished) {
+      this.stats.aborts += 1;
+      try {
+        controller.abort();
+      } catch (error) {
+      }
+    }
+    this.registry.deleteController(tabId);
+    this.registry.deleteRun(tabId);
+  }
+  setController(tabId, controller) {
+    this.registry.setController(tabId, controller);
+  }
+  setChannel(runId, channel) {
+    this.registry.setChannel(runId, channel);
+  }
+  deleteChannel(runId) {
+    this.registry.deleteChannel(runId);
+  }
+  setRun(tabId, record) {
+    this.registry.setRun(tabId, record);
+  }
+};
+
 // lib/shared/idb-kv.ts
 function requestResult2(request) {
   return new Promise((resolve, reject) => {
@@ -12435,6 +12580,7 @@ function createIndexedDbKeyValueStore(options) {
 }
 
 // entries/background.ts
+var agentRunner = createAgentRunner(runAgentStream);
 var persistentPanelStorage = createIndexedDbKeyValueStore({
   dbName: "recallflow-history",
   storeName: "panel-kv",
@@ -13087,21 +13233,7 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   runSubscriptions.delete(tabId);
-  const runRec = runRegistry.runFor(tabId);
-  if (runRec && runRec.runId) {
-    clearRunAbortTimer(runRec.runId);
-    runRegistry.deleteChannel(runRec.runId);
-  }
-  const c = runRegistry.controllerFor(tabId);
-  if (c) {
-    try {
-      runStats.aborts += 1;
-      c.abort();
-    } catch (e) {
-    }
-    runRegistry.deleteController(tabId);
-  }
-  runRegistry.deleteRun(tabId);
+  runLifecycle.cleanupTab(tabId);
   panelSessions.releaseTabLocks(tabId).then(async (r) => {
     if (r && r.released) {
       const state2 = await panelSessions.list();
@@ -13120,7 +13252,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 var runRegistry = createTabRunRegistry();
 var REATTACH_GRACE_MS = 8e3;
-var runStats = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0 };
+var runLifecycle = new RunLifecycleService(runRegistry, runHub, {
+  sendToTab(tabId, message) {
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  }
+}, REATTACH_GRACE_MS);
+var runStats = runLifecycle.stats;
 try {
   Object.defineProperty(globalThis, "__rfRunStats", {
     configurable: true,
@@ -13131,80 +13268,13 @@ try {
 } catch (e) {
 }
 function clearRunAbortTimer(runId) {
-  runRegistry.clearAbortTimer(runId);
+  runLifecycle.clearAbortTimer(runId);
 }
 function scheduleAbortIfNoReattach(runId, tabId) {
-  const id = String(runId || "");
-  runRegistry.scheduleAbort(id, REATTACH_GRACE_MS, () => {
-    const rec = runRegistry.runFor(tabId);
-    if (!rec || String(rec.runId || "") !== id) return;
-    const channel = runRegistry.channelFor(id);
-    if (channel && channel.isAttached()) return;
-    try {
-      if (rec.controller && !rec.controller.__rfFinished) {
-        runStats.aborts += 1;
-        rec.controller.abort();
-      }
-    } catch (e) {
-    }
-  });
+  runLifecycle.scheduleAbortIfNoReattach(runId, tabId);
 }
 function requestRunStop(params, requesterTabId) {
-  const p = params || {};
-  const wantedRunId = String(p.runId || "");
-  const wantedSessionId = String(p.sessionId || "");
-  let owner = null;
-  for (const [tabId, rec] of runRegistry.runs) {
-    if (!rec) continue;
-    if (wantedRunId && String(rec.runId || "") !== wantedRunId) continue;
-    if (!wantedRunId && wantedSessionId && String(rec.sessionId || "") !== wantedSessionId) continue;
-    owner = { tabId: Number(tabId), rec };
-    break;
-  }
-  if (!owner && wantedSessionId) {
-    const snap = runHub.findBySession(wantedSessionId);
-    if (snap && snap.ownerTabId != null) {
-      const tabId = Number(snap.ownerTabId);
-      owner = { tabId, rec: runRegistry.runFor(tabId) || {} };
-    }
-  }
-  const runId = String(owner && owner.rec && owner.rec.runId || wantedRunId);
-  const snapshot = runId ? runHub.snapshot(runId) : null;
-  if (!snapshot || snapshot.status !== "running") {
-    return { ok: false, code: "not-running", error: "\u8BE5\u4EFB\u52A1\u5DF2\u7ED3\u675F\uFF0C\u65E0\u9700\u505C\u6B62" };
-  }
-  if (!owner) return { ok: false, code: "owner-missing", error: "\u627E\u4E0D\u5230\u4EFB\u52A1\u6240\u5C5E\u6807\u7B7E\u9875" };
-  const controller = runRegistry.controllerFor(owner.tabId);
-  if (!controller || controller.signal.aborted) {
-    return { ok: false, code: "already-stopping", error: "\u8BE5\u4EFB\u52A1\u5DF2\u5728\u505C\u6B62\u4E2D" };
-  }
-  if (owner.rec && typeof owner.rec === "object") {
-    runRegistry.updateRun(owner.tabId, owner.rec, { resumable: false });
-  }
-  clearRunAbortTimer(runId);
-  runHub.push(runId, {
-    type: "stop-requested",
-    byTabId: requesterTabId == null ? null : Number(requesterTabId)
-  });
-  try {
-    runStats.aborts += 1;
-    controller.abort();
-  } catch (e) {
-  }
-  if (requesterTabId != null && Number(requesterTabId) !== owner.tabId) {
-    chrome.tabs.sendMessage(
-      owner.tabId,
-      {
-        type: "run:stopped",
-        runId,
-        sessionId: snapshot.sessionId || wantedSessionId,
-        remote: true
-      },
-      { frameId: 0 },
-      () => void chrome.runtime.lastError
-    );
-  }
-  return { ok: true, runId, sessionId: snapshot.sessionId || wantedSessionId, ownerTabId: owner.tabId };
+  return runLifecycle.requestStop(params || {}, requesterTabId);
 }
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "ai-stream") return;
@@ -13422,14 +13492,14 @@ chrome.runtime.onConnect.addListener((port) => {
           });
         }
         try {
-          await runAgentStream(
-            channel,
+          await agentRunner.run({
+            port: channel,
             payload,
             settings,
             book,
-            runController.signal,
+            signal: runController.signal,
             tabId,
-            (event) => {
+            observeEvent: (event) => {
               if (event && event.type === "tabs-close-pending") registerRunCleanup(runId, event);
               if (sessionId) {
                 try {
@@ -13440,7 +13510,7 @@ chrome.runtime.onConnect.addListener((port) => {
                 }
               }
             }
-          );
+          });
           console.log("[RecallFlow] agent run finished");
           if (sessionId) runHub.finish(runId, runController.signal.aborted ? "cancelled" : "completed");
           runController.__rfFinished = true;

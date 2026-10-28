@@ -665,11 +665,45 @@ function createKnowledgeRepository(store = defaultStore) {
   return new KnowledgeRepositoryImpl(store);
 }
 
+// lib/adapters/chrome/tabs.ts
+var ChromeTabsAdapter = class {
+  api;
+  constructor(api = chrome) {
+    this.api = api;
+  }
+  query(queryInfo) {
+    return new Promise((resolve) => {
+      try {
+        this.api.tabs.query(queryInfo, (tabs) => {
+          resolve(this.api.runtime.lastError ? [] : tabs || []);
+        });
+      } catch (error) {
+        resolve([]);
+      }
+    });
+  }
+  open(url) {
+    return new Promise((resolve) => {
+      try {
+        this.api.tabs.create({ url }, (tab) => {
+          resolve(this.api.runtime.lastError ? void 0 : tab?.id);
+        });
+      } catch (error) {
+        resolve(void 0);
+      }
+    });
+  }
+};
+function createChromeTabsAdapter(api = chrome) {
+  return new ChromeTabsAdapter(api);
+}
+
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
 // entries/popup.ts
 var knowledge = createKnowledgeRepository();
+var tabsPort = createChromeTabsAdapter();
 var currentTab = null;
 var currentUrl = null;
 var currentTitle = null;
@@ -775,7 +809,7 @@ async function init() {
     const uaPlatform = uaData && uaData.platform || navigator.platform || "";
     shortcut.textContent = /mac/i.test(uaPlatform) ? "\u2318 K" : "Ctrl K";
   }
-  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [t] = await tabsPort.query({ active: true, currentWindow: true });
   const localFileBlocked = Boolean(t && t.url && isFileUrl(t.url) && !await isAllowedFileSchemeAccess());
   if (t && t.url && isOperableUrl(t.url) && !localFileBlocked) {
     currentTab = t;
@@ -957,7 +991,7 @@ $("list").addEventListener("click", async (e) => {
   }
   const item = knowledge.get(id);
   if (closest(e.target, ".open") && item && item.url) {
-    chrome.tabs.create({ url: item.url });
+    void tabsPort.open(item.url);
     return;
   }
   const starCell = closest(e.target, ".star-cell[data-star]");
@@ -974,26 +1008,26 @@ $("list").addEventListener("click", async (e) => {
     return;
   }
   if (closest(e.target, ".item-title") && item && item.url) {
-    chrome.tabs.create({ url: item.url });
+    void tabsPort.open(item.url);
   }
 });
 var openManager = (e) => {
   e.preventDefault();
   const id = currentUrl && knowledge.get(currentUrl) ? currentUrl : null;
   const url = chrome.runtime.getURL("manager.html") + (id ? `#focus=${encodeURIComponent(id)}` : "");
-  chrome.tabs.create({ url });
+  void tabsPort.open(url);
 };
 $("open-manager").addEventListener("click", openManager);
 $("open-manager-top").addEventListener("click", openManager);
 $("open-manager-all").addEventListener("click", openManager);
 $("open-scripts").addEventListener("click", (e) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL("userscripts.html") });
+  void tabsPort.open(chrome.runtime.getURL("userscripts.html"));
 });
 var openSkillsBtn = $("open-skills");
 if (openSkillsBtn) openSkillsBtn.addEventListener("click", (e) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL("skills.html") });
+  void tabsPort.open(chrome.runtime.getURL("skills.html"));
 });
 $("open-settings").addEventListener("click", (e) => {
   e.preventDefault();
@@ -1001,10 +1035,10 @@ $("open-settings").addEventListener("click", (e) => {
 });
 $("open-assistant").addEventListener("click", async () => {
   try {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
     let tab = activeTab;
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {
-      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const tabs = await tabsPort.query({ currentWindow: true });
       tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
     }
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {

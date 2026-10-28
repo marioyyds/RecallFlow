@@ -22,11 +22,14 @@ import {
 } from '../lib/shared/utils.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
+import type { TabSummary } from '../lib/application/ports/tabs.ts';
+import { createChromeTabsAdapter } from '../lib/adapters/chrome/tabs.ts';
 import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 
 const knowledge = createKnowledgeRepository();
-let currentTab: chrome.tabs.Tab | null = null;
+const tabsPort = createChromeTabsAdapter();
+let currentTab: TabSummary | null = null;
 let currentUrl: string | null = null;
 let currentTitle: string | null = null;
 // 收录面板只在「当前页可收录」分支里读它；原代码同样不检查 null。
@@ -168,7 +171,7 @@ async function init() {
     shortcut.textContent = /mac/i.test(uaPlatform) ? '⌘ K' : 'Ctrl K';
   }
 
-  const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [t] = await tabsPort.query({ active: true, currentWindow: true });
   // 本地页（file://）只要用户开了「允许访问文件网址」，就和普通网页一样可收录、可开助手；
   // 没开时把"为什么不行"直接写在页面上，而不是笼统说"页面不支持"。
   const localFileBlocked = Boolean(t && t.url && isFileUrl(t.url) && !(await isAllowedFileSchemeAccess()));
@@ -368,7 +371,7 @@ $('list').addEventListener('click', async (e: Event) => {
 
   const item = knowledge.get(id);
   if (closest(e.target, '.open') && item && item.url) {
-    chrome.tabs.create({ url: item.url });
+    void tabsPort.open(item.url);
     return;
   }
 
@@ -388,7 +391,7 @@ $('list').addEventListener('click', async (e: Event) => {
   }
 
   if (closest(e.target, '.item-title') && item && item.url) {
-    chrome.tabs.create({ url: item.url });
+    void tabsPort.open(item.url);
   }
 });
 
@@ -397,7 +400,7 @@ const openManager = (e: Event) => {
   // 带上当前条目 id，复用 manager 的 #focus 高亮定位，打通「收录→管理」闭环
   const id = currentUrl && knowledge.get(currentUrl) ? currentUrl : null;
   const url = chrome.runtime.getURL('manager.html') + (id ? `#focus=${encodeURIComponent(id)}` : '');
-  chrome.tabs.create({ url });
+  void tabsPort.open(url);
 };
 $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);
@@ -405,13 +408,13 @@ $('open-manager-all').addEventListener('click', openManager);
 
 $('open-scripts').addEventListener('click', (e: Event) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL('userscripts.html') });
+  void tabsPort.open(chrome.runtime.getURL('userscripts.html'));
 });
 
 const openSkillsBtn = $('open-skills');
 if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e: Event) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL('skills.html') });
+  void tabsPort.open(chrome.runtime.getURL('skills.html'));
 });
 
 $('open-settings').addEventListener('click', (e: Event) => {
@@ -421,12 +424,12 @@ $('open-settings').addEventListener('click', (e: Event) => {
 
 $('open-assistant').addEventListener('click', async () => {
   try {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    let tab: chrome.tabs.Tab | undefined = activeTab;
+    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
+    let tab: TabSummary | undefined = activeTab;
     // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
     // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {
-      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const tabs = await tabsPort.query({ currentWindow: true });
       tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
     }
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {

@@ -8,6 +8,8 @@ export interface RunChannelLike {
   attach(port: unknown, options?: unknown): boolean;
   detach(port?: unknown): void;
   resume(): void;
+  postMessage(message: unknown): void;
+  onMessage: { addListener(listener: (message: any) => void): void };
 }
 
 export interface RunRecordLike {

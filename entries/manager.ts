@@ -16,12 +16,14 @@ import {
 } from '../lib/shared/utils.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
+import { createChromeTabsAdapter } from '../lib/adapters/chrome/tabs.ts';
 import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 import { renderMarkdown } from '../lib/page/markdown.ts';
 import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.ts';
 
 const knowledge = createKnowledgeRepository();
+const tabsPort = createChromeTabsAdapter();
 
 /** 按 id 取元素：id 全部写死在 manager.html 里（取不到就是模板坏了，原代码也不检查）。 */
 const $ = (id: string): any => document.getElementById(id);
@@ -511,7 +513,7 @@ $('doc-overlay').addEventListener('click', (e: Event) => {
 });
 $('doc-open').addEventListener('click', () => {
   const item = knowledge.get(docItemId);
-  if (item && item.url) chrome.tabs.create({ url: item.url });
+  if (item && item.url) void tabsPort.open(item.url);
 });
 $('doc-edit').addEventListener('click', () => {
   const id = docItemId;
@@ -598,7 +600,7 @@ $('list').addEventListener('click', async (e: Event) => {
 
   const item = knowledge.get(id);
   if (closestEl(e.target, '.item-title') && item) {
-    if (item.url) chrome.tabs.create({ url: item.url });
+    if (item.url) void tabsPort.open(item.url);
     else if (item.note) openDocument(id);
   }
 });
