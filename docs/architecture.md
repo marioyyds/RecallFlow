@@ -37,6 +37,7 @@ Domain ─→ no Chrome, DOM, storage, or framework code
 - `application/ports/runtime.ts` / `adapters/chrome/runtime.ts`：Runtime Port 与 Chrome 实现。
 - `application/ports/tabs.ts` / `adapters/chrome/tabs.ts`：Tabs Port 与 Chrome 实现。
 - `domain/knowledge/model.ts`、`domain/knowledge/query.ts`：知识库领域契约与查询规则。
+- `ui/panel/approval-view.ts`、`ui/panel/tool-step-view.ts`：无业务状态的 DOM 渲染组件。
 
 ## 架构门禁
 

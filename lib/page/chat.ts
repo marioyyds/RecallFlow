@@ -85,6 +85,13 @@ import {
   describeApprovalRequest as describeApprovalRequestView,
   renderApprovalPrompt as renderApprovalPromptView,
 } from '../ui/panel/approval-view.ts';
+import {
+  authChallengeHtml,
+  authChallengeElement,
+  clipDetail,
+  toolStepHtml,
+  toolStepElement,
+} from '../ui/panel/tool-step-view.ts';
 
 
 /**
@@ -1166,78 +1173,6 @@ function argHint(args: any) {
   if (typeof args.code === 'string') return args.code.replace(/\s+/g, ' ').slice(0, 60);
   const keys = Object.keys(args).filter((k) => args[k] !== undefined && args[k] !== '');
   return keys.length ? keys.slice(0, 3).join('、') : '';
-}
-
-function clipDetail(text: any, max: any) {
-  const t = String(text === undefined || text === null ? '' : text);
-  if (!t) return '';
-  return t.length > max ? t.slice(0, max) + '\n…（共 ' + t.length + ' 字符，已截断）' : t;
-}
-
-// 工具步骤 HTML：有细节时输出 <details>（原生可键盘展开，顺带满足可访问性）。
-function toolStepHtml(lead: any, name: any, hint: any, detailLabel: any, detail: any) {
-  const head =
-    '<span class="agent-tool">' + escHtml(lead) + escHtml(name) + '</span>' +
-    (hint ? '<span class="agent-tool-arg">：' + escHtml(hint) + '</span>' : '');
-  if (!detail) return '<div class="agent-step">' + head + '</div>';
-  return (
-    '<details class="agent-step"><summary>' + head + '</summary>' +
-    '<div class="agent-step-detail">' +
-    (detailLabel ? '<div class="agent-step-label">' + escHtml(detailLabel) + '</div>' : '') +
-    '<pre class="agent-step-pre">' + escHtml(detail) + '</pre>' +
-    '</div></details>'
-  );
-}
-
-function toolStepElement(lead: any, name: any, hint: any, detailLabel: any, detail: any) {
-  const wrap = document.createElement('div');
-  wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
-  return wrap.firstElementChild;
-}
-
-/** 只允许 http/https 链接进入面板；登录提示可能来自历史记录，不能直接信任。 */
-function safeAuthLink(value: any) {
-  try {
-    const u = new URL(String(value || ''));
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
-    u.username = '';
-    u.password = '';
-    return u.href;
-  } catch (e: any) {
-    return '';
-  }
-}
-
-/**
- * 登录 / 权限拦截提示条。
- *
- * 它是 tool-result 的子块：RunHub 快照、跟随页与历史回放都从同一个 parts 数组
- * 重建，因此不需要为每个标签页再维护一份“当前是否要登录”的临时状态。
- */
-function authChallengeHtml(auth: any) {
-  if (!auth || auth.required !== true) return '';
-  const loginUrl = safeAuthLink(auth.loginUrl);
-  const summary = String(auth.summary || auth.message || '操作被登录 / 权限拦截，请登录后重试。');
-  // MCP / API 端点被拒不是「登录拦截」：标题必须说对，否则用户会去找一个不存在的登录页。
-  const reason =
-    auth.reason === 'permission-denied' ? '权限限制' : auth.reason === 'mcp-token-required' ? '服务端点拒绝（凭据）' : '登录拦截';
-  return (
-    '<div class="auth-challenge" role="alert" data-auth-reason="' + escAttr(auth.reason || 'login-required') + '">' +
-      '<div class="auth-challenge-title">⚠ 操作被' + escHtml(reason) + '</div>' +
-      '<div class="auth-challenge-summary">' + escHtml(summary) + '</div>' +
-      (loginUrl
-        ? '<a class="auth-challenge-link" href="' + escAttr(loginUrl) + '" target="_blank" rel="noopener noreferrer">打开登录页</a>'
-        : '') +
-    '</div>'
-  );
-}
-
-function authChallengeElement(auth: any) {
-  const html = authChallengeHtml(auth);
-  if (!html) return null;
-  const wrap = document.createElement('div');
-  wrap.innerHTML = html;
-  return wrap.firstElementChild;
 }
 
 // ---- 截图渲染 ----

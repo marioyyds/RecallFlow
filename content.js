@@ -6400,6 +6400,48 @@
     return true;
   }
 
+  // lib/ui/panel/tool-step-view.ts
+  function clipDetail(text, max) {
+    const value = String(text === void 0 || text === null ? "" : text);
+    if (!value) return "";
+    return value.length > max ? value.slice(0, max) + "\n\u2026\uFF08\u5171 " + value.length + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF09" : value;
+  }
+  function toolStepHtml(lead, name, hint, detailLabel, detail) {
+    const head = '<span class="agent-tool">' + esc(lead) + esc(name) + "</span>" + (hint ? '<span class="agent-tool-arg">\uFF1A' + esc(hint) + "</span>" : "");
+    if (!detail) return '<div class="agent-step">' + head + "</div>";
+    return '<details class="agent-step"><summary>' + head + '</summary><div class="agent-step-detail">' + (detailLabel ? '<div class="agent-step-label">' + esc(detailLabel) + "</div>" : "") + '<pre class="agent-step-pre">' + esc(detail) + "</pre></div></details>";
+  }
+  function toolStepElement(lead, name, hint, detailLabel, detail) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
+    return wrap.firstElementChild;
+  }
+  function safeAuthLink(value) {
+    try {
+      const url = new URL(String(value || ""));
+      if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+      url.username = "";
+      url.password = "";
+      return url.href;
+    } catch (error) {
+      return "";
+    }
+  }
+  function authChallengeHtml(auth) {
+    if (!auth || auth.required !== true) return "";
+    const loginUrl = safeAuthLink(auth.loginUrl);
+    const summary = String(auth.summary || auth.message || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\uFF0C\u8BF7\u767B\u5F55\u540E\u91CD\u8BD5\u3002");
+    const reason = auth.reason === "permission-denied" ? "\u6743\u9650\u9650\u5236" : auth.reason === "mcp-token-required" ? "\u670D\u52A1\u7AEF\u70B9\u62D2\u7EDD\uFF08\u51ED\u636E\uFF09" : "\u767B\u5F55\u62E6\u622A";
+    return '<div class="auth-challenge" role="alert" data-auth-reason="' + esc(auth.reason || "login-required") + '"><div class="auth-challenge-title">\u26A0 \u64CD\u4F5C\u88AB' + esc(reason) + '</div><div class="auth-challenge-summary">' + esc(summary) + "</div>" + (loginUrl ? '<a class="auth-challenge-link" href="' + esc(loginUrl) + '" target="_blank" rel="noopener noreferrer">\u6253\u5F00\u767B\u5F55\u9875</a>' : "") + "</div>";
+  }
+  function authChallengeElement(auth) {
+    const html = authChallengeHtml(auth);
+    if (!html) return null;
+    const wrap = document.createElement("div");
+    wrap.innerHTML = html;
+    return wrap.firstElementChild;
+  }
+
   // lib/page/chat.ts
   function isExtContextAlive() {
     try {
@@ -7111,46 +7153,6 @@
     if (typeof args.code === "string") return args.code.replace(/\s+/g, " ").slice(0, 60);
     const keys = Object.keys(args).filter((k) => args[k] !== void 0 && args[k] !== "");
     return keys.length ? keys.slice(0, 3).join("\u3001") : "";
-  }
-  function clipDetail(text, max) {
-    const t = String(text === void 0 || text === null ? "" : text);
-    if (!t) return "";
-    return t.length > max ? t.slice(0, max) + "\n\u2026\uFF08\u5171 " + t.length + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF09" : t;
-  }
-  function toolStepHtml(lead, name, hint, detailLabel, detail) {
-    const head = '<span class="agent-tool">' + escHtml(lead) + escHtml(name) + "</span>" + (hint ? '<span class="agent-tool-arg">\uFF1A' + escHtml(hint) + "</span>" : "");
-    if (!detail) return '<div class="agent-step">' + head + "</div>";
-    return '<details class="agent-step"><summary>' + head + '</summary><div class="agent-step-detail">' + (detailLabel ? '<div class="agent-step-label">' + escHtml(detailLabel) + "</div>" : "") + '<pre class="agent-step-pre">' + escHtml(detail) + "</pre></div></details>";
-  }
-  function toolStepElement(lead, name, hint, detailLabel, detail) {
-    const wrap = document.createElement("div");
-    wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
-    return wrap.firstElementChild;
-  }
-  function safeAuthLink(value) {
-    try {
-      const u = new URL(String(value || ""));
-      if (u.protocol !== "http:" && u.protocol !== "https:") return "";
-      u.username = "";
-      u.password = "";
-      return u.href;
-    } catch (e) {
-      return "";
-    }
-  }
-  function authChallengeHtml(auth) {
-    if (!auth || auth.required !== true) return "";
-    const loginUrl = safeAuthLink(auth.loginUrl);
-    const summary = String(auth.summary || auth.message || "\u64CD\u4F5C\u88AB\u767B\u5F55 / \u6743\u9650\u62E6\u622A\uFF0C\u8BF7\u767B\u5F55\u540E\u91CD\u8BD5\u3002");
-    const reason = auth.reason === "permission-denied" ? "\u6743\u9650\u9650\u5236" : auth.reason === "mcp-token-required" ? "\u670D\u52A1\u7AEF\u70B9\u62D2\u7EDD\uFF08\u51ED\u636E\uFF09" : "\u767B\u5F55\u62E6\u622A";
-    return '<div class="auth-challenge" role="alert" data-auth-reason="' + escAttr(auth.reason || "login-required") + '"><div class="auth-challenge-title">\u26A0 \u64CD\u4F5C\u88AB' + escHtml(reason) + '</div><div class="auth-challenge-summary">' + escHtml(summary) + "</div>" + (loginUrl ? '<a class="auth-challenge-link" href="' + escAttr(loginUrl) + '" target="_blank" rel="noopener noreferrer">\u6253\u5F00\u767B\u5F55\u9875</a>' : "") + "</div>";
-  }
-  function authChallengeElement(auth) {
-    const html = authChallengeHtml(auth);
-    if (!html) return null;
-    const wrap = document.createElement("div");
-    wrap.innerHTML = html;
-    return wrap.firstElementChild;
   }
   var SHOT_CACHE_MAX = 30;
   var shotCache = createLruCache(SHOT_CACHE_MAX);
