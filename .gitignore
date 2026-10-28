@@ -41,6 +41,9 @@ desktop.ini
 .vscode/*
 !.vscode/settings.json
 
+# 本地记忆
+.workbuddy
+
 # 说明：**刻意不忽略 package-lock.json。**
 # 此前仓库只有 integrations/opencode/recallflow-mcp/package-lock.json，
 # 根目录没有 lockfile，依赖解析不可复现（见 docs/agent-engineering-review.md 的发布工程部分）。
