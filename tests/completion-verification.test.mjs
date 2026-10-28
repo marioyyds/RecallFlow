@@ -54,6 +54,8 @@ test('提示词保留「不要因为 Agent 说完成就采信」', () => {
 
 const src = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
+const policySrc = fs.readFileSync('lib/application/agent/verification-policy.ts', 'utf8');
+const policyLines = policySrc.split('\n').map((l) => l.replace(/\r$/, ''));
 
 function indexOfLine(pattern, from = 0) {
   const i = lines.findIndex((l, idx) => idx >= from && l.includes(pattern));
@@ -66,8 +68,16 @@ function sliceBetween(startMarker, endMarker) {
   return lines.slice(s, e).join('\n');
 }
 
+function slicePolicyBetween(startMarker, endMarker) {
+  const s = policyLines.findIndex((line) => line.includes(startMarker));
+  assert.notEqual(s, -1, '找不到：' + startMarker);
+  const e = policyLines.findIndex((line, idx) => idx > s && line.includes(endMarker));
+  assert.notEqual(e, -1, '找不到：' + endMarker);
+  return policyLines.slice(s, e).join('\n');
+}
+
 test('expand_result 必须算作读类证据（模型读到的内容不能被排除）', () => {
-  const block = sliceBetween('const EVIDENCE_READ_TOOLS', ']');
+  const block = slicePolicyBetween('const EVIDENCE_READ_TOOLS', ']');
   assert.match(block, /expand_result/, 'expand_result 读出的正是模型看到的内容，不纳入就会「证据与所见对不上」');
 });
 
@@ -88,7 +98,7 @@ test('留存全文必须发生在截断之前', () => {
 });
 
 test('完成校验改用按事实定位片段，而不是固定窗口', () => {
-  const fn = sliceBetween('export function buildVerificationEvidence', '// 用最近页面证据做一次独立校验');
+  const fn = slicePolicyBetween('export function buildVerificationEvidence', 'export function verifyEvidenceSignature');
   assert.match(fn, /selectEvidence\(/, '必须走 selectEvidence');
   assert.match(fn, /fullText: ctx\.lastReadFullText/, '要把全文交给证据选择');
   assert.ok(!/lastEvidence\)\.slice\(0, 2500\)/.test(fn), '不应再退回到固定窗口截断');
@@ -96,7 +106,7 @@ test('完成校验改用按事实定位片段，而不是固定窗口', () => {
 });
 
 test('证据必须**同时**含动作回执与页面片段（曾经只用后者，回执被挤掉）', () => {
-  const fn = sliceBetween('export function buildVerificationEvidence', '// 用最近页面证据做一次独立校验');
+  const fn = slicePolicyBetween('export function buildVerificationEvidence', 'export function verifyEvidenceSignature');
   assert.match(fn, /ctx\.lastEvidence/, '动作回执必须进证据 —— 它回答「刚刚做了什么」');
   assert.match(fn, /selectEvidence\(/, '页面片段也必须进证据 —— 它回答「结论与页面是否一致」');
   assert.match(fn, /最近一次动作的回执/, '两份证据要标注来源，否则校验方分不清哪句是页面原文');

@@ -33,49 +33,38 @@ import { visionMessagesFor } from './vision.ts';
 import { shouldSendImage, imageCapNote } from './vision.ts';
 // 出站消毒（孤立代理对）：所有请求的唯一出口都在本函数，兜底放这里。
 import { sanitizeLoneSurrogates, sanitizeMessages, sliceSafe } from '../shared/surrogates.ts';
-
-export const AGENT_BUDGET_DEFAULTS: Record<string, any> = Object.freeze({
-  // **没有轮数上限、没有工具数上限、没有任务时长上限**（对齐 DSH：dsh-agent-loop 里
-  // 既没有 maxTurns 也没有 maxToolCalls，唯一的限制常量是并发度）。
-  // 结束条件只有：complete_task / 模型给出最终回答 / 用户中断 / 成本兜底 maxTotalTokens。
-  //
-  // 原先的三道进度墙（maxModelTurns=30、maxToolCalls=40、maxDurationMs=180s）已移除：
-  // 它们惩罚的是「任务确实很长」而不是「任务失控」。实测一次正常的「24 类工具冒烟测试」
-  // 被工具墙硬停，用户被迫连说两次「继续」—— 每次「继续」都要重新建立上下文，更贵。
-  //
-  // 守卫侧的阈值：**只提醒、不否决**（详见 tool-guard.js）。
-  repeatThresholds: [3, 5, 8],
-  failThresholds: [2, 3, 5],
-  noProgressThresholds: [3, 5, 8],
-  excludeTools: ['update_plan'],
-  maxOpenedTabs: 6,
-  // 标签页切换上限：只限制**真实前台切换**，同一页的 switch_tab 是 no-op。
-  // 用户明确反馈过模型 A→B→A 反复跳转会让页面不停闪动；6 次足够覆盖正常的
-  // 「来源页 → 目标页 → 返回补充信息」流程，也能拦住失控循环。
-  maxTabSwitches: 6,
-  // 单个工具调用的超时（对齐 DSH 的 tool-call-timeout-policy：限制单点而非整体）。
-  toolTimeoutMs: 15000,
-  // 唯一保留的总量限制，而且是**成本**维度而非进度维度。
-  // 保留它的理由：DSH 敢完全不设上限，是因为它有一整套替代品（压缩 / 溢出到可恢复路径 /
-  // 委派给 subagent），且有用户在旁边随时打断；RecallFlow 的面板在后台跑，缺这个外部止损器。
-  // 注意 totalTokens 累加的是**每次请求的用量**，而每轮都重发整段上下文，因此它超线性增长 ——
-  // 不能用「单轮用量」估上限。按实测推导（CJK 1 token/字）：browser_task 每轮光工具定义约
-  // 8.3k tokens；取 6M ≈ 正常峰值（数十万）的十几倍，只有真正的失控才会撞上。
-  // 设为 0 表示不限制。
-  maxTotalTokens: 6000000,
-  // 完成前最多触发几次「独立校验未通过 → 反思重试」。
-  maxVerifications: 2,
-  // **唯一的存活兜底**：连续多少轮没有产生任何可观察进展就收尾。
-  //
-  // 为什么必须有它：移除三道进度墙之后，结束条件只剩 complete_task / 最终回答 /
-  // 用户中断 / 6M token 成本闸门。守卫按设计只提醒不否决（tool-guard.js），
-  // 于是一个陷入循环的 run 只能靠把 600 万 token 烧完才停 —— 而面板在后台跑，
-  // 用户看不到也拦不住。这是「不设进度墙」的哲学里唯一没被搬过来的配套件。
-  //
-  // 与 DSH 的差别：DSH 不设上限是因为旁边有人随时能打断，且有压缩/溢出/委派等替代品；
-  // 这里的定位是**外部止损器**，不是进度墙 —— 它有进展就永远不触发。
-  maxNoProgressRounds: 12,
-});
+import { AGENT_BUDGET_DEFAULTS, getBudget, tokenBudgetExceeded } from '../application/agent/budget.ts';
+import { promoteToResearch } from '../application/agent/intent-policy.ts';
+import { compactSessionMessages, sanitizeToolPairing, SESSION_MAX_TAIL_MESSAGES, SESSION_MESSAGE_MAX_CHARS } from '../application/agent/history-policy.ts';
+import {
+  EVIDENCE_READ_TOOLS,
+  buildVerificationEvidence,
+  classifyTaskKind,
+  classifyVerifyOutcome,
+  evaluateLiveness,
+  evidenceAfter,
+  resolveVerifyIntent,
+  shouldVerifyCompletion,
+  verifyEvidenceSignature,
+} from '../application/agent/verification-policy.ts';
+export {
+  AGENT_BUDGET_DEFAULTS,
+  compactSessionMessages,
+  sanitizeToolPairing,
+  SESSION_MAX_TAIL_MESSAGES,
+  SESSION_MESSAGE_MAX_CHARS,
+  tokenBudgetExceeded,
+  promoteToResearch,
+  EVIDENCE_READ_TOOLS,
+  buildVerificationEvidence,
+  classifyTaskKind,
+  classifyVerifyOutcome,
+  evaluateLiveness,
+  evidenceAfter,
+  resolveVerifyIntent,
+  shouldVerifyCompletion,
+  verifyEvidenceSignature,
+};
 
 // 预算弹性：即使意图被归为普通对话，一旦实际调用到「研究/网络类」工具，
 // 就把预算放宽到资料研究级，避免「工具刚用起来就触顶」。只加不减，对已达标意图无影响。
@@ -92,123 +81,6 @@ const RESEARCH_TRIGGER_TOOLS = new Set([
 // 历史折叠阈值等上下文治理参数已集中到 ./context-tuning.js（含各自的取值理由）。
 // 这里是纯引用，**数值一字未改** —— 搬运式重构不得改变行为。
 const CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
-
-// 运行时自纠：当普通对话（CHAT）任务实际调用到研究/网络类工具时，
-// 把任务画像就地提升为「资料研究」——补齐全套浏览器/网络工具，并把系统提示规则
-// 切换成 RESEARCH 的（含 complete_task 收尾），而不是只放宽预算。
-// 导出以便单测：画像提升时必须保留追加的系统提示段，这一点很容易在重构中被破坏。
-export function promoteToResearch(tools: any, messages: any, instruction: string, allSkills: any, promptExtras: any) {
-  const researchInfo = resolveIntent(INTENTS.RESEARCH);
-  // 缓存代价：往 tools 里追加会让请求前缀在追加点之后重新计算。
-  // 这一步没法省 —— 研究类工具不在 CHAT 的 schema 里，模型根本调用不了它们。
-  // 之所以可以接受：由 !promotedToResearch 守卫，整个 run 最多发生一次；
-  // 另一条路（CHAT 起手就带上全部研究工具）会让每一轮都多背几 k token，更亏。
-  for (const name of researchInfo.allowedTools) {
-    if (tools.some((t: any) => t.function && t.function.name === name)) continue;
-    const def = TOOL_REGISTRY.find((t) => t.name === name);
-    if (def) tools.push(def.openai);
-  }
-  const names = tools.map((t: any) => t.function && t.function.name).filter(Boolean);
-  const newPrompt = buildSystemPrompt(INTENTS.RESEARCH, instruction, names, allSkills);
-  // 必须带上附加段（站点记忆 / 宏目录）：它们追加在基础系统提示之后，
-  // 只按 buildSystemPrompt 重建会把它们静默丢掉 —— 而浏览器任务最需要它们。
-  const content = promptExtras ? newPrompt + promptExtras : newPrompt;
-  // 追加到末尾，**不覆写 messages[0]**。
-  // messages[0] 是整段请求前缀的起点，改写它会让此前累积的全部前缀缓存失效、
-  // 整段历史都要重新 prefill。追加是 append-only 的，只影响新增部分。
-  // DeepSeek 的 Chat Completion 接口明确支持在对话中间插入 system 消息；
-  // 位置更靠近当前轮，对模型行为的约束力也不弱于放在开头。
-  // 调用方须保证此时 messages 末尾没有待配对的 tool_calls（否则 tool 结果会被隔开、请求非法）。
-  messages.push({ role: 'system', content });
-  return content;
-}
-
-function getBudget(payload: Record<string, any> = {}, settings: Record<string, any> = {}, intent: string) {
-  const source = payload.agentBudget || settings.agentBudget || {};
-  const budget = Object.fromEntries(Object.entries(AGENT_BUDGET_DEFAULTS).map(([key, value]) => {
-    const n = Number(source[key]);
-    return [key, Number.isFinite(n) && n > 0 ? Math.floor(n) : value];
-  }));
-  // 注意：这里原先还会按意图分配 maxModelTurns / maxToolCalls（浏览器任务多给、纯对话少给）。
-  // 那两道**进度**上限已整体移除（对齐 DSH：不分意图地不限制「做了多少件事」），
-  // 因此不再有按意图分配的东西可算。
-  //
-  // 唯一按意图分配的是「能开多少新标签页」—— 那是**副作用**边界（别把用户的标签栏塞满），
-  // 不是进度预算，保留。
-  if (source.maxOpenedTabs === undefined || source.maxOpenedTabs === null || source.maxOpenedTabs === '') {
-    budget.maxOpenedTabs = intent === INTENTS.BROWSER ? 8 : intent === INTENTS.RESEARCH ? 6 : 4;
-  }
-  return budget;
-}
-
-/**
- * 是否已达到 token 成本上限（纯函数，便于直测边界语义）。
- * 0 / 负数 / 非数字表示不限制 —— 沿用「高上限兜底而非正常态硬墙」的既有原则。
- */
-export function tokenBudgetExceeded(totalTokens: any, budget: any) {
-  const cap = Number(budget && budget.maxTotalTokens);
-  if (!Number.isFinite(cap) || cap <= 0) return false;
-  const used = Number(totalTokens);
-  if (!Number.isFinite(used) || used <= 0) return false;
-  return used >= cap;
-}
-
-// 修正 tool 调用配对：OpenAI 兼容接口要求每个 tool 结果都有对应的 assistant.tool_calls，
-// 且 assistant.tool_calls 的每个 id 都必须有结果。截断/中断可能破坏配对，
-// 这里剔除「无 provider 的 tool 消息」与「结果不全的 assistant tool_calls 消息」。
-export function sanitizeToolPairing(list: any) {
-  const source = Array.isArray(list) ? list : [];
-  const isCallAssistant = (m: any) => m && m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
-  let out = source;
-  // 1) assistant 带 tool_calls，但并非每个 id 都有对应 tool 结果 → 整条去掉（否则请求非法）。
-  let resultIds = new Set(out.filter((m) => m && m.role === 'tool' && m.tool_call_id).map((m) => m.tool_call_id));
-  out = out.filter((m) => !isCallAssistant(m) || m.tool_calls.every((tc: any) => tc && resultIds.has(tc.id)));
-  // 2) tool 结果没有对应的 assistant tool_calls（provider 被裁掉/剔除）→ 去掉孤儿结果。
-  const providerIds = new Set();
-  for (const m of out) if (isCallAssistant(m)) for (const tc of m.tool_calls) if (tc && tc.id) providerIds.add(tc.id);
-  out = out.filter((m) => !(m && m.role === 'tool' && !providerIds.has(m.tool_call_id)));
-  return out;
-}
-
-// 落盘快照的两条上限。**必须显式说明"少了什么"**：
-// 这份快照在「继续上一次运行」时会被**原样恢复成发给模型的 messages**
-//（见下方 canResume 分支），所以它里面的静默截断 = 模型看到一段没有开头的文本，
-// 却以为那就是全部对话。原先两处都是静默的（content 静默 slice、超出 39 条静默丢弃）。
-export const SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
-export const SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;
-
-export function compactSessionMessages(messages: any) {
-  const source = Array.isArray(messages) ? messages : [];
-  const system = source.find((message) => message && message.role === 'system');
-  const rest = source.filter((message) => message !== system);
-  const tail = sanitizeToolPairing(rest.slice(-SESSION_MAX_TAIL_MESSAGES));
-  const notices = [];
-  // ① 整条消息被上限丢掉：补一条**可辨认的**说明，而不是让接手方以为对话就这么短。
-  const droppedMessages = rest.length - Math.min(rest.length, SESSION_MAX_TAIL_MESSAGES);
-  if (droppedMessages > 0) {
-    notices.push({
-      role: 'user',
-      content:
-        '⟨…更早的 ' + droppedMessages + ' 条消息未随快照保存（落盘上限 ' + SESSION_MAX_TAIL_MESSAGES +
-        ' 条）；**这些消息取不回原文**，需要时请让用户重新说明上下文。⟩',
-    });
-  }
-  const compacted = tail.map((message) => {
-    const copy: any = { role: message.role };
-    if (typeof message.content === 'string') {
-      // ② 单条超长：留尾（结论通常在后面），并**前置**说明被截掉的是开头那段。
-      copy.content =
-        message.content.length > SESSION_MESSAGE_MAX_CHARS
-          ? formatTailKeptTruncationNotice(message.content.length, SESSION_MESSAGE_MAX_CHARS) +
-            message.content.slice(-SESSION_MESSAGE_MAX_CHARS)
-          : message.content;
-    } else if (message.content !== undefined) copy.content = message.content;
-    if (Array.isArray(message.tool_calls)) copy.tool_calls = message.tool_calls.slice(-8);
-    if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
-    return copy;
-  });
-  return (system ? [system, ...notices, ...compacted] : [...notices, ...compacted]);
-}
 
 function buildInitialMessages(instruction: string, selectedText: any, page: any, pageUrl: any, history: any, emit: any, systemPrompt: any, pickedElements: any) {
   // 历史归一化与「去掉与当前指令重复的尾部 user 消息」留在原处（它依赖 normalizeHistory）。
@@ -382,35 +254,6 @@ import { toolNeedsApproval } from './approval-policy.ts';
 import type { Caught } from './errors.ts';
 export { toolNeedsApproval };
 
-/**
- * 存活看门狗（纯函数，便于直测边界语义）。
- *
- * 判定「本任务是否已经不再产生任何可观察进展」。它与 token 成本闸门是**互补**的：
- * 成本闸门管"花了多少钱"，它管"是不是卡住了" —— 一个卡住的任务可能几轮就烧掉大量 token，
- * 也可能因为每轮都很小而烧得慢却永远不回结果。
- *
- * 语义：
- *   - 尚未有过任何进展（lastProgressIter 为 null）时，以起点为基准，不会一开工就判定卡死；
- *   - 只要有过进展就重置基准，**正常的长任务永远不会触发**（这是它不构成"进度墙"的关键）；
- *   - maxNoProgressRounds 为 0/负数/非数字表示不启用（沿用本仓库"高上限兜底、非正常态硬墙"的原则）。
- *
- * @param {Object} input
- * @param {number} input.iter 当前迭代下标（从 0 起）
- * @param {number|null} input.lastProgressIter 最近一次有进展的迭代下标
- * @param {number} input.maxNoProgressRounds 允许的无进展轮数上限
- * @returns {{stalled:boolean, reason:string, noProgressRounds:number}}
- */
-export function evaluateLiveness(input: Record<string, any> = {}) {
-  const iter = Number(input.iter);
-  const cap = Number(input.maxNoProgressRounds);
-  const base = Number.isFinite(Number(input.lastProgressIter)) ? Number(input.lastProgressIter) : 0;
-  const safeIter = Number.isFinite(iter) && iter > 0 ? iter : 0;
-  const noProgressRounds = Math.max(0, safeIter - base);
-  if (!Number.isFinite(cap) || cap <= 0) return { stalled: false, reason: '', noProgressRounds };
-  if (noProgressRounds >= cap) return { stalled: true, reason: 'noProgress', noProgressRounds };
-  return { stalled: false, reason: '', noProgressRounds };
-}
-
 // 工具结果是否产生“可观察进展”：新标签页绑定、页面内容/URL 变化、等待匹配成功等。
 // 有进展时应重置重复工具计数，避免“新页面后的第一次快照”被误判为重复调用。
 function toolResultProgress(res: any) {
@@ -438,71 +281,6 @@ function resultProgressByChange(store: any, name: string, res: any) {
   return prev !== undefined && prev !== fp;
 }
 
-// 完成前校验的证据来源。
-//
-// 读类工具给的是「页面现在长什么样」；有副作用的动作给的是「刚刚发生了什么」。
-// 原实现只采集 4 个读类工具的结果，于是「划出关键信息」这类任务里，校验器拿到的
-// 要么是空证据、要么是动作**之前**读到的页面 —— 它只能判未达成，进而把 agent 逼去
-// 用 run_javascript 手工做 DOM 取证（实测撞满每工具上限，complete_task 被否决两次）。
-const EVIDENCE_READ_TOOLS = new Set([
-  'read_current_page',
-  'get_page_snapshot',
-  // inspect_element 是 C-4 合并后的元素检查入口（原 get_element_text / inspect_element / extract_table 三者）。
-  // 名单里必须保留它，否则「划出关键信息」这类任务的完成校验会重新丢掉文本证据。
-  'inspect_element',
-  'get_ax_snapshot',
-  // expand_result 也必须算：它读出的正是「模型实际看到的内容」。
-  // 原先不在名单里，于是模型展开了长文的后半段，完成校验却对此一无所知 ——
-  // 证据和模型看到的东西对不上，这是长页面任务被误否的直接原因之一。
-  'expand_result',
-  // fetch_webpage 也一样：它抓到的是「这一轮真正读到的资料」，研究类任务的结论全都建立在它上面。
-  // ⚠ 它现在标了 readOnly（见 tool-metadata.js），而下面那段「只读动作不记回执」的早返回会把它整个丢掉 ——
-  // 所以必须挂在这里：**先按内容取证据，再按 readOnly 决定要不要回执**。
-  'fetch_webpage',
-]);
-
-// 导出以便单测：证据采集规则直接决定完成前校验能否通过，
-// 而它出错的症状（校验器永远判未达成 → agent 手工取证）离代码很远。
-export function evidenceAfter(prev: any, tc: any, res: any, summarizeArgs: any) {
-  const text = res && typeof res.result === 'string' ? res.result : '';
-  if (!text) return prev;
-  // 证据文本同样来自页面原文 —— 按码元下标切会切裂代理对（见 surrogates.js 的事故说明）。
-  if (EVIDENCE_READ_TOOLS.has(tc.name)) return sliceSafe(text, 0, 3000);
-  let metadata = null;
-  try {
-    metadata = getToolMetadata(tc.name);
-  } catch (e) {
-    metadata = null;
-  }
-  // 只读动作（截图等）不改变页面，不能当作「做了事」的证据
-  if (metadata && metadata.readOnly === true) return prev;
-  // 有副作用的动作：把回执本身作为证据。失败也要记 —— 「最后一步失败了」
-  // 对校验器同样是关键信息，隐瞒它只会换来一次被否决的 complete_task。
-  return (
-    '【最近一次页面动作】' + tc.name + (res.ok === false ? '（执行失败）' : '（已执行成功）') + '\n' +
-    '参数：' + summarizeArgs(tc.args) + '\n' +
-    '返回：' + text.slice(0, 2000) +
-    '\n（备注：若同时提供了页面快照，那份快照是在本动作之前采集的。）'
-  );
-}
-
-// 是否需要「完成前独立校验」：仅对会操作页面的浏览器/研究类任务、且确实调用过工具时启用。
-//
-// 导出是为了直接测这条**成本策略**（原先是模块内私有、零覆盖）：
-// 它决定"什么时候多花一次模型调用"，答错的代价是**每次收尾都白花一次调用**，
-// 或者反过来该校验时不校验。
-/**
- * 完成校验用的「有效意图」。
- *
- * 为什么要单独导出这个函数（而不是在主循环里内联三元表达式）：`promoteToResearch`
- * 只换工具集与系统提示、**不改 intent**，所以「起点是 CHAT、中途被提升为研究画像」的
- * run 若照 `intent` 判定就会永远跳过 LLM 完成校验。这条判定必须是**可直接测的纯函数**，
- * 否则它只能靠人记得在两处保持一致。
- */
-export function resolveVerifyIntent(intent: string, promotedToResearch: any) {
-  return promotedToResearch ? INTENTS.RESEARCH : intent;
-}
-
 // 「这次 run 是纯读取还是改过页面」——决定完成校验该问哪一个问题。
 //
 // 抽成纯函数的理由：这条判断的价值全在**边界**上（哪种工具算读、未知工具算哪边），
@@ -515,82 +293,9 @@ function changesState(md: any) {
   return md.readOnly !== true && md.mutatesState !== false;
 }
 
-export function classifyTaskKind(ranToolNames: any) {
-  const names = [...new Set((Array.isArray(ranToolNames) ? ranToolNames : []).filter(Boolean))];
-  // 一次工具都没调过却走到这里（理论上不该发生）：按改过页面的严格问法处理，宁可多要一次证据。
-  if (!names.length) return 'mutation';
-  const allReadOnly = names.every((nm) => {
-    try {
-      return !changesState(getToolMetadata(nm as string));
-    } catch (e) {
-      // 元数据查不到（例如 MCP 工具）时**不能**当成只读：我们不知道它会改什么，
-      // 按严格问法处理才是安全方向（放宽只会让「声称做了」更容易蒙混过关）。
-      return false;
-    }
-  });
-  return allReadOnly ? 'read' : 'mutation';
-}
-
-export function shouldVerifyCompletion(intent: string, toolCallCount: number, settings: any) {
-  if (!settings || settings.verifierEnabled === false) return false;
-  if (!settings.apiKey) return false;
-  if (!toolCallCount) return false;
-  return intent === INTENTS.BROWSER || intent === INTENTS.RESEARCH;
-}
-
 // 动作回执在证据里的上限。回执本身很短（工具名 + 参数 + 返回值摘要），
 // 给它留固定额度是为了不挤占页面片段的预算。
 const EVIDENCE_RECEIPT_CHARS = 1800;
-
-/**
- * 组装送给完成校验的证据。
- *
- * **两份都要给，缺一不可**（这是修过一次的回归）：
- * - `ctx.lastEvidence` 是「最近一次动作的回执」，回答**刚刚做了什么**
- *   （如「【最近一次页面动作】annotate({op:"highlight"})（已执行成功）… 返回：已高亮 12 / 12 处关键信息」）；
- * - `selectEvidence` 抽出的页面片段回答**结论与页面是否一致**。
- *
- * 曾经改成只用页面片段（把 lastEvidence 当作「没有全文时的退路」），
- * 结果有副作用的动作回执被整个挤掉 —— 校验方看不到「刚做了什么」，
- * 于是怀疑高亮是否真的存在，agent 又花十几次调用自证。
- * 纯函数，导出以便直接测「两者同时在场」这条装配性质。
- */
-export function buildVerificationEvidence(ctx: any, claim: any) {
-  const parts = [];
-  if (ctx.lastSnapshot) parts.push(compactSnapshotSummary(ctx.lastSnapshot));
-  const receipt = String(ctx.lastEvidence || '').slice(0, EVIDENCE_RECEIPT_CHARS);
-  if (receipt) parts.push('【最近一次动作的回执】\n' + receipt);
-  const picked = selectEvidence({
-    fullText: ctx.lastReadFullText,
-    fallback: ctx.lastEvidence,
-    claim: String(claim || ''),
-  });
-  if (picked.text) parts.push('【页面相关片段】\n' + picked.text);
-  if (picked.coverage) parts.push(picked.coverage);
-  return parts.join('\n\n');
-}
-
-/**
- * 「这次送审的证据是否与上次被否决时完全相同」—— 用签名比较，而不是比较全文。
- *
- * 只取四个能代表"有没有产生新东西"的维度：
- *   · claim            —— 总结本身（换个说法也算变了，但换了说法却没做事，随后仍会被否决）
- *   · lastEvidence     —— 最近一次动作的回执（做了新动作就会变）
- *   · 页面指纹          —— 页面内容真的变了（零成本，快照自带）
- *   · 读类全文长度      —— 重新取证/换了一页（长度变说明读到了不同体量的内容）
- *
- * 为什么不用全文做签名：长任务里 lastReadFullText 可达几十万字，每次收尾都拼一遍既慢又占内存，
- * 而这四个维度已经足够回答"有没有新证据"这个二元问题。
- */
-export function verifyEvidenceSignature(claim: any, ctx: any) {
-  const c = ctx || {};
-  return [
-    String(claim || ''),
-    String(c.lastEvidence || ''),
-    String((c.lastSnapshot && c.lastSnapshot.fingerprint) || ''),
-    String((c.lastReadFullText || '').length),
-  ].join('\u0000');
-}
 
 // 用最近页面证据做一次独立校验，判断目标是否真的达成。
 //
@@ -610,29 +315,6 @@ async function runCompletionVerification(settings: any, instruction: string, res
     },
     signal
   );
-}
-
-/**
- * 「完成校验这一步的结果该怎么读」—— 纯函数，便于直测（agent 主循环本身不好单测）。
- *
- * 三种结局，混淆任意两种都会产生用户可见的错误：
- *   · `interrupt`  —— 用户中断。必须按中断收尾（保留已做的动作、状态记 interrupted），
- *                     **不能**当成「校验器故障 ⇒ 按通过放行」。否则一次「我按了停止」
- *                     会以「任务已完成」被持久化，用户看到的却是「已按通过放行」。
- *   · `fail-open`  —— 校验器不可用（超时 / 报错 / 无 API Key / 返回空）。它是安全网，
- *                     自己坏掉不该卡住用户 ⇒ 放行，但必须让前端看得见。
- *   · `verdict`    —— 有结论，按 ok / !ok 分派。
- *
- * 只认 `error.name === 'AbortError'`；其它异常一律算故障（verifier.js 已保证
- * 中断会以 AbortError 抛出，而不是 return null）。
- */
-export function classifyVerifyOutcome(verdict: any, error: any) {
-  if (error) {
-    if (error.name === 'AbortError') return { kind: 'interrupt' };
-    return { kind: 'fail-open' };
-  }
-  if (!verdict) return { kind: 'fail-open' };
-  return { kind: 'verdict', verdict };
 }
 // 任务结束时清理辅助页（两阶段）：这里只登记待关闭页，保留最后使用的 tab 与用户原本的 tab。
 // 真正的关闭由后台在“最终消息已落盘”的 ack 之后执行。
