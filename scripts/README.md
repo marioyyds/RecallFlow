@@ -1,71 +1,125 @@
-test(bridge): MCP 截图通道的端到端验证台
+# Scripts
 
-桥接层是整个项目最难手工回归的部分：它横跨扩展与 MCP 两个包，
-且真实调用需要「重载扩展 + 重启 server」，两者都会打断正在使用的 MCP 会话。
-因此这里提供一套**隔离验证台**，不需要触碰任何运行中的实例。
+本目录包含 RecallFlow 的构建、验证与维护脚本，以及它们的使用说明。
 
-scripts/verify-mcp-shot.mjs
-  在隔离端口起一个 server 实例，用真实 MCP 协议（initialize / tools/list / tools/call）
-  核对：工具已注册、参数完整、扩展不可用时错误路径优雅、本地工具能正常往返。
+## MCP 截图通道隔离验证台
 
-scripts/verify-mcp-shot-success.mjs
-  额外扮演「假扩展」——通过 /poll 领取请求、经 /result 回结果，
-  从而走通**成功路径**：图片真的以 MCP image 内容块返回、includeImage 开关生效、
-  归档落盘且字节与源一致。
+桥接层是整个项目中最难手工回归的部分。它横跨扩展与 MCP 两个包，真实调用还需要「重载扩展 + 重启 server」，两者都会打断正在使用的 MCP 会话。
 
-用法（PowerShell）：
-  $env:RECALLFLOW_MCP_PORT='7802'            # 隔离端口，别用 7801
-  $env:RECALLFLOW_EXT_TIMEOUT_MS='3000'      # 让依赖扩展的调用快速失败
-  $env:RECALLFLOW_EVIDENCE_DIR="$env:TEMP\rf-evidence-test"   # 隔离证据目录
-  node integrations/opencode/recallflow-mcp/index.js --http  # 后台起实例
-  node scripts/verify-mcp-shot.mjs
-  node scripts/verify-mcp-shot-success.mjs
+因此，这里提供一套**隔离验证台**，无需触碰任何运行中的实例。
 
-两个脚本都返回非零退出码表示未通过，可直接用于改动后的回归。
+| 脚本 | 作用 |
+| --- | --- |
+| [`verify-mcp-shot.mjs`](./verify-mcp-shot.mjs) | 在隔离端口启动 server，通过真实 MCP 协议检查工具注册、参数、错误路径和本地工具往返。 |
+| [`verify-mcp-shot-success.mjs`](./verify-mcp-shot-success.mjs) | 模拟扩展，走通截图成功路径，并验证图片返回、`includeImage` 开关和证据归档。 |
 
-## scripts/check-const-assign.mjs
+### 基础协议验证
 
-扫描「对 const 声明重新赋值」这类**只能在运行时炸**的代码，并被
-`tests/static-checks.test.mjs` 作为门禁每次执行。
+`verify-mcp-shot.mjs` 会在隔离端口启动 server 实例，并使用真实 MCP 协议完成以下检查：
 
-起因是一个真实崩溃：`agent.js` 里 `const deterministicFails` 却在后面 `+= 1`，
-于是「完成断言判定失败」这条分支一走到就抛 `Assignment to constant variable`，
-整个 agent run 直接挂掉。要命的是 **`node --check` 抓不到（语法合法），
-400 项单测也抓不到（需要真实 agent 运行 + 特定失败场景）** ——
-也就是说这类 bug 之前没有任何一层能发现它。
+- `initialize`、`tools/list` 和 `tools/call` 调用正常。
+- `page_screenshot` 工具已注册，参数定义完整。
+- 扩展不可用时能返回清晰错误，不会抛出未处理异常或将 base64 包装成 JSON。
+- `evidence_get` 等本地工具能够正常往返，证明协议处理本身可用。
 
-本仓库没有安装任何 JS 解析器（acorn / espree / typescript 都没有），
-为这一个检查引入依赖不划算，因此用两层保守启发式，目标是**零误报**：
+### 成功路径验证
 
-1. **字符串剥离**：逐字符跟踪 `'` `"` `` ` `` 三种引号与转义，把字符串内容替换成空白。
-   否则 `'<button title="x">'` 里的 `title=` 会被当成对 `const title` 的赋值
-   （实测这一项贡献了 38 处误报）。
-2. **声明收集**：识别 const/let/var（含无初始化的 `let m;`）、function/class 名、函数参数。
-   只有「全部声明都是 const 且从未作为参数」的名字，其非声明处的赋值才报告。
+`verify-mcp-shot-success.mjs` 会额外扮演一个「假扩展」：
 
-实测精度：修复后 0 处；把 `const` 改回去则恰好命中那一处。
+1. 通过 `/poll` 领取请求。
+2. 通过 `/result` 返回模拟截图。
+3. 验证图片以 MCP image 内容块返回。
+4. 验证 `includeImage` 开关生效。
+5. 验证证据成功归档，且落盘字节与源数据一致。
 
-已知局限（宁可漏报不误报）：不做真正的词法作用域分析，同名跨作用域遮蔽时会漏报；
-模板字符串的 `${}` 插值按字符串处理，插值内含赋值会漏报。
+### 使用方法
 
-用法：
+在独立的 PowerShell 终端中启动隔离实例，避免占用正在使用的 `7801` 端口：
 
-  node scripts/check-const-assign.mjs     # 退出码非零表示发现问题
+```powershell
+$env:RECALLFLOW_MCP_PORT = '7802'
+$env:RECALLFLOW_EXT_TIMEOUT_MS = '3000'
+$env:RECALLFLOW_EVIDENCE_DIR = "$env:TEMP\rf-evidence-test"
 
-已知未覆盖：真实扩展的 CDP 截图本身（screenshot_capture 的 relay 实现）需要重载扩展才能验证。
+node integrations/opencode/recallflow-mcp/index.js --http
+```
 
-## scripts/mutation-check.mjs
+server 启动后，在另一个终端中运行验证：
 
-验证 `tests/page-debug-hook.test.mjs` 的断言**真的有牙齿**。
+```powershell
+node scripts/verify-mcp-shot.mjs
+node scripts/verify-mcp-shot-success.mjs
+```
 
-动机来自一次实测：该测试最初有两条「恒真断言」——vm 沙箱里栈帧不带文件名（导致
-「initiator 不含自身帧」永远通过），以及 `var f = function(){}` 的名字推断（让「具名」
-断言对某种写法失效）。**没有牙齿的测试比没有测试更糟，因为它制造虚假信心。**
+两个脚本都以非零退出码表示验证失败，可直接用于改动后的回归检查。
 
-做法：在**临时副本**上精确破坏一处行为（源文件只读不改，哈希可验证），
-跑测试并确认「预期的那条」变红。用法：
+> **端口隔离：** 不要使用 `7801`。该端口通常属于正在运行的实例，验证脚本应始终使用独立的 `7802`。
 
-  node scripts/mutation-check.mjs
+> **已知未覆盖：** 真实扩展的 CDP 截图实现（`screenshot_capture` relay）仍需要重载扩展后才能验证。
 
-返回非零退出码表示有变异未被抓住，即对应断言形同虚设。新增针对该文件的断言后，
-建议同时补一条变异。
+## `check-const-assign.mjs`
+
+扫描「对 `const` 声明重新赋值」这类只能在运行时触发的代码问题。该检查由 `tests/static-checks.test.mjs` 作为门禁在每次执行时调用。
+
+### 背景
+
+该脚本源于一次真实崩溃：`agent.js` 中的 `const deterministicFails` 在后面被 `+= 1`。当「完成断言判定失败」分支执行时，代码会抛出 `Assignment to constant variable`，导致整个 agent run 中断。
+
+这个问题不容易被现有检查发现：
+
+- `node --check` 无法识别，因为语法本身合法。
+- 400 项单元测试也无法覆盖，因为需要真实运行 agent 并进入特定失败场景。
+
+也就是说，这类问题此前没有任何一层检查能够发现。
+
+### 检查策略
+
+仓库没有安装 JavaScript 解析器（如 acorn、espree 或 TypeScript），为单个检查引入依赖并不划算。因此，脚本使用两层保守启发式检查，目标是**零误报**：
+
+1. **字符串剥离**
+
+   逐字符跟踪 `'`、`"`、`` ` `` 三种引号及转义字符，将字符串内容替换为空白。否则，`'<button title="x">'` 中的 `title=` 会被误认为对 `const title` 赋值。实测中，这一项曾贡献 38 处误报。
+
+2. **声明收集**
+
+   识别 `const`、`let`、`var`（包括无初始化的 `let m;`）、`function`、`class` 名称和函数参数。只有当某个名称的所有声明都是 `const`，且从未作为参数使用时，脚本才会报告它在声明位置之外的赋值。
+
+实测精度为：修复后 0 处误报；将 `const` 改回后，正好命中对应的一处问题。
+
+### 运行
+
+```powershell
+node scripts/check-const-assign.mjs
+```
+
+非零退出码表示发现可疑赋值。
+
+### 已知限制
+
+该检查倾向于漏报而不是误报：
+
+- 不执行真正的词法作用域分析，同名变量跨作用域遮蔽时可能漏报。
+- 模板字符串的 `${}` 插值按字符串处理；插值中包含赋值时可能漏报。
+
+## `mutation-check.mjs`
+
+验证 `tests/page-debug-hook.test.mjs` 中的断言是否真正能够发现问题。
+
+### 背景
+
+该脚本源于一次实测：测试中最初有两条「恒真断言」。
+
+- 在 vm 沙箱中，栈帧不包含文件名，导致「initiator 不含自身帧」始终通过。
+- `var f = function() {}` 的名称推断问题，使「具名」断言在某种写法下失效。
+
+没有检查能力的测试比没有测试更危险，因为它会制造虚假信心。
+
+### 工作方式
+
+脚本会在**临时副本**上精确破坏一处行为，然后运行测试，并确认预期断言确实失败。源文件保持只读，修改前后可通过哈希验证。
+
+```powershell
+node scripts/mutation-check.mjs
+```
+
+非零退出码表示存在未被测试捕获的变异，即对应断言可能形同虚设。新增针对该文件的断言后，建议同时补一条对应的变异检查。
