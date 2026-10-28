@@ -1,5 +1,5 @@
 // Application-level adapter for long-lived AI stream ports.
-import { RunChannel } from '../../assistant/run-channel.ts';
+import { RunChannel } from '../agent/run-channel.ts';
 import type { RunControllerLike } from '../agent/run-registry.ts';
 import { sanitizeMessages } from '../../shared/surrogates.ts';
 

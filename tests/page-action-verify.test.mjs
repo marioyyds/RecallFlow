@@ -12,7 +12,7 @@ import {
   snapshotChanged,
   observedChange,
   buildActionVerification,
-} from '../lib/assistant/page-action-verify.ts';
+} from '../lib/application/agent/page-action-verify.ts';
 
 const snap = (over = {}) => Object.assign({ version: 2, url: 'https://a.test/', fingerprint: 'fp-1' }, over);
 

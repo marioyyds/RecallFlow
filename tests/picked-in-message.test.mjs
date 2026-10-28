@@ -18,12 +18,12 @@ import {
   summarizePickedForMessage,
   formatPickedSummary,
   pickedSummaryHtml,
-} from '../lib/shared/utils.ts';
+} from '../lib/shared/format/picked.ts';
 import { sourcePath } from './source-path.mjs';
 
-const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
-const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
-const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+const chatSrc = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
+const transcriptSrc = fs.readFileSync('lib/ui/page/transcript.ts', 'utf8');
+const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
 
 /**
  * 取一个顶层函数的**函数体**（按花括号配对），用于源码级门禁。
@@ -195,31 +195,31 @@ test('两条渲染路径共用同一个格式化函数（各写一份会漂移�
 test('定位串只有一处实现：三处调用点都走 formatElementLocator', () => {
   // 这个字符串原本有三份手写实现，其中一份在"只有 name 没有 role"时会输出畸形的
   // `role=name="…"` —— 而"复制定位"按钮复制的正是它。改成唯一来源后不会再漂移。
-  const utilsSrc = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
-  assert.match(utilsSrc, /export function formatElementLocator\(/);
+  const pickedSrc = fs.readFileSync(sourcePath('lib/shared/format/picked.ts'), 'utf8');
+  assert.match(pickedSrc, /export function formatElementLocator\(/);
   // 三处调用：给模型的元数据（agent.js）、chip 文案与"复制定位"（chat.js）、
   // 存进会话的那一行（utils.js 内的 summarizePickedForMessage）
   assert.match(agentSrc, /formatElementLocator\(\s*l\b/, 'agent.js 应走共用实现');
   assert.match(chatSrc, /formatElementLocator\(p && p\.locator/, 'chat.js 应走共用实现');
   // 锚点钉"这一处仍调用共用实现"，不钉它外面套了什么：
   // 2026-10-16 外面包了一层 sliceSafe（截断不许切裂代理对），钉死外层写法会把门禁钉红。
-  assert.match(utilsSrc, /formatElementLocator\(p\.locator, p\.selector, p\.tag\)/, 'summarizePickedForMessage 应走共用实现');
+  assert.match(pickedSrc, /formatElementLocator\(p\.locator, p\.selector, p\.tag\)/, 'summarizePickedForMessage 应走共用实现');
   // 不该再有第二份手写：旧的畸形写法（把 role 拼成空串再补 name）必须消失。
   // ⚠ 必须先剥掉**注释**：那段畸形的写法本身就是作为"反面例子"写在 utils.js 的注释里的，
   // 不剥注释会把自己举的例子当成违规（实测踩过一次）。
   const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
   assert.ok(
-    !/'role=' \+ \(l\.role \|\| ''\)/.test(stripComments(chatSrc) + stripComments(utilsSrc)),
+    !/'role=' \+ \(l\.role \|\| ''\)/.test(stripComments(chatSrc) + stripComments(pickedSrc)),
     '畸形的 role 拼接写法应已全部移除（注释里的反面例子不算）'
   );
 });
 
 test('发送时把拾取信息写进那条 user 消息（否则对话里没有它）', () => {
-  assert.match(chatSrc, /const pickedForMessage = summarizePickedForMessage\(pickedElements\);/);
+  assert.match(chatSrc, /const pickedForMessage = summarizePickedForMessage\(streamView\.pickedElements\);/);
   assert.match(chatSrc, /pickedForMessage\.length \? \{ pickedElements: pickedForMessage \} : \{\}/);
   // 取值必须在清空之前：清空点只有一个，且在 sendAgentRequest 里
   const takeAt = chatSrc.indexOf('const pickedForMessage = summarizePickedForMessage');
-  const clearAt = chatSrc.indexOf('pickedElements = [];', takeAt);
+  const clearAt = chatSrc.indexOf('streamView.pickedElements = [];', takeAt);
   assert.ok(takeAt > 0 && clearAt > takeAt, '应先取值再清空');
 });
 

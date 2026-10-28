@@ -1,4 +1,4 @@
-import { composeProgressText } from '../../shared/utils.ts';
+import { composeProgressText } from '../../shared/format/page-results.ts';
 
 const STATE_LABELS: Record<string, string> = {
   created: '准备中',

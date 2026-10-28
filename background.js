@@ -34,6 +34,11 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
+// lib/shared/dom/html.ts
+function typeInfo(id) {
+  return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
+}
+
 // lib/shared/surrogates.ts
 var REPLACEMENT = "\uFFFD";
 var isHigh = (c) => c >= 55296 && c <= 56319;
@@ -131,12 +136,9 @@ function rangeSafe(text, start, end) {
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
 
-// lib/shared/utils.ts
+// lib/shared/text.ts
 function logError(context, error) {
   console.warn(`[BookmarkSorter] ${context}:`, error);
-}
-function typeInfo(id) {
-  return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
 function cleanTitle(title) {
   let t = (title || "").trim();
@@ -163,27 +165,8 @@ function markdownExcerpt(text, maxChars = 160) {
   if (!s) return "";
   return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
 }
-function formatElementLocator(locator, selector, tag) {
-  const l = locator || {};
-  if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
-  if (l.name) return 'name="' + l.name + '"';
-  if (l.testid) return "testid=" + l.testid;
-  return String(selector || tag || "");
-}
-var DEFAULT_STYLE_PROPS = Object.freeze([
-  "font-size",
-  "line-height",
-  "color",
-  "background-color",
-  "width",
-  "height",
-  "display",
-  "visibility",
-  "opacity",
-  "overflow-x",
-  "position",
-  "z-index"
-]);
+
+// lib/shared/diagnostics.ts
 function isCspEvalBlockError(message) {
   const s = String(message === void 0 || message === null ? "" : message);
   if (!s) return false;
@@ -194,6 +177,18 @@ function isCspEvalBlockError(message) {
   if (/content security policy/i.test(s) && /(eval|script-src)/i.test(s)) return true;
   return false;
 }
+function isContentScriptUnreachable(message) {
+  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
+    String(message === void 0 || message === null ? "" : message)
+  );
+}
+function describeContentScriptUnreachable(message, prefix) {
+  const raw = String(message === void 0 || message === null ? "" : message);
+  if (!isContentScriptUnreachable(raw)) return (prefix || "") + raw;
+  return (prefix || "") + "\u8BE5\u6807\u7B7E\u9875\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u5185\u5BB9\u811A\u672C\uFF08" + sliceSafe(raw, 0, 120) + '\uFF09\u3002\u5E38\u89C1\u539F\u56E0\uFF1A\u9875\u9762\u8FD8\u5728\u52A0\u8F7D\u3001\u8BE5\u9875\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u5DF2\u5931\u6548\u3002\u53EF\u4EE5\u8FD9\u6837\u505A\uFF1A\u2460 \u7A0D\u7B49\u7247\u523B\u540E\u7528 wait_for_element / get_page_snapshot \u91CD\u8BD5\u4E00\u6B21\uFF1B\u2461 \u6539\u7528**\u4E0D\u7ECF\u5185\u5BB9\u811A\u672C**\u7684 CDP \u5DE5\u5177\uFF1Aget_ax_snapshot\u3001run_javascript({engine:"page"})\u3001take_screenshot\uFF1B\u2462 \u82E5\u8BE5\u7AD9\u59CB\u7EC8\u8BFB\u4E0D\u5230\uFF0C\u76F4\u63A5\u5982\u5B9E\u8BF4\u660E"\u8FD9\u4E2A\u9875\u9762\u8BFB\u4E0D\u4E86"\uFF0C\u4E0D\u8981\u53CD\u590D\u91CD\u8BD5\u540C\u4E00\u6761\u8DEF\u3002';
+}
+
+// lib/shared/vision-copy.ts
 var VISION_ENABLED = true;
 var VISION_CLAUSE = "**\u770B\u4E0D\u5230\u56FE\u50CF**\uFF08\u622A\u56FE\u53EA\u7ED9\u7528\u6237\u770B\uFF0C\u4E0D\u4F1A\u8FDB\u5165\u4F60\u7684\u8F93\u5165\uFF09";
 function visionLimitationNote(visionEnabled, prefix) {
@@ -207,16 +202,6 @@ var VISION_UNAVAILABLE_SKILL_COPY = '\u4F46**\u4F60\u770B\u4E0D\u5230\u56FE\u50C
 var VISION_ENABLED_TOOL_COPY = "\u56FE\u7247\u4E5F\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\u2014\u2014 \u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
 var VISION_ENABLED_SKILL_COPY = '\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\n  \u6240\u4EE5\u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u6539\u52A8\u7684\u89C6\u89C9\u6548\u679C\uFF1B\u4F46**\u5916\u89C2\u5224\u65AD\u4ECD\u8981\u8BFB\u8BA1\u7B97\u503C**\uFF08\u50CF\u7D20\u8BC1\u636E\u66FF\u4EE3\u4E0D\u4E86 `inspect_element({op:"styles"})` \u7684\u8BFB\u6570\uFF09\u3002';
 var VISION_ENABLED_SUMMARY_COPY = "\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\u636E\u6B64\u53EF\u4EE5\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
-function isContentScriptUnreachable(message) {
-  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
-    String(message === void 0 || message === null ? "" : message)
-  );
-}
-function describeContentScriptUnreachable(message, prefix) {
-  const raw = String(message === void 0 || message === null ? "" : message);
-  if (!isContentScriptUnreachable(raw)) return (prefix || "") + raw;
-  return (prefix || "") + "\u8BE5\u6807\u7B7E\u9875\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u5185\u5BB9\u811A\u672C\uFF08" + sliceSafe(raw, 0, 120) + '\uFF09\u3002\u5E38\u89C1\u539F\u56E0\uFF1A\u9875\u9762\u8FD8\u5728\u52A0\u8F7D\u3001\u8BE5\u9875\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u5DF2\u5931\u6548\u3002\u53EF\u4EE5\u8FD9\u6837\u505A\uFF1A\u2460 \u7A0D\u7B49\u7247\u523B\u540E\u7528 wait_for_element / get_page_snapshot \u91CD\u8BD5\u4E00\u6B21\uFF1B\u2461 \u6539\u7528**\u4E0D\u7ECF\u5185\u5BB9\u811A\u672C**\u7684 CDP \u5DE5\u5177\uFF1Aget_ax_snapshot\u3001run_javascript({engine:"page"})\u3001take_screenshot\uFF1B\u2462 \u82E5\u8BE5\u7AD9\u59CB\u7EC8\u8BFB\u4E0D\u5230\uFF0C\u76F4\u63A5\u5982\u5B9E\u8BF4\u660E"\u8FD9\u4E2A\u9875\u9762\u8BFB\u4E0D\u4E86"\uFF0C\u4E0D\u8981\u53CD\u590D\u91CD\u8BD5\u540C\u4E00\u6761\u8DEF\u3002';
-}
 function screenshotAttempts(format, quality) {
   const q = Math.min(100, Math.max(20, Math.round(Number(quality) || 72)));
   if (format === "png") {
@@ -241,20 +226,45 @@ function formatScreenshotSummary(meta, visionEnabled) {
   const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
   return parts.join("\xB7") + "\n" + (enabled ? VISION_ENABLED_SUMMARY_COPY : "\u56FE\u7247\u53EA\u5C55\u793A\u7ED9\u7528\u6237\u3001\u4E0D\u8FDB\u5165\u4F60\u7684\u4E0A\u4E0B\u6587\uFF1A" + visionLimitationNote(visionEnabled, "**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**") + "\uFF0C\u4E0D\u8981\u636E\u5B83\u63CF\u8FF0\u9875\u9762\u5916\u89C2\u3002") + "\u82E5\u9700\u8981\u53EF\u5224\u65AD\u7684\u6587\u672C\u8BC1\u636E\uFF0C\u8BF7\u7528 get_page_snapshot / read_diagnostics / inspect_element\u3002\n**\u622A\u56FE\u4E0D\u80FD\u4F5C\u4E3A complete_task \u7684 evidence**\uFF1A\u5B8C\u6210\u524D\u6821\u9A8C\u53EA\u8BFB\u6587\u672C\u8BC1\u636E\u3002\u622A\u56FE\u662F\u7ED9\u7528\u6237\u7559\u6863\u7684\uFF0C\u4E0D\u8981\u4E3A\u4E86\u300C\u53D6\u8BC1\u300D\u53CD\u590D\u622A\u56FE\u3002";
 }
+
+// lib/shared/format/picked.ts
+function formatElementLocator(locator, selector, tag) {
+  const l = locator || {};
+  if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
+  if (l.name) return 'name="' + l.name + '"';
+  if (l.testid) return "testid=" + l.testid;
+  return String(selector || tag || "");
+}
+
+// lib/shared/format/page-results.ts
+var DEFAULT_STYLE_PROPS = Object.freeze([
+  "font-size",
+  "line-height",
+  "color",
+  "background-color",
+  "width",
+  "height",
+  "display",
+  "visibility",
+  "opacity",
+  "overflow-x",
+  "position",
+  "z-index"
+]);
 function formatCurrentPageResult(input) {
   const o = input || {};
   const len = Math.max(0, Math.floor(Number(o.textLength) || 0));
   const headLines = ["\u9875\u9762\u6807\u9898\uFF1A" + String(o.title || ""), "\u9875\u9762URL\uFF1A" + String(o.url || "")];
   if (len) headLines.push("\u6B63\u6587\u7EA6 " + len + " \u5B57");
-  const head = headLines.join("\n") + "\n\n";
+  const head2 = headLines.join("\n") + "\n\n";
   const vis = String(o.visReport || "");
   const texts = (Array.isArray(o.checkTexts) ? o.checkTexts : []).filter((t) => String(t == null ? "" : t).trim());
   if (texts.length && vis) {
-    return head + "\u8FD9\u662F\u300C\u6587\u6848\u53EF\u89C1\u6027\u6838\u67E5\u300D\u7684\u7ED3\u679C\uFF0C**\u4E0D\u542B\u9875\u9762\u6B63\u6587**\u3002\u5982\u9700\u6B63\u6587\uFF0C\u8BF7\u518D\u6B21\u8C03\u7528 read_current_page \u4E14\u4E0D\u8981\u4F20 checkTexts\u3002\n\n" + vis;
+    return head2 + "\u8FD9\u662F\u300C\u6587\u6848\u53EF\u89C1\u6027\u6838\u67E5\u300D\u7684\u7ED3\u679C\uFF0C**\u4E0D\u542B\u9875\u9762\u6B63\u6587**\u3002\u5982\u9700\u6B63\u6587\uFF0C\u8BF7\u518D\u6B21\u8C03\u7528 read_current_page \u4E14\u4E0D\u8981\u4F20 checkTexts\u3002\n\n" + vis;
   }
   const chunks = Array.isArray(o.chunks) ? o.chunks : [];
   const text = String(o.text || "");
-  let out = head + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text);
+  let out = head2 + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text);
   if (vis) out += "\n\n" + vis;
   if (o.visibleOnly === true) {
     out += "\n\n\uFF08\u672C\u6B21\u4EC5\u8FD4\u56DE\u6309\u53EF\u89C1\u6027\u8FC7\u6EE4\u540E\u7684\u6587\u672C\uFF1B\u5982\u9700\u5305\u542B\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u53BB\u6389 visibleOnly\u3002\uFF09";
@@ -790,7 +800,7 @@ function buildAiMessages(action, payload, settings, book, normalizeHistory2) {
   return null;
 }
 
-// lib/assistant/llm.ts
+// lib/application/agent/llm.ts
 async function callDeepSeekOnce(settings, messages, signal) {
   if (signal && signal.aborted) throw makeAbortError();
   const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
@@ -1354,7 +1364,7 @@ async function userscriptXhr(details) {
   }
 }
 
-// lib/assistant/skill-defs.ts
+// lib/application/agent/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
@@ -2109,7 +2119,7 @@ var SKILL_REGISTRY = Object.freeze([
   }
 ]);
 
-// lib/assistant/skill-md.ts
+// lib/application/agent/skill-md.ts
 function compileKeywords(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -2201,7 +2211,7 @@ function toRuntimeSkill(skill, builtin = false) {
   };
 }
 
-// lib/assistant/skill-store.ts
+// lib/application/agent/skill-store.ts
 var STORAGE_KEY2 = "recallflow.skills";
 function compileAll(list, builtin) {
   return list.map((s) => toRuntimeSkill(s, builtin));
@@ -2668,7 +2678,7 @@ function siteKeyOf(url) {
   }
 }
 
-// lib/assistant/site-memory.ts
+// lib/application/agent/site-memory.ts
 var KEY = "recallflow.siteMemory.v1";
 var MAX_PER_ORIGIN = 60;
 var MAX_ORIGINS = 50;
@@ -2733,7 +2743,7 @@ async function getSiteHints(url, limit = 12) {
   ).slice(0, limit);
 }
 
-// lib/assistant/macro-store.ts
+// lib/application/agent/macro-store.ts
 var KEY2 = "recallflow.macros.v1";
 var MAX_PER_ORIGIN2 = 20;
 var MAX_ORIGINS2 = 50;
@@ -2869,7 +2879,7 @@ async function recallTrace(url, opts = {}) {
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
 
-// lib/assistant/target-manager.ts
+// lib/application/agent/target-manager.ts
 var state = /* @__PURE__ */ new Map();
 var listening = false;
 function bucket(tabId) {
@@ -2912,7 +2922,7 @@ async function handleDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/trace.ts
+// lib/application/agent/trace.ts
 var TRACE_PREFIX = "recallflow.runTrace.v1.";
 var TRACE_INDEX_KEY = "recallflow.runTraceIndex.v1";
 var LEGACY_KEY = "recallflow.runTraces.v1";
@@ -3060,7 +3070,7 @@ async function listTraces() {
   return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
-// lib/assistant/tool-schemas.ts
+// lib/application/agent/tool-schemas.ts
 var HIGHLIGHT_MAX_TEXTS = 20;
 var TOOL_SCHEMAS = [
   {
@@ -3875,7 +3885,7 @@ var TOOL_SCHEMAS = [
   }
 ];
 
-// lib/assistant/tool-metadata.ts
+// lib/application/agent/tool-metadata.ts
 var TOOL_METADATA = {
   // C-4 合并第 4 档：只读三件套（search/list/get）→ knowledge_read({ op })。
   // 三者权限完全一致（read/readOnly/parallelSafe），因此合并**不改变任何权限语义**。
@@ -4015,7 +4025,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   }
 }
 
-// lib/assistant/net-parse.ts
+// lib/application/agent/net-parse.ts
 function stripHtmlTags(html) {
   return String(html || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&ensp;/g, " ").replace(/&emsp;/g, " ").replace(/&middot;/g, "\xB7").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&#(\d+);/g, (_, n) => {
     try {
@@ -4170,7 +4180,7 @@ async function searchWeb(query, maxResults = 6) {
   return [];
 }
 
-// lib/assistant/page-action-verify.ts
+// lib/application/agent/page-action-verify.ts
 function buildActionVerification(observed, reason) {
   const text = String(reason || "");
   if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
@@ -4219,7 +4229,7 @@ function verifyPageAction(command2, before, after, response) {
   };
 }
 
-// lib/assistant/target-frame.ts
+// lib/application/agent/target-frame.ts
 function parseRef(ref) {
   const m = String(ref || "").match(/^f(\d+):(.*)$/);
   if (m) return { frameId: Number(m[1]), ref: m[2] };
@@ -4250,7 +4260,7 @@ function planFrameBatches(targets) {
   return Array.from(groups.entries()).map(([frameId, items]) => ({ frameId, items }));
 }
 
-// lib/assistant/tool-results.ts
+// lib/application/agent/tool-results.ts
 function summarizeCdpError(e) {
   const msg = e && e.message ? e.message : String(e);
   return msg.replace(/^[A-Za-z.]+：/, "");
@@ -4270,7 +4280,7 @@ function compactSnapshotSummary(snapshot) {
   return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
 }
 
-// lib/assistant/diagnostics.ts
+// lib/application/agent/diagnostics.ts
 async function readConsole(sendTabMessage2, tabId, args) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   try {
@@ -4299,9 +4309,9 @@ async function readNetwork(sendTabMessage2, tabId, args) {
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0\u7F51\u7EDC\u8BF7\u6C42\u8BB0\u5F55\u3002" };
     const text = entries.map((e) => {
-      const head = (e.method || "GET") + " " + (e.error ? "ERR" : e.status || "") + " " + e.url + (e.ms != null ? " (" + e.ms + "ms)" : "") + (e.error ? " \u2014 " + e.error : "");
+      const head2 = (e.method || "GET") + " " + (e.error ? "ERR" : e.status || "") + " " + e.url + (e.ms != null ? " (" + e.ms + "ms)" : "") + (e.error ? " \u2014 " + e.error : "");
       const init = e.initiator ? e.initiator.split("\n").slice(0, 2).join(" ") : "";
-      return head + (init ? "\n  \u53D1\u8D77\u4E8E: " + init : "");
+      return head2 + (init ? "\n  \u53D1\u8D77\u4E8E: " + init : "");
     }).join("\n");
     return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text };
   } catch (e) {
@@ -4328,7 +4338,7 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/macros.ts
+// lib/application/agent/macros.ts
 var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
   "click_element",
   "type_text",
@@ -4445,7 +4455,7 @@ async function macroTool(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/knowledge.ts
+// lib/application/agent/knowledge.ts
 var KNOWLEDGE_READ_OPS = ["search", "list", "get"];
 function knowledgeRead(deps, args) {
   const op = String(args && args.op || "").trim();
@@ -4496,7 +4506,7 @@ function knowledgeGet(deps, args) {
   };
 }
 
-// lib/assistant/tab-tools.ts
+// lib/application/agent/tab-tools.ts
 var DEFAULT_MAX_TAB_SWITCHES = 6;
 function tabSwitchBudget(ctx) {
   const used = Math.max(0, Number(ctx && ctx.tabSwitchCount) || 0);
@@ -4674,7 +4684,7 @@ async function handleTabTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/run-metrics.ts
+// lib/application/agent/run-metrics.ts
 var num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 function summarizeRunTrace(entries) {
   const list = Array.isArray(entries) ? entries : [];
@@ -4718,7 +4728,7 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
-// lib/assistant/run-state-tools.ts
+// lib/application/agent/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
   const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
@@ -4770,7 +4780,7 @@ async function handleRunStateTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/permission-tools.ts
+// lib/application/agent/permission-tools.ts
 async function trustSite(deps) {
   const ctx = deps.ctx;
   const origin = siteKeyOf(ctx.pageUrl);
@@ -4911,7 +4921,7 @@ function removeSessionScreenshots(chromeApi, sessionId) {
   });
 }
 
-// lib/assistant/screenshot-tool.ts
+// lib/application/agent/screenshot-tool.ts
 var MAX_SHOT_B64 = 4e5;
 var DEFAULT_SCREENSHOT_BUDGET_MS = 12e3;
 async function captureWithLadder(deps) {
@@ -5029,7 +5039,7 @@ function editableTextSummary(expected, actual) {
   };
 }
 
-// lib/assistant/page-input-tools.ts
+// lib/application/agent/page-input-tools.ts
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
   const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + '); if (!el) return null; if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || ""); return typeof el.value === "string" ? el.value : null; })()';
@@ -5149,7 +5159,7 @@ async function handlePageInputTool(name, args, deps) {
   return await thinPageCommand(deps, name, args);
 }
 
-// lib/assistant/auth-challenge.ts
+// lib/application/agent/auth-challenge.ts
 var AUTH_PATH_RE = /(?:^|\/)(?:login|log-in|signin|sign-in|sign_in|passport|sso|auth)(?:\/|$)/i;
 var MCP_PATH_RE = /(?:^|\/)mcp(?:\/|$)/i;
 var MCP_HINT_RE = /(mcp[-_ ]?session|mcp\s*(?:server|服务器|端点)|jsonrpc|streamable\s*http)/i;
@@ -5327,7 +5337,7 @@ function authChallengeNotice(challenge) {
   return "\n\n\u26A0 " + challenge.message + "\n\u8BF7\u5148\u628A\u4E0A\u9762\u7684\u767B\u5F55 / \u6388\u6743\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u5E76\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u3002\u5728\u7528\u6237\u660E\u786E\u8868\u793A\u5DF2\u767B\u5F55\u524D\uFF0C\u4E0D\u8981\u53CD\u590D\u70B9\u51FB\u3001\u731C\u6D4B\u5176\u5B83\u5730\u5740\uFF0C\u4E5F\u4E0D\u8981\u5728\u6807\u7B7E\u9875\u4E4B\u95F4\u6765\u56DE\u5207\u6362\u3002";
 }
 
-// lib/assistant/fetch-tools.ts
+// lib/application/agent/fetch-tools.ts
 async function fetchWebpage(deps, args) {
   const ctx = deps.ctx;
   ctx.failedUrls = Array.isArray(ctx.failedUrls) ? ctx.failedUrls : [];
@@ -5441,7 +5451,7 @@ async function handleFetchTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/cdp-input-tools.ts
+// lib/application/agent/cdp-input-tools.ts
 async function clickElement(deps, args) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, "click", args, ctx);
@@ -5572,7 +5582,7 @@ async function handleCdpInputTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-read-tools.ts
+// lib/application/agent/page-read-tools.ts
 async function listFramesRaw(deps, tabId) {
   try {
     const results = await deps.chrome.scripting.executeScript({
@@ -5826,7 +5836,7 @@ async function handlePageReadTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/userscript-tools.ts
+// lib/application/agent/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
   const text = scripts.length ? scripts.map(
@@ -5869,7 +5879,7 @@ async function handleUserscriptTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/skill-tools.ts
+// lib/application/agent/skill-tools.ts
 var COMMON_OPERATING_DISCIPLINE = [
   "## \u901A\u7528\u64CD\u4F5C\u7EAA\u5F8B\uFF08\u6240\u6709\u6280\u80FD\u5171\u7528\uFF0C\u52A1\u5FC5\u9075\u5B88\uFF09",
   "",
@@ -5986,7 +5996,7 @@ async function handleSkillTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/code-access-tools.ts
+// lib/application/agent/code-access-tools.ts
 var pageWorldPreferred = /* @__PURE__ */ new Set();
 function tabKey(ctx) {
   return ctx && ctx.tabId != null ? String(ctx.tabId) : "";
@@ -6144,7 +6154,7 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-command-tools.ts
+// lib/application/agent/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
   outline: "outline",
@@ -6224,7 +6234,7 @@ async function handlePageCommandTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/knowledge-store-tools.ts
+// lib/application/agent/knowledge-store-tools.ts
 async function knowledgeReadTool(deps, args) {
   return deps.knowledgeRead(
     { book: deps.ctx.book, buildRagContext: deps.buildRagContext, buildCitations: deps.buildCitations, typeInfo: deps.typeInfo, starLevels: deps.STAR_LEVELS },
@@ -6260,7 +6270,7 @@ async function handleKnowledgeStoreTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/tools.ts
+// lib/application/agent/tools.ts
 var TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
     const name = tool.function.name;
@@ -6992,7 +7002,7 @@ function stripHtml(html) {
   return s.trim();
 }
 
-// lib/assistant/mcp.ts
+// lib/application/agent/mcp.ts
 var MCP_PROTOCOL_VERSION = "2024-11-05";
 var MCP_TTL = 5 * 60 * 1e3;
 var _mcpCache = /* @__PURE__ */ new Map();
@@ -7256,7 +7266,7 @@ async function executeAnyTool(name, args, ctx) {
   return executeTool(name, args, ctx);
 }
 
-// lib/assistant/agent-state.ts
+// lib/application/agent/agent-state.ts
 var RUN_STATUS = Object.freeze({
   CREATED: "created",
   PLANNING: "planning",
@@ -7299,7 +7309,7 @@ function createRun(runId, budget) {
 }
 var TOOL_STATUS = Object.freeze({ PENDING: "pending", APPROVAL_REQUIRED: "approval_required", APPROVED: "approved", REJECTED: "rejected", RUNNING: "running", SUCCEEDED: "succeeded", FAILED: "failed", TIMEOUT: "timeout" });
 
-// lib/assistant/session-store.ts
+// lib/application/agent/session-store.ts
 var SESSION_PREFIX = "recallflow.agentSession.v1.";
 var INDEX_KEY = "recallflow.agentSessionIndex.v1";
 var LEGACY_KEY2 = "recallflow.agentSessions.v1";
@@ -7471,7 +7481,7 @@ async function removeAgentSession(id) {
   }
 }
 
-// lib/assistant/tool-guard.ts
+// lib/application/agent/tool-guard.ts
 function canonicalize(value) {
   if (value === null || value === void 0) return String(value);
   if (typeof value !== "object") return JSON.stringify(value);
@@ -7594,7 +7604,7 @@ function createToolGuard(budget = {}) {
   };
 }
 
-// lib/assistant/skills.ts
+// lib/application/agent/skills.ts
 function buildSkillCatalog(skills = []) {
   const list = Array.isArray(skills) ? skills : [];
   if (!list.length) return "";
@@ -7610,7 +7620,7 @@ function buildSkillCatalog(skills = []) {
   ].join("\n");
 }
 
-// lib/assistant/intent-router.ts
+// lib/application/agent/intent-router.ts
 var INTENTS = Object.freeze({
   BROWSER: "browser_task",
   KNOWLEDGE: "knowledge_task",
@@ -8014,7 +8024,7 @@ function buildSystemPrompt(intent, instruction = "", toolNames = [], skills = []
   return [lines.join("\n"), skillCatalog].filter(Boolean).join("\n\n");
 }
 
-// lib/assistant/context.ts
+// lib/application/agent/context.ts
 var CJK_RE2 = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
 function estimateTokens(text) {
   const s = String(text || "");
@@ -8139,8 +8149,8 @@ function buildCollapsed(content, headLen = 300, tailLen = 150) {
   const resultId = noticeMatch ? noticeMatch[1] : (text.match(ID_ONLY_RE) || [])[1] || "";
   const body = noticeMatch ? text.slice(0, noticeMatch.index) : text;
   if (body.length <= headLen + tailLen + 40) return text;
-  const head = sliceSafe(body, 0, headLen);
-  const tail = sliceSafe(body, -tailLen);
+  const head2 = sliceSafe(body, 0, headLen);
+  const tail2 = sliceSafe(body, -tailLen);
   const notice = "\n" + COLLAPSE_MARK + "\u5171 " + body.length + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4FDD\u7559\u5F00\u5934\u4E0E\u7ED3\u5C3E" + (resultId ? "\uFF1B**\u5168\u6587\u672A\u4E22\u5931**\uFF0Cid=" + resultId + '\uFF0C\u53EF\u7528 expand_result(id="' + resultId + '") \u5206\u6BB5\u53D6\u56DE' : (
     // ⚠ 没有 id 就**取不回中段**：只有被 agent 截断的大结果才会进 resultStore，
     // 快照 / 页面读取这类结果不进 ⇒ expand_result 找不到它。
@@ -8149,7 +8159,7 @@ function buildCollapsed(content, headLen = 300, tailLen = 150) {
     // 折叠后就再也看不到，而模型并不知道自己被折叠了）✗
     "\uFF1B**\u4E2D\u6BB5\u5185\u5BB9\u5DF2\u7701\u7565\u4E14\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u5FEB\u7167/\u9875\u9762\u8BFB\u53D6\u7C7B\u7ED3\u679C\u4E0D\u8FDB\u6682\u5B58\uFF09\uFF0C\u9700\u8981\u65F6\u8BF7**\u91CD\u65B0\u8C03\u7528**\u4EA7\u751F\u5B83\u7684\u5DE5\u5177\uFF08\u53EF\u5148\u7528\u53C2\u6570\u7F29\u5C0F\u8303\u56F4\uFF0C\u5982 maxElements / maxText / \u6EDA\u52A8\u5230\u76EE\u6807\u518D\u8BFB\uFF09"
   )) + "\n";
-  return head + notice + tail;
+  return head2 + notice + tail2;
 }
 function collapseOldToolResults(messages, keepFull = 6, maxLen = 300, tailLen = 150) {
   const idx = [];
@@ -8170,7 +8180,7 @@ function collapseOldToolResults(messages, keepFull = 6, maxLen = 300, tailLen = 
   return collapsed;
 }
 
-// lib/assistant/prefix-watch.ts
+// lib/application/agent/prefix-watch.ts
 function fingerprintMessage(m) {
   if (!m || typeof m !== "object") return "";
   return canonicalize(m);
@@ -8222,7 +8232,7 @@ function formatPrefixReport(diff) {
   return "prefix changed at " + diff.reason + "\uFF1A" + diff.detail + "\uFF08" + diff.prevLength + " \u2192 " + diff.nextLength + " \u6761\uFF09";
 }
 
-// lib/assistant/context-tuning.ts
+// lib/application/agent/context-tuning.ts
 var CONTEXT_TUNING = Object.freeze({
   // ---- 历史折叠 ----
   // 按 **token 估算**而不是字符数：中英文密度差约 4 倍，同样 6 万字符，
@@ -8242,7 +8252,7 @@ var CONTEXT_TUNING = Object.freeze({
   sessionMaxTailMessages: 39
 });
 
-// lib/assistant/conversation-guard.ts
+// lib/application/agent/conversation-guard.ts
 var CONTENT_OK = (m) => typeof m.content === "string" || Array.isArray(m.content);
 function diagnoseConversation(messages) {
   const list = Array.isArray(messages) ? messages : [];
@@ -8360,7 +8370,7 @@ function repairConversation(messages) {
   return out;
 }
 
-// lib/assistant/verifier.ts
+// lib/application/agent/verifier.ts
 var VERIFIER_SYSTEM = `\u4F60\u662F RecallFlow \u7684\u4EFB\u52A1\u6821\u9A8C\u5668\u3002\u6839\u636E\u300C\u7528\u6237\u76EE\u6807\u300D\u300CAgent \u58F0\u79F0\u7684\u7ED3\u679C\u300D\u300C\u672C\u6B21\u4EFB\u52A1\u6027\u8D28\u300D\u548C\u300C\u9875\u9762/\u73AF\u5883\u8BC1\u636E\u300D\uFF0C\u5224\u65AD\u76EE\u6807\u662F\u5426\u771F\u7684\u8FBE\u6210\u3002
 \u53EA\u8F93\u51FA\u4E25\u683C JSON\uFF1A
 {"ok": true|false, "confidence": 0~1\u7684\u5C0F\u6570, "reason": "\u4E00\u53E5\u8BDD\u7ED3\u8BBA", "missing": "\u672A\u8FBE\u6210\u65F6\u8FD8\u5DEE\u4EC0\u4E48", "suggestion": "\u672A\u8FBE\u6210\u65F6\u4E0B\u4E00\u6B65\u7684\u5177\u4F53\u5EFA\u8BAE"}
@@ -8453,11 +8463,11 @@ function buildVerificationReflection(verdict) {
   return parts.join("\n");
 }
 function buildStuckReflection(message, opts = {}) {
-  const head = "\uFF08\u53CD\u601D\uFF09" + (message || "\u8FDE\u7EED\u52A8\u4F5C\u6CA1\u6709\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55");
+  const head2 = "\uFF08\u53CD\u601D\uFF09" + (message || "\u8FDE\u7EED\u52A8\u4F5C\u6CA1\u6709\u4EA7\u751F\u53EF\u89C2\u5BDF\u8FDB\u5C55");
   const attempt = Number(opts && opts.attempt) > 0 ? Number(opts.attempt) : 1;
   const advice = adviceFor(opts && opts.reason, attempt);
   const exit = attempt >= 3 ? "\n\u8FD9\u5DF2\u7ECF\u662F\u7B2C " + attempt + ' \u6B21\u63D0\u9192\u4E86\uFF1A\u5982\u679C\u786E\u8BA4\u8FD9\u4E2A\u52A8\u4F5C\u672C\u8EAB\u662F\u5BF9\u7684\uFF08\u4F8B\u5982\u53EA\u662F\u5728\u7B49\u9875\u9762\u6E32\u67D3\uFF09\uFF0C\u5C31\u76F4\u63A5\u6309\u5F53\u524D\u5DF2\u77E5\u60C5\u51B5\u4F5C\u7B54\u5E76\u8BF4\u660E\u5361\u70B9\uFF1B\u4E0D\u8981\u4E3A\u4E86"\u518D\u8BD5\u4E00\u6B21"\u7EE7\u7EED\u6D88\u8017\u3002' : "";
-  return head + "\n" + advice + exit;
+  return head2 + "\n" + advice + exit;
 }
 function adviceFor(reason, attempt) {
   if (reason === "maxSameToolCalls") {
@@ -8472,7 +8482,7 @@ function adviceFor(reason, attempt) {
   return "\u8BF7\u5206\u6790\u5361\u70B9\u5E76\u6362\u4E00\u79CD\u65B9\u5F0F\uFF1A\u66F4\u6362\u5B9A\u4F4D\u65B9\u5F0F\uFF08role+name / testid / text\uFF09\u3001\u6362\u7528\u5176\u5B83\u5DE5\u5177\u3001\u6539\u7528 CDP\uFF08get_ax_snapshot + click_at\uFF09\u3001\u6216\u5148\u7B49\u5F85/\u5173\u95ED\u906E\u6321\uFF1B\u4E0D\u8981\u91CD\u590D\u540C\u6837\u7684\u52A8\u4F5C\u3002" + (attempt >= 2 ? "" : "");
 }
 
-// lib/assistant/claim-check.ts
+// lib/application/agent/claim-check.ts
 var MUTATION_VERBS = [
   "\u9690\u85CF",
   "\u6E05\u9664",
@@ -8573,7 +8583,7 @@ function buildDeterministicReflection(result) {
   return parts.join("\n");
 }
 
-// lib/assistant/initial-messages.ts
+// lib/application/agent/initial-messages.ts
 var UNTRUSTED_BEGIN = "<<<RECALLFLOW_UNTRUSTED_DATA>>>";
 var UNTRUSTED_END = "<<<END_RECALLFLOW_UNTRUSTED_DATA>>>";
 function sanitizeUntrusted(text) {
@@ -8662,7 +8672,113 @@ function createAgentRunContext(input) {
   };
 }
 
-// lib/assistant/vision.ts
+// lib/application/agent/history-policy.ts
+var SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
+var SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;
+function sanitizeToolPairing(list) {
+  const source = Array.isArray(list) ? list : [];
+  const isCallAssistant = (m) => m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+  let out = source;
+  let resultIds = new Set(out.filter((m) => m && m.role === "tool" && m.tool_call_id).map((m) => m.tool_call_id));
+  out = out.filter((m) => !isCallAssistant(m) || m.tool_calls.every((tc) => tc && resultIds.has(tc.id)));
+  const providerIds = /* @__PURE__ */ new Set();
+  for (const m of out) if (isCallAssistant(m)) {
+    for (const tc of m.tool_calls) if (tc && tc.id) providerIds.add(tc.id);
+  }
+  out = out.filter((m) => !(m && m.role === "tool" && !providerIds.has(m.tool_call_id)));
+  return out;
+}
+function compactSessionMessages(messages) {
+  const source = Array.isArray(messages) ? messages : [];
+  const system = source.find((message) => message && message.role === "system");
+  const rest = source.filter((message) => message !== system);
+  const tail2 = sanitizeToolPairing(rest.slice(-SESSION_MAX_TAIL_MESSAGES));
+  const notices = [];
+  const droppedMessages = rest.length - Math.min(rest.length, SESSION_MAX_TAIL_MESSAGES);
+  if (droppedMessages > 0) {
+    notices.push({
+      role: "user",
+      content: "\u27E8\u2026\u66F4\u65E9\u7684 " + droppedMessages + " \u6761\u6D88\u606F\u672A\u968F\u5FEB\u7167\u4FDD\u5B58\uFF08\u843D\u76D8\u4E0A\u9650 " + SESSION_MAX_TAIL_MESSAGES + " \u6761\uFF09\uFF1B**\u8FD9\u4E9B\u6D88\u606F\u53D6\u4E0D\u56DE\u539F\u6587**\uFF0C\u9700\u8981\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\u4E0A\u4E0B\u6587\u3002\u27E9"
+    });
+  }
+  const compacted = tail2.map((message) => {
+    const copy = { role: message.role };
+    if (typeof message.content === "string") {
+      copy.content = message.content.length > SESSION_MESSAGE_MAX_CHARS ? formatTailKeptTruncationNotice(message.content.length, SESSION_MESSAGE_MAX_CHARS) + message.content.slice(-SESSION_MESSAGE_MAX_CHARS) : message.content;
+    } else if (message.content !== void 0) copy.content = message.content;
+    if (Array.isArray(message.tool_calls)) copy.tool_calls = message.tool_calls.slice(-8);
+    if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
+    return copy;
+  });
+  return system ? [system, ...notices, ...compacted] : [...notices, ...compacted];
+}
+
+// lib/application/agent/session-persistence.ts
+function tail(value, limit, copy = false) {
+  const list = Array.isArray(value) ? value : [];
+  return (copy ? list.slice() : list).slice(-limit);
+}
+function head(value, limit) {
+  return (Array.isArray(value) ? value : []).slice(0, limit);
+}
+var RunSessionPersistence = class {
+  readState;
+  write;
+  constructor(readState, write) {
+    this.readState = readState;
+    this.write = write;
+  }
+  save(extra = {}) {
+    const state2 = this.readState();
+    const ctx = state2.ctx || {};
+    return this.write({
+      id: state2.runId,
+      status: state2.run.status,
+      run: { ...state2.run },
+      budget: state2.budget,
+      startedAt: state2.startedAt,
+      eventSeq: state2.eventSeq,
+      toolCallCount: state2.toolCallCount,
+      guard: state2.guard,
+      promotedToResearch: state2.promotedToResearch,
+      runCitations: tail(state2.runCitations, 60),
+      failedUrls: tail(ctx.failedUrls, 80),
+      browsingMode: ctx.browsingMode,
+      agentWindowId: Number.isInteger(Number(ctx.agentWindowId)) ? Number(ctx.agentWindowId) : null,
+      sessionApprovedTools: Array.from(state2.sessionApprovedTools || []),
+      messages: compactSessionMessages(state2.messages),
+      instruction: state2.instruction,
+      selectedText: state2.selectedText,
+      pickedElements: state2.pickedElements,
+      intent: state2.intent,
+      intentKeyword: state2.intentKeyword,
+      skills: state2.skills,
+      page: ctx.page,
+      pageUrl: ctx.pageUrl,
+      pageTitle: ctx.pageTitle,
+      tabId: ctx.tabId,
+      originalTabId: ctx.originalTabId,
+      openedTabs: tail(ctx.openedTabs, Number.MAX_SAFE_INTEGER, true),
+      openedTabCount: Number(ctx.openedTabCount || 0),
+      tabSwitchCount: Number(ctx.tabSwitchCount || 0),
+      disabledTools: Array.from(state2.disabledTools || []),
+      trace: tail(ctx.trace, 40),
+      plan: head(ctx.plan, 20),
+      totalTokens: state2.totalTokens,
+      verificationCount: state2.verificationCount,
+      lastDeniedSignature: state2.lastDeniedSignature,
+      ranToolNames: tail(state2.ranToolNames, 60),
+      failedToolNames: tail(state2.failedToolNames, 60),
+      succeededToolNames: tail(state2.succeededToolNames, 60),
+      deterministicFails: state2.deterministicFails,
+      lastProgressIter: state2.lastProgressIter,
+      resultIds: tail(Array.from(ctx.resultIds || []), 80),
+      ...extra
+    });
+  }
+};
+
+// lib/application/agent/vision.ts
 var MAX_IMAGES_PER_TASK = 3;
 function shouldSendImage(sentCount, cap = MAX_IMAGES_PER_TASK) {
   return (Number(sentCount) || 0) < (Number(cap) || 0);
@@ -8954,7 +9070,7 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
   return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc };
 }
 
-// lib/assistant/approval-policy.ts
+// lib/application/agent/approval-policy.ts
 var APPROVAL_CATEGORY_BY_RISK = Object.freeze({
   read: "read",
   page: "commands",
@@ -8987,7 +9103,7 @@ function toolNeedsApproval(name, settings = {}, pageUrl = "") {
   return p[category] !== true;
 }
 
-// lib/assistant/parallel-tools.ts
+// lib/application/agent/parallel-tools.ts
 var DEFAULT_MAX_BATCH = 4;
 function planParallelGroups(toolCalls, opts = {}) {
   const isParallelSafe = typeof opts.isParallelSafe === "function" ? opts.isParallelSafe : () => false;
@@ -9161,48 +9277,7 @@ function promoteToResearch(tools, messages, instruction, allSkills, promptExtras
   return content;
 }
 
-// lib/application/agent/history-policy.ts
-var SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
-var SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;
-function sanitizeToolPairing(list) {
-  const source = Array.isArray(list) ? list : [];
-  const isCallAssistant = (m) => m && m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
-  let out = source;
-  let resultIds = new Set(out.filter((m) => m && m.role === "tool" && m.tool_call_id).map((m) => m.tool_call_id));
-  out = out.filter((m) => !isCallAssistant(m) || m.tool_calls.every((tc) => tc && resultIds.has(tc.id)));
-  const providerIds = /* @__PURE__ */ new Set();
-  for (const m of out) if (isCallAssistant(m)) {
-    for (const tc of m.tool_calls) if (tc && tc.id) providerIds.add(tc.id);
-  }
-  out = out.filter((m) => !(m && m.role === "tool" && !providerIds.has(m.tool_call_id)));
-  return out;
-}
-function compactSessionMessages(messages) {
-  const source = Array.isArray(messages) ? messages : [];
-  const system = source.find((message) => message && message.role === "system");
-  const rest = source.filter((message) => message !== system);
-  const tail = sanitizeToolPairing(rest.slice(-SESSION_MAX_TAIL_MESSAGES));
-  const notices = [];
-  const droppedMessages = rest.length - Math.min(rest.length, SESSION_MAX_TAIL_MESSAGES);
-  if (droppedMessages > 0) {
-    notices.push({
-      role: "user",
-      content: "\u27E8\u2026\u66F4\u65E9\u7684 " + droppedMessages + " \u6761\u6D88\u606F\u672A\u968F\u5FEB\u7167\u4FDD\u5B58\uFF08\u843D\u76D8\u4E0A\u9650 " + SESSION_MAX_TAIL_MESSAGES + " \u6761\uFF09\uFF1B**\u8FD9\u4E9B\u6D88\u606F\u53D6\u4E0D\u56DE\u539F\u6587**\uFF0C\u9700\u8981\u65F6\u8BF7\u8BA9\u7528\u6237\u91CD\u65B0\u8BF4\u660E\u4E0A\u4E0B\u6587\u3002\u27E9"
-    });
-  }
-  const compacted = tail.map((message) => {
-    const copy = { role: message.role };
-    if (typeof message.content === "string") {
-      copy.content = message.content.length > SESSION_MESSAGE_MAX_CHARS ? formatTailKeptTruncationNotice(message.content.length, SESSION_MESSAGE_MAX_CHARS) + message.content.slice(-SESSION_MESSAGE_MAX_CHARS) : message.content;
-    } else if (message.content !== void 0) copy.content = message.content;
-    if (Array.isArray(message.tool_calls)) copy.tool_calls = message.tool_calls.slice(-8);
-    if (message.tool_call_id) copy.tool_call_id = message.tool_call_id;
-    return copy;
-  });
-  return system ? [system, ...notices, ...compacted] : [...notices, ...compacted];
-}
-
-// lib/assistant/evidence.ts
+// lib/application/agent/evidence.ts
 var EVIDENCE_BUDGET = 3600;
 var SNIPPET_PAD = 130;
 var HEAD_CHARS = 420;
@@ -9294,9 +9369,9 @@ function selectEvidence(input = {}) {
       at = fullText.indexOf(tok, at + tok.length);
     }
   }
-  const head = { start: 0, end: Math.min(fullText.length, HEAD_CHARS) };
-  const tail = { start: Math.max(0, fullText.length - TAIL_CHARS), end: fullText.length };
-  const merged = mergeRanges([head, ...ranges, tail]);
+  const head2 = { start: 0, end: Math.min(fullText.length, HEAD_CHARS) };
+  const tail2 = { start: Math.max(0, fullText.length - TAIL_CHARS), end: fullText.length };
+  const merged = mergeRanges([head2, ...ranges, tail2]);
   const headRange = merged[0];
   const hasTail = merged.length > 1;
   const tailRange = hasTail ? merged[merged.length - 1] : null;
@@ -9431,7 +9506,7 @@ function classifyVerifyOutcome(verdict, error) {
   return { kind: "verdict", verdict };
 }
 
-// lib/assistant/agent.ts
+// lib/application/agent/agent.ts
 var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage",
   "web_search",
@@ -9461,8 +9536,8 @@ function buildInitialMessages(instruction, selectedText, page, pageUrl, history,
     const src = p.source || {};
     const loc = src.file ? src.file + (src.line ? ":" + src.line + (src.column ? ":" + src.column : "") : "") + (src.framework ? "\uFF08" + src.framework + (src.component ? " \xB7 " + src.component : "") + "\uFF09" : "") : "";
     const l = p.locator || {};
-    const head = picks.length > 1 ? "\u9009\u53D6\u7684\u5143\u7D20 " + (i + 1) + "\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A" : "\u7528\u6237\u5728\u9875\u9762\u4E0A\u9009\u53D6\u7684\u5143\u7D20\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A";
-    const lines = [head];
+    const head2 = picks.length > 1 ? "\u9009\u53D6\u7684\u5143\u7D20 " + (i + 1) + "\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A" : "\u7528\u6237\u5728\u9875\u9762\u4E0A\u9009\u53D6\u7684\u5143\u7D20\uFF08\u8BF7\u9488\u5BF9\u5B83\u56DE\u7B54/\u64CD\u4F5C\uFF09\uFF1A";
+    const lines = [head2];
     if (l.role || l.name) lines.push("- \u8BED\u4E49\u5B9A\u4F4D\uFF1A" + formatElementLocator(l, void 0, void 0));
     if (l.testid) lines.push("- testid\uFF1A" + l.testid);
     if (p.selector) lines.push("- CSS \u9009\u62E9\u5668\uFF1A" + p.selector);
@@ -9814,51 +9889,40 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
   injectPlanMessage();
   const resumeIteration = canResume ? Math.max(0, Number.isFinite(Number(persisted.nextIteration)) ? Number(persisted.nextIteration) : Math.max(0, Number(run.currentStep || 1) - 1)) : 0;
   let prevPrefixSnapshot = null;
-  const persist = async (extra = {}) => {
-    await saveAgentSession({
-      id: runId,
-      status: run.status,
-      run: { ...run },
+  const runPersistence = new RunSessionPersistence(
+    () => ({
+      runId,
+      run,
       budget,
       startedAt,
       eventSeq,
       toolCallCount,
       guard: guard.snapshot(),
       promotedToResearch,
-      runCitations: runCitations.slice(-60),
-      failedUrls: Array.isArray(ctx.failedUrls) ? ctx.failedUrls.slice(-80) : [],
-      browsingMode: ctx.browsingMode,
-      agentWindowId: Number.isInteger(Number(ctx.agentWindowId)) ? Number(ctx.agentWindowId) : null,
-      sessionApprovedTools: Array.from(sessionApprovedTools),
-      messages: compactSessionMessages(messages),
+      runCitations,
+      ctx,
+      sessionApprovedTools,
+      messages,
       instruction,
       selectedText,
       pickedElements: payload && payload.pickedElements || (canResume ? persisted.pickedElements : null) || (payload && payload.pickedElement ? [payload.pickedElement] : []),
       intent,
       intentKeyword: detected.keyword,
       skills: loadedSkillNames,
-      page: ctx.page,
-      pageUrl: ctx.pageUrl,
-      pageTitle: ctx.pageTitle,
-      tabId: ctx.tabId,
-      originalTabId: ctx.originalTabId,
-      openedTabs: Array.isArray(ctx.openedTabs) ? ctx.openedTabs.slice() : [],
-      openedTabCount: Number(ctx.openedTabCount || 0),
-      tabSwitchCount: Number(ctx.tabSwitchCount || 0),
-      disabledTools: Array.from(disabledTools),
-      trace: Array.isArray(ctx.trace) ? ctx.trace.slice(-40) : [],
-      plan: Array.isArray(ctx.plan) ? ctx.plan.slice(0, 20) : [],
+      disabledTools,
       totalTokens,
       verificationCount,
       lastDeniedSignature,
-      ranToolNames: ranToolNames.slice(-60),
-      failedToolNames: failedToolNames.slice(-60),
-      succeededToolNames: succeededToolNames.slice(-60),
+      ranToolNames,
+      failedToolNames,
+      succeededToolNames,
       deterministicFails,
-      lastProgressIter,
-      resultIds: Array.from(ctx.resultIds || []).slice(-80),
-      ...extra
-    });
+      lastProgressIter
+    }),
+    (session) => saveAgentSession(session)
+  );
+  const persist = async (extra = {}) => {
+    await runPersistence.save(extra);
   };
   await persist({ status: RUN_STATUS.CREATED, phase: "created", nextIteration: resumeIteration }).catch(() => {
   });
@@ -10635,7 +10699,7 @@ var AutomationMessageRouter = class {
   }
 };
 
-// lib/assistant/run-channel.ts
+// lib/application/agent/run-channel.ts
 var RunChannel = class {
   constructor() {
     this.port = null;
@@ -11093,6 +11157,58 @@ function handleAiStreamConnection(port, deps) {
     }
   });
 }
+
+// lib/application/background/workspace-router.ts
+var WorkspaceMessageRouter = class {
+  ports;
+  constructor(ports) {
+    this.ports = ports;
+  }
+  matches(message) {
+    const type = String(message && message.type || "");
+    return type === "openOptions" || type === "openManager" || type.startsWith("conv:") || type.startsWith("handoff:");
+  }
+  async handle(message, source) {
+    const type = String(message.type || "");
+    if (type === "openOptions") {
+      await this.ports.openOptions();
+      return { ok: true };
+    }
+    if (type === "openManager") {
+      await this.ports.openManager(String(message.focusId || ""));
+      return { ok: true };
+    }
+    if (type === "conv:save") {
+      if (source.tabId != null && Array.isArray(message.conversation)) {
+        await this.ports.sessionStorage.set({
+          ["recallflow.conv." + source.tabId]: {
+            conversation: message.conversation,
+            updatedAt: Date.now()
+          }
+        });
+      }
+      return { ok: true };
+    }
+    if (type === "conv:get") {
+      if (source.tabId == null) return { conversation: [] };
+      const store = await this.ports.sessionStorage.get("recallflow.conv." + source.tabId);
+      return { conversation: (store["recallflow.conv." + source.tabId] || {}).conversation || [] };
+    }
+    if (type === "handoff:save") {
+      return this.ports.saveHandoff(message.record || {}, { trailItems: message.trailItems });
+    }
+    if (type === "handoff:get") {
+      return this.ports.getHandoff(message.id, {
+        trailFrom: message.trailFrom,
+        trailTo: message.trailTo
+      });
+    }
+    if (type === "handoff:list") {
+      return this.ports.listHandoffs(message.limit);
+    }
+    return { ok: false, error: "\u672A\u77E5\u5DE5\u4F5C\u533A\u6D88\u606F\uFF1A" + type };
+  }
+};
 
 // lib/shared/handoff.ts
 var ID_PREFIX = "RF-";
@@ -12525,7 +12641,7 @@ var PanelSessionStore = class {
   }
 };
 
-// lib/assistant/run-hub.ts
+// lib/application/agent/run-hub.ts
 var RUN_TEXT_FLUSH_MS = 40;
 function createRunState(input) {
   const data = input || {};
@@ -13414,6 +13530,20 @@ var automationMessageRouter = new AutomationMessageRouter({
     xhr: userscriptXhr
   }
 });
+var workspaceMessageRouter = new WorkspaceMessageRouter({
+  openOptions() {
+    chrome.runtime.openOptionsPage();
+  },
+  openManager(focusId) {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL("manager.html") + (focusId ? "#focus=" + encodeURIComponent(focusId) : "")
+    });
+  },
+  sessionStorage: chromeSessionStorage,
+  saveHandoff,
+  getHandoff,
+  listHandoffs
+});
 var runSubscriptions = /* @__PURE__ */ new Map();
 var pendingRunCleanup = /* @__PURE__ */ new Map();
 function registerRunCleanup(runId, event) {
@@ -13562,16 +13692,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleAi(msg.payload || msg).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
-  if (msg && msg.type === "openOptions") {
-    chrome.runtime.openOptionsPage();
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "openManager") {
-    const focusId = msg.focusId || "";
-    chrome.tabs.create({ url: chrome.runtime.getURL("manager.html") + (focusId ? "#focus=" + encodeURIComponent(focusId) : "") });
-    sendResponse({ ok: true });
-    return false;
+  if (msg && workspaceMessageRouter.matches(msg)) {
+    workspaceMessageRouter.handle(msg, { tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null }).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
   }
   if (msg && panelMessageRouter.matches(msg)) {
     panelMessageRouter.handle(msg, { tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null, url: sender.tab && sender.tab.url }).then(sendResponse).catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
@@ -13624,38 +13747,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       snapshot: selfOwned ? null : snapshot
     });
     return false;
-  }
-  if (msg && msg.type === "conv:save") {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null && Array.isArray(msg.conversation)) {
-      try {
-        chromeSessionStorage.set({ ["recallflow.conv." + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
-      } catch (e) {
-      }
-    }
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === "conv:get") {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId == null) {
-      sendResponse({ conversation: [] });
-      return false;
-    }
-    chromeSessionStorage.get("recallflow.conv." + tabId).then((d) => sendResponse({ conversation: (d["recallflow.conv." + tabId] || {}).conversation || [] })).catch(() => sendResponse({ conversation: [] }));
-    return true;
-  }
-  if (msg && msg.type === "handoff:save") {
-    saveHandoff(msg.record || {}, { trailItems: msg.trailItems }).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "handoff:get") {
-    getHandoff(msg.id, { trailFrom: msg.trailFrom, trailTo: msg.trailTo }).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === "handoff:list") {
-    listHandoffs(msg.limit).then((r) => sendResponse(r)).catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
   }
 });
 async function requestPersistentHistoryStorage() {

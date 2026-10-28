@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOL_REGISTRY, getToolMetadata, validateToolCall, BUILTIN_TOOLS } from '../lib/assistant/tools.ts';
-import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.ts';
-import { TOOL_METADATA } from '../lib/assistant/tool-metadata.ts';
-import { resolveIntent, INTENTS } from '../lib/assistant/intent-router.ts';
+import { TOOL_REGISTRY, getToolMetadata, validateToolCall, BUILTIN_TOOLS } from '../lib/application/agent/tools.ts';
+import { TOOL_SCHEMAS } from '../lib/application/agent/tool-schemas.ts';
+import { TOOL_METADATA } from '../lib/application/agent/tool-metadata.ts';
+import { resolveIntent, INTENTS } from '../lib/application/agent/intent-router.ts';
 
 const NAMES = TOOL_SCHEMAS.map((t) => t && t.function && t.function.name);
 
@@ -220,7 +220,7 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 //   ⚠ 另有一条不体现在本表里的真实成本：`save_skill` 是 `alwaysAvailable`（跨意图常驻，
 //   与 `load_skill` 同），因此它进「合计」但**不进**下面各意图的数字；
 //   实际每轮下发的 prompt 比表里那几个数各多出这 1459 字符。这是既有设计
-//   （见 lib/assistant/mcp.js 的 alwaysAvailable 分支），这里如实记一笔，避免读者以为表=实际。
+//   （见 lib/application/agent/mcp.js 的 alwaysAvailable 分支），这里如实记一笔，避免读者以为表=实际。
 const SCHEMA_BYTES_BUDGET = {
   合计: 39000,
   browser_task: 35900,

@@ -27,7 +27,7 @@ let seq = 0;
 async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome({});
-  const mod = await import('../lib/page/chat.ts?case=approval-' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=approval-' + (seq += 1));
   return {
     dom,
     mod,

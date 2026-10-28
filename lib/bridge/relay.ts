@@ -4,13 +4,13 @@
 // 服务端收到 MCP 工具调用后，优先经 WebSocket 推送；无 WS 时排队等扩展长轮询取走。
 //
 // 说明：MCP server 由用户显式配置并启动；本中继只做「读页面」，不写数据、不执行代码。
-import { executeTool, closeAgentWindow, collectPageDiagnostics, collectElementSource, verifyPageTargets } from '../assistant/tools.ts';
+import { executeTool, closeAgentWindow, collectPageDiagnostics, collectElementSource, verifyPageTargets } from '../application/agent/tools.ts';
 import { getHandoff, listHandoffs } from '../shared/handoff-store.ts';
 import { BRIDGE_METHODS } from '../shared/bridge-methods.ts';
 import { validateBridgeWrite } from '../shared/bridge-write-policy.ts';
 import { getAISettings } from '../shared/settings.ts';
-import { screenshotAttempts } from '../shared/utils.ts';
-import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../assistant/screenshot-tool.ts';
+import { screenshotAttempts } from '../shared/vision-copy.ts';
+import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../application/agent/screenshot-tool.ts';
 import * as cdp from '../backend/cdp.ts';
 
 const RELAY_HOST = '127.0.0.1:7801';

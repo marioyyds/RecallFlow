@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
@@ -27,16 +27,16 @@ test('inspect_element 的 op 枚举覆盖三个原工具，外加 styles / optio
   assert.deepEqual(byName.inspect_element.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
-test('分派表必须与 lib/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
+test('分派表必须与 lib/ui/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
   // 这些命令名是内容脚本 switch 的 key；写错不会报错，只会让页面命令无响应。
-  const cli = fs.readFileSync(new URL('../lib/page/commands.ts', import.meta.url), 'utf8');
+  const cli = fs.readFileSync(new URL('../lib/ui/page/commands.ts', import.meta.url), 'utf8');
   for (const cmd of ['get_text', 'inspect_element', 'extract_table', 'read_styles', 'read_options', 'query_elements']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
   // C-1 拆分把 INSPECT_OPS 搬进 ./page-command-tools.js 时，
   // 基于切片的老写法会静默切到空串（然后断言失败但原因指向错误的地方）。
-  const { INSPECT_OPS } = await import('../lib/assistant/page-command-tools.ts');
+  const { INSPECT_OPS } = await import('../lib/application/agent/page-command-tools.ts');
   assert.deepEqual(INSPECT_OPS, {
     text: 'get_text',
     inspect: 'inspect_element',
@@ -93,7 +93,7 @@ test('合并后权限不变：仍是 read + readOnly + parallelSafe', () => {
   assert.equal(byName.inspect_element.readOnly, true);
   assert.equal(byName.inspect_element.requiresApproval, false);
 
-  const md = fs.readFileSync(new URL('../lib/assistant/tool-metadata.ts', import.meta.url), 'utf8');
+  const md = fs.readFileSync(new URL('../lib/application/agent/tool-metadata.ts', import.meta.url), 'utf8');
   const line = md.split('\n').find((l) => l.trim().startsWith('inspect_element:'));
   assert.ok(line, '元数据里应有 inspect_element');
   assert.match(line, /parallelSafe: true/, '读类只读工具应保持可并行');

@@ -40,7 +40,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // TS 迁移 Batch 5（TITA-86）：源码全部改成 `.ts`（`entries/*.js` 已不存在）。
 // `debug-hook` 是同一模式的第 8 个入口：manifest 的 content_scripts 按**路径**注入
 // `lib/page/debug-hook.js`，而浏览器不认 `.ts` —— 所以它也必须走构建，
-// 源码在 `lib/page/debug-hook.ts`，产物仍是 manifest 里写的那个文件名（manifest 零改动）。
+// 源码在 `lib/adapters/page/debug-hook.ts`，产物仍是 manifest 里写的那个文件名（manifest 零改动）。
 export const ENTRIES = [
   // Background 增加 RunLifecycleService（停止、abort 宽限、标签页统一清理）。
   // Popup 增加 ChromeTabsAdapter；两者均为小型自包含状态/Port 适配，无新依赖。
@@ -55,7 +55,7 @@ export const ENTRIES = [
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。
   { src: 'entries/userscript-runner.ts', out: 'lib/userscript/runner.js', format: 'iife', budget: 11 * 1024 },
-  { src: 'lib/page/debug-hook.ts', out: 'lib/page/debug-hook.js', format: 'iife', budget: 13 * 1024 },
+  { src: 'lib/adapters/page/debug-hook.ts', out: 'lib/page/debug-hook.js', format: 'iife', budget: 13 * 1024 },
 ];
 
 export async function buildEntry(entry) {

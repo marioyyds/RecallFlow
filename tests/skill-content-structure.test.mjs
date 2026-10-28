@@ -25,8 +25,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SKILL_REGISTRY, ORPHAN_SKILL_REASONS } from '../lib/assistant/skill-defs.ts';
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { SKILL_REGISTRY, ORPHAN_SKILL_REASONS } from '../lib/application/agent/skill-defs.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 import { buildSkillsOverview, parseOrphanReasonEntries } from '../scripts/gen-skills-overview.mjs';
 import fs from 'node:fs';
 
@@ -237,7 +237,7 @@ test('每个内置技能声明的工具都必须真实存在（含没有剧本�
 // 直接印着 `' + '` 这种源码碎片 —— **门禁比对的是"生成物 vs 生成物"，发现不了它** ✗
 // （比对逻辑没错：两边的垃圾是一样的。）所以必须**直接断言理由文本里没有源码碎片**。
 test('生成物里的孤儿理由不得混进源码拼接碎片（`+` / 未闭合引号）', () => {
-  const src = fs.readFileSync(new URL('../lib/assistant/skill-defs.ts', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../lib/application/agent/skill-defs.ts', import.meta.url), 'utf8');
   const parsed = parseOrphanReasonEntries(src);
   const problems = [];
   for (const e of parsed) {

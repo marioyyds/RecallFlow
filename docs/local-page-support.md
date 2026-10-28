@@ -43,11 +43,11 @@
 - 实时页面里注册成功 ⇒ `:defined` 为真 ⇒ 悬浮球正常显示。
 
 `:defined` 是**运行期状态**，不写进 HTML，所以这条判据与"用户是 Ctrl+S、菜单另存为，还是页面自己写盘"完全无关。
-`lib/page/save-clean.js` 是第二层（Ctrl+S / 打印把宿主整体摘掉，产物里连节点都不留）。
+`lib/ui/page/save-clean.js` 是第二层（Ctrl+S / 打印把宿主整体摘掉，产物里连节点都不留）。
 
 ## 4. 三条导出路径分别怎么处理
 
-实现见 `lib/page/save-clean.js`（守卫）与 `lib/page/panel-css.js`（打印样式）。
+实现见 `lib/ui/page/save-clean.js`（守卫）与 `lib/ui/page/panel-css.js`（打印样式）。
 
 | 路径 | 漏的形态（实测） | 处理 |
 | --- | --- | --- |

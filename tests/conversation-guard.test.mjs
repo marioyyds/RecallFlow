@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { diagnoseConversation, repairConversation, formatProblems } from '../lib/assistant/conversation-guard.ts';
-import { sanitizeToolPairing } from '../lib/assistant/agent.ts';
+import { diagnoseConversation, repairConversation, formatProblems } from '../lib/application/agent/conversation-guard.ts';
+import { sanitizeToolPairing } from '../lib/application/agent/agent.ts';
 
 const sys = (c) => ({ role: 'system', content: c });
 const user = (c) => ({ role: 'user', content: c });

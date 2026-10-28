@@ -27,10 +27,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TOOL_REGISTRY, registeredToolNames } from '../lib/assistant/tools.ts';
-import { ANNOTATE_OPS, INSPECT_OPS } from '../lib/assistant/page-command-tools.ts';
-import { MACRO_OPS } from '../lib/assistant/macros.ts';
-import { KNOWLEDGE_READ_OPS } from '../lib/assistant/knowledge.ts';
+import { TOOL_REGISTRY, registeredToolNames } from '../lib/application/agent/tools.ts';
+import { ANNOTATE_OPS, INSPECT_OPS } from '../lib/application/agent/page-command-tools.ts';
+import { MACRO_OPS } from '../lib/application/agent/macros.ts';
+import { KNOWLEDGE_READ_OPS } from '../lib/application/agent/knowledge.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTED_SOURCE = path.join(HERE, 'e2e', 'fixtures', 'server.mjs');

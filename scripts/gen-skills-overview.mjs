@@ -70,12 +70,12 @@ export function parseOrphanReasonEntries(src) {
 /** 孤儿技能的原因表（key → 已拼好的理由文本）。 */
 const ORPHAN_REASONS = (() => {
   const out = {};
-  for (const e of parseOrphanReasonEntries(read('lib/assistant/skill-defs.ts'))) out[e.name] = e.reason;
+  for (const e of parseOrphanReasonEntries(read('lib/application/agent/skill-defs.ts'))) out[e.name] = e.reason;
   return out;
 })();
 
 export function buildSkillsOverview() {
-  const src = read('lib/assistant/skill-defs.ts');
+  const src = read('lib/application/agent/skill-defs.ts');
   // 技能块：以 `name: '...'` 起，到下一个 `name: '...'` 之前（够用且不脆）
   const blocks = [];
   const re = /\n\s{4}name:\s*'([a-z0-9-]+)'/g;
@@ -151,7 +151,7 @@ export function buildSkillsOverview() {
   const lines = [];
   lines.push('# 技能清单（自动生成，勿手改）');
   lines.push('');
-  lines.push('本文件由 `node scripts/gen-skills-overview.mjs` 从 `lib/assistant/skill-defs.ts` 与');
+  lines.push('本文件由 `node scripts/gen-skills-overview.mjs` 从 `lib/application/agent/skill-defs.ts` 与');
   lines.push('`tests/e2e/fixtures/playbooks.mjs` 推导得出，并由 `tests/skills-overview.test.mjs` 门禁');
   lines.push('比对"产物变了而本文件没跟上"。**不要手写这份清单** —— 手写的必然腐烂。');
   lines.push('');
@@ -171,9 +171,9 @@ export function buildSkillsOverview() {
   lines.push('这一节是**手工维护的固定说明**（不是从源码数出来的），因为它讲的是运行时的真实行为，');
   lines.push('而清单只能数出"有哪些技能、对应哪条剧本"。');
   lines.push('');
-  lines.push('1. **生产只给模型一行 `name：description`。** `buildSkillCatalog()`（`lib/assistant/skills.ts`）');
+  lines.push('1. **生产只给模型一行 `name：description`。** `buildSkillCatalog()`（`lib/application/agent/skills.ts`）');
   lines.push('   把每个技能渲染成 `- name：用途`，随 system prompt 一起发出；**正文不预先注入**。');
-  lines.push('   模型判断当前任务适合某个技能时，才调用常驻工具 `load_skill(name)` 取回正文（`lib/assistant/skill-tools.ts`）。');
+  lines.push('   模型判断当前任务适合某个技能时，才调用常驻工具 `load_skill(name)` 取回正文（`lib/application/agent/skill-tools.ts`）。');
   lines.push('2. **运行时不做关键词匹配。** 曾经有一条"按 `x.keywords` 正则命中就注入正文"的路');
   lines.push('   （`skills.js` 的 `detectSkill()`），它**在生产代码里没有任何调用方**，已于目标 ⑤ 删除。');
   lines.push('   `x.keywords` / `x.intents` 仍保留，但只用于 **SkillHub 格式往返**（`skill-md.js`）与技能编辑页展示');

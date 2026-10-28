@@ -1,7 +1,7 @@
 // Streaming model-step client with retries, abort handling, and SSE decoding.
-import { isRetryableError } from '../../assistant/llm.ts';
-import { parseToolArgs } from '../../assistant/tools.ts';
-import type { Caught } from '../../assistant/errors.ts';
+import { isRetryableError } from './llm.ts';
+import { parseToolArgs } from './tools.ts';
+import type { Caught } from './errors.ts';
 import { sanitizeMessages } from '../../shared/surrogates.ts';
 
 /**

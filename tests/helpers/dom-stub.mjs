@@ -1,4 +1,4 @@
-// 最小 DOM 桩：给"只能靠读源码做正则断言"的页面模块（lib/page/chat.ts）一个真 import 的机会。
+// 最小 DOM 桩：给"只能靠读源码做正则断言"的页面模块（lib/ui/page/chat.ts）一个真 import 的机会。
 //
 // 为什么需要它：chat.js 有 4900 行、12 个测试文件提到它，但**没有一个真的 import 过**。
 // 那些测试全是 `fs.readFileSync` + 正则 —— 它们能钉住"某句话还在文件里"，
@@ -511,7 +511,7 @@ export function createWindowStub(doc) {
   win.scrollY = 0;
   win.devicePixelRatio = 1;
   // 布局视口（不含滚动条）也按同一个视口给。页面侧有代码用
-  // `documentElement.clientWidth` 做几何判定（气泡悬浮热区，见 lib/page/fab-position.ts）：
+  // `documentElement.clientWidth` 做几何判定（气泡悬浮热区，见 lib/ui/page/fab-position.ts）：
   // 桩若给 0，那条判定会**恒假**，于是"鼠标还在气泡上"这件事永远检测不到。
   if (doc.documentElement) {
     doc.documentElement.clientWidth = win.innerWidth;

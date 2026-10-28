@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { PANEL_CSS } from '../lib/page/panel-css.ts';
+import { PANEL_CSS } from '../lib/ui/page/panel-css.ts';
 
-const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
+const chat = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
 
 test('RecallFlow 气泡支持纵向拖动，并保存归一化位置', () => {
   // ⚠ 这里只钉**接线**（事件是否还挂着、是否还走夹取与持久化）。

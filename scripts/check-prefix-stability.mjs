@@ -7,7 +7,7 @@
 // 这类改动功能上完全正确、测试也全绿，唯一的症状是「越跑越慢」—— 属于
 // 和 check-const-assign 同一类「静态可查但没人查」的问题，所以在这里钉死。
 //
-// 本检查强制的不变式（针对 lib/assistant/agent.js）：
+// 本检查强制的不变式（针对 lib/application/agent/agent.js）：
 //   R1  绝不出现 `messages[0] = ...`：messages[0] 是前缀起点，改写它等于全量失效。
 //       曾经 promoteToResearch 就是这么干的，改为在末尾追加 system 消息。
 //   R2  绝不出现 unshift / shift / pop / sort / reverse：这些都会移动或删除已有位置。
@@ -31,7 +31,7 @@ import { stripStringsAndComments } from './check-const-assign.mjs';
 // 检查的应该是**正在用**的那一份。
 // 抽成纯函数是为了能在测试里直接喂 exists 谓词 —— 否则「改名后选中哪一份」
 // 这个行为只能靠真去改仓库文件才能验证。
-export const TARGET_CANDIDATES = ['lib/assistant/agent.ts', 'lib/assistant/agent.js'];
+export const TARGET_CANDIDATES = ['lib/application/agent/agent.ts', 'lib/application/agent/agent.js'];
 export function pickTarget(exists) {
   return TARGET_CANDIDATES.find(exists) || TARGET_CANDIDATES[TARGET_CANDIDATES.length - 1];
 }

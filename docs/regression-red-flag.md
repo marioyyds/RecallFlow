@@ -19,7 +19,7 @@
 
 ## 已做的处理
 
-1. **回退注入**：`lib/assistant/skill-tools.js` 里那段改成明确的"⛔ 不要注入"说明 + 实测数字；
+1. **回退注入**：`lib/application/agent/skill-tools.js` 里那段改成明确的"⛔ 不要注入"说明 + 实测数字；
 2. **常量留着**（内容本身是对的，问题在"每次注入"）并在源码里写明停用原因；
 3. **门禁改成钉住"不要注入"**（`tests/skill-common-discipline.test.mjs`）——
    方向与直觉相反，所以更要写死：**没有测量就不要加提示** ✗
@@ -164,7 +164,7 @@ foreach ($i in 1..6) {
 
 ## 复核入口
 
-- 底座定义与装配：`lib/assistant/skill-tools.js`
+- 底座定义与装配：`lib/application/agent/skill-tools.js`
 - 相关门禁：`tests/skill-common-discipline.test.mjs`（6 条）
 - 重复度统计（为什么抽它）：`docs/skills-overview.md` → "重复的通用纪律"
 - 真模型 eval：`npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep 付费墙`

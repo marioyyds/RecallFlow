@@ -1,5 +1,6 @@
 // 脚本中心：已安装脚本管理（启停/更新/运行/导出/卸载）+ 发现安装（GreasyFork 搜索 / 链接 / 代码）
-import { showToast, esc } from '../lib/shared/utils.ts';
+import { esc } from '../lib/shared/dom/html.ts';
+import { showToast } from '../lib/shared/dom/toast.ts';
 import { getUserscriptSettings } from '../lib/userscript/settings.ts';
 
 /**

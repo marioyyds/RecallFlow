@@ -7,9 +7,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { PANEL_CSS } from '../lib/page/panel-css.ts';
+import { PANEL_CSS } from '../lib/ui/page/panel-css.ts';
 
-const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
+const chat = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
 const optionsHtml = fs.readFileSync('options.html', 'utf8');
 const optionsCss = fs.readFileSync('options.css', 'utf8');
 const managerCss = fs.readFileSync('manager.css', 'utf8');

@@ -105,7 +105,7 @@ test('README 的「失败软着陆」描述必须与守卫的真实语义一致'
   // 「守卫绝不摘除工具、绝不终止任务」——两者相反，且没有任何一层能发现
   // （本文件原先只校验链接，不校验声明）。这是最容易误导读者的一种漂移：
   // 读者会以为"工具会被自动拿走"，从而误判失败恢复的行为。
-  const { GUARD_CAN_DISABLE_TOOLS } = await import('../lib/assistant/tool-guard.ts');
+  const { GUARD_CAN_DISABLE_TOOLS } = await import('../lib/application/agent/tool-guard.ts');
   for (const f of README_FILES) {
     const rule = SOFT_LANDING[f];
     const src = requireSrc(f);

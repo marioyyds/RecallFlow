@@ -73,7 +73,7 @@ node spec.mjs
 
 Node **不做** TS 的 `.js → .ts` 扩展名替换（esbuild 做，见 §2.1）。所以改名有涟漪：
 
-> 实测：只把 `lib/assistant/claim-check.js` 改成 `.ts`，`lib/assistant/agent.js:22` 立刻
+> 实测：只把 `lib/application/agent/claim-check.js` 改成 `.ts`，`lib/application/agent/agent.js:22` 立刻
 > `ERR_MODULE_NOT_FOUND: ... lib\assistant\claim-check.js imported from ... lib\assistant\agent.js`。
 
 **需要改写的 specifier 实测计数**（`b58288c`）：
@@ -92,7 +92,7 @@ Node **不做** TS 的 `.js → .ts` 扩展名替换（esbuild 做，见 §2.1�
 **路径 1 —— 直接把 specifier 改成 `.ts`（推荐）**
 
 脚本改写 + 全量测试回归。优点：零运行时开销、零 loader、行为与现在完全一致（显式后缀）。
-实测：`lib/assistant/claim-check.js → .ts`（还加了 `interface ClaimInput` / `ClaimResult` 联合类型 / 显式返回类型）+ 测试 import 改 `.ts` → `tests 21 / pass 21 / fail 0`。
+实测：`lib/application/agent/claim-check.js → .ts`（还加了 `interface ClaimInput` / `ClaimResult` 联合类型 / 显式返回类型）+ 测试 import 改 `.ts` → `tests 21 / pass 21 / fail 0`。
 
 **路径 2 —— 一个 20 行的 resolve hook，specifier 一字不改**
 
@@ -140,7 +140,7 @@ export async function resolve(spec, ctx, next) {
 实测（沙箱，`lib/shared/lru.js` → `lru.ts`，加了泛型 `createLruCache<K,V>` 与 `interface LruCache`）：
 
 ```
-importer lib/page/chat.js 里仍然是：import { createLruCache } from '../shared/lru.js';
+importer lib/ui/page/chat.js 里仍然是：import { createLruCache } from '../shared/lru.js';
 node scripts/build-content.mjs --check
   → 输入模块：25 个 / 产物大小：442 KB / 自包含性检查通过
 ```
@@ -187,7 +187,7 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 | 1 | `scripts/check-const-assign.mjs` | `EXTENSIONS = ['.js', '.mjs']` ⇒ `.ts` 文件**完全不进扫描集**；即便把 TS 文本放进 `.js`，`const total: number = 1; total += 1;` 也**检测不到** | 🔴 **静默失效** |
 | 2 | `scripts/check-prefix-stability.mjs` | ①文件改名 → `[R0] 目标文件不存在` exit 1；②`let iter: number = ...` → `[R0] 未找到主循环…检查已失效` exit 1；③`const injectPlanMessage: () => void = ` → `[R3] splice 出现在 injectPlanMessage 之外` 误报在 1504 行 | 🟢 高声失败 |
 | 3 | `scripts/mutation-check.mjs` | 15 个 TARGET / 10 个文件硬编码；①改名 → `ENOENT` 直接崩 exit 1；②**只改名不改行 → 6 条变异全抓住**；③变异锚点那一行加了类型标注 → `✗ 变异锚点未找到（脚本需随源码更新）` exit 1 | 🟢 高声失败 |
-| 4 | `tests/panel-scope.test.mjs`（整file） | `SRC='lib/page/chat.js'`；改名 → `tests 5 / pass 2 / fail 3`（ENOENT） | 🟢 高声失败 |
+| 4 | `tests/panel-scope.test.mjs`（整file） | `SRC='lib/ui/page/chat.js'`；改名 → `tests 5 / pass 2 / fail 3`（ENOENT） | 🟢 高声失败 |
 | 5 | `tests/panel-scope.test.mjs` 变量规则 | 收集 openPanel 局部变量的正则要求「名字后紧跟 `=`」；`const el: HTMLElement = document.createElement(...)` ⇒ 局部集归零 → `前置：应识别出若干局部元素变量，实际 0`，`tests 5 / pass 4 / fail 1` | 🟡 失败（有前置断言兜住） |
 | 6 | `tests/panel-scope.test.mjs` 模块级假阳性 | 模块级 `interface RowRefs { chip: HTMLElement \| null }` ⇒ 判成「引用了 openPanel 内局部变量 chip」，offender 原文 `chip 出现于：chip: HTMLElement \| null;` | 🟠 **假阳性**（L-37 的类型版） |
 | 7 | `tests/panel-scope.test.mjs` 顶层函数断言 | 给 `mountThinkSegment` 加 `export` ⇒ 该条红；改成多行签名 ⇒ 仍绿 | 约束 |
@@ -223,14 +223,14 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 +const LOOP_RE = /for\s*\(\s*let\s+iter\s*(?::\s*[^=;]+)?=\s*resumeIteration/;
 -const PLAN_FN_RE = /const\s+injectPlanMessage\s*=/;
 +const PLAN_FN_RE = /const\s+injectPlanMessage\s*(?::\s*[^=;]+)?=/;
--export const TARGET = 'lib/assistant/agent.js';
-+export const TARGET = ['lib/assistant/agent.ts', 'lib/assistant/agent.js'].find((f) => fs.existsSync(f)) || 'lib/assistant/agent.js';
+-export const TARGET = 'lib/application/agent/agent.js';
++export const TARGET = ['lib/application/agent/agent.ts', 'lib/application/agent/agent.js'].find((f) => fs.existsSync(f)) || 'lib/application/agent/agent.js';
 ```
 实测：两个锚点都加类型标注 → `请求前缀稳定性检查通过 ✓`；文件改名成 `.ts` → 也通过（自动选中 `.ts`）。
 
 ### 3.3 mutation-check：对 TS 源码仍然有效（特别验证）
 
-- **inplace 模式与文件扩展名无关**：把 `lib/assistant/claim-check.js` 改成 `.ts`（并加 interface + 联合类型 + 显式返回类型），只含该目标的副本跑出来仍是 6/6：
+- **inplace 模式与文件扩展名无关**：把 `lib/application/agent/claim-check.js` 改成 `.ts`（并加 interface + 联合类型 + 显式返回类型），只含该目标的副本跑出来仍是 6/6：
   ```
   ✓ 规则 2 退回「只看失败名单」…        （实际变红：**同名工具失败后又重试成功** → …）
   ✓ 规则 1 去掉「调用过工具」的前提…    （实际变红：规则 1 只在「调用过工具」时触发…）
@@ -298,7 +298,7 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 
 - **浏览器加载图**（`background.js` + `popup/options/manager/skills-page/userscripts.js` + `lib/page/debug-hook.js`）：**85 个文件，其中 79 个 lib 模块**。
 - **content bundle 图**（`entries/content.js`）：**25 个文件，其中 24 个 lib 模块**。
-- **两图交集 9 个模块**：`lib/page/markdown.js`、`lib/assistant/run-hub.js`、`lib/shared/{utils,surrogates,constants,editable-text,screenshot-store,settings,handoff}.js`
+- **两图交集 9 个模块**：`lib/ui/page/markdown.js`、`lib/application/agent/run-hub.js`、`lib/shared/{utils,surrogates,constants,editable-text,screenshot-store,settings,handoff}.js`
 - **仅 content 图内（15 个 lib + 入口）**：`page/{chat,commands,picker,debug-capture,page-text,settle,transcript,render-scheduler,save-clean,panel-css,panel-layout,fab-position,citation}.js`、`shared/{lru,table}.js`
 - 两个图都不在：`lib/userscript/runner.js`（被 executeScript 注入）
 - **目录级依赖方向**：`page → assistant → backend → shared → assistant`（**注意 `shared ↔ assistant` 有环**：`lib/shared/rag.js:4` import `../assistant/context.js`）。`bridge → assistant/backend/shared`；`userscript` 是纯叶子。
@@ -328,7 +328,7 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 - **Dev B（聚合层，4 个）**：`page/{commands,picker}.js`、`page/chat.js`、`entries/content.js`
   （依赖 Dev A 的 `page-text/citation/debug-capture/settle/table`；用 loader 时不必等 A 合完，串行/把它排到 A 之后更稳）
 
-> 这一批覆盖了 strict 错误最集中的文件：`lib/page/chat.js`（604 条）、`lib/page/commands.js`（162 条）、`lib/page/picker.js`（83 条）、`lib/page/transcript.js`（62 条）、`lib/page/page-text.js`（57 条）。
+> 这一批覆盖了 strict 错误最集中的文件：`lib/ui/page/chat.js`（604 条）、`lib/ui/page/commands.js`（162 条）、`lib/ui/page/picker.js`（83 条）、`lib/ui/page/transcript.js`（62 条）、`lib/application/page/page-text.js`（57 条）。
 
 **Batch 2 —— 交集 9 个模块 + `lib/userscript/*`（7 个）**
 动到这里就要先回答「`background.js` 怎么加载 TS」。**必须先做一次 4.1 的真浏览器复验**，再开 `lib/shared/*` 里那 7 个。
@@ -355,7 +355,7 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 >    冲突时先解源码、再 `node scripts/build-content.mjs` / `node scripts/build-entries.mjs` 重建，
 >    然后用 `git cat-file -s` / `compareEntry` 比字节，最后在合并树重跑门禁（L-04 / L-05）。
 
-**Batch 3 —— `lib/assistant/*`（53 个文件，14312 行，strict 错误 1172 条）**
+**Batch 3 —— `lib/application/agent/*`（53 个文件，14312 行，strict 错误 1172 条）**
 最大的一块，建议再拆：
 - 3a：纯叶子（无 `../` import 的约 34 个文件）
 - 3b：`agent.js`（197 条）、`tools.js`（165 条）、`context.js`、`llm.js` 等有环 / 有 mutation 目标的文件
@@ -398,15 +398,15 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 | `lib/backend` | 437 | 93 | 21.3 |
 | `lib/bridge` | 485 | 42 | 8.7 |
 
-**最难的 5 个文件**：`lib/page/chat.js` 604、`lib/assistant/agent.js` 197、`lib/assistant/tools.js` 165、`lib/page/commands.js` 162、`lib/backend/cdp.js` 93。
+**最难的 5 个文件**：`lib/ui/page/chat.js` 604、`lib/application/agent/agent.js` 197、`lib/application/agent/tools.js` 165、`lib/ui/page/commands.js` 162、`lib/backend/cdp.js` 93。
 
 **抽查 3 个文件的逐项错误 TS**:
 
 | 文件 | 行数 | strict 错误 | 构成 |
 | --- | --- | --- | --- |
-| `lib/assistant/claim-check.js` | 150 | 3 | TS7006 ×3（参数 `claim`/`verbs`/`result` 隐式 any）—— 它本来就有完整 JSDoc，逐个抄进 TS 即可 |
+| `lib/application/agent/claim-check.js` | 150 | 3 | TS7006 ×3（参数 `claim`/`verbs`/`result` 隐式 any）—— 它本来就有完整 JSDoc，逐个抄进 TS 即可 |
 | `lib/shared/lru.js` | 52 | 6 | TS7006 ×5 + TS7005 ×1 —— 全是 `createLruCache(max)`/`get(key)` 的隐式 any |
-| `lib/page/settle.js` | 127 | 20 | TS7006 ×5 / TS7005 ×3 / TS2339 ×5 / TS7034 ×3 —— 对象选项参数被推成 `{}`，`let quietTimer` 无初始值 |
+| `lib/application/page/settle.js` | 127 | 20 | TS7006 ×5 / TS7005 ×3 / TS2339 ×5 / TS7034 ×3 —— 对象选项参数被推成 `{}`，`let quietTimer` 无初始值 |
 | （补充）`lib/shared/store.js` | 327 | 9 | TS7006 ×3 / TS7034 ×2 / TS2307 ×2（单文件检查时的相对模块，全库一起检查时为 0）/ TS7005 / TS2810 |
 
 **需要的类型来源**

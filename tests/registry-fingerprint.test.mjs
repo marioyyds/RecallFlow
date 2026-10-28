@@ -17,7 +17,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
 // 指纹覆盖：名字 + 完整 schema + 权限元数据。顺序无关（先按名字排序）。
 function computeRegistryFingerprint(registry) {
@@ -59,7 +59,7 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   74fa51f522897891 —— **有意改动**：C-4 合并第 5 档（宏）。
   //                       save_macro + list_macros + run_macro → macro(op)，53 → 51。
   //                       **risk 取三者最高**：save_macro 是 write+审批 → macro 继承 write + 逐次审批。
-  //                       ⚠ 另有两条**必须按 op 分别保留**的防线（见 lib/assistant/macros.js）：
+  //                       ⚠ 另有两条**必须按 op 分别保留**的防线（见 lib/application/agent/macros.js）：
   //                         · op=save 的写审批；· op=run 的执行期 REPLAYABLE_TOOLS 白名单
   //                          （曾有真实提权：run_macro 回放 run_javascript 绕过 alwaysRequireApproval）。
   //                       副作用：chat_task 原先只带最轻的 list_macros，现在必须带整个 macro schema，
@@ -68,9 +68,9 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       search_knowledge_base + list_knowledge_base + get_entry → knowledge_read(op)，51 → 49。
   //                       ⚠ **只合并了同权限类别的三个读工具**：add_entry（write）与 remove_entry（destructive）
   //                       刻意保持独立。原方案写的是"知识库 5→2"，但那需要把读与 destructive 合到一起，
-  //                       而工具级审批**看不到 args**（见 lib/assistant/agent.js），
+  //                       而工具级审批**看不到 args**（见 lib/application/agent/agent.js），
   //                       结果就是**每一次知识库检索都要批准** —— 那是全仓库最高频的知识库动作。
-  //                       净减量与原方案相同（省 2 个），但不产生权限污染。理由详见 lib/assistant/knowledge.js。
+  //                       净减量与原方案相同（省 2 个），但不产生权限污染。理由详见 lib/application/agent/knowledge.js。
   //   d92c7bddfc975d6b —— **有意改动**：C-4 合并第 2 档（元素检查**只读**三件套）。
   //                       get_element_text + inspect_element + extract_table → inspect_element({op})，49 → 47。
   //                       ⚠ **只合并了同权限、同执行路径**的三个：它们原本就共用一个 case

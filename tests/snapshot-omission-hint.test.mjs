@@ -14,8 +14,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const SRC = fs.readFileSync('lib/assistant/page-read-tools.ts', 'utf8');
-const PAGE = fs.readFileSync('lib/page/page-text.ts', 'utf8');
+const SRC = fs.readFileSync('lib/application/agent/page-read-tools.ts', 'utf8');
+const PAGE = fs.readFileSync('lib/application/page/page-text.ts', 'utf8');
 
 test('元素被体积预算裁掉时，结果里要说明数量', () => {
   assert.match(SRC, /const omittedBySize = Number\(/, '要真的读 counts.omittedBySize');

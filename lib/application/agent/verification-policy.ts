@@ -1,7 +1,7 @@
 // Pure completion-verification and liveness policies.
-import { getToolMetadata, compactSnapshotSummary } from '../../assistant/tools.ts';
-import { INTENTS } from '../../assistant/intent-router.ts';
-import { selectEvidence } from '../../assistant/evidence.ts';
+import { getToolMetadata, compactSnapshotSummary } from './tools.ts';
+import { INTENTS } from './intent-router.ts';
+import { selectEvidence } from './evidence.ts';
 import { sliceSafe } from '../../shared/surrogates.ts';
 
 export const EVIDENCE_READ_TOOLS = new Set([

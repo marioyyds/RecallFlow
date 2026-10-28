@@ -104,8 +104,8 @@ const safe = sanitizeHref(url);           // url 来自 data-cite-url（页面/�
 
 | 模块 | 前 | 后 | 抽出到 |
 |---|---:|---:|---|
-| `lib/page/chat.js` | 2568 | **2181** | `markdown.js`(462)、`panel-css.js`(364) |
-| `lib/assistant/tools.js` | 3027 | **2049** | `tool-schemas.js`(915)、`tool-metadata.js`(65) |
+| `lib/ui/page/chat.js` | 2568 | **2181** | `markdown.js`(462)、`panel-css.js`(364) |
+| `lib/application/agent/tools.js` | 3027 | **2049** | `tool-schemas.js`(915)、`tool-metadata.js`(65) |
 
 **方法**：用脚本按行区间精确搬运，**从不手工转写**。每次搬运都先验证前置条件，再做等价性证明：
 
@@ -117,11 +117,11 @@ const safe = sanitizeHref(url);           // url 来自 data-cite-url（页面/�
 
 | 模块 | 行数 | 职责 |
 |---|---:|---|
-| `lib/assistant/tool-schemas.js` | 913 | 44 个工具的 Schema（唯一来源） |
-| `lib/page/markdown.js` | 462 | 模型输出 → HTML 渲染 + 引用 + `sanitizeHref` |
-| `lib/page/panel-css.js` | 364 | 面板样式（纯字符串） |
+| `lib/application/agent/tool-schemas.js` | 913 | 44 个工具的 Schema（唯一来源） |
+| `lib/ui/page/markdown.js` | 462 | 模型输出 → HTML 渲染 + 引用 + `sanitizeHref` |
+| `lib/ui/page/panel-css.js` | 364 | 面板样式（纯字符串） |
 | `lib/shared/table.js` | 125 | `rowspan/colspan` 网格展开算法 |
-| `lib/assistant/claim-check.js` | 103 | 完成类断言的确定性预检 |
+| `lib/application/agent/claim-check.js` | 103 | 完成类断言的确定性预检 |
 | `lib/shared/bridge-methods.js` | 27 | 跨端桥接方法名唯一来源 |
 
 ---

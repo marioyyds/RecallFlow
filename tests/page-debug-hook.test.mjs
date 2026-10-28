@@ -1,4 +1,4 @@
-// lib/page/debug-hook.ts（产物 lib/page/debug-hook.js）的首次测试覆盖。
+// lib/adapters/page/debug-hook.ts（产物 lib/page/debug-hook.js）的首次测试覆盖。
 //
 // 为什么值得测：这个文件以 MAIN world 注入到**用户访问的每一个 http/https 页面**，
 // 并且在 document_start 就替换了页面自己的 window.fetch / XMLHttpRequest。
@@ -21,7 +21,7 @@ import { transformSync } from 'esbuild';
 const SOURCE_PATH =
   // 允许指向副本：变异测试（scripts/mutation-check.mjs）借此在临时文件上验证断言灵敏度，
   // 从而绝不去改写仓库里的源文件。
-  process.env.RF_DEBUG_HOOK_SRC || path.resolve(import.meta.dirname, '../lib/page/debug-hook.ts');
+  process.env.RF_DEBUG_HOOK_SRC || path.resolve(import.meta.dirname, '../lib/adapters/page/debug-hook.ts');
 const SRC = transformSync(fs.readFileSync(SOURCE_PATH, 'utf8'), { loader: 'ts', target: 'es2022' }).code;
 
 /** 把 debug-hook.js 加载进一个带桩全局对象的沙箱。 */

@@ -19,7 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 于是那一版的全部数字都是错的 —— 而它看起来完全正常。
 // 这正是本仓库反复出现的那类问题：**报告看起来有数据，但数据描述的不是这个系统**。
 // 改成从 TOOL_REGISTRY 取真名，并在开头显式校验每个名字都存在，不存在就直接报错。
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
 const ALL_NAMES = new Set(TOOL_REGISTRY.map((t) => t.name));
 

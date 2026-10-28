@@ -19,7 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { extractCiteNum, renumberCitations, renumberCitationsAcross } from '../lib/page/markdown.ts';
+import { extractCiteNum, renumberCitations, renumberCitationsAcross } from '../lib/ui/page/markdown.ts';
 import { sourcePath } from './source-path.mjs';
 
 const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
@@ -46,7 +46,7 @@ test('非数字标签不会被重编号，也不会生成来源（它就是死�
 // ---------------------------------------------------------------- 提示层：不许要求给当前页面编号
 
 const DEMANDING = [
-  { file: 'lib/assistant/intent-router.ts', label: 'agent 规则 3' },
+  { file: 'lib/application/agent/intent-router.ts', label: 'agent 规则 3' },
   { file: 'lib/shared/rag.ts', label: '面板直答提示' },
 ];
 
@@ -89,7 +89,7 @@ test('知识库条目的 [n] 要求必须保留（那是真有编号的）', () 
 // ---------------------------------------------------------------- 渲染层：死文本不能装成可点引用
 
 test('渲染层：非数字方括号不会变成可点击的引用徽章', () => {
-  const src = read('lib/page/markdown.js');
+  const src = read('lib/ui/page/markdown.js');
   // renderAnswer 里的替换必须在 idx === null 时原样返回，否则 [页面] 会挂上
   // data-cite-* 变成"点了可能打开别的东西"的假引用。
   assert.ok(
@@ -99,7 +99,7 @@ test('渲染层：非数字方括号不会变成可点击的引用徽章', () =>
 });
 
 test('渲染层：编号对不上来源时也原样返回（不许错配到别的来源）', () => {
-  const src = read('lib/page/markdown.js');
+  const src = read('lib/ui/page/markdown.js');
   assert.ok(/if \(!c\) return match;/.test(src), '编号超出参考来源区时必须原样返回，不能错配');
 });
 

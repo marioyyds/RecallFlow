@@ -19,11 +19,11 @@
 | # | 档位 | 变化 | 省 | 性质 | 说明 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 视觉标注 | 4→1 | 3 | ✅ **已执行** | 四个工具合并为 `annotate({op})`（highlight / outline / style / clear）。**这一档是 C-4 里最纯粹的一次合并**：四者风险完全一致（`page` + 逐次审批）、执行路径完全一致（都走 `executePageTool` → 内容脚本的 `highlight` / `outline` / `set_style` / `clear_highlights`），因此既没有"取最高"的歧义，也没有"路径不同"的冲突。47 → 44。<br>⚠ **实测代价**：四个 schema 的描述合成一个，`browser_task` 的 prompt 预算由 33400 上调到 35600 —— 这是**第三次**"工具数下降但字符数上升" |
-| 2 | 元素检查 | 5→**3**（原写 5→1） | 2 | ✅ **已执行（按执行路径与权限分组）** | **与原方案不同**：原写"五个合并为 `inspect_element({fields})`"。但五个里只有三个共用同一条执行路径（`executePageTool` → 内容脚本 `get_text` / `inspect_element` / `extract_table`），另两个走各自不同的链路：<br>· `get_attribute` —— 独立的 `kbGetAttribute` 消息；<br>· `get_element_source` —— 源码映射链路，被 MCP 的「**页面元素 → 源码 file:line**」闭环直接使用。<br>因此只合并那三个（`inspect_element({op})`），**净减量与原方案相同（省 2 个）**，且不把不同路径硬塞进一个入口。实现见 `lib/assistant/tools.js` 的 `INSPECT_OPS`；49 → 47 |
-| 3 | 诊断 | 3→1 | 2 | ✅ **已执行** | 已合并为 `read_diagnostics({kind})`（console/network/downloads）。三者原本权限完全一致（`read`/`readOnly`/`parallelSafe`）。实现见 `lib/assistant/diagnostics.js`；55 → 53 |
-| 4 | 知识库 | 5→**3**（原写 5→2） | 2 | ✅ **已执行（按权限类别分组）** | **与原方案不同**：原写"检索 1 个 + 增删改 1 个"，但那会让**读取**继承写权限 —— 工具级审批看不到 args（见 `lib/assistant/agent.js`），于是"增删改"那个工具的 `destructive` 会被**每一次知识库检索**继承，而检索是最高频的知识库动作。<br>改为**按权限类别**分组：三个只读（search/list/get）→ `knowledge_read({op})`，`add_entry`（write）与 `remove_entry`（destructive）保持独立。**净减量与原方案相同（省 2 个），但不产生权限污染**。实现见 `lib/assistant/knowledge.js`；51 → 49 |
-| 5 | 宏 | 3→1 | 2 | ✅ **已执行** | 已合并为 `macro({op})`（save/list/run）。**risk 取三者最高**：`save_macro` 是 `write`+审批 → `macro` 继承 `write` + 逐次审批。实现见 `lib/assistant/macros.js`；53 → 51。⚠ 两条防线**按 op 分别保留**：`op=save` 的写审批、`op=run` 的执行期 `REPLAYABLE_TOOLS` 白名单（有真实提权先例）。副作用：`chat_task` 原先只带最轻的 `list_macros`，现在必须带整个 `macro` schema → 该意图预算 8400→9700 |
-| 6 | 技能 | **3→1** | 2 | ⚠ **不建议**（原判为"可重构"，实测有冲突） | 我原先写"权限从 `read` 升到 `external`，按 op 分级审批即可"。**实测"按 op 分级"做不到**：`toolNeedsApproval(name, settings, pageUrl)` **拿不到 args**（见 `lib/assistant/agent.js:276`），因此无法按 `op` 区分审批。后果二选一：<br>· 继承最严的 `save_skill`（`high` + 逐次审批）→ **每次 `load_skill` 都要批准**（而加载一个已安装技能是高频、只读、安全的动作，`agent.js:1561` 还专门为它做了白名单并入）；<br>· 不继承 → **`install_skill` 的安装闸门与 `save_skill` 的保存闸门被移除**（前者下载并写入本地技能，后者写入**会进入今后系统提示**的正文）。<br>**省 2 个工具换来"高频安全操作变烦"或"两个写闸门一起丢"，更不值得。** 要做需先改 `toolNeedsApproval` 的签名并让 args 贯通整条审批链路 —— 那是独立改动，不是合并 |
+| 2 | 元素检查 | 5→**3**（原写 5→1） | 2 | ✅ **已执行（按执行路径与权限分组）** | **与原方案不同**：原写"五个合并为 `inspect_element({fields})`"。但五个里只有三个共用同一条执行路径（`executePageTool` → 内容脚本 `get_text` / `inspect_element` / `extract_table`），另两个走各自不同的链路：<br>· `get_attribute` —— 独立的 `kbGetAttribute` 消息；<br>· `get_element_source` —— 源码映射链路，被 MCP 的「**页面元素 → 源码 file:line**」闭环直接使用。<br>因此只合并那三个（`inspect_element({op})`），**净减量与原方案相同（省 2 个）**，且不把不同路径硬塞进一个入口。实现见 `lib/application/agent/tools.js` 的 `INSPECT_OPS`；49 → 47 |
+| 3 | 诊断 | 3→1 | 2 | ✅ **已执行** | 已合并为 `read_diagnostics({kind})`（console/network/downloads）。三者原本权限完全一致（`read`/`readOnly`/`parallelSafe`）。实现见 `lib/application/agent/diagnostics.js`；55 → 53 |
+| 4 | 知识库 | 5→**3**（原写 5→2） | 2 | ✅ **已执行（按权限类别分组）** | **与原方案不同**：原写"检索 1 个 + 增删改 1 个"，但那会让**读取**继承写权限 —— 工具级审批看不到 args（见 `lib/application/agent/agent.js`），于是"增删改"那个工具的 `destructive` 会被**每一次知识库检索**继承，而检索是最高频的知识库动作。<br>改为**按权限类别**分组：三个只读（search/list/get）→ `knowledge_read({op})`，`add_entry`（write）与 `remove_entry`（destructive）保持独立。**净减量与原方案相同（省 2 个），但不产生权限污染**。实现见 `lib/application/agent/knowledge.js`；51 → 49 |
+| 5 | 宏 | 3→1 | 2 | ✅ **已执行** | 已合并为 `macro({op})`（save/list/run）。**risk 取三者最高**：`save_macro` 是 `write`+审批 → `macro` 继承 `write` + 逐次审批。实现见 `lib/application/agent/macros.js`；53 → 51。⚠ 两条防线**按 op 分别保留**：`op=save` 的写审批、`op=run` 的执行期 `REPLAYABLE_TOOLS` 白名单（有真实提权先例）。副作用：`chat_task` 原先只带最轻的 `list_macros`，现在必须带整个 `macro` schema → 该意图预算 8400→9700 |
+| 6 | 技能 | **3→1** | 2 | ⚠ **不建议**（原判为"可重构"，实测有冲突） | 我原先写"权限从 `read` 升到 `external`，按 op 分级审批即可"。**实测"按 op 分级"做不到**：`toolNeedsApproval(name, settings, pageUrl)` **拿不到 args**（见 `lib/application/agent/agent.js:276`），因此无法按 `op` 区分审批。后果二选一：<br>· 继承最严的 `save_skill`（`high` + 逐次审批）→ **每次 `load_skill` 都要批准**（而加载一个已安装技能是高频、只读、安全的动作，`agent.js:1561` 还专门为它做了白名单并入）；<br>· 不继承 → **`install_skill` 的安装闸门与 `save_skill` 的保存闸门被移除**（前者下载并写入本地技能，后者写入**会进入今后系统提示**的正文）。<br>**省 2 个工具换来"高频安全操作变烦"或"两个写闸门一起丢"，更不值得。** 要做需先改 `toolNeedsApproval` 的签名并让 args 贯通整条审批链路 —— 那是独立改动，不是合并 |
 | 7 | 帧 + AX | 2→1 | 1 | ⚠ **不建议**（原判为"可重构"，实测有冲突） | 我原先写"都是结构视图，`op` 里体现差异即可"。**实测这不成立**：`get_ax_snapshot` **需要 CDP**（未开启时直接返回失败），而 `list_frames` 刻意**不依赖 CDP**（`lib/backend/cdp.js` 之外的原生能力，在未开 CDP 的环境下仍可用）。合并后必须二选一：要么给 `list_frames` 也加上 CDP 前置条件（**会破坏一个本来能用的路径**），要么做按 `op` 的能力门控（那就不再是"纯重构"）。**省 1 个工具不值得这个代价** —— 建议跳过 |
 | — | **小计（可重构档已全部完成）** | | **0** | | **45；剩余只有"需取舍"档（8/9）** |
 | 8 | 指针族 | 4→1 | 3 | **需取舍** | **风险最高**。`click_element` 是最高频工具；合并成 `pointer(op)` 会让最常用调用变间接，且丢掉 `role+name` 的显式签名。**建议不做**，除非明确接受可靠性下降 |
@@ -34,7 +34,7 @@
   会话 RF-FY6PUP 里用户说「沉淀为技能」，而技能族当时只有"读手册"与"从 SkillHub 安装"，
   没有任何工具能**写**一份技能，模型只能把它降级成 `macro({op:"save"})`，最后两头落空
   （用户看到的现象就是「不能保存 skill 和宏」）。风险取最严一档（`high` + `alwaysRequireApproval`），
-  理由见 `lib/assistant/tool-metadata.js` 的条目注释。
+  理由见 `lib/application/agent/tool-metadata.js` 的条目注释。
 - **所有"可重构"档已执行完毕**。剩下只有：
   - 第 8 档（指针族 4→1）：**需取舍** —— 会削弱最高频工具 `click_element` 的签名；
   - 第 9 档（用户脚本 4→1）：**需取舍** —— 需要砍掉"内置用户脚本管理"这个能力面。
@@ -60,11 +60,11 @@
 
 | 位置 | 说明 |
 | --- | --- |
-| `lib/assistant/tool-schemas.js` | 写 schema（含 `op` / `fields` / `kind` 枚举与描述） |
-| `lib/assistant/tool-metadata.js` | 合并后的 `risk` / `requiresApproval` / `readOnly` / `route` |
-| `lib/assistant/tools.js` | `executeTool` 的 case：改为按 `op` 分派到**保留原实现**的内部函数（不重写行为） |
-| `lib/assistant/intent-router.js` | 系统提示里的工具清单与使用指引（引用最集中的文件之一） |
-| `lib/assistant/skill-defs.js` / `tool-guard.js` | 技能与完成校验里出现的工具名 |
+| `lib/application/agent/tool-schemas.js` | 写 schema（含 `op` / `fields` / `kind` 枚举与描述） |
+| `lib/application/agent/tool-metadata.js` | 合并后的 `risk` / `requiresApproval` / `readOnly` / `route` |
+| `lib/application/agent/tools.js` | `executeTool` 的 case：改为按 `op` 分派到**保留原实现**的内部函数（不重写行为） |
+| `lib/application/agent/intent-router.js` | 系统提示里的工具清单与使用指引（引用最集中的文件之一） |
+| `lib/application/agent/skill-defs.js` / `tool-guard.js` | 技能与完成校验里出现的工具名 |
 | `tests/registry.test.mjs` | 以 55 钉住的断言（改为新值） |
 | `tests/registry-fingerprint.test.mjs` | 指纹 `1ce25a3575f7a834` → 新值，并**写明原因** |
 | 宏 / 站点记忆的存量数据 | 旧宏里存的是旧工具名；`run_macro` 的回放白名单需能识别或明确拒绝旧名 |

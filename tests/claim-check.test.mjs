@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkCompletionClaim, buildDeterministicReflection } from '../lib/assistant/claim-check.ts';
+import { checkCompletionClaim, buildDeterministicReflection } from '../lib/application/agent/claim-check.ts';
 
 const base = {
   ranTools: ['get_page_snapshot', 'set_element_style'],

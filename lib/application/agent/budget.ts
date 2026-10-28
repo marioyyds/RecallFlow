@@ -1,5 +1,5 @@
 // Agent cost and side-effect budget policy.
-import { INTENTS } from '../../assistant/intent-router.ts';
+import { INTENTS } from './intent-router.ts';
 
 export const AGENT_BUDGET_DEFAULTS: Record<string, any> = Object.freeze({
   repeatThresholds: [3, 5, 8],

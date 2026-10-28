@@ -7,8 +7,8 @@
 // 期望值必须写死，写成 `=== 常量本身` 就成了恒真断言）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT_TUNING } from '../lib/assistant/context-tuning.ts';
-import { SESSION_MESSAGE_MAX_CHARS, SESSION_MAX_TAIL_MESSAGES } from '../lib/assistant/agent.ts';
+import { CONTEXT_TUNING } from '../lib/application/agent/context-tuning.ts';
+import { SESSION_MESSAGE_MAX_CHARS, SESSION_MAX_TAIL_MESSAGES } from '../lib/application/agent/agent.ts';
 
 test('阈值必须被字面量钉住（改一个数就会红）', () => {
   assert.equal(CONTEXT_TUNING.collapseTokens, 16000);

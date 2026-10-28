@@ -53,7 +53,7 @@
 
 - 内容脚本改为**打包产物**：源码在 `entries/content.js`（静态 import），由 `scripts/build-content.mjs` 用 esbuild 打成自包含的 `content.js`（18 模块 / 265KB）。
 - `manifest.json` 的 `web_accessible_resources` **整条删掉了 `lib/`** —— 任何一个网页都不再能枚举读取扩展源码（含 `run_javascript` 的黑名单实现，那等于公开了绕过地图）。
-- 期间修掉一个会**静默失效**的依赖：`chat.js` 的 `snapshotHandoff()` 原先用 `import(getURL('lib/page/debug-capture.js'))` 现取模块；打包后该 URL 不再指向可用模块，于是**交接包里的控制台错误快照会悄悄变空**，而"事后无法复现的错误"正是交接最关键的证据。已改为共享同一个已打包实例。
+- 期间修掉一个会**静默失效**的依赖：`chat.js` 的 `snapshotHandoff()` 原先用 `import(getURL('lib/ui/page/debug-capture.js'))` 现取模块；打包后该 URL 不再指向可用模块，于是**交接包里的控制台错误快照会悄悄变空**，而"事后无法复现的错误"正是交接最关键的证据。已改为共享同一个已打包实例。
 
 ## 四、批次 B-4b：断线恢复（完成，但过程值得单独记）
 
@@ -97,7 +97,7 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 
 | 指标 | 值 |
 | --- | --- |
-| 单元测试 | **1439 项 / 115 个文件**（视觉开关那一轮 +6；**目标 ⑤ 技能归纳**那一轮 +9 / −3 / +1 —— 见「九、目标 ⑤ 技能归纳」；付费墙技能口径 +1（`lib/assistant/skill-defs.js` 的 `paywall-boundary`，见 `docs/real-model-eval-log.md` 第八轮）、思考记录默认折叠 +2 —— 见下表的"思考记录"一行；**目标 ③ 收口** +13 —— 见 `docs/remaining-work.md` 第五节）|
+| 单元测试 | **1439 项 / 115 个文件**（视觉开关那一轮 +6；**目标 ⑤ 技能归纳**那一轮 +9 / −3 / +1 —— 见「九、目标 ⑤ 技能归纳」；付费墙技能口径 +1（`lib/application/agent/skill-defs.js` 的 `paywall-boundary`，见 `docs/real-model-eval-log.md` 第八轮）、思考记录默认折叠 +2 —— 见下表的"思考记录"一行；**目标 ③ 收口** +13 —— 见 `docs/remaining-work.md` 第五节）|
 | 真实浏览器 E2E | **45 个用例**（黄金任务 41 + 断线恢复 1 + 视觉两臂 3；开关已打开 ⇒ 跑的是开启臂，关闭臂按开关跳过），全通过 |
 | 独立脚本门禁 | 3 道（const 赋值 / 前缀稳定性 / 变异测试），全通过 |
 | 变异测试 | 5/5 条变异都被断言抓住（证明断言不是摆设） |
@@ -132,7 +132,7 @@ node scripts/tool-merge-impact.mjs   # C-4 合并成本数据（分组从注册�
 
 | 项 | 做了什么 | 验证 |
 | --- | --- | --- |
-| 删死代码 | `lib/assistant/skills.js` 的 `detectSkill()`（按 `x.keywords` 正则命中就注入正文）**在生产里没有调用方** ⇒ 连同只测它的 3 条用例一起删除；`x.keywords`/`x.intents` **保留**（SkillHub 格式往返 + 技能编辑页仍用）。新增 1 条门禁钉住"不许接回来"，并在源码注释里写清删因与"要接回必须先测量" | 全仓 grep（含 `integrations/`、`background.js`、字符串动态引用）+ 门禁 |
+| 删死代码 | `lib/application/agent/skills.js` 的 `detectSkill()`（按 `x.keywords` 正则命中就注入正文）**在生产里没有调用方** ⇒ 连同只测它的 3 条用例一起删除；`x.keywords`/`x.intents` **保留**（SkillHub 格式往返 + 技能编辑页仍用）。新增 1 条门禁钉住"不许接回来"，并在源码注释里写清删因与"要接回必须先测量" | 全仓 grep（含 `integrations/`、`background.js`、字符串动态引用）+ 门禁 |
 | 充实薄技能 | `remove-ads`(246→约 730 字符) / `clip-to-knowledge`(292→约 940) / `userscript-task`(357→约 800)：全部改成**编号步骤清单 + 关键动作单列 + 硬约束**；顺带修掉 `clip-to-knowledge` 声明**已不存在的工具**（`search_knowledge_base` / `get_entry` 已合并进 `knowledge_read`） | 新门禁 4 条 + `docs/skills-overview.md` 重新生成 |
 | 加牙齿 | 新增 `tests/skill-content-structure.test.mjs`（9 条）：① 每个技能要么有编号步骤清单、要么显式声明"本技能无步骤：<原因>"；② 孤儿理由必须够用（长度下限 + 禁空话）；③ 技能声明的工具必须真实存在（**覆盖孤儿**，补上契约门禁只查有剧本技能的盲区）；④ 生成物里不许混进 `' + '` 这类源码拼接碎片 | 两处"注入缺陷 ⇒ 必红"实测（纯散文技能、空话理由）|
 | 修门禁自身 | `scripts/gen-skills-overview.mjs` 的孤儿理由解析原来只认单行字符串 ⇒ 跨行拼接会把 `' + '` 印进生成物（比对门禁发现不了"两边一样的垃圾"）；改为按字面量拼接解析。另修 `tests/annotation-merge.test.mjs` 的**硬编码 900 字符**截断（充实文案反而把它弄红） | 解析器 + 生成物双重断言 |

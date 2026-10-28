@@ -14,12 +14,12 @@ import {
   CODE_ACCESS_TOOLS,
   handleCodeAccessTool,
   __resetPageWorldPreferenceForTests,
-} from '../lib/assistant/code-access-tools.ts';
-import { buildPageWorldExpression } from '../lib/assistant/tools.ts';
+} from '../lib/application/agent/code-access-tools.ts';
+import { buildPageWorldExpression } from '../lib/application/agent/tools.ts';
 import fs from 'node:fs';
 // 用**真实的** CSP 判定，而不是在测试里再写一个近似版：
 // 近似版会与实现漂移，而漂移的表现是"该重试的没重试"（或反过来无谓提权执行）。
-import { isCspEvalBlockError } from '../lib/shared/utils.ts';
+import { isCspEvalBlockError } from '../lib/shared/diagnostics.ts';
 
 function mkDeps(overrides = {}) {
   const calls = [];

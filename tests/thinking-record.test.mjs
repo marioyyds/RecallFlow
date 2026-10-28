@@ -13,10 +13,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { thinkLabelText } from '../lib/ui/panel/conversation-format.ts';
+import { StreamViewState } from '../lib/application/panel/stream-view-state.ts';
 
-const chatSrc = fs.readFileSync('lib/page/chat.ts', 'utf8');
+const chatSrc = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
 const agentSrc = fs.readFileSync('lib/application/agent/stream-step.ts', 'utf8');
-const cssSrc = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
+const cssSrc = fs.readFileSync('lib/ui/page/panel-css.ts', 'utf8');
 const bundle = fs.readFileSync('content.js', 'utf8');
 
 // ---------------------------------------------------------------- 后台侧
@@ -103,10 +104,10 @@ test('chat.js：正文/结束/进入工具步骤时都要给思考记录定稿',
 
 test('chat.js：思考记录的展开状态是**三态**，不是布尔', () => {
   // 与计划条同一个坑：若写成「布尔 + 初值」，「用户手动收起」会永远被下一次自动展开覆盖。
-  assert.match(chatSrc, /let thinkExpandedManual(?::[^=]+)? = null;/, '初值必须是 null（未表态）');
-  assert.match(chatSrc, /thinkExpandedManual === null/, '自动开合必须先判断用户是否表过态');
+  assert.equal(new StreamViewState().thinkExpandedManual, null, '初值必须是 null（未表态）');
+  assert.match(chatSrc, /streamView\.thinkExpandedManual === null/, '自动开合必须先判断用户是否表过态');
   // 用户一旦点过，就不再自动改
-  assert.match(chatSrc, /thinkExpandedManual = opening;/, '点击时应记录用户的选择');
+  assert.match(chatSrc, /streamView\.thinkExpandedManual = opening;/, '点击时应记录用户的选择');
 });
 
 test('chat.js：思考块**默认折叠** —— 进行中也是折叠的', () => {
@@ -129,7 +130,7 @@ test('chat.js：思考块**默认折叠** —— 进行中也是折叠的', () =
   // 新段（pushReasoning）与历史段（pendingParts 重建）都不传展开态 ⇒ 折叠
   const push = chatSrc.slice(chatSrc.indexOf('function pushReasoning('));
   const pushBody = push.slice(0, push.indexOf('\n  }'));
-  assert.match(pushBody, /mountThinkSegment\(thinkSeg\);/, '新段必须以折叠挂载（不传展开态）');
+  assert.match(pushBody, /mountThinkSegment\(streamView\.thinkSeg\);/, '新段必须以折叠挂载（不传展开态）');
 });
 
 test('chat.js：思考块标记**只有一处来源**（两条路共用，重复一份必然漂移）', () => {
@@ -298,7 +299,7 @@ test('chat.js：中断轮的"原因 + 已中断"说明必须可见（不能因�
 test('chat.js：停止的那一轮也要把执行计划留下（否则重开后计划条回退到更早一轮）', () => {
   const at = chatSrc.indexOf('async function interrupt(source: any)');
   const body = chatSrc.slice(at, at + 2600);
-  assert.match(body, /plan: lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
+  assert.match(body, /plan: streamView\.lastPlan\.slice\(\)/, '计划是"哪几步做完了"的唯一线索，停止路径也要记');
 });
 
 test('chat.js：流式重开面板时，flowEl 必须**先**指向新的 flow（否则思考挂到孤儿节点上）', () => {

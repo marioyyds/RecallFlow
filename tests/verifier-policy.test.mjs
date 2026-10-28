@@ -20,8 +20,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { shouldVerifyCompletion, resolveVerifyIntent } from '../lib/assistant/agent.ts';
-import { INTENTS } from '../lib/assistant/intent-router.ts';
+import { shouldVerifyCompletion, resolveVerifyIntent } from '../lib/application/agent/agent.ts';
+import { INTENTS } from '../lib/application/agent/intent-router.ts';
 
 const SETTINGS = { apiKey: 'k' };
 

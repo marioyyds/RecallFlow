@@ -1,5 +1,5 @@
 import type { KnowledgeBook } from '../../shared/store.ts';
-import type { AgentBudget, AgentSettings, McpServerStatus, PlanStep, RunCtx, TraceStep } from '../../assistant/types.ts';
+import type { AgentBudget, AgentSettings, McpServerStatus, PlanStep, RunCtx, TraceStep } from './types.ts';
 
 export interface AgentRunContextInput {
   book: KnowledgeBook;

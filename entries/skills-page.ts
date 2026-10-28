@@ -6,9 +6,9 @@ import {
   updateUserSkill,
   removeUserSkill,
   PAGE_SIZE,
-} from '../lib/assistant/skill-store.ts';
-import { mdToSkill, serializeSkillMd } from '../lib/assistant/skill-md.ts';
-import { TOOL_REGISTRY, TOOL_RENAME_MAP } from '../lib/assistant/tools.ts';
+} from '../lib/application/agent/skill-store.ts';
+import { mdToSkill, serializeSkillMd } from '../lib/application/agent/skill-md.ts';
+import { TOOL_REGISTRY, TOOL_RENAME_MAP } from '../lib/application/agent/tools.ts';
 
 const INTENT_LABEL = {
   browser_task: '浏览器操作',

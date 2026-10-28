@@ -17,8 +17,8 @@ import {
   buildMcpStatusSection,
   mcpCacheKey,
   mcpToolPrefix,
-} from '../lib/assistant/mcp.ts';
-import { detectIntent, resolveIntent } from '../lib/assistant/intent-router.ts';
+} from '../lib/application/agent/mcp.ts';
+import { detectIntent, resolveIntent } from '../lib/application/agent/intent-router.ts';
 
 const REAL_FETCH = globalThis.fetch;
 

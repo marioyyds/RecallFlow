@@ -47,7 +47,7 @@ globalThis.chrome = {
   },
 };
 
-const { runParallelBatch } = await import('../lib/assistant/agent.ts');
+const { runParallelBatch } = await import('../lib/application/agent/agent.ts');
 
 function makeOpts(overrides = {}) {
   return Object.assign(

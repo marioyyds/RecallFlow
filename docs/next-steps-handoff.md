@@ -52,7 +52,7 @@
 
 ### 2.4 C-1 核心（**已完成**）
 
-`lib/assistant/tools.js` 的 `executeTool` 已从**巨型 switch 变成分派注册表**：
+`lib/application/agent/tools.js` 的 `executeTool` 已从**巨型 switch 变成分派注册表**：
 
 ```js
 const TOOL_HANDLERS = new Map();            // 工具名 → 该族的 handler
@@ -105,14 +105,14 @@ export async function executeTool(name, args, ctx) {
 （见 `docs/change-delivery-summary.md` 第七节）。大块搬动会让这类问题累积到无法定位。
 
 **下一族候选**（按内聚度）：`complete_task` / `undo_last_action`（会话收尾类）、
-`get_ax_snapshot`（CDP 结构视图，单工具族），或按 `lib/page/commands.js` 的分组
+`get_ax_snapshot`（CDP 结构视图，单工具族），或按 `lib/ui/page/commands.js` 的分组
 把 `click_element` / `type_text` / `press_key` 等页面命令族一起搬。
 
 ### 2.5 我**没有**动、且已明确记录为设计决定的事
 
 - `agent-browser` 内置技能仍会通配匹配；
 - CDP 升级**不**在"动作无效果"时触发（否则会对真实页面重复点击）；
-- 写操作**不**因"当前含不可信页面内容"而自动加闸（理由写在 `lib/assistant/agent.js` 注释里：
+- 写操作**不**因"当前含不可信页面内容"而自动加闸（理由写在 `lib/application/agent/agent.js` 注释里：
   不可预测的审批会训练用户无脑点同意）；
 - 桥接 WS 的 token 仍在查询串里。
 
@@ -176,7 +176,7 @@ npm run test:e2e         # 真实 Chromium，44 个用例（三阶段：黄金�
 或"看起来失败的点击"累积触发工具摘除（`click_element` 被移出工具集后，第二步点击根本没发生）。
 
 **复现入口**：夹具页在 `/dialog`；`handle_dialog` 的实现见
-`lib/assistant/target-manager.js`（`getPendingDialogs` / `handleDialog`）与
-`lib/assistant/permission-tools.js`。**注意**：调试时不要用 PowerShell 改写源文件
+`lib/application/agent/target-manager.js`（`getPendingDialogs` / `handleDialog`）与
+`lib/application/agent/permission-tools.js`。**注意**：调试时不要用 PowerShell 改写源文件
 （`Get-Content`/`Set-Content` 会破坏 UTF-8，本轮实测把 `golden.spec.mjs` 写坏过一次，
 已从 git 恢复）。

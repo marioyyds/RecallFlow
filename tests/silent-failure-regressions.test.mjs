@@ -13,22 +13,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { validateToolCall, TOOL_REGISTRY, executeTool, getToolMetadata, buildActionVerification, observedChange } from '../lib/assistant/tools.ts';
+import { validateToolCall, TOOL_REGISTRY, executeTool, getToolMetadata, buildActionVerification, observedChange } from '../lib/application/agent/tools.ts';
 // decodeBuffer 随 web_search 的解析逻辑一起搬到了 net-parse.js（见该文件的搬运说明）。
-import { decodeBuffer } from '../lib/assistant/net-parse.ts';
-import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/assistant/agent.ts';
+import { decodeBuffer } from '../lib/application/agent/net-parse.ts';
+import { toolNeedsApproval, evaluateLiveness, buildPartialStep } from '../lib/application/agent/agent.ts';
 import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.ts';
 import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.ts';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.ts';
-import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.ts';
-import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.ts';
-import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
-import { toRuntimeSkill } from '../lib/assistant/skill-md.ts';
+import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/application/page/citation.ts';
+import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/application/agent/initial-messages.ts';
+import { SKILL_REGISTRY } from '../lib/application/agent/skill-defs.ts';
+import { toRuntimeSkill } from '../lib/application/agent/skill-md.ts';
 
-// 宏存储键（与 lib/assistant/macro-store.js 的 KEY 一致）
+// 宏存储键（与 lib/application/agent/macro-store.js 的 KEY 一致）
 const MACRO_KEY = 'recallflow.macros.v1';
 
 // ---------------- decodeBuffer ----------------
@@ -359,7 +359,7 @@ test('observedChange：指纹相同 → unchanged；缺指纹 → unobservable�
 test('CDP 路径不得再硬编码 hadEffect/verified/changed 都为 true', () => {
   // 原先 7 处 CDP 返回体写死 `hadEffect:true` + `changed:true`，而同一条返回里
   // 可能带一个 changed:false 的 verification（自相矛盾），且会让卡死检测永远认为在推进。
-  const src = readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/application/agent/tools.ts', import.meta.url), 'utf8');
   const hardcoded = src.match(/verification:\s*\{\s*executed:\s*true,\s*verified:\s*true,\s*changed:\s*true/g) || [];
   assert.deepEqual(hardcoded, [], '仍有硬编码 verified/changed 全 true 的验证字段：' + hardcoded.length + ' 处');
 });
@@ -369,7 +369,7 @@ test('不得再声称「已验证」却同时说「没有变化」（语义矛�
   // 它等于宣称「我验证过了」，而实际什么都没观测 —— 会让卡死检测与完成校验双双失准。
   // 注意：buildActionVerification('unchanged') 返回的同样是 verified:true + changed:false，
   // 但那是**真实观测到的结论**（指纹相同），因此下面只针对带固定文案的硬编码字面量。
-  const src = readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/application/agent/tools.ts', import.meta.url), 'utf8');
   const contradictory = src.match(/verified:\s*true,\s*changed:\s*false,\s*reason:\s*'[^']+'/g) || [];
   assert.deepEqual(
     contradictory,
@@ -595,7 +595,7 @@ test('evaluateLiveness：上限为 0/负数/非数字表示不启用（沿用高
 });
 
 test('存活看门狗必须已接入主循环（不能只定义不调用）', () => {
-  const src = readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/application/agent/agent.ts', import.meta.url), 'utf8');
   assert.match(src, /const liveness = evaluateLiveness\(/, '主循环必须调用看门狗');
   assert.match(src, /if \(liveness\.stalled\)/, '必须对判定结果做处理');
   assert.match(src, /if \(progress\) lastProgressIter = iter/, '有进展必须重置基准');
@@ -631,13 +631,13 @@ test('元素收集的排除名单不得包含任何用户交互控件', () => {
 test('元素定位路径不得再用正文抽取名单做候选过滤', () => {
   // 上述缺陷的**具体成因**就是这一行：`el.closest(PAGE_TEXT_EXCLUDE)` 会把按钮挡在
   // role/name 匹配之前。这里确保它不会以任何形式回来。
-  for (const rel of ['../lib/page/commands.ts', '../lib/page/page-text.ts']) {
+  for (const rel of ['../lib/ui/page/commands.ts', '../lib/application/page/page-text.ts']) {
     const src = readFileSync(new URL(rel, import.meta.url), 'utf8');
     const bad = src.match(/closest\(\s*PAGE_TEXT_EXCLUDE\s*\)/g) || [];
     assert.deepEqual(bad, [], rel + ' 里仍有 closest(PAGE_TEXT_EXCLUDE) 做元素过滤（应改用 isElementCollectExcluded）');
   }
   // page-text.js 的可交互元素收集也必须走收集名单。
-  const pt = readFileSync(new URL('../lib/page/page-text.ts', import.meta.url), 'utf8');
+  const pt = readFileSync(new URL('../lib/application/page/page-text.ts', import.meta.url), 'utf8');
   assert.match(pt, /isElementCollectExcluded\(el\)/, 'isVisibleElement 应使用元素收集名单');
 });
 
@@ -706,7 +706,7 @@ test('技能触发的"死路"不许再被接回来（含它的门禁也不许复
   // 这条与 skill-common-discipline.test.mjs 同型：钉住一个**反直觉的删除决定**。
   // 有人若"顺手"把关键词匹配加回运行时（无论是恢复 detectSkill，还是换个名字重写一遍），
   // 那都是模型可见内容的改动 ⇒ 必须先按 docs/regression-red-flag.md 测量，而不是直接合。
-  const src = readFileSync(new URL('../lib/assistant/skills.ts', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../lib/application/agent/skills.ts', import.meta.url), 'utf8');
   const live = src.split('\n').filter((l) => !l.trim().startsWith('//'));
   assert.ok(
     !live.some((l) => /export\s+(async\s+)?function\s+detectSkill/.test(l)),

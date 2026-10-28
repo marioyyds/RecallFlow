@@ -1,6 +1,6 @@
 // Durable agent history compression and provider-safe tool pairing.
-import { CONTEXT_TUNING } from '../../assistant/context-tuning.ts';
-import { formatTailKeptTruncationNotice } from '../../assistant/context.ts';
+import { CONTEXT_TUNING } from './context-tuning.ts';
+import { formatTailKeptTruncationNotice } from './context.ts';
 
 export const SESSION_MESSAGE_MAX_CHARS = CONTEXT_TUNING.sessionMessageMaxChars;
 export const SESSION_MAX_TAIL_MESSAGES = CONTEXT_TUNING.sessionMaxTailMessages;

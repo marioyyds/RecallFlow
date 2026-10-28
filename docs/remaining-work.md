@@ -23,10 +23,10 @@
 
 | # | 事项 | 状态 | 位置 |
 | --- | --- | --- | --- |
-| 1 | 数组 content 的历史不再被**静默丢弃**（归一化为文本 + 说明图片有没有传下去）| ✅ | `lib/assistant/context.js` 的 `flattenHistoryContent` |
+| 1 | 数组 content 的历史不再被**静默丢弃**（归一化为文本 + 说明图片有没有传下去）| ✅ | `lib/application/agent/context.js` 的 `flattenHistoryContent` |
 | 2 | **开关**（单一事实来源）+ 文案函数 | ✅ **已打开** | `lib/shared/utils.js` 的 `VISION_ENABLED` / `visionLimitationNote` |
-| 3 | 多模态消息装配 + 预算（张数 / 单片体积 / **丢弃必说明**）| ✅ | `lib/assistant/vision.js` |
-| 4 | **接线**：截图在 tool 消息之后作为**追加的 user 消息**进入上下文 | ✅ | `lib/assistant/agent.js`（`messages.push({role:'tool'…})` 之后）|
+| 3 | 多模态消息装配 + 预算（张数 / 单片体积 / **丢弃必说明**）| ✅ | `lib/application/agent/vision.js` |
+| 4 | **接线**：截图在 tool 消息之后作为**追加的 user 消息**进入上下文 | ✅ | `lib/application/agent/agent.js`（`messages.push({role:'tool'…})` 之后）|
 | 5 | "你看不到图像"文案条件化（**四处**，整句二选一）| ✅ 关闭侧与 HEAD 逐字节相同（脚本可证）| `tool-schemas.js` / `skill-defs.js` / `utils.js` / `context.js` |
 | 6 | **打开开关**（`VISION_ENABLED = true`）| ✅ **本轮完成** | 见下「第 6 步怎么做的」|
 | 7 | 对照门禁：关闭时请求里**不得**有 `image_url`；开启时**应当**有 | ✅ | `tests/e2e/vision-switch.spec.mjs`（按常量实际值选臂）|
@@ -58,7 +58,7 @@
      ⇒ 差异块**恰好 4 处**（`take_screenshot` 说明、readability-fix 技能、`formatScreenshotSummary`、
      `visionLimitationNote` 默认整句），前三处 + 这一处**都已经条件化** ⇒ 没有第五处 ✓
    - 再扫源码里的**字符串字面量**（同时命中「图像」与「可见性主张」）：命中 8 条，逐条判"是否模型可见 / 是否随开关换档"
-     ⇒ 找出**第 4 处接线点**：`lib/assistant/context.js` 的 `flattenHistoryContent`
+     ⇒ 找出**第 4 处接线点**：`lib/application/agent/context.js` 的 `flattenHistoryContent`
      （历史回放把图片降级为 `[图片]` 后补一句"当前**未把图片传给模型**"）。
      ⚠ 这一处**不会**随开关翻转而改变输出（它原先根本没读开关）⇒ 只有"逐条读模型可见文本"才发现它 ✗
    - 判定为"不是假话、不需改"的两条（也写下来，免得下一个人重查）：
@@ -99,7 +99,7 @@
 
 ⚠ **如实标注（不许假装可配置）**：`ctx.visionBudget` **至今没有任何地方赋值**（`agent.js` 只有一处读，
 恒为 `undefined`）⇒ 生产实际生效的**只有 `DEFAULT_VISION_BUDGET`**，**不可配置**。
-这一点写在 `lib/assistant/vision.js` 的常量注释里，并有门禁用例钉住
+这一点写在 `lib/application/agent/vision.js` 的常量注释里，并有门禁用例钉住
 （若哪天 `agent.js` 里出现 `ctx.visionBudget = …`，那条用例会红，逼人同步文档）✓
 
 ### ⬜ 待决项（本轮**刻意没做**，单列出来）
@@ -132,7 +132,7 @@
 | 失败 | 根因 | 证据 |
 | --- | --- | --- |
 | `能力清单必须与产物一致` | 工作区里 `docs/capability-inventory.md` 有一处**未提交的他人改动**（把 `form-validation` 回执判据 4→0、`video-playback-verify` 页面判据 8→11；合计 101/64→104/65），而产物推导出的仍是 101/64 | 只读渲染该清单并与磁盘文件逐行比对 ⇒ 不同行 = **3 行**，全部是上面那两行 + 合计行；`git status` 显示该文件的修改**不是**本轮产生的（本轮未碰 docs 下任何未跟踪/已改文件）|
-| `清单必须与产物一致（改了技能或剧本…）` + 它的牙齿用例 | `scripts/gen-skills-overview.mjs` 解析 `ORPHAN_SKILL_REASONS` 的正则要求 `',\n`，而本工作副本 `lib/assistant/skill-defs.js` 是 **CRLF**（`core.autocrlf=true`）⇒ 9 条原因解析出 **0** 条 ⇒ 文档里那份原因表被判"与产物不一致" | 同一脚本在 **HEAD 解出的旧树上跑，得到完全相同的 9 行差异**；LF 化后解析 9 条 ✓。`git status` 显示 `skill-defs.js` / `playbooks.mjs` / 该生成脚本本轮**一行未改** ⇒ 与本轮无关 |
+| `清单必须与产物一致（改了技能或剧本…）` + 它的牙齿用例 | `scripts/gen-skills-overview.mjs` 解析 `ORPHAN_SKILL_REASONS` 的正则要求 `',\n`，而本工作副本 `lib/application/agent/skill-defs.js` 是 **CRLF**（`core.autocrlf=true`）⇒ 9 条原因解析出 **0** 条 ⇒ 文档里那份原因表被判"与产物不一致" | 同一脚本在 **HEAD 解出的旧树上跑，得到完全相同的 9 行差异**；LF 化后解析 9 条 ✓。`git status` 显示 `skill-defs.js` / `playbooks.mjs` / 该生成脚本本轮**一行未改** ⇒ 与本轮无关 |
 
 ⇒ 这两处若要修，是**独立的一轮**（修生成器的行尾健壮性 / 让同事的清单改动与产物对齐），
 **本轮刻意不碰**（纪律：不顺手重构无关代码）。本轮自己的用例（含视觉 47 条）**全绿** ✓
@@ -185,7 +185,7 @@
 而是**把现有文案原样包起来** ✓：
 
 ```js
-// 例：lib/assistant/tool-schemas.js 的截图工具说明
+// 例：lib/application/agent/tool-schemas.js 的截图工具说明
 VISION_ENABLED ? '' : '<这里原样保留当时那段"你看不到图像"的文本>'
 ```
 
@@ -261,7 +261,7 @@ VISION_ENABLED ? '' : '<这里原样保留当时那段"你看不到图像"的文
 | attach 缓存的是**带超时**的 promise | `lib/backend/cdp.js:48` 缓存 `task`（= `withTimeout(...)`），注释在 `:45-47` 写明"缓存原始 promise 会让这个标签页再也用不了 CDP" | ✓ |
 | 失败清缓存（无毒化） | `lib/backend/cdp.js:54-58`（`catch` 里 `attached.delete(id)`）；`onDetach` 也清（`:19-23`） | ✓ |
 | **✗ 漏网的一条：`detach`** | 原 `detach()` 把 `chrome.debugger.detach` 的回调直接包进 `new Promise`，回调不触发 ⇒ **永不 settle** | **本轮补**：`lib/backend/cdp.js:72` 现在走 `withTimeout(...).catch(()=>{})`（解绑是尽力而为，超时吞掉但不许挂住） |
-| 截图阶梯受**总预算**约束 | 面板侧：`lib/assistant/screenshot-tool.js:69` `captureWithLadder`（预算 → 剩余预算下传 `timeoutMs`），默认 `:28` `DEFAULT_SCREENSHOT_BUDGET_MS = 12000`，`takeScreenshot` 的预算入口 `:124`；`Page.getLayoutMetrics` 共用同一份 deadline（`:148`） | ✓（12s < 15s） |
+| 截图阶梯受**总预算**约束 | 面板侧：`lib/application/agent/screenshot-tool.js:69` `captureWithLadder`（预算 → 剩余预算下传 `timeoutMs`），默认 `:28` `DEFAULT_SCREENSHOT_BUDGET_MS = 12000`，`takeScreenshot` 的预算入口 `:124`；`Page.getLayoutMetrics` 共用同一份 deadline（`:148`） | ✓（12s < 15s） |
 | **✗ 桥接侧完全没有预算** | `lib/bridge/relay.js:234` `screenshotCapture` **自己抄了一份阶梯**：无 deadline、每档默认 8s（最坏 24s+），失败一律报"无法附加" | **本轮补**：`:263` 改用共享的 `captureWithLadder`，失败按 `:276` 的 `shot.timedOut` 分两种措辞 |
 | 超时 vs 附加失败**分开报** | 面板侧 `screenshot-tool.js` 的成功/失败分支；桥接侧同上 | ✓（两处都有门禁） |
 
@@ -291,14 +291,14 @@ node --test tests/cdp-timeout.test.mjs
 
 | 产物 | 谁生成 | 谁读 | file:line |
 | --- | --- | --- | --- |
-| **进模型上下文**：控制台/网络数据的省略标记 | 页面主世界的裸脚本 | `page_health` / `read_console` 的工具结果 → 模型消息 | `lib/page/debug-hook.js:92`（数组元素）、`:103`（对象键）；取数链：`lib/page/debug-capture.js` → `lib/page/chat.js:1014-1021` → `content.js:5356-5384` → `lib/bridge/relay.js:187` → MCP `page_health` |
-| **渲染器产物**（人看 / 导出 / 粘贴给别人） | 导出与面板渲染器 | 导出记录、面板持久化 —— **不进本次模型的请求** | `lib/page/transcript.js:247` `previewArgsJson`、`:133` `clipPart`、`:279` `toolLine`；调用方 `lib/page/chat.js:922/937` |
+| **进模型上下文**：控制台/网络数据的省略标记 | 页面主世界的裸脚本 | `page_health` / `read_console` 的工具结果 → 模型消息 | `lib/page/debug-hook.js:92`（数组元素）、`:103`（对象键）；取数链：`lib/ui/page/debug-capture.js` → `lib/ui/page/chat.js:1014-1021` → `content.js:5356-5384` → `lib/bridge/relay.js:187` → MCP `page_health` |
+| **渲染器产物**（人看 / 导出 / 粘贴给别人） | 导出与面板渲染器 | 导出记录、面板持久化 —— **不进本次模型的请求** | `lib/ui/page/transcript.js:247` `previewArgsJson`、`:133` `clipPart`、`:279` `toolLine`；调用方 `lib/ui/page/chat.js:922/937` |
 
 | 判据 | 现状 | 结论 |
 | --- | --- | --- |
-| 省略标记用可辨形态（不是 `…共 N 项`） | `lib/page/transcript.js:226` `OMIT_MARK_START = '⟨…省略 '` / `formatOmittedItems`；debug-hook 用同一字面量（`:92`） | ✓ |
+| 省略标记用可辨形态（不是 `…共 N 项`） | `lib/ui/page/transcript.js:226` `OMIT_MARK_START = '⟨…省略 '` / `formatOmittedItems`；debug-hook 用同一字面量（`:92`） | ✓ |
 | 数组元素形态不与数据同形 | 上面两处 | ✓ |
-| **✗ 键名仍与数据同形**：`clipPart` 与 `previewArgsJson` 的退化分支原先写 `{ '…': … }`（键名与真实字段名同形） | 旧形态在 `lib/page/transcript.js` 的 `clipPart`（现在 `:156`）与 `previewArgsJson` 退化分支（现在 `:271`）—— 改动前两处都是 `'…'` 键 | **本轮补**：新增 `:239` `OMIT_ARGS_KEY = '⟨…省略参数⟩'`，两处都改用它；`debug-hook.js:103` 早已是 `⟨…省略字段⟩` |
+| **✗ 键名仍与数据同形**：`clipPart` 与 `previewArgsJson` 的退化分支原先写 `{ '…': … }`（键名与真实字段名同形） | 旧形态在 `lib/ui/page/transcript.js` 的 `clipPart`（现在 `:156`）与 `previewArgsJson` 退化分支（现在 `:271`）—— 改动前两处都是 `'…'` 键 | **本轮补**：新增 `:239` `OMIT_ARGS_KEY = '⟨…省略参数⟩'`，两处都改用它；`debug-hook.js:103` 早已是 `⟨…省略字段⟩` |
 | 门禁是否**两边都扫** | 旧 `tests/omit-mark.test.mjs` ⑤ **只正则扫 debug-hook.js** ⇒ transcript.js 那个坑一直没被管 | **本轮补**：⑤ 现在同时扫两个文件；新增 ⑥（行为面：键名必须是 `OMIT_ARGS_KEY`、要说"取不回"）、⑦（正常参数逐字节不变） |
 
 **实跑**：
@@ -319,21 +319,21 @@ node --test tests/omit-mark.test.mjs
 
 | 截断路径 | 现状（file:line） | 判据 |
 | --- | --- | --- |
-| 工具结果 > 6000 字符 | `lib/assistant/agent.js:1734` 用 `formatTruncationNotice(res.result.length, rid)`（格式单一来源 `:327`），全文进 `ctx.resultStore` | ✓ 有 id=res-N + 用法 |
-| 历史折叠（`collapseOldToolResults`） | `lib/assistant/context.js:261` `buildCollapsed`：认得出整条通知就**保住 id**（`id=…，可用 expand_result(id=…) 分段取回`），认不出就明说"**中段内容已省略且取不回原文**，请重新调用产生它的工具" | ✓ 两条分歧都有措辞 |
+| 工具结果 > 6000 字符 | `lib/application/agent/agent.js:1734` 用 `formatTruncationNotice(res.result.length, rid)`（格式单一来源 `:327`），全文进 `ctx.resultStore` | ✓ 有 id=res-N + 用法 |
+| 历史折叠（`collapseOldToolResults`） | `lib/application/agent/context.js:261` `buildCollapsed`：认得出整条通知就**保住 id**（`id=…，可用 expand_result(id=…) 分段取回`），认不出就明说"**中段内容已省略且取不回原文**，请重新调用产生它的工具" | ✓ 两条分歧都有措辞 |
 | handoff 轨迹上限（`MAX_TOOL_TRAIL=60` / `MAX_TRAIL_RESULT_CHARS=600`） | `lib/shared/handoff.js:30/:32`；`buildHandoffRecord` 写 `trailTotal/trailStored/trailOmitted`（`:330-332`），全量另存一个 key（`:170` `MAX_TRAIL_FULL=200`），MCP 侧把三个数的语义写给调用方（`integrations/opencode/recallflow-mcp/index.js:930`、`:1085-1086`） | ✓ 可恢复的步数 vs 取不回的步数分开 |
-| 快照体积预算（`omittedBySize`） | 生产 `lib/page/page-text.js:606-617`；提示语 `lib/assistant/page-read-tools.js:168-182`（"另有 N 个…，需要它们时先 scroll_page…"） | ✓ |
-| 单图超预算（视觉） | `lib/assistant/vision.js:138-143`：全部被跳过时仍产出一条说明消息 | ✓ |
-| **✗ 历史单条超长（`normalizeHistory`）** | `lib/assistant/context.js:219` 原来是 `content.slice(0, maxChars)`——**一个字节的说明都没有** | **本轮补**：`:223` 追加 `formatHistoryTruncationNotice`（共 N 字符 / 只送入前 M / **被截掉的部分取不回原文**） |
+| 快照体积预算（`omittedBySize`） | 生产 `lib/application/page/page-text.js:606-617`；提示语 `lib/application/agent/page-read-tools.js:168-182`（"另有 N 个…，需要它们时先 scroll_page…"） | ✓ |
+| 单图超预算（视觉） | `lib/application/agent/vision.js:138-143`：全部被跳过时仍产出一条说明消息 | ✓ |
+| **✗ 历史单条超长（`normalizeHistory`）** | `lib/application/agent/context.js:219` 原来是 `content.slice(0, maxChars)`——**一个字节的说明都没有** | **本轮补**：`:223` 追加 `formatHistoryTruncationNotice`（共 N 字符 / 只送入前 M / **被截掉的部分取不回原文**） |
 | **✗ 上一轮执行摘要超长** | 同一处 `toolSummary.slice(0, 400)` 静默 | **本轮补**：`:225-233` 追加 `⟨…摘要已截断，共 N 字符⟩`（上限改由 `:99` `HISTORY_SUMMARY_MAX_CHARS` 单一来源） |
-| **✗ 更早历史被丢弃（两种上限）** | `noticeOnTruncation` 这个开关**生产从未打开**（`git grep noticeOnTruncation` 旧结果只有测试），且"条数上限"那条路连置位点都没有（循环条件里退出） | **本轮补**：`lib/assistant/context.js:205`+`:211` 两种上限都置 `dropped`；`lib/assistant/agent.js:210` 与 `lib/shared/rag.js:213` 显式传 `noticeOnTruncation: true` |
-| **✗ 指令去重判据的字面量耦合** | `agent.js` 原判据 `last.length === 3000`：一旦历史被截断（长度变了）就静默失效 ⇒ 当前指令在请求里出现两次 | **本轮补**：抽成 `lib/assistant/context.js:160` `isDuplicateInstruction`（先剥通知再比，`:97` `HISTORY_MAX_CHARS` 单一来源），`lib/assistant/agent.js:220` 调用它 |
+| **✗ 更早历史被丢弃（两种上限）** | `noticeOnTruncation` 这个开关**生产从未打开**（`git grep noticeOnTruncation` 旧结果只有测试），且"条数上限"那条路连置位点都没有（循环条件里退出） | **本轮补**：`lib/application/agent/context.js:205`+`:211` 两种上限都置 `dropped`；`lib/application/agent/agent.js:210` 与 `lib/shared/rag.js:213` 显式传 `noticeOnTruncation: true` |
+| **✗ 指令去重判据的字面量耦合** | `agent.js` 原判据 `last.length === 3000`：一旦历史被截断（长度变了）就静默失效 ⇒ 当前指令在请求里出现两次 | **本轮补**：抽成 `lib/application/agent/context.js:160` `isDuplicateInstruction`（先剥通知再比，`:97` `HISTORY_MAX_CHARS` 单一来源），`lib/application/agent/agent.js:220` 调用它 |
 | **✗ 桥接 `browser_read` 的截断** | `lib/bridge/relay.js:396` `truncateEvidenceText` 只说"已截断" | **本轮补**：说明改成"**被截掉的部分无法用 id 取回**，需要时请用更大的 maxChars 重新调用 browser_read" |
-| **✗ 落盘快照单条超长（`compactSessionMessages`）** | `lib/assistant/agent.js:168` 原为 `message.content.slice(-12000)`——静默留尾 | **本轮补**：`:186-193` 前置 `formatTailKeptTruncationNotice`（`lib/assistant/context.js` 新增），说明"共 N 字符 / 只保留末尾 / 前半段取不回"；上限改由 `:165` `SESSION_MESSAGE_MAX_CHARS` 单一来源 |
+| **✗ 落盘快照单条超长（`compactSessionMessages`）** | `lib/application/agent/agent.js:168` 原为 `message.content.slice(-12000)`——静默留尾 | **本轮补**：`:186-193` 前置 `formatTailKeptTruncationNotice`（`lib/application/agent/context.js` 新增），说明"共 N 字符 / 只保留末尾 / 前半段取不回"；上限改由 `:165` `SESSION_MESSAGE_MAX_CHARS` 单一来源 |
 | **✗ 落盘快照丢整条消息** | 同一函数 `source.filter(…).slice(-39)`：超出 39 条的历史**静默消失** | **本轮补**：`:175-182` 补一条"更早的 N 条消息未随快照保存，取不回原文"的说明消息 |
 
 > ⚠ 为什么落盘快照也算 A5：它在"继续上一次运行"时被**原样恢复成发给模型的 messages**
->（`lib/assistant/agent.js:1279-1283`）。快照里的静默截断 = 模型看到一段没有开头的文本，
+>（`lib/application/agent/agent.js:1279-1283`）。快照里的静默截断 = 模型看到一段没有开头的文本，
 > 却以为那就是全部对话 —— 与 `normalizeHistory` 那条是同一个错，只是发生在恢复路径上。
 
 **实跑**：
@@ -361,7 +361,7 @@ node --test tests/context.test.mjs tests/agent-prompt.test.mjs tests/silent-fail
    ⚠ **不要把它当成"已测量"** ✗
 2. **`noticeOnTruncation` 打开后的前缀缓存影响没有实测**：那条提示会作为**第一条**历史消息出现，
    首次出现时整段前缀失效一次（与本仓库已知的折叠行为同类）。没有测过它的成本。
-3. **`sanitizeToolPairing` 仍会静默剔除"配对不全"的消息**（`lib/assistant/agent.js:147-159`）：
+3. **`sanitizeToolPairing` 仍会静默剔除"配对不全"的消息**（`lib/application/agent/agent.js:147-159`）：
    这是协议硬要求（悬空的 tool 结果会让请求非法），但它剔掉的**内容**没有留痕。
    本轮**没有**动它（要动得先想清"合法请求"与"留痕"如何兼得）。
 4. 历史截断的说明里写的是"请让用户重新说明 / 改用工具重新读取页面"——

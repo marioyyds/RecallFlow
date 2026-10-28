@@ -150,7 +150,7 @@ test('扫描范围覆盖根目录文件与 .mjs（原先只有 lib/ 与 .js，�
     'skills-page.js',
     'userscripts.js',
     'lib/userscript/runner.js',
-    // TITA-86（Batch 5）：debug-hook 也变成了入口产物（源码 `lib/page/debug-hook.ts`）。
+    // TITA-86（Batch 5）：debug-hook 也变成了入口产物（源码 `lib/adapters/page/debug-hook.ts`）。
     'lib/page/debug-hook.js',
   ]) {
     assert.ok(!files.includes(artifact), '入口产物不应被扫描：' + artifact);

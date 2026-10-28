@@ -1,4 +1,4 @@
-import type { AgentSettings } from '../../assistant/types.ts';
+import type { AgentSettings } from './types.ts';
 import type { KnowledgeBook } from '../../shared/store.ts';
 
 export interface AgentEventPort {

@@ -6,7 +6,7 @@ import {
   applyRunEvent,
   createRunState,
   runStateToAssistantMessage,
-} from '../lib/assistant/run-hub.ts';
+} from '../lib/application/agent/run-hub.ts';
 
 function state() {
   return createRunState({

@@ -1,4 +1,4 @@
-// lib/page/chat.ts 的**第一次真 import**。
+// lib/ui/page/chat.ts 的**第一次真 import**。
 //
 // 背景：这个文件有 4900 行，12 个测试文件提到它，但此前**没有一个真的 import 过** ——
 // 全是 `readFileSync` + 正则。正则能钉住"某句话还在文件里"，却完全不知道代码跑起来会不会抛。
@@ -26,7 +26,7 @@ let seq = 0;
 async function boot(chromeOpts = {}) {
   const dom = installDomStub();
   const prevChrome = installChrome(chromeOpts);
-  const mod = await import('../lib/page/chat.ts?case=' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=' + (seq += 1));
   mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
@@ -139,7 +139,7 @@ test('审批面板必须覆盖全部 5 个类别（少一个 = 那类工具永�
     assert.deepEqual(
       values.slice().sort(),
       ['browser', 'commands', 'edit', 'mcp', 'read'],
-      'UI 的 data-policy 必须与审批策略的 5 个类别一一对应（见 lib/assistant/approval-policy.js）'
+      'UI 的 data-policy 必须与审批策略的 5 个类别一一对应（见 lib/application/agent/approval-policy.js）'
     );
     assert.ok(panel.querySelector('[data-autopilot]'), '「自动驾驶」总开关必须在');
   } finally {

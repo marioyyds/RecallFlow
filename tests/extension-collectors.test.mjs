@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { collectElementSource, verifyPageTargets, collectPageDiagnostics } from '../lib/assistant/tools.ts';
+import { collectElementSource, verifyPageTargets, collectPageDiagnostics } from '../lib/application/agent/tools.ts';
 
 // 安装 chrome.tabs 桩；handler 决定每个消息返回什么。
 function installTabs(handler) {

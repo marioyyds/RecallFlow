@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
 const TOTAL = TOOL_REGISTRY.length; // 变更工具集时这里会自动跟随
 
@@ -30,7 +30,7 @@ const PLAN = [
   // 第 4 档**只合并了同权限的读三件套**（search/list/get → knowledge_read）：
   // 51 → 49。add_entry（write）与 remove_entry（destructive）保持独立 ——
   // 原方案写"5→2"，但那需要把读与 destructive 合到一起，会让每次读取都被强制审批
-  //（工具级审批看不到 args，见 lib/assistant/agent.js）。
+  //（工具级审批看不到 args，见 lib/application/agent/agent.js）。
   { id: 4, label: '知识库（只读三件套）', from: ['knowledge_read'], to: 1, kind: 'merge', merged: true },
   { id: 4.1, label: '知识库（写/删）', from: ['add_entry', 'remove_entry'], to: 2, kind: 'blocked' },
   { id: 5, label: '宏', from: ['macro'], to: 1, kind: 'merge', merged: true },
@@ -87,7 +87,7 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   // C-1 拆分后，三个页面读取工具共用一个 deps 对象（其中含 cdpAllowed），
   // 于是 dispatch case 里**必然**出现 `cdpAllowed` 字样 —— 扫 dispatch 会得出相反结论。
   // 本轮就踩过这个坑：切片还一度跨进相邻 case，读到邻居的代码。
-  const readSrc = fs.readFileSync(new URL('../lib/assistant/page-read-tools.ts', import.meta.url), 'utf8');
+  const readSrc = fs.readFileSync(new URL('../lib/application/agent/page-read-tools.ts', import.meta.url), 'utf8');
   const fnBody = (name) => {
     const start = readSrc.indexOf('export async function ' + name + '(');
     if (start < 0) return '';
@@ -105,7 +105,7 @@ test('方案的数字自洽：已合并的已生效，未做的按预估累计',
   // get_ax_snapshot 则**依赖** CDP（它读的是可访问性树）。
   // 断言同样落在**实现**上（./code-access-tools.js），而不是 tools.js 的分派注册表 ——
   // C-1 完成后那里已没有 case，扫它只会切到空串（正是本轮踩过的坑）。
-  const codeSrc = fs.readFileSync(new URL('../lib/assistant/code-access-tools.ts', import.meta.url), 'utf8');
+  const codeSrc = fs.readFileSync(new URL('../lib/application/agent/code-access-tools.ts', import.meta.url), 'utf8');
   const axImpl = codeSrc.slice(codeSrc.indexOf('export async function getAxSnapshot('));
   assert.match(axImpl.slice(0, 400), /cdpAllowed/, 'get_ax_snapshot 的实现依赖 CDP（合并前必须知道这一点）');
 });
@@ -156,8 +156,8 @@ test('宏合并必须保住"运行期白名单"这条防线（有真实提权先
   // 宏组合并成 macro(op) 后，这条防线**必须按 op=run 保留**：
   //   · op=save 要审批（写操作）
   //   · op=run 要过 REPLAYABLE_TOOLS 白名单（否则历史宏能执行任意工具）
-  // 实现已移到 lib/assistant/macros.js —— 断言跟着实现走（否则一次纯搬运就让门禁失效）。
-  const src = fs.readFileSync(new URL('../lib/assistant/macros.ts', import.meta.url), 'utf8');
+  // 实现已移到 lib/application/agent/macros.js —— 断言跟着实现走（否则一次纯搬运就让门禁失效）。
+  const src = fs.readFileSync(new URL('../lib/application/agent/macros.ts', import.meta.url), 'utf8');
   assert.match(src, /export const REPLAYABLE_TOOLS/, '回放白名单必须存在且被导出（tools.js 记录时也用它）');
   const runIdx = src.indexOf('export async function macroRun');
   assert.ok(runIdx > 0, 'macroRun 应存在');
@@ -165,7 +165,7 @@ test('宏合并必须保住"运行期白名单"这条防线（有真实提权先
   assert.match(runBody, /REPLAYABLE_TOOLS\.has/, 'op=run 执行期必须校验白名单（不能只靠 schema 声明）');
   // 记录时与回放时必须用**同一份**白名单：两处各写一份就会漂移，而漂移后果是
   // "回放能执行记录时不允许的工具"。tools.js 必须从 macros.js 导入它。
-  const toolsSrc = fs.readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
+  const toolsSrc = fs.readFileSync(new URL('../lib/application/agent/tools.ts', import.meta.url), 'utf8');
   assert.match(toolsSrc, /import \{[^}]*REPLAYABLE_TOOLS[^}]*\} from '\.\/macros\.(?:js|ts)'/, 'tools.js 必须从 macros.js 导入白名单（唯一来源）');
   assert.ok(!/const REPLAYABLE_TOOLS = new Set/.test(toolsSrc), 'tools.js 不得再自己声明一份白名单');
 });
@@ -176,9 +176,9 @@ test('技能合并不可做：toolNeedsApproval 拿不到 args，无法按 op �
   // 合并后只能二选一：每次加载技能都要批准（高频安全操作变烦），
   // 或移除安装闸门（外部下载+写本地不再确认）。两者都比"省 1 个工具"更糟。
   // 这条断言把"为什么不做"钉住，避免将来有人照着表格直接合并。
-  // 实现已搬到 lib/assistant/approval-policy.js —— 断言跟着实现走
+  // 实现已搬到 lib/application/agent/approval-policy.js —— 断言跟着实现走
   //（否则一次纯搬运就让门禁失效，而它守的是"审批函数拿不到 args"这个架构事实）。
-  const policySrc = fs.readFileSync(new URL('../lib/assistant/approval-policy.ts', import.meta.url), 'utf8');
+  const policySrc = fs.readFileSync(new URL('../lib/application/agent/approval-policy.ts', import.meta.url), 'utf8');
   const sig = policySrc.match(/export function toolNeedsApproval\(([^)]*)\)/);
   assert.ok(sig, 'toolNeedsApproval 应存在');
   assert.ok(

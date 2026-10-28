@@ -1,6 +1,6 @@
 // Adaptive intent policy used when a chat run starts invoking research tools.
-import { INTENTS, buildSystemPrompt, resolveIntent } from '../../assistant/intent-router.ts';
-import { TOOL_REGISTRY } from '../../assistant/tools.ts';
+import { INTENTS, buildSystemPrompt, resolveIntent } from './intent-router.ts';
+import { TOOL_REGISTRY } from './tools.ts';
 
 // 运行时自纠：当普通对话（CHAT）任务实际调用到研究/网络类工具时，
 // 把任务画像就地提升为「资料研究」——补齐全套浏览器/网络工具，并把系统提示规则

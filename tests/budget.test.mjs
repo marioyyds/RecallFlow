@@ -10,10 +10,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { AGENT_BUDGET_DEFAULTS, tokenBudgetExceeded } from '../lib/assistant/agent.ts';
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
-import { resolveIntent, INTENTS } from '../lib/assistant/intent-router.ts';
-import { estimateTokens } from '../lib/assistant/context.ts';
+import { AGENT_BUDGET_DEFAULTS, tokenBudgetExceeded } from '../lib/application/agent/agent.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
+import { resolveIntent, INTENTS } from '../lib/application/agent/intent-router.ts';
+import { estimateTokens } from '../lib/application/agent/context.ts';
 
 const readSource = (p) => fs.readFileSync(p, 'utf8').split('\n').map((l) => l.replace(/\r$/, '')).join('\n');
 
@@ -26,7 +26,7 @@ test('不再存在任何进度上限：轮数 / 工具数 / 任务时长', () =>
 });
 
 test('主循环不设轮数上限，而是无限循环 + 靠结束条件退出', () => {
-  const src = readSource('lib/assistant/agent.ts');
+  const src = readSource('lib/application/agent/agent.ts');
   assert.match(src, /for \(let iter = resumeIteration; ; iter\+\+\)/, '主循环应为无限循环');
   assert.ok(!/iter < effectiveModelTurns/.test(src), '不该再有轮数上界');
   assert.ok(!/reason: 'maxModelTurns'/.test(src), '不该再有「达到最大推理轮数」的终止路径');
@@ -35,7 +35,7 @@ test('主循环不设轮数上限，而是无限循环 + 靠结束条件退出',
 });
 
 test('按意图分配轮数/工具数的表已移除（留一个没人读的表会让人以为仍受控）', () => {
-  const src = readSource('lib/assistant/intent-router.ts');
+  const src = readSource('lib/application/agent/intent-router.ts');
   assert.ok(!/export const INTENT_TURN_DEFAULTS/.test(src), '不该再导出轮数默认值表');
 });
 
@@ -104,14 +104,14 @@ test('tokenBudgetExceeded: 字符串数字按数值处理', () => {
 });
 
 test('成本兜底的提示语必须说清它是**花费**而非「额度用完」', () => {
-  const src = readSource('lib/assistant/agent.ts');
+  const src = readSource('lib/application/agent/agent.ts');
   assert.match(src, /这与「做了多少事」无关 —— 它是花费兜底/, '否则用户会以为又是「工具额度」那种墙');
 });
 
 // ---------------------------------------------------------------- 接线
 
 test('接线：守卫只有 ok / reflect 两种消费分支，不得再摘除工具或终止任务', () => {
-  const src = readSource('lib/assistant/agent.ts');
+  const src = readSource('lib/application/agent/agent.ts');
   assert.match(src, /decision\.level === 'reflect'/, '应保留 reflect 分支');
   assert.ok(!/decision\.level === 'disable'/.test(src), '不该再摘除工具');
   assert.ok(!/decision\.level === 'stop'/.test(src), '不该再因守卫终止任务');
@@ -126,6 +126,6 @@ test('接线：守卫只有 ok / reflect 两种消费分支，不得再摘除工
 });
 
 test('接线：并发上限存在（DSH 里唯一的数量闸门）', () => {
-  const src = readSource('lib/assistant/parallel-tools.ts');
+  const src = readSource('lib/application/agent/parallel-tools.ts');
   assert.match(src, /DEFAULT_MAX_BATCH\s*=\s*\d+/, '并行批次必须有上限');
 });

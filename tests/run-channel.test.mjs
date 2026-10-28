@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { RunChannel } from '../lib/assistant/run-channel.ts';
+import { RunChannel } from '../lib/application/agent/run-channel.ts';
 
 function fakePort() {
   const listeners = new Set();

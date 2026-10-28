@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fetchWebpage, webSearch, FETCH_TOOLS, handleFetchTool } from '../lib/assistant/fetch-tools.ts';
+import { fetchWebpage, webSearch, FETCH_TOOLS, handleFetchTool } from '../lib/application/agent/fetch-tools.ts';
 
 /** 造一个假的 fetch 响应。 */
 function mkResp({ ok = true, status = 200, ct = 'text/html', url = '', body = '', throwOnBody = null } = {}) {

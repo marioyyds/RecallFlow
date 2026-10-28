@@ -22,7 +22,7 @@ let seq = 0;
 async function load() {
   const dom = installDomStub();
   const prevChrome = installChrome({});
-  const mod = await import('../lib/page/chat.ts?case=controls-' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=controls-' + (seq += 1));
   return {
     mod,
     close() { dom.restore(); restoreChrome(prevChrome); },

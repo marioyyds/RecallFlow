@@ -1,8 +1,10 @@
 import { createLruCache } from '../../shared/lru.ts';
+import type { DomPort } from '../../application/ports/dom.ts';
 
 export interface ScreenshotViewPorts {
   load(id: string): Promise<{ dataUrl?: string } | null>;
   escape(value: unknown): string;
+  dom?: DomPort;
   getPanel(): any;
   canRepaint(): boolean;
   onRepaint(): void;
@@ -16,10 +18,21 @@ export class PanelScreenshotView {
   private readonly pending = new Set<string>();
   private readonly missingIds = new Set<string>();
   private readonly ports: ScreenshotViewPorts;
+  private domPort: DomPort | null = null;
 
   constructor(ports: ScreenshotViewPorts) {
     this.ports = ports;
     this.cache = createLruCache(ports.cacheSize || 30);
+    this.domPort = ports.dom || null;
+  }
+
+  setDom(dom: DomPort): void {
+    this.domPort = dom;
+  }
+
+  private dom(): DomPort {
+    if (!this.domPort) throw new Error('DOM port 尚未注入');
+    return this.domPort;
   }
 
   private caption(meta: any): string {
@@ -78,7 +91,7 @@ export class PanelScreenshotView {
   }
 
   element(meta: any): Element | null {
-    const wrap = document.createElement('div');
+    const wrap = this.dom().createElement('div');
     wrap.innerHTML = this.html(meta);
     return wrap.firstElementChild;
   }
@@ -86,16 +99,16 @@ export class PanelScreenshotView {
   openLightbox(url: unknown): void {
     const panel = this.ports.getPanel();
     if (!url || !panel) return;
-    const box = document.createElement('div');
+    const box = this.dom().createElement('div');
     box.className = 'shot-lightbox';
-    const image = document.createElement('img');
+    const image = this.dom().createElement('img');
     image.src = String(url);
-    box.appendChild(image);
+    this.dom().append(box, image);
     box.addEventListener('click', () => {
       box.remove();
       this.lightboxOpen = false;
     });
     this.lightboxOpen = true;
-    panel.appendChild(box);
+    this.dom().append(panel, box);
   }
 }

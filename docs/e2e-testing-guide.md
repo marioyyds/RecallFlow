@@ -343,7 +343,7 @@ E2E 里原有 9 处硬等待，本轮压到 2 处。剩下的 2 处就是上面�
 ### 缺陷 2：渲染合并器的 key 冲突（E2E 抓到）
 
 `pushReasoning` 与 `finishReasoning` 共用 key `'reason'`，
-而 [`render-scheduler.js`](../lib/page/render-scheduler.js) 是**按 key 去重**的（同 key 只保留最后一次回调）。
+而 [`render-scheduler.js`](../lib/ui/page/render-scheduler.js) 是**按 key 去重**的（同 key 只保留最后一次回调）。
 于是"下一段开始时的排入"**顶掉了上一段尚未执行的回调** —— 第一块思考记录的正文永远是空的。
 
 **它为什么躲过了 1140 项单测**：
@@ -488,7 +488,7 @@ RECALLFLOW_EVAL_API_KEY=sk-xxx node scripts/eval-real-model.mjs
 tests/e2e/fixtures/playbooks.mjs          剧本：trigger / tools（契约锚点）/ success / eval 判据
 tests/e2e/fixtures/server.mjs             代表页面 + 脚本化剧本 + 请求记录
 tests/e2e/golden.spec.mjs                 端到端用例（页面状态 + 模型收到了什么）
-lib/assistant/skill-defs.js               技能（x.playbook 指向剧本、x.tools 覆盖剧本工具）
+lib/application/agent/skill-defs.js               技能（x.playbook 指向剧本、x.tools 覆盖剧本工具）
 tests/skill-playbook-contract.test.mjs   ②契约门禁（自动覆盖新剧本，无需改测试）
 tests/e2e-eval/real-model.eval.mjs        ③真模型 eval（自动覆盖带 eval 声明的剧本）
 ```

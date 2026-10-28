@@ -12,8 +12,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { StreamViewState } from '../lib/application/panel/stream-view-state.ts';
 
-const src = fs.readFileSync('lib/page/chat.ts', 'utf8');
+const src = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
 
 function indexOfLine(pattern, from = 0) {
@@ -38,7 +39,7 @@ test('计划条挂在**底部控件区的第一格**（快捷指令之上）', (
   // 位置试过四轮：助手消息开头（会滚走）→ 对话区顶部（压住内容）→ 紧贴输入框
   // （和 4 条挤在一起）→ 现在是底部控件区的第一格。
   const cmdAreaStart = indexOfLine('const cmdArea = document.createElement');
-  const planAppend = indexOfLine('cmdArea.appendChild(planBar);', cmdAreaStart);
+  const planAppend = indexOfLine('cmdArea.appendChild(streamView.planBar);', cmdAreaStart);
   const quickAppend = indexOfLine('cmdArea.appendChild(quickWrap);', cmdAreaStart);
   assert.notEqual(planAppend, -1, '找不到计划条的挂载点');
   assert.notEqual(quickAppend, -1, '找不到快捷指令的挂载点');
@@ -58,18 +59,18 @@ test('计划条的展开状态必须是**三态**，且默认收起', () => {
   // 现在的契约更进一步：**默认就是收起的一行**（不再依赖「全部完成」才收）——
   // 因为它先前用「限高 + 内层滚动条」处理步骤过多，那个方案已被否掉。
   // 类型标注是 TS 迁移（TITA-75）加的：允许可选的 `: T`，初值仍必须是 null。
-  assert.match(src, /let planExpanded(?::[^=]+)? = null;/, '初值必须是「未表态」的 null，不能是 true');
+  assert.equal(new StreamViewState().planExpanded, null, '初值必须是「未表态」的 null，不能是 true');
   const fn = sliceBetween('function renderPlan', 'function messagesForExport');
-  assert.match(fn, /const collapsed = planExpanded !== true;/, '未表态时必须收起');
+  assert.match(fn, /const collapsed = streamView\.planExpanded !== true;/, '未表态时必须收起');
   // 点击处理器在 openPanel 里（不在 renderPlan 内），所以对全文断言。
-  assert.match(src, /planExpanded = planBar\.classList\.contains\('collapsed'\);/, '点击切换要写回显式选择');
+  assert.match(src, /streamView\.planExpanded = streamView\.planBar\.classList\.contains\('collapsed'\);/, '点击切换要写回显式选择');
 });
 
 test('计划条只在「完成 ↔ 进行中」切换时回到默认，不打断用户的展开', () => {
   const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   // 若写成 `if (!allDone) planExpanded = null;`，用户展开后每一次计划更新都会把它收回去。
-  assert.match(fn, /if \(allDone !== planWasAllDone\) planExpanded = null;/, '只在状态切换时归零');
-  assert.ok(!/if \(!allDone\) planExpanded = null;/.test(fn), '不该每次未完成都强制归零');
+  assert.match(fn, /if \(allDone !== streamView\.planWasAllDone\) streamView\.planExpanded = null;/, '只在状态切换时归零');
+  assert.ok(!/if \(!allDone\) streamView\.planExpanded = null;/.test(fn), '不该每次未完成都强制归零');
 });
 
 test('计划条：收起那一行必须带上「进度 + 当前步骤」（信息量不能因收起而丢）', () => {
@@ -130,7 +131,7 @@ test('计划条样式**不得**限定高度或内层滚动 —— 改为收起/�
   // 步骤一多它就变成一个小滚动框，既难看又要二次滚动。
   // 用户明确要求「换一种」，于是改为「默认收成一行 / 点击展开全部」，
   // 展开时不设高度上限 —— 因此任何情况下都不该再有内层滚动条。
-  const css = fs.readFileSync('lib/page/panel-css.ts', 'utf8');
+  const css = fs.readFileSync('lib/ui/page/panel-css.ts', 'utf8');
   const block = /\.agent-plan-bar\s*\{([^}]*)\}/.exec(css);
   assert.ok(block, '缺少 .agent-plan-bar 样式');
   assert.ok(!/max-height/.test(block[1]), '计划条不该再限高：' + block[1].trim());

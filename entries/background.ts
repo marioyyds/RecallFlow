@@ -2,27 +2,28 @@
 import { getBook } from '../lib/shared/store.ts';
 import { getAISettings } from '../lib/shared/settings.ts';
 import { buildAiMessages } from '../lib/shared/rag.ts';
-import { callDeepSeek } from '../lib/assistant/llm.ts';
-import { runAgentStream } from '../lib/assistant/agent.ts';
+import { callDeepSeek } from '../lib/application/agent/llm.ts';
+import { runAgentStream } from '../lib/application/agent/agent.ts';
 import { createAgentRunner } from '../lib/application/agent/runner.ts';
 import { PanelMessageRouter } from '../lib/application/background/panel-router.ts';
 import { AutomationMessageRouter } from '../lib/application/background/automation-router.ts';
 import { handleAiStreamConnection } from '../lib/application/background/ai-stream-router.ts';
+import { WorkspaceMessageRouter } from '../lib/application/background/workspace-router.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
-import { initTargetManager } from '../lib/assistant/target-manager.ts';
-import { logError } from '../lib/shared/utils.ts';
+import { initTargetManager } from '../lib/application/agent/target-manager.ts';
+import { logError } from '../lib/shared/text.ts';
 import { isOperableUrl } from '../lib/shared/url.ts';
-import { normalizeHistory } from '../lib/assistant/context.ts';
+import { normalizeHistory } from '../lib/application/agent/context.ts';
 import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.ts';
-import { loadAgentSession } from '../lib/assistant/session-store.ts';
+import { loadAgentSession } from '../lib/application/agent/session-store.ts';
 import {
   PanelSessionStore,
   PSESS_INDEX_KEY,
   PSESS_ACTIVE_KEY,
   PSESS_SESSION_PREFIX,
 } from '../lib/shared/panel-sessions.ts';
-import { RunStreamHub } from '../lib/assistant/run-hub.ts';
-import { RunChannel } from '../lib/assistant/run-channel.ts';
+import { RunStreamHub } from '../lib/application/agent/run-hub.ts';
+import { RunChannel } from '../lib/application/agent/run-channel.ts';
 import { createTabRunRegistry, type RunControllerLike, type RunRecordLike } from '../lib/application/agent/run-registry.ts';
 import { RunLifecycleService } from '../lib/application/agent/run-lifecycle.ts';
 import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.ts';
@@ -303,6 +304,21 @@ const automationMessageRouter = new AutomationMessageRouter({
   },
 });
 
+const workspaceMessageRouter = new WorkspaceMessageRouter({
+  openOptions() {
+    chrome.runtime.openOptionsPage();
+  },
+  openManager(focusId) {
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : ''),
+    });
+  },
+  sessionStorage: chromeSessionStorage,
+  saveHandoff,
+  getHandoff,
+  listHandoffs,
+});
+
 // tabId -> 当前订阅的 sessionId。跟随页只在面板打开/会话切换时登记一次，
 // SW 按 session 定向广播，避免把每个 token 发给所有网页。
 const runSubscriptions = new Map<number, string>();
@@ -470,16 +486,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
-  if (msg && msg.type === 'openOptions') {
-    chrome.runtime.openOptionsPage();
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'openManager') {
-    const focusId = msg.focusId || '';
-    chrome.tabs.create({ url: chrome.runtime.getURL('manager.html') + (focusId ? '#focus=' + encodeURIComponent(focusId) : '') });
-    sendResponse({ ok: true });
-    return false;
+  if (msg && workspaceMessageRouter.matches(msg)) {
+    workspaceMessageRouter
+      .handle(msg, { tabId: sender.tab && sender.tab.id != null ? sender.tab.id : null })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e && e.message ? e.message : String(e) }));
+    return true;
   }
   if (msg && panelMessageRouter.matches(msg)) {
     panelMessageRouter
@@ -543,52 +555,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       snapshot: selfOwned ? null : snapshot,
     });
     return false;
-  }
-  if (msg && msg.type === 'conv:save') {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId != null && Array.isArray(msg.conversation)) {
-      try {
-        chromeSessionStorage.set({ ['recallflow.conv.' + tabId]: { conversation: msg.conversation, updatedAt: Date.now() } });
-      } catch (e) {}
-    }
-    sendResponse({ ok: true });
-    return false;
-  }
-  if (msg && msg.type === 'conv:get') {
-    const tabId = sender.tab && sender.tab.id;
-    if (tabId == null) {
-      sendResponse({ conversation: [] });
-      return false;
-    }
-    chromeSessionStorage
-      .get('recallflow.conv.' + tabId)
-      .then((d: Dyn) => sendResponse({ conversation: (d['recallflow.conv.' + tabId] || {}).conversation || [] }))
-      .catch(() => sendResponse({ conversation: [] }));
-    return true;
-  }
-  // 交接包：面板复制「会话标识」时写入；外部 agent 凭标识经 MCP 取回。
-  if (msg && msg.type === 'handoff:save') {
-    // ⚠ 必须把**完整轨迹**一起转交：面板发来的是**已建好的 record**（里面只有交付用的摘要），
-    //   若不带 `trailItems`，`saveHandoff` 只能从摘要重算"全量" ⇒ 独立 key 里存的其实是摘要 ✗
-    //   （`trailItems` 最多 MAX_TRAIL_FULL 步、并受 MAX_FULL_TRAIL_BYTES 约束）
-    saveHandoff(msg.record || {}, { trailItems: msg.trailItems })
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'handoff:get') {
-    // 带上 trailFrom / trailTo 时改为分页读取**完整轨迹**（见 getHandoff 的说明）：
-    // 记录里只有摘要，完整轨迹在独立 key 里，按区间取才不至于一次灌爆接手方的上下文。
-    getHandoff(msg.id, { trailFrom: msg.trailFrom, trailTo: msg.trailTo })
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
-  }
-  if (msg && msg.type === 'handoff:list') {
-    listHandoffs(msg.limit)
-      .then((r) => sendResponse(r))
-      .catch((e) => sendResponse({ ok: false, error: e.message }));
-    return true;
   }
 });
 

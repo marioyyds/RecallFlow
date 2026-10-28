@@ -12,7 +12,7 @@ import {
   MAX_SHOTS_PER_SESSION,
   MAX_SHOT_STORE_CHARS,
 } from '../lib/shared/screenshot-store.ts';
-import { applyRunEvent, createRunState, runStateToAssistantMessage } from '../lib/assistant/run-hub.ts';
+import { applyRunEvent, createRunState, runStateToAssistantMessage } from '../lib/application/agent/run-hub.ts';
 
 function mkStorage(initial = {}) {
   const data = Object.assign({}, initial);

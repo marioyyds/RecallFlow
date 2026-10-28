@@ -28,75 +28,12 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
-// lib/shared/surrogates.ts
-var isHigh = (c) => c >= 55296 && c <= 56319;
-var isLow = (c) => c >= 56320 && c <= 57343;
-function alignRange(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
-  const len = s.length;
-  const clamp = (v, fallback) => {
-    if (v === void 0 || v === null) return fallback;
-    const n = Math.trunc(Number(v));
-    if (!Number.isFinite(n)) return fallback;
-    return n < 0 ? Math.max(0, len + n) : Math.min(len, n);
-  };
-  let a = clamp(start, 0);
-  let b = clamp(end, len);
-  if (b < a) b = a;
-  if (a > 0 && a < len && isLow(s.charCodeAt(a)) && isHigh(s.charCodeAt(a - 1))) a -= 1;
-  if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
-  return { start: a, end: b };
-}
-function sliceSafe(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
-  const { start: a, end: b } = alignRange(s, start, end);
-  return s.slice(a, b);
-}
-
-// lib/shared/utils.ts
-function debounce(fn, delay) {
-  let timer = null;
-  return function(...args) {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => fn.apply(this, args), delay);
-  };
-}
-function logError(context, error) {
-  console.warn(`[BookmarkSorter] ${context}:`, error);
-}
+// lib/shared/dom/html.ts
 function typeInfo(id) {
   return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
 }
 function starColor(n) {
   return (STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).color;
-}
-function cleanTitle(title) {
-  let t = (title || "").trim();
-  t = t.replace(
-    /[|\-–—]\s*(力扣（LeetCode）|力扣|LeetCode|牛客网|牛客|nowcoder|洛谷|Luogu|AcWing|Codeforces|AtCoder).*$/i,
-    ""
-  ).trim();
-  return t;
-}
-function parseTags(str) {
-  return String(str || "").split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
-}
-function markdownExcerpt(text, maxChars = 160) {
-  const limit = Math.max(20, Number(maxChars) || 160);
-  let s = String(text || "");
-  s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
-  s = s.replace(/`([^`]+)`/g, "$1");
-  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
-  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
-  s = s.replace(/^\s{0,3}>\s?/gm, "");
-  s = s.replace(/^\s*[-*+]\s+/gm, "");
-  s = s.replace(/^\s*\d+[.)]\s+/gm, "");
-  s = s.replace(/[*_~]{1,3}/g, "");
-  s = s.replace(/\|/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
-  if (!s) return "";
-  return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
 }
 function starBarHtml(n, interactive) {
   const level = Math.max(1, Math.min(3, Number(n) || 1));
@@ -164,20 +101,74 @@ function tagsHtml(tags) {
   if (!Array.isArray(tags) || !tags.length) return "";
   return `<span class="tag-list">${tags.map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</span>`;
 }
-var DEFAULT_STYLE_PROPS = Object.freeze([
-  "font-size",
-  "line-height",
-  "color",
-  "background-color",
-  "width",
-  "height",
-  "display",
-  "visibility",
-  "opacity",
-  "overflow-x",
-  "position",
-  "z-index"
-]);
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// lib/shared/surrogates.ts
+var isHigh = (c) => c >= 55296 && c <= 56319;
+var isLow = (c) => c >= 56320 && c <= 57343;
+function alignRange(text, start, end) {
+  const s = String(text === void 0 || text === null ? "" : text);
+  const len = s.length;
+  const clamp = (v, fallback) => {
+    if (v === void 0 || v === null) return fallback;
+    const n = Math.trunc(Number(v));
+    if (!Number.isFinite(n)) return fallback;
+    return n < 0 ? Math.max(0, len + n) : Math.min(len, n);
+  };
+  let a = clamp(start, 0);
+  let b = clamp(end, len);
+  if (b < a) b = a;
+  if (a > 0 && a < len && isLow(s.charCodeAt(a)) && isHigh(s.charCodeAt(a - 1))) a -= 1;
+  if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
+  return { start: a, end: b };
+}
+function sliceSafe(text, start, end) {
+  const s = String(text === void 0 || text === null ? "" : text);
+  const { start: a, end: b } = alignRange(s, start, end);
+  return s.slice(a, b);
+}
+
+// lib/shared/text.ts
+function debounce(fn, delay) {
+  let timer = null;
+  return function(...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+function logError(context, error) {
+  console.warn(`[BookmarkSorter] ${context}:`, error);
+}
+function cleanTitle(title) {
+  let t = (title || "").trim();
+  t = t.replace(
+    /[|\-–—]\s*(力扣（LeetCode）|力扣|LeetCode|牛客网|牛客|nowcoder|洛谷|Luogu|AcWing|Codeforces|AtCoder).*$/i,
+    ""
+  ).trim();
+  return t;
+}
+function parseTags(str) {
+  return String(str || "").split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
+}
+function markdownExcerpt(text, maxChars = 160) {
+  const limit = Math.max(20, Number(maxChars) || 160);
+  let s = String(text || "");
+  s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
+  s = s.replace(/`([^`]+)`/g, "$1");
+  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
+  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  s = s.replace(/^\s{0,3}>\s?/gm, "");
+  s = s.replace(/^\s*[-*+]\s+/gm, "");
+  s = s.replace(/^\s*\d+[.)]\s+/gm, "");
+  s = s.replace(/[*_~]{1,3}/g, "");
+  s = s.replace(/\|/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
+}
 function fmtTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
@@ -187,9 +178,8 @@ function fmtTime(ts) {
   if (diff < 7 * 24 * 60 * 60 * 1e3) return Math.round(diff / 864e5) + " \u5929\u524D";
   return d.toLocaleDateString("zh-CN");
 }
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
+
+// lib/shared/dom/toast.ts
 var _toastTimer = null;
 function showToast(msg, opts) {
   const o = opts || {};
@@ -242,6 +232,22 @@ function sortItems(list, sortBy2) {
   }
   return arr;
 }
+
+// lib/shared/format/page-results.ts
+var DEFAULT_STYLE_PROPS = Object.freeze([
+  "font-size",
+  "line-height",
+  "color",
+  "background-color",
+  "width",
+  "height",
+  "display",
+  "visibility",
+  "opacity",
+  "overflow-x",
+  "position",
+  "z-index"
+]);
 
 // lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
@@ -665,7 +671,7 @@ function createChromeTabsAdapter(api = chrome) {
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
-// lib/page/markdown.ts
+// lib/ui/page/markdown.ts
 var HL_KEYWORDS = new Set(
   "function return if else for while do switch case break continue default new class extends super this const let var typeof instanceof in of try catch finally throw async await yield import export from as static get set null undefined true false void delete package private protected public interface type enum namespace module def elif lambda pass None True False and or not global raise with assert import print del class return if elif else".split(" ")
 );

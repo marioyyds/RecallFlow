@@ -1,6 +1,6 @@
 // 「这个模块到底有没有被测试碰过」—— 用**静态 import 图**回答，而不是靠人记得。
 //
-// 起因（评审的头号发现）：`lib/page/chat.ts` 有 4900 行、12 个测试文件「提到」它，
+// 起因（评审的头号发现）：`lib/ui/page/chat.ts` 有 4900 行、12 个测试文件「提到」它，
 // 却没有一个真的 import 过 —— 全是 `readFileSync` + 正则。于是 fab 位置那个 bug
 // 能一路活到线上：断言源码里有 `clampFabTop(...)` 这句话，无法证明它被调用过。
 //
@@ -31,19 +31,19 @@ const ALLOWED = {
   // 也不能 import）。它的正确性由 tests/omit-mark.test.mjs（读源码比对形态）、
   // tests/page-debug-hook.test.mjs（vm 沙箱跑源码）与 E2E 保证。
   // TITA-86：源码已改名 `.ts`，产物 `lib/page/debug-hook.js` 由 build-entries 生成（产物不在本清单候选集里）。
-  'lib/page/debug-hook.ts': 'MAIN world 裸脚本，由 manifest 注入，不是 ES 模块',
+  'lib/adapters/page/debug-hook.ts': 'MAIN world 裸脚本，由 manifest 注入，不是 ES 模块',
   // 同上，用 chrome.scripting.executeScript 以**路径**注入（见 lib/userscript/manager.js）。
   'lib/userscript/runner.js': '由 executeScript 以路径注入的裸脚本，不是 ES 模块',
   // 这两个只经 entries/content.ts 静态导入（内容脚本打包入口），页面侧行为由 E2E 覆盖。
-  'lib/page/picker.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 的拾取用例覆盖',
-  'lib/page/debug-capture.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 覆盖',
+  'lib/ui/page/picker.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 的拾取用例覆盖',
+  'lib/ui/page/debug-capture.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 覆盖',
   // service worker 入口 background.js 才 import 它，而测试从不 import 入口（会真起 chrome API）。
   'lib/shared/idb-kv.ts': '只被 background.js 导入；入口不能 import（会摸真 chrome API）',
 };
 
 const IMPORT_RE = /(?:from\s*|import\(\s*|require\(\s*)['"]([^'"]+)['"]/g;
 
-/** 剥离 `?case=1` / `#x` —— `import('../lib/page/chat.ts?case=' + n)` 是为了绕开模块缓存，
+/** 剥离 `?case=1` / `#x` —— `import('../lib/ui/page/chat.ts?case=' + n)` 是为了绕开模块缓存，
  *  解析时必须把 query 去掉，否则这个**最关键的**模块会被判成"没人引用"（实测踩过：
  *  第一次跑就漏了 chat.js，而它正是这条门禁要防的那个）。 */
 export function stripQuery(spec) {
@@ -107,12 +107,12 @@ const FROM_TESTS = reachableFrom(walk(path.join(ROOT, 'tests')).map(rel));
 const reachableByTests = (libRel) => FROM_TESTS.has(path.join(ROOT, libRel));
 
 test('分析器有牙齿：query 不影响解析，非相对 specifier 不瞎认', () => {
-  // 这条不是仪式：`import('../lib/page/chat.ts?case=' + n)` 里的 query 如果没被剥掉，
+  // 这条不是仪式：`import('../lib/ui/page/chat.ts?case=' + n)` 里的 query 如果没被剥掉，
   // 解析会失败，于是"chat.js 被测试引用"这个事实会被判成 false —— 门禁从此看不见
   // 它最该看的那个文件（我第一版就是这么错的）。
-  assert.equal(stripQuery('../lib/page/chat.ts?case=3'), '../lib/page/chat.ts');
+  assert.equal(stripQuery('../lib/ui/page/chat.ts?case=3'), '../lib/ui/page/chat.ts');
   const fake = path.join(ROOT, 'tests', 'chat-panel-smoke.test.mjs');
-  assert.equal(rel(resolveImport(fake, '../lib/page/chat.ts?case=1')), 'lib/page/chat.ts');
+  assert.equal(rel(resolveImport(fake, '../lib/ui/page/chat.ts?case=1')), 'lib/ui/page/chat.ts');
   // 裸包名（node:fs / @playwright/test）不该被当成文件去解析。
   assert.equal(resolveImport(fake, 'node:fs'), null);
   assert.equal(resolveImport(fake, '@playwright/test'), null);

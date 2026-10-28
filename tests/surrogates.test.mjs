@@ -26,9 +26,9 @@ import {
   rangeSafe,
 } from '../lib/shared/surrogates.ts';
 import { formatTableText } from '../lib/shared/table.ts';
-import { buildCollapsed, collapseOldToolResults } from '../lib/assistant/context.ts';
-import { expandResult } from '../lib/assistant/run-state-tools.ts';
-import { streamAgentStep } from '../lib/assistant/agent.ts';
+import { buildCollapsed, collapseOldToolResults } from '../lib/application/agent/context.ts';
+import { expandResult } from '../lib/application/agent/run-state-tools.ts';
+import { streamAgentStep } from '../lib/application/agent/agent.ts';
 
 // 用 fromCharCode 构造，**绝不把裸代理写进本文件**（那会让测试文件自己就不是合法 UTF-8）。
 const PAIR = String.fromCharCode(0xd835, 0xdc66); // 𝑦（U+1D466）：2 个码元
@@ -246,7 +246,7 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
   const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
   const paths = [
     ['lib/application/agent/stream-step.ts', read('lib/application/agent/stream-step.ts')],
-    ['lib/assistant/llm.ts', read('lib/assistant/llm.ts')],
+    ['lib/application/agent/llm.ts', read('lib/application/agent/llm.ts')],
     ['lib/application/background/ai-stream-router.ts', read('lib/application/background/ai-stream-router.ts')],
   ];
   for (const [name, src] of paths) {
@@ -257,9 +257,9 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
 
   // 这几个点是**按码元下标截断页面原文**的地方，是事故的高发区。
   // 用正则钉住"不许再出现裸 slice"：改回去就会红（和 vision-wiring 那类门禁同款）。
-  assert.doesNotMatch(read('lib/assistant/agent.ts'), /\.slice\(0,\s*3000\)/, 'agent.js 的两处 3000 字截断都要走 sliceSafe');
+  assert.doesNotMatch(read('lib/application/agent/agent.ts'), /\.slice\(0,\s*3000\)/, 'agent.js 的两处 3000 字截断都要走 sliceSafe');
   assert.doesNotMatch(read('lib/shared/table.ts'), /\.slice\(0,\s*maxCellChars\)/, '表格单元格截断必须走 sliceSafe（本次事故的触发点）');
-  assert.doesNotMatch(read('lib/assistant/context.ts'), /body\.slice\(/, '折叠的头尾切片必须走 sliceSafe');
-  assert.doesNotMatch(read('lib/assistant/run-state-tools.ts'), /String\(text\)\.slice\(/, 'expand_result 必须走 rangeSafe（offset 由模型给）');
-  assert.doesNotMatch(read('lib/assistant/tools.ts'), /fromCharCode\(parseInt\(/, 'HTML 数字实体必须用 fromCodePoint');
+  assert.doesNotMatch(read('lib/application/agent/context.ts'), /body\.slice\(/, '折叠的头尾切片必须走 sliceSafe');
+  assert.doesNotMatch(read('lib/application/agent/run-state-tools.ts'), /String\(text\)\.slice\(/, 'expand_result 必须走 rangeSafe（offset 由模型给）');
+  assert.doesNotMatch(read('lib/application/agent/tools.ts'), /fromCharCode\(parseInt\(/, 'HTML 数字实体必须用 fromCodePoint');
 });

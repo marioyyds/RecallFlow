@@ -1,4 +1,4 @@
-// 面板布局存档协议的纯单元测试（lib/page/panel-layout.ts）。
+// 面板布局存档协议的纯单元测试（lib/ui/page/panel-layout.ts）。
 //
 // 为什么要单独测这层：以前「位置没保存」不是某一行的错，而是**三处判据口径不一致** ——
 // 关闭时只有 `_manualPos` 才写、打开时只有停靠分支才读、气泡路径完全不读。
@@ -19,7 +19,7 @@ import {
   readPanelLayout,
   writePanelLayout,
   resolvePanelPlacement,
-} from '../lib/page/panel-layout.ts';
+} from '../lib/ui/page/panel-layout.ts';
 
 function memoryStorage(seed) {
   const map = new Map(Object.entries(seed || {}));

@@ -1,6 +1,6 @@
 # RecallFlow 工具设计规范
 
-> 适用范围：为 RecallFlow 的 Agent 新增或重构内置工具（`lib/assistant/tools.js` 的 `TOOL_SCHEMAS` / `TOOL_METADATA`）时，必须遵循本文。
+> 适用范围：为 RecallFlow 的 Agent 新增或重构内置工具（`lib/application/agent/tools.js` 的 `TOOL_SCHEMAS` / `TOOL_METADATA`）时，必须遵循本文。
 > 目标：让工具"模型好调用、动作可验证、安全边界清晰、预算不浪费"。
 
 ## 1. 一个工具的定义三要素

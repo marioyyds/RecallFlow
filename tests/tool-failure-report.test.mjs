@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { withTimeout } from '../lib/application/agent/tool-execution.ts';
 
-import { describeToolFailure } from '../lib/assistant/agent.ts';
+import { describeToolFailure } from '../lib/application/agent/agent.ts';
 
 /** 造一个与 withTimeout 内部打标一致的超时错误。 */
 const timeoutError = (ms, tool) => Object.assign(new Error('工具执行超时'), { rfToolTimeout: true, timeoutMs: ms, toolName: tool });
@@ -63,7 +63,7 @@ test('工具名为空也不崩（不能因为少个标签就丢掉整条说明�
 // ---------------------------------------------------------------- 接线
 
 test('接线：withTimeout 必须给超时错误打标，调用点必须走 describeToolFailure', async () => {
-  const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+  const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
   const timedOut = await withTimeout(() => new Promise(() => {}), 5, undefined, 'slow_tool').then(
     () => null,
     (error) => error

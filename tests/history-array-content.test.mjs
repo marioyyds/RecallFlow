@@ -21,8 +21,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { flattenHistoryContent, normalizeHistory } from '../lib/assistant/context.ts';
-import { VISION_ENABLED } from '../lib/shared/utils.ts';
+import { flattenHistoryContent, normalizeHistory } from '../lib/application/agent/context.ts';
+import { VISION_ENABLED } from '../lib/shared/vision-copy.ts';
 
 // 两臂各自的**原文**（改动前 vs 开启后），写在用例里当基准。
 const OFF_NOTE = '（该消息含 1 张图片；当前**未把图片传给模型**，仅保留此文字说明。）';

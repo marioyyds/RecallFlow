@@ -86,7 +86,7 @@ cmd /c npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep "<场�
 
 ### 1 `detectSkill()` 在生产代码里**没有调用方**（已用 `git grep` 核实）
 
-- `lib/assistant/skills.js:21` 导出它，但**只有** `tests/silent-failure-regressions.test.mjs` 调它；
+- `lib/application/agent/skills.js:21` 导出它，但**只有** `tests/silent-failure-regressions.test.mjs` 调它；
   生产给模型看的只有 `buildSkillCatalog()` 生成的一行 `name：description`（`intent-router.js:477`）。
 - **好消息**：「关键词重叠 ⇒ 触发错技能」在当前架构里**根本不成立** ⇒ 上面"没劫持"的结论有**结构级**证据，
   不只是 27 条轨迹的观察。
@@ -199,7 +199,7 @@ eval 这层只验"数据有没有交到模型手上"（权威判据在脚本化 
 
 1. **新技能没有劫持任何别的场景**：28 条回归轨迹里 **0 条**出现 `multi-candidate-convergence`；
    它 4/4 只在**自己那条**场景里被加载。再加一层**结构级**证据：上一轮已核实
-   `lib/assistant/skills.js:21` 的 `detectSkill()` 在生产代码里**没有调用方**，
+   `lib/application/agent/skills.js:21` 的 `detectSkill()` 在生产代码里**没有调用方**，
    运行时不做关键词匹配、模型只看 `buildSkillCatalog()` 的一行 `name：description` ⇒
    "关键词重叠劫持"在当前架构里不成立（详见基线「发现 1」）。
 2. **新技能的 `description` 足够准**：4 个 run 的**第 1 个工具调用**都是
@@ -256,7 +256,7 @@ eval 这层只验"数据有没有交到模型手上"（权威判据在脚本化 
   随后重读 `#list` 并点开 `VL-87`；
 - **3 条页面判据全过**（第 87 条真的进过窗口 / 点开的正是第 87 条 / 页面回执「已点开：87」）；
 - 判据 `mustSeeInToolResults: ['scrollTop=3480']`（`playbooks.mjs:524`）来自
-  `lib/page/commands.js:527-530` 的实测回执「已滚动容器（偏移 y=…）→ scrollTop=…」——
+  `lib/ui/page/commands.js:527-530` 的实测回执「已滚动容器（偏移 y=…）→ scrollTop=…」——
   它记的是"**滚了多少**"（内部容器是**偏移**滚动：`box.scrollTop = prevTop + offY`），
   而 `3480` 是夹具里"目标行位置"的换算值，不是"滚到目标"的唯一合法量。
   模型滚 3400 一样把目标带进了窗口（3 条页面判据就是证据）。
@@ -383,11 +383,11 @@ eval 这层只验"数据有没有交到模型手上"（权威判据在脚本化 
 
 这是本轮唯一一处**超出"只改夹具"**的改动，理由要写清楚：
 
-- `inspect_element({op:"text"})` 走 `get_text`（`lib/page/commands.js:1021`），读的是
+- `inspect_element({op:"text"})` 走 `get_text`（`lib/ui/page/commands.js:1021`），读的是
   `el.innerText || el.textContent` —— **不产生任何 DOM 变更**，`MutationObserver` 只能看见**写**。
   所以页面无从知道"agent 已经读到了缓存值"，"从第一次读起才重新询价"在今天的框架里**表达不出来**。
 - 因此补了一个**通用**的页面可见信号：`cmdGetText` 在**算出文本之后**，在被读的每个元素上派发
-  不冒泡的 `CustomEvent('recallflow:element-read')`（`notifyElementsRead`，见 `lib/page/commands.js`）。
+  不冒泡的 `CustomEvent('recallflow:element-read')`（`notifyElementsRead`，见 `lib/ui/page/commands.js`）。
   页面想参与就监听；不监听**零影响**（其它夹具一个监听器都没有）。
   ⚠ 顺带一个正是我们需要的顺序事实：**先取值、后派发** ⇒ 第一次读拿到的值在**读的那一刻**就定了。
 - 真模型 eval 3/3 通过**同时**证明了这个跨世界信号在真实扩展里生效
@@ -566,7 +566,7 @@ RESULT hasSO=true trustedEnters=65 fakeEnters=0 peek="最近一次查看：订�
 
 ## 二、新增门禁：`tests/page-read-signal.test.mjs`（8 条）
 
-钉住 `lib/page/commands.js` 的 `notifyElementsRead` 那个页面读信号：
+钉住 `lib/ui/page/commands.js` 的 `notifyElementsRead` 那个页面读信号：
 事件名**只出现一次**（连注释都不许再写一遍，为此把源码注释里的字面量改写成「这个读信号事件」）、
 `bubbles: false`、派发**包在 try 里**（且 dispatch 必须落在 try 块内）、
 `content.js` 产物里同样**恰好一次**（改了 `lib/page/**` 必须重建），
@@ -1006,7 +1006,7 @@ base64 字符数：27432
 这条**不需要密钥**，是"人读开启侧文案 + 脚本核对"时抓到的（也正是本轮任务要求做的那一步）：
 
 - 开启侧三条文案原来都写着「只送**预算内**的最近几张，超出的会省略并说明」；
-- 但 `lib/assistant/agent.js` 的接线是**每张截图各调用一次** `visionMessagesFor([res.screenshot])`
+- 但 `lib/application/agent/agent.js` 的接线是**每张截图各调用一次** `visionMessagesFor([res.screenshot])`
   —— 数组里永远只有 1 张 ⇒ `DEFAULT_VISION_BUDGET.maxImages`（2）**永远不是约束**：
 
 ```
@@ -1026,7 +1026,7 @@ DEFAULT_VISION_BUDGET.maxImages = 2
 | --- | --- | --- |
 | ① | 三条开启侧文案改成**如实说法**：「本次任务里截的每张都会送；单张过大的会省略并说明」 | `lib/shared/utils.js` 的 `VISION_ENABLED_*_COPY` |
 | ② | 加门禁：**不许**再出现 `预算内` / `超出的会省略`（防止有人改回这个假承诺） | `tests/vision-text-conditional.test.mjs` ⑥ |
-| ③ | 修掉静默丢图：全被跳过时仍产出**一条纯文本说明消息** | `lib/assistant/vision.js` 的 `visionMessagesFor` |
+| ③ | 修掉静默丢图：全被跳过时仍产出**一条纯文本说明消息** | `lib/application/agent/vision.js` 的 `visionMessagesFor` |
 | ④ | 补测试：全被跳过 ⇒ 1 条纯文本说明、**不含** `image_url`；并另有一条用例把"当前形状下 5 张全进上下文、0 次说明"钉住（谁真去接了任务级上限，它会红） | `tests/vision-messages.test.mjs` |
 
 ⚠ **没有做**（列入 `docs/remaining-work.md` 的待决项）：把上限做成**任务级**（在 `agent.js` 累计已送张数）。
@@ -1041,7 +1041,7 @@ DEFAULT_VISION_BUDGET.maxImages = 2
 3. **每图 token 的"打开后新读数"没有**：本轮只有脚本化 E2E，读不到 `usage.prompt_tokens`。
    计划用的预算上限（`maxImages: 2` / `maxBase64Chars: 2e6`）是**基于历史实测 578 token/图 + 本轮
    实测 20.1KB 单图体积**推出来的**有依据的保留值**，不是新测出来的 ✗（依据写在
-   `lib/assistant/vision.js` 的 `DEFAULT_VISION_BUDGET` 注释与 `docs/remaining-work.md` 的「预算复核」）。
+   `lib/application/agent/vision.js` 的 `DEFAULT_VISION_BUDGET` 注释与 `docs/remaining-work.md` 的「预算复核」）。
 4. **`ctx.visionBudget` 不可配置**：全仓库只有一处**读**、零处**写** ⇒ 生产恒用默认预算。
    本轮**如实标注**（代码注释 + 一条门禁），**没有**给它接上设置项 —— 要接就得同时加"设置真的生效"的门禁。
 5. **3 条既有失败本轮没修**：它们与本轮无关（根因与证据见 `docs/remaining-work.md`），
@@ -1050,8 +1050,8 @@ DEFAULT_VISION_BUDGET.maxImages = 2
 ## 六、改动
 
 - 本轮**除了** `docs/real-model-eval-log.md`（本节，纯追加；历史五节**逐字未动**）以外，
-  还改了视觉开关那一轮涉及的文件（`lib/shared/utils.js`、`lib/assistant/context.js`、
-  `lib/assistant/vision.js`、`lib/assistant/agent.js`、`tests/vision-*.test.mjs`、
+  还改了视觉开关那一轮涉及的文件（`lib/shared/utils.js`、`lib/application/agent/context.js`、
+  `lib/application/agent/vision.js`、`lib/application/agent/agent.js`、`tests/vision-*.test.mjs`、
   `tests/history-array-content.test.mjs`、`tests/utils.test.mjs`、`tests/registry-fingerprint.test.mjs`、
   `tests/vision-wiring.test.mjs`、`tests/e2e/vision-switch.spec.mjs`、
   `tests/e2e/fixtures/server.mjs`、`scripts/run-e2e.mjs`、`tests/.test-count.json` 与几份 docs 的数字）。
@@ -1143,8 +1143,8 @@ DEFAULT_VISION_BUDGET.maxImages = 2
 ## 五、改动
 
 - 本轮除本文件（纯追加，历史六节**逐字未动**）外，还改了：
-  `lib/assistant/skills.js`（删 `detectSkill` + 写明原因）、`lib/assistant/skill-defs.js`（3 个薄技能 + 2 句无步骤声明 + 理由表）、
-  `lib/assistant/tools.js`（`TOOL_RENAME_MAP` 补知识库旧名）、`scripts/gen-skills-overview.mjs`（固定说明段 + 修解析器）、
+  `lib/application/agent/skills.js`（删 `detectSkill` + 写明原因）、`lib/application/agent/skill-defs.js`（3 个薄技能 + 2 句无步骤声明 + 理由表）、
+  `lib/application/agent/tools.js`（`TOOL_RENAME_MAP` 补知识库旧名）、`scripts/gen-skills-overview.mjs`（固定说明段 + 修解析器）、
   `tests/skill-content-structure.test.mjs`（新增门禁）、`tests/silent-failure-regressions.test.mjs`（删 3 条测死代码的用例、改造 1 条、新增 1 条）、
   `tests/annotation-merge.test.mjs`（修硬编码 900 字截断）、`docs/skill-design.md`（新增）、
   `docs/skills-overview.md`（重新生成）、`README.md` / `docs/change-delivery-summary.md` / `docs/next-steps-handoff.md`（数字与链接）、
@@ -1164,7 +1164,7 @@ DEFAULT_VISION_BUDGET.maxImages = 2
 | # | 改动 | 模型可见吗 | 纪律要求 |
 | --- | --- | --- | --- |
 | ① | `paywall-boundary` 技能的 `displayName` / `description` / `content` / `tags` / `x.keywords` 改成「**找合法免费可看的那一份**」口径 | **是**（目录里发的是 `name：description`，正文由 `load_skill` 取回） | **必须**真模型测量 ⇒ 本轮跑了 3 次 |
-| ② | 面板的思考记录**默认折叠**（`lib/page/chat.js`） | **否**（纯展示层，不进任何请求） | 不需要真模型 eval（理由见第五节） |
+| ② | 面板的思考记录**默认折叠**（`lib/ui/page/chat.js`） | **否**（纯展示层，不进任何请求） | 不需要真模型 eval（理由见第五节） |
 
 口径改动的边界（写进技能正文，并加了门禁）：目标是**免费集 / 试看窗口 / 官方免费入口 / 限时免费**；
 必须**如实判定"能不能看"**（能打开 ≠ 能看）；确实要付费就**如实报告"拿不到内容"**，
@@ -1236,10 +1236,10 @@ cmd /c npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep "付�
 
 ## 五、第二块（思考记录默认折叠）**不需要**真模型 eval —— 说明理由
 
-- 它只改 `lib/page/chat.js` 的**展示层**：`mountThinkSegment` 的初始 `data-open`、
+- 它只改 `lib/ui/page/chat.js` 的**展示层**：`mountThinkSegment` 的初始 `data-open`、
   `pushReasoning` 不再写开合状态、恢复路径带回用户的选择。
 - **不改变任何模型可见文本**：请求体（system prompt / 技能目录 / 工具结果）一个字都没动。
-  本轮唯一碰 `lib/assistant/agent.js` 的地方是**一行注释**（不是字符串，不进请求）。
+  本轮唯一碰 `lib/application/agent/agent.js` 的地方是**一行注释**（不是字符串，不进请求）。
 - 验证靠三层：`tests/thinking-record.test.mjs` 的接线门禁（+2 条新门禁）、
   `tests/e2e/golden.spec.mjs` 的真浏览器用例（断言"进行中即折叠 + 点击后才展开 + 顺序 + 无内层滚动条"）、
   **注入缺陷必红**（两种注入各自让单测与 E2E 变红，见交付报告）。
@@ -1248,8 +1248,8 @@ cmd /c npx playwright test -c tests/e2e-eval/playwright.config.mjs --grep "付�
 ## 六、改动
 
 - 本轮除本文件（**纯追加**，历史七节**逐字未动**）外，还改了：
-  `lib/assistant/skill-defs.js`（`paywall-boundary` 的口径）、`tests/skill-playbook-contract.test.mjs`（+1 条口径门禁）、
-  `docs/skills-overview.md`（重新生成）、`lib/page/chat.js`（思考记录默认折叠）、`lib/assistant/agent.js`（一行注释）、
+  `lib/application/agent/skill-defs.js`（`paywall-boundary` 的口径）、`tests/skill-playbook-contract.test.mjs`（+1 条口径门禁）、
+  `docs/skills-overview.md`（重新生成）、`lib/ui/page/chat.js`（思考记录默认折叠）、`lib/application/agent/agent.js`（一行注释）、
   `tests/thinking-record.test.mjs`（+2 条门禁）、`tests/e2e/golden.spec.mjs`（那条用例改成断言新默认）、
   `tests/e2e/helpers.mjs`（新增 `thinkState`：一次 evaluate 原子读三元组）、`tests/e2e/fixtures/server.mjs`（`sseThinkStream` 留出"思考中"窗口）、
   `tests/stream-step.test.mjs`（注释与行为对齐）、`tests/e2e/README.md`、`content.js`（重新构建的产物）、
@@ -1428,9 +1428,9 @@ LLM 请求次数：40 / 35 / 20（工具调用去重 64 / 39 / 23）
 （每张约 600 token 进上下文，而 `take_screenshot` 模型可反复调用 ✓）
 
 **实现方案（含门禁）**：
-1. `lib/assistant/vision.js`：`MAX_IMAGES_PER_TASK = 3` + 纯函数 `shouldSendImage(sentCount, cap)` + `imageCapNote(sentCount, label, cap)`
+1. `lib/application/agent/vision.js`：`MAX_IMAGES_PER_TASK = 3` + 纯函数 `shouldSendImage(sentCount, cap)` + `imageCapNote(sentCount, label, cap)`
    （说明文案**不假装送过图**、也**不说"看不到图"**这种与开关状态矛盾的话 ✗）
-2. `lib/assistant/agent.js` 调用点：`ctx.visionSentImages` 计数；**达到上界时改推一条纯文字说明**（不静默丢 ✓）
+2. `lib/application/agent/agent.js` 调用点：`ctx.visionSentImages` 计数；**达到上界时改推一条纯文字说明**（不静默丢 ✓）
 3. **门禁**：单测覆盖 0/1/2 送、3/4 不送、说明文案含"第几张起不再送图" ✓；
    ⚠ 还要一条**反向样张**（上界写成 0 或负数时必须全部不送、且文案仍然出现 ✓），否则"计数"很容易退化成恒真 ✓
 

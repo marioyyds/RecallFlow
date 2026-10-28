@@ -16,9 +16,9 @@
 // 这里钉住四件事：中断不重试、中断不发请求、真故障仍然重试、真故障仍然 fail-open。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callDeepSeek, isRetryableError, makeAbortError } from '../lib/assistant/llm.ts';
-import { verifyCompletion } from '../lib/assistant/verifier.ts';
-import { classifyVerifyOutcome } from '../lib/assistant/agent.ts';
+import { callDeepSeek, isRetryableError, makeAbortError } from '../lib/application/agent/llm.ts';
+import { verifyCompletion } from '../lib/application/agent/verifier.ts';
+import { classifyVerifyOutcome } from '../lib/application/agent/agent.ts';
 
 const ORIGINAL_FETCH = globalThis.fetch;
 

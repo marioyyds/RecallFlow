@@ -12,8 +12,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { stripHtml } from '../lib/assistant/tools.ts';
-import { closestComposed, isPageContentExcluded, PAGE_TEXT_EXCLUDE } from '../lib/page/citation.ts';
+import { stripHtml } from '../lib/application/agent/tools.ts';
+import { closestComposed, isPageContentExcluded, PAGE_TEXT_EXCLUDE } from '../lib/application/page/citation.ts';
 
 // ---------------------------------------------------------------- ① stripHtml
 
@@ -102,7 +102,7 @@ test('isPageContentExcluded：深层 shadow（shadow 里再套 shadow）也要�
 });
 
 test('接线：page-text.js 不得再用原生 closest 做排除', () => {
-  const src = fs.readFileSync('lib/page/page-text.ts', 'utf8');
+  const src = fs.readFileSync('lib/application/page/page-text.ts', 'utf8');
   assert.ok(!/el\.closest\(PAGE_TEXT_EXCLUDE\)/.test(src), '原生 closest 到 ShadowRoot 就停，会漏掉自己的面板');
   assert.ok(/isPageContentExcluded\(el\)/.test(src), '应改用穿透 shadow 的判断');
 });
@@ -110,9 +110,9 @@ test('接线：page-text.js 不得再用原生 closest 做排除', () => {
 // ---------------------------------------------------------------- ③ 宏名不再有歧义
 
 test('接线：宏列表必须显式标出 name（原写法名字与描述共用 `：`，边界歧义）', () => {
-  // C-4 第 5 档合并后，实现从 tools.js 移到 lib/assistant/macros.js —— 断言跟着实现走，
+  // C-4 第 5 档合并后，实现从 tools.js 移到 lib/application/agent/macros.js —— 断言跟着实现走，
   // 而不是跟着文件名走（否则一次纯搬运就会让这条门禁失效）。
-  const src = fs.readFileSync('lib/assistant/macros.ts', 'utf8');
+  const src = fs.readFileSync('lib/application/agent/macros.ts', 'utf8');
   assert.ok(/name="' \+ m\.name \+ '"/.test(src), '宏列表应把 name 用引号显式标出');
   assert.ok(
     !/\+ m\.name \+ \(m\.description \? '：'/.test(src),
@@ -121,7 +121,7 @@ test('接线：宏列表必须显式标出 name（原写法名字与描述共用
 });
 
 test('接线：宏找不到时必须列出可用宏名，而不是让调用方自己去看', () => {
-  const src = fs.readFileSync('lib/assistant/macros.ts', 'utf8');
+  const src = fs.readFileSync('lib/application/agent/macros.ts', 'utf8');
   assert.ok(/本站可用的宏名如下，请照抄 name 的值/.test(src), '报错要直接给出候选');
   assert.ok(
     !/（可用 list_macros 查看）/.test(src),

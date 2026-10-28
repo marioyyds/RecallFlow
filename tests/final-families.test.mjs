@@ -14,7 +14,7 @@ import {
   removeEntry,
   KNOWLEDGE_STORE_TOOLS,
   handleKnowledgeStoreTool,
-} from '../lib/assistant/knowledge-store-tools.ts';
+} from '../lib/application/agent/knowledge-store-tools.ts';
 import {
   annotate,
   inspectElement,
@@ -25,8 +25,8 @@ import {
   INSPECT_OPS,
   PAGE_COMMAND_TOOLS,
   handlePageCommandTool,
-} from '../lib/assistant/page-command-tools.ts';
-import { TOOL_REGISTRY, executeTool, registeredToolNames } from '../lib/assistant/tools.ts';
+} from '../lib/application/agent/page-command-tools.ts';
+import { TOOL_REGISTRY, executeTool, registeredToolNames } from '../lib/application/agent/tools.ts';
 
 // ---------------------------------------------------------------- 知识库存储族
 
@@ -277,7 +277,7 @@ test('undo_last_action：必须用 verify:false（恢复动作不该再被校验
 //
 // C-1 的终点是把 `executeTool` 的巨型 switch 换成**分派注册表**。
 // 换掉之后，下面这些性质不再是"靠 review 保证"，而是可以被直接断言 ——
-// 而且这几条正是 switch 时代真实出过的问题（见 lib/assistant/tools.js 注册表上方注释）。
+// 而且这几条正是 switch 时代真实出过的问题（见 lib/application/agent/tools.js 注册表上方注释）。
 
 test('分派注册表 == TOOL_REGISTRY（两边必须严格相等）', () => {
   const reg = TOOL_REGISTRY.map((t) => t.name).sort();
@@ -301,7 +301,7 @@ test('未知工具名回落到「未知工具」而不是抛错', async () => {
 });
 
 test('重名注册在**模块加载时**就抛错（不留到运行时静默走错分支）', () => {
-  const src = fs.readFileSync(new URL('../lib/assistant/tools.ts', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../lib/application/agent/tools.ts', import.meta.url), 'utf8');
   const fn = src.slice(src.indexOf('function registerHandlers('));
   const body = fn.slice(0, fn.indexOf('\n}'));
   assert.match(body, /TOOL_HANDLERS\.has\(n\)/, '注册函数必须先查重');

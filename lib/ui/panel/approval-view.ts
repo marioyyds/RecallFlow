@@ -1,4 +1,4 @@
-import { esc } from '../../shared/utils.ts';
+import { esc } from '../../shared/dom/html.ts';
 
 const APPROVAL_LONG_TEXT_FIELD: Record<string, string> = {
   run_javascript: 'code',

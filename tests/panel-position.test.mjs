@@ -1,7 +1,7 @@
-// 面板位置「关掉再开必须回到原处」的行为测试 —— 真 import lib/page/chat.ts。
+// 面板位置「关掉再开必须回到原处」的行为测试 —— 真 import lib/ui/page/chat.ts。
 //
 // 这是 TITA-9 的验收门禁。用户的原始反馈是「关闭面板对话框，它不能保存面板的位置状态」，
-// 而这个问题**不是某一行的错**，是三处判据口径不一致（见 lib/page/panel-layout.ts 顶部说明）：
+// 而这个问题**不是某一行的错**，是三处判据口径不一致（见 lib/ui/page/panel-layout.ts 顶部说明）：
 //   ① 关闭时只有 `_manualPos` 才写位置 —— 默认停靠面板的 `top` 恰好是 `auto`，从来写不进去；
 //   ② 打开时只有停靠分支读位置 —— 划词气泡那条路径把面板摆到鼠标点上；
 //   ③ 存档没有 `docked` 字段 —— 停靠态无法还原，只能靠 CSS 默认值，窗口一变就"看起来没保存"。
@@ -22,7 +22,7 @@ let seq = 0;
 async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome();
-  const mod = await import('../lib/page/chat.ts?case=pos' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=pos' + (seq += 1));
   mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);

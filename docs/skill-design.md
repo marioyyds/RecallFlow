@@ -23,21 +23,21 @@ system prompt  ┌────────────────────�
         load_skill({ name: "readability-fix" })  ──► 取回该技能**正文**（这一步才进上下文）
 ```
 
-- 目录由 `lib/assistant/skills.js` 的 `buildSkillCatalog()` 生成，拼进 system prompt 的是
+- 目录由 `lib/application/agent/skills.js` 的 `buildSkillCatalog()` 生成，拼进 system prompt 的是
   `intent-router.js` 的 `buildSystemPrompt()`。
-- 技能的完整正文**只在 `load_skill` 被调用后**才进上下文（`lib/assistant/skill-tools.js`）。
+- 技能的完整正文**只在 `load_skill` 被调用后**才进上下文（`lib/application/agent/skill-tools.js`）。
   这是**按需加载**（省 token），也是"模型有选择权"的来源。
 - 技能族一共三个工具，方向各不相同：`load_skill`（**读**手册，只读常驻）、
   `install_skill`（从 SkillHub **装**，`external` + 审批）、
   `save_skill`（把一段做法**写**成技能，`high` + **逐次审批**）。
   第三个是后来补的：此前"写技能"只能用技能页，用户说「沉淀为技能」时 Agent 无路可走
   （实测会话 RF-FY6PUP）。它的风险档取最严，因为**技能正文会进入今后的系统提示** ——
-  这是一条持久化的注入面，比一次性的页面操作影响更长远（见 `lib/assistant/tool-metadata.js`）。
+  这是一条持久化的注入面，比一次性的页面操作影响更长远（见 `lib/application/agent/tool-metadata.js`）。
 - **没有**正则、**没有**关键词打分、**没有**"命中即注入"。
 
 ## 2 被删掉的那条路：`detectSkill()`（关键词匹配）
 
-原来 `lib/assistant/skills.js` 里有一个 `detectSkill(instruction, intent)`：拿 `x.keywords` 里的正则
+原来 `lib/application/agent/skills.js` 里有一个 `detectSkill(instruction, intent)`：拿 `x.keywords` 里的正则
 去跑**整条用户指令**，命中就把技能正文注入 system prompt。
 
 **它是一条死代码**：全仓 grep（`lib/`、`scripts/`、`integrations/`、`background.js`、`content.js` 产物，
@@ -50,8 +50,8 @@ system prompt  ┌────────────────────�
 靠**模型读 `description` 自己选**（上面那张图）。于是：
 
 - `x.keywords` / `x.intents` **仍然保留**，但只服务于**非运行时**的用途：
-  SkillHub 格式往返（`lib/assistant/skill-md.js` 的 `x-recallflow-keywords` / `x-recallflow-intents`）、
-  用户自定义技能的存取（`lib/assistant/skill-store.js`）、技能编辑页的展示（`skills-page.js`）。
+  SkillHub 格式往返（`lib/application/agent/skill-md.js` 的 `x-recallflow-keywords` / `x-recallflow-intents`）、
+  用户自定义技能的存取（`lib/application/agent/skill-store.js`）、技能编辑页的展示（`skills-page.js`）。
 - 触发条件写得再准也不会自动提升命中率 —— **只有 `description` 那一行会影响模型的选择**。
   这就是本仓库反复强调"文案要准"的原因：模型能看到的只有那一行。
 
@@ -87,7 +87,7 @@ system prompt  ┌────────────────────�
 
 `readability-fix` 最早是一堆"要改字号 / 行高 / 对比度"的自然段，真模型实测**只改了字号就收尾**，
 横向溢出原封不动。把"改行宽"写成**编号第 4 步**并单列说明之后，它才被稳定执行
-（详见 `lib/assistant/skill-defs.js` 里该技能的第 4 步注释）。
+（详见 `lib/application/agent/skill-defs.js` 里该技能的第 4 步注释）。
 
 所以每个技能的正文要么：
 
@@ -99,7 +99,7 @@ system prompt  ┌────────────────────�
 
 ## 5 改动技能的纪律（清单式）
 
-1. 改 `lib/assistant/skill-defs.js`（正文 / `description` / `x`）；
+1. 改 `lib/application/agent/skill-defs.js`（正文 / `description` / `x`）；
 2. `node scripts/gen-skills-overview.mjs` 重跑生成物（清单与产物不一致会红）；
 3. `node scripts/run-all-checks.mjs` 全绿（含新增的结构门禁）；
 4. **改了模型可见文本 ⇒ 必须测量**：跑该技能对应的场景（`--grep "<剧本 title>" --repeat-each=2`），

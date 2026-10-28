@@ -9,8 +9,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
-import { TOOL_SCHEMAS } from '../lib/assistant/tool-schemas.ts';
+import { SKILL_REGISTRY } from '../lib/application/agent/skill-defs.ts';
+import { TOOL_SCHEMAS } from '../lib/application/agent/tool-schemas.ts';
 import { HIGHLIGHT_MAX_TEXTS } from '../lib/shared/constants.ts';
 
 const skill = SKILL_REGISTRY.find((s) => s.name === 'highlight-key-points');

@@ -1,11 +1,11 @@
 // Tool timeout, live approval, and safe parallel batch execution.
-import { executeAnyTool } from '../../assistant/mcp.ts';
-import { getToolMetadata, validateToolCall } from '../../assistant/tools.ts';
-import { toolNeedsApproval } from '../../assistant/approval-policy.ts';
-import { planParallelGroups } from '../../assistant/parallel-tools.ts';
-import { RUN_STATUS } from '../../assistant/agent-state.ts';
+import { executeAnyTool } from './mcp.ts';
+import { getToolMetadata, validateToolCall } from './tools.ts';
+import { toolNeedsApproval } from './approval-policy.ts';
+import { planParallelGroups } from './parallel-tools.ts';
+import { RUN_STATUS } from './agent-state.ts';
 import { getAISettings } from '../../shared/settings.ts';
-import type { Caught } from '../../assistant/errors.ts';
+import type { Caught } from './errors.ts';
 
 export function withTimeout(task: any, timeoutMs: number, signal?: AbortSignal, toolName?: string): Promise<any> {
   return new Promise((resolve, reject) => {

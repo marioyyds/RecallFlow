@@ -1,25 +1,21 @@
 // 完整管理页：类型 Tab、标签筛选、搜索、内联编辑、批量操作、导入导出
 import { STATUS, ITEM_TYPES, STAR_LEVELS } from '../lib/shared/constants.ts';
 import {
-  debounce,
-  logError,
-  showToast,
   starBarHtml,
   levelNameHtml,
   typeBadgeHtml,
   tagsHtml,
-  fmtTime,
   esc,
-  markdownExcerpt,
-  parseTags,
   bindStarKeyboard,
-} from '../lib/shared/utils.ts';
+} from '../lib/shared/dom/html.ts';
+import { debounce, logError, fmtTime, markdownExcerpt, parseTags } from '../lib/shared/text.ts';
+import { showToast } from '../lib/shared/dom/toast.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
 import { createChromeTabsAdapter } from '../lib/adapters/chrome/tabs.ts';
 import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
-import { renderMarkdown } from '../lib/page/markdown.ts';
+import { renderMarkdown } from '../lib/ui/page/markdown.ts';
 import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.ts';
 
 const knowledge = createKnowledgeRepository();

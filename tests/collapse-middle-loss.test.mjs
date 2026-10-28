@@ -15,7 +15,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { collapseOldToolResults, buildCollapsed } from '../lib/assistant/context.ts';
+import { collapseOldToolResults, buildCollapsed } from '../lib/application/agent/context.ts';
 
 // ⚠ 必须**明显超过** headLen + tailLen + 40（默认 300 + 150 + 40 = 490），
 // 否则 buildCollapsed 会判定"头尾本来就够短"而**原样返回**（第一版测试就栽在这儿 ✗）。

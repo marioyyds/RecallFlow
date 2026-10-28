@@ -52,10 +52,10 @@
 | 57 | `test:cov` / `test:cov:write` npm 入口 | 实跑 | ✅ |
 | 58 | `mock_server.py` 补归属说明（是手动演示工具，不删） | 审读 | ✅ |
 | 59 | `page/chat.js` 零 import 的根因确认：只导出 `initAssistant`，其余重度依赖 DOM ⇒ 结构上不可测 | 审读 | ✅ |
-| 60–62 | 抽出 `lib/page/fab-position.js`（依赖显式注入，同 C-1 套路），chat.js 改为委托 | 语法 + 重建产物 | ✅ 语义原样搬运 |
+| 60–62 | 抽出 `lib/ui/page/fab-position.js`（依赖显式注入，同 C-1 套路），chat.js 改为委托 | 语法 + 重建产物 | ✅ 语义原样搬运 |
 | 63–68 | `tests/fab-position.test.mjs` 15 条**真行为**断言（替换原 16 条 `assert.match(chat, /regex/)`） | 单测 | ✅ 15/15（首跑 2 红：`normalizeFabRatio(null)` 返回 0 而非 null，会让气泡跳顶——已修） |
 | 69 | 旧正则用例改成"接线仍在"的最小断言 | 单测 | ✅ |
-| 70–71 | 新增 `lib/assistant/context-tuning.js`，把 5 组上下文阈值集中（各自取值理由一并搬入） | 全量 | ✅ 数值一字未改 |
+| 70–71 | 新增 `lib/application/agent/context-tuning.js`，把 5 组上下文阈值集中（各自取值理由一并搬入） | 全量 | ✅ 数值一字未改 |
 | 72 | `tests/context-tuning.test.mjs` 用字面量钉住每个阈值 | 单测 | ✅ 4/4 |
 | 73–80 | E2E `waitForTimeout` **20 → 10**（`stream-scroll` 7 处全换 `expect.poll`） | 实跑 E2E | ✅ 5/5 绿，24s → 18s |
 | 81 | **rebase 到 master**（`--onto 87cd66b`，只搬自己的 12 个提交——master 刻意回退了两个安全提交） | 全量 + E2E | ✅ 见下节 |
@@ -151,7 +151,7 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 3. **`describeToolFailure` 产出 `[object Object]`** 喂给模型。
 4. **恒真断言** `deepEqual(warnedAt, REPEAT_THRESHOLDS.slice())`。
 5. **变异脚本把 CRLF 源文件永久改成 LF**，且收尾核对用归一化比较所以永远看不见。
-   实证：`lib/assistant/tool-guard.js` 工作区行尾是 LF，而同目录 `agent.js`/`chat.js` 是 CRLF。
+   实证：`lib/application/agent/tool-guard.js` 工作区行尾是 LF，而同目录 `agent.js`/`chat.js` 是 CRLF。
 6. **`normalizeFabRatio(null)` 返回 0 而不是 null** —— 存的值里 ratio 为 null 时气泡会跳到顶部。
 7. **任意代码执行档零测试**（`run_userscript`/`install_userscript`/`save_skill`）：
    把那一档的审批分支改成恒 false，1720 条测试没有一条变红。而 `risk:'high'` 不在类别映射里
@@ -162,7 +162,7 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 > 本节在**轮 95 后重写**。原先那 6 条里 4 条已经做完（`toolNeedsApproval` 归位、富文本 flaky 根因、
 > 硬等待降到 2 处、`context.js` / `run-hub.js` 补上变异算子），留着会误导下一个人。
 
-- **`lib/page/chat.js` 主体仍靠 E2E**：4911 行。已经有单测的部分：fab 位置（抽出）、
+- **`lib/ui/page/chat.js` 主体仍靠 E2E**：4911 行。已经有单测的部分：fab 位置（抽出）、
   开合/去抖/审批设置面板（轮 89，DOM 桩）、**审批条**与**发送·停止状态**（轮 96，纯函数 + DOM 桩）、
   **失败态渲染与失败轮次入库**（轮 98）。
   仍然只能靠 Playwright 验的：断线重连的中断收尾文案、输入路径（回车发送、Esc 关闭浮层）、
@@ -191,7 +191,7 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
 它是"用户点了同意才写页面"的唯一闸门，却住在 2200 行、顶层直接摸 chrome API 的 `agent.js` 里。
 想测它得先起一整套 chrome 桩 —— 结果它长期只有 5 条断言，最关键的一档（任意代码执行）曾经零测试。
 
-搬到 `lib/assistant/approval-policy.js` 后（零 chrome 依赖），顺手做了一件**语义收紧**：
+搬到 `lib/application/agent/approval-policy.js` 后（零 chrome 依赖），顺手做了一件**语义收紧**：
 
 | 情况 | 原行为 | 现行为 |
 | --- | --- | --- |
@@ -206,7 +206,7 @@ node 的 `--test --experimental-test-coverage` 在"同一模块被多个测试�
   「声明无类别的风险，其工具必须真的 `alwaysRequireApproval`」。
 - 变异算子 5 条（从 `agent.js` 移过来 3 条 + 新增 2 条：fail-closed 退化、`auto` 被忽略），全部被抓住。
 
-## 轮 89：`lib/page/chat.js` 从"零 import"到"真跑起来"
+## 轮 89：`lib/ui/page/chat.js` 从"零 import"到"真跑起来"
 
 这是评审里标出的最大风险敞口：4900 行，12 个测试文件提到它，**没有一个真的 import 过**。
 
@@ -462,7 +462,7 @@ B: 还原（写回**自己备份的变异版**）→ 删除备份
 被活进程占有时拒绝 / 陈旧锁（pid 已死）可抢 / 只删自己的锁 / 还原逐字节（含 CRLF）/
 自愈三态各一条。
 
-顺带把 `lib/assistant/llm.js`（3 条）与 `agent.js` 的 `classifyVerifyOutcome`（1 条）
+顺带把 `lib/application/agent/llm.js`（3 条）与 `agent.js` 的 `classifyVerifyOutcome`（1 条）
 加进变异目标。后者第一版写 `expectFail: '中断必须走中断收尾'` 抓不住 —— 变异测试
 匹配的是**用例名**，不是断言消息里的关键词。改成 `'结局分派'` 才命中。
 
@@ -872,7 +872,7 @@ export function buildFailedTurn(parts, errorText) {
 
 ### 五、一处清理（不是代码问题）
 
-`lib/page/chat.js.mutation-backup` 还躺在盘上（`.gitignore` 里，所以 `git status` 看不见）。
+`lib/ui/page/chat.js.mutation-backup` 还躺在盘上（`.gitignore` 里，所以 `git status` 看不见）。
 它是上一轮门禁跑完后没被删掉的备份 —— 说明 `removeBackup` 的删除失败是被**静默吞掉**的。
 备份本身无害（源码是对的、下次运行的自愈会扫掉），但「静默」正是这个项目反复吃亏的地方，
 先记在这里：若哪天要动它，记得 `recoverLeftovers` 只在**下一次运行开始时**扫，

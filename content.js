@@ -5,22 +5,6 @@
       __defProp(target, name, { get: all[name], enumerable: true });
   };
 
-  // lib/shared/constants.ts
-  var HIGHLIGHT_MAX_TEXTS = 20;
-  var STATUS = {
-    GENERAL: 1,
-    // 一般
-    IMPORTANT: 2,
-    // 重点
-    FREQUENT: 3
-    // 高频
-  };
-  var STAR_LEVELS = {
-    [STATUS.GENERAL]: { name: "\u4E00\u822C", color: "#f5b860" },
-    [STATUS.IMPORTANT]: { name: "\u91CD\u70B9", color: "#f39c12" },
-    [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
-  };
-
   // lib/shared/surrogates.ts
   var isHigh = (c) => c >= 55296 && c <= 56319;
   var isLow = (c) => c >= 56320 && c <= 57343;
@@ -46,181 +30,12 @@
     return s.slice(a, b);
   }
 
-  // lib/shared/utils.ts
+  // lib/shared/text.ts
   function logError(context, error) {
     console.warn(`[BookmarkSorter] ${context}:`, error);
   }
-  function formatElementLocator(locator, selector, tag) {
-    const l = locator || {};
-    if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
-    if (l.name) return 'name="' + l.name + '"';
-    if (l.testid) return "testid=" + l.testid;
-    return String(selector || tag || "");
-  }
-  function summarizePickedForMessage(picked) {
-    if (!Array.isArray(picked)) return [];
-    return picked.filter((p) => p && typeof p === "object").slice(0, 8).map((p) => {
-      const src = p.source || {};
-      return {
-        tag: sliceSafe(String(p.tag || ""), 0, 40),
-        label: sliceSafe(String(p.label || ""), 0, 60),
-        loc: src.file ? sliceSafe(String(src.file), 0, 200) + (src.line ? ":" + src.line : "") : "",
-        locator: sliceSafe(formatElementLocator(p.locator, p.selector, p.tag), 0, 200)
-      };
-    });
-  }
-  function formatPickedSummary(picks) {
-    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
-    if (!list.length) return "";
-    return list.map(
-      (p, i) => (list.length > 1 ? i + 1 + ". " : "") + (p.tag || "\u5143\u7D20") + (p.label ? "\u300C" + p.label + "\u300D" : "") + (p.loc ? " \u2192 " + p.loc : "")
-    ).join("\uFF1B");
-  }
-  function pickedSummaryHtml(picks) {
-    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
-    if (!list.length) return "";
-    const title = list.map((p) => p.locator).filter(Boolean).join(" / ");
-    return '<span class="user-picks"' + (title ? ' title="' + esc(title) + '"' : "") + ">\u27E1 " + esc(formatPickedSummary(list)) + "</span>";
-  }
-  function selectedTextMessageHtml(selectedText) {
-    const text = String(selectedText || "").trim();
-    if (!text) return "";
-    return '<span class="user-selection" title="' + esc(text) + '"><span class="user-selection-label">\u9875\u9762\u5F15\u7528</span><span class="user-selection-text">' + esc(text) + "</span></span>";
-  }
-  var DEFAULT_STYLE_PROPS = Object.freeze([
-    "font-size",
-    "line-height",
-    "color",
-    "background-color",
-    "width",
-    "height",
-    "display",
-    "visibility",
-    "opacity",
-    "overflow-x",
-    "position",
-    "z-index"
-  ]);
-  function formatSelectOptions(items) {
-    if (!Array.isArray(items) || !items.length) return "";
-    return items.map((it, i) => {
-      const parts = ["[" + (i + 1) + "]", 'value="' + String(it.value == null ? "" : it.value) + '"'];
-      parts.push('\u6587\u5B57="' + String(it.label == null ? "" : it.label) + '"');
-      if (it.selected) parts.push("\uFF08\u5F53\u524D\u9009\u4E2D\uFF09");
-      if (it.disabled) parts.push("\uFF08\u7981\u7528\uFF09");
-      return parts.join(" ");
-    }).join("\n");
-  }
-  function formatInvalidControls(items) {
-    if (!Array.isArray(items) || !items.length) return "";
-    const lines = items.map(
-      (it, i) => "[" + (i + 1) + "] " + it.selector + (it.name ? "\uFF08" + it.name + "\uFF09" : "") + " \u539F\u56E0\uFF1A" + ((it.reasons || []).join("+") || "\u672A\u77E5") + (it.message ? " \u2014\u2014 " + it.message : "")
-    );
-    return "\n\u26A0 \u8868\u5355\u672A\u901A\u8FC7\u6821\u9A8C\uFF08" + items.length + " \u4E2A\u5B57\u6BB5\uFF09\u2014\u2014 **\u63D0\u4EA4\u4F1A\u88AB\u6D4F\u89C8\u5668\u62E6\u4F4F\u3001\u9875\u9762\u4E0A\u4E0D\u4F1A\u6709\u4EFB\u4F55\u63D0\u793A**\uFF1A\n" + lines.join("\n");
-  }
-  function formatStylesSummary(items, total) {
-    const list = Array.isArray(items) ? items : [];
-    const n = typeof total === "number" && total > list.length ? total : list.length;
-    const head = "\u8BA1\u7B97\u6837\u5F0F\uFF08\u547D\u4E2D " + n + " \u4E2A" + (n > list.length ? "\uFF0C\u5217\u51FA\u524D " + list.length + " \u4E2A" : "") + "\uFF09\uFF1A";
-    if (!list.length) return head + "\uFF08\u65E0\uFF09";
-    const lines = list.map((it) => {
-      const s = it && it.styles || {};
-      const pairs = Object.keys(s).map((k) => k + "=" + s[k]).join("  ");
-      return "  " + (it && (it.selector || it.tag) || "?") + (it && it.visible === false ? "\uFF08\u4E0D\u53EF\u89C1\uFF09" : "") + "\uFF1A" + (pairs || "\uFF08\u65E0\uFF09");
-    });
-    return head + "\n" + lines.join("\n");
-  }
-  function formatInspectMatches(matches) {
-    const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
-    if (!list.length) return "";
-    return list.map((m) => {
-      const bits = [m.selector || m.tag || "?"];
-      bits.push(m.visible === false ? "\u4E0D\u53EF\u89C1" : "\u53EF\u89C1");
-      if (m.size && (m.size.w || m.size.h)) bits.push(m.size.w + "\xD7" + m.size.h);
-      if (typeof m.textLength === "number") bits.push("\u6587\u672C " + m.textLength + " \u5B57");
-      if (m.shadowDepth) bits.push("shadow \u6DF1\u5EA6 " + m.shadowDepth);
-      if (m.containsMainContent) bits.push("\u7591\u4F3C\u542B\u6B63\u6587");
-      let s = "  - " + bits.join("\uFF5C");
-      if (m.path) s += "\n    \u7956\u5148\u94FE\uFF1A" + m.path;
-      return s;
-    }).join("\n");
-  }
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  }
-  function formatInspectSummary(input) {
-    const o = input || {};
-    const total = Math.max(0, Math.floor(Number(o.total) || 0));
-    const listed = Math.max(0, Math.floor(Number(o.listed) || 0));
-    const visible = Math.max(0, Math.floor(Number(o.visibleCount) || 0));
-    const hidden = Math.max(0, listed - visible);
-    const hiddenText = hidden ? "\uFF0C\u4E0D\u53EF\u89C1 " + hidden + " \u4E2A" : "";
-    let s = "\u547D\u4E2D " + total + " \u4E2A\u5143\u7D20\u3002";
-    if (o.truncated) {
-      s += "\uFF08\u547D\u4E2D\u8FC7\u591A\uFF0C\u4EC5\u5217\u51FA\u524D " + listed + " \u4E2A\uFF09\u5217\u51FA\u90E8\u5206\u4E2D\u53EF\u89C1 " + visible + " \u4E2A" + hiddenText + "\u3002";
-    } else {
-      s += "\u53EF\u89C1 " + visible + " \u4E2A" + hiddenText + "\u3002";
-    }
-    const main = o.main;
-    if (o.touchesMain && main && main.selector) {
-      s += " \u547D\u4E2D\u9879\u5305\u542B\u7591\u4F3C\u6B63\u6587\u5BB9\u5668 " + main.selector + "\uFF08\u7EA6 " + main.textLength + " \u5B57\uFF09\u2014\u2014 \u9690\u85CF\u5E7F\u544A\u65F6\u4E0D\u8981\u8FDE\u5E26\u9690\u85CF\u5B83\u6216\u5176\u7956\u5148\u3002";
-    }
-    return s;
-  }
-  var SNAPSHOT_CHAR_BUDGET = 12e3;
-  var SNAPSHOT_FIXED_ALLOWANCE = 600;
-  function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
-    const list = Array.isArray(described) ? described : [];
-    const limit = Math.max(0, Number(budget) || 0);
-    const elements = [];
-    let used = Math.max(0, Number(textLength) || 0) + SNAPSHOT_FIXED_ALLOWANCE;
-    for (const d of list) {
-      let size = 0;
-      try {
-        size = JSON.stringify(d).length + 1;
-      } catch (e) {
-        size = 0;
-      }
-      if (elements.length && used + size > limit) break;
-      elements.push(d);
-      used += size;
-    }
-    return { elements, omittedBySize: list.length - elements.length };
-  }
-  function formatHighlightResult(input) {
-    const o = input || {};
-    const num = (v) => Math.max(0, Math.floor(Number(v) || 0));
-    const hit = num(o.hit);
-    const attempted = num(o.attempted);
-    const requested = Math.max(attempted, num(o.requested));
-    const limit = num(o.limit);
-    const misses = Array.isArray(o.misses) ? o.misses : [];
-    const dropped = requested - attempted;
-    let s = "\u5DF2\u9AD8\u4EAE " + hit + " / " + attempted + " \u5904\u5173\u952E\u4FE1\u606F";
-    if (misses.length) {
-      s += "\uFF1B\u672A\u627E\u5230 " + misses.length + " \u6761\uFF1A" + misses.map((m) => {
-        const t = String(m == null ? "" : m);
-        return sliceSafe(t, 0, 16) + (t.length > 16 ? "\u2026" : "");
-      }).join("\u3001");
-    }
-    if (dropped > 0) {
-      s += "\uFF1B\u672C\u6B21\u5171\u6536\u5230 " + requested + " \u6761\uFF0C\u8D85\u51FA\u5355\u6B21\u4E0A\u9650 " + limit + " \u6761\u7684 " + dropped + ' \u6761**\u672A\u5904\u7406**\uFF0C\u8BF7\u518D\u8C03\u7528\u4E00\u6B21 annotate({op:"highlight", texts:[\u2026]}) \u4F20\u5269\u4F59\u7247\u6BB5';
-    }
-    return s;
-  }
-  function composeProgressText(step, max, label) {
-    const parts = [];
-    const n = Number(step);
-    const m = Number(max);
-    if (Number.isFinite(n) && n > 0) {
-      parts.push("\u7B2C " + Math.floor(n) + (Number.isFinite(m) && m > 0 ? " / " + Math.floor(m) : "") + " \u6B65");
-    }
-    const text = String(label === void 0 || label === null ? "" : label).trim();
-    if (text) parts.push(text);
-    return parts.length ? parts.join(" \xB7 ") : "\u6B63\u5728\u601D\u8003\u2026";
-  }
 
-  // lib/page/citation.ts
+  // lib/application/page/citation.ts
   var PAGE_TEXT_EXCLUDE = "script,style,noscript,iframe,svg,canvas,nav,header,footer,aside,form,button,input,select,textarea,[contenteditable],.ad,.ads,.advertisement,.banner,[class*=cookie],[id*=cookie],[class*=popup],[class*=modal],#__kb-ai-host,#toast,[data-rf-injected]";
   function closestComposed(el, selector) {
     let node = el;
@@ -533,7 +348,138 @@
     return true;
   }
 
-  // lib/page/page-text.ts
+  // lib/shared/format/page-results.ts
+  var DEFAULT_STYLE_PROPS = Object.freeze([
+    "font-size",
+    "line-height",
+    "color",
+    "background-color",
+    "width",
+    "height",
+    "display",
+    "visibility",
+    "opacity",
+    "overflow-x",
+    "position",
+    "z-index"
+  ]);
+  function formatSelectOptions(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    return items.map((it, i) => {
+      const parts = ["[" + (i + 1) + "]", 'value="' + String(it.value == null ? "" : it.value) + '"'];
+      parts.push('\u6587\u5B57="' + String(it.label == null ? "" : it.label) + '"');
+      if (it.selected) parts.push("\uFF08\u5F53\u524D\u9009\u4E2D\uFF09");
+      if (it.disabled) parts.push("\uFF08\u7981\u7528\uFF09");
+      return parts.join(" ");
+    }).join("\n");
+  }
+  function formatInvalidControls(items) {
+    if (!Array.isArray(items) || !items.length) return "";
+    const lines = items.map(
+      (it, i) => "[" + (i + 1) + "] " + it.selector + (it.name ? "\uFF08" + it.name + "\uFF09" : "") + " \u539F\u56E0\uFF1A" + ((it.reasons || []).join("+") || "\u672A\u77E5") + (it.message ? " \u2014\u2014 " + it.message : "")
+    );
+    return "\n\u26A0 \u8868\u5355\u672A\u901A\u8FC7\u6821\u9A8C\uFF08" + items.length + " \u4E2A\u5B57\u6BB5\uFF09\u2014\u2014 **\u63D0\u4EA4\u4F1A\u88AB\u6D4F\u89C8\u5668\u62E6\u4F4F\u3001\u9875\u9762\u4E0A\u4E0D\u4F1A\u6709\u4EFB\u4F55\u63D0\u793A**\uFF1A\n" + lines.join("\n");
+  }
+  function formatStylesSummary(items, total) {
+    const list = Array.isArray(items) ? items : [];
+    const n = typeof total === "number" && total > list.length ? total : list.length;
+    const head = "\u8BA1\u7B97\u6837\u5F0F\uFF08\u547D\u4E2D " + n + " \u4E2A" + (n > list.length ? "\uFF0C\u5217\u51FA\u524D " + list.length + " \u4E2A" : "") + "\uFF09\uFF1A";
+    if (!list.length) return head + "\uFF08\u65E0\uFF09";
+    const lines = list.map((it) => {
+      const s = it && it.styles || {};
+      const pairs = Object.keys(s).map((k) => k + "=" + s[k]).join("  ");
+      return "  " + (it && (it.selector || it.tag) || "?") + (it && it.visible === false ? "\uFF08\u4E0D\u53EF\u89C1\uFF09" : "") + "\uFF1A" + (pairs || "\uFF08\u65E0\uFF09");
+    });
+    return head + "\n" + lines.join("\n");
+  }
+  function formatInspectMatches(matches) {
+    const list = Array.isArray(matches) ? matches.filter(Boolean) : [];
+    if (!list.length) return "";
+    return list.map((m) => {
+      const bits = [m.selector || m.tag || "?"];
+      bits.push(m.visible === false ? "\u4E0D\u53EF\u89C1" : "\u53EF\u89C1");
+      if (m.size && (m.size.w || m.size.h)) bits.push(m.size.w + "\xD7" + m.size.h);
+      if (typeof m.textLength === "number") bits.push("\u6587\u672C " + m.textLength + " \u5B57");
+      if (m.shadowDepth) bits.push("shadow \u6DF1\u5EA6 " + m.shadowDepth);
+      if (m.containsMainContent) bits.push("\u7591\u4F3C\u542B\u6B63\u6587");
+      let s = "  - " + bits.join("\uFF5C");
+      if (m.path) s += "\n    \u7956\u5148\u94FE\uFF1A" + m.path;
+      return s;
+    }).join("\n");
+  }
+  function formatInspectSummary(input) {
+    const o = input || {};
+    const total = Math.max(0, Math.floor(Number(o.total) || 0));
+    const listed = Math.max(0, Math.floor(Number(o.listed) || 0));
+    const visible = Math.max(0, Math.floor(Number(o.visibleCount) || 0));
+    const hidden = Math.max(0, listed - visible);
+    const hiddenText = hidden ? "\uFF0C\u4E0D\u53EF\u89C1 " + hidden + " \u4E2A" : "";
+    let s = "\u547D\u4E2D " + total + " \u4E2A\u5143\u7D20\u3002";
+    if (o.truncated) {
+      s += "\uFF08\u547D\u4E2D\u8FC7\u591A\uFF0C\u4EC5\u5217\u51FA\u524D " + listed + " \u4E2A\uFF09\u5217\u51FA\u90E8\u5206\u4E2D\u53EF\u89C1 " + visible + " \u4E2A" + hiddenText + "\u3002";
+    } else {
+      s += "\u53EF\u89C1 " + visible + " \u4E2A" + hiddenText + "\u3002";
+    }
+    const main = o.main;
+    if (o.touchesMain && main && main.selector) {
+      s += " \u547D\u4E2D\u9879\u5305\u542B\u7591\u4F3C\u6B63\u6587\u5BB9\u5668 " + main.selector + "\uFF08\u7EA6 " + main.textLength + " \u5B57\uFF09\u2014\u2014 \u9690\u85CF\u5E7F\u544A\u65F6\u4E0D\u8981\u8FDE\u5E26\u9690\u85CF\u5B83\u6216\u5176\u7956\u5148\u3002";
+    }
+    return s;
+  }
+  var SNAPSHOT_CHAR_BUDGET = 12e3;
+  var SNAPSHOT_FIXED_ALLOWANCE = 600;
+  function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
+    const list = Array.isArray(described) ? described : [];
+    const limit = Math.max(0, Number(budget) || 0);
+    const elements = [];
+    let used = Math.max(0, Number(textLength) || 0) + SNAPSHOT_FIXED_ALLOWANCE;
+    for (const d of list) {
+      let size = 0;
+      try {
+        size = JSON.stringify(d).length + 1;
+      } catch (e) {
+        size = 0;
+      }
+      if (elements.length && used + size > limit) break;
+      elements.push(d);
+      used += size;
+    }
+    return { elements, omittedBySize: list.length - elements.length };
+  }
+  function formatHighlightResult(input) {
+    const o = input || {};
+    const num = (v) => Math.max(0, Math.floor(Number(v) || 0));
+    const hit = num(o.hit);
+    const attempted = num(o.attempted);
+    const requested = Math.max(attempted, num(o.requested));
+    const limit = num(o.limit);
+    const misses = Array.isArray(o.misses) ? o.misses : [];
+    const dropped = requested - attempted;
+    let s = "\u5DF2\u9AD8\u4EAE " + hit + " / " + attempted + " \u5904\u5173\u952E\u4FE1\u606F";
+    if (misses.length) {
+      s += "\uFF1B\u672A\u627E\u5230 " + misses.length + " \u6761\uFF1A" + misses.map((m) => {
+        const t = String(m == null ? "" : m);
+        return sliceSafe(t, 0, 16) + (t.length > 16 ? "\u2026" : "");
+      }).join("\u3001");
+    }
+    if (dropped > 0) {
+      s += "\uFF1B\u672C\u6B21\u5171\u6536\u5230 " + requested + " \u6761\uFF0C\u8D85\u51FA\u5355\u6B21\u4E0A\u9650 " + limit + " \u6761\u7684 " + dropped + ' \u6761**\u672A\u5904\u7406**\uFF0C\u8BF7\u518D\u8C03\u7528\u4E00\u6B21 annotate({op:"highlight", texts:[\u2026]}) \u4F20\u5269\u4F59\u7247\u6BB5';
+    }
+    return s;
+  }
+  function composeProgressText(step, max, label) {
+    const parts = [];
+    const n = Number(step);
+    const m = Number(max);
+    if (Number.isFinite(n) && n > 0) {
+      parts.push("\u7B2C " + Math.floor(n) + (Number.isFinite(m) && m > 0 ? " / " + Math.floor(m) : "") + " \u6B65");
+    }
+    const text = String(label === void 0 || label === null ? "" : label).trim();
+    if (text) parts.push(text);
+    return parts.length ? parts.join(" \xB7 ") : "\u6B63\u5728\u601D\u8003\u2026";
+  }
+
+  // lib/application/page/page-text.ts
   function extractPageText(options = {}) {
     if (options && options.visibleOnly) {
       try {
@@ -1231,7 +1177,7 @@
     return el ? refFor(el) : null;
   }
 
-  // lib/page/command-session.ts
+  // lib/application/page/commands/session.ts
   var PageCommandSession = class {
     undoStack = [];
     styleReverters = [];
@@ -1371,7 +1317,7 @@
     return lines.join("\n");
   }
 
-  // lib/page/command-locator.ts
+  // lib/application/page/commands/locator.ts
   function queryAllInFrames(root, selector, into = []) {
     try {
       Array.prototype.push.apply(into, root.querySelectorAll(selector));
@@ -1640,7 +1586,7 @@
     }
   }
 
-  // lib/page/command-read.ts
+  // lib/application/page/commands/read.ts
   function isRenderedForVerify(el) {
     try {
       const cs = window.getComputedStyle(el);
@@ -2132,7 +2078,23 @@
   var extractTable = cmdExtractTable;
   var readText = cmdGetText;
 
-  // lib/page/command-overlays.ts
+  // lib/shared/constants.ts
+  var HIGHLIGHT_MAX_TEXTS = 20;
+  var STATUS = {
+    GENERAL: 1,
+    // 一般
+    IMPORTANT: 2,
+    // 重点
+    FREQUENT: 3
+    // 高频
+  };
+  var STAR_LEVELS = {
+    [STATUS.GENERAL]: { name: "\u4E00\u822C", color: "#f5b860" },
+    [STATUS.IMPORTANT]: { name: "\u91CD\u70B9", color: "#f39c12" },
+    [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
+  };
+
+  // lib/application/page/commands/overlays.ts
   function scrollRangeIntoView(range) {
     const rect = range.getBoundingClientRect();
     if (rect && rect.height) {
@@ -2327,7 +2289,7 @@
   var outline = cmdOutline;
   var setStyle = cmdSetStyle;
 
-  // lib/page/settle.ts
+  // lib/application/page/settle.ts
   var SETTLE_DEFAULTS = Object.freeze({
     /** 静默窗口：连续这么久没有 DOM 变更就认为稳定 */
     quietMs: 180,
@@ -2439,7 +2401,7 @@
     };
   }
 
-  // lib/page/command-actions.ts
+  // lib/application/page/commands/actions.ts
   function nextPaint() {
     return waitForSettle();
   }
@@ -3112,7 +3074,7 @@
     return { ok: true, result: serialized };
   }
 
-  // lib/page/commands.ts
+  // lib/ui/page/commands.ts
   function undoLast() {
     return pageCommandSession.undo();
   }
@@ -3160,7 +3122,7 @@
   var waitForElement2 = waitForElement;
   var getAttribute2 = getAttribute;
 
-  // lib/page/debug-capture.ts
+  // lib/ui/page/debug-capture.ts
   var debug_capture_exports = {};
   __export(debug_capture_exports, {
     getDebugBuffer: () => getDebugBuffer,
@@ -3222,7 +3184,7 @@
     return request({ kind: "element-source", selector }, null);
   }
 
-  // lib/page/picker.ts
+  // lib/ui/page/picker.ts
   var active = false;
   var overlayMargin = null;
   var overlayPadding = null;
@@ -3815,7 +3777,51 @@
     return merged;
   }
 
-  // lib/page/transcript.ts
+  // lib/shared/dom/html.ts
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
+
+  // lib/shared/format/picked.ts
+  function formatElementLocator(locator, selector, tag) {
+    const l = locator || {};
+    if (l.role) return "role=" + l.role + (l.name ? ' name="' + l.name + '"' : "");
+    if (l.name) return 'name="' + l.name + '"';
+    if (l.testid) return "testid=" + l.testid;
+    return String(selector || tag || "");
+  }
+  function summarizePickedForMessage(picked) {
+    if (!Array.isArray(picked)) return [];
+    return picked.filter((p) => p && typeof p === "object").slice(0, 8).map((p) => {
+      const src = p.source || {};
+      return {
+        tag: sliceSafe(String(p.tag || ""), 0, 40),
+        label: sliceSafe(String(p.label || ""), 0, 60),
+        loc: src.file ? sliceSafe(String(src.file), 0, 200) + (src.line ? ":" + src.line : "") : "",
+        locator: sliceSafe(formatElementLocator(p.locator, p.selector, p.tag), 0, 200)
+      };
+    });
+  }
+  function formatPickedSummary(picks) {
+    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
+    if (!list.length) return "";
+    return list.map(
+      (p, i) => (list.length > 1 ? i + 1 + ". " : "") + (p.tag || "\u5143\u7D20") + (p.label ? "\u300C" + p.label + "\u300D" : "") + (p.loc ? " \u2192 " + p.loc : "")
+    ).join("\uFF1B");
+  }
+  function pickedSummaryHtml(picks) {
+    const list = Array.isArray(picks) ? picks.filter(Boolean) : [];
+    if (!list.length) return "";
+    const title = list.map((p) => p.locator).filter(Boolean).join(" / ");
+    return '<span class="user-picks"' + (title ? ' title="' + esc(title) + '"' : "") + ">\u27E1 " + esc(formatPickedSummary(list)) + "</span>";
+  }
+  function selectedTextMessageHtml(selectedText) {
+    const text = String(selectedText || "").trim();
+    if (!text) return "";
+    return '<span class="user-selection" title="' + esc(text) + '"><span class="user-selection-label">\u9875\u9762\u5F15\u7528</span><span class="user-selection-text">' + esc(text) + "</span></span>";
+  }
+
+  // lib/ui/page/transcript.ts
   var PARTIAL_TURN_NOTE = "\uFF08\u672C\u6BB5\u5728\u5BFC\u51FA\u65F6\u5C1A\u672A\u7ED3\u675F\uFF1A\u4EFB\u52A1\u4ECD\u5728\u8FDB\u884C\u4E2D\uFF0C\u4EE5\u4E0B\u662F\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
   var INTERRUPTED_TURN_NOTE = "\uFF08\u4EFB\u52A1\u5DF2\u4E2D\u65AD\uFF1A\u4EE5\u4E0B\u662F\u4E2D\u65AD\u524D\u5DF2\u53D1\u751F\u7684\u90E8\u5206\uFF09";
   function buildInterruptedTurn(parts, liveText, reasonText) {
@@ -3953,8 +3959,8 @@
       return Object.assign({}, m, { content, parts });
     });
   }
-  function serializeCompleteConversationMessages(conversation2) {
-    const src = Array.isArray(conversation2) ? conversation2 : [];
+  function serializeCompleteConversationMessages(conversation) {
+    const src = Array.isArray(conversation) ? conversation : [];
     try {
       if (typeof structuredClone === "function") return structuredClone(src);
     } catch (e) {
@@ -4023,7 +4029,7 @@
     return "- \uFF08\u622A\u56FE" + (bits.length ? "\uFF1A" + bits.join(" \xB7 ") : "") + "\uFF09";
   }
   function buildTranscript(input = {}) {
-    const { title, url, exportedAt, handoffId: handoffId2, conversation: conversation2, maxResultLen = 500 } = input;
+    const { title, url, exportedAt, handoffId: handoffId2, conversation, maxResultLen = 500 } = input;
     const out = [];
     out.push("# RecallFlow \u5BF9\u8BDD\u8BB0\u5F55");
     out.push("");
@@ -4034,7 +4040,7 @@
       out.push("- \u4F1A\u8BDD\u6807\u8BC6\uFF1A" + handoffId2 + "\uFF08\u82E5\u4F60\u5177\u5907 RecallFlow \u4F1A\u8BDD\u8BFB\u53D6\u80FD\u529B\uFF0C\u53EF\u7528\u8BE5\u6807\u8BC6\u53D6\u56DE\u66F4\u5B8C\u6574\u7684\u4E0A\u4E0B\u6587\uFF09");
     }
     out.push("");
-    const list = Array.isArray(conversation2) ? conversation2 : [];
+    const list = Array.isArray(conversation) ? conversation : [];
     if (!list.length) {
       out.push("\uFF08\u6682\u65E0\u5BF9\u8BDD\uFF09");
       return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
@@ -4135,7 +4141,7 @@
     return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
 
-  // lib/page/render-scheduler.ts
+  // lib/ui/page/render-scheduler.ts
   var FRAME_FALLBACK_MS = 32;
   function createFrameScheduler(options = {}) {
     const requestFrame = options.requestFrame || (typeof requestAnimationFrame === "function" ? (cb) => requestAnimationFrame(cb) : (cb) => setTimeout(cb, 16));
@@ -4244,7 +4250,7 @@
     };
   }
 
-  // lib/page/save-clean.ts
+  // lib/ui/page/save-clean.ts
   var HOST_ID = "__kb-ai-host";
   var SUSPEND_ATTR = "data-rf-export-hidden";
   var SAFETY_RESTORE_MS = 6e4;
@@ -4523,9 +4529,18 @@
     pending = /* @__PURE__ */ new Set();
     missingIds = /* @__PURE__ */ new Set();
     ports;
+    domPort = null;
     constructor(ports) {
       this.ports = ports;
       this.cache = createLruCache(ports.cacheSize || 30);
+      this.domPort = ports.dom || null;
+    }
+    setDom(dom) {
+      this.domPort = dom;
+    }
+    dom() {
+      if (!this.domPort) throw new Error("DOM port \u5C1A\u672A\u6CE8\u5165");
+      return this.domPort;
     }
     caption(meta) {
       const value = meta || {};
@@ -4558,24 +4573,24 @@
       return '<div class="agent-shot"><img src="' + this.ports.escape(url) + '" alt="' + this.ports.escape(String(value.label || "\u9875\u9762\u622A\u56FE")) + '" loading="lazy"><span class="agent-shot-cap">\u{1F5BC} ' + this.ports.escape(this.caption(value)) + " \xB7 \u70B9\u51FB\u653E\u5927</span></div>";
     }
     element(meta) {
-      const wrap = document.createElement("div");
+      const wrap = this.dom().createElement("div");
       wrap.innerHTML = this.html(meta);
       return wrap.firstElementChild;
     }
     openLightbox(url) {
       const panel2 = this.ports.getPanel();
       if (!url || !panel2) return;
-      const box = document.createElement("div");
+      const box = this.dom().createElement("div");
       box.className = "shot-lightbox";
-      const image = document.createElement("img");
+      const image = this.dom().createElement("img");
       image.src = String(url);
-      box.appendChild(image);
+      this.dom().append(box, image);
       box.addEventListener("click", () => {
         box.remove();
         this.lightboxOpen = false;
       });
       this.lightboxOpen = true;
-      panel2.appendChild(box);
+      this.dom().append(panel2, box);
     }
   };
 
@@ -4634,6 +4649,88 @@
       sendDisabled: running
     };
   }
+
+  // lib/application/panel/session-state.ts
+  var PanelSessionState = class {
+    conversation = [];
+    panelSessionId = "";
+    panelSessionSeq = 0;
+    panelSessionList = [];
+    panelSessionActiveId = "";
+    panelSessionSaveChain = Promise.resolve();
+    panelSessionSwitchInFlight = false;
+    deferredRemoteSessionId = "";
+    panelSessionLockHeld = false;
+    panelSessionLockRunId = "";
+    adoptIdentity(id, seq) {
+      this.panelSessionId = String(id || "");
+      this.panelSessionSeq = Number(seq) || 0;
+    }
+    replaceConversation(messages) {
+      this.conversation = Array.isArray(messages) ? messages : [];
+    }
+    enqueueSave(operation) {
+      const queued = this.panelSessionSaveChain.catch(() => {
+      }).then(operation);
+      this.panelSessionSaveChain = queued;
+      return queued;
+    }
+    resetLock() {
+      this.panelSessionLockHeld = false;
+      this.panelSessionLockRunId = "";
+    }
+  };
+
+  // lib/application/panel/followed-run-state.ts
+  var FollowedRunState = class {
+    followedRunState = null;
+    followedRunId = "";
+    followedCursor = 0;
+    followedMessages = [];
+    followedLiveReady = false;
+    followedDom = null;
+    followRefreshTimer = null;
+    followStatusTimer = null;
+    observerAutoScroll = true;
+    reset() {
+      this.followedRunState = null;
+      this.followedRunId = "";
+      this.followedCursor = 0;
+      this.followedMessages = [];
+      this.followedLiveReady = false;
+      this.followedDom = null;
+      if (this.followRefreshTimer) clearTimeout(this.followRefreshTimer);
+      this.followRefreshTimer = null;
+      if (this.followStatusTimer) clearTimeout(this.followStatusTimer);
+      this.followStatusTimer = null;
+      this.observerAutoScroll = true;
+    }
+  };
+
+  // lib/application/panel/stream-view-state.ts
+  var StreamViewState = class {
+    pendingAiMsg = null;
+    pendingContentEl = null;
+    flowEl = null;
+    typingEl = null;
+    thinkSeg = null;
+    thinkSegSeq = 0;
+    thinkExpandedManual = null;
+    planBar = null;
+    apiKeyBanner = null;
+    approvalSettingsEl = null;
+    approvalPopoverEl = null;
+    lastPlan = [];
+    planExpanded = null;
+    planWasAllDone = false;
+    usageEl = null;
+    currentCitations = null;
+    pickedElements = [];
+    pickUi = null;
+    picking = false;
+    pageContextEnabled = true;
+    citeHighlightEntered = false;
+  };
 
   // lib/shared/handoff.ts
   var ID_PREFIX = "RF-";
@@ -4820,7 +4917,7 @@
     return "\u8BFB\u53D6 RecallFlow \u4F1A\u8BDD " + norm2 + where + "\uFF0C\u7136\u540E\u5E2E\u6211\u89E3\u51B3\u5176\u4E2D\u7684\u524D\u7AEF\u95EE\u9898\u3002\n\u82E5\u4F60\u6709 RecallFlow \u7684\u4F1A\u8BDD\u8BFB\u53D6\u5DE5\u5177\uFF0C\u8BF7\u5148\u53D6\u56DE\u8BE5\u4F1A\u8BDD\u4E0A\u4E0B\u6587\u518D\u52A8\u624B\uFF1B\u82E5\u6CA1\u6709\u8FD9\u4E2A\u80FD\u529B\uFF0C\u8BF7\u76F4\u63A5\u8BF4\u660E\uFF0C\u6211\u4F1A\u6539\u7528\u9762\u677F\u7684\u300C\u5BFC\u51FA\u8BB0\u5F55\u300D\u628A\u5185\u5BB9\u7C98\u8D34\u7ED9\u4F60\u3002";
   }
 
-  // lib/page/markdown.ts
+  // lib/ui/page/markdown.ts
   var HL_KEYWORDS = new Set(
     "function return if else for while do switch case break continue default new class extends super this const let var typeof instanceof in of try catch finally throw async await yield import export from as static get set null undefined true false void delete package private protected public interface type enum namespace module def elif lambda pass None True False and or not global raise with assert import print del class return if elif else".split(" ")
   );
@@ -5190,7 +5287,7 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
-  // lib/page/panel-css.ts
+  // lib/ui/page/panel-css.ts
   var PANEL_CSS = `
     :host { all: initial; }
     /* \u5B58\u6863\u81EA\u6BC1\u95F8 \u2014\u2014 \u522B\u5220\u8FD9\u6761\u3002
@@ -5764,7 +5861,7 @@
     }
 `;
 
-  // lib/page/panel-layout.ts
+  // lib/ui/page/panel-layout.ts
   var PANEL_POS_KEY = "recallflow-panel-pos";
   var PANEL_SIZE_KEY = "recallflow-panel-size";
   var PANEL_MIN_WIDTH = 280;
@@ -5909,7 +6006,7 @@
     };
   }
 
-  // lib/assistant/run-hub.ts
+  // lib/application/agent/run-hub.ts
   function endReasoning(state) {
     if (!state.reasoning) return;
     state.parts.push({ type: "thinking", text: state.reasoning });
@@ -6188,7 +6285,7 @@
     }
   }
 
-  // lib/page/fab-position.ts
+  // lib/ui/page/fab-position.ts
   var FAB_POSITION_KEY = "recallflow.fab-position.v1";
   var LEGACY_FAB_POSITION_KEY = "recallflow-fab-position";
   var FAB_EDGE_GAP = 8;
@@ -6760,7 +6857,7 @@
     return wrap.firstElementChild;
   }
 
-  // lib/page/chat.ts
+  // lib/ui/page/chat.ts
   function isExtContextAlive() {
     try {
       if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.id) return false;
@@ -6821,46 +6918,31 @@
   var fabDragState = null;
   var fabSuppressClickUntil = 0;
   var lastShortcutToggleAt = 0;
-  var conversation = [];
   var panelTitleEl = null;
-  var panelSessionId = "";
-  var panelSessionSeq = 0;
-  var panelSessionList = [];
-  var panelSessionActiveId = "";
   var panelSessionMenuEl = null;
   var panelSessionBtnEl = null;
   var panelSessionMenuOpen = false;
-  var panelSessionSaveChain = Promise.resolve();
-  var panelSessionSwitchInFlight = false;
-  var deferredRemoteSessionId = "";
-  var panelSessionLockHeld = false;
-  var panelSessionLockRunId = "";
   var panelVisibility = createPanelVisibilityController({
     send: (type, payload) => sendPanelMessage(type, payload),
     isMounted: () => Boolean(panel),
     open: () => {
       ensureHost();
       lastText = "";
-      pageText = pageContextEnabled ? extractPageText() : "";
+      pageText = streamView.pageContextEnabled ? extractPageText() : "";
       openPanel(0, 0, true, true);
     },
     close: () => removePanel({ publish: false })
   });
   var runSession = createPanelRunSession();
+  var panelSessionState = new PanelSessionState();
+  var followedRun = new FollowedRunState();
+  var streamView = new StreamViewState();
   var streamState = createPanelStreamState();
   var runtimePort = UNAVAILABLE_RUNTIME_PORT;
-  var followedRunState = null;
-  var followedRunId = "";
-  var followedCursor = 0;
-  var followedMessages = [];
-  var followedLiveReady = false;
-  var followedDom = null;
-  var followRefreshTimer = null;
-  var followStatusTimer = null;
   var stopBtn = null;
   var sendBtn = null;
   function updateRunControlState() {
-    const control = computeRunControls({ streaming: runSession.isRunning, followed: followedRunState });
+    const control = computeRunControls({ streaming: runSession.isRunning, followed: followedRun.followedRunState });
     if (stopBtn) {
       stopBtn.style.display = control.showStop ? "" : "none";
       stopBtn.disabled = control.stopDisabled;
@@ -6868,20 +6950,6 @@
     }
     if (sendBtn) sendBtn.disabled = control.sendDisabled;
   }
-  var pendingAiMsg = null;
-  var pendingContentEl = null;
-  var flowEl = null;
-  var typingEl = null;
-  var thinkSeg = null;
-  var thinkSegSeq = 0;
-  var thinkExpandedManual = null;
-  var planBar = null;
-  var apiKeyBanner = null;
-  var approvalSettingsEl = null;
-  var approvalPopoverEl = null;
-  var lastPlan = [];
-  var planExpanded = null;
-  var planWasAllDone = false;
   var streamRender = createFrameScheduler();
   if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
     document.addEventListener("visibilitychange", () => {
@@ -6895,20 +6963,13 @@
   var progressController = new PanelProgressController();
   var panelKeyHandler = null;
   var keepAliveTimer = null;
-  var usageEl = null;
   function resetUsageChip() {
-    if (usageEl) usageEl.textContent = "";
+    if (streamView.usageEl) streamView.usageEl.textContent = "";
   }
   var handoffId = "";
   var conversationLoaded = false;
   var conversationLoadPromise = null;
   var handoffEl = null;
-  var pickedElements = [];
-  var pickUi = null;
-  var picking = false;
-  var currentCitations = null;
-  var pageContextEnabled = true;
-  var citeHighlightEntered2 = false;
   var fabCtl = createFabController({
     getFab: () => fab,
     win: window,
@@ -7051,13 +7112,13 @@
     document.documentElement.appendChild(host);
   }
   function resetDetachedHostState() {
-    if (picking) {
+    if (streamView.picking) {
       try {
         chrome.runtime.sendMessage({ type: "pick:cancel" });
       } catch (e) {
       }
-      picking = false;
-      if (pickUi) pickUi = null;
+      streamView.picking = false;
+      if (streamView.pickUi) streamView.pickUi = null;
     }
     if (panelKeyHandler) {
       document.removeEventListener("keydown", panelKeyHandler, true);
@@ -7069,7 +7130,7 @@
     resetPanelFitCache();
     panelTextEl = null;
     panelTitleEl = null;
-    planBar = null;
+    streamView.planBar = null;
     stopBtn = null;
     sendBtn = null;
     bubble = null;
@@ -7164,7 +7225,7 @@
       if (selection2) selection2.removeAllRanges();
     } catch (e) {
     }
-    if (opts.render !== false && panelBody && !runSession.isRunning && !conversation.length && !followedMessages.length) {
+    if (opts.render !== false && panelBody && !runSession.isRunning && !panelSessionState.conversation.length && !followedRun.followedMessages.length) {
       renderConversation();
     }
     if (panel && opts.render !== false) fitPanelHeight();
@@ -7174,13 +7235,13 @@
   }
   function removePanel(options) {
     const hadPanel = Boolean(panel);
-    if (picking) {
+    if (streamView.picking) {
       try {
         chrome.runtime.sendMessage({ type: "pick:cancel" });
       } catch (e) {
       }
-      picking = false;
-      if (pickUi) pickUi.setActive(false);
+      streamView.picking = false;
+      if (streamView.pickUi) streamView.pickUi.setActive(false);
     }
     if (!runSession.isRunning) closePort();
     if (panelKeyHandler) {
@@ -7198,7 +7259,7 @@
       resetPanelFitCache();
       panelTextEl = null;
       panelTitleEl = null;
-      planBar = null;
+      streamView.planBar = null;
       if (fab) fab.classList.remove("hidden");
       fabPeek.setPanelOpen(false);
     }
@@ -7245,7 +7306,7 @@
     } else {
       ensureHost();
       lastText = "";
-      pageText = pageContextEnabled ? extractPageText() : "";
+      pageText = streamView.pageContextEnabled ? extractPageText() : "";
       openPanel(0, 0, true);
     }
   }
@@ -7318,7 +7379,7 @@
     return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));
   }
   function pinToBottom() {
-    if (!observerAutoScroll) return false;
+    if (!followedRun.observerAutoScroll) return false;
     if (!panelBody || !panelBody.isConnected) return false;
     markSelfScroll();
     panelBody.scrollTop = BOTTOM_SCROLL_PX;
@@ -7334,12 +7395,12 @@
   function markUserScrollIntent(up) {
     const now = Date.now();
     userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
-    if (up === true) observerAutoScroll = false;
+    if (up === true) followedRun.observerAutoScroll = false;
   }
   function isPinnedForFollow() {
-    if (Date.now() < userScrollIntentUntil && observerAutoScroll === false) return false;
+    if (Date.now() < userScrollIntentUntil && followedRun.observerAutoScroll === false) return false;
     if (!panelBody) return false;
-    return !!observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
+    return !!followedRun.observerAutoScroll || panelBody.scrollHeight - panelBody.scrollTop - panelBody.clientHeight < 40;
   }
   var screenshotView = new PanelScreenshotView({
     load: (id) => loadScreenshot(typeof chrome !== "undefined" ? chrome : null, id),
@@ -7405,7 +7466,7 @@
   function renderDecisionButtonsIfPresent() {
     if (!panelBody || !panel) return;
     if (panelBody.querySelector(".suggestion-options")) return;
-    const last = conversation[conversation.length - 1];
+    const last = panelSessionState.conversation[panelSessionState.conversation.length - 1];
     if (last && last.role === "assistant" && /<options>/i.test(String(last.content || ""))) {
       renderSuggestionButtons(panelBody, last.content, panel._sendFn || activeSendFn);
       fitPanelHeight();
@@ -7424,7 +7485,7 @@
     return '<div class="think-block" data-state="' + (o.done === true ? "done" : "running") + '" data-open="' + (o.open === true ? "true" : "false") + '"><button type="button" class="think-head"><span class="think-dots"><span></span><span></span><span></span></span><span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span><span class="think-caret" aria-hidden="true">\u25BE</span></button><div class="think-body">' + escHtml(body) + "</div></div>";
   }
   function mountThinkSegment(seg, open) {
-    if (!flowEl) return null;
+    if (!streamView.flowEl) return null;
     const frag = document.createRange().createContextualFragment(
       thinkBlockHtml(seg.text, { open, done: seg.done, truncated: seg.truncated })
     );
@@ -7433,18 +7494,18 @@
     seg.block = block;
     seg.body = block.querySelector(".think-body");
     refreshThinkHead(seg);
-    flowEl.appendChild(block);
+    streamView.flowEl.appendChild(block);
     return block;
   }
   function renderCommittedParts(flow) {
-    flowEl = flow;
+    streamView.flowEl = flow;
     for (const p of streamState.parts) {
       if (p.type === "thinking" && p.text) {
         mountThinkSegment({ text: p.text, done: true, block: null, body: null });
       } else if (p.type === "narration" && p.text) {
         const d = document.createElement("div");
         d.className = "agent-content";
-        d.innerHTML = renderAnswer(p.text, currentCitations, false);
+        d.innerHTML = renderAnswer(p.text, streamView.currentCitations, false);
         flow.appendChild(d);
       } else if (p.type === "tool-call") {
         flow.appendChild(
@@ -7467,7 +7528,7 @@
   }
   function restoreStreamingUI() {
     if (!panelBody || !runSession.isRunning) return;
-    if (pendingContentEl && pendingContentEl.isConnected) return;
+    if (streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return;
     const aiMsg = document.createElement("div");
     aiMsg.className = "msg ai";
     const flow = document.createElement("div");
@@ -7477,22 +7538,22 @@
     const contentEl = document.createElement("div");
     contentEl.className = "agent-content";
     if (streamState.narration) {
-      contentEl.innerHTML = renderAnswer(streamState.narration, currentCitations, false);
+      contentEl.innerHTML = renderAnswer(streamState.narration, streamView.currentCitations, false);
     } else {
       contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
     }
     flow.appendChild(contentEl);
-    if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
+    if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
     panelBody.appendChild(aiMsg);
-    pendingAiMsg = aiMsg;
-    pendingContentEl = contentEl;
-    if (thinkSeg && thinkSeg.text) {
-      thinkSeg.block = null;
-      thinkSeg.body = null;
-      mountThinkSegment(thinkSeg, thinkExpandedManual === true);
+    streamView.pendingAiMsg = aiMsg;
+    streamView.pendingContentEl = contentEl;
+    if (streamView.thinkSeg && streamView.thinkSeg.text) {
+      streamView.thinkSeg.block = null;
+      streamView.thinkSeg.body = null;
+      mountThinkSegment(streamView.thinkSeg, streamView.thinkExpandedManual === true);
     }
-    typingEl = streamState.narration ? null : contentEl;
-    pendingAiMsg._raw = streamState.content;
+    streamView.typingEl = streamState.narration ? null : contentEl;
+    streamView.pendingAiMsg._raw = streamState.content;
     if (progressController.el) {
       if (!progressController.startedAt) progressController.startedAt = Date.now();
       progressController.el.classList.add("on");
@@ -7514,18 +7575,18 @@
     }, 5e3);
   }
   function refreshApiKeyBanner() {
-    if (!apiKeyBanner) return;
+    if (!streamView.apiKeyBanner) return;
     getAISettings().then((s) => {
-      if (!apiKeyBanner) return;
+      if (!streamView.apiKeyBanner) return;
       const missing = !String(s && s.apiKey || "").trim();
-      apiKeyBanner.style.display = missing ? "flex" : "none";
+      streamView.apiKeyBanner.style.display = missing ? "flex" : "none";
       fitPanelHeight();
     }).catch(() => {
     });
   }
   function closeApprovalPopover() {
-    if (!approvalPopoverEl || approvalPopoverEl.hidden) return;
-    approvalPopoverEl.hidden = true;
+    if (!streamView.approvalPopoverEl || streamView.approvalPopoverEl.hidden) return;
+    streamView.approvalPopoverEl.hidden = true;
     if (panel) panel.classList.remove("approval-open");
     fitPanelHeight();
   }
@@ -7763,9 +7824,9 @@
   }
   function renderConversation() {
     if (!panelBody) return;
-    followedLiveReady = false;
-    followedDom = null;
-    const view = followedMessages.length ? conversation.concat(followedMessages) : conversation;
+    followedRun.followedLiveReady = false;
+    followedRun.followedDom = null;
+    const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
     if (!view.length) {
       panelBody.className = "p-body";
       panelBody.innerHTML = '<div class="msg ai">' + (lastText ? "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u57FA\u4E8E\u9009\u4E2D\u6587\u672C\u6267\u884C\u3002" : "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u76F4\u63A5\u6267\u884C\uFF08\u53EF\u57FA\u4E8E\u77E5\u8BC6\u5E93\uFF09\u3002") + "</div>";
@@ -7790,30 +7851,30 @@
     }
   }
   function rebuildFollowedMessages() {
-    followedMessages = [];
-    if (!followedRunState) return;
-    const instruction = String(followedRunState.instruction || "").trim();
-    const last = conversation.length ? conversation[conversation.length - 1] : null;
+    followedRun.followedMessages = [];
+    if (!followedRun.followedRunState) return;
+    const instruction = String(followedRun.followedRunState.instruction || "").trim();
+    const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
     const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
     if (instruction && !alreadyHasUser) {
-      followedMessages.push({ role: "user", content: instruction, live: true });
+      followedRun.followedMessages.push({ role: "user", content: instruction, live: true });
     }
-    const assistant = runStateToAssistantMessage(followedRunState);
-    if (assistant) followedMessages.push(assistant);
+    const assistant = runStateToAssistantMessage(followedRun.followedRunState);
+    if (assistant) followedRun.followedMessages.push(assistant);
   }
   function followedRunCommitted() {
-    if (!followedRunState) return false;
-    const instruction = String(followedRunState.instruction || "").trim();
+    if (!followedRun.followedRunState) return false;
+    const instruction = String(followedRun.followedRunState.instruction || "").trim();
     if (!instruction) return false;
     let userIndex = -1;
-    for (let i = conversation.length - 1; i >= 0; i--) {
-      if (conversation[i] && conversation[i].role === "user" && String(conversation[i].content || "").trim() === instruction) {
+    for (let i = panelSessionState.conversation.length - 1; i >= 0; i--) {
+      if (panelSessionState.conversation[i] && panelSessionState.conversation[i].role === "user" && String(panelSessionState.conversation[i].content || "").trim() === instruction) {
         userIndex = i;
         break;
       }
     }
     if (userIndex < 0) return false;
-    return conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
+    return panelSessionState.conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
   }
   function followedPartElement(part, citations) {
     if (!part) return null;
@@ -7822,13 +7883,13 @@
     return wrap.firstElementChild;
   }
   function ensureFollowedDom() {
-    if (followedDom && followedDom.aiEl && followedDom.aiEl.isConnected && followedDom.aiEl.parentNode === panelBody) {
-      return followedDom;
+    if (followedRun.followedDom && followedRun.followedDom.aiEl && followedRun.followedDom.aiEl.isConnected && followedRun.followedDom.aiEl.parentNode === panelBody) {
+      return followedRun.followedDom;
     }
-    const instruction = String(followedRunState.instruction || "").trim();
-    const last = conversation.length ? conversation[conversation.length - 1] : null;
+    const instruction = String(followedRun.followedRunState.instruction || "").trim();
+    const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
     const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
-    if (!conversation.length) panelBody.innerHTML = "";
+    if (!panelSessionState.conversation.length) panelBody.innerHTML = "";
     panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
     let userEl = null;
     if (instruction && !alreadyHasUser) {
@@ -7839,20 +7900,20 @@
     }
     const aiEl = document.createElement("div");
     aiEl.className = "msg ai follow-live-ai";
-    const flowEl2 = document.createElement("div");
-    flowEl2.className = "agent-flow";
+    const flowEl = document.createElement("div");
+    flowEl.className = "agent-flow";
     const committedEl = document.createElement("div");
     committedEl.className = "follow-committed";
     const liveEl = document.createElement("div");
     liveEl.className = "follow-live-tail";
-    flowEl2.appendChild(committedEl);
-    flowEl2.appendChild(liveEl);
-    aiEl.appendChild(flowEl2);
+    flowEl.appendChild(committedEl);
+    flowEl.appendChild(liveEl);
+    aiEl.appendChild(flowEl);
     panelBody.appendChild(aiEl);
-    followedDom = {
+    followedRun.followedDom = {
       userEl,
       aiEl,
-      flowEl: flowEl2,
+      flowEl,
       committedEl,
       liveEl,
       renderedParts: 0,
@@ -7861,18 +7922,18 @@
       liveText: "",
       typingEl: null
     };
-    return followedDom;
+    return followedRun.followedDom;
   }
   function renderFollowedLive() {
-    if (!panelBody || !followedRunState) return;
-    if (!followedLiveReady) {
-      followedMessages = [];
+    if (!panelBody || !followedRun.followedRunState) return;
+    if (!followedRun.followedLiveReady) {
+      followedRun.followedMessages = [];
       renderConversation();
-      followedLiveReady = true;
-      followedDom = null;
+      followedRun.followedLiveReady = true;
+      followedRun.followedDom = null;
     }
     const dom = ensureFollowedDom();
-    const assistant = runStateToAssistantMessage(followedRunState);
+    const assistant = runStateToAssistantMessage(followedRun.followedRunState);
     if (!assistant) return;
     const parts = Array.isArray(assistant.parts) ? assistant.parts : [];
     const committedParts = parts.filter(
@@ -7948,7 +8009,7 @@
     }
     dom.aiEl._raw = assistant.content || "";
     renderPlan(Array.isArray(assistant.plan) ? assistant.plan : []);
-    if (usageEl) usageEl.textContent = followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
+    if (streamView.usageEl) streamView.usageEl.textContent = followedRun.followedRunState.tokens ? "tokens " + followedRun.followedRunState.tokens : "";
     fitPanelHeight();
     pinToBottom();
   }
@@ -7957,14 +8018,14 @@
     streamRender.schedule("follow-live", () => {
       renderFollowedLive();
     });
-    if (usageEl) usageEl.textContent = followedRunState && followedRunState.tokens ? "tokens " + followedRunState.tokens : "";
-    if (followedRunState && followedRunState.status === "running") {
+    if (streamView.usageEl) streamView.usageEl.textContent = followedRun.followedRunState && followedRun.followedRunState.tokens ? "tokens " + followedRun.followedRunState.tokens : "";
+    if (followedRun.followedRunState && followedRun.followedRunState.status === "running") {
       if (progressController.el) {
         progressController.el.classList.add("on");
-        progressController.startedAt = Number(followedRunState.startedAt) || Date.now();
-        progressController.state = stateLabel(followedRunState.progress && followedRunState.progress.state) || "\u8DDF\u968F\u8FD0\u884C";
-        progressController.step = Number(followedRunState.progress && followedRunState.progress.step) || 0;
-        progressController.max = Number(followedRunState.progress && followedRunState.progress.max) || 0;
+        progressController.startedAt = Number(followedRun.followedRunState.startedAt) || Date.now();
+        progressController.state = stateLabel(followedRun.followedRunState.progress && followedRun.followedRunState.progress.state) || "\u8DDF\u968F\u8FD0\u884C";
+        progressController.step = Number(followedRun.followedRunState.progress && followedRun.followedRunState.progress.step) || 0;
+        progressController.max = Number(followedRun.followedRunState.progress && followedRun.followedRunState.progress.max) || 0;
         if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1e3);
         progressController.render();
       }
@@ -7973,21 +8034,21 @@
     ensureFollowedRunWatch();
   }
   function ensureFollowedRunWatch() {
-    if (followStatusTimer) return;
-    followStatusTimer = setInterval(async () => {
-      if (!followedRunState) {
-        clearInterval(followStatusTimer);
-        followStatusTimer = null;
+    if (followedRun.followStatusTimer) return;
+    followedRun.followStatusTimer = setInterval(async () => {
+      if (!followedRun.followedRunState) {
+        clearInterval(followedRun.followStatusTimer);
+        followedRun.followStatusTimer = null;
         return;
       }
-      if (followRefreshTimer) return;
-      const sessionId = panelSessionId;
+      if (followedRun.followRefreshTimer) return;
+      const sessionId = panelSessionState.panelSessionId;
       const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
-      if (sessionId !== panelSessionId) return;
+      if (sessionId !== panelSessionState.panelSessionId) return;
       if (res && res.ok && res.snapshot && res.snapshot.status === "running") {
-        followedRunState = res.snapshot;
-        followedRunId = res.snapshot.runId;
-        followedCursor = Number(res.snapshot.cursor) || 0;
+        followedRun.followedRunState = res.snapshot;
+        followedRun.followedRunId = res.snapshot.runId;
+        followedRun.followedCursor = Number(res.snapshot.cursor) || 0;
         rebuildFollowedMessages();
         renderFollowedRun();
         return;
@@ -7997,20 +8058,20 @@
   }
   function resetFollowedRun(options) {
     const opts = options || {};
-    if (followRefreshTimer) {
-      clearTimeout(followRefreshTimer);
-      followRefreshTimer = null;
+    if (followedRun.followRefreshTimer) {
+      clearTimeout(followedRun.followRefreshTimer);
+      followedRun.followRefreshTimer = null;
     }
-    if (followStatusTimer) {
-      clearInterval(followStatusTimer);
-      followStatusTimer = null;
+    if (followedRun.followStatusTimer) {
+      clearInterval(followedRun.followStatusTimer);
+      followedRun.followStatusTimer = null;
     }
-    followedRunState = null;
-    followedRunId = "";
-    followedCursor = 0;
-    followedMessages = [];
-    followedLiveReady = false;
-    followedDom = null;
+    followedRun.followedRunState = null;
+    followedRun.followedRunId = "";
+    followedRun.followedCursor = 0;
+    followedRun.followedMessages = [];
+    followedRun.followedLiveReady = false;
+    followedRun.followedDom = null;
     if (!runSession.isRunning) {
       progressController.stop();
     }
@@ -8029,34 +8090,34 @@
       scheduleFollowedRunRefresh();
       return;
     }
-    followedRunState = snapshot;
-    followedRunId = snapshot.runId;
-    followedCursor = Number(snapshot.cursor) || 0;
+    followedRun.followedRunState = snapshot;
+    followedRun.followedRunId = snapshot.runId;
+    followedRun.followedCursor = Number(snapshot.cursor) || 0;
     rebuildFollowedMessages();
     renderFollowedRun();
   }
   async function subscribePanelRun() {
-    if (!panelSessionId) return;
-    const sessionId = panelSessionId;
+    if (!panelSessionState.panelSessionId) return;
+    const sessionId = panelSessionState.panelSessionId;
     const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
-    if (sessionId !== panelSessionId) return;
+    if (sessionId !== panelSessionState.panelSessionId) return;
     if (!res || !res.ok || res.selfOwned) {
-      resetFollowedRun({ render: Boolean(followedRunState) });
+      resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
       return;
     }
     if (res.snapshot && res.snapshot.status === "running") applyFollowedSnapshot(res.snapshot);
-    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRunState) });
-    else if (followedRunState) resetFollowedRun({ render: true });
+    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
+    else if (followedRun.followedRunState) resetFollowedRun({ render: true });
   }
   function scheduleFollowedRunRefresh() {
-    if (followRefreshTimer) clearTimeout(followRefreshTimer);
+    if (followedRun.followRefreshTimer) clearTimeout(followedRun.followRefreshTimer);
     let attempts = 0;
     const tick = async () => {
       attempts += 1;
-      const sessionId = panelSessionId;
+      const sessionId = panelSessionState.panelSessionId;
       const got = await sendPanelMessage("panel:get", { id: sessionId });
-      if (sessionId !== panelSessionId) return;
-      const instruction = String(followedRunState && followedRunState.instruction ? followedRunState.instruction : "").trim();
+      if (sessionId !== panelSessionState.panelSessionId) return;
+      const instruction = String(followedRun.followedRunState && followedRun.followedRunState.instruction ? followedRun.followedRunState.instruction : "").trim();
       const messages = got && got.ok && got.session ? got.session.messages || [] : [];
       let userIndex = -1;
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -8066,7 +8127,7 @@
         }
       }
       const hasCommittedTurn = userIndex >= 0 && messages.slice(userIndex + 1).some((m) => m && m.role === "assistant");
-      if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionSeq || hasCommittedTurn)) {
+      if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionState.panelSessionSeq || hasCommittedTurn)) {
         resetFollowedRun();
         adoptPanelSession(got.session, { activeId: got.activeId || sessionId });
         subscribePanelRun().catch(() => {
@@ -8074,68 +8135,68 @@
         return;
       }
       if (attempts < 6) {
-        followRefreshTimer = setTimeout(tick, 300);
+        followedRun.followRefreshTimer = setTimeout(tick, 300);
       } else {
         resetFollowedRun({ render: true });
       }
     };
-    followRefreshTimer = setTimeout(tick, 250);
+    followedRun.followRefreshTimer = setTimeout(tick, 250);
   }
   function handleRunStarted(msg) {
-    if (!msg || String(msg.sessionId || "") !== panelSessionId) return;
+    if (!msg || String(msg.sessionId || "") !== panelSessionState.panelSessionId) return;
     subscribePanelRun().catch(() => {
     });
   }
   function handleRunDelta(msg) {
-    if (!msg || String(msg.sessionId || "") !== panelSessionId) return;
-    if (!followedRunState || String(msg.runId || "") !== followedRunId) {
+    if (!msg || String(msg.sessionId || "") !== panelSessionState.panelSessionId) return;
+    if (!followedRun.followedRunState || String(msg.runId || "") !== followedRun.followedRunId) {
       subscribePanelRun().catch(() => {
       });
       return;
     }
     const cursor = Number(msg.cursor) || 0;
-    if (cursor !== followedCursor + 1) {
+    if (cursor !== followedRun.followedCursor + 1) {
       subscribePanelRun().catch(() => {
       });
       return;
     }
-    followedCursor = cursor;
-    applyRunEvent(followedRunState, msg.event);
+    followedRun.followedCursor = cursor;
+    applyRunEvent(followedRun.followedRunState, msg.event);
     renderFollowedRun();
     if (msg.event && (msg.event.type === "end" || msg.event.type === "error")) {
       scheduleFollowedRunRefresh();
     }
   }
   function renderPlan(plan) {
-    lastPlan = Array.isArray(plan) ? plan : [];
-    if (!planBar) return;
-    if (!lastPlan.length) {
-      planBar.style.display = "none";
-      planBar.innerHTML = "";
-      planExpanded = null;
+    streamView.lastPlan = Array.isArray(plan) ? plan : [];
+    if (!streamView.planBar) return;
+    if (!streamView.lastPlan.length) {
+      streamView.planBar.style.display = "none";
+      streamView.planBar.innerHTML = "";
+      streamView.planExpanded = null;
       return;
     }
-    const total = lastPlan.length;
-    const doneCount = lastPlan.filter((p) => p && p.status === "done").length;
+    const total = streamView.lastPlan.length;
+    const doneCount = streamView.lastPlan.filter((p) => p && p.status === "done").length;
     const allDone = total > 0 && doneCount === total;
-    const current = lastPlan.find((p) => p && p.status === "in_progress") || lastPlan.find((p) => p && p.status !== "done");
-    if (allDone !== planWasAllDone) planExpanded = null;
-    planWasAllDone = allDone;
-    const collapsed = planExpanded !== true;
-    const items = lastPlan.map((p) => {
+    const current = streamView.lastPlan.find((p) => p && p.status === "in_progress") || streamView.lastPlan.find((p) => p && p.status !== "done");
+    if (allDone !== streamView.planWasAllDone) streamView.planExpanded = null;
+    streamView.planWasAllDone = allDone;
+    const collapsed = streamView.planExpanded !== true;
+    const items = streamView.lastPlan.map((p) => {
       const st = p.status === "done" ? "done" : p.status === "in_progress" ? "in_progress" : "pending";
       const mark = st === "done" ? "\u2713" : st === "in_progress" ? "\u25B6" : "\u25CB";
       return '<div class="agent-plan-item ' + st + '">' + mark + " " + escHtml(p.text || "") + "</div>";
     }).join("");
     const title = collapsed ? "\u6267\u884C\u8BA1\u5212 \xB7 " + doneCount + "/" + total + (allDone ? " \u6B65\u5DF2\u5B8C\u6210" : current ? " \xB7 \u25B6 " + String(current.text || "").slice(0, 40) : "") + "\uFF08\u70B9\u51FB\u5C55\u5F00\uFF09" : "\u6267\u884C\u8BA1\u5212 \xB7 " + doneCount + "/" + total + "\uFF08\u70B9\u51FB\u6536\u8D77\uFF09";
-    planBar.classList.toggle("collapsed", collapsed);
-    planBar.innerHTML = '<div class="agent-plan-title" role="button" tabindex="0" title="\u70B9\u51FB\u5C55\u5F00/\u6298\u53E0">' + escHtml(title) + '</div><div class="agent-plan-items">' + items + "</div>";
-    planBar.style.display = "";
+    streamView.planBar.classList.toggle("collapsed", collapsed);
+    streamView.planBar.innerHTML = '<div class="agent-plan-title" role="button" tabindex="0" title="\u70B9\u51FB\u5C55\u5F00/\u6298\u53E0">' + escHtml(title) + '</div><div class="agent-plan-items">' + items + "</div>";
+    streamView.planBar.style.display = "";
     fitPanelHeight();
     pinToBottom();
   }
   function messagesForExport() {
-    const list = Array.isArray(conversation) ? conversation.slice() : [];
+    const list = Array.isArray(panelSessionState.conversation) ? panelSessionState.conversation.slice() : [];
     const partial = buildPartialTurn(streamState.parts, streamState.responseText);
     if (partial) list.push(partial);
     return list;
@@ -8153,7 +8214,7 @@
     });
   }
   function serializeConversation() {
-    return serializeCompleteConversationMessages(conversation);
+    return serializeCompleteConversationMessages(panelSessionState.conversation);
   }
   function sendPanelMessage(type, payload) {
     if (!isExtContextAlive()) {
@@ -8163,8 +8224,8 @@
   }
   function applyPanelSessionSummaries(state) {
     if (!state) return;
-    if (Array.isArray(state.sessions)) panelSessionList = state.sessions.slice();
-    if (typeof state.activeId === "string") panelSessionActiveId = state.activeId;
+    if (Array.isArray(state.sessions)) panelSessionState.panelSessionList = state.sessions.slice();
+    if (typeof state.activeId === "string") panelSessionState.panelSessionActiveId = state.activeId;
     renderSessionButton();
     renderSessionMenu();
   }
@@ -8182,17 +8243,17 @@
       lastRunId: String(session.lastRunId || ""),
       titleAuto: session.titleAuto !== false
     };
-    const old = panelSessionList.find((s) => s.id === session.id);
+    const old = panelSessionState.panelSessionList.find((s) => s.id === session.id);
     if (old) Object.assign(old, summary);
-    else panelSessionList.push(summary);
-    panelSessionList.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+    else panelSessionState.panelSessionList.push(summary);
+    panelSessionState.panelSessionList.sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
     renderSessionButton();
     renderSessionMenu();
   }
   function renderSessionButton() {
     if (!panelSessionBtnEl) return;
-    const current = panelSessionList.find((s) => s.id === panelSessionId);
-    const count = panelSessionList.length;
+    const current = panelSessionState.panelSessionList.find((s) => s.id === panelSessionState.panelSessionId);
+    const count = panelSessionState.panelSessionList.length;
     panelSessionBtnEl.textContent = "\u{1F5C2} \u4F1A\u8BDD" + (count ? " " + count : "");
     if (panelTitleEl) {
       const titleText = current && current.title ? current.title : "RecallFlow";
@@ -8226,18 +8287,18 @@
     panelSessionMenuEl.appendChild(head);
     const list = document.createElement("div");
     list.className = "session-list";
-    if (!panelSessionList.length) {
+    if (!panelSessionState.panelSessionList.length) {
       const empty = document.createElement("div");
       empty.className = "session-empty";
       empty.textContent = "\u8FD8\u6CA1\u6709\u4F1A\u8BDD";
       list.appendChild(empty);
     }
-    for (const session of panelSessionList) {
+    for (const session of panelSessionState.panelSessionList) {
       const item = document.createElement("div");
       item.className = "session-item";
       item.setAttribute("data-session-id", session.id);
-      if (session.id === panelSessionId) item.classList.add("active");
-      if (session.id === panelSessionActiveId) item.classList.add("shared-active");
+      if (session.id === panelSessionState.panelSessionId) item.classList.add("active");
+      if (session.id === panelSessionState.panelSessionActiveId) item.classList.add("shared-active");
       if (session.locked) item.classList.add("running");
       const main = document.createElement("button");
       main.type = "button";
@@ -8250,7 +8311,7 @@
       title.textContent = (session.locked ? "\u25CF " : "") + (session.title || "\u65B0\u4F1A\u8BDD");
       const meta = document.createElement("span");
       meta.className = "session-meta";
-      meta.textContent = sessionTimeText(session.updatedAt) + " \xB7 " + (Number(session.messageCount) || 0) + " \u6761" + (session.id === panelSessionActiveId ? " \xB7 \u6D4F\u89C8\u5668\u5F53\u524D" : "") + (session.storageWarning ? " \xB7 \u8D85 1M tokens" : "");
+      meta.textContent = sessionTimeText(session.updatedAt) + " \xB7 " + (Number(session.messageCount) || 0) + " \u6761" + (session.id === panelSessionState.panelSessionActiveId ? " \xB7 \u6D4F\u89C8\u5668\u5F53\u524D" : "") + (session.storageWarning ? " \xB7 \u8D85 1M tokens" : "");
       main.appendChild(title);
       main.appendChild(meta);
       item.appendChild(main);
@@ -8302,18 +8363,18 @@
   function adoptPanelSession(session, options) {
     if (!session || !session.id) return false;
     const opts = options || {};
-    if (panelSessionId !== session.id) resetUsageChip();
-    panelSessionId = session.id;
-    panelSessionSeq = Number(session.seq) || 0;
-    if (opts.activeId) panelSessionActiveId = String(opts.activeId);
-    conversation = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
+    if (panelSessionState.panelSessionId !== session.id) resetUsageChip();
+    panelSessionState.panelSessionId = session.id;
+    panelSessionState.panelSessionSeq = Number(session.seq) || 0;
+    if (opts.activeId) panelSessionState.panelSessionActiveId = String(opts.activeId);
+    panelSessionState.conversation = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
     handoffId = normalizeHandoffId(session.handoffId || "") || loadHandoffId() || newHandoffId();
     try {
       localStorage.setItem(HANDOFF_ID_KEY, handoffId);
     } catch (e) {
     }
-    mergePanelSessionSummary(Object.assign({}, session, { messageCount: conversation.length, handoffId }));
-    if (followedRunState) {
+    mergePanelSessionSummary(Object.assign({}, session, { messageCount: panelSessionState.conversation.length, handoffId }));
+    if (followedRun.followedRunState) {
       if (followedRunCommitted()) resetFollowedRun();
       else rebuildFollowedMessages();
     }
@@ -8330,13 +8391,13 @@
   }
   function saveConversation(options) {
     const opts = options || {};
-    const id = panelSessionId;
+    const id = panelSessionState.panelSessionId;
     if (!id) return Promise.resolve({ ok: false, skipped: true });
     const messages = serializeConversation();
-    const baseSeq = panelSessionSeq;
+    const baseSeq = panelSessionState.panelSessionSeq;
     const runId = runSession.runId;
     const savedHandoffId = handoffId;
-    panelSessionSaveChain = panelSessionSaveChain.catch(() => {
+    panelSessionState.panelSessionSaveChain = panelSessionState.panelSessionSaveChain.catch(() => {
     }).then(async () => {
       const res = await sendPanelMessage("panel:save", {
         id,
@@ -8348,13 +8409,13 @@
         origin: location.href
       });
       if (res && res.ok && res.session) {
-        if (id === panelSessionId) panelSessionSeq = Number(res.session.seq) || panelSessionSeq;
+        if (id === panelSessionState.panelSessionId) panelSessionState.panelSessionSeq = Number(res.session.seq) || panelSessionState.panelSessionSeq;
         mergePanelSessionSummary(res.session);
-        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+        if (Array.isArray(res.sessions)) panelSessionState.panelSessionList = res.sessions.slice();
         renderSessionButton();
         renderSessionMenu();
       } else if (res && (res.conflict || res.stale) && res.session) {
-        if (id === panelSessionId && !runSession.isRunning) {
+        if (id === panelSessionState.panelSessionId && !runSession.isRunning) {
           adoptPanelSession(res.session, { activeId: res.activeId });
           showCitationHint(
             res.stale ? "\u68C0\u6D4B\u5230\u65E7\u6807\u7B7E\u9875\u7684\u56DE\u5199\uFF0C\u5DF2\u4FDD\u7559\u66F4\u5B8C\u6574\u7684\u4F1A\u8BDD\u5185\u5BB9\u3002" : "\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u5176\u4ED6\u6807\u7B7E\u9875\u66F4\u65B0\uFF0C\u5DF2\u4E3A\u4F60\u5237\u65B0\u5230\u6700\u65B0\u5185\u5BB9\u3002"
@@ -8363,13 +8424,13 @@
       }
       return res;
     });
-    return panelSessionSaveChain;
+    return panelSessionState.panelSessionSaveChain;
   }
   async function loadConversation() {
     try {
       const state = await sendPanelMessage("panel:state");
       if (state && state.ok) applyPanelSessionSummaries(state);
-      const target = state && state.activeId || panelSessionList[0] && panelSessionList[0].id || "";
+      const target = state && state.activeId || panelSessionState.panelSessionList[0] && panelSessionState.panelSessionList[0].id || "";
       if (target) {
         const got = await sendPanelMessage("panel:get", { id: target });
         if (got && got.ok && got.session) {
@@ -8539,12 +8600,12 @@
       showCitationHint("\u5F53\u524D\u4EFB\u52A1\u8FD8\u5728\u8FD0\u884C\uFF0C\u7ED3\u675F\u540E\u624D\u80FD\u5207\u6362\u4F1A\u8BDD\u3002");
       return false;
     }
-    if (wanted === panelSessionId && !opts.force) {
+    if (wanted === panelSessionState.panelSessionId && !opts.force) {
       closeSessionMenu();
       return true;
     }
-    if (panelSessionSwitchInFlight) return false;
-    panelSessionSwitchInFlight = true;
+    if (panelSessionState.panelSessionSwitchInFlight) return false;
+    panelSessionState.panelSessionSwitchInFlight = true;
     try {
       let res;
       if (opts.activate === false) {
@@ -8557,16 +8618,16 @@
         return false;
       }
       adoptPanelSession(res.session, { activeId: res.activeId || wanted });
-      if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+      if (Array.isArray(res.sessions)) panelSessionState.panelSessionList = res.sessions.slice();
       renderSessionButton();
       renderSessionMenu();
       closeSessionMenu();
       return true;
     } finally {
-      panelSessionSwitchInFlight = false;
-      if (deferredRemoteSessionId && !runSession.isRunning && deferredRemoteSessionId !== panelSessionId) {
-        const next = deferredRemoteSessionId;
-        deferredRemoteSessionId = "";
+      panelSessionState.panelSessionSwitchInFlight = false;
+      if (panelSessionState.deferredRemoteSessionId && !runSession.isRunning && panelSessionState.deferredRemoteSessionId !== panelSessionState.panelSessionId) {
+        const next = panelSessionState.deferredRemoteSessionId;
+        panelSessionState.deferredRemoteSessionId = "";
         setTimeout(() => {
           switchPanelSession(next, { activate: false, force: true }).catch(() => {
           });
@@ -8589,7 +8650,7 @@
       return false;
     }
     adoptPanelSession(res.session, { activeId: res.activeId });
-    if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
+    if (Array.isArray(res.sessions)) panelSessionState.panelSessionList = res.sessions.slice();
     renderSessionButton();
     renderSessionMenu();
     closeSessionMenu();
@@ -8601,7 +8662,7 @@
     return true;
   }
   function renamePanelSession(id) {
-    const session = panelSessionList.find((s) => s.id === id);
+    const session = panelSessionState.panelSessionList.find((s) => s.id === id);
     if (!session) return;
     showPanelDialog({
       title: "\u91CD\u547D\u540D\u4F1A\u8BDD",
@@ -8616,9 +8677,9 @@
           showCitationHint(res && res.error || "\u91CD\u547D\u540D\u5931\u8D25");
           return false;
         }
-        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
-        if (id === panelSessionId && res.session) {
-          panelSessionSeq = Number(res.session.seq) || panelSessionSeq;
+        if (Array.isArray(res.sessions)) panelSessionState.panelSessionList = res.sessions.slice();
+        if (id === panelSessionState.panelSessionId && res.session) {
+          panelSessionState.panelSessionSeq = Number(res.session.seq) || panelSessionState.panelSessionSeq;
         }
         renderSessionButton();
         renderSessionMenu();
@@ -8627,7 +8688,7 @@
     });
   }
   function deletePanelSession(id) {
-    const session = panelSessionList.find((s) => s.id === id);
+    const session = panelSessionState.panelSessionList.find((s) => s.id === id);
     if (!session) return;
     showPanelDialog({
       title: "\u5220\u9664\u4F1A\u8BDD",
@@ -8640,12 +8701,12 @@
           showCitationHint(res && res.error || "\u5220\u9664\u5931\u8D25");
           return false;
         }
-        if (Array.isArray(res.sessions)) panelSessionList = res.sessions.slice();
-        if (id === panelSessionId) {
+        if (Array.isArray(res.sessions)) panelSessionState.panelSessionList = res.sessions.slice();
+        if (id === panelSessionState.panelSessionId) {
           const nextId = res.activeId || res.sessions && res.sessions[0] && res.sessions[0].id;
           if (nextId) await switchPanelSession(nextId, { force: true });
         } else {
-          panelSessionActiveId = res.activeId || panelSessionActiveId;
+          panelSessionState.panelSessionActiveId = res.activeId || panelSessionState.panelSessionActiveId;
           renderSessionButton();
           renderSessionMenu();
         }
@@ -8654,7 +8715,7 @@
     });
   }
   async function exportPanelSession(id, btn) {
-    const session = panelSessionList.find((s) => s.id === id);
+    const session = panelSessionState.panelSessionList.find((s) => s.id === id);
     if (!session) return;
     const res = await sendPanelMessage("panel:get", { id });
     if (!res || !res.ok || !res.session) {
@@ -8690,39 +8751,39 @@
     }
   }
   async function acquirePanelSessionLock(runId, takeover) {
-    if (!panelSessionId) return { ok: false, error: "\u4F1A\u8BDD\u5C1A\u672A\u5C31\u7EEA" };
+    if (!panelSessionState.panelSessionId) return { ok: false, error: "\u4F1A\u8BDD\u5C1A\u672A\u5C31\u7EEA" };
     const res = await sendPanelMessage("panel:lock", {
-      id: panelSessionId,
+      id: panelSessionState.panelSessionId,
       runId,
       takeover: takeover === true
     });
     if (res && res.ok) {
-      panelSessionLockHeld = true;
-      panelSessionLockRunId = runId;
+      panelSessionState.panelSessionLockHeld = true;
+      panelSessionState.panelSessionLockRunId = runId;
       if (Array.isArray(res.sessions)) {
-        panelSessionList = res.sessions.slice();
+        panelSessionState.panelSessionList = res.sessions.slice();
         renderSessionMenu();
       }
     }
     return res || { ok: false, error: "\u8FD0\u884C\u9501\u83B7\u53D6\u5931\u8D25" };
   }
   function releasePanelSessionLock() {
-    if (!panelSessionLockHeld || !panelSessionLockRunId) return Promise.resolve();
-    const id = panelSessionId;
-    const runId = panelSessionLockRunId;
-    panelSessionLockHeld = false;
-    panelSessionLockRunId = "";
+    if (!panelSessionState.panelSessionLockHeld || !panelSessionState.panelSessionLockRunId) return Promise.resolve();
+    const id = panelSessionState.panelSessionId;
+    const runId = panelSessionState.panelSessionLockRunId;
+    panelSessionState.panelSessionLockHeld = false;
+    panelSessionState.panelSessionLockRunId = "";
     return sendPanelMessage("panel:unlock", { id, runId });
   }
   function renewPanelSessionLock() {
-    if (!panelSessionLockHeld || !panelSessionLockRunId) return;
+    if (!panelSessionState.panelSessionLockHeld || !panelSessionState.panelSessionLockRunId) return;
     sendPanelMessage("panel:lock", {
-      id: panelSessionId,
-      runId: panelSessionLockRunId,
+      id: panelSessionState.panelSessionId,
+      runId: panelSessionState.panelSessionLockRunId,
       takeover: false
     }).then((res) => {
       if (res && res.locked && !res.ok) {
-        panelSessionLockHeld = false;
+        panelSessionState.panelSessionLockHeld = false;
         showCitationHint("\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u9875\u4EFB\u52A1\u5C06\u505C\u6B62\u3002");
         runSession.requestStop();
       }
@@ -8734,17 +8795,17 @@
     applyPanelSessionSummaries(state);
     const nextActive = String(state.activeId || "");
     if (!nextActive) return;
-    if (runSession.isRunning || panelSessionSwitchInFlight) {
-      if (nextActive !== panelSessionId) deferredRemoteSessionId = nextActive;
+    if (runSession.isRunning || panelSessionState.panelSessionSwitchInFlight) {
+      if (nextActive !== panelSessionState.panelSessionId) panelSessionState.deferredRemoteSessionId = nextActive;
       return;
     }
-    if (nextActive !== panelSessionId) {
+    if (nextActive !== panelSessionState.panelSessionId) {
       await switchPanelSession(nextActive, { activate: false, force: true });
       return;
     }
-    const current = panelSessionList.find((s) => s.id === panelSessionId);
-    if (current && Number(current.seq) > panelSessionSeq) {
-      await switchPanelSession(panelSessionId, { activate: false, force: true });
+    const current = panelSessionState.panelSessionList.find((s) => s.id === panelSessionState.panelSessionId);
+    if (current && Number(current.seq) > panelSessionState.panelSessionSeq) {
+      await switchPanelSession(panelSessionState.panelSessionId, { activate: false, force: true });
     }
   }
   function whenConversationReady() {
@@ -8783,7 +8844,7 @@
       }
     } catch (e) {
     }
-    let picked = Array.isArray(pickedElements) ? pickedElements : [];
+    let picked = Array.isArray(streamView.pickedElements) ? streamView.pickedElements : [];
     if (!picked.length) {
       try {
         const d = await new Promise((resolve) => {
@@ -8861,7 +8922,7 @@
     close.addEventListener("click", () => removePanel());
     const usageChip = document.createElement("span");
     usageChip.className = "usage";
-    usageEl = usageChip;
+    streamView.usageEl = usageChip;
     panelSessionBtnEl = document.createElement("button");
     panelSessionBtnEl.type = "button";
     panelSessionBtnEl.className = "session-btn";
@@ -8959,7 +9020,7 @@
     panelBody.setAttribute("aria-atomic", "false");
     panelBody.setAttribute("aria-label", "\u5BF9\u8BDD\u5185\u5BB9");
     panelBody.setAttribute("tabindex", "0");
-    observerAutoScroll = true;
+    followedRun.observerAutoScroll = true;
     const pbEl = panelBody;
     pbEl.addEventListener("scroll", () => {
       if (!pbEl) return;
@@ -8967,7 +9028,7 @@
       const userDriven = now < userScrollIntentUntil;
       if (!userDriven && now < selfScrollMuteUntil) return;
       if (userDriven) userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
-      observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
+      followedRun.observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
     });
     pbEl.addEventListener("wheel", (e) => {
       markUserScrollIntent(Number(e.deltaY) < 0);
@@ -8997,7 +9058,7 @@
           const wasPinned = isPinnedForFollow();
           const opening = block.dataset.open !== "true";
           block.dataset.open = opening ? "true" : "false";
-          if (thinkSeg && thinkSeg.block === block) thinkExpandedManual = opening;
+          if (streamView.thinkSeg && streamView.thinkSeg.block === block) streamView.thinkExpandedManual = opening;
           if (wasPinned && panelBody) panelBody.scrollTop = panelBody.scrollHeight;
         }
         return;
@@ -9006,9 +9067,9 @@
       if (rewind) {
         if (runSession.isRunning) return;
         const index = Number(rewind.getAttribute("data-turn-index"));
-        if (Number.isInteger(index) && conversation[index] && conversation[index].role === "user") {
-          const undone = conversation[index];
-          conversation = conversation.slice(0, index);
+        if (Number.isInteger(index) && panelSessionState.conversation[index] && panelSessionState.conversation[index].role === "user") {
+          const undone = panelSessionState.conversation[index];
+          panelSessionState.conversation = panelSessionState.conversation.slice(0, index);
           saveConversation({ allowShrink: true });
           renderConversation();
           fitPanelHeight();
@@ -9053,16 +9114,16 @@
       if (regen) {
         if (runSession.isRunning) return;
         let lastUser = -1;
-        for (let i = conversation.length - 1; i >= 0; i--) {
-          if (conversation[i] && conversation[i].role === "user") {
+        for (let i = panelSessionState.conversation.length - 1; i >= 0; i--) {
+          if (panelSessionState.conversation[i] && panelSessionState.conversation[i].role === "user") {
             lastUser = i;
             break;
           }
         }
         if (lastUser < 0) return;
-        const instruction = String(conversation[lastUser].content || "");
+        const instruction = String(panelSessionState.conversation[lastUser].content || "");
         if (!instruction) return;
-        conversation = conversation.slice(0, lastUser);
+        panelSessionState.conversation = panelSessionState.conversation.slice(0, lastUser);
         saveConversation({ allowShrink: true });
         renderConversation();
         run(instruction);
@@ -9110,7 +9171,7 @@
     const approvalSettings = document.createElement("div");
     approvalSettings.className = "approval-settings";
     approvalSettings.innerHTML = '<button class="approval-settings-toggle" type="button">\u81EA\u52A8\u6279\u51C6\uFF1A\u8BFB\u53D6 <span>\u203A</span></button><div class="approval-settings-popover" hidden><label class="approval-autopilot"><input data-autopilot type="checkbox"> <b>\u81EA\u52A8\u9A7E\u9A76\uFF08\u5168\u90E8\u81EA\u52A8\u6279\u51C6\uFF09</b></label><div class="approval-settings-caption">\u672A\u5F00\u542F\u65F6\uFF0C\u6309\u4E0B\u5217\u7C7B\u522B\u9010\u9879\u63A7\u5236\u662F\u5426\u514D\u786E\u8BA4\uFF1A</div><div class="approval-group"><div class="approval-group-title">\u8BFB\u53D6</div><label class="approval-item"><input data-policy="read" type="checkbox"> \u8BFB\u53D6\u5185\u5BB9 <small>\u641C\u7D22\u3001\u8BFB\u53D6\u9875\u9762\u3001\u5217\u51FA\u6807\u7B7E\u9875</small></label></div><div class="approval-group"><div class="approval-group-title">\u5199\u5165</div><label class="approval-item"><input data-policy="edit" type="checkbox"> \u7F16\u8F91\u77E5\u8BC6\u5E93 <small>\u65B0\u589E / \u4FEE\u6539 / \u5220\u9664\u6536\u85CF</small></label><label class="approval-item"><input data-policy="commands" type="checkbox"> \u9875\u9762\u547D\u4EE4 <small>\u70B9\u51FB\u3001\u8F93\u5165\u3001\u6EDA\u52A8\u3001\u9AD8\u4EAE\u3001\u8FD0\u884C JavaScript \u7B49</small></label></div><div class="approval-group"><div class="approval-group-title">\u5916\u90E8</div><label class="approval-item"><input data-policy="browser" type="checkbox"> \u6D4F\u89C8\u5668\u4E0E\u7F51\u7EDC <small>\u6253\u5F00\u6807\u7B7E\u9875\u3001\u6293\u53D6\u7F51\u9875</small></label><label class="approval-item"><input data-policy="mcp" type="checkbox"> MCP \u670D\u52A1\u5668 <small>\u8C03\u7528\u5916\u90E8\u5DE5\u5177</small></label></div></div>';
-    approvalSettingsEl = approvalSettings;
+    streamView.approvalSettingsEl = approvalSettings;
     const autopilotEl = approvalSettings.querySelector("[data-autopilot]");
     autopilotEl.addEventListener("change", () => {
       const on = autopilotEl.checked;
@@ -9121,7 +9182,7 @@
     });
     const approvalToggle = approvalSettings.querySelector(".approval-settings-toggle");
     const approvalPopover = approvalSettings.querySelector(".approval-settings-popover");
-    approvalPopoverEl = approvalPopover;
+    streamView.approvalPopoverEl = approvalPopover;
     panel.addEventListener("click", (e) => {
       if (!approvalSettings.contains(e.target)) closeApprovalPopover();
     });
@@ -9155,9 +9216,9 @@
       refreshApprovalLabel();
     }).catch(() => {
     });
-    apiKeyBanner = document.createElement("div");
-    apiKeyBanner.className = "api-key-banner";
-    apiKeyBanner.style.cssText = "display:none;margin:4px 0;padding:6px 8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px;color:#8a5a00;font-size:12px;align-items:center;gap:8px;justify-content:space-between;";
+    streamView.apiKeyBanner = document.createElement("div");
+    streamView.apiKeyBanner.className = "api-key-banner";
+    streamView.apiKeyBanner.style.cssText = "display:none;margin:4px 0;padding:6px 8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px;color:#8a5a00;font-size:12px;align-items:center;gap:8px;justify-content:space-between;";
     const apiKeyText = document.createElement("span");
     apiKeyText.textContent = "\u5C1A\u672A\u914D\u7F6E API Key\uFF0C\u914D\u7F6E\u540E\u624D\u80FD\u5F00\u59CB\u5BF9\u8BDD\u3002";
     const apiKeySettingsBtn = document.createElement("button");
@@ -9171,22 +9232,22 @@
       } catch (e) {
       }
     });
-    apiKeyBanner.appendChild(apiKeyText);
-    apiKeyBanner.appendChild(apiKeySettingsBtn);
-    planBar = document.createElement("div");
-    planBar.className = "agent-plan agent-plan-bar";
-    planBar.style.display = "none";
-    planBar.addEventListener("click", (e) => {
+    streamView.apiKeyBanner.appendChild(apiKeyText);
+    streamView.apiKeyBanner.appendChild(apiKeySettingsBtn);
+    streamView.planBar = document.createElement("div");
+    streamView.planBar.className = "agent-plan agent-plan-bar";
+    streamView.planBar.style.display = "none";
+    streamView.planBar.addEventListener("click", (e) => {
       if (!e.target || !e.target.closest || !e.target.closest(".agent-plan-title")) return;
-      planExpanded = planBar.classList.contains("collapsed");
-      renderPlan(lastPlan);
+      streamView.planExpanded = streamView.planBar.classList.contains("collapsed");
+      renderPlan(streamView.lastPlan);
     });
     renderConversation();
     restoreStreamingUI();
     renderDecisionButtonsIfPresent();
     const cmdArea = document.createElement("div");
     cmdArea.className = "cmd-area";
-    cmdArea.appendChild(planBar);
+    cmdArea.appendChild(streamView.planBar);
     const approvalArea = document.createElement("div");
     approvalArea.className = "tool-approval";
     approvalArea.style.display = "none";
@@ -9194,7 +9255,7 @@
     const quickWrap = document.createElement("div");
     quickWrap.className = "quick-prompts";
     cmdArea.appendChild(quickWrap);
-    cmdArea.appendChild(apiKeyBanner);
+    cmdArea.appendChild(streamView.apiKeyBanner);
     cmdArea.appendChild(approvalSettings);
     refreshApiKeyBanner();
     const pickBar = document.createElement("div");
@@ -9225,19 +9286,19 @@
     const locatorText = (p) => formatElementLocator(p && p.locator, p && p.selector, p && p.tag);
     const renderPick = () => {
       pickBar.innerHTML = "";
-      if (!pickedElements.length) {
+      if (!streamView.pickedElements.length) {
         pickBar.style.display = "none";
         return;
       }
       pickBar.style.display = "";
-      pickedElements.forEach((p, idx) => {
+      streamView.pickedElements.forEach((p, idx) => {
         const src = p.source || {};
         const loc = src.file ? src.file + (src.line ? ":" + src.line : "") : "";
         const chip = document.createElement("span");
         chip.className = "pick-chip";
         const txt = document.createElement("span");
         txt.className = "pick-chip-text";
-        txt.textContent = (pickedElements.length > 1 ? idx + 1 + ". " : "") + (p.tag || "") + (p.label ? "\u300C" + p.label + "\u300D" : "") + (loc ? " \u2192 " + loc : "");
+        txt.textContent = (streamView.pickedElements.length > 1 ? idx + 1 + ". " : "") + (p.tag || "") + (p.label ? "\u300C" + p.label + "\u300D" : "") + (loc ? " \u2192 " + loc : "");
         txt.title = locatorText(p);
         const copy = document.createElement("button");
         copy.className = "pick-copy";
@@ -9259,7 +9320,7 @@
         clear.textContent = "\u2715";
         clear.title = "\u79FB\u9664\u8BE5\u5143\u7D20";
         clear.addEventListener("click", () => {
-          pickedElements.splice(idx, 1);
+          streamView.pickedElements.splice(idx, 1);
           renderPick();
         });
         chip.appendChild(txt);
@@ -9267,43 +9328,43 @@
         chip.appendChild(clear);
         pickBar.appendChild(chip);
       });
-      if (pickedElements.length > 1) {
+      if (streamView.pickedElements.length > 1) {
         const clearAll = document.createElement("button");
         clearAll.className = "pick-clear-all";
         clearAll.textContent = "\u6E05\u7A7A";
         clearAll.addEventListener("click", () => {
-          pickedElements = [];
+          streamView.pickedElements = [];
           renderPick();
         });
         pickBar.appendChild(clearAll);
       }
       fitPanelHeight();
     };
-    pickUi = {
+    streamView.pickUi = {
       setActive: (on) => {
-        picking = !!on;
+        streamView.picking = !!on;
         pickBtn.classList.toggle("active", !!on);
       },
       onPicked: (list) => {
-        pickedElements = Array.isArray(list) ? list : list ? [list] : [];
+        streamView.pickedElements = Array.isArray(list) ? list : list ? [list] : [];
         renderPick();
         cmdInput.focus();
       }
     };
     pickBtn.addEventListener("click", () => {
-      if (picking) {
+      if (streamView.picking) {
         try {
           chrome.runtime.sendMessage({ type: "pick:cancel" });
         } catch (e) {
         }
-        pickUi.setActive(false);
+        streamView.pickUi.setActive(false);
         return;
       }
-      pickUi.setActive(true);
+      streamView.pickUi.setActive(true);
       try {
         chrome.runtime.sendMessage({ type: "pick:start" });
       } catch (e) {
-        pickUi.setActive(false);
+        streamView.pickUi.setActive(false);
       }
     });
     renderPick();
@@ -9436,18 +9497,18 @@
       streamRender.cancel();
       cancelStreamPaintRetry();
       const endedRunId = runSession.runId;
-      const endedSessionId = panelSessionId;
+      const endedSessionId = panelSessionState.panelSessionId;
       runSession.finish();
       progressController.stop();
       updateRunControlState();
-      pendingAiMsg = null;
-      pendingContentEl = null;
-      flowEl = null;
+      streamView.pendingAiMsg = null;
+      streamView.pendingContentEl = null;
+      streamView.flowEl = null;
       streamState.reset();
-      typingEl = null;
+      streamView.typingEl = null;
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
-      panelSessionSaveChain.catch(() => null).then(async (saved) => {
+      panelSessionState.panelSessionSaveChain.catch(() => null).then(async (saved) => {
         await releasePanelSessionLock();
         if (saved && saved.ok && endedRunId) {
           await sendPanelMessage("panel:run:committed", {
@@ -9458,32 +9519,32 @@
         }
       }).catch(() => {
       }).finally(() => {
-        if (!deferredRemoteSessionId || runSession.isRunning) return;
-        const next = deferredRemoteSessionId;
-        deferredRemoteSessionId = "";
-        if (next !== panelSessionId) switchPanelSession(next, { activate: false, force: true }).catch(() => {
+        if (!panelSessionState.deferredRemoteSessionId || runSession.isRunning) return;
+        const next = panelSessionState.deferredRemoteSessionId;
+        panelSessionState.deferredRemoteSessionId = "";
+        if (next !== panelSessionState.panelSessionId) switchPanelSession(next, { activate: false, force: true }).catch(() => {
         });
       });
     }
     function removeTypingEl() {
-      if (typingEl && typingEl.parentNode) {
-        typingEl.parentNode.removeChild(typingEl);
-        if (pendingContentEl === typingEl) pendingContentEl = null;
+      if (streamView.typingEl && streamView.typingEl.parentNode) {
+        streamView.typingEl.parentNode.removeChild(streamView.typingEl);
+        if (streamView.pendingContentEl === streamView.typingEl) streamView.pendingContentEl = null;
       }
-      typingEl = null;
+      streamView.typingEl = null;
     }
     function ensureTextEl() {
-      return makeContentEl(flowEl);
+      return makeContentEl(streamView.flowEl);
     }
     function pushReasoning(text) {
       const piece = String(text || "");
       if (!piece) return;
-      if (!thinkSeg || thinkSeg.done) {
-        thinkSeg = { id: ++thinkSegSeq, text: "", done: false, block: null, body: null };
-        thinkExpandedManual = null;
-        mountThinkSegment(thinkSeg);
+      if (!streamView.thinkSeg || streamView.thinkSeg.done) {
+        streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: "", done: false, block: null, body: null };
+        streamView.thinkExpandedManual = null;
+        mountThinkSegment(streamView.thinkSeg);
       }
-      const seg = thinkSeg;
+      const seg = streamView.thinkSeg;
       seg.text += piece;
       streamRender.schedule("reason-" + seg.id, () => {
         if (seg.body) seg.body.textContent = seg.text;
@@ -9492,12 +9553,12 @@
       });
     }
     function finishReasoning() {
-      const seg = thinkSeg;
+      const seg = streamView.thinkSeg;
       if (!seg || seg.done) return;
       seg.done = true;
       if (seg.block) {
         seg.block.dataset.state = "done";
-        if (thinkExpandedManual === null) seg.block.dataset.open = "false";
+        if (streamView.thinkExpandedManual === null) seg.block.dataset.open = "false";
       }
       refreshThinkHead(seg);
       streamRender.schedule("reason-" + seg.id, () => {
@@ -9506,24 +9567,24 @@
         pinToBottom();
       });
       streamState.appendPart({ type: "thinking", text: seg.text });
-      thinkSeg = null;
+      streamView.thinkSeg = null;
     }
     function resetReasoning() {
-      thinkSeg = null;
-      thinkExpandedManual = null;
+      streamView.thinkSeg = null;
+      streamView.thinkExpandedManual = null;
     }
     function appendStep(step) {
       removeTypingEl();
       finishReasoning();
       if (streamState.narration) {
         const narration = streamState.flushNarration() || "";
-        if (pendingContentEl) {
-          removeStreamCursor(pendingContentEl);
-          pendingContentEl.innerHTML = renderAnswer(narration, currentCitations, false);
+        if (streamView.pendingContentEl) {
+          removeStreamCursor(streamView.pendingContentEl);
+          streamView.pendingContentEl.innerHTML = renderAnswer(narration, streamView.currentCitations, false);
         }
       }
-      pendingContentEl = null;
-      if (flowEl) flowEl.appendChild(step);
+      streamView.pendingContentEl = null;
+      if (streamView.flowEl) streamView.flowEl.appendChild(step);
     }
     function appendNoticePart(text, color, className) {
       const value = String(text || "").trim();
@@ -9539,14 +9600,14 @@
       streamState.commitVerifyPass();
     }
     async function stopFollowedRun() {
-      if (!followedRunState || followedRunState.status !== "running" || followedRunState.stopping) return;
-      const runId = followedRunId;
-      followedRunState.stopping = true;
+      if (!followedRun.followedRunState || followedRun.followedRunState.status !== "running" || followedRun.followedRunState.stopping) return;
+      const runId = followedRun.followedRunId;
+      followedRun.followedRunState.stopping = true;
       updateRunControlState();
-      const res = await sendPanelMessage("panel:run:stop", { sessionId: panelSessionId, runId });
+      const res = await sendPanelMessage("panel:run:stop", { sessionId: panelSessionState.panelSessionId, runId });
       if (res && (res.ok || res.code === "already-stopping")) return;
-      if (followedRunId === runId && followedRunState) {
-        followedRunState.stopping = false;
+      if (followedRun.followedRunId === runId && followedRun.followedRunState) {
+        followedRun.followedRunState.stopping = false;
         updateRunControlState();
       }
       showCitationHint(res && res.error || "\u505C\u6B62\u5931\u8D25\uFF1A\u4EFB\u52A1\u53EF\u80FD\u5DF2\u7ECF\u7ED3\u675F");
@@ -9569,53 +9630,53 @@
       }
       const acc = streamState.content;
       closePort();
-      if (pendingAiMsg && pendingAiMsg.parentNode) {
+      if (streamView.pendingAiMsg && streamView.pendingAiMsg.parentNode) {
         lastResponse = streamState.responseText;
         if (acc) {
-          if (pendingContentEl) {
-            removeStreamCursor(pendingContentEl);
-            pendingContentEl.innerHTML = renderAnswer(streamState.narration || lastResponse, currentCitations, false);
+          if (streamView.pendingContentEl) {
+            removeStreamCursor(streamView.pendingContentEl);
+            streamView.pendingContentEl.innerHTML = renderAnswer(streamState.narration || lastResponse, streamView.currentCitations, false);
           }
-          pendingAiMsg._raw = acc;
+          streamView.pendingAiMsg._raw = acc;
         } else if (!streamState.parts.length) {
-          if (pendingContentEl) {
-            removeStreamCursor(pendingContentEl);
-            pendingContentEl.textContent = "\uFF08\u5DF2\u505C\u6B62\uFF09";
-            pendingContentEl.style.color = "#999";
+          if (streamView.pendingContentEl) {
+            removeStreamCursor(streamView.pendingContentEl);
+            streamView.pendingContentEl.textContent = "\uFF08\u5DF2\u505C\u6B62\uFF09";
+            streamView.pendingContentEl.style.color = "#999";
           }
         }
         if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
           streamState.appendPart({ type: "text", text: lastResponse });
         }
         if (acc || streamState.parts.length) {
-          conversation.push({
+          panelSessionState.conversation.push({
             role: "assistant",
             content: acc,
             toolSummary: summarizeToolParts(streamState.parts),
             parts: streamState.parts.slice(),
             // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
             // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
-            plan: lastPlan.slice()
+            plan: streamView.lastPlan.slice()
           });
           saveConversation();
         }
         const note = document.createElement("div");
         note.className = "stopped-note";
         note.textContent = "\xB7 \u5DF2\u505C\u6B62\u751F\u6210";
-        pendingAiMsg.appendChild(note);
-        pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
+        streamView.pendingAiMsg.appendChild(note);
+        streamView.pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
       }
       endStream();
       fitPanelHeight();
       pinToBottom();
     }
     function commitInterruptedTurn(reasonText) {
-      const last = conversation.length ? conversation[conversation.length - 1] : null;
+      const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
       if (last && last.role === "assistant" && last.interrupted) return;
       commitPendingVerifyPass();
       const turn = buildInterruptedTurn(streamState.parts, streamState.responseText, reasonText);
       if (!turn.parts.length && !String(streamState.responseText || "").trim()) return;
-      conversation.push(turn);
+      panelSessionState.conversation.push(turn);
       saveConversation();
     }
     const MAX_PORT_RETRIES = 2;
@@ -9657,15 +9718,15 @@
         activeConn.postMessage({
           action: "agent",
           runId: runSession.runId,
-          sessionId: panelSessionId,
+          sessionId: panelSessionState.panelSessionId,
           question: activeInstruction,
           text: activeSelection,
           page: pageText,
           pageUrl: location.href,
           pageTitle: document.title,
-          history: conversation.slice(),
+          history: panelSessionState.conversation.slice(),
           ...portRetries > 0 || lastRunOpts && lastRunOpts.continuation ? { continuation: true } : {},
-          ...pickedElements.length ? { pickedElements } : {}
+          ...streamView.pickedElements.length ? { pickedElements: streamView.pickedElements } : {}
         });
       } catch (e) {
         removeTypingEl();
@@ -9682,16 +9743,16 @@
         if (conversationLoadPromise) await conversationLoadPromise;
       } catch (e) {
       }
-      if (!panelSessionId) {
+      if (!panelSessionState.panelSessionId) {
         showCitationHint("\u4F1A\u8BDD\u5C1A\u672A\u6062\u590D\u5B8C\u6210\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
         endStream();
         return;
       }
-      if (panelSessionActiveId && panelSessionActiveId !== panelSessionId) {
-        const activated = await sendPanelMessage("panel:activate", { id: panelSessionId });
+      if (panelSessionState.panelSessionActiveId && panelSessionState.panelSessionActiveId !== panelSessionState.panelSessionId) {
+        const activated = await sendPanelMessage("panel:activate", { id: panelSessionState.panelSessionId });
         if (activated && activated.ok) {
-          panelSessionActiveId = panelSessionId;
-          if (Array.isArray(activated.sessions)) panelSessionList = activated.sessions.slice();
+          panelSessionState.panelSessionActiveId = panelSessionState.panelSessionId;
+          if (Array.isArray(activated.sessions)) panelSessionState.panelSessionList = activated.sessions.slice();
           renderSessionButton();
           renderSessionMenu();
         }
@@ -9743,11 +9804,11 @@
         }
       };
       lastResponse = "";
-      const pickedForMessage = summarizePickedForMessage(pickedElements);
+      const pickedForMessage = summarizePickedForMessage(streamView.pickedElements);
       const selectedForMessage = activeSelection;
       const skipUserTurn = Boolean(runOptions.skipUserTurn);
       if (!skipUserTurn) {
-        conversation.push(
+        panelSessionState.conversation.push(
           Object.assign(
             { role: "user", content: instruction },
             selectedForMessage ? { selectedText: selectedForMessage } : {},
@@ -9757,19 +9818,19 @@
         saveConversation();
         const userMsg = document.createElement("div");
         userMsg.className = "user-turn";
-        userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + selectedTextMessageHtml(selectedForMessage) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(conversation.length - 1);
+        userMsg.innerHTML = '<div class="msg user">' + escHtml(instruction) + selectedTextMessageHtml(selectedForMessage) + pickedSummaryHtml(pickedForMessage) + "</div>" + userActionsHtml(panelSessionState.conversation.length - 1);
         panelBody.appendChild(userMsg);
         clearSelectedText({ render: false });
       }
       const aiMsg = document.createElement("div");
       aiMsg.className = "msg ai";
-      flowEl = document.createElement("div");
-      flowEl.className = "agent-flow";
+      streamView.flowEl = document.createElement("div");
+      streamView.flowEl.className = "agent-flow";
       const contentEl = document.createElement("div");
       contentEl.className = "agent-content";
       contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
-      flowEl.appendChild(contentEl);
-      aiMsg.appendChild(flowEl);
+      streamView.flowEl.appendChild(contentEl);
+      aiMsg.appendChild(streamView.flowEl);
       panelBody.appendChild(aiMsg);
       fitPanelHeight();
       pinToBottom();
@@ -9777,25 +9838,25 @@
       const applyResumeSnapshot = (snapshot, approvalConn) => {
         if (!snapshot || typeof snapshot !== "object") return;
         streamState.restore(snapshot);
-        currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
+        streamView.currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
         const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
         renderPlan(plan);
-        lastPlan = plan;
-        if (usageEl) usageEl.textContent = snapshot.tokens ? "tokens " + snapshot.tokens : "";
-        flowEl.innerHTML = "";
-        renderCommittedParts(flowEl);
+        streamView.lastPlan = plan;
+        if (streamView.usageEl) streamView.usageEl.textContent = snapshot.tokens ? "tokens " + snapshot.tokens : "";
+        streamView.flowEl.innerHTML = "";
+        renderCommittedParts(streamView.flowEl);
         resetReasoning();
         if (snapshot.reasoning) {
-          thinkSeg = { id: ++thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
-          mountThinkSegment(thinkSeg);
+          streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
+          mountThinkSegment(streamView.thinkSeg);
         }
-        contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
-        flowEl.appendChild(contentEl);
-        if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
-        typingEl = streamState.narration ? null : contentEl;
-        pendingAiMsg = aiMsg;
-        pendingContentEl = contentEl;
-        pendingAiMsg._raw = streamState.content;
+        contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, streamView.currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
+        streamView.flowEl.appendChild(contentEl);
+        if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
+        streamView.typingEl = streamState.narration ? null : contentEl;
+        streamView.pendingAiMsg = aiMsg;
+        streamView.pendingContentEl = contentEl;
+        streamView.pendingAiMsg._raw = streamState.content;
         progressController.startedAt = Number(snapshot.startedAt) || progressController.startedAt || Date.now();
         const p = snapshot.progress || {};
         progressController.state = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
@@ -9819,12 +9880,12 @@
       };
       if (!resumeSnapshot) {
         streamState.beginNew();
-        if (usageEl) usageEl.textContent = "";
+        if (streamView.usageEl) streamView.usageEl.textContent = "";
         renderPlan([]);
-        lastPlan = [];
-        pendingAiMsg = aiMsg;
-        pendingContentEl = contentEl;
-        typingEl = contentEl;
+        streamView.lastPlan = [];
+        streamView.pendingAiMsg = aiMsg;
+        streamView.pendingContentEl = contentEl;
+        streamView.typingEl = contentEl;
         resetReasoning();
       }
       runSession.setRunning(true);
@@ -9859,7 +9920,7 @@
           });
           return;
         } else if (resp.type === "citations") {
-          currentCitations = resp.citations || null;
+          streamView.currentCitations = resp.citations || null;
         } else if (resp.type === "tool-call") {
           streamState.appendPart({ type: "tool-call", callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || "unknown" });
           appendStep(
@@ -9976,7 +10037,7 @@
             pinToBottom();
           }
         } else if (resp.type === "usage") {
-          if (usageEl) usageEl.textContent = "tokens " + (resp.totalTokens || 0);
+          if (streamView.usageEl) streamView.usageEl.textContent = "tokens " + (resp.totalTokens || 0);
         } else if (resp.type === "plan") {
           renderPlan(resp.plan);
         } else if (resp.type === "skill") {
@@ -9993,15 +10054,15 @@
           removeTypingEl();
           finishReasoning();
           streamState.appendChunk(resp.text);
-          if (!pendingContentEl) {
-            pendingContentEl = ensureTextEl();
-            if (pendingContentEl) pendingContentEl.innerHTML = "";
+          if (!streamView.pendingContentEl) {
+            streamView.pendingContentEl = ensureTextEl();
+            if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = "";
           }
           streamRender.schedule("answer", () => {
             const paintPendingAnswer = () => {
               const startedAt = Date.now();
-              if (pendingContentEl) showStreamingAnswer(pendingContentEl, streamState.narration, currentCitations);
-              pendingAiMsg._raw = streamState.content;
+              if (streamView.pendingContentEl) showStreamingAnswer(streamView.pendingContentEl, streamState.narration, streamView.currentCitations);
+              streamView.pendingAiMsg._raw = streamState.content;
               noteStreamPaint(startedAt);
             };
             if (throttleStreamPaint(paintPendingAnswer)) return;
@@ -10022,17 +10083,17 @@
           const textParts = streamState.parts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
           const renumbered = renumberCitationsAcross(
             textParts.map((p) => p.text).concat([lastResponse]),
-            currentCitations
+            streamView.currentCitations
           );
           const finalText = renumbered.apply(lastResponse);
           const finalCitations = renumbered.citations;
           if (!streamState.started) {
             const el = ensureTextEl();
             if (el) el.textContent = streamState.budgetStopped ? "\uFF08\u4EFB\u52A1\u5DF2\u505C\u6B62\uFF0C\u672A\u751F\u6210\u6700\u7EC8\u56DE\u590D\uFF09" : "\uFF08\u65E0\u8FD4\u56DE\u5185\u5BB9\uFF09";
-          } else if (pendingContentEl) {
-            removeStreamCursor(pendingContentEl);
-            pendingContentEl.innerHTML = renderAnswer(lastResponse, currentCitations, false);
-            pendingAiMsg._raw = streamState.content;
+          } else if (streamView.pendingContentEl) {
+            removeStreamCursor(streamView.pendingContentEl);
+            streamView.pendingContentEl.innerHTML = renderAnswer(lastResponse, streamView.currentCitations, false);
+            streamView.pendingAiMsg._raw = streamState.content;
           }
           if (finalCitations.length) {
             const srcWrap = document.createElement("div");
@@ -10047,16 +10108,16 @@
               const snippetAttr = String(c.snippet || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
               return '<button class="cite-badge" data-cite-id="' + idAttr + '" data-cite-source="' + sourceAttr + '" data-cite-url="' + urlAttr + '" data-cite-snippet="' + snippetAttr + '" title="\u6253\u5F00\u8BC1\u636E\uFF1A' + titleAttr + '"><span class="cite-idx">[' + c.index + "]</span>" + tAttr + "</button>";
             }).join("");
-            pendingAiMsg.appendChild(srcWrap);
+            streamView.pendingAiMsg.appendChild(srcWrap);
           }
           if (streamState.verifyPass) {
             const verifyEl = document.createElement("div");
             verifyEl.className = "agent-step verify-final";
             verifyEl.style.color = streamState.verifyPass.color || "#16a34a";
             verifyEl.textContent = streamState.verifyPass.text;
-            pendingAiMsg.appendChild(verifyEl);
+            streamView.pendingAiMsg.appendChild(verifyEl);
           }
-          if (lastResponse) pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
+          if (lastResponse) streamView.pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
           commitPendingVerifyPass();
           const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
@@ -10067,34 +10128,34 @@
             }
             return p;
           }));
-          conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
+          panelSessionState.conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: streamView.lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
           saveConversation();
-          if (!pendingAiMsg || !pendingAiMsg.isConnected) {
+          if (!streamView.pendingAiMsg || !streamView.pendingAiMsg.isConnected) {
             try {
               renderConversation();
             } catch (e) {
             }
           } else {
-            renderSuggestionButtons(pendingAiMsg, finalText, run);
+            renderSuggestionButtons(streamView.pendingAiMsg, finalText, run);
           }
           fitPanelHeight();
-          currentCitations = null;
+          streamView.currentCitations = null;
           endStream();
           closePort();
         } else if (resp.type === "error") {
           removeTypingEl();
           const errText = String(resp.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
           const hasPartial = streamState.hasPartial();
-          renderRunError(flowEl, pendingContentEl, errText, hasPartial);
+          renderRunError(streamView.flowEl, streamView.pendingContentEl, errText, hasPartial);
           if (resp.needSetup) {
             refreshApiKeyBanner();
-            const anchor = pendingAiMsg || flowEl;
+            const anchor = streamView.pendingAiMsg || streamView.flowEl;
             if (anchor) {
               anchor.appendChild(document.createElement("br"));
               anchor.appendChild(buildOpenSettingsButton());
             }
           }
-          conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
+          panelSessionState.conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
           saveConversation();
           endStream();
           closePort();
@@ -10153,24 +10214,24 @@
         renewPanelSessionLock();
       }, 2e4);
       if (runOptions.reattach) {
-        conn.postMessage({ type: "reattach", runId: runSession.runId, sessionId: panelSessionId });
+        conn.postMessage({ type: "reattach", runId: runSession.runId, sessionId: panelSessionState.panelSessionId });
       } else {
         conn.postMessage({
           action: "agent",
           runId: runSession.runId,
-          sessionId: panelSessionId,
+          sessionId: panelSessionState.panelSessionId,
           question: instruction,
           text: activeSelection,
           page: pageText,
           pageUrl: location.href,
           pageTitle: document.title,
-          history: conversation.slice(),
+          history: panelSessionState.conversation.slice(),
           ...runOptions.continuation ? { continuation: true } : {},
-          ...pickedElements.length ? { pickedElements } : {}
+          ...streamView.pickedElements.length ? { pickedElements: streamView.pickedElements } : {}
         });
       }
-      if (pickedElements.length) {
-        pickedElements = [];
+      if (streamView.pickedElements.length) {
+        streamView.pickedElements = [];
         try {
           renderPick();
         } catch (e) {
@@ -10186,16 +10247,16 @@
       respTimer = setTimeout(() => {
         if (!runSession.isRunning || respWarned) return;
         respWarned = true;
-        if (pendingContentEl) {
+        if (streamView.pendingContentEl) {
           const note = document.createElement("div");
           note.style.cssText = "color:#999;font-size:11px;margin-top:4px;";
           note.textContent = "\u23F3 \u6B63\u5728\u7B49\u5F85\u6A21\u578B\u54CD\u5E94\u2026\uFF08\u7F51\u7EDC\u8F83\u6162\u6216\u6A21\u578B\u7E41\u5FD9\uFF09";
-          pendingContentEl.appendChild(note);
+          streamView.pendingContentEl.appendChild(note);
         }
       }, 15e3);
       respFailTimer = setTimeout(() => {
         if (!runSession.isRunning) return;
-        const el = pendingContentEl || ensureTextEl();
+        const el = streamView.pendingContentEl || ensureTextEl();
         if (el) {
           removeStreamCursor(el);
           el.textContent = "\u672A\u6536\u5230\u6A21\u578B\u54CD\u5E94\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u6216 API \u914D\u7F6E\u540E\u91CD\u8BD5\u3002";
@@ -10221,7 +10282,7 @@
     sendBtn.addEventListener("click", send);
     cmdInput.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        if (picking) return;
+        if (streamView.picking) return;
         e.preventDefault();
         e.stopPropagation();
         removePanel();
@@ -10239,7 +10300,7 @@
     });
     panelKeyHandler = (e) => {
       if (e.key !== "Escape") return;
-      if (picking) return;
+      if (streamView.picking) return;
       if (panel && panel.querySelector(".session-dialog-backdrop")) return;
       if (panelSessionMenuOpen) {
         e.preventDefault();
@@ -10247,7 +10308,7 @@
         closeSessionMenu();
         return;
       }
-      if (approvalPopoverEl && !approvalPopoverEl.hidden) {
+      if (streamView.approvalPopoverEl && !streamView.approvalPopoverEl.hidden) {
         e.preventDefault();
         e.stopPropagation();
         closeApprovalPopover();
@@ -10291,19 +10352,18 @@
     renderConversation();
     restoreStreamingUI();
   }
-  var observerAutoScroll = true;
   function adoptFinishedRunSnapshot(snapshot) {
     if (!snapshot || snapshot.status === "running" || !Array.isArray(snapshot.parts)) return false;
     const instruction = String(snapshot.instruction || "").trim();
     if (!instruction) return false;
     let userIndex = -1;
-    for (let i = conversation.length - 1; i >= 0; i--) {
-      if (conversation[i] && conversation[i].role === "user" && String(conversation[i].content || "").trim() === instruction) {
+    for (let i = panelSessionState.conversation.length - 1; i >= 0; i--) {
+      if (panelSessionState.conversation[i] && panelSessionState.conversation[i].role === "user" && String(panelSessionState.conversation[i].content || "").trim() === instruction) {
         userIndex = i;
         break;
       }
     }
-    if (userIndex >= 0 && conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live)) {
+    if (userIndex >= 0 && panelSessionState.conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live)) {
       return false;
     }
     const msg = runStateToAssistantMessage(snapshot);
@@ -10311,7 +10371,7 @@
     msg.live = false;
     msg.liveStatus = "completed";
     msg.showCitations = true;
-    conversation.push(msg);
+    panelSessionState.conversation.push(msg);
     saveConversation();
     if (panelBody && !runSession.isRunning) {
       renderConversation();
@@ -10367,7 +10427,7 @@
             await panelVisibility.withSuppressed(async () => {
               openPanel(0, 0, true, true);
             });
-            const last = conversation.length ? conversation[conversation.length - 1] : null;
+            const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
             const runPromise = runSession.hasRunner ? Promise.resolve(runSession.invokeRunner(String(resp.instruction), {
               // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
@@ -10401,9 +10461,10 @@
   }
   function initAssistant(options = {}) {
     if (options.runtime) runtimePort = options.runtime;
+    if (options.dom) screenshotView.setDom(options.dom);
     try {
       window.addEventListener("pagehide", () => {
-        if (followedRunState || followedMessages.length) return;
+        if (followedRun.followedRunState || followedRun.followedMessages.length) return;
         try {
           saveConversation();
         } catch (e) {
@@ -10421,9 +10482,9 @@
       removeBubble();
     });
     document.addEventListener("pointerdown", (e) => {
-      if (!approvalPopoverEl || approvalPopoverEl.hidden) return;
+      if (!streamView.approvalPopoverEl || streamView.approvalPopoverEl.hidden) return;
       const path = typeof e.composedPath === "function" ? e.composedPath() : [];
-      if (path.includes(approvalSettingsEl)) return;
+      if (path.includes(streamView.approvalSettingsEl)) return;
       closeApprovalPopover();
     }, true);
     document.addEventListener("pointermove", (e) => fabPeek.handlePointerMove(e.clientX, e.clientY), true);
@@ -10441,16 +10502,16 @@
         return;
       }
       if (e.key === "Escape") {
-        if (picking) return;
+        if (streamView.picking) return;
         removeBubble();
         if (panel) return;
       }
     }, true);
     document.addEventListener("mousemove", (e) => {
       const inCitation = isPointerInCitationRange(e);
-      if (inCitation) citeHighlightEntered2 = true;
-      else if (citeHighlightEntered2) {
-        citeHighlightEntered2 = false;
+      if (inCitation) streamView.citeHighlightEntered = true;
+      else if (streamView.citeHighlightEntered) {
+        streamView.citeHighlightEntered = false;
         clearCiteHighlight();
       }
       if (dragState && panel) {
@@ -10521,7 +10582,7 @@
       }
       lastText = text;
       clearCiteHighlight();
-      pageText = pageContextEnabled ? extractPageText() : "";
+      pageText = streamView.pageContextEnabled ? extractPageText() : "";
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       if (panel) {
@@ -10532,7 +10593,7 @@
       showBubble(rect.left + rect.width / 2, rect.top);
     });
     getAISettings().then((s) => {
-      pageContextEnabled = s.pageContext !== false;
+      streamView.pageContextEnabled = s.pageContext !== false;
     }).catch(() => {
     });
     try {
@@ -10552,15 +10613,15 @@
       chrome.runtime.onMessage.addListener((msg) => {
         if (!msg) return;
         if (msg.type === "kbPickResult") {
-          if (pickUi) {
-            pickUi.setActive(false);
-            pickUi.onPicked(msg.pickedList || msg.picked);
+          if (streamView.pickUi) {
+            streamView.pickUi.setActive(false);
+            streamView.pickUi.onPicked(msg.pickedList || msg.picked);
           } else {
-            picking = false;
+            streamView.picking = false;
           }
         } else if (msg.type === "kbPickCancel") {
-          if (pickUi) pickUi.setActive(false);
-          else picking = false;
+          if (streamView.pickUi) streamView.pickUi.setActive(false);
+          else streamView.picking = false;
         } else if (msg.type === "panel:sessions-changed") {
           handleRemotePanelSessions(msg).catch(() => {
           });
@@ -10572,14 +10633,14 @@
         } else if (msg.type === "run:delta") {
           handleRunDelta(msg);
         } else if (msg.type === "run:ended") {
-          if (String(msg.sessionId || "") === panelSessionId) scheduleFollowedRunRefresh();
+          if (String(msg.sessionId || "") === panelSessionState.panelSessionId) scheduleFollowedRunRefresh();
         } else if (msg.type === "run:stopped") {
-          if (String(msg.sessionId || "") === panelSessionId && String(msg.runId || "") === String(runSession.runId || "")) {
+          if (String(msg.sessionId || "") === panelSessionState.panelSessionId && String(msg.runId || "") === String(runSession.runId || "")) {
             runSession.requestStop("remote");
           }
         } else if (msg.type === "panel:lock-lost") {
-          if (String(msg.id || "") !== panelSessionId) return;
-          if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
+          if (String(msg.id || "") !== panelSessionState.panelSessionId) return;
+          if (String(msg.runId || "") && panelSessionState.panelSessionLockRunId && String(msg.runId) !== panelSessionState.panelSessionLockRunId) return;
           showCitationHint("\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u5DF2\u63A5\u7BA1\u8BE5\u4F1A\u8BDD\uFF0C\u672C\u9875\u4EFB\u52A1\u5DF2\u505C\u6B62\u3002");
           runSession.requestStop();
         } else if (msg.type === "panel:toggle") {
@@ -10640,6 +10701,35 @@
   };
   function createChromeRuntimeAdapter(api = chrome) {
     return new ChromeRuntimeAdapter(api);
+  }
+
+  // lib/adapters/dom/document.ts
+  var BrowserDocumentAdapter = class {
+    documentApi;
+    constructor(documentApi) {
+      this.documentApi = documentApi;
+    }
+    createElement(tagName) {
+      return this.documentApi.createElement(tagName);
+    }
+    append(parent, child) {
+      parent.appendChild(child);
+    }
+    getElementById(id) {
+      return this.documentApi.getElementById(id);
+    }
+    querySelector(selector, root) {
+      return (root || this.documentApi).querySelector(selector);
+    }
+    getActiveElement() {
+      return this.documentApi.activeElement;
+    }
+    getVisibilityState() {
+      return String(this.documentApi.visibilityState || "");
+    }
+  };
+  function createBrowserDocumentAdapter(documentApi = document) {
+    return new BrowserDocumentAdapter(documentApi);
   }
 
   // entries/content.ts
@@ -10765,7 +10855,12 @@
       }
       return false;
     });
-    if (isTopFrame) initAssistant({ runtime: createChromeRuntimeAdapter() });
+    if (isTopFrame) {
+      initAssistant({
+        runtime: createChromeRuntimeAdapter(),
+        dom: createBrowserDocumentAdapter()
+      });
+    }
   }
   window.__rfContentInit = initContentScript;
 })();

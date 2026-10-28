@@ -837,7 +837,7 @@ function canvasPage() {
 // 所以判据是**计数**，不是"工具返回了 ok"。
 //
 // 另外：宏按**站点**存储，且只记录白名单内的可回放工具
-// （见 lib/assistant/macros.js 的 REPLAYABLE_TOOLS）——
+// （见 lib/application/agent/macros.js 的 REPLAYABLE_TOOLS）——
 // 所以剧本里 `get_page_snapshot` / `macro` 本身都不会进宏，
 // 存下来的应当**恰好是 3 步**（填词 / 选范围 / 点执行）。
 function macroPage() {
@@ -2020,7 +2020,7 @@ function pickPage() {
     // ★★ 两种调用者必须分开（fromClient）：
     //      · fromClient = true：**agent 真的读了这个节点**。页面自己看不出"被读了"
     //        （innerText / textContent 不产生 DOM 变更），所以框架会在**被读的那个元素上**
-    //        派发 recallflow:element-read（见 lib/page/commands.ts 的 notifyElementsRead），
+    //        派发 recallflow:element-read（见 lib/ui/page/commands.ts 的 notifyElementsRead），
     //        这里就是那个监听器的落点；
     //      · fromClient = false：**页面自己写节点**引起的观察者回调（paintRaw() 摆缓存价、
     //        刷新定时器写实时价）。它是"页面重渲染"，不是"agent 读了一次"。
@@ -2177,7 +2177,7 @@ function pickPage() {
       //   · 节点被**页面自己**改写（paintRaw / 刷新定时器）⇒ observer 走 fromClient = false，
       //     只记一次"页面重渲染"，**不**启动刷新；
       //   · 节点被 **agent 读**⇒ 框架在**被读的那个元素上**派发 recallflow:element-read
-      //     （lib/page/commands.ts 的 notifyElementsRead；读取类是 innerText/textContent，
+      //     （lib/ui/page/commands.ts 的 notifyElementsRead；读取类是 innerText/textContent，
       //     **不产生任何 DOM 变更** ⇒ 页面无法用 MutationObserver 察觉"被读了"，
       //     所以必须有这个信号）。这里收到就按 fromClient = true 记一次读。
       //   没有这条，"agent 看到什么"与"页面写了什么"就分不开，"第一次读必然是缓存价"也无从保证。
@@ -3299,7 +3299,7 @@ const REAL_MODEL = process.env.E2E_LLM_REAL_MODEL || '';
 // 结果**检索剧本被选中**，而它去 `type_text(name:'站内搜索')` 自然找不到（那一页叫「搜索关键词」），
 // 报出来的是「未找到可输入的目标元素」。症状看起来像**工具坏了**，实际是剧本选错了。
 //
-// 指令段有固定标签（带随机校验 token，见 lib/assistant/initial-messages.js 的 instructionLabel），
+// 指令段有固定标签（带随机校验 token，见 lib/application/agent/initial-messages.js 的 instructionLabel），
 // 据此切出真正的指令即可；找不到标签时退回整条消息（兼容没有标签的请求形态）。
 //
 // ⚠ 遮挡页的 H1 刻意**保留**「站内搜索」不去改：它现在是这条修复的**永久回归探针** ——
@@ -4225,7 +4225,7 @@ const llm = http.createServer((req, res) => {
       // 第 9 步：读回"值真的写进去了"。
       //   ⚠ 这里原来是 `inspect_element({ op: 'value' })` —— **没有这个 op**
       //     （`INSPECT_OPS` 只有 text / inspect / table / styles / options，见
-      //     lib/assistant/page-command-tools.js），所以它每一步都回 BAD_ARGS、
+      //     lib/application/agent/page-command-tools.js），所以它每一步都回 BAD_ARGS、
       //     面板上是个红叉，而用例没断言这一步 ⇒ 长期静默失败（直到录 GIF 才看见）。
       //     现在由 tests/e2e-scripted-steps.test.mjs 在**源码层**兜住这一类错误。
       //   为什么读 `#status` 而不是读输入框：

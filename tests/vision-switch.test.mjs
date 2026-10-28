@@ -28,9 +28,9 @@ import {
   VISION_ENABLED_TOOL_COPY,
   VISION_ENABLED_SKILL_COPY,
   VISION_ENABLED_SUMMARY_COPY,
-} from '../lib/shared/utils.ts';
-import { flattenHistoryContent } from '../lib/assistant/context.ts';
-import { visionMessagesFor } from '../lib/assistant/vision.ts';
+} from '../lib/shared/vision-copy.ts';
+import { flattenHistoryContent } from '../lib/application/agent/context.ts';
+import { visionMessagesFor } from '../lib/application/agent/vision.ts';
 import { sourcePath } from './source-path.mjs';
 
 const META = { width: 1280, height: 720, format: 'jpeg', quality: 72, bytes: 145408 };
@@ -91,7 +91,7 @@ test('**两臂都被钉住**：四处受开关影响的文案/装配，override 
 });
 
 test('单一来源：这两个符号只在一个文件里定义（别处硬编码"看不到图像"会被这条盯上）', () => {
-  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/vision-copy.ts'), 'utf8');
   // ⚠ 必须用**词边界**数，不能用 `split('export const VISION_ENABLED').length - 1`：
   // 那会把 `VISION_ENABLED_TOOL_COPY` 这类**同前缀的文案常数**也数进去 ⇒ 假红 ✗（第 7 步踩到）
   assert.equal(
@@ -123,7 +123,7 @@ test('这条门禁本身有牙齿：开启侧文案没接上（仍写着"看不�
 });
 
 test('三处启用分支的文案常数都存在且被开关引用（单一来源，别处不许再抄一份）', () => {
-  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/vision-copy.ts'), 'utf8');
   for (const [name, copy] of [
     ['tool', VISION_ENABLED_TOOL_COPY],
     ['skill', VISION_ENABLED_SKILL_COPY],
@@ -136,18 +136,18 @@ test('三处启用分支的文案常数都存在且被开关引用（单一来�
 });
 
 test('依赖链要短：开关与说明必须是纯函数，不引入浏览器依赖（否则内容脚本里用不了）', () => {
-  const utils = fs.readFileSync(sourcePath('lib/shared/utils.js'), 'utf8');
+  const utils = fs.readFileSync(sourcePath('lib/shared/vision-copy.ts'), 'utf8');
   const at = utils.indexOf('export function visionLimitationNote');
   const body = utils.slice(at, utils.indexOf('\n}', at));
   assert.ok(!/chrome\.|window\.|document\./.test(body), '说明函数不许碰浏览器对象');
 });
 
 test('默认预算不可配置这一点有**如实标注**（别假装 ctx.visionBudget 可配）', () => {
-  const vision = fs.readFileSync('lib/assistant/vision.ts', 'utf8');
+  const vision = fs.readFileSync('lib/application/agent/vision.ts', 'utf8');
   assert.match(vision, /没有任何地方赋值/, 'vision.js 必须如实标注"ctx.visionBudget 从未被赋值"');
   assert.match(vision, /不可配置/, '必须明确写"不可配置"');
   // 有牙齿：源码里若真的出现赋值点，这个用例会红，逼人把标注改成"可配置"并补门禁
-  const agent = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+  const agent = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
   const assignments = agent.match(/ctx\.visionBudget\s*=/g) || [];
   assert.equal(assignments.length, 0, 'agent.js 里不应有 visionBudget 赋值（若加了，请同步上面两处标注）');
 });

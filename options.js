@@ -116,6 +116,65 @@ var OLD_STATUS_MIGRATION = {
   "mastered": 3
 };
 
+// lib/shared/dom/html.ts
+function typeInfo(id) {
+  return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// lib/userscript/settings.ts
+var USERSCRIPT_SETTINGS_KEY = "recallflow.userscript.settings.v1";
+var USERSCRIPT_SETTINGS_DEFAULTS = {
+  // 允许 Agent 通过 install_userscript 自动安装脚本。
+  agentCanInstall: true,
+  // 打开脚本中心或扩展启动时，自动检查全部脚本更新。
+  autoCheckUpdates: false,
+  // 脚本未显式声明 @run-at 时的默认运行时机。
+  defaultRunAt: "document-idle"
+};
+async function getUserscriptSettings() {
+  const d = await chrome.storage.local.get(USERSCRIPT_SETTINGS_KEY);
+  const saved = d[USERSCRIPT_SETTINGS_KEY] || {};
+  return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
+}
+async function saveUserscriptSettings(patch) {
+  const current = await getUserscriptSettings();
+  const next = Object.assign({}, current, patch || {});
+  await chrome.storage.local.set({ [USERSCRIPT_SETTINGS_KEY]: next });
+  return next;
+}
+
+// lib/userscript/store.ts
+var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
+function storage() {
+  return typeof chrome !== "undefined" && chrome.storage ? chrome.storage.local : null;
+}
+async function listScripts() {
+  const area2 = storage();
+  if (!area2) return [];
+  const data = await area2.get(USERSCRIPTS_KEY);
+  const map = data[USERSCRIPTS_KEY] || {};
+  return Object.values(map).sort((a, b) => (b.installedAt || 0) - (a.installedAt || 0));
+}
+async function getScript(id) {
+  const area2 = storage();
+  if (!area2 || !id) return null;
+  const data = await area2.get(USERSCRIPTS_KEY);
+  const map = data[USERSCRIPTS_KEY] || {};
+  return map[id] || null;
+}
+async function saveScript(script) {
+  const area2 = storage();
+  if (!area2 || !script || !script.id) return null;
+  const data = await area2.get(USERSCRIPTS_KEY);
+  const map = data[USERSCRIPTS_KEY] || {};
+  map[script.id] = script;
+  await area2.set({ [USERSCRIPTS_KEY]: map });
+  return script;
+}
+
 // lib/shared/surrogates.ts
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
@@ -146,35 +205,7 @@ function rangeSafe(text, start, end) {
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
 
-// lib/shared/utils.ts
-function typeInfo(id) {
-  return ITEM_TYPES.find((t) => t.id === id) || ITEM_TYPES[0];
-}
-function cleanTitle(title) {
-  let t = (title || "").trim();
-  t = t.replace(
-    /[|\-–—]\s*(力扣（LeetCode）|力扣|LeetCode|牛客网|牛客|nowcoder|洛谷|Luogu|AcWing|Codeforces|AtCoder).*$/i,
-    ""
-  ).trim();
-  return t;
-}
-function markdownExcerpt(text, maxChars = 160) {
-  const limit = Math.max(20, Number(maxChars) || 160);
-  let s = String(text || "");
-  s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
-  s = s.replace(/`([^`]+)`/g, "$1");
-  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
-  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
-  s = s.replace(/^\s{0,3}>\s?/gm, "");
-  s = s.replace(/^\s*[-*+]\s+/gm, "");
-  s = s.replace(/^\s*\d+[.)]\s+/gm, "");
-  s = s.replace(/[*_~]{1,3}/g, "");
-  s = s.replace(/\|/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
-  if (!s) return "";
-  return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
-}
+// lib/shared/format/page-results.ts
 var DEFAULT_STYLE_PROPS = Object.freeze([
   "font-size",
   "line-height",
@@ -189,66 +220,6 @@ var DEFAULT_STYLE_PROPS = Object.freeze([
   "position",
   "z-index"
 ]);
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-function isCspEvalBlockError(message) {
-  const s = String(message === void 0 || message === null ? "" : message);
-  if (!s) return false;
-  if (/unsafe-eval/i.test(s)) return true;
-  if (/refused to evaluate/i.test(s)) return true;
-  if (/call to eval\(\) blocked/i.test(s)) return true;
-  if (/blocked by (?:the )?csp/i.test(s)) return true;
-  if (/content security policy/i.test(s) && /(eval|script-src)/i.test(s)) return true;
-  return false;
-}
-var VISION_ENABLED = true;
-var VISION_CLAUSE = "**\u770B\u4E0D\u5230\u56FE\u50CF**\uFF08\u622A\u56FE\u53EA\u7ED9\u7528\u6237\u770B\uFF0C\u4E0D\u4F1A\u8FDB\u5165\u4F60\u7684\u8F93\u5165\uFF09";
-function visionLimitationNote(visionEnabled, prefix) {
-  const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
-  if (enabled) return "";
-  if (typeof prefix === "string") return prefix;
-  return "\u6CE8\u610F\uFF1A\u5F53\u524D" + VISION_CLAUSE + "\uFF0C\u8BF7\u4F9D\u636E DOM / \u53EF\u8BBF\u95EE\u6027\u6811\u7B49\u6587\u672C\u4FE1\u606F\u5224\u65AD\u3002";
-}
-var VISION_UNAVAILABLE_TOOL_COPY = "\u4E0D\u8FDB\u5165\u4F60\u7684\u4E0A\u4E0B\u6587 \u2014\u2014 \u5F53\u524D\u6A21\u578B\u662F\u7EAF\u6587\u672C\u7684\uFF0C**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**\uFF0C\u4E0D\u8981\u636E\u300C\u5DF2\u622A\u56FE\u300D\u63CF\u8FF0\u9875\u9762\u5916\u89C2\u6216\u58F0\u79F0\u89C6\u89C9\u4E0A\u5DF2\u4FEE\u597D\u3002";
-var VISION_UNAVAILABLE_SKILL_COPY = '\u4F46**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**\uFF0C\n  \u4E0D\u8981\u636E"\u5DF2\u622A\u56FE"\u58F0\u79F0\u89C6\u89C9\u4E0A\u5DF2\u7ECF\u6539\u597D\u3002';
-var VISION_ENABLED_TOOL_COPY = "\u56FE\u7247\u4E5F\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\u2014\u2014 \u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
-var VISION_ENABLED_SKILL_COPY = '\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\n  \u6240\u4EE5\u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u6539\u52A8\u7684\u89C6\u89C9\u6548\u679C\uFF1B\u4F46**\u5916\u89C2\u5224\u65AD\u4ECD\u8981\u8BFB\u8BA1\u7B97\u503C**\uFF08\u50CF\u7D20\u8BC1\u636E\u66FF\u4EE3\u4E0D\u4E86 `inspect_element({op:"styles"})` \u7684\u8BFB\u6570\uFF09\u3002';
-var VISION_ENABLED_SUMMARY_COPY = "\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\u636E\u6B64\u53EF\u4EE5\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
-function isContentScriptUnreachable(message) {
-  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
-    String(message === void 0 || message === null ? "" : message)
-  );
-}
-function describeContentScriptUnreachable(message, prefix) {
-  const raw = String(message === void 0 || message === null ? "" : message);
-  if (!isContentScriptUnreachable(raw)) return (prefix || "") + raw;
-  return (prefix || "") + "\u8BE5\u6807\u7B7E\u9875\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u5185\u5BB9\u811A\u672C\uFF08" + sliceSafe(raw, 0, 120) + '\uFF09\u3002\u5E38\u89C1\u539F\u56E0\uFF1A\u9875\u9762\u8FD8\u5728\u52A0\u8F7D\u3001\u8BE5\u9875\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u5DF2\u5931\u6548\u3002\u53EF\u4EE5\u8FD9\u6837\u505A\uFF1A\u2460 \u7A0D\u7B49\u7247\u523B\u540E\u7528 wait_for_element / get_page_snapshot \u91CD\u8BD5\u4E00\u6B21\uFF1B\u2461 \u6539\u7528**\u4E0D\u7ECF\u5185\u5BB9\u811A\u672C**\u7684 CDP \u5DE5\u5177\uFF1Aget_ax_snapshot\u3001run_javascript({engine:"page"})\u3001take_screenshot\uFF1B\u2462 \u82E5\u8BE5\u7AD9\u59CB\u7EC8\u8BFB\u4E0D\u5230\uFF0C\u76F4\u63A5\u5982\u5B9E\u8BF4\u660E"\u8FD9\u4E2A\u9875\u9762\u8BFB\u4E0D\u4E86"\uFF0C\u4E0D\u8981\u53CD\u590D\u91CD\u8BD5\u540C\u4E00\u6761\u8DEF\u3002';
-}
-function screenshotAttempts(format, quality) {
-  const q = Math.min(100, Math.max(20, Math.round(Number(quality) || 72)));
-  if (format === "png") {
-    return [{ format: "png" }, { format: "jpeg", quality: 60 }, { format: "jpeg", quality: 35 }];
-  }
-  const ladder = [{ format: "jpeg", quality: q }];
-  const mid = Math.max(30, q - 25);
-  if (mid < q) ladder.push({ format: "jpeg", quality: mid });
-  if (ladder[ladder.length - 1].quality > 30) ladder.push({ format: "jpeg", quality: 30 });
-  return ladder;
-}
-function formatScreenshotSummary(meta, visionEnabled) {
-  const m = meta || {};
-  const w = Math.max(0, Math.round(Number(m.width) || 0));
-  const h = Math.max(0, Math.round(Number(m.height) || 0));
-  const kb = Math.max(0, Math.round((Number(m.bytes) || 0) / 1024));
-  const fmt = String(m.format || "jpeg").toUpperCase();
-  const sizeText = w && h ? w + "\xD7" + h + " CSS px" : "\u5C3A\u5BF8\u672A\u77E5";
-  const parts = ["\u5DF2\u622A\u56FE " + sizeText + "\uFF08" + fmt + (m.quality ? " q" + m.quality : "") + "\uFF0C" + kb + "KB\uFF09"];
-  if (m.label) parts.push("\u6807\u6CE8\uFF1A" + String(m.label).slice(0, 60));
-  if (m.degraded) parts.push("\uFF08\u4E3A\u63A7\u5236\u4F53\u79EF\u5DF2\u81EA\u52A8\u964D\u8D28\uFF09");
-  const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
-  return parts.join("\xB7") + "\n" + (enabled ? VISION_ENABLED_SUMMARY_COPY : "\u56FE\u7247\u53EA\u5C55\u793A\u7ED9\u7528\u6237\u3001\u4E0D\u8FDB\u5165\u4F60\u7684\u4E0A\u4E0B\u6587\uFF1A" + visionLimitationNote(visionEnabled, "**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**") + "\uFF0C\u4E0D\u8981\u636E\u5B83\u63CF\u8FF0\u9875\u9762\u5916\u89C2\u3002") + "\u82E5\u9700\u8981\u53EF\u5224\u65AD\u7684\u6587\u672C\u8BC1\u636E\uFF0C\u8BF7\u7528 get_page_snapshot / read_diagnostics / inspect_element\u3002\n**\u622A\u56FE\u4E0D\u80FD\u4F5C\u4E3A complete_task \u7684 evidence**\uFF1A\u5B8C\u6210\u524D\u6821\u9A8C\u53EA\u8BFB\u6587\u672C\u8BC1\u636E\u3002\u622A\u56FE\u662F\u7ED9\u7528\u6237\u7559\u6863\u7684\uFF0C\u4E0D\u8981\u4E3A\u4E86\u300C\u53D6\u8BC1\u300D\u53CD\u590D\u622A\u56FE\u3002";
-}
 function formatCurrentPageResult(input) {
   const o = input || {};
   const len = Math.max(0, Math.floor(Number(o.textLength) || 0));
@@ -306,55 +277,92 @@ function formatVisibilityReport(results) {
   return "\u3010\u53EF\u89C1\u6027\u6838\u67E5\u3011\u5224\u65AD\u300C\u6587\u6848\u662F\u5426\u8FD8\u770B\u5F97\u89C1\u300D\u53EA\u80FD\u770B**\u53EF\u89C1\u6B21\u6570**\uFF1BDOM \u6B21\u6570\u5305\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u7684\u6587\u5B57\u3002\n" + lines.join("\n");
 }
 
-// lib/userscript/settings.ts
-var USERSCRIPT_SETTINGS_KEY = "recallflow.userscript.settings.v1";
-var USERSCRIPT_SETTINGS_DEFAULTS = {
-  // 允许 Agent 通过 install_userscript 自动安装脚本。
-  agentCanInstall: true,
-  // 打开脚本中心或扩展启动时，自动检查全部脚本更新。
-  autoCheckUpdates: false,
-  // 脚本未显式声明 @run-at 时的默认运行时机。
-  defaultRunAt: "document-idle"
-};
-async function getUserscriptSettings() {
-  const d = await chrome.storage.local.get(USERSCRIPT_SETTINGS_KEY);
-  const saved = d[USERSCRIPT_SETTINGS_KEY] || {};
-  return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
+// lib/shared/diagnostics.ts
+function isCspEvalBlockError(message) {
+  const s = String(message === void 0 || message === null ? "" : message);
+  if (!s) return false;
+  if (/unsafe-eval/i.test(s)) return true;
+  if (/refused to evaluate/i.test(s)) return true;
+  if (/call to eval\(\) blocked/i.test(s)) return true;
+  if (/blocked by (?:the )?csp/i.test(s)) return true;
+  if (/content security policy/i.test(s) && /(eval|script-src)/i.test(s)) return true;
+  return false;
 }
-async function saveUserscriptSettings(patch) {
-  const current = await getUserscriptSettings();
-  const next = Object.assign({}, current, patch || {});
-  await chrome.storage.local.set({ [USERSCRIPT_SETTINGS_KEY]: next });
-  return next;
+function isContentScriptUnreachable(message) {
+  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
+    String(message === void 0 || message === null ? "" : message)
+  );
+}
+function describeContentScriptUnreachable(message, prefix) {
+  const raw = String(message === void 0 || message === null ? "" : message);
+  if (!isContentScriptUnreachable(raw)) return (prefix || "") + raw;
+  return (prefix || "") + "\u8BE5\u6807\u7B7E\u9875\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u5185\u5BB9\u811A\u672C\uFF08" + sliceSafe(raw, 0, 120) + '\uFF09\u3002\u5E38\u89C1\u539F\u56E0\uFF1A\u9875\u9762\u8FD8\u5728\u52A0\u8F7D\u3001\u8BE5\u9875\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u5DF2\u5931\u6548\u3002\u53EF\u4EE5\u8FD9\u6837\u505A\uFF1A\u2460 \u7A0D\u7B49\u7247\u523B\u540E\u7528 wait_for_element / get_page_snapshot \u91CD\u8BD5\u4E00\u6B21\uFF1B\u2461 \u6539\u7528**\u4E0D\u7ECF\u5185\u5BB9\u811A\u672C**\u7684 CDP \u5DE5\u5177\uFF1Aget_ax_snapshot\u3001run_javascript({engine:"page"})\u3001take_screenshot\uFF1B\u2462 \u82E5\u8BE5\u7AD9\u59CB\u7EC8\u8BFB\u4E0D\u5230\uFF0C\u76F4\u63A5\u5982\u5B9E\u8BF4\u660E"\u8FD9\u4E2A\u9875\u9762\u8BFB\u4E0D\u4E86"\uFF0C\u4E0D\u8981\u53CD\u590D\u91CD\u8BD5\u540C\u4E00\u6761\u8DEF\u3002';
 }
 
-// lib/userscript/store.ts
-var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
-function storage() {
-  return typeof chrome !== "undefined" && chrome.storage ? chrome.storage.local : null;
+// lib/shared/vision-copy.ts
+var VISION_ENABLED = true;
+var VISION_CLAUSE = "**\u770B\u4E0D\u5230\u56FE\u50CF**\uFF08\u622A\u56FE\u53EA\u7ED9\u7528\u6237\u770B\uFF0C\u4E0D\u4F1A\u8FDB\u5165\u4F60\u7684\u8F93\u5165\uFF09";
+function visionLimitationNote(visionEnabled, prefix) {
+  const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
+  if (enabled) return "";
+  if (typeof prefix === "string") return prefix;
+  return "\u6CE8\u610F\uFF1A\u5F53\u524D" + VISION_CLAUSE + "\uFF0C\u8BF7\u4F9D\u636E DOM / \u53EF\u8BBF\u95EE\u6027\u6811\u7B49\u6587\u672C\u4FE1\u606F\u5224\u65AD\u3002";
 }
-async function listScripts() {
-  const area2 = storage();
-  if (!area2) return [];
-  const data = await area2.get(USERSCRIPTS_KEY);
-  const map = data[USERSCRIPTS_KEY] || {};
-  return Object.values(map).sort((a, b) => (b.installedAt || 0) - (a.installedAt || 0));
+var VISION_UNAVAILABLE_TOOL_COPY = "\u4E0D\u8FDB\u5165\u4F60\u7684\u4E0A\u4E0B\u6587 \u2014\u2014 \u5F53\u524D\u6A21\u578B\u662F\u7EAF\u6587\u672C\u7684\uFF0C**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**\uFF0C\u4E0D\u8981\u636E\u300C\u5DF2\u622A\u56FE\u300D\u63CF\u8FF0\u9875\u9762\u5916\u89C2\u6216\u58F0\u79F0\u89C6\u89C9\u4E0A\u5DF2\u4FEE\u597D\u3002";
+var VISION_UNAVAILABLE_SKILL_COPY = '\u4F46**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**\uFF0C\n  \u4E0D\u8981\u636E"\u5DF2\u622A\u56FE"\u58F0\u79F0\u89C6\u89C9\u4E0A\u5DF2\u7ECF\u6539\u597D\u3002';
+var VISION_ENABLED_TOOL_COPY = "\u56FE\u7247\u4E5F\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\u2014\u2014 \u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
+var VISION_ENABLED_SKILL_COPY = '\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\n  \u6240\u4EE5\u4F60\u53EF\u4EE5\u636E\u6B64\u89C2\u5BDF\u6539\u52A8\u7684\u89C6\u89C9\u6548\u679C\uFF1B\u4F46**\u5916\u89C2\u5224\u65AD\u4ECD\u8981\u8BFB\u8BA1\u7B97\u503C**\uFF08\u50CF\u7D20\u8BC1\u636E\u66FF\u4EE3\u4E0D\u4E86 `inspect_element({op:"styles"})` \u7684\u8BFB\u6570\uFF09\u3002';
+var VISION_ENABLED_SUMMARY_COPY = "\u56FE\u7247\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\uFF08\u672C\u6B21\u4EFB\u52A1\u91CC\u622A\u7684\u6BCF\u5F20\u90FD\u4F1A\u9001\uFF1B\u5355\u5F20\u8FC7\u5927\u7684\u4F1A\u7701\u7565\u5E76\u8BF4\u660E\uFF09\uFF0C\u636E\u6B64\u53EF\u4EE5\u89C2\u5BDF\u9875\u9762\u5916\u89C2\u3002";
+function screenshotAttempts(format, quality) {
+  const q = Math.min(100, Math.max(20, Math.round(Number(quality) || 72)));
+  if (format === "png") {
+    return [{ format: "png" }, { format: "jpeg", quality: 60 }, { format: "jpeg", quality: 35 }];
+  }
+  const ladder = [{ format: "jpeg", quality: q }];
+  const mid = Math.max(30, q - 25);
+  if (mid < q) ladder.push({ format: "jpeg", quality: mid });
+  if (ladder[ladder.length - 1].quality > 30) ladder.push({ format: "jpeg", quality: 30 });
+  return ladder;
 }
-async function getScript(id) {
-  const area2 = storage();
-  if (!area2 || !id) return null;
-  const data = await area2.get(USERSCRIPTS_KEY);
-  const map = data[USERSCRIPTS_KEY] || {};
-  return map[id] || null;
+function formatScreenshotSummary(meta, visionEnabled) {
+  const m = meta || {};
+  const w = Math.max(0, Math.round(Number(m.width) || 0));
+  const h = Math.max(0, Math.round(Number(m.height) || 0));
+  const kb = Math.max(0, Math.round((Number(m.bytes) || 0) / 1024));
+  const fmt = String(m.format || "jpeg").toUpperCase();
+  const sizeText = w && h ? w + "\xD7" + h + " CSS px" : "\u5C3A\u5BF8\u672A\u77E5";
+  const parts = ["\u5DF2\u622A\u56FE " + sizeText + "\uFF08" + fmt + (m.quality ? " q" + m.quality : "") + "\uFF0C" + kb + "KB\uFF09"];
+  if (m.label) parts.push("\u6807\u6CE8\uFF1A" + String(m.label).slice(0, 60));
+  if (m.degraded) parts.push("\uFF08\u4E3A\u63A7\u5236\u4F53\u79EF\u5DF2\u81EA\u52A8\u964D\u8D28\uFF09");
+  const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
+  return parts.join("\xB7") + "\n" + (enabled ? VISION_ENABLED_SUMMARY_COPY : "\u56FE\u7247\u53EA\u5C55\u793A\u7ED9\u7528\u6237\u3001\u4E0D\u8FDB\u5165\u4F60\u7684\u4E0A\u4E0B\u6587\uFF1A" + visionLimitationNote(visionEnabled, "**\u4F60\u770B\u4E0D\u5230\u56FE\u50CF\u5185\u5BB9**") + "\uFF0C\u4E0D\u8981\u636E\u5B83\u63CF\u8FF0\u9875\u9762\u5916\u89C2\u3002") + "\u82E5\u9700\u8981\u53EF\u5224\u65AD\u7684\u6587\u672C\u8BC1\u636E\uFF0C\u8BF7\u7528 get_page_snapshot / read_diagnostics / inspect_element\u3002\n**\u622A\u56FE\u4E0D\u80FD\u4F5C\u4E3A complete_task \u7684 evidence**\uFF1A\u5B8C\u6210\u524D\u6821\u9A8C\u53EA\u8BFB\u6587\u672C\u8BC1\u636E\u3002\u622A\u56FE\u662F\u7ED9\u7528\u6237\u7559\u6863\u7684\uFF0C\u4E0D\u8981\u4E3A\u4E86\u300C\u53D6\u8BC1\u300D\u53CD\u590D\u622A\u56FE\u3002";
 }
-async function saveScript(script) {
-  const area2 = storage();
-  if (!area2 || !script || !script.id) return null;
-  const data = await area2.get(USERSCRIPTS_KEY);
-  const map = data[USERSCRIPTS_KEY] || {};
-  map[script.id] = script;
-  await area2.set({ [USERSCRIPTS_KEY]: map });
-  return script;
+
+// lib/shared/text.ts
+function cleanTitle(title) {
+  let t = (title || "").trim();
+  t = t.replace(
+    /[|\-–—]\s*(力扣（LeetCode）|力扣|LeetCode|牛客网|牛客|nowcoder|洛谷|Luogu|AcWing|Codeforces|AtCoder).*$/i,
+    ""
+  ).trim();
+  return t;
+}
+function markdownExcerpt(text, maxChars = 160) {
+  const limit = Math.max(20, Number(maxChars) || 160);
+  let s = String(text || "");
+  s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
+  s = s.replace(/`([^`]+)`/g, "$1");
+  s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
+  s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  s = s.replace(/^\s{0,3}#{1,6}\s+/gm, "");
+  s = s.replace(/^\s{0,3}>\s?/gm, "");
+  s = s.replace(/^\s*[-*+]\s+/gm, "");
+  s = s.replace(/^\s*\d+[.)]\s+/gm, "");
+  s = s.replace(/[*_~]{1,3}/g, "");
+  s = s.replace(/\|/g, " ");
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + "\u2026" : s;
 }
 
 // lib/shared/store.ts
@@ -966,7 +974,7 @@ async function searchScripts(q) {
   return searchGreasyFork(q);
 }
 
-// lib/assistant/skill-defs.ts
+// lib/application/agent/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
@@ -1721,7 +1729,7 @@ var SKILL_REGISTRY = Object.freeze([
   }
 ]);
 
-// lib/assistant/skill-md.ts
+// lib/application/agent/skill-md.ts
 function compileKeywords(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -1813,7 +1821,7 @@ function toRuntimeSkill(skill, builtin = false) {
   };
 }
 
-// lib/assistant/skill-store.ts
+// lib/application/agent/skill-store.ts
 var STORAGE_KEY2 = "recallflow.skills";
 function compileAll(list, builtin) {
   return list.map((s) => toRuntimeSkill(s, builtin));
@@ -2274,7 +2282,7 @@ function siteKeyOf(url) {
   }
 }
 
-// lib/assistant/site-memory.ts
+// lib/application/agent/site-memory.ts
 var KEY = "recallflow.siteMemory.v1";
 var MAX_PER_ORIGIN = 60;
 var MAX_ORIGINS = 50;
@@ -2328,7 +2336,7 @@ async function rememberElement(url, info) {
   await writeAll(Object.fromEntries(origins));
 }
 
-// lib/assistant/macro-store.ts
+// lib/application/agent/macro-store.ts
 var KEY2 = "recallflow.macros.v1";
 var MAX_PER_ORIGIN2 = 20;
 var MAX_ORIGINS2 = 50;
@@ -2440,7 +2448,7 @@ async function recallTrace(url, opts = {}) {
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
 
-// lib/assistant/target-manager.ts
+// lib/application/agent/target-manager.ts
 var state = /* @__PURE__ */ new Map();
 function bucket(tabId) {
   const id = Number(tabId);
@@ -2466,7 +2474,7 @@ async function handleDialog(tabId, accept, promptText) {
   return { ok: true };
 }
 
-// lib/assistant/trace.ts
+// lib/application/agent/trace.ts
 var TRACE_PREFIX = "recallflow.runTrace.v1.";
 var TRACE_INDEX_KEY = "recallflow.runTraceIndex.v1";
 var LEGACY_KEY = "recallflow.runTraces.v1";
@@ -2594,7 +2602,7 @@ async function listTraces() {
   return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
-// lib/assistant/tool-schemas.ts
+// lib/application/agent/tool-schemas.ts
 var HIGHLIGHT_MAX_TEXTS = 20;
 var TOOL_SCHEMAS = [
   {
@@ -3409,7 +3417,7 @@ var TOOL_SCHEMAS = [
   }
 ];
 
-// lib/assistant/tool-metadata.ts
+// lib/application/agent/tool-metadata.ts
 var TOOL_METADATA = {
   // C-4 合并第 4 档：只读三件套（search/list/get）→ knowledge_read({ op })。
   // 三者权限完全一致（read/readOnly/parallelSafe），因此合并**不改变任何权限语义**。
@@ -3549,7 +3557,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   }
 }
 
-// lib/assistant/net-parse.ts
+// lib/application/agent/net-parse.ts
 function stripHtmlTags(html) {
   return String(html || "").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&ensp;/g, " ").replace(/&emsp;/g, " ").replace(/&middot;/g, "\xB7").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&#(\d+);/g, (_, n) => {
     try {
@@ -3704,7 +3712,7 @@ async function searchWeb(query, maxResults = 6) {
   return [];
 }
 
-// lib/assistant/page-action-verify.ts
+// lib/application/agent/page-action-verify.ts
 function buildActionVerification(observed, reason) {
   const text = String(reason || "");
   if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
@@ -3753,7 +3761,7 @@ function verifyPageAction(command2, before, after, response) {
   };
 }
 
-// lib/assistant/target-frame.ts
+// lib/application/agent/target-frame.ts
 function parseRef(ref) {
   const m = String(ref || "").match(/^f(\d+):(.*)$/);
   if (m) return { frameId: Number(m[1]), ref: m[2] };
@@ -3774,7 +3782,7 @@ function localTargetArgs(args) {
   return out;
 }
 
-// lib/assistant/tool-results.ts
+// lib/application/agent/tool-results.ts
 function summarizeCdpError(e) {
   const msg = e && e.message ? e.message : String(e);
   return msg.replace(/^[A-Za-z.]+：/, "");
@@ -3794,7 +3802,7 @@ function compactSnapshotSummary(snapshot) {
   return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
 }
 
-// lib/assistant/diagnostics.ts
+// lib/application/agent/diagnostics.ts
 async function readConsole(sendTabMessage2, tabId, args) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   try {
@@ -3852,7 +3860,7 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/macros.ts
+// lib/application/agent/macros.ts
 var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
   "click_element",
   "type_text",
@@ -3969,7 +3977,7 @@ async function macroTool(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
 }
 
-// lib/assistant/knowledge.ts
+// lib/application/agent/knowledge.ts
 var KNOWLEDGE_READ_OPS = ["search", "list", "get"];
 function knowledgeRead(deps, args) {
   const op = String(args && args.op || "").trim();
@@ -4020,7 +4028,7 @@ function knowledgeGet(deps, args) {
   };
 }
 
-// lib/assistant/tab-tools.ts
+// lib/application/agent/tab-tools.ts
 var DEFAULT_MAX_TAB_SWITCHES = 6;
 function tabSwitchBudget(ctx) {
   const used = Math.max(0, Number(ctx && ctx.tabSwitchCount) || 0);
@@ -4198,7 +4206,7 @@ async function handleTabTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/run-metrics.ts
+// lib/application/agent/run-metrics.ts
 var num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 function summarizeRunTrace(entries) {
   const list = Array.isArray(entries) ? entries : [];
@@ -4242,7 +4250,7 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
-// lib/assistant/run-state-tools.ts
+// lib/application/agent/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
   const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
@@ -4294,7 +4302,7 @@ async function handleRunStateTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/permission-tools.ts
+// lib/application/agent/permission-tools.ts
 async function trustSite(deps) {
   const ctx = deps.ctx;
   const origin = siteKeyOf(ctx.pageUrl);
@@ -4415,7 +4423,7 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
   });
 }
 
-// lib/assistant/screenshot-tool.ts
+// lib/application/agent/screenshot-tool.ts
 var MAX_SHOT_B64 = 4e5;
 var DEFAULT_SCREENSHOT_BUDGET_MS = 12e3;
 async function captureWithLadder(deps) {
@@ -4533,7 +4541,7 @@ function editableTextSummary(expected, actual) {
   };
 }
 
-// lib/assistant/page-input-tools.ts
+// lib/application/agent/page-input-tools.ts
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
   const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + '); if (!el) return null; if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || ""); return typeof el.value === "string" ? el.value : null; })()';
@@ -4653,7 +4661,7 @@ async function handlePageInputTool(name, args, deps) {
   return await thinPageCommand(deps, name, args);
 }
 
-// lib/assistant/auth-challenge.ts
+// lib/application/agent/auth-challenge.ts
 var AUTH_PATH_RE = /(?:^|\/)(?:login|log-in|signin|sign-in|sign_in|passport|sso|auth)(?:\/|$)/i;
 var MCP_PATH_RE = /(?:^|\/)mcp(?:\/|$)/i;
 var MCP_HINT_RE = /(mcp[-_ ]?session|mcp\s*(?:server|服务器|端点)|jsonrpc|streamable\s*http)/i;
@@ -4831,7 +4839,7 @@ function authChallengeNotice(challenge) {
   return "\n\n\u26A0 " + challenge.message + "\n\u8BF7\u5148\u628A\u4E0A\u9762\u7684\u767B\u5F55 / \u6388\u6743\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u5E76\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u3002\u5728\u7528\u6237\u660E\u786E\u8868\u793A\u5DF2\u767B\u5F55\u524D\uFF0C\u4E0D\u8981\u53CD\u590D\u70B9\u51FB\u3001\u731C\u6D4B\u5176\u5B83\u5730\u5740\uFF0C\u4E5F\u4E0D\u8981\u5728\u6807\u7B7E\u9875\u4E4B\u95F4\u6765\u56DE\u5207\u6362\u3002";
 }
 
-// lib/assistant/fetch-tools.ts
+// lib/application/agent/fetch-tools.ts
 async function fetchWebpage(deps, args) {
   const ctx = deps.ctx;
   ctx.failedUrls = Array.isArray(ctx.failedUrls) ? ctx.failedUrls : [];
@@ -4945,7 +4953,7 @@ async function handleFetchTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/cdp-input-tools.ts
+// lib/application/agent/cdp-input-tools.ts
 async function clickElement(deps, args) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, "click", args, ctx);
@@ -5076,7 +5084,7 @@ async function handleCdpInputTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-read-tools.ts
+// lib/application/agent/page-read-tools.ts
 async function listFramesRaw(deps, tabId) {
   try {
     const results = await deps.chrome.scripting.executeScript({
@@ -5330,7 +5338,7 @@ async function handlePageReadTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/userscript-tools.ts
+// lib/application/agent/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
   const text = scripts.length ? scripts.map(
@@ -5373,7 +5381,7 @@ async function handleUserscriptTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/skill-tools.ts
+// lib/application/agent/skill-tools.ts
 var COMMON_OPERATING_DISCIPLINE = [
   "## \u901A\u7528\u64CD\u4F5C\u7EAA\u5F8B\uFF08\u6240\u6709\u6280\u80FD\u5171\u7528\uFF0C\u52A1\u5FC5\u9075\u5B88\uFF09",
   "",
@@ -5490,7 +5498,7 @@ async function handleSkillTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/code-access-tools.ts
+// lib/application/agent/code-access-tools.ts
 var pageWorldPreferred = /* @__PURE__ */ new Set();
 function tabKey(ctx) {
   return ctx && ctx.tabId != null ? String(ctx.tabId) : "";
@@ -5648,7 +5656,7 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/page-command-tools.ts
+// lib/application/agent/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
   outline: "outline",
@@ -5728,7 +5736,7 @@ async function handlePageCommandTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/knowledge-store-tools.ts
+// lib/application/agent/knowledge-store-tools.ts
 async function knowledgeReadTool(deps, args) {
   return deps.knowledgeRead(
     { book: deps.ctx.book, buildRagContext: deps.buildRagContext, buildCitations: deps.buildCitations, typeInfo: deps.typeInfo, starLevels: deps.STAR_LEVELS },
@@ -5764,7 +5772,7 @@ async function handleKnowledgeStoreTool(name, args, deps) {
   return null;
 }
 
-// lib/assistant/tools.ts
+// lib/application/agent/tools.ts
 var TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
     const name = tool.function.name;
@@ -6364,7 +6372,7 @@ function stripHtml(html) {
   return s.trim();
 }
 
-// lib/assistant/mcp.ts
+// lib/application/agent/mcp.ts
 var MCP_PROTOCOL_VERSION = "2024-11-05";
 var MCP_TTL = 5 * 60 * 1e3;
 var MCP_STATUS_STORAGE_KEY = "recallflow.mcpLastStatus";

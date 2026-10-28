@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { sourcePath } from './source-path.mjs';
 
-const chat = fs.readFileSync('lib/page/chat.ts', 'utf8');
-const hub = fs.readFileSync(sourcePath('lib/assistant/run-hub.js'), 'utf8');
+const chat = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
+const hub = fs.readFileSync(sourcePath('lib/application/agent/run-hub.js'), 'utf8');
 
 function bodyOf(src, marker, length = 1800) {
   const at = src.indexOf(marker);
@@ -21,7 +21,7 @@ test('跟随页的每个 delta 不再整轮重绘：只调度 renderFollowedLive
 test('跟随页的 live 消息有独立节点，历史对话只建一次', () => {
   const body = bodyOf(chat, 'function renderFollowedLive()', 2200);
   assert.match(chat, /follow-live-ai/, '应标记/替换 live assistant 节点');
-  assert.match(body, /if \(!followedLiveReady\)/, '历史对话应只构建一次');
+  assert.match(body, /if \(!followedRun\.followedLiveReady\)/, '历史对话应只构建一次');
 });
 
 test('handleRunDelta 不在帧外重建 followedMessages', () => {

@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { readDiagnostics, DIAGNOSTIC_KINDS, readConsole, readNetwork, listDownloads } from '../lib/assistant/diagnostics.ts';
+import { readDiagnostics, DIAGNOSTIC_KINDS, readConsole, readNetwork, listDownloads } from '../lib/application/agent/diagnostics.ts';
 
 function mkDeps({ console: c = [], network: n = [], downloads: d = [] } = {}) {
   const calls = [];

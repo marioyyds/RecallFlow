@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { PanelThemeController } from '../lib/ui/panel/theme-controller.ts';
 import { PanelProgressController, stateLabel } from '../lib/ui/panel/progress-controller.ts';
+import { PanelSessionState } from '../lib/application/panel/session-state.ts';
 
 function fakeButton() {
   return {
@@ -66,4 +67,35 @@ test('PanelProgressController：停止后清空事实，resume 复用已有时�
 test('stateLabel：未知状态不回显内部标识', () => {
   assert.equal(stateLabel('executing'), '执行动作');
   assert.equal(stateLabel('unknown-internal-state'), '');
+});
+
+test('PanelSessionState：保存队列串行执行，失败不会断链', async () => {
+  const state = new PanelSessionState();
+  const order = [];
+  const first = state.enqueueSave(async () => {
+    order.push('first');
+    throw new Error('failed');
+  });
+  const second = state.enqueueSave(async () => {
+    order.push('second');
+    return 'ok';
+  });
+
+  await assert.rejects(first, /failed/);
+  assert.equal(await second, 'ok');
+  assert.deepEqual(order, ['first', 'second']);
+});
+
+test('PanelSessionState：会话身份、正文与锁状态集中重置', () => {
+  const state = new PanelSessionState();
+  state.adoptIdentity('session-1', 7);
+  state.replaceConversation([{ role: 'user', content: 'hi' }]);
+  state.panelSessionLockHeld = true;
+  state.panelSessionLockRunId = 'run-1';
+  assert.equal(state.panelSessionId, 'session-1');
+  assert.equal(state.panelSessionSeq, 7);
+  assert.equal(state.conversation.length, 1);
+  state.resetLock();
+  assert.equal(state.panelSessionLockHeld, false);
+  assert.equal(state.panelSessionLockRunId, '');
 });

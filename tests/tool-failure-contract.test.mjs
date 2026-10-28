@@ -20,9 +20,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { isContentScriptUnreachable, describeContentScriptUnreachable } from '../lib/shared/utils.ts';
-import { readCurrentPage } from '../lib/assistant/page-read-tools.ts';
-import { runJavascript } from '../lib/assistant/code-access-tools.ts';
+import { isContentScriptUnreachable, describeContentScriptUnreachable } from '../lib/shared/diagnostics.ts';
+import { readCurrentPage } from '../lib/application/agent/page-read-tools.ts';
+import { runJavascript } from '../lib/application/agent/code-access-tools.ts';
 import { sourcePath } from './source-path.mjs';
 
 const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
@@ -33,8 +33,14 @@ test('不许有「裸失败返回」：以失败文案为 result 的 return 必�
   const files = fs
     .readdirSync('lib/assistant')
     .filter((f) => f.endsWith('.js'))
-    .map((f) => 'lib/assistant/' + f)
-    .concat(['lib/shared/utils.js']);
+    .map((f) => 'lib/application/agent/' + f)
+    .concat([
+      'lib/shared/diagnostics.ts',
+      'lib/shared/format/page-results.ts',
+      'lib/shared/format/picked.ts',
+      'lib/shared/dom/html.ts',
+      'lib/shared/text.ts',
+    ]);
   // 失败语义的用词（不要只写「失败」—— 实测第一版就因为漏了「未知/无法」而少抓 3 处）
   const FAILURE_WORDS = '失败|错误|未知|无法|非法|不正确';
   const bad = [];
@@ -141,6 +147,6 @@ test('翻译器与用户脚本运行时的判定同源（同一族错误，两�
     /Receiving end does not exist\|Could not establish connection\|message port closed/,
     '运行时那份判定仍应是同一族；若改动了请同步 isContentScriptUnreachable'
   );
-  const utils = read('lib/shared/utils.js');
-  assert.match(utils, /export function isContentScriptUnreachable/);
+  const diagnostics = read('lib/shared/diagnostics.ts');
+  assert.match(diagnostics, /export function isContentScriptUnreachable/);
 });

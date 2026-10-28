@@ -9,7 +9,7 @@
 // 此前这个函数**零覆盖** —— 改措辞的人不会知道自己在删一条安全网。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeToolFailure } from '../lib/assistant/agent.ts';
+import { describeToolFailure } from '../lib/application/agent/agent.ts';
 
 test('取消：AbortError 必须安静地收尾，不带工具名也不带重试暗示', () => {
   const msg = describeToolFailure({ name: 'AbortError' }, 'click_element');

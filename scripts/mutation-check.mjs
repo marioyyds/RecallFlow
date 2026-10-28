@@ -71,7 +71,7 @@ function report(name, expectFail, parsed, ok) {
 
 const TARGETS = [
   {
-    file: 'lib/page/debug-hook.ts',
+    file: 'lib/adapters/page/debug-hook.ts',
     mode: 'env',
     envVar: 'RF_DEBUG_HOOK_SRC',
     test: 'tests/page-debug-hook.test.mjs',
@@ -116,7 +116,7 @@ const TARGETS = [
     // 为什么选 tool-guard 作为第二个目标：它是"只提醒不否决"这套策略的唯一实现，
     // 且 tests/tool-guard.test.mjs 有 22 条**行为**断言（不是读源码的静态断言）。
     // 变异测试的价值取决于"被测断言是不是行为断言" —— 对静态断言做变异没有意义。
-    file: 'lib/assistant/tool-guard.ts',
+    file: 'lib/application/agent/tool-guard.ts',
     mode: 'inplace',
     test: 'tests/tool-guard.test.mjs',
     mutations: [
@@ -155,8 +155,8 @@ const TARGETS = [
   {
     // 审批判定：这是"用户点了同意才写页面"的唯一闸门，判错的后果是**静默放行**。
     // 它原先住在 agent.js 里（为了测它得先起一整套 chrome 桩），所以只有 3 条断言；
-    // 搬到 lib/assistant/approval-policy.js 后可以直接单测，那 14 条到底有没有牙齿由这里验证。
-    file: 'lib/assistant/approval-policy.ts',
+    // 搬到 lib/application/agent/approval-policy.js 后可以直接单测，那 14 条到底有没有牙齿由这里验证。
+    file: 'lib/application/agent/approval-policy.ts',
     mode: 'inplace',
     test: 'tests/approval-policy.test.mjs',
     mutations: [
@@ -195,7 +195,7 @@ const TARGETS = [
   {
     // 面板 UI：这是长期零 import 的那个文件。目标是证明
     // tests/chat-panel-smoke.test.mjs 里那几条"真建 DOM"的断言不是摆样子。
-    file: 'lib/page/chat.ts',
+    file: 'lib/ui/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-panel-smoke.test.mjs',
     mutations: [
@@ -294,7 +294,7 @@ const TARGETS = [
     // 上下文折叠：它是"长任务不会把上下文撑爆"的唯一手段，同时也是**唯一会改写历史中部**的
     // 操作（每次改写都会让服务端前缀缓存失效）。三条算子分别对应它的三个性质：
     // 只折叠靠前的、折叠过的绝不再动、折叠后一定更短。
-    file: 'lib/assistant/context.ts',
+    file: 'lib/application/agent/context.ts',
     mode: 'inplace',
     test: 'tests/context.test.mjs',
     mutations: [
@@ -321,7 +321,7 @@ const TARGETS = [
   {
     // 多 run 状态机：跟随页与 SW 共用同一份归约。这里错一步，表现是
     // "思考被混进正文""停止按钮永远灰着"这类只有真跑长任务才看得见的问题。
-    file: 'lib/assistant/run-hub.ts',
+    file: 'lib/application/agent/run-hub.ts',
     mode: 'inplace',
     test: 'tests/run-hub.test.mjs',
     mutations: [
@@ -348,7 +348,7 @@ const TARGETS = [
   {
     // LLM 调用的中断语义：这三条错任何一条，用户按停止都会变成「再等 1.5 秒、再花钱」，
     // 甚至变成「记录里写着任务已完成」（见 tests/llm-abort-retry.test.mjs 的说明）。
-    file: 'lib/assistant/llm.ts',
+    file: 'lib/application/agent/llm.ts',
     mode: 'inplace',
     test: 'tests/llm-abort-retry.test.mjs',
     mutations: [
@@ -416,7 +416,7 @@ const TARGETS = [
     // 完成前确定性断言（claim-check）：它是"省掉一次 LLM 校验"的零成本预检，
     // 但判错的方向比漏判更贵 —— 误判 fail 会灌给模型一条**内容错误**的反思，
     // 它据此可能重复已经成功的动作，或把总结改口成"没做成"。
-    file: 'lib/assistant/claim-check.ts',
+    file: 'lib/application/agent/claim-check.ts',
     mode: 'inplace',
     test: 'tests/claim-check.test.mjs',
     mutations: [
@@ -481,7 +481,7 @@ const TARGETS = [
   },
   {
     // 失败态的渲染：两条规则错了都不报错，只让用户丢东西（屏幕上丢半截回答 / 记录里丢正文）。
-    file: 'lib/page/chat.ts',
+    file: 'lib/ui/page/chat.ts',
     mode: 'inplace',
     test: 'tests/chat-error-state.test.mjs',
     mutations: [
@@ -513,7 +513,7 @@ const TARGETS = [
     // 失败走不到 end ⇒ 不带它，一次中途失败就把用户看到的整段回答从记录里抹掉。
     // TITA-74（TS 迁移 Batch 1a）：本文件改名 .ts，file 字段必须跟着改，
     // 否则这一步直接 ENOENT 崩（§3.3：迁移 PR 撞上 mutation-check 目标时自己同步锚点）。
-    file: 'lib/page/transcript.ts',
+    file: 'lib/ui/page/transcript.ts',
     mode: 'inplace',
     test: 'tests/transcript.test.mjs',
     mutations: [

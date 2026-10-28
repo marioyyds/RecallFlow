@@ -17,7 +17,7 @@ const popupJs = fs.readFileSync('entries/popup.ts', 'utf8');
 
 test('知识库复用安全 Markdown 渲染器', () => {
   // 迁移期：specifier 可能是 `.js` 或 `.ts`，两种都认（同模块改名后 import 侧跟着改）。
-  assert.match(managerJs, /import \{ renderMarkdown \} from '\.\.\/lib\/page\/markdown\.(?:js|ts)'/);
+  assert.match(managerJs, /import \{ renderMarkdown \} from '\.\.\/lib\/ui\/page\/markdown\.(?:js|ts)'/);
   assert.match(managerJs, /renderMarkdown\(String\(item\.note\), null, false\)/);
 });
 

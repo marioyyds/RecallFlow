@@ -51,7 +51,7 @@ node scripts/run-e2e-live.mjs
 5. **百度会重定向自动化浏览器到安全验证页**：`#kw` 搜索框不存在、任务填不进去。
    `sites.mjs` 里标 `flaky: true`，默认跳过，`E2E_LIVE_FLAKY=1` 才跑（真实站点失败不追绿）。
 6. **SPA 客户端导航会移除面板宿主**（GitHub Turbo 实测）：内容脚本不重新注入、
-   模块级 `host` 引用仍指向已脱离的节点，FAB 永久消失。已修：`lib/page/chat.js` 增加
+   模块级 `host` 引用仍指向已脱离的节点，FAB 永久消失。已修：`lib/ui/page/chat.js` 增加
    低频保活轮询 `watchHostKeepalive()`，宿主脱离后自动重建；回归用例在
    `tests/e2e/golden.spec.mjs`（「SPA 导航移除宿主后自动重建」）。
    注：GitHub 点进仓库的场景仍暂时收敛为"读结果并沉淀"——点击后是否还会中断本轮任务

@@ -69,11 +69,11 @@ function closure(entries) {
 // content.js 的静态入口清单：它动态 import 的 4 个模块 + 顶层才加载的 chat.js。
 // MAIN-world 的 debug-hook.js 由 manifest 的 content_scripts 直接注入，**不需要** WAR。
 export const WAR_ENTRIES = [
-  'lib/page/page-text.js',
-  'lib/page/commands.js',
-  'lib/page/picker.js',
-  'lib/page/debug-capture.js',
-  'lib/page/chat.js',
+  'lib/application/page/page-text.js',
+  'lib/ui/page/commands.js',
+  'lib/ui/page/picker.js',
+  'lib/ui/page/debug-capture.js',
+  'lib/ui/page/chat.js',
 ];
 
 /** 返回 content.js 传递闭包的仓库相对路径（POSIX 分隔符，已排序）。 */

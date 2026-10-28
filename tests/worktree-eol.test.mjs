@@ -104,14 +104,14 @@ test('R1：autocrlf=true/input 下「新增内容改动」仍然判红（不能�
     const after = collectState({
       autocrlf: value,
       eolRows: [],
-      dirty: [{ status: 'M', path: 'lib/assistant/agent.ts' }],
-      plainDiff: ['lib/assistant/agent.ts'],
-      ignoringCrDiff: ['lib/assistant/agent.ts'],
+      dirty: [{ status: 'M', path: 'lib/application/agent/agent.ts' }],
+      plainDiff: ['lib/application/agent/agent.ts'],
+      ignoringCrDiff: ['lib/application/agent/agent.ts'],
     });
     const r = compareStates(before, after);
     assert.equal(r.ok, false, 'autocrlf=' + value + ' 只跳过行尾判定，内容改动仍必须红');
     assert.equal(r.eolSkipped, true);
-    assert.deepEqual(r.newDirty.map((d) => d.path), ['lib/assistant/agent.ts']);
+    assert.deepEqual(r.newDirty.map((d) => d.path), ['lib/application/agent/agent.ts']);
   }
 });
 
@@ -192,14 +192,14 @@ test('快照之外的任何新增改动仍然判红（白名单只放一个文�
     eolRows: [],
     dirty: [
       { status: 'M', path: 'tests/.test-count.json' },
-      { status: 'M', path: 'lib/assistant/agent.ts' },
+      { status: 'M', path: 'lib/application/agent/agent.ts' },
     ],
-    plainDiff: ['tests/.test-count.json', 'lib/assistant/agent.ts'],
-    ignoringCrDiff: ['tests/.test-count.json', 'lib/assistant/agent.ts'],
+    plainDiff: ['tests/.test-count.json', 'lib/application/agent/agent.ts'],
+    ignoringCrDiff: ['tests/.test-count.json', 'lib/application/agent/agent.ts'],
   });
   const r = compareStates(before, after);
   assert.equal(r.ok, false);
-  assert.deepEqual(r.newDirty.map((d) => d.path), ['lib/assistant/agent.ts']);
+  assert.deepEqual(r.newDirty.map((d) => d.path), ['lib/application/agent/agent.ts']);
 });
 
 test('本来就脏的文件被门禁又改了行尾：仍判红（diff 那条会漏，靠 ls-files 兜住）', () => {

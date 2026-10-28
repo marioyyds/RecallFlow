@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
 const byName = Object.fromEntries(TOOL_REGISTRY.map((t) => [t.name, t]));
 
@@ -20,15 +20,15 @@ test('annotate 的 op 枚举与四个原工具一一对应', () => {
   assert.deepEqual(byName.annotate.inputSchema.required, ['op'], 'op 必填（缺了会静默走错分支）');
 });
 
-test('分派表必须与 lib/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
-  const cli = fs.readFileSync(new URL('../lib/page/commands.ts', import.meta.url), 'utf8');
+test('分派表必须与 lib/ui/page/commands.ts 的命令名一致（否则得到"页面命令无响应"）', async () => {
+  const cli = fs.readFileSync(new URL('../lib/ui/page/commands.ts', import.meta.url), 'utf8');
   for (const cmd of ['highlight', 'outline', 'set_style', 'clear_highlights']) {
     assert.match(cli, new RegExp("case '" + cmd + "'"), '内容脚本应支持命令 ' + cmd);
   }
   // 直接断言**真实的分派表对象**，而不是在源码里做字符串切片 ——
   // C-1 拆分把 ANNOTATE_OPS 搬进 ./page-command-tools.js 时，
   // 基于切片的老写法会静默切到空串（失败原因指向错误的地方）。
-  const { ANNOTATE_OPS } = await import('../lib/assistant/page-command-tools.ts');
+  const { ANNOTATE_OPS } = await import('../lib/application/agent/page-command-tools.ts');
   assert.deepEqual(ANNOTATE_OPS, { highlight: 'highlight', outline: 'outline', style: 'set_style', clear: 'clear_highlights' });
 });
 
@@ -59,9 +59,11 @@ test('模型可见文案里不得再出现已消失的工具名', () => {
   // 这些字符串会直接进模型上下文：写旧名会让它去调用一个不存在的工具。
   const files = [
     '../lib/shared/utils.ts',
-    '../lib/assistant/tool-schemas.ts',
-    '../lib/assistant/intent-router.ts',
-    '../lib/assistant/skill-defs.ts',
+    '../lib/shared/format/page-results.ts',
+    '../lib/shared/format/picked.ts',
+    '../lib/application/agent/tool-schemas.ts',
+    '../lib/application/agent/intent-router.ts',
+    '../lib/application/agent/skill-defs.ts',
   ];
   const offenders = [];
   for (const rel of files) {
@@ -82,7 +84,7 @@ test('模型可见文案里不得再出现已消失的工具名', () => {
 });
 
 test('划重点技能的工具清单必须是 annotate（否则技能会引导模型调用不存在的工具）', () => {
-  const src = fs.readFileSync(new URL('../lib/assistant/skill-defs.ts', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../lib/application/agent/skill-defs.ts', import.meta.url), 'utf8');
   const block = src.slice(src.indexOf("name: 'highlight-key-points'"), src.indexOf("name: 'remove-ads'"));
   assert.match(block, /'annotate'/, '划重点技能应声明 annotate');
   assert.ok(!/'highlight_text'/.test(block), '不得再声明 highlight_text');

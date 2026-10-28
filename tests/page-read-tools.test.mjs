@@ -18,7 +18,7 @@ import {
   listFrames,
   PAGE_READ_TOOLS,
   handlePageReadTool,
-} from '../lib/assistant/page-read-tools.ts';
+} from '../lib/application/agent/page-read-tools.ts';
 
 test('能力提示把快照元数据翻成下一步工具（而不是重复清单）', () => {
   const hint = formatCapabilityHint({

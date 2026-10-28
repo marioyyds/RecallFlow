@@ -1,6 +1,6 @@
 # 技能清单（自动生成，勿手改）
 
-本文件由 `node scripts/gen-skills-overview.mjs` 从 `lib/assistant/skill-defs.ts` 与
+本文件由 `node scripts/gen-skills-overview.mjs` 从 `lib/application/agent/skill-defs.ts` 与
 `tests/e2e/fixtures/playbooks.mjs` 推导得出，并由 `tests/skills-overview.test.mjs` 门禁
 比对"产物变了而本文件没跟上"。**不要手写这份清单** —— 手写的必然腐烂。
 
@@ -18,9 +18,9 @@
 这一节是**手工维护的固定说明**（不是从源码数出来的），因为它讲的是运行时的真实行为，
 而清单只能数出"有哪些技能、对应哪条剧本"。
 
-1. **生产只给模型一行 `name：description`。** `buildSkillCatalog()`（`lib/assistant/skills.ts`）
+1. **生产只给模型一行 `name：description`。** `buildSkillCatalog()`（`lib/application/agent/skills.ts`）
    把每个技能渲染成 `- name：用途`，随 system prompt 一起发出；**正文不预先注入**。
-   模型判断当前任务适合某个技能时，才调用常驻工具 `load_skill(name)` 取回正文（`lib/assistant/skill-tools.ts`）。
+   模型判断当前任务适合某个技能时，才调用常驻工具 `load_skill(name)` 取回正文（`lib/application/agent/skill-tools.ts`）。
 2. **运行时不做关键词匹配。** 曾经有一条"按 `x.keywords` 正则命中就注入正文"的路
    （`skills.js` 的 `detectSkill()`），它**在生产代码里没有任何调用方**，已于目标 ⑤ 删除。
    `x.keywords` / `x.intents` 仍保留，但只用于 **SkillHub 格式往返**（`skill-md.js`）与技能编辑页展示

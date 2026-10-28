@@ -21,7 +21,7 @@ let seq = 0;
 async function boot(chromeOpts = {}) {
   const dom = installDomStub();
   const prevChrome = installChrome(chromeOpts);
-  const mod = await import('../lib/page/chat.ts?case=errorel-' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=errorel-' + (seq += 1));
   const make = (tag) => dom.document.createElement(tag);
   return {
     dom,

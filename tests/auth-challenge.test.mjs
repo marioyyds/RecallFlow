@@ -7,7 +7,7 @@ import {
   authChallengeNotice,
   isAuthUrl,
   isMcpEndpoint,
-} from '../lib/assistant/auth-challenge.ts';
+} from '../lib/application/agent/auth-challenge.ts';
 
 test('auth: 导航到登录路径时给出当前登录页链接', () => {
   const auth = detectAuthChallenge({

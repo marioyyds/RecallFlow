@@ -98,7 +98,7 @@ async function boot(backend) {
   const dom = installDomStub();
   const prevChrome = installChrome();
   globalThis.chrome.runtime.sendMessage = (msg, cb) => backend.send(msg, cb);
-  const mod = await import('../lib/page/chat.ts?case=' + (seq += 1));
+  const mod = await import('../lib/ui/page/chat.ts?case=' + (seq += 1));
   mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
   const shadow = () => {
     const host = dom.document.documentElement.querySelector('#__kb-ai-host');

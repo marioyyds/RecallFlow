@@ -13,8 +13,8 @@ import {
   estimateVisionTokens,
   TOKENS_PER_IMAGE,
   DEFAULT_VISION_BUDGET,
-} from '../lib/assistant/vision.ts';
-import { VISION_ENABLED } from '../lib/shared/utils.ts';
+} from '../lib/application/agent/vision.ts';
+import { VISION_ENABLED } from '../lib/shared/vision-copy.ts';
 
 const shot = (id, chars = 100) => ({
   id,
@@ -119,7 +119,7 @@ test('没有超出预算时不写说明（免得每次都塞一句废话）', ()
 
 test('token 记账：按**实测上界**估算（第 8 步实测：1280×720 ≈ 578 ⇒ 取 600）', () => {
   // 为什么钉住具体数字：它是"预算里还能塞几张"的依据，改小会让判断偏乐观（无声失准）。
-  // 实测表见 lib/assistant/vision.js 的 TOKENS_PER_IMAGE 注释。
+  // 实测表见 lib/application/agent/vision.js 的 TOKENS_PER_IMAGE 注释。
   assert.equal(TOKENS_PER_IMAGE, 600, '实测 578（1280×720）⇒ 取 600 作上界');
   assert.equal(estimateVisionTokens(3), 1800);
   assert.equal(estimateVisionTokens(0), 0);
@@ -184,7 +184,7 @@ test('E2E 对照门禁存在、且按常量实际值选臂（不是写死"今天
   assert.ok(fs.existsSync(p), '缺少 E2E 对照门禁：' + p);
   const src = fs.readFileSync(p, 'utf8');
   // 迁移期：specifier 可能是 `.js`（E2E 侧还没跟着改）或 `.ts`，两种都认。
-  assert.match(src, /import\s*\{[^}]*VISION_ENABLED[^}]*\}\s*from\s*'\.\.\/\.\.\/lib\/shared\/utils\.(?:js|ts)'/, '必须 import VISION_ENABLED');
+  assert.match(src, /import\s*\{[^}]*VISION_ENABLED[^}]*\}\s*from\s*'\.\.\/\.\.\/lib\/shared\/vision-copy\.(?:js|ts)'/, '必须 import VISION_ENABLED');
   assert.match(src, /test\.skip\(VISION_ENABLED !== false/, '关闭臂要按常量选臂');
   assert.match(src, /test\.skip\(VISION_ENABLED !== true/, '开启臂要按常量选臂');
   assert.match(src, /image_url/, '必须断言 image_url 的存在/形态');
@@ -198,7 +198,7 @@ test('E2E 对照门禁存在、且按常量实际值选臂（不是写死"今天
 // 没有上界时一次任务能把上下文塞满图 ✗。ctx.visionBudget（按 token）**无人赋值** ⇒
 // 唯一兜得住的就是这个**按张数**的上界；到上界后必须**留痕**（纯文字说明），不许静默丢 ✗
 test('任务级截图上限：到上界后不再送图，但必须**留痕**（纯文字说明）', async () => {
-  const { MAX_IMAGES_PER_TASK, shouldSendImage, imageCapNote } = await import('../lib/assistant/vision.ts');
+  const { MAX_IMAGES_PER_TASK, shouldSendImage, imageCapNote } = await import('../lib/application/agent/vision.ts');
   assert.equal(MAX_IMAGES_PER_TASK, 3, '上界默认值（改了要同步说明与文档）');
   for (const n of [0, 1, 2]) assert.equal(shouldSendImage(n), true, '第 ' + (n + 1) + ' 张应当送');
   for (const n of [3, 4, 99]) assert.equal(shouldSendImage(n), false, '第 ' + (n + 1) + ' 张超出上界，不该送');

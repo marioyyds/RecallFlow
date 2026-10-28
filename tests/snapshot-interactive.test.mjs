@@ -18,7 +18,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const SRC = fs.readFileSync('lib/page/page-text.ts', 'utf8');
+const SRC = fs.readFileSync('lib/application/page/page-text.ts', 'utf8');
 
 /** 抽出实际使用的两份名单（不复制粘贴，避免文档与实现漂移）。 */
 function selectorList() {
@@ -64,7 +64,7 @@ test('disabled **不影响**采集（这是被我误读的那一点，写清楚�
   const body = SRC.slice(at, SRC.indexOf('\n}', at));
   assert.ok(!/disabled/.test(body), '可见性判定里不含 disabled ⇒ disabled 元素照样会被采集');
   // 而 action 层确实会拦：点击/输入前才检查 disabled（那里是正确的地方）
-  const commands = fs.readFileSync('lib/page/command-actions.ts', 'utf8');
+  const commands = fs.readFileSync('lib/application/page/commands/actions.ts', 'utf8');
   assert.match(commands, /el\.disabled \|\| el\.getAttribute\('aria-disabled'\)/, '动作层才检查 disabled');
 });
 

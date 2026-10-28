@@ -3,8 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const AGENT = fs.readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
-const CHAT = fs.readFileSync(new URL('../lib/page/chat.ts', import.meta.url), 'utf8');
+const AGENT = fs.readFileSync(new URL('../lib/application/agent/agent.ts', import.meta.url), 'utf8');
+const CHAT = fs.readFileSync(new URL('../lib/ui/page/chat.ts', import.meta.url), 'utf8');
 const BACKGROUND = fs.readFileSync(new URL('../entries/background.ts', import.meta.url), 'utf8');
 
 function functionSlice(src, startNeedle, endNeedle) {

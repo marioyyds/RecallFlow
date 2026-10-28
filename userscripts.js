@@ -13,24 +13,12 @@ var STAR_LEVELS = {
   [STATUS.FREQUENT]: { name: "\u9AD8\u9891", color: "#e74c3c" }
 };
 
-// lib/shared/utils.ts
-var DEFAULT_STYLE_PROPS = Object.freeze([
-  "font-size",
-  "line-height",
-  "color",
-  "background-color",
-  "width",
-  "height",
-  "display",
-  "visibility",
-  "opacity",
-  "overflow-x",
-  "position",
-  "z-index"
-]);
+// lib/shared/dom/html.ts
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
+
+// lib/shared/dom/toast.ts
 var _toastTimer = null;
 function showToast(msg, opts) {
   const o = opts || {};

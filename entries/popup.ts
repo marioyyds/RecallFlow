@@ -1,20 +1,16 @@
 // 弹窗（快速收录 + 列表）
 import { STATUS, ITEM_TYPES } from '../lib/shared/constants.ts';
 import {
-  showToast,
-  debounce,
   starBarHtml,
   levelNameHtml,
   esc,
-  markdownExcerpt,
   typeBadgeHtml,
   tagsHtml,
-  fmtTime,
   bindStarKeyboard,
-  cleanTitle,
   platformColor,
-  parseTags,
-} from '../lib/shared/utils.ts';
+} from '../lib/shared/dom/html.ts';
+import { showToast } from '../lib/shared/dom/toast.ts';
+import { debounce, markdownExcerpt, fmtTime, cleanTitle, parseTags } from '../lib/shared/text.ts';
 import { detectPlatform, detectType, isFileUrl, isOperableUrl, normalizeUrl } from '../lib/shared/url.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';

@@ -95,7 +95,7 @@ lib/backend/
 ### 层二 · 助手层（核心）
 
 ```text
-lib/assistant/
+lib/application/agent/
   agent.js            主循环（1200+ 行）
   tools.js            工具实现（2000+ 行）
   tool-schemas.js     工具 schema（900+ 行）
@@ -203,7 +203,7 @@ integrations/...    MCP（文档说整包删除了，但本地还在——见开
           并带【反向自测】：断言它在复刻的旧写法上全部命中
           ——「一个永远返回空的检查器也能通过」这个问题被正面解决了
 
-运行时哨兵 lib/assistant/prefix-watch.js
+运行时哨兵 lib/application/agent/prefix-watch.js
           每轮出站前把 messages 压成指纹，与上一轮实际发出的逐条比对
           一旦不是纯追加就打印 + 写 trace
           用 canonicalize 递归序列化（不手写字段列表，避免将来加字段时静默失效）
@@ -494,7 +494,7 @@ all_urls + debugger + MAIN-world 注入 + CDP 可信事件
 - **S4** [docs/recallflow-latency-options.md](recallflow-latency-options.md) —— 分阶段计时、并行工具、剩余延迟项
 - **S5** [docs/recallflow-400-empty-body.md](recallflow-400-empty-body.md) —— 会话结构非法的根因与三层修复
 - **S6** [docs/recallflow-dsh-keypoints.md](recallflow-dsh-keypoints.md) —— DSH 集成要点、已确认事实、踩坑清单
-- **S7** [lib/assistant/agent.js](lib/assistant/agent.js)、[lib/assistant/tools.js](lib/assistant/tools.js)、[lib/assistant/macro-store.js](lib/assistant/macro-store.js)、[lib/assistant/tool-schemas.js](lib/assistant/tool-schemas.js)、[lib/backend/cdp.js](lib/backend/cdp.js)
+- **S7** [lib/application/agent/agent.js](lib/application/agent/agent.js)、[lib/application/agent/tools.js](lib/application/agent/tools.js)、[lib/application/agent/macro-store.js](lib/application/agent/macro-store.js)、[lib/application/agent/tool-schemas.js](lib/application/agent/tool-schemas.js)、[lib/backend/cdp.js](lib/backend/cdp.js)
 
 **本文引用的自己写的相关文档**
 

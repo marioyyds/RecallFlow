@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { VERIFIER_SYSTEM } from '../lib/assistant/verifier.ts';
+import { VERIFIER_SYSTEM } from '../lib/application/agent/verifier.ts';
 import {
   EVIDENCE_READ_TOOLS,
   buildVerificationEvidence,
@@ -56,7 +56,7 @@ test('提示词保留「不要因为 Agent 说完成就采信」', () => {
 // 这几条是「某条代码路径少做一步」型缺陷：接线漏了不会报错、测试也不红，
 // 只是长页面任务又开始被误否。因此按源码级门禁钉住（与既有做法一致）。
 
-const src = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+const src = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
 const lines = src.split('\n').map((l) => l.replace(/\r$/, ''));
 
 function indexOfLine(pattern, from = 0) {

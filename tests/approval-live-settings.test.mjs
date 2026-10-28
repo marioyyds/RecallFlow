@@ -16,11 +16,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const agentSrc = fs.readFileSync('lib/assistant/agent.ts', 'utf8');
+const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
 
-// `lib/assistant/agent.ts` 在模块顶层会 import 一堆东西，但不会在 import 期访问 chrome，
+// `lib/application/agent/agent.ts` 在模块顶层会 import 一堆东西，但不会在 import 期访问 chrome，
 // 因此这里可以直接导入纯函数（另有测试用同样的方式导入它）。
-const { readLiveApprovalSettings, toolNeedsApproval } = await import('../lib/assistant/agent.ts');
+const { readLiveApprovalSettings, toolNeedsApproval } = await import('../lib/application/agent/agent.ts');
 
 test('现读的设置覆盖快照里的四个审批字段', async () => {
   const snapshot = {

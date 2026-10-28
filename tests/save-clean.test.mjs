@@ -1,4 +1,4 @@
-// 导出期 UI 守卫（lib/page/save-clean.ts）。
+// 导出期 UI 守卫（lib/ui/page/save-clean.ts）。
 //
 // 这条守卫要保证的事只有一句：**用户保存/打印页面时，产物里没有 RecallFlow 的痕迹。**
 // 而"隐藏"和"摘掉"在这一点上是两回事 —— `display:none` 的节点照样会被序列化写进
@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installDomStub } from './helpers/dom-stub.mjs';
-import { createExportGuard, HOST_ID, SUSPEND_ATTR } from '../lib/page/save-clean.ts';
+import { createExportGuard, HOST_ID, SUSPEND_ATTR } from '../lib/ui/page/save-clean.ts';
 
 function setup() {
   const dom = installDomStub();
@@ -226,7 +226,7 @@ test('uninstall：复原并摘掉全部监听（守卫可以有第二个实例�
 
 test('打印路径的 CSS 兜底仍在：shadow 内 @media print 隐藏 :host', async () => {
   // JS 那条路依赖 beforeprint 真的被派发；样式这条不依赖事件，是最后一道保险。
-  const { PANEL_CSS } = await import('../lib/page/panel-css.ts');
+  const { PANEL_CSS } = await import('../lib/ui/page/panel-css.ts');
   const block = PANEL_CSS.match(/@media print\s*\{[\s\S]*?:host[\s\S]*?\}/);
   assert.ok(block, '缺了这条，beforeprint 未触发时打印/导出 PDF 会印出悬浮球');
   assert.match(block[0], /display:\s*none/);
@@ -239,7 +239,7 @@ test('存档自毁闸的接线：样式门控 + 主世界注册，缺一不可',
   //   · 少了主世界注册 → 元素永远不被升级 → 实时页面里悬浮球也显示不出来（更糟，连入口都没了）。
   // 真正的行为由 tests/e2e/save-clean.spec.mjs 在真浏览器里验；
   // 这里钉住"接线还在"，让删掉任何一端时**单测就跑红**，而不是等到用户保存文件才发现。
-  const { PANEL_CSS } = await import('../lib/page/panel-css.ts');
+  const { PANEL_CSS } = await import('../lib/ui/page/panel-css.ts');
   assert.match(
     PANEL_CSS,
     /:host\(:not\(:defined\)\)\s*\{\s*display:\s*none\s*!important/,

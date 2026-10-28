@@ -17,10 +17,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { previewArgsJson, formatOmittedItems, OMIT_MARK_START, OMIT_MARK_END, OMIT_ARGS_KEY, serializeConversationMessages } from '../lib/page/transcript.ts';
+import { previewArgsJson, formatOmittedItems, OMIT_MARK_START, OMIT_MARK_END, OMIT_ARGS_KEY, serializeConversationMessages } from '../lib/ui/page/transcript.ts';
 
-const debugHookSrc = fs.readFileSync('lib/page/debug-hook.ts', 'utf8');
-const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
+const debugHookSrc = fs.readFileSync('lib/adapters/page/debug-hook.ts', 'utf8');
+const transcriptSrc = fs.readFileSync('lib/ui/page/transcript.ts', 'utf8');
 
 test('① 省略标记用可辨形态，且**不**长得像普通数组元素', () => {
   const mark = formatOmittedItems(6);

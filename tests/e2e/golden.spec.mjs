@@ -147,7 +147,7 @@ test('golden: 刷新时正在等审批 —— 新面板接管并恢复审批条'
 });
 // 回归：SPA 客户端导航会整体替换 DOM 树，面板宿主被移除后要能自动重建。
 // 这是真实站点实验室（GitHub Turbo 导航）暴露的产品缺陷 —— 修复前宿主引用仍指向已脱离的节点，
-// FAB 永久消失；修复后由低频保活轮询重建（见 lib/page/chat.ts 的 watchHostKeepalive）。
+// FAB 永久消失；修复后由低频保活轮询重建（见 lib/ui/page/chat.ts 的 watchHostKeepalive）。
 test('golden: SPA 导航移除宿主后自动重建（FAB 回来且可再开面板）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);
@@ -1446,7 +1446,7 @@ test('golden: canvas —— DOM 路线点不动，按可访问性树坐标点击
 // 所以判据是**计数**，不是"工具返回了 ok"。
 //
 // 另外钉住一条**契约**：宏只记录白名单内的可回放工具
-// （见 lib/assistant/macros.js 的 REPLAYABLE_TOOLS），
+// （见 lib/application/agent/macros.js 的 REPLAYABLE_TOOLS），
 // 所以 `get_page_snapshot` 与 `macro` 自身都不该进宏 —— 存下来应**恰好 3 步**。
 test('golden: 宏 —— 保存后回放真的在页面上重放了动作（计数可证）', async () => {
   await configureSettings(context);
@@ -1711,7 +1711,7 @@ test('golden: 虚拟列表 —— 滚容器后目标行才进入 DOM（朴素读
   //     （真模型 eval 实测：它滚 3400、三条页面判据全过，却因为回执里没有 `scrollTop=3480` 被判红）。
   //     这里要的仍然是"必须滚**容器**"这个难点：窗口滚不动它（基线③ 已经用 `window.scrollBy` 证明过）。
   await expect.poll(() => page.evaluate(() => window.__maxScrollTop), { timeout: 30_000 }).toBeGreaterThan(0);
-  //   ⚠ `已滚动容器` 来自 `lib/page/commands.ts` 的容器滚动回执 —— 它证的是"滚动这个**动作**发生过"，
+  //   ⚠ `已滚动容器` 来自 `lib/ui/page/commands.ts` 的容器滚动回执 —— 它证的是"滚动这个**动作**发生过"，
   //     与偏移量无关（`scrollTop=<n>` 那一半被刻意忽略）。
   await expect.poll(() => toolResultsText(), { timeout: 30_000 }).toContain('已滚动容器');
 

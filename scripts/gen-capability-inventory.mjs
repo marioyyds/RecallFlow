@@ -14,7 +14,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 export function buildInventory() {
   const server = read('tests/e2e/fixtures/server.mjs');
   const spec = read('tests/e2e/golden.spec.mjs');
-  const skillDefs = read('lib/assistant/skill-defs.ts');
+  const skillDefs = read('lib/application/agent/skill-defs.ts');
 
   // 技能声明的 playbook 归属（`playbook: '<id>'`）
   const skillFor = {};

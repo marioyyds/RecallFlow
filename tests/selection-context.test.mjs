@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { selectedTextMessageHtml } from '../lib/shared/utils.ts';
+import { selectedTextMessageHtml } from '../lib/shared/format/picked.ts';
 import {
   serializeConversationMessages,
   MAX_SELECTED_TEXT_CHARS,
-} from '../lib/page/transcript.ts';
+} from '../lib/ui/page/transcript.ts';
 
 test('选文 HTML 转义页面内容，空文本不生成节点', () => {
   assert.equal(selectedTextMessageHtml(''), '');

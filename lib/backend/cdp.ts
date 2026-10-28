@@ -6,7 +6,7 @@
 // - 懒附加：仅在真正需要 CDP 时才 attach，任务结束统一 detach（减少「正在调试」提示条）。
 // - 可选降级：调用方先尝试内容脚本合成事件，失败或无可观察变化时再走 CDP。
 // - 页面世界执行：Runtime.evaluate 默认在主世界执行，不受页面 CSP 限制，且拿不到扩展权限。
-import { logError } from '../shared/utils.ts';
+import { logError } from '../shared/text.ts';
 
 const PROTOCOL_VERSION = '1.3';
 const attached: Map<number, Promise<void>> = new Map(); // tabId -> Promise<void>（避免并发重复 attach）

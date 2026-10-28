@@ -13,7 +13,7 @@ import {
   SESSION_PREFIX,
   INDEX_KEY,
   MAX_SESSIONS,
-} from '../lib/assistant/session-store.ts';
+} from '../lib/application/agent/session-store.ts';
 
 // 安装 chrome.storage.session 桩，支持 get(单个/数组/null) / set / remove，并统计读写。
 function installStorage(initial = {}) {

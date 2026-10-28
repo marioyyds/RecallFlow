@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, cleanTitle, parseTags, markdownExcerpt, formatVisibilityReport, isCspEvalBlockError, composeProgressText, screenshotAttempts, formatScreenshotSummary, formatInspectSummary, formatCurrentPageResult, trimElementsToBudget, formatHighlightResult, SNAPSHOT_CHAR_BUDGET, VISION_ENABLED } from '../lib/shared/utils.ts';
+import { esc } from '../lib/shared/dom/html.ts';
+import { cleanTitle, parseTags, markdownExcerpt } from '../lib/shared/text.ts';
+import { isCspEvalBlockError } from '../lib/shared/diagnostics.ts';
+import {
+  composeProgressText,
+  formatVisibilityReport,
+  formatInspectSummary,
+  formatCurrentPageResult,
+  trimElementsToBudget,
+  formatHighlightResult,
+  SNAPSHOT_CHAR_BUDGET,
+} from '../lib/shared/format/page-results.ts';
+import {
+  screenshotAttempts,
+  formatScreenshotSummary,
+  VISION_ENABLED,
+} from '../lib/shared/vision-copy.ts';
 import { normalizeUrl, detectPlatform } from '../lib/shared/url.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 

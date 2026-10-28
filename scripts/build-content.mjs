@@ -44,24 +44,24 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * `panel-stream-state.ts` 再接管正文、叙述、parts、校验与预算停止状态；三个
  * 自包含模块合计增加约 5.7KB，实测 458500 字节，未引入第三方依赖）。
  * 上一档 444KB 是 FAB 收起 / 展开的
- * `peek` 视图态 —— `lib/page/fab-position.js` 的 `resolveFabPeek` / `isPointerInFabZone`
+ * `peek` 视图态 —— `lib/ui/page/fab-position.js` 的 `resolveFabPeek` / `isPointerInFabZone`
  * 与 chat.js 侧的悬浮 / 聚焦 / 拖拽接线，加上 panel-css.js 里的 `.fab.peek` 与
  * `right` 过渡；实测产物 452306 字节 = 441.7KB，故在上一档 438KB 之上再抬一档，
  * 留 ~2.3KB 余量）。
- * 上一档 438KB 是面板布局存档 `lib/page/panel-layout.js` 与 chat.js 侧的读写接线
+ * 上一档 438KB 是面板布局存档 `lib/ui/page/panel-layout.js` 与 chat.js 侧的读写接线
  * （与 perf 分支合并后实测 446864 字节）；再上一档 434KB 是
  * 面板流式渲染的两处性能优化 —— `fitPanelHeight` 的 chrome 测量复用、流式游标按树深
  * 定位最后一个文本节点；428KB 是页面选文的清除控件、用户消息内引用渲染与
- * 持久化；424KB 是导出期 UI 守卫 `lib/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
+ * 持久化；424KB 是导出期 UI 守卫 `lib/ui/page/save-clean.js` + 站点键判定 `siteKeyOf`）。
  * 真需要涨的话，请在同一处上调并写清原因 —— 但先确认不是误引入。
  * 它现在由 npm test 守（tests/content-bundle-freshness.test.mjs），不再是
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-// 2026-10-29: +2KB for extracted panel theme/progress/screenshot controllers and
-// command collaborators. They replace module-level state in chat.ts/commands.ts
-// without adding a dependency; this keeps a ~1KB guard above the measured 453KB.
-export const SIZE_BUDGET_BYTES = 454 * 1024;
+// 2026-10-29: layered page/chat migration and injected DOM/session collaborators
+// add small adapter boundaries but no third-party dependency. Measured size is
+// 462KB after the state/controller split; keep ~2KB of headroom.
+export const SIZE_BUDGET_BYTES = 464 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

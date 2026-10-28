@@ -34,8 +34,8 @@ globalThis.chrome = {
   },
 };
 
-const { getSiteHints } = await import('../lib/assistant/site-memory.ts');
-const { listMacros } = await import('../lib/assistant/macro-store.ts');
+const { getSiteHints } = await import('../lib/application/agent/site-memory.ts');
+const { listMacros } = await import('../lib/application/agent/macro-store.ts');
 
 const siteEntry = (selector, hits, updatedAt) => ({
   selector,

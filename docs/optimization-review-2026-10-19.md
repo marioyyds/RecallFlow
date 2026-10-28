@@ -1,7 +1,7 @@
 # 优化评审：Agent 设计 + 自动化测试
 
 > 评审对象：`master` @ `87cd66b`（2026-10-19）
-> 范围：`lib/assistant/**`（Agent 核心）、`tests/**`、`scripts/**`、`.github/workflows/checks.yml`
+> 范围：`lib/application/agent/**`（Agent 核心）、`tests/**`、`scripts/**`、`.github/workflows/checks.yml`
 > 方法：全量通读 + 脚本实测交叉验证。**本文每条结论都带 `文件:行号` 或实测输出**，
 > 其中 4 条 P0 已由我逐条亲手复核（不是转述）。
 > 本文**只做分析，未改动任何源码**。
@@ -26,7 +26,7 @@
 
 ### P0-1 并行工具调用是死代码（最重要的一条）
 
-`lib/assistant/agent.js:1091` 的 `runParallelBatch` **永远返回空 Map**，即并行从未真正执行过。
+`lib/application/agent/agent.js:1091` 的 `runParallelBatch` **永远返回空 Map**，即并行从未真正执行过。
 
 ```js
 // agent.js:1095-1096
@@ -81,7 +81,7 @@ export function shouldVerifyCompletion(intent, toolCallCount, settings) {
 | 来源 | 说法 |
 | --- | --- |
 | `README.md:63` | 「只**摘除问题工具**并注入反思继续」 |
-| `lib/assistant/tool-guard.js:5` | 「守卫**绝不摘除工具**、绝不终止任务」 |
+| `lib/application/agent/tool-guard.js:5` | 「守卫**绝不摘除工具**、绝不终止任务」 |
 
 实现确实是后者（只注入建议，`level` 仅有 `ok` / `reflect`）。唯一的实际摘除点是资源触顶 `res.blocked === true`（`agent.js:1953-1958`）。
 
@@ -173,12 +173,12 @@ SAFE 名单僵尸条目  : []
 
 | 模块 | 行数 | 真 `import` 的测试文件数 |
 | --- | --- | --- |
-| `lib/page/chat.js` | 4975 | **0** |
+| `lib/ui/page/chat.js` | 4975 | **0** |
 | `lib/backend/cdp.js` | 440 | **1** |
-| `lib/page/commands.js` | 2108 | 2 |
-| `lib/assistant/skill-defs.js` | 1847 | 5 |
-| `lib/assistant/agent.js` | 2220 | 12（其中多数是读源码做正则） |
-| `lib/assistant/tools.js` | 1253 | 20 ✅ |
+| `lib/ui/page/commands.js` | 2108 | 2 |
+| `lib/application/agent/skill-defs.js` | 1847 | 5 |
+| `lib/application/agent/agent.js` | 2220 | 12（其中多数是读源码做正则） |
+| `lib/application/agent/tools.js` | 1253 | 20 ✅ |
 
 `chat.js`（4975 行，DOM 渲染与面板编排）和 `cdp.js`（CDP 协议层）是**纯零 import**——恰恰是最难靠肉眼验证的两块。
 
@@ -227,7 +227,7 @@ SAFE 名单僵尸条目  : []
 
 ### P1 变异测试只覆盖 1 个文件
 
-`scripts/mutation-check.mjs` 设计质量很高（5 个算子、防静默失效、已进 `checks.yml:28`，我实跑 5/5 全被抓住）。但 `const FILE = 'lib/page/debug-hook.js'`（`:14`）**硬编码单文件** ⇒ 相对 136 个测试文件覆盖率 ≈ 0.7%。建议改成数组配置，至少纳入 `lib/assistant/agent.js`、`lib/shared/utils.js`、`lib/page/markdown.js`（这三个有最多行为测试可被验证）。
+`scripts/mutation-check.mjs` 设计质量很高（5 个算子、防静默失效、已进 `checks.yml:28`，我实跑 5/5 全被抓住）。但 `const FILE = 'lib/page/debug-hook.js'`（`:14`）**硬编码单文件** ⇒ 相对 136 个测试文件覆盖率 ≈ 0.7%。建议改成数组配置，至少纳入 `lib/application/agent/agent.js`、`lib/shared/utils.js`、`lib/ui/page/markdown.js`（这三个有最多行为测试可被验证）。
 
 ### P2 其它
 

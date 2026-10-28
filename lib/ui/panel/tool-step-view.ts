@@ -1,4 +1,4 @@
-import { esc } from '../../shared/utils.ts';
+import { esc } from '../../shared/dom/html.ts';
 
 export function clipDetail(text: any, max: any): string {
   const value = String(text === undefined || text === null ? '' : text);

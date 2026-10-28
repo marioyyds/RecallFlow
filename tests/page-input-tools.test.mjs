@@ -13,7 +13,7 @@ import {
   handlePageInputTool,
   PAGE_INPUT_TOOLS,
   THIN_PAGE_COMMANDS,
-} from '../lib/assistant/page-input-tools.ts';
+} from '../lib/application/agent/page-input-tools.ts';
 
 /** 造一套假依赖，并记录每次调用（便于断言"有没有升级 CDP"）。 */
 function mkDeps(overrides = {}) {

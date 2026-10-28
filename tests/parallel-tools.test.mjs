@@ -8,8 +8,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { planParallelGroups, DEFAULT_MAX_BATCH } from '../lib/assistant/parallel-tools.ts';
-import { TOOL_METADATA } from '../lib/assistant/tool-metadata.ts';
+import { planParallelGroups, DEFAULT_MAX_BATCH } from '../lib/application/agent/parallel-tools.ts';
+import { TOOL_METADATA } from '../lib/application/agent/tool-metadata.ts';
 
 const call = (name, args = {}) => ({ name, args });
 const all = () => true;

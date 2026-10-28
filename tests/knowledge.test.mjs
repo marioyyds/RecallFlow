@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { knowledgeRead, KNOWLEDGE_READ_OPS } from '../lib/assistant/knowledge.ts';
+import { knowledgeRead, KNOWLEDGE_READ_OPS } from '../lib/application/agent/knowledge.ts';
 
 const typeInfo = (t) => ({ name: ({ wrong: '错题', article: '文章', ai: 'AI·Prompt', note: '笔记' })[t] || t });
 const starLevels = { 2: { name: '重要' }, 1: { name: '普通' } };

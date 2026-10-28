@@ -10,12 +10,13 @@
 // 现在改成：本文件写**静态 import**（可被 esbuild 顺着解析），由 `scripts/build-content.mjs`
 // 打成单文件 `content.js`（classic 脚本、自包含、无任何动态 import），manifest 只加载产物。
 // 产物是构建物 —— **不要手工编辑 content.js**，改这里然后重新构建。
-import * as pageText from '../lib/page/page-text.ts';
-import * as commands from '../lib/page/commands.ts';
-import * as picker from '../lib/page/picker.ts';
-import * as debugCapture from '../lib/page/debug-capture.ts';
-import * as chat from '../lib/page/chat.ts';
+import * as pageText from '../lib/application/page/page-text.ts';
+import * as commands from '../lib/ui/page/commands.ts';
+import * as picker from '../lib/ui/page/picker.ts';
+import * as debugCapture from '../lib/ui/page/debug-capture.ts';
+import * as chat from '../lib/ui/page/chat.ts';
 import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
+import { createBrowserDocumentAdapter } from '../lib/adapters/dom/document.ts';
 
 // 入口在 window 上挂的三样东西：本文件自己约定的全局槽位。
 // 声明集中在这里（而不是散落 `as any`）：面板侧（chat.ts）与构建产物的 footer 都依赖它们。
@@ -164,7 +165,12 @@ export function initContentScript() {
 
   // 助手 UI 只在顶层文档初始化；子框架（含跨域 iframe）只保留消息处理，
   // 供后台按 frameId 在对应框架内执行页面命令（跨域 iframe 打通的关键）。
-  if (isTopFrame) chat.initAssistant({ runtime: createChromeRuntimeAdapter() });
+  if (isTopFrame) {
+    chat.initAssistant({
+      runtime: createChromeRuntimeAdapter(),
+      dom: createBrowserDocumentAdapter(),
+    });
+  }
 }
 
 // 打包产物是 iife，模块导出不会自动执行。这里用**副作用**把入口挂到一个约定变量上，

@@ -12,13 +12,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/utils.ts';
-import { INSPECT_OPS } from '../lib/assistant/page-command-tools.ts';
-import { TOOL_REGISTRY } from '../lib/assistant/tools.ts';
+import { DEFAULT_STYLE_PROPS, formatStylesSummary } from '../lib/shared/format/page-results.ts';
+import { INSPECT_OPS } from '../lib/application/agent/page-command-tools.ts';
+import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
 
-const facadeSrc = fs.readFileSync('lib/page/commands.ts', 'utf8');
-const cmdSrc = fs.readFileSync('lib/page/command-read.ts', 'utf8');
-const schemaSrc = fs.readFileSync('lib/assistant/tool-schemas.ts', 'utf8');
+const facadeSrc = fs.readFileSync('lib/ui/page/commands.ts', 'utf8');
+const cmdSrc = fs.readFileSync('lib/application/page/commands/read.ts', 'utf8');
+const schemaSrc = fs.readFileSync('lib/application/agent/tool-schemas.ts', 'utf8');
 
 const inspectTool = () => TOOL_REGISTRY.find((t) => t.name === 'inspect_element');
 
