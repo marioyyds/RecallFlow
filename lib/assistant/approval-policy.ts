@@ -61,7 +61,7 @@ export function resolveApprovalCategory(risk: any) {
  * @param {string} [pageUrl] 当前页面 URL（用于站点信任判定）
  * @returns {boolean}
  */
-export function toolNeedsApproval(name: any, settings: Record<string, any> = {}, pageUrl = '') {
+export function toolNeedsApproval(name: string, settings: Record<string, any> = {}, pageUrl = '') {
   const meta = getToolMetadata(name);
   if (meta.requiresApproval !== true) return false;
   // 仍有独立"任意代码执行"审批档的工具（run_userscript / install_userscript / save_skill）：

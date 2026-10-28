@@ -1,3 +1,4 @@
+import type { Caught } from './errors.ts';
 // 页面命令（内容脚本）族（annotate / inspect_element / scroll_page / get_element_source /
 // undo_last_action）—— C-1 拆出的第 13 族，也是 `executeTool` 巨型 switch 的最后一族。
 //
@@ -51,7 +52,7 @@ export const INSPECT_OPS: Record<string, any> = Object.freeze({
  * page + 逐次审批，都会走到 `executePageTool` → 内容脚本的
  * highlight / outline / set_style / clear_highlights）而合并为纯换入口。
  */
-export async function annotate(deps: any, args: any) {
+export async function annotate(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const op = String(args.op || '').trim();
   const cmd = ANNOTATE_OPS[op];
@@ -75,7 +76,7 @@ export async function annotate(deps: any, args: any) {
  * MCP 集成侧的「页面元素 → 源码文件」闭环直接使用。理由与知识库档一致：
  * **按执行路径与权限类别分组，而不是按语义相似度分组**。
  */
-export async function inspectElement(deps: any, args: any) {
+export async function inspectElement(deps: any, args: Record<string, unknown>) {
   const op = String(args.op || '').trim();
   const cmd = INSPECT_OPS[op];
   if (!cmd) {
@@ -91,7 +92,7 @@ export async function inspectElement(deps: any, args: any) {
  *
  * 合并自 scroll_to_element / scroll_page（更早的一次合并）。
  */
-export async function scrollPage(deps: any, args: any) {
+export async function scrollPage(deps: any, args: Record<string, unknown>) {
   const params = args || {};
   const hasTarget = Boolean(params.ref || params.selector || params.text);
   const hasCoords = typeof params.top === 'number' || typeof params.left === 'number';
@@ -99,7 +100,7 @@ export async function scrollPage(deps: any, args: any) {
 }
 
 /** get_element_source：把页面元素映射回源码文件:行:列（框架组件信息也在里面）。 */
-export async function getElementSource(deps: any, args: any) {
+export async function getElementSource(deps: any, args: Record<string, unknown>) {
   const tabId = deps.ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   try {
@@ -111,13 +112,13 @@ export async function getElementSource(deps: any, args: any) {
     const loc = String(s.file || '') + (s.line ? ':' + s.line + (s.column ? ':' + s.column : '') : '');
     const extra = (s.framework ? '（' + s.framework + (s.component ? ' · ' + s.component : '') + '）' : '');
     return { ok: true, result: '元素源码位置：' + loc + extra + (res.selector ? '\n选择器：' + res.selector : '') };
-  } catch (e: any) {
-    return { ok: false, result: '解析元素源码失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '解析元素源码失败：' + (e as Caught).message };
   }
 }
 
 /** undo_last_action：撤销上一次页面动作（`verify:false` —— 恢复动作不该再被校验拖慢）。 */
-export async function undoLastAction(deps: any, args: any) {
+export async function undoLastAction(deps: any, args: Record<string, unknown>) {
   return await deps.executeContentAction(deps.ctx.tabId, 'undo_last_action', { type: 'kbUndo', params: args }, { verify: false });
 }
 
@@ -125,7 +126,7 @@ export async function undoLastAction(deps: any, args: any) {
 export const PAGE_COMMAND_TOOLS = new Set(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePageCommandTool(name: any, args: any, deps: any) {
+export async function handlePageCommandTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'annotate') return await annotate(deps, args);
   if (name === 'inspect_element') return await inspectElement(deps, args);
   if (name === 'scroll_page') return await scrollPage(deps, args);

@@ -27,7 +27,7 @@ const CONTENT_OK = (m: any) => typeof m.content === 'string' || Array.isArray(m.
 export function diagnoseConversation(messages: any) {
   const list = Array.isArray(messages) ? messages : [];
   const problems: any[] = [];
-  const add = (index: any, code: any, detail: any) => problems.push({ index, code, detail });
+  const add = (index: any, code: string, detail: any) => problems.push({ index, code, detail });
 
   // 最近一条带 tool_calls 的 assistant 消息中，尚未被答复的 id
   let pending: any = null; // { index:number, ids:Set<string> }

@@ -1,3 +1,4 @@
+import type { Caught } from './errors.ts';
 // 宏类工具（save_macro / list_macros / run_macro）→ 收敛为 macro(op)。
 //
 // C-4 合并第 5 档（见 docs/tool-merge-plan.md）。选它是因为：三个 handler 都很短（15–22 行）、
@@ -38,7 +39,7 @@ export const REPLAYABLE_TOOLS = new Set([
  *
  * @param {object} deps { pageUrl, trace, saveMacro, recallTrace? }
  */
-export async function macroSave(deps: any, args: any) {
+export async function macroSave(deps: any, args: Record<string, unknown>) {
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: 'macro(op="save") 需要 name。' };
   let trace = Array.isArray(deps.trace) ? deps.trace : [];
@@ -114,7 +115,7 @@ export async function macroList(deps: any) {
  * @param {object} deps { pageUrl, ctx, getMacro, listMacros, bumpMacroHits, executeTool, validateToolCall }
  *   `ctx` 会被就地更新（tabId/pageUrl/pageTitle）——宏中途开新标签页后，后续步骤要在新页上执行。
  */
-export async function macroRun(deps: any, args: any) {
+export async function macroRun(deps: any, args: Record<string, unknown>) {
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: 'macro(op="run") 需要 name。' };
   const macro = await deps.getMacro(deps.pageUrl, name);
@@ -124,7 +125,7 @@ export async function macroRun(deps: any, args: any) {
     let names = [];
     try {
       names = (await deps.listMacros(deps.pageUrl)).map((m: any) => m.name);
-    } catch (e: any) {}
+    } catch (e) {}
     return {
       ok: false,
       result:
@@ -163,8 +164,8 @@ export async function macroRun(deps: any, args: any) {
     let r;
     try {
       r = await deps.executeTool(s.tool, s.args, ctx);
-    } catch (e: any) {
-      r = { ok: false, result: e && e.message ? e.message : String(e) };
+    } catch (e) {
+      r = { ok: false, result: e && (e as Caught).message ? (e as Caught).message : String(e) };
     }
     const failed = r && r.ok === false;
     log.push('[' + (i + 1) + '/' + steps.length + '] ' + s.tool + (failed ? ' ✗ ' + String(r.result || '').slice(0, 120) : ' ✓'));
@@ -186,7 +187,7 @@ export async function macroRun(deps: any, args: any) {
 export const MACRO_OPS = ['save', 'list', 'run'];
 
 /** 统一入口：macro({ op, name?, description? })。op 必填。 */
-export async function macroTool(deps: any, args: any) {
+export async function macroTool(deps: any, args: Record<string, unknown>) {
   const op = String((args && args.op) || '').trim();
   if (!op) return { ok: false, result: 'macro 需要 op 参数，取值：' + MACRO_OPS.join(' / ') + '。' };
   if (op === 'save') return await macroSave(deps, args);

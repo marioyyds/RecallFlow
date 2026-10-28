@@ -53,7 +53,7 @@ export class RunChannel {
     this.portListener = (message: any) => this.emit(message);
     try {
       port.onMessage.addListener(this.portListener);
-    } catch (e: any) {
+    } catch (e) {
       this.port = null;
       this.portListener = null;
       return false;
@@ -67,7 +67,7 @@ export class RunChannel {
     if (this.port && this.portListener) {
       try {
         this.port.onMessage.removeListener(this.portListener);
-      } catch (e: any) {}
+      } catch (e) {}
     }
     this.port = null;
     this.portListener = null;
@@ -84,7 +84,7 @@ export class RunChannel {
     if (!this.port) return;
     try {
       this.port.postMessage(message);
-    } catch (e: any) {
+    } catch (e) {
       // 端口刚好断开：保留 run，下一个 reattach 会从快照恢复。
     }
   }
@@ -101,7 +101,7 @@ export class RunChannel {
     for (const listener of [...this.listeners]) {
       try {
         listener(message);
-      } catch (e: any) {}
+      } catch (e) {}
     }
   }
 }

@@ -57,7 +57,7 @@ export { SKILL_REGISTRY, getMergedSkills };
 // 把全部技能渲染为「技能目录」注入 system prompt：仅列 name + 用途，不注入正文。
 // 模型判断相关时再通过常驻工具 load_skill 按需加载完整说明（进阶版 A）。
 export function buildSkillCatalog(skills: any[] = []) {
-  const list = (Array.isArray(skills) ? skills : []) as any[];
+  const list = (Array.isArray(skills) ? skills : []) as Array<{ name?: string; description?: string; content?: string }>;
   if (!list.length) return '';
   const items = list.map((s) => {
     const name = s.name || '';

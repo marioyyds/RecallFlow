@@ -4,7 +4,7 @@
 // 这条路径（意图分类 / 独立校验）的输入里也夹着页面原文（证据片段），所以同样必须过一遍。
 import { sanitizeMessages } from '../shared/surrogates.ts';
 
-async function callDeepSeekOnce(settings: any, messages: any, signal: any) {
+async function callDeepSeekOnce(settings: any, messages: any, signal?: AbortSignal) {
   // ⚠ 已经中断就别发请求。`signal.addEventListener('abort')` 对**已经 abort 过**的 signal
   //   不会再触发（事件是一次性的、发生过就过去了），于是这里会照常发一个真实请求、
   //   照常计费，然后才被上层当成「用户取消」丢掉。
@@ -43,7 +43,7 @@ async function callDeepSeekOnce(settings: any, messages: any, signal: any) {
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-  } catch (e: any) {
+  } catch (e) {
     // 把「我们自己超时」翻译成可识别的类型。用户中断（signal 已 abort）保持原样，
     // 由上层按中断收尾 —— 这两条路径的处置完全不同，不能共用一种错误。
     if (timedOut && !(signal && signal.aborted)) {
@@ -73,11 +73,11 @@ async function callDeepSeekOnce(settings: any, messages: any, signal: any) {
         try {
           const j = JSON.parse(raw);
           detail = j && j.error && j.error.message ? j.error.message : JSON.stringify(j);
-        } catch (e: any) {
+        } catch (e) {
           detail = raw;
         }
       }
-    } catch (e: any) {
+    } catch (e) {
       detail = '';
     }
     const err: any = new Error('DeepSeek 请求失败 (' + resp.status + '): ' + detail);
@@ -120,13 +120,13 @@ export function isRetryableError(e: any) {
  * 实测探针里确实出现过「1 次校验被记成 3 条请求」的现象（429 重试），
  * 而校验器本来就是 fail-open 的安全网 —— 重试换不来护栏强度，只换来卡顿。
  */
-export async function callDeepSeek(settings: any, messages: any, signal: any) {
+export async function callDeepSeek(settings: any, messages: any, signal?: AbortSignal) {
   const raw = Number(settings && settings.maxRetries);
   const MAX_RETRIES = Number.isFinite(raw) && raw >= 0 ? Math.min(Math.floor(raw), 3) : 2;
   for (let attempt = 0; ; attempt++) {
     try {
       return await callDeepSeekOnce(settings, messages, signal);
-    } catch (e: any) {
+    } catch (e) {
       // 第三道保险：有些中断以 TypeError('Failed to fetch') 的形式冒出（fetch 被 abort 时
       // 不同实现不一致），那种错看不出 AbortError，只能靠 signal 本身判断。
       if (attempt >= MAX_RETRIES || !isRetryableError(e) || (signal && signal.aborted)) throw e;

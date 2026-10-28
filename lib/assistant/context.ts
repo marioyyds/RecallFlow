@@ -9,7 +9,7 @@ import { sliceSafe } from '../shared/surrogates.ts';
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
 
 // 粗估 token：中文约 1 字 ≈ 1 token，英文约 4 字符 ≈ 1 token。仅用于预算与告警。
-export function estimateTokens(text: any) {
+export function estimateTokens(text: string) {
   const s = String(text || '');
   if (!s) return 0;
   const cjk = (s.match(CJK_RE) || []).length;
@@ -58,7 +58,7 @@ export function flattenHistoryContent(content: any, visionEnabled: any) {
     if (content == null) return '';
     try {
       return typeof content === 'object' ? JSON.stringify(content) : String(content);
-    } catch (e: any) {
+    } catch (e) {
       return '';
     }
   }
@@ -138,12 +138,12 @@ export function formatTailKeptTruncationNotice(totalChars: any, limitChars: any)
 export const TAIL_TRUNC_RE = /^⟨…本条消息过长，只保留末尾：[\s\S]*?⟩\n/;
 
 /** 去掉"只保留末尾"的通知，拿回真正被保存的正文。 */
-export function stripTailKeptTruncationNotice(text: any) {
+export function stripTailKeptTruncationNotice(text: string) {
   return String(text === undefined || text === null ? '' : text).replace(TAIL_TRUNC_RE, '');
 }
 
 /** 去掉截断通知，拿回"真正被送入的内容"（agent.js 去重判据要用它）。 */
-export function stripHistoryTruncationNotice(text: any) {
+export function stripHistoryTruncationNotice(text: string) {
   return String(text === undefined || text === null ? '' : text).replace(HISTORY_TRUNC_RE, '');
 }
 
@@ -159,7 +159,7 @@ export function stripHistoryTruncationNotice(text: any) {
  * 本轮的 A5 收口给截断历史追加了说明 ⇒ 那个等式会静默失效（指令重复一次，没有任何报错）。
  * 现在两处共用同一形态：先剥掉通知，再拿 `HISTORY_MAX_CHARS` 比长度。
  */
-export function isDuplicateInstruction(lastContent: any, instruction: any) {
+export function isDuplicateInstruction(lastContent: any, instruction: string) {
   const instr = String(instruction === undefined || instruction === null ? '' : instruction).trim();
   if (!instr) return false;
   const last = stripHistoryTruncationNotice(lastContent).trim();

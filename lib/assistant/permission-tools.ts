@@ -24,7 +24,7 @@ export async function trustSite(deps: any) {
   ctx.settings.trustedSites = list;
   try {
     await deps.chrome.storage.local.set({ aiSettings: Object.assign({}, ctx.settings, { trustedSites: list }) });
-  } catch (e: any) {}
+  } catch (e) {}
   return {
     ok: true,
     result: '已信任站点 ' + origin + '：此站点的写操作将不再逐次确认（用户脚本 / 技能写入等高风险工具仍每次确认）。',
@@ -32,13 +32,13 @@ export async function trustSite(deps: any) {
 }
 
 /** 回应页面对话框（原 handle_dialog）。 */
-export async function handleDialogTool(deps: any, args: any) {
+export async function handleDialogTool(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '处理对话框需要 CDP（请在设置中开启）。' };
   try {
     await deps.handleDialog(ctx.tabId, args.accept !== false, args.promptText);
     return { ok: true, result: (args.accept !== false ? '已接受' : '已取消') + '页面对话框。' };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '处理对话框失败：' + deps.summarizeCdpError(e) };
   }
 }
@@ -47,7 +47,7 @@ export async function handleDialogTool(deps: any, args: any) {
 export const PERMISSION_TOOLS = new Set(['trust_site', 'handle_dialog']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePermissionTool(name: any, args: any, deps: any) {
+export async function handlePermissionTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'trust_site') return await trustSite(deps);
   if (name === 'handle_dialog') return await handleDialogTool(deps, args);
   return null;

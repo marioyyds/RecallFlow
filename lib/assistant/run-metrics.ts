@@ -44,7 +44,7 @@ export function summarizeRunTrace(entries: any) {
 
 /** 把指标对象格式化成给模型/人读的几行摘要。 */
 export function formatRunMetrics(m: any) {
-  const sec = (ms: any) => (Math.round(ms / 100) / 10).toFixed(1) + 's';
+  const sec = (ms: number) => (Math.round(ms / 100) / 10).toFixed(1) + 's';
   const lines = [
     '指标摘要：',
     '轮次 ' + m.rounds + ' / 工具调用 ' + m.toolCalls + '（失败 ' + m.failedTools + '）',

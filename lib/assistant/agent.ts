@@ -96,7 +96,7 @@ const CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
 // 把任务画像就地提升为「资料研究」——补齐全套浏览器/网络工具，并把系统提示规则
 // 切换成 RESEARCH 的（含 complete_task 收尾），而不是只放宽预算。
 // 导出以便单测：画像提升时必须保留追加的系统提示段，这一点很容易在重构中被破坏。
-export function promoteToResearch(tools: any, messages: any, instruction: any, allSkills: any, promptExtras: any) {
+export function promoteToResearch(tools: any, messages: any, instruction: string, allSkills: any, promptExtras: any) {
   const researchInfo = resolveIntent(INTENTS.RESEARCH);
   // 缓存代价：往 tools 里追加会让请求前缀在追加点之后重新计算。
   // 这一步没法省 —— 研究类工具不在 CHAT 的 schema 里，模型根本调用不了它们。
@@ -122,7 +122,7 @@ export function promoteToResearch(tools: any, messages: any, instruction: any, a
   return content;
 }
 
-function getBudget(payload: Record<string, any> = {}, settings: Record<string, any> = {}, intent: any) {
+function getBudget(payload: Record<string, any> = {}, settings: Record<string, any> = {}, intent: string) {
   const source = payload.agentBudget || settings.agentBudget || {};
   const budget = Object.fromEntries(Object.entries(AGENT_BUDGET_DEFAULTS).map(([key, value]) => {
     const n = Number(source[key]);
@@ -209,7 +209,7 @@ export function compactSessionMessages(messages: any) {
   return (system ? [system, ...notices, ...compacted] : [...notices, ...compacted]);
 }
 
-function buildInitialMessages(instruction: any, selectedText: any, page: any, pageUrl: any, history: any, emit: any, systemPrompt: any, pickedElements: any) {
+function buildInitialMessages(instruction: string, selectedText: any, page: any, pageUrl: any, history: any, emit: any, systemPrompt: any, pickedElements: any) {
   // 历史归一化与「去掉与当前指令重复的尾部 user 消息」留在原处（它依赖 normalizeHistory）。
   // ⚠ noticeOnTruncation **必须**传 true：不传时"更早的对话被裁掉"对模型完全不可见
   //（它会把"只剩最近几轮"当成"对话本来就这么短"）。历史上这个开关只被测试用过，
@@ -269,7 +269,7 @@ function buildInitialMessages(instruction: any, selectedText: any, page: any, pa
   return { messages, pageCitations: [] };
 }
 
-function withTimeout(task: any, timeoutMs: any, signal?: any, toolName?: any): Promise<any> {
+function withTimeout(task: any, timeoutMs: number, signal?: AbortSignal, toolName?: string): Promise<any> {
   return new Promise((resolve, reject) => {
     let settled = false;
     // timer 先声明为 null：原先 `finish` 里直接引用后面才 `const` 的 timer，
@@ -284,7 +284,7 @@ function withTimeout(task: any, timeoutMs: any, signal?: any, toolName?: any): P
     };
     const onAbort = () => finish(reject, new DOMException('任务已取消', 'AbortError'));
     timer = setTimeout(() => {
-      const err: any = new Error('工具执行超时');
+      const err = new Error('工具执行超时') as Caught;
       // 打上标记，让调用方能把它与「工具自己抛的错」区分开 ——
       // 两者的含义完全不同：超时意味着**后果未知**，不是干净失败。
       err.rfToolTimeout = true;
@@ -305,7 +305,7 @@ function withTimeout(task: any, timeoutMs: any, signal?: any, toolName?: any): P
  * （动作可能已经部分生效），也没给出下一步该做什么。模型很容易据此原样重试，
  * 而重试一个「可能已经做了」的写操作是危险的。
  */
-export function describeToolFailure(e: any, toolName: any) {
+export function describeToolFailure(e: any, toolName: string) {
   const name = String(toolName || '');
   if (e && e.name === 'AbortError') return '任务已取消。';
   if (e && e.rfToolTimeout === true) {
@@ -369,7 +369,7 @@ export async function readLiveApprovalSettings(base: any, loader?: any) {
       trustedSites: Array.isArray(s.trustedSites) ? s.trustedSites : [],
       codeExecutionApproval: s.codeExecutionApproval,
     });
-  } catch (e: any) {
+  } catch (e) {
     return snapshot;
   }
 }
@@ -378,6 +378,7 @@ export async function readLiveApprovalSettings(base: any, loader?: any) {
 // 这里保留 re-export，是为了让 agent.js 的既有调用点与文档引用不必跟着改。
 // 注意必须同时**导入**（本地调用点要用），只 re-export 不会在本模块内建绑定。
 import { toolNeedsApproval } from './approval-policy.ts';
+import type { Caught } from './errors.ts';
 export { toolNeedsApproval };
 
 /**
@@ -423,7 +424,7 @@ function toolResultProgress(res: any) {
 // 结果指纹变化：只读/网络工具有实质新产出（内容长度或首尾片段变化）也算进展，
 // 修复 web_search / search_knowledge_base / read_current_page 等「字段不匹配」被误判无进展的问题。
 // 仅在执行成功时参与，失败重试（错误文案各异）不误判为进展。
-function resultProgressByChange(store: any, name: any, res: any) {
+function resultProgressByChange(store: any, name: string, res: any) {
   if (!res || res.ok === false) return false;
   const text = typeof res.result === 'string' ? res.result : '';
   if (!text) return false;
@@ -469,7 +470,7 @@ export function evidenceAfter(prev: any, tc: any, res: any, summarizeArgs: any) 
   let metadata = null;
   try {
     metadata = getToolMetadata(tc.name);
-  } catch (e: any) {
+  } catch (e) {
     metadata = null;
   }
   // 只读动作（截图等）不改变页面，不能当作「做了事」的证据
@@ -497,7 +498,7 @@ export function evidenceAfter(prev: any, tc: any, res: any, summarizeArgs: any) 
  * run 若照 `intent` 判定就会永远跳过 LLM 完成校验。这条判定必须是**可直接测的纯函数**，
  * 否则它只能靠人记得在两处保持一致。
  */
-export function resolveVerifyIntent(intent: any, promotedToResearch: any) {
+export function resolveVerifyIntent(intent: string, promotedToResearch: any) {
   return promotedToResearch ? INTENTS.RESEARCH : intent;
 }
 
@@ -519,8 +520,8 @@ export function classifyTaskKind(ranToolNames: any) {
   if (!names.length) return 'mutation';
   const allReadOnly = names.every((nm) => {
     try {
-      return !changesState(getToolMetadata(nm));
-    } catch (e: any) {
+      return !changesState(getToolMetadata(nm as string));
+    } catch (e) {
       // 元数据查不到（例如 MCP 工具）时**不能**当成只读：我们不知道它会改什么，
       // 按严格问法处理才是安全方向（放宽只会让「声称做了」更容易蒙混过关）。
       return false;
@@ -529,7 +530,7 @@ export function classifyTaskKind(ranToolNames: any) {
   return allReadOnly ? 'read' : 'mutation';
 }
 
-export function shouldVerifyCompletion(intent: any, toolCallCount: any, settings: any) {
+export function shouldVerifyCompletion(intent: string, toolCallCount: number, settings: any) {
   if (!settings || settings.verifierEnabled === false) return false;
   if (!settings.apiKey) return false;
   if (!toolCallCount) return false;
@@ -595,7 +596,7 @@ export function verifyEvidenceSignature(claim: any, ctx: any) {
 // 证据不能只给「页面前 N 个字」：长页面上结论依据的事实往往在深处，校验方找不到就按
 // 「证据不足」否决，把 agent 逼去做无谓的重新取证。这里改为按结论里的具体事实定位片段
 // （selectEvidence），并显式告诉校验方「这是片段、不是全文」以及本次任务的性质。
-async function runCompletionVerification(settings: any, instruction: any, res: any, ctx: any, signal: any, taskKind: any) {
+async function runCompletionVerification(settings: any, instruction: string, res: any, ctx: any, signal: AbortSignal, taskKind: any) {
   return verifyCompletion(
     settings,
     {
@@ -640,7 +641,7 @@ export function classifyVerifyOutcome(verdict: any, error: any) {
 //（实测：repositories 辅助页关闭后，用户说「可以」之后的整轮回答消失）。
 async function closeAuxTabs(ctx: any) {
   // 任务结束释放 CDP 调试会话（无论是否开过标签页），隐藏「正在调试」提示条。
-  try { detachAllCdp(); } catch (e: any) {}
+  try { detachAllCdp(); } catch (e) {}
   if (!ctx) return [];
   const opened = Array.isArray(ctx.openedTabs) ? ctx.openedTabs : [];
   if (!opened.length) {
@@ -657,7 +658,7 @@ async function closeAuxTabs(ctx: any) {
   return toClose;
 }
 
-function emitTabsClosePending(ctx: any, tabIds: any, emit: any) {
+function emitTabsClosePending(ctx: any, tabIds: number[], emit: any) {
   const ids = Array.isArray(tabIds) ? tabIds.filter((id) => Number.isInteger(Number(id))) : [];
   const windowId = Number.isInteger(Number(ctx && ctx.pendingCloseWindowId)) ? Number(ctx.pendingCloseWindowId) : null;
   if (!ids.length && !windowId) return;
@@ -667,7 +668,7 @@ function emitTabsClosePending(ctx: any, tabIds: any, emit: any) {
 // 触底收尾：预算 / 超时 / 卡死触顶时，不再干巴巴报错，而是让模型基于已经拿到的
 // 工具结果生成一份尽可能完整、诚实的最终回复（已完成哪些步骤、得到什么、还差什么、接下来怎么做）。
 // 用空工具集调用模型，避免继续触发工具；失败时退回一句简短说明。
-async function finalizeWithPartialInfo(port: any, settings: any, messages: any, signal: any, emit: any, tools: any) {
+async function finalizeWithPartialInfo(port: any, settings: any, messages: any, signal: AbortSignal, emit: any, tools: any) {
   const finalMessages = (Array.isArray(messages) ? messages : []).concat([
     {
       role: 'user',
@@ -723,14 +724,14 @@ async function finalizeWithPartialInfo(port: any, settings: any, messages: any, 
     if (step && step.error) throw new Error(step.error);
     // streamAgentStep 已把内容实时流式输出到前端，这里无需重复 emit。
     return true;
-  } catch (e: any) {
-    if (e && e.name === 'AbortError') return false;
+  } catch (e) {
+    if (e && (e as Caught).name === 'AbortError') return false;
     emit({ type: 'chunk', text: '\n\n（无法生成补充回答，任务已在安全上限处停止。）' });
     return false;
   }
 }
 
-function waitForToolApproval(port: any, callId: any, name: any, args: any, signal: any, runId: any, allowSession: any, emit: any) {
+function waitForToolApproval(port: any, callId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, runId: string, allowSession: any, emit: any) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (approved: any) => {
@@ -754,7 +755,7 @@ function waitForToolApproval(port: any, callId: any, name: any, args: any, signa
       const event = { type: 'tool-call', runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false };
       if (typeof emit === 'function') emit(event);
       else port.postMessage(event);
-    } catch (e: any) {
+    } catch (e) {
       finish(false);
     }
   });
@@ -790,7 +791,7 @@ export function buildPartialStep(contentAcc: any, toolAcc: any) {
     let args;
     try {
       args = t.args ? JSON.parse(t.args) : {};
-    } catch (e: any) {
+    } catch (e) {
       // 半截 JSON：丢弃这个调用（保留它会让下一次请求非法）
       continue;
     }
@@ -802,7 +803,7 @@ export function buildPartialStep(contentAcc: any, toolAcc: any) {
     });
   }
   if (!content && !toolCalls.length) return null;
-  const assistantMessage: any = { role: 'assistant', content };
+  const assistantMessage: Record<string, unknown> = { role: 'assistant', content };
   if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
   return { assistantMessage };
 }
@@ -823,7 +824,7 @@ async function readErrorDetail(resp: any) {
   let raw = '';
   try {
     raw = await resp.text();
-  } catch (e: any) {
+  } catch (e) {
     raw = '';
   }
   const text = String(raw === undefined || raw === null ? '' : raw).trim();
@@ -832,7 +833,7 @@ async function readErrorDetail(resp: any) {
     const j = JSON.parse(text);
     const msg = j && j.error && j.error.message ? j.error.message : JSON.stringify(j);
     return { detail: String(msg), parsed: true };
-  } catch (e: any) {
+  } catch (e) {
     return { detail: text, parsed: false };
   }
 }
@@ -853,7 +854,7 @@ function isBodyParseRejection(status: any, parsed: any, detail: any) {
   );
 }
 
-export async function streamAgentStep(port: any, settings: any, messages: any, signal: any, tools: any, emit: any, toolChoice?: any) {
+export async function streamAgentStep(port: any, settings: any, messages: any, signal: AbortSignal, tools: any, emit: any, toolChoice?: any) {
   const url = settings.baseUrl.replace(/\/+$/, '') + '/chat/completions';
   const body: any = { model: settings.model, messages, temperature: 0.3, stream: true, stream_options: { include_usage: true } };
   // 出站消毒（**所有模型请求都从这里走**，所以兜底放在这一处最省）。
@@ -899,7 +900,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
   }
 
   const MAX_RETRIES = 2;
-  const sleep = (ms: any) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let resp;
   // 计时起点必须在 fetch **之前**：SSE 是「响应头先到、token 后到」，
   // 只从拿到响应头开始算，会把网络往返和排队时间整个漏掉（实测会算成 1ms）。
@@ -922,15 +923,15 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
         });
         if (timer) clearTimeout(timer);
         console.log('[RecallFlow] LLM fetch done:', resp.status);
-      } catch (e: any) {
+      } catch (e) {
         if (timer) clearTimeout(timer);
         if (timedOut) {
           cleanup();
           return { error: '模型请求超时（' + Math.round(timeoutMs / 1000) + ' 秒），请检查网络连接或 API 服务后重试。' };
         }
-        if (e && e.name === 'AbortError') throw e; // 外部中断（用户停止）交给上层按中断处理
+        if (e && (e as Caught).name === 'AbortError') throw e; // 外部中断（用户停止）交给上层按中断处理
         if (attempt < MAX_RETRIES && isRetryableError(e)) {
-          console.log('[RecallFlow] LLM fetch retry ' + (attempt + 1) + ':', e && e.message);
+          console.log('[RecallFlow] LLM fetch retry ' + (attempt + 1) + ':', e && (e as Caught).message);
           await sleep(500 * Math.pow(2, attempt));
           continue;
         }
@@ -979,7 +980,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
             '）';
         }
       }
-      const err: any = new Error('DeepSeek 请求失败 (' + resp.status + '): ' + detail);
+      const err = new Error('DeepSeek 请求失败 (' + resp.status + '): ' + detail) as Caught;
       err.status = resp.status;
       err.bodyParseRejected = bodyParseRejected;
       if (attempt < MAX_RETRIES && isRetryableError(err)) {
@@ -990,7 +991,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       cleanup();
       return { error: err.message };
     }
-  } catch (e: any) {
+  } catch (e) {
     cleanup();
     throw e;
   }
@@ -1025,12 +1026,12 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
     let chunk;
     try {
       chunk = await reader.read();
-    } catch (e: any) {
+    } catch (e) {
       // 读取过程中被中断（用户停止 / 端口断开 / worker 被回收）。
       // **必须把已经收到的内容附在错误上**：否则这一轮模型已经生成的东西全部丢失，
       // 恢复时只能退回上一个完整 tool turn —— 若中断发生在"正在等首个响应/正在生成"
       // 的瞬间，那一步就完全没有可续跑的状态，恢复等于从头再来（实测就是这个后果）。
-      if (e && (e.name === 'AbortError' || signal?.aborted)) {
+      if (e && ((e as Caught).name === 'AbortError' || signal?.aborted)) {
         const partialErr: any = new DOMException('任务已取消', 'AbortError');
         partialErr.partial = buildPartialStep(contentAcc, toolAcc);
         cleanup();
@@ -1052,7 +1053,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       let json;
       try {
         json = JSON.parse(data);
-      } catch (e: any) {
+      } catch (e) {
         continue;
       }
       if (json.usage) usage = json.usage;
@@ -1093,7 +1094,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
     .filter((t) => t.name || t.id)
     .map((t) => ({ id: t.id, name: t.name, args: parseToolArgs(t.args) }));
 
-  const assistantMessage: any = { role: 'assistant', content: contentAcc };
+  const assistantMessage: Record<string, unknown> = { role: 'assistant', content: contentAcc };
   if (toolCalls.length) {
     assistantMessage.tool_calls = toolCalls.map((t) => ({
       id: t.id,
@@ -1144,8 +1145,8 @@ export async function runParallelBatch(toolCalls: any, o: any) {
   o.approvalSettings = await readLiveApprovalSettings(o.settings);
 
   const groups = planParallelGroups(calls.slice(0, limit), {
-    isParallelSafe: (name: any) => getToolMetadata(name).parallelSafe === true,
-    shouldSkip: (name: any, args: any) => {
+    isParallelSafe: (name: string) => getToolMetadata(name).parallelSafe === true,
+    shouldSkip: (name: string, args: Record<string, unknown>) => {
       // 三条安全边界：停用 / 参数非法 / 需要审批，任一命中就退回串行路径。
       // 判定条件与下面循环里的完全一致，避免"预执行了但循环会拒绝"的空转。
       if (o.disabledTools.has(name)) return true;
@@ -1193,11 +1194,11 @@ export async function runParallelBatch(toolCalls: any, o: any) {
             o.signal
           );
           return { index: i, res, ms: Date.now() - t0, beforeUrl };
-        } catch (e: any) {
+        } catch (e) {
           // 单个工具失败不能拖垮整组（串行路径同样是 catch 后继续）。
           return {
             index: i,
-            res: { result: e && e.name === 'AbortError' ? '任务已取消。' : e.message, ok: false },
+            res: { result: e && (e as Caught).name === 'AbortError' ? '任务已取消。' : (e as Caught).message, ok: false },
             ms: Date.now() - t0,
             beforeUrl,
           };
@@ -1215,7 +1216,7 @@ export async function runParallelBatch(toolCalls: any, o: any) {
  * 模型返回 tool_calls 时执行真实工具（检索/增删知识库）并把结果喂回，
  * 直到模型给出最终文本回复（流式推送）或达到最大步数。
  */
-export async function runAgentStream(port: any, payload: any, settings: any, book: any, signal: any, tabId: any, observeEvent: any) {
+export async function runAgentStream(port: any, payload: any, settings: any, book: any, signal: AbortSignal, tabId: number | undefined, observeEvent: any) {
   const runId = payload.runId || 'run-' + Date.now().toString(36);
   const persisted = await loadAgentSession(runId).catch(() => null);
   const canResume = persisted && persisted.status !== RUN_STATUS.COMPLETED && persisted.status !== RUN_STATUS.FAILED && persisted.status !== RUN_STATUS.CANCELLED && persisted.status !== RUN_STATUS.TIMEOUT;
@@ -1224,14 +1225,14 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
 
   const emit = (event: any) => {
     const message = Object.assign({ runId, seq: ++eventSeq, timestamp: Date.now() }, event);
-    try { port.postMessage(message); } catch (e: any) { /* 端口断开时保留 Session，等待同 runId 恢复 */ }
+    try { port.postMessage(message); } catch (e) { /* 端口断开时保留 Session，等待同 runId 恢复 */ }
     try {
       if (typeof observeEvent === 'function') observeEvent(message);
-    } catch (e: any) {}
+    } catch (e) {}
   };
   // 结构化运行轨迹（排障用，异步落盘，不阻塞主流程）。
   const trace = (entry: any) => {
-    try { appendTrace(runId, entry).catch(() => {}); } catch (e: any) {}
+    try { appendTrace(runId, entry).catch(() => {}); } catch (e) {}
   };
   // 每轮耗时汇总：把一次模型往返拆成 prefill（到首个 token）与 decode（首 token 到流结束），
   // 再单独列出工具执行。缓存只影响 prefill，decode 只受模型档位与输出长度影响，
@@ -1239,7 +1240,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
   const reportTurnTiming = (iter: any, step: any, toolMs: any) => {
     const t = step && step.timing;
     if (!t) return;
-    const sec = (ms: any) => Math.round(ms / 100) / 10 + 's';
+    const sec = (ms: number) => Math.round(ms / 100) / 10 + 's';
     console.log(
       '[RecallFlow] turn=' + (iter + 1) +
       ' ttfb=' + sec(t.ttfbMs) +
@@ -1254,7 +1255,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
     try {
       const s = JSON.stringify(a || {});
       return s.length > 200 ? s.slice(0, 200) + '…' : s;
-    } catch (e: any) {
+    } catch (e) {
       return '';
     }
   };
@@ -1262,7 +1263,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
   // 提前跳出工具循环时（完成前校验未通过 → 注入反思继续下一轮），若不给剩余的
   // tool_call 补上结果，下一次请求就会带着「有调用、无结果」的 assistant 消息发出去，
   // 服务端只回一个**空的 400** —— 从报错里完全看不出原因。
-  const fillRemainingToolResults = (toolCalls: any, fromIndex: any, reason: any) => {
+  const fillRemainingToolResults = (toolCalls: any, fromIndex: any, reason: string) => {
     const list = Array.isArray(toolCalls) ? toolCalls : [];
     for (let k = fromIndex; k < list.length; k++) {
       messages.push({ role: 'tool', tool_call_id: list[k].id, content: reason });
@@ -1700,7 +1701,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
       trace({ phase: 'error', error });
       emit({ type: 'error', error });
       await persist({ status: RUN_STATUS.FAILED, error }).catch(() => {});
-      try { detachAllCdp(); } catch (err: any) {}
+      try { detachAllCdp(); } catch (err) {}
       return;
     }
     if (step.error) {
@@ -1708,7 +1709,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
       trace({ phase: 'error', error: step.error });
       emit({ type: 'error', error: step.error });
       await persist({ status: RUN_STATUS.FAILED, error: step.error }).catch(() => {});
-      try { detachAllCdp(); } catch (err: any) {}
+      try { detachAllCdp(); } catch (err) {}
       return;
     }
     messages.push(step.assistantMessage);
@@ -1858,7 +1859,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
             authBeforeUrl = ctx.pageUrl;
             try {
               res = await withTimeout(() => executeAnyTool(tc.name, tc.args, ctx), metadata.timeoutMs || budget.toolTimeoutMs, signal, tc.name);
-            } catch (e: any) {
+            } catch (e) {
               res = { result: describeToolFailure(e, tc.name), ok: false };
             }
             toolMs = Date.now() - toolStartedAt;
@@ -1980,8 +1981,8 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
         const rawResult = typeof res.result === 'string' ? res.result : '';
         if (rawResult.length > CONTEXT_TUNING.spillResultChars) {
           const rid = 'res-' + toolCallCount;
-          try { ctx.resultStore.set(rid, res.result); } catch (e: any) {}
-          try { ctx.resultIds.add(rid); } catch (e: any) {}
+          try { ctx.resultStore.set(rid, res.result); } catch (e) {}
+          try { ctx.resultIds.add(rid); } catch (e) {}
           // sliceSafe：论文/数学页面里 𝑦 𝒜 𝐺 各占 2 个码元，按码元切会切裂代理对，
           // 半个字符进历史 = 之后每一次请求都被服务端在解析阶段整单拒收（见 surrogates.js）。
           res.result = sliceSafe(res.result, 0, CONTEXT_TUNING.spillInlineChars) + formatTruncationNotice(res.result.length, rid);
@@ -2017,7 +2018,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
         // 完成校验据此按结论里的具体事实定位片段，而不是只能看页面前 2500 字。
         if (EVIDENCE_READ_TOOLS.has(tc.name) && rawResult) ctx.lastReadFullText = rawResult;
         // 记录可重放的成功动作，供 save_macro 保存为宏。
-        try { recordTraceStep(ctx, tc.name, tc.args, res); } catch (e: any) {}
+        try { recordTraceStep(ctx, tc.name, tc.args, res); } catch (e) {}
         messages.push({ role: 'tool', tool_call_id: tc.id, content: res.result });
         // 视觉（多模态）接线：截图**不能**放进 tool 消息（工具消息只能是文本 ✗），
         // 所以作为**追加的 user 消息**送进上下文。
@@ -2063,8 +2064,8 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
             const evidenceForCheck = [ctx.lastSnapshot ? compactSnapshotSummary(ctx.lastSnapshot) : '', ctx.lastEvidence || ''].join('\n');
             const mutatingRun = [...new Set(ranToolNames)].filter((nm) => {
               try {
-                return changesState(getToolMetadata(nm));
-              } catch (e: any) {
+                return changesState(getToolMetadata(nm as string));
+              } catch (e) {
                 return false;
               }
             });
@@ -2128,7 +2129,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
             let verifyError = null;
             try {
               verdict = await runCompletionVerification(settings, instruction, res, ctx, signal, taskKind);
-            } catch (e: any) {
+            } catch (e) {
               verifyError = e;
             }
             const verifyOutcome = classifyVerifyOutcome(verdict, verifyError);
@@ -2141,7 +2142,7 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
               //   界面却永远停在"运行中"，用户看到的就是"卡死"。
               //   这条分支曾经是唯一一个只 persist 不发事件的出口（其余收尾路径都成对发）。
               await persist({ status: RUN_STATUS.CANCELLED, phase: 'interrupted', reason: 'aborted-during-verify' }).catch(() => {});
-              try { emitState(RUN_STATUS.CANCELLED, { reason: 'aborted-during-verify' }); } catch (e: any) {}
+              try { emitState(RUN_STATUS.CANCELLED, { reason: 'aborted-during-verify' }); } catch (e) {}
               trace({ phase: 'interrupted', reason: 'aborted-during-verify' });
               emitTabsClosePending(ctx, await closeAuxTabs(ctx).catch(() => []), emit);
               emit({ type: 'end' });
@@ -2242,8 +2243,8 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
     ) {
       const mutatingRunFinal = [...new Set(ranToolNames)].filter((nm) => {
         try {
-          return changesState(getToolMetadata(nm));
-        } catch (e: any) {
+          return changesState(getToolMetadata(nm as string));
+        } catch (e) {
           return false;
         }
       });

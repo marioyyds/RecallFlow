@@ -259,7 +259,7 @@ async function pageAction(params: BridgeParams): Promise<Record<string, unknown>
   const tab = await activeTab();
   if (!tab || !tab.id) return { ok: false, error: '未找到活动标签页（请先让用户切到要调试的页面）', code: 'NO_ACTIVE_TAB' };
   const ctx = { tabId: tab.id, pageUrl: tab.url || '', pageTitle: tab.title || '' };
-  const res = await executeTool(verdict.name, p.args || {}, ctx);
+  const res = await executeTool(verdict.name as string, (p.args || {}) as Record<string, unknown>, ctx);
   return {
     ok: res && res.ok !== false,
     tool: verdict.name,

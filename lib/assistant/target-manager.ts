@@ -5,7 +5,7 @@ import * as cdp from '../backend/cdp.ts';
 const state = new Map(); // tabId -> { dialogs: [], downloads: [], fileChoosers: [] }
 let listening = false;
 
-function bucket(tabId: any) {
+function bucket(tabId: number) {
   const id = Number(tabId);
   let rec = state.get(id);
   if (!rec) {
@@ -23,51 +23,51 @@ export function initTargetManager() {
     if (tabId == null) return;
     const rec = bucket(tabId);
     if (method === 'Page.javascriptDialogOpening') {
-      rec.dialogs.push({ type: (params as any).type, message: (params as any).message, defaultPrompt: (params as any).defaultPrompt, at: Date.now() });
+      rec.dialogs.push({ type: (params as Record<string, unknown>).type, message: (params as Record<string, unknown>).message, defaultPrompt: (params as Record<string, unknown>).defaultPrompt, at: Date.now() });
     } else if (method === 'Page.downloadWillBegin') {
-      rec.downloads.push({ url: (params as any).url, suggestedFilename: (params as any).suggestedFilename, at: Date.now() });
+      rec.downloads.push({ url: (params as Record<string, unknown>).url, suggestedFilename: (params as Record<string, unknown>).suggestedFilename, at: Date.now() });
     } else if (method === 'Page.fileChooserOpened') {
-      rec.fileChoosers.push({ mode: (params as any).mode, backendNodeId: (params as any).backendNodeId, at: Date.now() });
+      rec.fileChoosers.push({ mode: (params as Record<string, unknown>).mode, backendNodeId: (params as Record<string, unknown>).backendNodeId, at: Date.now() });
     }
   });
 }
 
-export function getPendingDialogs(tabId: any) {
+export function getPendingDialogs(tabId: number) {
   return bucket(tabId).dialogs;
 }
-export function clearDialogs(tabId: any) {
+export function clearDialogs(tabId: number) {
   bucket(tabId).dialogs = [];
 }
-export function getDownloads(tabId: any) {
+export function getDownloads(tabId: number) {
   return bucket(tabId).downloads;
 }
-export function clearDownloads(tabId: any) {
+export function clearDownloads(tabId: number) {
   bucket(tabId).downloads = [];
 }
-export function getFileChoosers(tabId: any) {
+export function getFileChoosers(tabId: number) {
   return bucket(tabId).fileChoosers;
 }
-export function clearFileChoosers(tabId: any) {
+export function clearFileChoosers(tabId: number) {
   bucket(tabId).fileChoosers = [];
 }
 
 // 处理（接受/取消）当前页面的 JS 对话框（alert/confirm/prompt）。
-export async function handleDialog(tabId: any, accept: any, promptText: any) {
+export async function handleDialog(tabId: number, accept: any, promptText: any) {
   await cdp.handleJavaScriptDialog(tabId, accept !== false, promptText);
   clearDialogs(tabId);
   return { ok: true };
 }
 
 // 允许当前标签页下载到指定目录（缺省为浏览器默认下载目录）。
-export async function allowDownloads(tabId: any, downloadPath: any) {
+export async function allowDownloads(tabId: number, downloadPath: any) {
   const params: any = { behavior: 'allow', eventsEnabled: true };
   if (downloadPath) params.downloadPath = downloadPath;
   try {
     await cdp.command(tabId, 'Browser.setDownloadBehavior', params);
-  } catch (e: any) {
+  } catch (e) {
     try {
       await cdp.command(tabId, 'Page.setDownloadBehavior', downloadPath ? { behavior: 'allow', downloadPath } : { behavior: 'allow' });
-    } catch (e2: any) {}
+    } catch (e2) {}
   }
   return { ok: true };
 }

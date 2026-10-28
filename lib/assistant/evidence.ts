@@ -150,7 +150,7 @@ export function selectEvidence(input: Record<string, any> = {}) {
 
   const picked: any[] = [];
   let used = 0;
-  const push = (start: any, text: any, truncated: any) => {
+  const push = (start: any, text: string, truncated: any) => {
     if (!text) return;
     picked.push({ start, text, truncated });
     used += text.length;

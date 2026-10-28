@@ -315,7 +315,7 @@ function citeNumber(inner: unknown): number | null {
  * 没有任何正文引用时，citations 必须为空，界面才不会凭空出现“参考来源”。
  */
 function bindCitationsToText(parts: any, citations: any) {
-  const list = (Array.isArray(citations) ? citations : []) as any[];
+  const list = (Array.isArray(citations) ? citations : []) as Array<{ url?: string; title?: string; snippet?: string; index?: number }>;
   // 没有引用时不必扫描全文；跟随页每 40ms 都会走这里，长回答下这是纯浪费。
   if (!list.length) return { parts, citations: [] };
   const collect = /[\uFF3B\u005B]([^\]]*?)[\uFF3D\u005D]/g;

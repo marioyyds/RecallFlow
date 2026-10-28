@@ -3,6 +3,7 @@
 // 约束：目标服务器源需写入 manifest.json 的 host_permissions（MV3 跨域 fetch 要求）。
 import { TOOL_REGISTRY, executeTool, validateToolCall } from './tools.ts';
 import { logError } from '../shared/utils.ts';
+import type { Caught } from './errors.ts';
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const MCP_TTL = 5 * 60 * 1000; // 工具列表缓存 5 分钟
@@ -54,7 +55,7 @@ export function mcpCacheKey(server: any) {
 // HTTP 错误要**指得出原因**：401/403 在 MCP 上几乎总是 token 问题，
 // 只回一句「MCP initialize 失败 (403)」时，模型会把它猜成「端口冲突 / 登录页 / 没这个能力」。
 // ⚠ 这里绝不拼接 token 本身。
-function describeHttpFailure(method: any, status: any, body: any) {
+function describeHttpFailure(method: string, status: any, body: any) {
   const detail = String(body || '').replace(/\s+/g, ' ').trim().slice(0, 300);
   if (status === 401 || status === 403) {
     return (
@@ -73,7 +74,7 @@ function failWithStatus(message: any, status: any) {
 }
 
 class McpClient {
-  declare url: any;
+  declare url: string;
   declare headers: any;
   declare sessionId: any;
 
@@ -95,7 +96,7 @@ class McpClient {
     return headers;
   }
 
-  async _rpc(method: any, params: any, id: any) {
+  async _rpc(method: string, params: any, id: any) {
     const resp = await fetch(this.url, {
       method: 'POST',
       headers: this._buildHeaders(),
@@ -126,7 +127,7 @@ class McpClient {
    * 按普通 RPC 去解析 result 会在空 body / 204 上抛错，所以单独走这条路；
    * 失败只做尽力而为（少数服务器对通知返回 405），真正的连通性由随后的 tools/list 证明。
    */
-  async _notify(method: any, params: any) {
+  async _notify(method: string, params: any) {
     try {
       const resp = await fetch(this.url, {
         method: 'POST',
@@ -136,7 +137,7 @@ class McpClient {
       const sid = resp.headers && resp.headers.get && resp.headers.get('Mcp-Session-Id');
       if (sid) this.sessionId = sid;
       return resp.ok;
-    } catch (e: any) {
+    } catch (e) {
       return false;
     }
   }
@@ -164,7 +165,7 @@ class McpClient {
     return (r && r.tools) || [];
   }
 
-  async callTool(name: any, args: any) {
+  async callTool(name: string, args: Record<string, unknown>) {
     const r = await this._rpc('tools/call', { name, arguments: args || {} }, 3);
     if (!r || !Array.isArray(r.content)) return '（空结果）';
     return r.content
@@ -173,7 +174,7 @@ class McpClient {
   }
 }
 
-function parseSseResult(text: any) {
+function parseSseResult(text: string) {
   const lines = String(text).split('\n');
   let last = null;
   for (const line of lines) {
@@ -184,7 +185,7 @@ function parseSseResult(text: any) {
     try {
       const j = JSON.parse(d);
       last = j;
-    } catch (e: any) {
+    } catch (e) {
       /* 跳过非 JSON 的 SSE 行 */
     }
   }
@@ -229,11 +230,11 @@ export async function probeMcpServer(server: any) {
     await client.notifyInitialized();
     const list = await client.listTools();
     return Object.assign(base, { ok: true, toolCount: list.length, ms: Date.now() - started, ts: Date.now() });
-  } catch (e: any) {
+  } catch (e) {
     return Object.assign(base, {
       ok: false,
-      status: e && e.status ? e.status : undefined,
-      error: String((e && e.message) || e),
+      status: e && (e as Caught).status ? (e as Caught).status : undefined,
+      error: String((e && (e as Caught).message) || e),
       ms: Date.now() - started,
       ts: Date.now(),
     });
@@ -294,11 +295,11 @@ export async function collectAgentTools(settings: any, options: Record<string, a
         });
       }
       mcpStatus.push({ serverId, url: s.url, ok: true, toolCount: entry.tools.length, ts: entry.ts });
-    } catch (e: any) {
+    } catch (e) {
       const status = Object.assign(
         { serverId, url: s.url, ok: false },
-        e && e.status ? { status: e.status } : {},
-        { error: String((e && e.message) || e) }
+        e && (e as Caught).status ? { status: (e as Caught).status } : {},
+        { error: String((e && (e as Caught).message) || e) }
       );
       mcpStatus.push(status);
       logError('MCP 连接失败: ' + (s.url || ''), e);
@@ -315,7 +316,7 @@ export async function collectAgentTools(settings: any, options: Record<string, a
  * 用户看到的是「配置没生效」，实际是「连不上但没人告诉它」。
  */
 export function buildMcpStatusSection(mcpStatus = []) {
-  const list = (Array.isArray(mcpStatus) ? mcpStatus.filter(Boolean) : []) as any[];
+  const list = (Array.isArray(mcpStatus) ? mcpStatus.filter(Boolean) : []) as Array<{ serverId?: string; url?: string; ok?: boolean; toolCount?: number; error?: string }>;
   if (!list.length) return '';
   const lines = ['【MCP 服务器（用户自己配置的外部能力）】工具名规则：`mcp__<serverId>__<工具名>`（serverId 里的空格等字符会替换成 `_`）。'];
   for (const st of list) {
@@ -342,13 +343,13 @@ export function persistMcpStatus(mcpStatus: any) {
     return Promise.resolve(
       chrome.storage.local.set({ [MCP_STATUS_STORAGE_KEY]: { ts: Date.now(), servers: mcpStatus || [] } })
     ).catch(() => {});
-  } catch (e: any) {
+  } catch (e) {
     return Promise.resolve();
   }
 }
 
 /** 工具名对应的服务器本次是否处于失败状态？用于把「未知 MCP 工具」说成人能看懂的原因。 */
-function mcpFailureHint(name: any, ctx: any) {
+function mcpFailureHint(name: string, ctx: any) {
   const statuses = ctx && Array.isArray(ctx.mcpStatus) ? ctx.mcpStatus : null;
   if (!statuses) return '';
   const failed = statuses.filter((s: any) => s && s.ok === false);
@@ -365,7 +366,7 @@ function mcpFailureHint(name: any, ctx: any) {
  * 统一工具分发：以 mcp__ 前缀区分 MCP 工具，其余走内置 executeTool。
  * MCP 工具依赖 ctx.mcpIndex（由 collectAgentTools 返回并挂在运行上下文上）。
  */
-export async function executeAnyTool(name: any, args: any, ctx: any) {
+export async function executeAnyTool(name: string, args: Record<string, unknown>, ctx: any) {
   const validation = validateToolCall(name, args || {});
   if (!validation.ok) return { ok: false, result: validation.error };
   if (typeof name === 'string' && name.indexOf('mcp__') === 0) {
@@ -382,11 +383,11 @@ export async function executeAnyTool(name: any, args: any, ctx: any) {
     try {
       const out = await meta.client.callTool(meta.origName, args || {});
       return { result: out || '（空结果）' };
-    } catch (e: any) {
+    } catch (e) {
       return {
         ok: false,
         result:
-          'MCP 调用失败：' + e.message +
+          'MCP 调用失败：' + (e as Caught).message +
           '（可重试一次；若持续失败，说明该服务器当前不可用，请改用其它方式或如实告知用户）',
       };
     }

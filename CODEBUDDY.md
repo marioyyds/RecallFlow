@@ -22,8 +22,8 @@
 
 3. **specifier 写真实后缀**（`import { x } from './table.ts'`）。
    esbuild 会自动做 `.js → .ts` 替换，但 **Node 不会** —— 写 `.js` 会
-   `ERR_MODULE_NOT_FOUND`。迁移期有 `scripts/ts-resolve.mjs` 这个 resolve hook 兜住
-   「importer 还写着 `.js`」的中间态（Batch 5 收口时回收）。
+   `ERR_MODULE_NOT_FOUND`。迁移期曾用 `scripts/ts-resolve.mjs` 兜住「importer 还写着 `.js`」的中间态；
+   **Batch 6 已回收**：现在全仓 specifier 都是真实后缀，不再需要 loader。
 
 4. **每批都必须 `node scripts/build-content.mjs` 重建 `content.js`。**
    产物字节数不受迁移影响（全图迁完实测逐字节相同），所以**不要抬体积棘轮**；

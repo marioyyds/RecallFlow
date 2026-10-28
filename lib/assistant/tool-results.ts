@@ -29,7 +29,7 @@ export function summarizeCdpError(e: any) {
  * `extra` 会被并入返回值（例如带上 selector、available 等诊断字段）——
  * 因此必须返回**新对象**，不能就地改 extra（调用方常复用同一字面量）。
  */
-export function toolError(code: any, message: any, extra?: any) {
+export function toolError(code: string, message: any, extra?: any) {
   return Object.assign({ ok: false, code, result: message }, extra || {});
 }
 

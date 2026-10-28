@@ -1,3 +1,4 @@
+import type { Caught } from './errors.ts';
 // 标签页族（list_tabs / switch_tab / open_tab）—— 从 tools.js 的巨型 switch 里拆出的第一族。
 //
 // 为什么要拆：`executeTool` 曾是一个 1000+ 行的 switch，所有工具族（标签页、抓取、页面命令、
@@ -53,13 +54,13 @@ export async function listTabs(deps: any) {
       .map((t: any, i: any) => `[${i + 1}] tabId=${t.id} ${t.active ? '（当前）' : ''} ${t.title || ''}｜${t.url}`)
       .join('\n');
     return { ok: true, tabs: tabInfo, result: '当前窗口标签页：\n' + (text || '（无）') };
-  } catch (e: any) {
-    return { ok: false, result: '列出标签页失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '列出标签页失败：' + (e as Caught).message };
   }
 }
 
 /** 切换活动标签页并等它就绪（原 switch_tab）。 */
-export async function switchTab(deps: any, args: any) {
+export async function switchTab(deps: any, args: Record<string, unknown>) {
   const tabId = Number(args && args.tabId);
   if (!Number.isInteger(tabId) || tabId <= 0) return { ok: false, result: 'tabId 必须是有效的标签页 ID' };
   const currentId = Number(deps.ctx && deps.ctx.tabId);
@@ -112,8 +113,8 @@ export async function switchTab(deps: any, args: any) {
         (snapshot ? '（页面已就绪）' : '（内容脚本尚未就绪）') +
         (activated ? '\n后续请留在该页完成操作，不要为验证/对比反复切回。' : '\n该页已在后台/前台就绪，无需再次切换。'),
     };
-  } catch (e: any) {
-    return { ok: false, result: '切换标签页失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '切换标签页失败：' + (e as Caught).message };
   }
 }
 
@@ -126,7 +127,7 @@ export async function switchTab(deps: any, args: any) {
  *   · 达到"累计新建数"上限时**软拒绝**（列出已开标签页 + 引导复用/抓取），
  *     而不是硬失败 —— 硬失败会让模型反复重试开页，白烧预算。
  */
-export async function openTab(deps: any, args: any) {
+export async function openTab(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   try {
     const url = String((args && args.url) || '');
@@ -241,8 +242,8 @@ export async function openTab(deps: any, args: any) {
         (snapshot ? '（页面已就绪）' : '（内容脚本尚未就绪）') +
         (!openActive && !isolated ? '\n' + tabSwitchLimitMessage(budget.used, budget.max) : ''),
     };
-  } catch (e: any) {
-    return { ok: false, result: '打开标签页失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '打开标签页失败：' + (e as Caught).message };
   }
 }
 
@@ -250,7 +251,7 @@ export async function openTab(deps: any, args: any) {
 export const TAB_TOOLS = new Set(['list_tabs', 'switch_tab', 'open_tab']);
 
 /** 统一入口（由 executeTool 分派）。返回 null 表示"不属于本族"。 */
-export async function handleTabTool(name: any, args: any, deps: any) {
+export async function handleTabTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'list_tabs') return await listTabs(deps);
   if (name === 'switch_tab') return await switchTab(deps, args);
   if (name === 'open_tab') return await openTab(deps, args);

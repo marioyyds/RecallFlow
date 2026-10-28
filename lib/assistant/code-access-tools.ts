@@ -22,6 +22,7 @@
 // `evaluateInPageWorld` 见 ./page-world.js（那里有它自己的说明）。
 // 失败翻译器是纯函数，直接 import（不走 deps 注入，避免打断既有调用方）。
 import { describeContentScriptUnreachable } from '../shared/utils.ts';
+import type { Caught } from './errors.ts';
 
 // 同一 tab 一旦确认沙箱被扩展 CSP 拦住，后续调用直接走页面主世界：
 // 这不是页面级差异，重复尝试只会制造同一条警告并浪费一次消息往返。
@@ -36,7 +37,7 @@ export function __resetPageWorldPreferenceForTests() {
 }
 
 /** run_javascript：先沙箱、被 CSP 拒则自动改用页面主世界。 */
-export async function runJavascript(deps: any, args: any) {
+export async function runJavascript(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   // engine='page'：用 CDP Runtime.evaluate 在页面主世界执行（可访问页面自身 JS 状态，
   // 且不受页面 CSP 限制）；默认走内容脚本受限沙箱（无 chrome.*）。
@@ -97,11 +98,11 @@ export async function runJavascript(deps: any, args: any) {
       r.verification.reason = 'JS 已执行，返回结果见上';
     }
     return r;
-  } catch (e: any) {
+  } catch (e) {
     // `ok:false` 早就在这里（这一处是对的），但文案是原始错误 —— 对模型毫无指导。
     // 实测（B 站转写）：这类站点上模型连续 8 次收到 "Could not establish connection.
     // Receiving end does not exist."，最后自己摸索出"改用主世界 JS"。现在翻成可操作的文案。
-    return { ok: false, result: describeContentScriptUnreachable(e.message, '执行 JS 失败：') };
+    return { ok: false, result: describeContentScriptUnreachable((e as Caught).message, '执行 JS 失败：') };
   }
 }
 
@@ -118,7 +119,7 @@ export const INTERACTIVE_ROLES = new Set([
  * AX 树由浏览器生成，DOM 侧的 #__kb-ai-host 排除规则不会自动作用于它；
  * 小红书实操里 AX 前 7 个节点全是助手面板按钮，直接挤占了页面元素预算。
  */
-async function collectAssistantPanelNodeIds(cdp: any, tabId: any) {
+async function collectAssistantPanelNodeIds(cdp: any, tabId: number) {
   if (!cdp || typeof cdp.command !== 'function') return new Set();
   try {
     const doc = await cdp.command(tabId, 'DOM.getDocument', { depth: 0 });
@@ -137,13 +138,13 @@ async function collectAssistantPanelNodeIds(cdp: any, tabId: any) {
     };
     walk(desc && desc.node);
     return ids;
-  } catch (e: any) {
+  } catch (e) {
     return new Set();
   }
 }
 
 /** get_ax_snapshot：读可访问性树里的可交互节点（含 role/名称/坐标）。 */
-export async function getAxSnapshot(deps: any, args: any) {
+export async function getAxSnapshot(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '可访问性树快照需要 CDP（请在设置中开启）。' };
   try {
@@ -175,7 +176,7 @@ export async function getAxSnapshot(deps: any, args: any) {
         } else {
           withBox.push(p); // 坐标取不到也照常返回该节点
         }
-      } catch (e: any) {
+      } catch (e) {
         withBox.push(p);
       }
     }
@@ -187,7 +188,7 @@ export async function getAxSnapshot(deps: any, args: any) {
         '可访问性树（交互节点 ' + withBox.length + ' 个，含 role/名称/坐标）：\n' + (lines.join('\n') || '（无）') +
         '\n用法：优先用 role+name 定位（如 click_element({role:"button",name:"登录"})），比坐标更稳；canvas/虚拟列表等无 DOM 场景再用坐标 click_at。',
     };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '读取可访问性树失败：' + deps.summarizeCdpError(e) };
   }
 }
@@ -196,7 +197,7 @@ export async function getAxSnapshot(deps: any, args: any) {
 export const CODE_ACCESS_TOOLS = new Set(['run_javascript', 'get_ax_snapshot']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleCodeAccessTool(name: any, args: any, deps: any) {
+export async function handleCodeAccessTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'run_javascript') return await runJavascript(deps, args);
   if (name === 'get_ax_snapshot') return await getAxSnapshot(deps, args);
   return null;

@@ -54,10 +54,10 @@ async function migrateLegacy(table: any) {
   }
   indexCache = pruneIndex(merged);
   if (a && Object.keys(writes).length) {
-    try { await a.set(Object.assign(writes, { [TRACE_INDEX_KEY]: indexCache })); } catch (e: any) {}
+    try { await a.set(Object.assign(writes, { [TRACE_INDEX_KEY]: indexCache })); } catch (e) {}
   }
   if (a) {
-    try { await a.remove(LEGACY_KEY); } catch (e: any) {}
+    try { await a.remove(LEGACY_KEY); } catch (e) {}
   }
 }
 
@@ -69,32 +69,32 @@ async function loadIndex() {
     return indexCache;
   }
   let idx = null;
-  try { const d = await a.get(TRACE_INDEX_KEY); idx = d && d[TRACE_INDEX_KEY]; } catch (e: any) { idx = null; }
+  try { const d = await a.get(TRACE_INDEX_KEY); idx = d && d[TRACE_INDEX_KEY]; } catch (e) { idx = null; }
   if (idx && typeof idx === 'object') indexCache = idx;
   let legacy = null;
-  try { const d = await a.get(LEGACY_KEY); legacy = d && d[LEGACY_KEY]; } catch (e: any) { legacy = null; }
+  try { const d = await a.get(LEGACY_KEY); legacy = d && d[LEGACY_KEY]; } catch (e) { legacy = null; }
   if (legacy && typeof legacy === 'object') await migrateLegacy(legacy);
   else if (!indexCache) indexCache = {};
   return indexCache;
 }
 
-async function readRun(runId: any): Promise<Record<string, any> | null> {
+async function readRun(runId: string): Promise<Record<string, any> | null> {
   const a = area();
   if (!a) return null;
   try {
     const d: any = await a.get(TRACE_PREFIX + runId);
     return d && d[TRACE_PREFIX + runId];
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
 
-async function writeRun(runId: any, rec: any) {
+async function writeRun(runId: string, rec: any) {
   const a = area();
   if (!a) return;
   try {
     await a.set({ [TRACE_PREFIX + runId]: rec, [TRACE_INDEX_KEY]: indexCache });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
 // ---- 批量落盘：待写条目 / 定时器 / 串行化链 ----
@@ -104,18 +104,18 @@ const pendingEntries = new Map(); // runId -> entry[]
 const flushTimers = new Map(); // runId -> timeout handle
 const flushChains = new Map(); // runId -> Promise
 
-function cancelPending(runId: any) {
+function cancelPending(runId: string) {
   const t = flushTimers.get(runId);
   if (t) {
     try {
       clearTimeout(t);
-    } catch (e: any) {}
+    } catch (e) {}
     flushTimers.delete(runId);
   }
   pendingEntries.delete(runId);
 }
 
-function scheduleFlush(runId: any) {
+function scheduleFlush(runId: string) {
   if (flushTimers.has(runId)) return;
   const handle = setTimeout(() => {
     flushTimers.delete(runId);
@@ -126,7 +126,7 @@ function scheduleFlush(runId: any) {
 }
 
 /** 把某个 run 的待写条目真正写下去。取走缓冲后立刻清空，因此 flush 期间新到的条目落到下一批。 */
-async function writePending(runId: any) {
+async function writePending(runId: string) {
   const entries = pendingEntries.get(runId);
   if (!entries || !entries.length) return;
   pendingEntries.set(runId, []);
@@ -149,7 +149,7 @@ async function writePending(runId: any) {
  * 读取路径（getTrace / listTraces）会先调它，否则会读到缺了最后几条的轨迹。
  * @param {string} [runId]
  */
-export async function flushTraces(runId?: any) {
+export async function flushTraces(runId?: string) {
   await loadIndex();
   const ids = runId ? [runId] : Array.from(pendingEntries.keys());
   for (const id of ids) {
@@ -161,7 +161,7 @@ export async function flushTraces(runId?: any) {
 }
 
 // 追加一条轨迹事件。写入被缓冲，只写当前 run。
-export async function appendTrace(runId: any, entry: any) {
+export async function appendTrace(runId: string, entry: any) {
   if (!runId) return;
   const buf = pendingEntries.get(runId) || [];
   buf.push(Object.assign({ ts: Date.now() }, entry));
@@ -170,7 +170,7 @@ export async function appendTrace(runId: any, entry: any) {
   else scheduleFlush(runId);
 }
 
-export async function getTrace(runId: any) {
+export async function getTrace(runId: string) {
   if (!runId) return null;
   // 先落盘再读：否则刚发生的步骤（工具、错误、耗时）会缺席，
   // 而 get_run_trace 这个工具的用途恰恰是「看看刚刚发生了什么」。
@@ -193,7 +193,7 @@ export async function listTraces() {
   return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
-export async function clearTrace(runId: any) {
+export async function clearTrace(runId: string) {
   await loadIndex();
   // 必须同时丢弃待写缓冲与定时器：否则清除之后，一个还在排队的 flush
   // 会把刚清掉的轨迹重新写回来。
@@ -202,14 +202,14 @@ export async function clearTrace(runId: any) {
   const a = area();
   if (runId) {
     delete indexCache[runId];
-    if (a) { try { await a.remove(TRACE_PREFIX + runId); } catch (e: any) {} }
+    if (a) { try { await a.remove(TRACE_PREFIX + runId); } catch (e) {} }
   } else {
     for (const id of Object.keys(indexCache)) {
-      if (a) { try { await a.remove(TRACE_PREFIX + id); } catch (e: any) {} }
+      if (a) { try { await a.remove(TRACE_PREFIX + id); } catch (e) {} }
     }
     indexCache = {};
   }
-  if (a) { try { await a.set({ [TRACE_INDEX_KEY]: indexCache }); } catch (e: any) {} }
+  if (a) { try { await a.set({ [TRACE_INDEX_KEY]: indexCache }); } catch (e) {} }
 }
 
 export { KEY as TRACE_KEY, TRACE_PREFIX, TRACE_INDEX_KEY };

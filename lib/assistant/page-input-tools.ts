@@ -13,9 +13,10 @@
 //   2. `hadEffect` / `verification` 由 `observedChange` + `buildActionVerification`
 //      按**观测**算出，不写死 true（此处曾是 7 处硬编码谎报之一）。
 import { editableTextSummary } from '../shared/editable-text.ts';
+import type { Caught } from './errors.ts';
 
 /** 从目标元素回读实际文本；用于 CDP 输入后的严格验收。 */
-async function readEditableValue(deps: any, tabId: any, selector: any, isSubframe: any, frameId: any) {
+async function readEditableValue(deps: any, tabId: number, selector: any, isSubframe: any, frameId: number) {
   const sel = JSON.stringify(String(selector || ''));
   const expr =
     '(() => { /* rf-read-editable */ const el = document.querySelector(' + sel + '); if (!el) return null;' +
@@ -25,7 +26,7 @@ async function readEditableValue(deps: any, tabId: any, selector: any, isSubfram
     return isSubframe
       ? await deps.cdp.evaluateInFrame(tabId, frameId, expr)
       : await deps.cdp.evaluate(tabId, expr);
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
@@ -35,12 +36,12 @@ async function readEditableValue(deps: any, tabId: any, selector: any, isSubfram
  *
  * @param {object} deps 见 handlePageInputTool
  */
-export async function typeText(deps: any, args: any) {
+export async function typeText(deps: any, args: Record<string, unknown>) {
   let res;
   try {
     res = await deps.executeContentAction(deps.ctx.tabId, 'type_text', { type: 'kbTypeText', params: args }, { delayMs: 80 });
-  } catch (e: any) {
-    res = { ok: false, result: '输入文本失败：' + e.message };
+  } catch (e) {
+    res = { ok: false, result: '输入文本失败：' + (e as Caught).message };
   }
   if (res && res.ok !== false && res.matchesIntent !== false && res.partial !== true) return res;
   // 合成输入失败 → 用 CDP 可信输入兜底（对受控组件/富文本编辑器更可靠）。
@@ -121,18 +122,18 @@ export async function typeText(deps: any, args: any) {
       result.verification.verified = verified && result.verification.verified;
     }
     return result;
-  } catch (e: any) {
+  } catch (e) {
     return res || { ok: false, result: 'CDP 输入失败：' + deps.summarizeCdpError(e) };
   }
 }
 
 /** press_key：合成按键，失败才升级 CDP。 */
-export async function pressKey(deps: any, args: any) {
+export async function pressKey(deps: any, args: Record<string, unknown>) {
   let res;
   try {
     res = await deps.executeContentAction(deps.ctx.tabId, 'press_key', { type: 'kbPressKey', params: args }, { delayMs: 120 });
-  } catch (e: any) {
-    res = { ok: false, result: '派发键盘事件失败：' + e.message };
+  } catch (e) {
+    res = { ok: false, result: '派发键盘事件失败：' + (e as Caught).message };
   }
   if (res && res.ok !== false) return res;
   if (!deps.cdpAllowed(deps.ctx)) return res;
@@ -148,7 +149,7 @@ export async function pressKey(deps: any, args: any) {
       verification: deps.buildActionVerification(deps.observedChange(before, after), '已用 CDP 派发按键'),
       result: '已用 CDP 派发按键：' + args.key + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
-  } catch (e: any) {
+  } catch (e) {
     return res || { ok: false, result: 'CDP 按键失败：' + deps.summarizeCdpError(e) };
   }
 }
@@ -162,13 +163,13 @@ export const THIN_PAGE_COMMANDS: Record<string, any> = Object.freeze({
 });
 
 /** 执行一个"薄包装"页面命令。 */
-export async function thinPageCommand(deps: any, name: any, args: any) {
+export async function thinPageCommand(deps: any, name: string, args: Record<string, unknown>) {
   const spec = THIN_PAGE_COMMANDS[name];
   if (!spec) return null;
   try {
     return await deps.executeContentAction(deps.ctx.tabId, name, { type: spec.message, params: args }, spec.opts);
-  } catch (e: any) {
-    return { ok: false, result: spec.label + '失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: spec.label + '失败：' + (e as Caught).message };
   }
 }
 
@@ -178,7 +179,7 @@ export const PAGE_INPUT_TOOLS = new Set([
 ]);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePageInputTool(name: any, args: any, deps: any) {
+export async function handlePageInputTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'type_text') return await typeText(deps, args);
   if (name === 'press_key') return await pressKey(deps, args);
   return await thinPageCommand(deps, name, args);

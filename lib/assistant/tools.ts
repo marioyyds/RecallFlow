@@ -63,6 +63,7 @@ import { handleCodeAccessTool } from './code-access-tools.ts';
 import { handlePageCommandTool } from './page-command-tools.ts';
 // C-1 拆分：知识库存储族（knowledge_read / add_entry / remove_entry）。
 import { handleKnowledgeStoreTool } from './knowledge-store-tools.ts';
+import type { Caught } from './errors.ts';
 
 export const TOOL_REGISTRY = Object.freeze(
   TOOL_SCHEMAS.map((tool) => {
@@ -95,7 +96,7 @@ export const TOOL_REGISTRY = Object.freeze(
 const TOOL_BY_NAME = new Map(TOOL_REGISTRY.map((tool) => [tool.name, tool]));
 export const BUILTIN_TOOLS = TOOL_REGISTRY.map((tool) => tool.openai);
 
-export function getToolDefinition(name: any) {
+export function getToolDefinition(name: string) {
   return TOOL_BY_NAME.get(name) || null;
 }
 
@@ -131,7 +132,7 @@ export function validateSkillTools(skill: any) {
   return warnings;
 }
 
-export function getToolMetadata(name: any) {
+export function getToolMetadata(name: string) {
   if (typeof name === 'string' && name.indexOf('mcp__') === 0) {
     // MCP 工具语义未知 ⇒ 按「会改动状态」处理（mutatesState 缺省为 true）。
     return { risk: 'external', requiresApproval: true };
@@ -164,7 +165,7 @@ export function getToolMetadata(name: any) {
 // 全局放宽会让别的工具的必填校验悄悄失效。
 const EMPTY_STRING_ALLOWED = new Set(['type_text.value']);
 
-export function validateToolCall(name: any, args: any) {
+export function validateToolCall(name: string, args: Record<string, unknown>) {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return { ok: false, error: '工具参数必须是 JSON 对象。' };
   }
@@ -210,7 +211,7 @@ export function validateToolCall(name: any, args: any) {
 export { buildActionVerification, observedChange, verifyPageAction, snapshotChanged } from './page-action-verify.ts';
 
 // 向指定标签页（可选指定 frameId，用于跨域 iframe）发送消息。
-function sendTabMessage(tabId: any, message: any, frameId?: any) {
+function sendTabMessage(tabId: number, message: any, frameId?: number | null) {
   // 默认发往顶层框架（frameId=0）；否则无 frameId 时消息会广播到所有框架，
   // 响应可能来自子框架，导致顶层快照/命令错乱。
   // 目标框架没有内容脚本时，桥接层会补注入 content.js 并重试一次。
@@ -220,20 +221,20 @@ function sendTabMessage(tabId: any, message: any, frameId?: any) {
 // 结构化页面诊断数据（console / network 原始条目，不做文本化）。
 // 供本机 MCP 的 page_health 使用：它需要 at 时间戳与 stack 原样，
 // 而 read_console / read_network 会拍平为文本并丢掉时间戳，无法做增量游标。
-export async function collectPageDiagnostics(tabId: any) {
+export async function collectPageDiagnostics(tabId: number) {
   const out: any = { console: [], network: [] };
   if (!tabId) return out;
   try {
     const c = await sendTabMessage(tabId, { type: 'kbGetConsole' });
     out.console = (c && c.entries) || [];
-  } catch (e: any) {
-    out.consoleError = e.message;
+  } catch (e) {
+    out.consoleError = (e as Caught).message;
   }
   try {
     const n = await sendTabMessage(tabId, { type: 'kbGetNetwork' });
     out.network = (n && n.entries) || [];
-  } catch (e: any) {
-    out.networkError = e.message;
+  } catch (e) {
+    out.networkError = (e as Caught).message;
   }
   return out;
 }
@@ -241,7 +242,7 @@ export async function collectPageDiagnostics(tabId: any) {
 // 结构化读取元素的框架源码位置（供 MCP 的 get_element_source 使用）。
 // 返回原始 source 对象而非格式化文本 —— 此前 MCP 只能拿到「元素源码位置：…」字符串，
 // 必须按文案反解，扩展一改措辞就会静默失效（字符串耦合）。
-export async function collectElementSource(tabId: any, params: any) {
+export async function collectElementSource(tabId: number, params: any) {
   if (!tabId) return { found: false, reason: '无法定位标签页' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetElementSource', params: params || {} });
@@ -259,8 +260,8 @@ export async function collectElementSource(tabId: any, params: any) {
     // 使「扩展已更新、server 尚未重启」的窗口期不会把该工具打断（曾因此短暂失效）。
     const text = '元素源码位置：' + loc + extra + (res.selector ? '\n选择器：' + res.selector : '');
     return { found: true, source: s, selector: res.selector || '', text };
-  } catch (e: any) {
-    return { found: false, reason: e.message };
+  } catch (e) {
+    return { found: false, reason: (e as Caught).message };
   }
 }
 
@@ -268,7 +269,7 @@ export async function collectElementSource(tabId: any, params: any) {
 
 // 结构化读取一批目标元素的渲染态（供 MCP 的 verify_change 做断言）。
 // 与 collectPageDiagnostics 一样返回结构化数据，不走会被拍平丢信息的文本通路。
-export async function verifyPageTargets(tabId: any, targets: any) {
+export async function verifyPageTargets(tabId: number, targets: any) {
   const list = Array.isArray(targets) ? targets : [];
   if (!tabId) return { found: false, targets: [], reason: '无法定位标签页' };
   const slots = new Array(list.length).fill(null);
@@ -285,9 +286,9 @@ export async function verifyPageTargets(tabId: any, targets: any) {
         batch.items.forEach((x: any, k: any) => {
           slots[x.at] = states[k] || { found: false, count: 0, reason: '该框架未返回结果' };
         });
-      } catch (e: any) {
+      } catch (e) {
         batch.items.forEach((x: any) => {
-          slots[x.at] = { found: false, count: 0, reason: '框架 ' + batch.frameId + ' 读取失败：' + e.message };
+          slots[x.at] = { found: false, count: 0, reason: '框架 ' + batch.frameId + ' 读取失败：' + (e as Caught).message };
         });
       }
     })
@@ -319,15 +320,15 @@ function cdpAllowed(ctx: any) {
  * 以前的同步 IIFE 让 `await` 直接变成语法错误（实测小红书会话）。
  * 同时保留 `return` 语义：用户代码里的 return 返回给 async IIFE。
  */
-export function buildPageWorldExpression(code: any) {
+export function buildPageWorldExpression(code: string) {
   return '(async () => {\n' + String(code === undefined || code === null ? '' : code) + '\n})()';
 }
 
-async function evaluateInPageWorld(ctx: any, args: any) {
+async function evaluateInPageWorld(ctx: any, args: Record<string, unknown>) {
   if (!cdpAllowed(ctx)) return { ok: false, result: '页面世界执行需要 CDP（请在设置中开启）。' };
   try {
     const jsFrame = frameIdFromArgs(args);
-    const expr = buildPageWorldExpression(args && args.code);
+    const expr = buildPageWorldExpression((args && args.code) as string);
     const value =
       jsFrame != null && jsFrame !== 0
         ? await cdp.evaluateInFrame(ctx.tabId, jsFrame, expr)
@@ -335,7 +336,7 @@ async function evaluateInPageWorld(ctx: any, args: any) {
     let serialized;
     try {
       serialized = JSON.stringify(value, null, 2);
-    } catch (e: any) {
+    } catch (e) {
       serialized = String(value);
     }
     if (serialized === undefined) serialized = 'undefined';
@@ -343,7 +344,7 @@ async function evaluateInPageWorld(ctx: any, args: any) {
     // 直接 slice 会把代理对切裂（见 surrogates.js 的事故说明）。
     if (serialized.length > 2000) serialized = sliceSafe(serialized, 0, 2000) + '\n…（结果过长已截断）';
     return { ok: true, cdp: true, result: serialized };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '页面世界执行失败：' + summarizeCdpError(e) };
   }
 }
@@ -351,13 +352,13 @@ async function evaluateInPageWorld(ctx: any, args: any) {
 // listFramesRaw 与 prefixFrameRefs 已随页面读取族移到 ./page-read-tools.js。
 
 // 解析目标元素为「唯一选择器 + 绝对视口坐标」，供 CDP 按坐标做可信输入。
-async function resolveTarget(tabId: any, params: any) {
+async function resolveTarget(tabId: number, params: any) {
   if (!tabId) return null;
   const frameId = frameIdFromArgs(params);
   try {
     const res = await sendTabMessage(tabId, { type: 'kbResolveTarget', params: localTargetArgs(params) }, frameId);
     return res && res.found && res.rect ? res : null;
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
@@ -377,7 +378,7 @@ function rememberTarget(ctx: any, target: any) {
 // 定义在 ./macros.js（**唯一来源**）：记录时（recordTraceStep）与回放时（macro op=run）
 // 必须用同一份白名单 —— 两处各写一份就会漂移，而漂移的后果是回放能执行记录时不允许的工具。
 
-export function recordTraceStep(ctx: any, name: any, args: any, res: any) {
+export function recordTraceStep(ctx: any, name: string, args: Record<string, unknown>, res: any) {
   if (!ctx || !Array.isArray(ctx.trace)) return;
   if (!REPLAYABLE_TOOLS.has(name)) return;
   if (!res || res.ok === false) return;
@@ -417,7 +418,7 @@ export function recordTraceStep(ctx: any, name: any, args: any, res: any) {
 }
 
 // 记录 Agent 本次任务新打开/接管过的标签页，供任务结束后清理（保留最后使用的 tab）。
-function trackOpenedTab(ctx: any, tabId: any) {
+function trackOpenedTab(ctx: any, tabId: number) {
   if (!ctx || !Number.isInteger(Number(tabId))) return;
   if (!Array.isArray(ctx.openedTabs)) ctx.openedTabs = [];
   if (!ctx.openedTabs.includes(tabId)) ctx.openedTabs.push(tabId);
@@ -430,7 +431,7 @@ async function ensureAgentWindow(ctx: any) {
     try {
       await chrome.windows.get(ctx.agentWindowId);
       return ctx.agentWindowId;
-    } catch (e: any) {
+    } catch (e) {
       ctx.agentWindowId = null;
     }
   }
@@ -444,7 +445,7 @@ export async function closeAgentWindow(ctx: any) {
   if (ctx && Number.isInteger(ctx.agentWindowId)) {
     try {
       await chrome.windows.remove(ctx.agentWindowId);
-    } catch (e: any) {}
+    } catch (e) {}
     ctx.agentWindowId = null;
   }
 }
@@ -462,20 +463,20 @@ async function listOpenedTabsSummary(ctx: any) {
 }
 
 // 记录 Agent 当前绑定的标签页（仅本任务上下文内使用，不做跨 tab 会话同步）。
-async function bindSessionTab(tabId: any) {
+async function bindSessionTab(tabId: number) {
   if (!Number.isInteger(Number(tabId))) return;
   try {
     await chrome.storage.local.set({ kbSessionTab: { tabId: Number(tabId), ts: Date.now() } });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
-async function getPageSnapshot(tabId: any, options: Record<string, any> = {}) {
+async function getPageSnapshot(tabId: number, options: Record<string, any> = {}) {
   if (!tabId) return null;
   const snapshot = await sendTabMessage(tabId, { type: 'kbGetPageSnapshot', options }, options.frameId);
   return snapshot && snapshot.version ? snapshot : null;
 }
 
-async function waitForTabReady(tabId: any, timeoutMs = 8000) {
+async function waitForTabReady(tabId: number, timeoutMs = 8000) {
   const deadline = Date.now() + Math.min(12000, Math.max(500, timeoutMs));
   while (Date.now() < deadline) {
     const snapshot = await getPageSnapshot(tabId, { maxElements: 30, maxText: 800 }).catch(() => null);
@@ -490,7 +491,7 @@ async function waitForTabReady(tabId: any, timeoutMs = 8000) {
 
 // compactSnapshotSummary 已移到 ./tool-results.js（并在文件顶部再导出）。
 
-async function executeContentAction(tabId: any, action: any, message: any, options: Record<string, any> = {}) {
+async function executeContentAction(tabId: number, action: any, message: any, options: Record<string, any> = {}) {
   if (!tabId) return toolError('NO_TARGET', '无法定位当前标签页（可能不在前台页面）。');
   const frameId = options.frameId != null ? options.frameId : frameIdFromArgs(message && message.params);
   const msg = Object.assign({}, message, { params: localTargetArgs(message && message.params) });
@@ -524,7 +525,7 @@ async function executeContentAction(tabId: any, action: any, message: any, optio
 // INSPECT_OPS 已移到 ./page-command-tools.js（唯一来源）。
 
 // 独立页面工具 → 底层页面命令的映射（拆分后每个工具只负责一个动作）。
-function pageToolCommand(name: any) {
+function pageToolCommand(name: string) {
   const map: Record<string, string> = {
     click_element: 'click',
   };
@@ -535,7 +536,7 @@ function pageToolCommand(name: any) {
 
 
 // 统一执行页面动作：动作前后快照验证、点击后新标签页自动发现与绑定、返回紧凑页面摘要。
-async function executePageTool(tabId: any, command: any, args: any, ctx: any) {
+async function executePageTool(tabId: number, command: string, args: Record<string, unknown>, ctx: any) {
   if (!tabId) return toolError('NO_TARGET', '无法定位当前标签页（可能不在前台页面）。');
   try {
     const frameId = frameIdFromArgs(args);
@@ -648,8 +649,8 @@ async function executePageTool(tabId: any, command: any, args: any, ctx: any) {
       verification,
       pageSnapshot: after,
     };
-  } catch (e: any) {
-    return { ok: false, result: '页面命令执行失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '页面命令执行失败：' + (e as Caught).message };
   }
 }
 
@@ -666,7 +667,7 @@ async function executePageTool(tabId: any, command: any, args: any, ctx: any) {
 // 注意：SkillHub 公开接口中 /api/v1/search 仅做检索；逐字 SKILL.md 正文走 /api/v1/skills/{slug}/file?path=SKILL.md&namespace={ns}
 // （匿名可 200/302 拿到正文），但部分技能（团队命名空间需鉴权或接口波动）可能取不到，此时降级为基于元数据的生成式安装。
 // 优先拉取 SkillHub 上的真实 SKILL.md 正文；不可用时降级为基于元数据的生成式安装。
-async function fetchRealSkillMd(apiBase: any, slug: any, ns: any, signal: any) {
+async function fetchRealSkillMd(apiBase: any, slug: any, ns: any, signal: AbortSignal) {
   try {
     const fileUrl =
       apiBase + '/skills/' + encodeURIComponent(slug) + '/file?path=SKILL.md' + (ns ? '&namespace=' + encodeURIComponent(ns) : '');
@@ -678,7 +679,7 @@ async function fetchRealSkillMd(apiBase: any, slug: any, ns: any, signal: any) {
     const parsed = mdToSkill(rawMd);
     if (!parsed || !parsed.name) return null;
     return parsed;
-  } catch (e: any) {
+  } catch (e) {
     return null;
   }
 }
@@ -706,7 +707,7 @@ async function installSkillFromSkillHub(identifier: any) {
         slug = decodeURIComponent(m[2]);
         keyword = slug;
       }
-    } catch (e: any) {
+    } catch (e) {
       /* 当关键词处理 */
     }
   }
@@ -786,7 +787,7 @@ async function installSkillFromSkillHub(identifier: any) {
         prefix + '「' + (saved.displayName || saved.name) + '」的完整正文（name=' + saved.name +
         '，版本 ' + (saved.version || '1.0.0') + '，来自 SkillHub 原文）。可调用 load_skill("' + saved.name + '") 使用。',
     };
-  } catch (e: any) {
+  } catch (e) {
     // 超时要与真正的安装失败分开说：前者是网络/服务慢，重试可能就成了；
     // 后者是技能本身或数据的问题。原先一律说「安装失败：<原始 abort 文案>」，
     // 模型会以为技能有问题而放弃 —— 实测（会话 RF-V6T7C5）就是这么被报成缺陷的。
@@ -798,7 +799,7 @@ async function installSkillFromSkillHub(identifier: any) {
           '稍后可以重试，或改用 load_skill 加载已安装的技能。',
       };
     }
-    return { ok: false, result: '安装失败：' + (e && e.message ? e.message : String(e)) };
+    return { ok: false, result: '安装失败：' + (e && (e as Caught).message ? (e as Caught).message : String(e)) };
   } finally {
     clearTimeout(timer);
   }
@@ -837,7 +838,7 @@ function registerHandlers(names: any, run: any) {
 }
 
 // —— 知识库存储族（只读 / 写 / 删是三类权限，刻意各自独立，见 ./knowledge-store-tools.js 头注释）
-registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: any, args: any, ctx: any) =>
+registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleKnowledgeStoreTool(name, args, {
     ctx,
     knowledgeRead,
@@ -852,7 +853,7 @@ registerHandlers(['knowledge_read', 'add_entry', 'remove_entry'], (name: any, ar
   }));
 
 // —— 页面读取族（Agent 的"眼睛"）
-registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (name: any, args: any, ctx: any) =>
+registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handlePageReadTool(name, args, {
     ctx,
     chrome,
@@ -868,11 +869,11 @@ registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (nam
   }));
 
 // —— 诊断（C-4 第 3 档合并：read_console / read_network / list_downloads → read_diagnostics）
-registerHandlers(['read_diagnostics'], (name: any, args: any, ctx: any) =>
+registerHandlers(['read_diagnostics'], (name: string, args: Record<string, unknown>, ctx: any) =>
   readDiagnostics({ sendTabMessage, tabId: ctx.tabId, getDownloads }, args));
 
 // —— 页面输入命令族
-registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_for_element', 'get_attribute'], (name: any, args: any, ctx: any) =>
+registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_for_element', 'get_attribute'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handlePageInputTool(name, args, {
     ctx,
     cdp,
@@ -889,7 +890,7 @@ registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_
   }));
 
 // —— 标签页族
-registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: any, args: any, ctx: any) =>
+registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleTabTool(name, args, {
     chrome,
     ctx,
@@ -901,7 +902,7 @@ registerHandlers(['list_tabs', 'switch_tab', 'open_tab'], (name: any, args: any,
   }));
 
 // —— 联网抓取与搜索族
-registerHandlers(['fetch_webpage', 'web_search'], (name: any, args: any, ctx: any) =>
+registerHandlers(['fetch_webpage', 'web_search'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleFetchTool(name, args, {
     ctx,
     // 原生 fetch 是 WebIDL 方法，this 必须是全局对象。作为 deps.fetchImpl(...) 调用时
@@ -918,7 +919,7 @@ registerHandlers(['fetch_webpage', 'web_search'], (name: any, args: any, ctx: an
 
 // —— CDP 输入族
 // ⚠ click_element 的"只在内容脚本**报错**时升级 CDP"是**有意保留**的决定，见 ./cdp-input-tools.js 头注释。
-registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file'], (name: any, args: any, ctx: any) =>
+registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleCdpInputTool(name, args, {
     ctx,
     cdp,
@@ -937,11 +938,11 @@ registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 
 // —— 页面命令（内容脚本）族
 // 注意：同属一族 ≠ 可以合并成一个工具。面向模型的边界由 C-4 判据决定
 //（执行路径 + 权限类别），见 ./page-command-tools.js 头注释。
-registerHandlers(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: any, args: any, ctx: any) =>
+registerHandlers(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
 
 // —— 截图（单工具族）
-registerHandlers(['take_screenshot'], (name: any, args: any, ctx: any) =>
+registerHandlers(['take_screenshot'], (name: string, args: Record<string, unknown>, ctx: any) =>
   takeScreenshot({
     ctx,
     args,
@@ -956,11 +957,11 @@ registerHandlers(['take_screenshot'], (name: any, args: any, ctx: any) =>
   }));
 
 // —— 页面内代码与结构访问族
-registerHandlers(['run_javascript', 'get_ax_snapshot'], (name: any, args: any, ctx: any) =>
+registerHandlers(['run_javascript', 'get_ax_snapshot'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleCodeAccessTool(name, args, { ctx, cdp, cdpAllowed, executeContentAction, evaluateInPageWorld, isCspEvalBlockError, summarizeCdpError }));
 
 // —— 用户脚本族（安装受用户设置约束）
-registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript'], (name: any, args: any, ctx: any) =>
+registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript', 'run_userscript'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleUserscriptTool(name, args, {
     ctx,
     listUserscripts,
@@ -974,7 +975,7 @@ registerHandlers(['list_userscripts', 'search_userscripts', 'install_userscript'
 // save_skill 是**写**操作（它写的正文会进入今后的系统提示）⇒ 自己的审批闸门，
 // 因此它是独立工具，而不是并入 `skill({op})` —— 见 docs/tool-merge-plan.md 第 6 档的结论：
 // `toolNeedsApproval(name, settings, pageUrl)` 拿不到 args，按 op 分级审批在当前架构下表达不了。
-registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: any, args: any, ctx: any) =>
+registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleSkillTool(name, args, {
     getMergedSkills,
     getDefaultSkills,
@@ -987,7 +988,7 @@ registerHandlers(['load_skill', 'install_skill', 'save_skill'], (name: any, args
 
 // —— 宏（C-4 第 5 档合并）
 // **op=run 的执行期白名单与 op=save 的审批必须分别保留**（见 ./macros.js 文件头注释）。
-registerHandlers(['macro'], (name: any, args: any, ctx: any) =>
+registerHandlers(['macro'], (name: string, args: Record<string, unknown>, ctx: any) =>
   macroTool(
     {
       pageUrl: ctx.pageUrl,
@@ -1005,18 +1006,18 @@ registerHandlers(['macro'], (name: any, args: any, ctx: any) =>
   ));
 
 // —— 权限 / 会话状态族（改的是"放行规则与待决状态"，不是页面）
-registerHandlers(['trust_site', 'handle_dialog'], (name: any, args: any, ctx: any) =>
+registerHandlers(['trust_site', 'handle_dialog'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handlePermissionTool(name, args, { ctx, chrome, cdpAllowed, handleDialog, summarizeCdpError }));
 
 // —— 运行状态族
 // 三个工具名都要**显式列出**：只写 update_plan 也能跑（handleRunStateTool 会按 name 分派），
 // 但那样注册表就不等于 TOOL_REGISTRY，门禁无法核对。
-registerHandlers(['update_plan', 'expand_result', 'get_run_trace'], (name: any, args: any, ctx: any) =>
+registerHandlers(['update_plan', 'expand_result', 'get_run_trace'], (name: string, args: Record<string, unknown>, ctx: any) =>
   handleRunStateTool(name, args, { ctx, getTrace, listTraces }));
 
 // —— 完成信号
 // agent.js 识别返回里的 complete:true 来结束本轮。单独注册，避免被误并入别的族。
-registerHandlers(['complete_task'], (name: any, args: any) => ({
+registerHandlers(['complete_task'], (name: string, args: Record<string, unknown>) => ({
   result: '任务已完成：' + String(args.summary || '任务完成。') + (args.evidence ? '\n证据：' + String(args.evidence) : ''),
   complete: true,
 }));
@@ -1026,7 +1027,7 @@ registerHandlers(['complete_task'], (name: any, args: any) => ({
  *
  * 这里只做三件事：补齐 args、查表、交给该族的 handler。**没有任何工具逻辑**。
  */
-export async function executeTool(name: any, args: any, ctx: any) {
+export async function executeTool(name: string, args: Record<string, unknown>, ctx: any) {
   args = args || {};
   const run = TOOL_HANDLERS.get(name);
   // 未知工具同样要 `ok:false`：它是**失败**，不是"调用成功但内容是这样"。
@@ -1048,7 +1049,7 @@ export function registeredToolNames() {
 export function parseToolArgs(s: any) {
   try {
     return JSON.parse(s);
-  } catch (e: any) {
+  } catch (e) {
     return {};
   }
 }
@@ -1067,17 +1068,17 @@ export function parseToolArgs(s: any) {
  * 非法码点（NaN、负数、超过 0x10FFFF、落在代理区）一律给 U+FFFD：
  * 宁可显示"这里有个表示不出来的字符"，也不要产生半个字符。
  */
-function decodeNumericEntity(code: any) {
+function decodeNumericEntity(code: number) {
   if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '\uFFFD';
   if (code >= 0xd800 && code <= 0xdfff) return '\uFFFD';
   try {
     return String.fromCodePoint(code);
-  } catch (e: any) {
+  } catch (e) {
     return '\uFFFD';
   }
 }
 
-export function splitIntoChunks(text: any, size: any, max: any) {
+export function splitIntoChunks(text: string, size: any, max: any) {
   const s = String(text || '').trim();
   if (!s) return [];
   const paras = s.split(/\n+/).map((p) => p.trim()).filter(Boolean);
@@ -1113,7 +1114,7 @@ export function splitIntoChunks(text: any, size: any, max: any) {
   return chunks.slice(0, max);
 }
 
-export function stripHtml(html: any) {
+export function stripHtml(html: string) {
   let s = String(html || '');
   s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
   s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');

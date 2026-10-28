@@ -16,7 +16,7 @@
 //   unobservable 无法观测时**不得**声称已验证
 
 /** 不可观测的结论（如视觉标注层不计入内容指纹）。 */
-export function buildActionVerification(observed: any, reason: any) {
+export function buildActionVerification(observed: any, reason: string) {
   const text = String(reason || '');
   if (observed === 'changed') return { executed: true, verified: true, changed: true, reason: text };
   if (observed === 'unchanged') return { executed: true, verified: true, changed: false, reason: text };
@@ -34,7 +34,7 @@ export function observedChange(before: any, after: any) {
 }
 
 /** 前后快照是否发生可观察变化（URL / 内容指纹 / 滚动位置）。 */
-export function snapshotChanged(before: any, after: any, command: any) {
+export function snapshotChanged(before: any, after: any, command: string) {
   if (!before || !after) return false;
   if (before.url !== after.url) return true;
   if (before.fingerprint && after.fingerprint && before.fingerprint !== after.fingerprint) return true;
@@ -56,7 +56,7 @@ export function snapshotChanged(before: any, after: any, command: any) {
  * 因此这些命令**无法**通过内容指纹验证 —— 它们的 verified 来自"动作已派发"这一事实，
  * 而不是来自"观测到了变化"。这是有意的取舍，不是漏洞；但**不得**用它去声称 changed。
  */
-export function verifyPageAction(command: any, before: any, after: any, response: any) {
+export function verifyPageAction(command: string, before: any, after: any, response: any) {
   const executed = Boolean(response && response.ok !== false);
   const urlChanged = Boolean(before && after && before.url !== after.url);
   const contentChanged = Boolean(before && after && before.fingerprint !== after.fingerprint);

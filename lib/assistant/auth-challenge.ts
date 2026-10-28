@@ -42,7 +42,7 @@ const MUTATING_TOOLS = new Set([
   'run_javascript',
 ]);
 
-function asHttpUrl(value: any, baseUrl?: any) {
+function asHttpUrl(value: any, baseUrl?: string) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   try {
@@ -53,27 +53,27 @@ function asHttpUrl(value: any, baseUrl?: any) {
     u.username = '';
     u.password = '';
     return u.href;
-  } catch (e: any) {
+  } catch (e) {
     return '';
   }
 }
 
-function withoutHash(url: any) {
+function withoutHash(url: string) {
   try {
     const u = new URL(url);
     u.hash = '';
     return u.href;
-  } catch (e: any) {
+  } catch (e) {
     return String(url || '');
   }
 }
 
-export function isAuthUrl(url: any) {
+export function isAuthUrl(url: string) {
   try {
     const u = new URL(String(url || ''));
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
     return AUTH_PATH_RE.test(decodeURIComponent(u.pathname || ''));
-  } catch (e: any) {
+  } catch (e) {
     return false;
   }
 }
@@ -85,12 +85,12 @@ export function isAuthUrl(url: any) {
  * 用 fetch_webpage 去 GET 它只会拿到 Express 的 403，随后被当成登录墙、
  * 拼出 `http://localhost:27123/login` —— 一个根本不存在的地址。
  */
-export function isMcpEndpoint(url: any) {
+export function isMcpEndpoint(url: string) {
   try {
     const u = new URL(String(url || ''));
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
     return MCP_PATH_RE.test(decodeURIComponent(u.pathname || ''));
-  } catch (e: any) {
+  } catch (e) {
     return false;
   }
 }
@@ -111,7 +111,7 @@ function snapshotHaystack(snapshot: any) {
  * 只接受 http/https 的 href：`javascript:`、`data:` 和空锚点都不能作为给用户的登录链接。
  * 优先 href 本身像登录页的元素；只有文案像登录但 href 是站内相对地址时，也保留作为候选。
  */
-export function findLoginLink(snapshot: any, baseUrl: any) {
+export function findLoginLink(snapshot: any, baseUrl: string) {
   const s = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const elements = Array.isArray(s.elements) ? s.elements : [];
   let best = null;
@@ -138,7 +138,7 @@ function fallbackLoginUrl(currentUrl: any) {
     const u = new URL(currentUrl);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
     return u.origin + '/login';
-  } catch (e: any) {
+  } catch (e) {
     return '';
   }
 }

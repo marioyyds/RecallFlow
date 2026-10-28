@@ -39,6 +39,7 @@ import {
   MAX_SHOTS,
   MAX_SHOT_STORE_CHARS,
 } from '../shared/screenshot-store.ts';
+import type { Caught } from './errors.ts';
 
 export { saveScreenshot, SHOT_KEY, MAX_SHOTS, MAX_SHOT_STORE_CHARS };
 
@@ -77,9 +78,9 @@ export async function captureWithLadder(deps: any) {
         fullPage: deps.fullPage === true,
         timeoutMs: remain,
       });
-    } catch (e: any) {
+    } catch (e) {
       data = '';
-      if (/未响应|超时/.test(String((e && e.message) || ''))) timedOut = true;
+      if (/未响应|超时/.test(String((e && (e as Caught).message) || ''))) timedOut = true;
     }
     used = step;
     usedIndex = i;
@@ -140,7 +141,7 @@ export async function takeScreenshot(deps: any) {
       width = Math.round(box.clientWidth || box.width || 0);
       height = Math.round(box.clientHeight || box.height || 0);
     }
-  } catch (e: any) {}
+  } catch (e) {}
   const bytes = Math.round((data.length * 3) / 4);
   const id = 'shot-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
   const mime = used.format === 'png' ? 'png' : 'jpeg';

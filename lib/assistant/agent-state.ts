@@ -24,7 +24,7 @@ export function transition(run: any, next: any, meta: Record<string, any> = {}) 
   return Object.assign({ state: next }, meta);
 }
 
-export function createRun(runId: any, budget: any) {
+export function createRun(runId: string, budget: any) {
   const now = Date.now();
   return { id: runId, status: RUN_STATUS.CREATED, budget, currentStep: 0, createdAt: now, updatedAt: now };
 }

@@ -262,7 +262,7 @@ const KEYWORD_RULES = [
 const PRIORITY = [INTENTS.BROWSER, INTENTS.KNOWLEDGE, INTENTS.RESEARCH, INTENTS.CHAT];
 const CONTINUATION_RE = /^(继续|接着|下一步|好的|可以|继续吧|然后呢|再来|再试一次|就这样|是的)[，。！？!?,\s]*$/u;
 
-function scoreIntent(text: any) {
+function scoreIntent(text: string) {
   const scores = { [INTENTS.BROWSER]: 0, [INTENTS.KNOWLEDGE]: 0, [INTENTS.RESEARCH]: 0, [INTENTS.CHAT]: 0 };
   for (const rule of KEYWORD_RULES) {
     for (const pattern of rule.patterns) {
@@ -304,10 +304,10 @@ export function detectIntent(instruction = '', history = [], opts: Record<string
   let viaContinuation = false;
   if (CONTINUATION_RE.test(text) || opts.forceContinuation === true) {
     viaContinuation = true;
-    const lastUser = ((Array.isArray(history) ? history : []) as any[])
+    const lastUser = ((Array.isArray(history) ? history : []) as Array<{ role?: string; content?: string }>)
       .filter((h) => h && h.role === 'user' && typeof h.content === 'string' && h.content.trim() !== text)
       .pop();
-    if (lastUser) sourceText = lastUser.content;
+    if (lastUser) sourceText = lastUser.content as string;
   }
   const scores = scoreIntent(sourceText);
   // 按得分降序；得分相同时保持 PRIORITY 顺序（稳定排序），保证“看看我的收藏”归为知识库。
@@ -366,7 +366,7 @@ export function detectIntent(instruction = '', history = [], opts: Record<string
 }
 
 // LLM 意图分类：few-shot 让模型语义理解指令，输出 {intent, confidence, reason}。
-async function classifyIntentWithLLM(instruction: any, settings: any, signal: any) {
+async function classifyIntentWithLLM(instruction: string, settings: any, signal: AbortSignal) {
   if (!settings || !settings.apiKey) return null;
   // 路由调用要快：8s 超时，失败即回退关键词，避免拖慢任务启动。
   const fastSettings = Object.assign({}, settings, { requestTimeoutMs: 8000 });
@@ -405,7 +405,7 @@ const LLM_INTENT_MAP: Record<string, any> = Object.freeze({
  * 3. 其余交给 LLM 语义分类（few-shot），失败/无 API 时回退关键词打分结果。
  * 返回结构与 detectIntent 一致。
  */
-export async function resolveIntentForAgent(instruction: any, history: any, settings: any, opts: Record<string, any> = {}, signal: any) {
+export async function resolveIntentForAgent(instruction: string, history: any, settings: any, opts: Record<string, any> = {}, signal: AbortSignal) {
   const detected = detectIntent(instruction, history, opts);
   if (detected.viaContinuation) return detected;
   if (PURE_CHITCHAT_RE.test(String(instruction || '').trim())) {
@@ -438,11 +438,11 @@ export async function resolveIntentForAgent(instruction: any, history: any, sett
   return detected;
 }
 
-export function resolveIntent(intent: any) {
+export function resolveIntent(intent: string) {
   return INTENT_DEFS[intent] || INTENT_DEFS[INTENTS.CHAT];
 }
 
-export function buildIntentSystemPrompt(intent: any, instruction = '') {
+export function buildIntentSystemPrompt(intent: string, instruction = '') {
   const info = resolveIntent(intent);
   const keyword = extractKeyword(instruction);
   const lines = [
@@ -459,10 +459,10 @@ export function buildIntentSystemPrompt(intent: any, instruction = '') {
  * 生成完整的 Agent 系统提示：可用工具列表按意图白名单动态生成，
  * 并明确禁止在文本里模拟 XML/JSON 工具调用（避免模型在无工具时“假装调用”）。
  */
-export function buildSystemPrompt(intent: any, instruction = '', toolNames: any[] = [], skills: any[] = []) {
+export function buildSystemPrompt(intent: string, instruction = '', toolNames: any[] = [], skills: any[] = []) {
   const info = resolveIntent(intent);
   const keyword = extractKeyword(instruction);
-  const availableTools = (Array.isArray(toolNames) ? toolNames.filter(Boolean) : []) as any[];
+  const availableTools = (Array.isArray(toolNames) ? toolNames.filter(Boolean) : []) as string[];
   const toolList = availableTools.length
     ? availableTools.map((name) => '- ' + name).join('\n')
     : '本轮不提供任何工具，请直接回答。';

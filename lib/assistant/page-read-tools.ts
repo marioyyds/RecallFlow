@@ -17,6 +17,7 @@
 // 纯函数直接 import，不走 deps 注入：它没有"需要替换"的场景，
 // 而走 deps 会让**所有**既有调用方（含本仓库两条既有测试）都得补这个依赖，破坏面大于收益。
 import { describeContentScriptUnreachable } from '../shared/utils.ts';
+import type { Caught } from './errors.ts';
 
 /**
  * 枚举标签页内的所有框架（含跨域 iframe）。
@@ -24,20 +25,20 @@ import { describeContentScriptUnreachable } from '../shared/utils.ts';
  * 用 `chrome.scripting.executeScript` 而不是内容脚本消息：这样才能一次拿到
  * **所有框架**（含跨域）的 href/title，而内容脚本只能报自己所在的那一个。
  */
-export async function listFramesRaw(deps: any, tabId: any) {
+export async function listFramesRaw(deps: any, tabId: number) {
   try {
     const results = await deps.chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
       func: () => ({ href: location.href, title: document.title || '', isTop: window.top === window }),
     });
     return (results || []).map((r: any) => Object.assign({ frameId: r.frameId }, r.result || {}));
-  } catch (e: any) {
+  } catch (e) {
     return [];
   }
 }
 
 /** 给某框架快照的元素 ref 加 f<frameId>: 前缀，使跨框架 ref 全局唯一、可路由。 */
-export function prefixFrameRefs(snapshot: any, frameId: any) {
+export function prefixFrameRefs(snapshot: any, frameId: number) {
   if (!snapshot || !Number.isInteger(Number(frameId)) || Number(frameId) === 0) return snapshot;
   const fid = Number(frameId);
   const elements = (snapshot.elements || []).map((e: any) => Object.assign({}, e, { ref: 'f' + fid + ':' + e.ref, frameId: fid }));
@@ -50,7 +51,7 @@ const CAPABILITY_SAMPLE_LIMIT = 4;
 export function isCrossOriginFrame(topUrl: any, frameUrl: any) {
   try {
     return new URL(String(frameUrl)).origin !== new URL(String(topUrl)).origin;
-  } catch (e: any) {
+  } catch (e) {
     return true;
   }
 }
@@ -168,7 +169,7 @@ export function formatCapabilityHint(capabilities: any) {
 }
 
 /** read_current_page：读正文（或核查若干文案是否可见）。 */
-export async function readCurrentPage(deps: any, args: any) {
+export async function readCurrentPage(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const tabId = ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
@@ -219,7 +220,7 @@ export async function readCurrentPage(deps: any, args: any) {
           snippet: c,
         }));
     return { result, citations };
-  } catch (e: any) {
+  } catch (e) {
     // ⚠ 必须带 `ok: false` —— 它是**下游信号**：失败摘除、卡死检测、完成校验、
     // 以及模型的自我纠错都读它。这里原先只返回 result 文本，工具在转写里显示成
     // **✓ 成功**、内容却是「读取页面失败：Could not establish connection...」（B 站那次
@@ -229,12 +230,12 @@ export async function readCurrentPage(deps: any, args: any) {
     // 这是同一个文件里的不一致，不是设计取舍。
     //
     // 文案另外要**可操作**：把"连不上内容脚本"翻成下一步能做什么（docs/tool-design.md §7）。
-    return { ok: false, result: describeContentScriptUnreachable(e.message, '读取页面失败：') };
+    return { ok: false, result: describeContentScriptUnreachable((e as Caught).message, '读取页面失败：') };
   }
 }
 
 /** get_page_snapshot：读结构化 DOM 快照（可指定框架 / 合并所有框架）。 */
-export async function getPageSnapshotTool(deps: any, args: any) {
+export async function getPageSnapshotTool(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const tabId = ctx.tabId;
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
@@ -376,8 +377,8 @@ export async function getPageSnapshotTool(deps: any, args: any) {
       snapshot,
       result: '当前页面 DOM 快照：\n' + JSON.stringify(snapshot) + capHint + mainHint + omitHint,
     };
-  } catch (e: any) {
-    return { ok: false, result: describeContentScriptUnreachable(e.message, '读取 DOM 快照失败：') };
+  } catch (e) {
+    return { ok: false, result: describeContentScriptUnreachable((e as Caught).message, '读取 DOM 快照失败：') };
   }
 }
 
@@ -403,7 +404,7 @@ export async function listFrames(deps: any) {
 export const PAGE_READ_TOOLS = new Set(['read_current_page', 'get_page_snapshot', 'list_frames']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handlePageReadTool(name: any, args: any, deps: any) {
+export async function handlePageReadTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'read_current_page') return await readCurrentPage(deps, args);
   if (name === 'get_page_snapshot') return await getPageSnapshotTool(deps, args);
   if (name === 'list_frames') return await listFrames(deps);

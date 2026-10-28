@@ -7,7 +7,7 @@ const MAX_ORIGINS = 50;
 const MAX_STEPS = 40;
 
 // 站点键与站点记忆同一套规则（本地页按目录归组），见 lib/shared/utils.js 的 siteKeyOf。
-function originOf(url: any) {
+function originOf(url: string) {
   return siteKeyOf(url);
 }
 
@@ -16,7 +16,7 @@ async function readAll() {
     const d = await chrome.storage.local.get(KEY);
     const m: any = d && d[KEY];
     return m && typeof m === 'object' ? m : {};
-  } catch (e: any) {
+  } catch (e) {
     return {};
   }
 }
@@ -24,16 +24,16 @@ async function readAll() {
 async function writeAll(all: any) {
   try {
     await chrome.storage.local.set({ [KEY]: all });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
 function latestTs(site: any) {
   let ts = 0;
-  for (const v of Object.values(site || {}) as any[]) ts = Math.max(ts, Number(v && v.updatedAt) || 0);
+  for (const v of Object.values(site || {}) as Array<{ updatedAt?: number }>) ts = Math.max(ts, Number(v && v.updatedAt) || 0);
   return ts;
 }
 
-function normalizeName(name: any) {
+function normalizeName(name: string) {
   return String(name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
 
@@ -45,7 +45,7 @@ function sanitizeSteps(steps: any) {
     .map((s) => ({ tool: s.tool, args: s.args }));
 }
 
-export async function saveMacro(url: any, macro: any) {
+export async function saveMacro(url: string, macro: any) {
   const origin = originOf(url);
   if (!origin) return null;
   const name = normalizeName(macro && macro.name);
@@ -77,7 +77,7 @@ export async function saveMacro(url: any, macro: any) {
 // 次级排序键用 name 字典序而不是 updatedAt：
 // 这份列表会拼进**系统提示**（请求前缀的起点）。时间戳做次级键时，
 // 命中数相同的宏会随使用重排，每次 run 的系统提示都不一样，跨 run 的前缀缓存永远命中不了。
-export async function listMacros(url: any) {
+export async function listMacros(url: string) {
   const origin = originOf(url);
   if (!origin) return [];
   const all = await readAll();
@@ -89,7 +89,7 @@ export async function listMacros(url: any) {
   );
 }
 
-export async function getMacro(url: any, name: any) {
+export async function getMacro(url: string, name: string) {
   const origin = originOf(url);
   if (!origin) return null;
   const all = await readAll();
@@ -98,7 +98,7 @@ export async function getMacro(url: any, name: any) {
   return site[normalizeName(name)] || null;
 }
 
-export async function bumpMacroHits(url: any, name: any) {
+export async function bumpMacroHits(url: string, name: string) {
   const origin = originOf(url);
   if (!origin) return;
   const all = await readAll();
@@ -109,7 +109,7 @@ export async function bumpMacroHits(url: any, name: any) {
   await writeAll(all);
 }
 
-export async function deleteMacro(url: any, name: any) {
+export async function deleteMacro(url: string, name: string) {
   const origin = originOf(url);
   if (!origin) return false;
   const all = await readAll();
@@ -150,7 +150,7 @@ async function readLastTraces() {
     const d = await chrome.storage.local.get(LAST_TRACE_KEY);
     const m: any = d && d[LAST_TRACE_KEY];
     return m && typeof m === 'object' ? m : {};
-  } catch (e: any) {
+  } catch (e) {
     return {};
   }
 }
@@ -158,11 +158,11 @@ async function readLastTraces() {
 async function writeLastTraces(all: any) {
   try {
     await chrome.storage.local.set({ [LAST_TRACE_KEY]: all });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
 /** 暂存本轮的可重放轨迹（按 origin 单槽覆盖）。返回写入的记录；没写时返回 null。 */
-export async function rememberTrace(url: any, steps: any) {
+export async function rememberTrace(url: string, steps: any) {
   const origin = originOf(url);
   if (!origin) return null;
   // 用与宏本体**同一份** sanitizeSteps：保证"能记住的"与"能存进宏的"形状一致，
@@ -185,7 +185,7 @@ export async function rememberTrace(url: any, steps: any) {
 }
 
 /** 取回某站点最近一次的可重放轨迹；超过 TTL 一律当作没有。 */
-export async function recallTrace(url: any, opts: Record<string, any> = {}) {
+export async function recallTrace(url: string, opts: Record<string, any> = {}) {
   const origin = originOf(url);
   if (!origin) return null;
   const maxAgeMs = Number.isFinite(Number(opts.maxAgeMs)) ? Number(opts.maxAgeMs) : LAST_TRACE_TTL_MS;

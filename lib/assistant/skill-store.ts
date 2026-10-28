@@ -23,7 +23,7 @@ export async function getUserSkills() {
     const r = await chrome.storage.local.get(STORAGE_KEY);
     const list = (r && r[STORAGE_KEY]) || [];
     return Array.isArray(list) ? list : [];
-  } catch (e: any) {
+  } catch (e) {
     return [];
   }
 }

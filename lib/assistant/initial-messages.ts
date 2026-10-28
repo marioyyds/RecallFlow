@@ -29,7 +29,7 @@ export const UNTRUSTED_END = '<<<END_RECALLFLOW_UNTRUSTED_DATA>>>';
  * 净化不可信文本里的定界符，防止内容提前闭合数据块、把后续文本伪装成可信指令。
  * 同时把零宽字符去掉：它们可用来让「看起来一样的文字」绕过字符串匹配。
  */
-export function sanitizeUntrusted(text: any) {
+export function sanitizeUntrusted(text: string) {
   return String(text === undefined || text === null ? '' : text)
     .split(UNTRUSTED_BEGIN).join('[[RF-DATA]]')
     .split(UNTRUSTED_END).join('[[/RF-DATA]]')
@@ -43,7 +43,7 @@ export function sanitizeUntrusted(text: any) {
  * @param {string} body 内容
  * @param {string} [note] 就近重申的提示
  */
-export function renderUntrustedBlock(label: any, body: any, note?: any) {
+export function renderUntrustedBlock(label: string, body: any, note?: any) {
   const safe = sanitizeUntrusted(body);
   if (!safe.trim()) return '';
   return (
@@ -64,7 +64,7 @@ function makeInstructionToken() {
       crypto.getRandomValues(a);
       return Array.from(a).map((x) => x.toString(16).padStart(2, '0')).join('');
     }
-  } catch (e: any) {}
+  } catch (e) {}
   return Math.random().toString(16).slice(2, 10);
 }
 
@@ -130,7 +130,7 @@ export function buildInitialMessagesPure(input: Record<string, any> = {}) {
 }
 
 /** 供测试与调用方断言：这段文本里是否出现了伪造的数据块边界。 */
-export function containsForgedDelimiter(text: any) {
+export function containsForgedDelimiter(text: string) {
   const t = String(text === undefined || text === null ? '' : text);
   return t.includes(UNTRUSTED_BEGIN) || t.includes(UNTRUSTED_END);
 }

@@ -23,7 +23,7 @@ export function parseRef(ref: any) {
  * 模型有时会从帧列表里拿到 frameId 并直接传参，此时 ref 可能仍是顶层形态，
  * 若让 ref 前缀覆盖显式参数，动作会投递到错误的框架。
  */
-export function frameIdFromArgs(args: any) {
+export function frameIdFromArgs(args: Record<string, unknown>) {
   if (!args) return null;
   if (args.frameId !== undefined && args.frameId !== null && args.frameId !== '' && Number.isInteger(Number(args.frameId)) && Number(args.frameId) >= 0) {
     return Number(args.frameId);
@@ -37,7 +37,7 @@ export function frameIdFromArgs(args: any) {
  * 同时删掉 frameId：那个字段只对后台有意义，内容脚本在自己的框架里
  * 不该再看到一个 frameId（否则它可能把动作再转发一次，造成重复执行）。
  */
-export function localTargetArgs(args: any) {
+export function localTargetArgs(args: Record<string, unknown>) {
   const out = Object.assign({}, args || {});
   const p = parseRef(out.ref);
   if (p.frameId != null) out.ref = p.ref;

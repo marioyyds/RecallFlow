@@ -316,6 +316,7 @@ esbuild **支持** enum / namespace / 参数属性；Node strip-only **不支持
 3. 按 §3.1 / §3.2 改 `check-const-assign.mjs` 与 `check-prefix-stability.mjs`（**这是唯一的脚本改动，建议把它写成范围里的显式例外**）。
 4. CI 的 `node-version` 从 `'22'` 改成 `'24'`（见 §6）。
 5. 加 `scripts/ts-resolve.mjs` + 注册器，`run-all-checks.mjs` 的测试步骤加 `--import`。
+   > Batch 6 收口已回收这套脚手架（全仓 specifier 是真实后缀后删除 `ts-resolve*` 与 `--import`）。
 6. 写进 `CODEBUDDY.md`：禁止 enum / namespace / 参数属性（§2.4）。
 
 **Batch 1 —— content-only 16 个文件（**最大收益 + 零新增构建**，强烈推荐先做）**

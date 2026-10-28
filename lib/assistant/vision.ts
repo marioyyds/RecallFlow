@@ -58,7 +58,7 @@ export function shouldSendImage(sentCount: any, cap = MAX_IMAGES_PER_TASK) {
 }
 
 /** 达到上界时的**纯文字**说明（不假装送过图，也不说"看不到图"这种与开关状态矛盾的话 ✗）。 */
-export function imageCapNote(sentCount: any, label: any, cap = MAX_IMAGES_PER_TASK) {
+export function imageCapNote(sentCount: any, label: string, cap = MAX_IMAGES_PER_TASK) {
   const n = Number(sentCount) || 0;
   const c = Number(cap) || 0;
   const what = label ? `（${label}）` : '';
@@ -127,7 +127,7 @@ export function selectScreenshotsForVision(screenshots: any, budget: Record<stri
 export function buildScreenshotMessage(screenshots: any, note = '') {
   const list = Array.isArray(screenshots) ? screenshots.filter((s) => s && s.dataUrl) : [];
   if (!list.length) return null;
-  const content = [
+  const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
     {
       type: 'text',
       text:
@@ -136,7 +136,7 @@ export function buildScreenshotMessage(screenshots: any, note = '') {
     },
   ];
   for (const s of list) {
-    content.push({ type: 'image_url', image_url: { url: String(s.dataUrl) } } as any);
+    content.push({ type: 'image_url', image_url: { url: String(s.dataUrl) } });
   }
   return { role: 'user', content };
 }

@@ -56,7 +56,7 @@ export const VERIFIER_TIMEOUT_MS = 25000;
 const VERIFIER_MAX_TOKENS = 400;
 
 // 返回 { ok, confidence, reason, missing, suggestion } 或 null（校验失败时调用方按“通过”处理，避免阻塞）。
-export async function verifyCompletion(settings: any, { instruction, claim, evidence, pageUrl, pageTitle, taskKind }: any, signal: any) {
+export async function verifyCompletion(settings: any, { instruction, claim, evidence, pageUrl, pageTitle, taskKind }: any, signal: AbortSignal) {
   if (!settings || !settings.apiKey) return null;
   const kind = taskKind === 'read' ? 'read（本次只有读取类操作，没有改动页面）' : 'mutation（本次有页面写操作）';
   const user = [
@@ -97,7 +97,7 @@ export async function verifyCompletion(settings: any, { instruction, claim, evid
       missing: String(parsed.missing || '').slice(0, 300),
       suggestion: String(parsed.suggestion || '').slice(0, 300),
     };
-  } catch (e: any) {
+  } catch (e) {
     // ⚠ 判据只能是 **signal 本身**，不是错误类型。
     //   内部超时（llm.js 里那个 setTimeout → controller.abort()）抛出的也是 AbortError，
     //   与用户按停止**长得一模一样**。原先按 `e.name === 'AbortError'` 判中断，
@@ -169,7 +169,7 @@ export function buildStuckReflection(message: any, opts: Record<string, any> = {
   return head + '\n' + advice + exit;
 }
 
-function adviceFor(reason: any, attempt: any) {
+function adviceFor(reason: string, attempt: any) {
   if (reason === 'maxSameToolCalls') {
     return (
       '你正在用**完全相同的参数**重复同一个动作。先确认它是不是幂等轮询（等渲染 / 等跳转）：\n' +

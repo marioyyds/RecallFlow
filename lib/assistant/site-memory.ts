@@ -7,7 +7,7 @@ const MAX_ORIGINS = 50;
 
 // 站点键：普通网页用 origin；本地页（file://）用它所在目录 ——
 // `URL.origin` 对本地页恒为字符串 'null'，若直接用，所有本地文件会混成同一个站点。
-function originOf(url: any) {
+function originOf(url: string) {
   return siteKeyOf(url);
 }
 
@@ -16,7 +16,7 @@ async function readAll() {
     const d = await chrome.storage.local.get(KEY);
     const m: any = d && d[KEY];
     return m && typeof m === 'object' ? m : {};
-  } catch (e: any) {
+  } catch (e) {
     return {};
   }
 }
@@ -24,10 +24,10 @@ async function readAll() {
 async function writeAll(all: any) {
   try {
     await chrome.storage.local.set({ [KEY]: all });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
-function normalizeKey(label: any, role: any, tag: any) {
+function normalizeKey(label: string, role: any, tag: any) {
   const l = String(label || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40);
   if (!l) return '';
   return (role || tag || 'el') + '::' + l;
@@ -35,12 +35,12 @@ function normalizeKey(label: any, role: any, tag: any) {
 
 function latestTs(site: any) {
   let ts = 0;
-  for (const v of Object.values(site || {}) as any[]) ts = Math.max(ts, Number(v && v.updatedAt) || 0);
+  for (const v of Object.values(site || {}) as Array<{ updatedAt?: number }>) ts = Math.max(ts, Number(v && v.updatedAt) || 0);
   return ts;
 }
 
 // 记住一个成功定位的元素（同 origin 内按 语义 key 去重，累计命中次数）。
-export async function rememberElement(url: any, info: any) {
+export async function rememberElement(url: string, info: any) {
   const origin = originOf(url);
   if (!origin || !info || !info.selector) return;
   const key = normalizeKey(info.label, info.role, info.tag);
@@ -71,7 +71,7 @@ export async function rememberElement(url: any, info: any) {
 // 这段文本会拼进**系统提示**，而系统提示是请求前缀的起点。
 // 用时间戳做次级键时，命中数相同的条目会随使用悄悄换位，整段前缀缓存随之失效；
 // 换成稳定键后，只要集合内容不变，拼出来的文本就逐字节一致，缓存才有机会命中。
-export async function getSiteHints(url: any, limit = 12) {
+export async function getSiteHints(url: string, limit = 12) {
   const origin = originOf(url);
   if (!origin) return [];
   const all = await readAll();
@@ -87,7 +87,7 @@ export async function getSiteHints(url: any, limit = 12) {
     .slice(0, limit);
 }
 
-export async function clearSiteMemory(url: any) {
+export async function clearSiteMemory(url: string) {
   const all = await readAll();
   if (url) {
     const origin = originOf(url);

@@ -12,20 +12,20 @@
 // 不是一回事，因此刻意不沿用同名 —— 同名会让"搬错函数"这种错误变得不可见。
 
 /** 去掉 HTML 标签并解常见实体（用于搜索结果标题/摘要）。 */
-export function stripHtmlTags(html: any) {
+export function stripHtmlTags(html: string) {
   return String(html || '')
     .replace(/<[^>]*>/g, ' ')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
     .replace(/&ensp;/g, ' ').replace(/&emsp;/g, ' ').replace(/&middot;/g, '·').replace(/&mdash;/g, '—').replace(/&ndash;/g, '–')
-    .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(Number(n)); } catch (e: any) { return ''; } })
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch (e: any) { return ''; } })
+    .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(Number(n)); } catch (e) { return ''; } })
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch (e) { return ''; } })
     .replace(/\s+/g, ' ')
     .trim();
 }
 
 /** 从 HTML 源码里提取 <title> 文本（去标签、解实体、限长）。 */
-export function extractHtmlTitle(html: any) {
+export function extractHtmlTitle(html: string) {
   const m = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return m ? stripHtmlTags(m[1]).slice(0, 120) : '';
 }
@@ -49,13 +49,13 @@ export function resolveSearchUrl(href: any, engine: any) {
     }
     const abs = new URL(href, engine === 'ddg' ? 'https://duckduckgo.com' : 'https://www.bing.com');
     return /^https?:\/\//i.test(abs.href) ? abs.href : '';
-  } catch (e: any) {
+  } catch (e) {
     return '';
   }
 }
 
 /** 把搜索结果的 HTML 解析成 {title,url,snippet} 列表（按引擎选择器差异处理）。 */
-export function parseSearchResults(html: any, engine: any) {
+export function parseSearchResults(html: string, engine: any) {
   const out = [];
   const src = String(html || '');
   if (engine === 'bing') {
@@ -107,7 +107,7 @@ export function isAbortLikeError(e: any) {
  * 并写进了给用户的报告 —— 而真相是**15 秒没响应、我们根本没拿到任何内容**，
  * 所以那时它**无从判断**页面类型。**错误归因比没有归因更糟。**
  */
-export function describeFetchError(e: any, url: any, timeoutMs: any) {
+export function describeFetchError(e: any, url: string, timeoutMs: number) {
   const u = String(url || '');
   if (isAbortLikeError(e)) {
     const secs = Math.round((Number(timeoutMs) || 15000) / 1000);
@@ -136,7 +136,7 @@ export function describeFetchError(e: any, url: any, timeoutMs: any) {
  *
  * 回落到**可识别的 URL 尾段**（README.md / www.csdn.net），实在没有才用占位。
  */
-export function citationTitleFor(pageTitle: any, url: any) {
+export function citationTitleFor(pageTitle: any, url: string) {
   const t = stripHtmlTags(String(pageTitle || '').trim());
   if (t) return t;
   const u = String(url || '');
@@ -144,7 +144,7 @@ export function citationTitleFor(pageTitle: any, url: any) {
     const parsed = new URL(u);
     const last = decodeURIComponent(parsed.pathname.replace(/\/+$/, '').split('/').filter(Boolean).pop() || '');
     return last || parsed.hostname || u || '（无标题页面）';
-  } catch (e: any) {
+  } catch (e) {
     return u || '（无标题页面）';
   }
 }
@@ -160,7 +160,7 @@ export function citationTitleFor(pageTitle: any, url: any) {
     total += value.byteLength;
     chunks.push(value);
     if (total >= maxBytes) {
-      try { await reader.cancel(); } catch (e: any) {}
+      try { await reader.cancel(); } catch (e) {}
       break;
     }
   }
@@ -187,7 +187,7 @@ export function decodeBuffer(buf: any, contentType: any) {
   const charset = ((contentType || '').match(/charset=([\w-]+)/i) || [])[1];
   try {
     return new TextDecoder((charset || 'utf-8').trim().toLowerCase());
-  } catch (e: any) {
+  } catch (e) {
     return new TextDecoder('utf-8');
   }
 }
@@ -216,7 +216,7 @@ export async function searchWeb(query: any, maxResults = 6) {
       const raw = decodeBuffer(buf, ct).decode(buf);
       const results = parseSearchResults(raw, engine.name);
       if (results.length) return results.slice(0, maxResults);
-    } catch (e: any) {
+    } catch (e) {
       // 尝试下一个引擎
     }
   }

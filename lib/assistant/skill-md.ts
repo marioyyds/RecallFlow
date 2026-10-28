@@ -35,7 +35,7 @@ function parseScalar(raw: any) {
 }
 
 // 解析 SKILL.md 文本 -> { data: frontmatter 对象, body: markdown 正文 }
-export function parseSkillMd(text: any) {
+export function parseSkillMd(text: string) {
   const str = String(text || '');
   const m = str.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/);
   if (!m) {
@@ -93,7 +93,7 @@ export function serializeSkillMd(skill: any) {
 }
 
 // 把 SKILL.md 解析结果（data + body）转为 RecallFlow 内部标准技能对象
-export function mdToSkill(text: any) {
+export function mdToSkill(text: string) {
   const { data, body } = parseSkillMd(text);
   const x = {
     intents: Array.isArray(data['x-recallflow-intents']) ? data['x-recallflow-intents'] : [],

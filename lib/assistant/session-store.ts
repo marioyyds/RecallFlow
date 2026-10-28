@@ -45,7 +45,7 @@ async function writeIndex(index: any) {
   if (!area) return;
   try {
     await area.set({ [INDEX_KEY]: index });
-  } catch (e: any) {}
+  } catch (e) {}
 }
 
 // 删除索引中已不存在的会话内容 key（prune 后清理存储）。
@@ -55,14 +55,14 @@ async function dropBodiesNotInIndex(index: any) {
   let all = null;
   try {
     all = await area.get(null);
-  } catch (e: any) {
+  } catch (e) {
     return;
   }
   if (!all || typeof all !== 'object') return;
   const stale = Object.keys(all).filter((k) => k.startsWith(SESSION_PREFIX) && !index[k.slice(SESSION_PREFIX.length)]);
   for (const k of stale) {
     bodyCache.delete(k.slice(SESSION_PREFIX.length));
-    try { await area.remove(k); } catch (e: any) {}
+    try { await area.remove(k); } catch (e) {}
   }
 }
 
@@ -81,10 +81,10 @@ async function migrateLegacy(table: any) {
   }
   indexCache = pruneIndex(merged);
   if (area && Object.keys(writes).length) {
-    try { await area.set(Object.assign(writes, { [INDEX_KEY]: indexCache })); } catch (e: any) {}
+    try { await area.set(Object.assign(writes, { [INDEX_KEY]: indexCache })); } catch (e) {}
   }
   if (area) {
-    try { await area.remove(LEGACY_KEY); } catch (e: any) {}
+    try { await area.remove(LEGACY_KEY); } catch (e) {}
   }
 }
 
@@ -100,7 +100,7 @@ async function loadIndex() {
   try {
     const d = await area.get(INDEX_KEY);
     idx = d && d[INDEX_KEY];
-  } catch (e: any) {
+  } catch (e) {
     idx = null;
   }
   if (idx && typeof idx === 'object') indexCache = idx;
@@ -109,7 +109,7 @@ async function loadIndex() {
   try {
     const d = await area.get(LEGACY_KEY);
     legacy = d && d[LEGACY_KEY];
-  } catch (e: any) {
+  } catch (e) {
     legacy = null;
   }
   if (legacy && typeof legacy === 'object') {
@@ -148,7 +148,7 @@ export async function saveAgentSession(session: any) {
   if (!area) return;
   try {
     await area.set({ [SESSION_PREFIX + id]: body, [INDEX_KEY]: indexCache });
-  } catch (e: any) {}
+  } catch (e) {}
   if (evicted) await dropBodiesNotInIndex(indexCache);
 }
 
@@ -167,7 +167,7 @@ export async function loadAgentSession(id: any) {
   try {
     const d = await area.get(SESSION_PREFIX + id);
     body = d && d[SESSION_PREFIX + id];
-  } catch (e: any) {
+  } catch (e) {
     body = null;
   }
   if (body && typeof body === 'object') {
@@ -189,8 +189,8 @@ export async function removeAgentSession(id: any) {
   indexCache = pruneIndex(indexCache);
   const area = storageArea();
   if (!area) return;
-  try { await area.set({ [INDEX_KEY]: indexCache }); } catch (e: any) {}
-  try { await area.remove(SESSION_PREFIX + id); } catch (e: any) {}
+  try { await area.set({ [INDEX_KEY]: indexCache }); } catch (e) {}
+  try { await area.remove(SESSION_PREFIX + id); } catch (e) {}
 }
 
 export async function listAgentSessions() {
@@ -201,7 +201,7 @@ export async function listAgentSessions() {
   if (!ids.length) return [];
   const keys = ids.map((id) => SESSION_PREFIX + id);
   let all = null;
-  try { all = await area.get(keys); } catch (e: any) { all = null; }
+  try { all = await area.get(keys); } catch (e) { all = null; }
   const out = [];
   for (const id of ids) {
     const k = SESSION_PREFIX + id;

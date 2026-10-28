@@ -26,7 +26,7 @@
  * 子框架（frameId≠0）需把框架内坐标换算为顶层坐标（`resolveFrameClickPoint`），
  * 换算不可靠时**退回内容脚本结果，绝不在错误坐标上点击**。
  */
-export async function clickElement(deps: any, args: any) {
+export async function clickElement(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const contentRes = await deps.executePageTool(ctx.tabId, 'click', args, ctx);
   const target = await deps.resolveTarget(ctx.tabId, args);
@@ -58,13 +58,13 @@ export async function clickElement(deps: any, args: any) {
         Math.round(point.x) + ',' + Math.round(point.y) + '）' +
         (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
-  } catch (e: any) {
+  } catch (e) {
     return contentRes;
   }
 }
 
 /** click_at：按视口坐标直接派发可信点击（合成点击无效的顽固站点用它）。 */
-export async function clickAt(deps: any, args: any) {
+export async function clickAt(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   const x = Number(args.x);
   const y = Number(args.y);
@@ -82,13 +82,13 @@ export async function clickAt(deps: any, args: any) {
       verification: deps.buildActionVerification(deps.observedChange(before, after), 'CDP 坐标点击已派发'),
       result: '已在坐标 (' + x + ',' + y + ') 点击' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: 'CDP 点击失败：' + deps.summarizeCdpError(e) };
   }
 }
 
 /** hover_element：把鼠标移到目标元素上。 */
-export async function hoverElement(deps: any, args: any) {
+export async function hoverElement(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '悬停需要 CDP 输入层（请在设置中开启）。' };
   const target = await deps.resolveTarget(ctx.tabId, args);
@@ -108,13 +108,13 @@ export async function hoverElement(deps: any, args: any) {
       verification: deps.buildActionVerification(deps.observedChange(before, after), 'CDP 悬停已派发（伪类变化可能不产生 DOM 变更）'),
       result: '已悬停到元素（坐标 ' + target.rect.centerX + ',' + target.rect.centerY + '）' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '悬停失败：' + deps.summarizeCdpError(e) };
   }
 }
 
 /** drag_element：从起点拖到终点。需要能**同时**定位两端。 */
-export async function dragElement(deps: any, args: any) {
+export async function dragElement(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '拖拽需要 CDP 输入层（请在设置中开启）。' };
   const from = await deps.resolveTarget(ctx.tabId, { ref: args.fromRef, selector: args.fromSelector, text: args.fromText });
@@ -132,13 +132,13 @@ export async function dragElement(deps: any, args: any) {
       verification: deps.buildActionVerification(deps.observedChange(before, after), 'CDP 拖拽已派发'),
       result: '已从 (' + from.rect.centerX + ',' + from.rect.centerY + ') 拖拽到 (' + to.rect.centerX + ',' + to.rect.centerY + ')' + (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '拖拽失败：' + deps.summarizeCdpError(e) };
   }
 }
 
 /** upload_file：把本地文件设置到 file input 上。 */
-export async function uploadFile(deps: any, args: any) {
+export async function uploadFile(deps: any, args: Record<string, unknown>) {
   const ctx = deps.ctx;
   if (!deps.cdpAllowed(ctx)) return { ok: false, result: '文件上传需要 CDP（请在设置中开启）。' };
   const files = Array.isArray(args.files) ? args.files.filter(Boolean) : args.files ? [args.files] : [];
@@ -156,7 +156,7 @@ export async function uploadFile(deps: any, args: any) {
       verification: deps.buildActionVerification('unobservable', '已向文件输入框设置文件（未做页面变化观测）'),
       result: '已向文件输入框设置 ' + files.length + ' 个文件：' + files.join('、'),
     };
-  } catch (e: any) {
+  } catch (e) {
     return { ok: false, result: '文件上传失败：' + deps.summarizeCdpError(e) };
   }
 }
@@ -165,7 +165,7 @@ export async function uploadFile(deps: any, args: any) {
 export const CDP_INPUT_TOOLS = new Set(['click_element', 'click_at', 'hover_element', 'drag_element', 'upload_file']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleCdpInputTool(name: any, args: any, deps: any) {
+export async function handleCdpInputTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'click_element') return await clickElement(deps, args);
   if (name === 'click_at') return await clickAt(deps, args);
   if (name === 'hover_element') return await hoverElement(deps, args);

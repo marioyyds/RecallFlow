@@ -54,11 +54,11 @@ function crosses(count: any, thresholds: any) {
   return thresholds.indexOf(count) !== -1;
 }
 
-function clipArgs(args: any) {
+function clipArgs(args: Record<string, unknown>) {
   let text;
   try {
     text = JSON.stringify(args || {});
-  } catch (e: any) {
+  } catch (e) {
     text = String(args);
   }
   text = String(text);

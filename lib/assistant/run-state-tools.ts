@@ -16,14 +16,14 @@ import { rangeSafe, sliceSafe } from '../shared/surrogates.ts';
 import { summarizeRunTrace, formatRunMetrics } from './run-metrics.ts';
 
 /** 更新计划条（原 update_plan）。 */
-export function updatePlan(ctx: any, args: any) {
-  const raw = Array.isArray(args && args.items) ? args.items : [];
+export function updatePlan(ctx: any, args: Record<string, unknown>) {
+  const raw: Array<Record<string, unknown>> = Array.isArray(args && args.items) ? (args.items as Array<Record<string, unknown>>) : [];
   const plan = raw
-    .filter((it: any) => it && typeof it.text === 'string' && it.text.trim())
+    .filter((it: Record<string, unknown>) => it && typeof it.text === 'string' && it.text.trim())
     .slice(0, 20)
-    .map((it: any) => ({
+    .map((it: Record<string, unknown>) => ({
       text: sliceSafe(String(it.text).trim(), 0, 120),
-      status: ['pending', 'in_progress', 'done'].includes(it.status) ? it.status : 'pending',
+      status: ['pending', 'in_progress', 'done'].includes(it.status as string) ? it.status : 'pending',
     }));
   ctx.plan = plan;
   const text = plan
@@ -39,7 +39,7 @@ export function updatePlan(ctx: any, args: any) {
  * 跨「继续」恢复后旧 id 的内容已释放。若只说"未找到"，模型会以为是自己记错了 id
  * 而反复重试同一个 id（实测空耗）。
  */
-export function expandResult(ctx: any, args: any) {
+export function expandResult(ctx: any, args: Record<string, unknown>) {
   const id = String((args && args.id) || '').trim();
   const store = ctx && ctx.resultStore;
   const text = store && typeof store.get === 'function' ? store.get(id) : null;
@@ -66,7 +66,7 @@ export function expandResult(ctx: any, args: any) {
 }
 
 /** 读取结构化运行轨迹（原 get_run_trace）。 */
-export async function getRunTrace(deps: any, args: any) {
+export async function getRunTrace(deps: any, args: Record<string, unknown>) {
   const rec = args && args.runId ? await deps.getTrace(String(args.runId)) : (await deps.listTraces())[0];
   if (!rec) return { ok: true, result: '暂无运行轨迹。' };
   const lines = (rec.entries || []).map((e: any) => {
@@ -87,7 +87,7 @@ export async function getRunTrace(deps: any, args: any) {
 export const RUN_STATE_TOOLS = new Set(['update_plan', 'expand_result', 'get_run_trace']);
 
 /** 统一入口（由 executeTool 分派）。返回 null 表示"不属于本族"。 */
-export async function handleRunStateTool(name: any, args: any, deps: any) {
+export async function handleRunStateTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'update_plan') return updatePlan(deps.ctx, args);
   if (name === 'expand_result') return expandResult(deps.ctx, args);
   if (name === 'get_run_trace') return await getRunTrace(deps, args);

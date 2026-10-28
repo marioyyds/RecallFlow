@@ -1,3 +1,4 @@
+import type { Caught } from './errors.ts';
 // 技能加载族（load_skill / install_skill / 以及 SkillHub 安装链路）—— C-1 拆出的第 10 族。
 //
 // 为什么这两者算一族：都围绕"技能"这一对象 —— 一个按需加载使用说明，一个从 SkillHub 安装。
@@ -44,7 +45,7 @@ export const COMMON_OPERATING_DISCIPLINE = [
 ].join('\n');
 
 /** load_skill：按需返回某技能的完整使用说明。 */
-export async function loadSkill(deps: any, args: any) {
+export async function loadSkill(deps: any, args: Record<string, unknown>) {
   // 进阶版 A：按需把技能的完整使用说明返回给模型（不预先注入，省 token、由模型自选）。
   const name = String((args && args.name) || '').trim();
   if (!name) return { ok: false, result: '缺少技能 name 参数。' };
@@ -79,7 +80,7 @@ export async function loadSkill(deps: any, args: any) {
 }
 
 /** install_skill：从 SkillHub 安装技能。 */
-export async function installSkill(deps: any, args: any) {
+export async function installSkill(deps: any, args: Record<string, unknown>) {
   const identifier = String((args && (args.identifier || args.url)) || '').trim();
   if (!identifier) return { ok: false, result: '缺少技能 identifier 参数。' };
   return await deps.installSkillFromSkillHub(identifier);
@@ -146,7 +147,7 @@ function toStringList(value: any, limit: any) {
 }
 
 /** save_skill：新增或覆盖一个自定义技能。 */
-export async function saveSkill(deps: any, args: any) {
+export async function saveSkill(deps: any, args: Record<string, unknown>) {
   const a = args || {};
   const name = normalizeSkillName(a.name);
   if (!name) {
@@ -203,10 +204,10 @@ export async function saveSkill(deps: any, args: any) {
   let saved = null;
   try {
     saved = isUpdate ? await deps.updateUserSkill(name, payload) : await deps.addUserSkill(payload);
-  } catch (e: any) {
+  } catch (e) {
     return {
       ok: false,
-      result: '保存技能失败：' + ((e && e.message) || String(e)) + '（本地存储可能已满或不可用，可在技能页确认）。',
+      result: '保存技能失败：' + ((e && (e as Caught).message) || String(e)) + '（本地存储可能已满或不可用，可在技能页确认）。',
     };
   }
   // updateUserSkill 对不存在的名字返回 null；若真发生，如实报错而不是假报成功。
@@ -225,7 +226,7 @@ export async function saveSkill(deps: any, args: any) {
 export const SKILL_TOOLS = new Set(['load_skill', 'install_skill', 'save_skill']);
 
 /** 统一入口。返回 null 表示"不属于本族"。 */
-export async function handleSkillTool(name: any, args: any, deps: any) {
+export async function handleSkillTool(name: string, args: Record<string, unknown>, deps: any) {
   if (name === 'load_skill') return await loadSkill(deps, args);
   if (name === 'install_skill') return await installSkill(deps, args);
   if (name === 'save_skill') return await saveSkill(deps, args);

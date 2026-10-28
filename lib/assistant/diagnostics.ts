@@ -1,3 +1,4 @@
+import type { Caught } from './errors.ts';
 // 诊断类工具（read_console / read_network / list_downloads）→ 收敛为 read_diagnostics(kind)。
 //
 // C-4 合并第 3 档（见 docs/tool-merge-plan.md）：三个工具都是"读环境事实"，权限完全一致（全是 read），
@@ -11,7 +12,7 @@
 // 不会触发新下载。
 
 /** 读取 console 记录（原 read_console 的实现）。 */
-export async function readConsole(sendTabMessage: any, tabId: any, args: any) {
+export async function readConsole(sendTabMessage: any, tabId: number, args: Record<string, unknown>) {
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetConsole' });
@@ -22,13 +23,13 @@ export async function readConsole(sendTabMessage: any, tabId: any, args: any) {
     if (!entries.length) return { ok: true, result: '暂无 console 记录。' };
     const text = entries.map((e: any) => '[' + e.level + '] ' + e.text + (e.stack ? '\n' + e.stack : '')).join('\n');
     return { ok: true, result: '最近 console 记录（' + entries.length + ' 条）：\n' + text };
-  } catch (e: any) {
-    return { ok: false, result: '读取 console 失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '读取 console 失败：' + (e as Caught).message };
   }
 }
 
 /** 读取网络请求记录（原 read_network 的实现）。 */
-export async function readNetwork(sendTabMessage: any, tabId: any, args: any) {
+export async function readNetwork(sendTabMessage: any, tabId: number, args: Record<string, unknown>) {
   if (!tabId) return { ok: false, result: '无法定位当前标签页（可能不在前台页面）。' };
   try {
     const res = await sendTabMessage(tabId, { type: 'kbGetNetwork' });
@@ -48,13 +49,13 @@ export async function readNetwork(sendTabMessage: any, tabId: any, args: any) {
       })
       .join('\n');
     return { ok: true, result: '最近网络请求（' + entries.length + ' 条）：\n' + text };
-  } catch (e: any) {
-    return { ok: false, result: '读取网络请求失败：' + e.message };
+  } catch (e) {
+    return { ok: false, result: '读取网络请求失败：' + (e as Caught).message };
   }
 }
 
 /** 列出本任务已捕获的下载（原 list_downloads 的实现）。 */
-export function listDownloads(getDownloads: any, tabId: any) {
+export function listDownloads(getDownloads: any, tabId: number) {
   const list = getDownloads(tabId);
   if (!list.length) return { ok: true, result: '本任务暂未捕获到下载。' };
   return {
@@ -72,7 +73,7 @@ export const DIAGNOSTIC_KINDS = ['console', 'network', 'downloads'];
  * `kind` 是**必填**（schema 里 required）。缺省时返回明确的错误而不是猜一个默认值 ——
  * 猜默认会让"想看网络却拿到 console"这种错误静默发生，模型只会以为"没有网络请求"。
  */
-export async function readDiagnostics(deps: any, args: any) {
+export async function readDiagnostics(deps: any, args: Record<string, unknown>) {
   const kind = String((args && args.kind) || '').trim();
   if (!kind) {
     return { ok: false, result: 'read_diagnostics 需要 kind 参数，取值：' + DIAGNOSTIC_KINDS.join(' / ') + '。' };
