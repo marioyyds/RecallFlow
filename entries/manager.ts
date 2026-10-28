@@ -15,25 +15,34 @@ import {
   parseTags,
   bindStarKeyboard,
 } from '../lib/shared/utils.ts';
-import { getBook, setBook, subscribeKnowledgeChanges } from '../lib/shared/store.js';
+import { getBook, setBook, subscribeKnowledgeChanges } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 import { renderMarkdown } from '../lib/page/markdown.ts';
-import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.js';
+import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.ts';
 
-let bookCache = {};
+/** 知识库条目 / 导入数据：形状由 store 决定，本页只按需读字段。 */
+type Dyn = Record<string, any>;
+
+/** 按 id 取元素：id 全部写死在 manager.html 里（取不到就是模板坏了，原代码也不检查）。 */
+const $ = (id: string): any => document.getElementById(id);
+
+/** 事件目标 → 最近的匹配元素（原代码直接 closestEl(e.target, ...)）。 */
+const closestEl = (target: EventTarget | null, selector: string): any =>
+  target ? (target as Element).closest(selector) : null;
+
+let bookCache: Dyn = {};
 let currentType = 'all';
 let currentTag = 'all';
 let currentStar = 'all';
 let sortBy = 'updated';
 const KB_PAGE_SIZE = 12;
 let currentPage = 1;
-let editingNoteId = null;
-let selectedIds = new Set();
+let editingNoteId: string | null = null;
+let selectedIds = new Set<string>();
 
-const $ = (id) => document.getElementById(id);
 let docItemId = '';
-let docPreviousFocus = null;
-let docKeyHandler = null;
+let docPreviousFocus: HTMLElement | null = null;
+let docKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
 async function loadCache() {
   bookCache = await getBook();
@@ -43,10 +52,10 @@ async function persist() {
   await setBook(bookCache);
 }
 
-function allTags() {
-  const map = {};
+function allTags(): string[] {
+  const map: Record<string, number> = {};
   Object.values(bookCache).forEach((it) => {
-    (it.tags || []).forEach((t) => {
+    (it.tags || []).forEach((t: string) => {
       if (t) map[t] = (map[t] || 0) + 1;
     });
   });
@@ -77,7 +86,7 @@ function renderTagFilter() {
   el.innerHTML = h;
 }
 
-function filtered() {
+function filtered(): Dyn[] {
   let items = Object.values(bookCache);
   if (currentType !== 'all') {
     items = items.filter((i) => (i.type || 'wrong') === currentType);
@@ -111,7 +120,7 @@ function renderBulkBar() {
   }
 }
 
-function toggleSelect(id) {
+function toggleSelect(id: string) {
   if (selectedIds.has(id)) {
     selectedIds.delete(id);
   } else {
@@ -119,11 +128,12 @@ function toggleSelect(id) {
   }
   renderBulkBar();
   document.querySelectorAll('.item-select').forEach((cb) => {
-    cb.checked = selectedIds.has(cb.closest('.item').dataset.id);
+    const box = cb as HTMLInputElement;
+    box.checked = selectedIds.has((box.closest('.item') as HTMLElement).dataset.id as string);
   });
 }
 
-function itemHtml(it) {
+function itemHtml(it: Dyn): string {
   const editing = editingNoteId === it.id;
   const titleHtml = editing
     ? `<input id="title-editor" class="note-editor title-editor" value="${esc(it.title)}" placeholder="标题">`
@@ -165,13 +175,13 @@ function itemHtml(it) {
 }
 
 // 就地更新单条目星级（避免整列表 render() 丢失焦点 / 滚动位置）
-function updateItemStar(itemEl, v) {
+function updateItemStar(itemEl: Element, v: number) {
   const bar = itemEl.querySelector('.star-bar');
   if (bar) {
     bar.querySelectorAll('.star-cell').forEach((c, i) => {
       const on = i < v;
       c.classList.toggle('on', on);
-      c.tabIndex = i === v - 1 ? 0 : -1;
+      (c as HTMLElement).tabIndex = i === v - 1 ? 0 : -1;
       c.setAttribute('aria-checked', String(on));
     });
   }
@@ -179,7 +189,7 @@ function updateItemStar(itemEl, v) {
   if (lvl) lvl.outerHTML = levelNameHtml(v);
 }
 
-function renderPagination(total, pageCount) {
+function renderPagination(total: number, pageCount: number) {
   const nav = $('kb-pagination');
   if (!nav) return;
   const current = clampPage(currentPage, pageCount);
@@ -229,7 +239,7 @@ function render() {
 function renderActiveFilters() {
   const el = $('active-filter-list');
   const labels = [];
-  if (currentType !== 'all') labels.push('类型：' + ((ITEM_TYPES.find((t) => t.id === currentType) || {}).name || currentType));
+  if (currentType !== 'all') labels.push('类型：' + (ITEM_TYPES.find((t) => t.id === currentType)?.name || currentType));
   if (currentTag !== 'all') labels.push('标签：' + currentTag);
   if (currentStar !== 'all') labels.push('星级：' + currentStar);
   const q = $('search').value.trim();
@@ -243,15 +253,16 @@ function renderActiveFilters() {
 
 function renderStats() {
   const all = Object.values(bookCache);
-  $('st-total').textContent = all.length;
+  $('st-total').textContent = String(all.length);
   [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].forEach((s) => {
-    $('st-' + s).textContent = all.filter((i) => Number(i.status) === s).length;
+    $('st-' + s).textContent = String(all.filter((i) => Number(i.status) === s).length);
   });
   document.querySelectorAll('.stars-lbl').forEach((el) => {
-    el.innerHTML = starBarHtml(Number(el.dataset.stars), false) + ' ' + (STAR_LEVELS[Number(el.dataset.stars)] || {}).name;
+    const stars = Number((el as HTMLElement).dataset.stars);
+    el.innerHTML = starBarHtml(stars, false) + ' ' + (STAR_LEVELS[stars] || {}).name;
   });
   document.querySelectorAll('.stat-card').forEach((el) => {
-    el.classList.toggle('active', el.dataset.s === currentStar);
+    el.classList.toggle('active', (el as HTMLElement).dataset.s === currentStar);
   });
 }
 
@@ -282,11 +293,11 @@ async function createNote() {
   if (input) input.focus();
 }
 
-function toast(msg, undoFn) {
+function toast(msg: string, undoFn?: (() => unknown) | null) {
   showToast(msg, { undoFn, duration: 4000 });
 }
 
-function showConfirm(msg) {
+function showConfirm(msg: string): Promise<boolean> {
   return new Promise((resolve) => {
     const overlay = $('confirm-overlay');
     const dialog = overlay.querySelector('.confirm-dialog');
@@ -295,21 +306,21 @@ function showConfirm(msg) {
     const prevFocus = document.activeElement;
     const yes = $('confirm-yes');
     const no = $('confirm-no');
-    const cleanup = (result) => {
+    const cleanup = (result: boolean) => {
       overlay.classList.add('hidden');
       overlay.removeEventListener('click', onBackdrop);
       document.removeEventListener('keydown', onKey);
       yes.removeEventListener('click', onYes);
       no.removeEventListener('click', onNo);
-      if (prevFocus && prevFocus.focus) prevFocus.focus();
+      if (prevFocus && (prevFocus as HTMLElement).focus) (prevFocus as HTMLElement).focus();
       resolve(result);
     };
     const onYes = () => cleanup(true);
     const onNo = () => cleanup(false);
-    const onBackdrop = (e) => {
+    const onBackdrop = (e: Event) => {
       if (e.target === overlay) cleanup(false);
     };
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         cleanup(false);
         return;
@@ -337,8 +348,8 @@ function showConfirm(msg) {
   });
 }
 
-function typeName(id) {
-  return (ITEM_TYPES.find((item) => item.id === id) || {}).name || id || '未分类';
+function typeName(id: string): string {
+  return ITEM_TYPES.find((item) => item.id === id)?.name || id || '未分类';
 }
 
 function closeDocument() {
@@ -358,11 +369,11 @@ function closeDocument() {
   docItemId = '';
 }
 
-function openDocument(id) {
+function openDocument(id: string) {
   const item = bookCache[id];
   if (!item) return;
   docItemId = id;
-  docPreviousFocus = document.activeElement;
+  docPreviousFocus = document.activeElement as HTMLElement | null;
   $('doc-title').textContent = item.title || '未命名文档';
   const tags = Array.isArray(item.tags) && item.tags.length ? ' · ' + item.tags.join(' / ') : '';
   $('doc-meta').textContent = typeName(item.type) + tags + ' · ' + fmtTime(item.updatedAt);
@@ -376,7 +387,7 @@ function openDocument(id) {
   overlay.classList.remove('hidden');
   document.body.classList.add('modal-open');
   $('doc-close').focus();
-  docKeyHandler = (e) => {
+  docKeyHandler = (e: KeyboardEvent) => {
     if (!overlay.isConnected || overlay.classList.contains('hidden')) return;
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -411,7 +422,7 @@ async function bulkDelete() {
   const ok = await showConfirm('确定删除 ' + count + ' 项？');
   if (!ok) return;
 
-  const backup = {};
+  const backup: Dyn = {};
   for (const id of selectedIds) {
     if (bookCache[id]) backup[id] = { ...bookCache[id] };
   }
@@ -429,16 +440,16 @@ async function bulkDelete() {
   });
 }
 
-$('type-tabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.type-tab');
+$('type-tabs').addEventListener('click', (e: Event) => {
+  const btn = closestEl(e.target, '.type-tab');
   if (!btn) return;
   currentType = btn.dataset.type;
   currentPage = 1;
   render();
 });
 
-$('tag-filter').addEventListener('click', (e) => {
-  const chip = e.target.closest('.tag-filter-chip');
+$('tag-filter').addEventListener('click', (e: Event) => {
+  const chip = closestEl(e.target, '.tag-filter-chip');
   if (!chip) return;
   currentTag = chip.dataset.tag;
   currentPage = 1;
@@ -447,7 +458,7 @@ $('tag-filter').addEventListener('click', (e) => {
 
 document.querySelectorAll('.stat-card').forEach((el) => {
   el.addEventListener('click', () => {
-    currentStar = el.dataset.s;
+    currentStar = (el as HTMLElement).dataset.s as string;
     currentPage = 1;
     render();
   });
@@ -465,16 +476,16 @@ $('clear-filters').addEventListener('click', () => {
   currentType = 'all'; currentTag = 'all'; currentStar = 'all'; $('search').value = ''; currentPage = 1; render();
 });
 
-$('sort-select').addEventListener('change', (e) => {
-  sortBy = e.target.value;
+$('sort-select').addEventListener('change', (e: Event) => {
+  sortBy = (e.target as HTMLSelectElement).value;
   currentPage = 1;
   render();
 });
 
 $('add-note-btn').addEventListener('click', createNote);
 
-$('kb-pagination').addEventListener('click', (e) => {
-  const btn = e.target.closest('.kb-page-btn');
+$('kb-pagination').addEventListener('click', (e: Event) => {
+  const btn = closestEl(e.target, '.kb-page-btn');
   if (!btn || btn.disabled) return;
   const page = Number(btn.dataset.page);
   if (!Number.isFinite(page) || page < 1) return;
@@ -486,7 +497,7 @@ $('kb-pagination').addEventListener('click', (e) => {
 
 $('doc-close').addEventListener('click', closeDocument);
 $('doc-close-bottom').addEventListener('click', closeDocument);
-$('doc-overlay').addEventListener('click', (e) => {
+$('doc-overlay').addEventListener('click', (e: Event) => {
   if (e.target === $('doc-overlay')) closeDocument();
 });
 $('doc-open').addEventListener('click', () => {
@@ -502,8 +513,8 @@ $('doc-edit').addEventListener('click', () => {
   const input = $('title-editor') || $('note-editor');
   if (input) input.focus();
 });
-$('doc-content').addEventListener('click', (e) => {
-  const btn = e.target.closest('.code-copy');
+$('doc-content').addEventListener('click', (e: Event) => {
+  const btn = closestEl(e.target, '.code-copy');
   if (!btn) return;
   const wrap = btn.closest('.code-wrap');
   const codeEl = wrap && wrap.querySelector('code');
@@ -514,18 +525,18 @@ $('doc-content').addEventListener('click', (e) => {
   }).catch(() => {});
 });
 
-$('list').addEventListener('click', async (e) => {
-  const itemEl = e.target.closest('.item');
+$('list').addEventListener('click', async (e: Event) => {
+  const itemEl = closestEl(e.target, '.item');
   if (!itemEl) return;
   const id = itemEl.dataset.id;
 
-  const cb = e.target.closest('.item-select');
+  const cb = closestEl(e.target, '.item-select');
   if (cb) {
     toggleSelect(id);
     return;
   }
 
-  if (e.target.closest('.item-note')) {
+  if (closestEl(e.target, '.item-note')) {
     editingNoteId = id;
     render();
     const input = $('note-editor');
@@ -533,7 +544,7 @@ $('list').addEventListener('click', async (e) => {
     return;
   }
 
-  const starCell = e.target.closest('.star-cell[data-star]');
+  const starCell = closestEl(e.target, '.star-cell[data-star]');
   if (starCell) {
     const v = Number(starCell.dataset.star);
     bookCache[id].status = v;
@@ -544,7 +555,7 @@ $('list').addEventListener('click', async (e) => {
     return;
   }
 
-  const act = e.target.closest('[data-act]');
+  const act = closestEl(e.target, '[data-act]');
   if (act) {
     const a = act.dataset.act;
     if (a === 'del') {
@@ -586,7 +597,7 @@ $('list').addEventListener('click', async (e) => {
     return;
   }
 
-  if (e.target.closest('.item-title') && bookCache[id]) {
+  if (closestEl(e.target, '.item-title') && bookCache[id]) {
     if (bookCache[id].url) chrome.tabs.create({ url: bookCache[id].url });
     else if (bookCache[id].note) openDocument(id);
   }
@@ -596,7 +607,7 @@ $('list').addEventListener('click', async (e) => {
 bindStarKeyboard($('list'), (v, cell) => {
   const itemEl = cell.closest('.item');
   if (!itemEl) return;
-  const id = itemEl.dataset.id;
+  const id = (itemEl as HTMLElement).dataset.id as string;
   if (!bookCache[id]) return;
   bookCache[id].status = v;
   bookCache[id].updatedAt = Date.now();
@@ -606,10 +617,10 @@ bindStarKeyboard($('list'), (v, cell) => {
   if (lvl) lvl.outerHTML = levelNameHtml(v);
 });
 
-$('list').addEventListener('keydown', async (e) => {
+$('list').addEventListener('keydown', async (e: KeyboardEvent) => {
   if (e.key !== 'Enter') return;
   // 文档编辑框允许用 Enter 正常换行；Ctrl/Cmd+Enter 才是保存。
-  if (e.target && e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
+  if (e.target && (e.target as Element).tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
   if (!editingNoteId) return;
   const t = $('title-editor');
   const n = $('note-editor');
@@ -644,7 +655,7 @@ $('import-btn').addEventListener('click', () => {
  * @param {*} item - 待验证的数据项
  * @returns {boolean} 是否有效
  */
-function isValidImportItem(item) {
+function isValidImportItem(item: Dyn | null | undefined): boolean {
   if (!item || typeof item !== 'object') return false;
   if (typeof item.title !== 'string' || !item.title.trim()) return false;
   // 验证 type 是否合法
@@ -661,8 +672,8 @@ function isValidImportItem(item) {
   return true;
 }
 
-$('import-file').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+$('import-file').addEventListener('change', async (e: Event) => {
+  const file = (e.target as HTMLInputElement).files![0];
   if (!file) return;
   try {
     const text = await file.text();
@@ -674,7 +685,7 @@ $('import-file').addEventListener('change', async (e) => {
 
     let count = 0;
     let skipped = 0;
-    for (const [id, item] of Object.entries(data)) {
+    for (const [id, item] of Object.entries(data) as Array<[string, Dyn]>) {
       if (isValidImportItem(item)) {
         if (bookCache[id]) {
           bookCache[id] = { ...bookCache[id], ...item, id, updatedAt: Date.now() };
@@ -691,10 +702,10 @@ $('import-file').addEventListener('change', async (e) => {
     render();
     toast(skipped > 0 ? `已导入 ${count} 项，跳过 ${skipped} 项无效数据` : `已导入 ${count} 项`);
   } catch (err) {
-    toast('导入失败：' + err.message);
+    toast('导入失败：' + (err as Error).message);
     logError('Import failed', err);
   }
-  e.target.value = '';
+  (e.target as HTMLInputElement).value = '';
 });
 
 $('bulk-delete-btn').addEventListener('click', bulkDelete);
@@ -722,13 +733,13 @@ document.addEventListener('keydown', (e) => {
     $('search').focus();
   }
   // Ctrl+A 全选当前筛选结果
-  if ((e.ctrlKey || e.metaKey) && e.key === 'a' && document.activeElement.tagName !== 'INPUT') {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a' && document.activeElement?.tagName !== 'INPUT') {
     e.preventDefault();
     filtered().forEach((it) => selectedIds.add(it.id));
     render();
   }
   // Delete 键批量删除已选项
-  if (e.key === 'Delete' && selectedIds.size > 0 && document.activeElement.tagName !== 'INPUT') {
+  if (e.key === 'Delete' && selectedIds.size > 0 && document.activeElement?.tagName !== 'INPUT') {
     bulkDelete();
   }
   if (e.key === 'Escape') {
@@ -791,7 +802,7 @@ async function renderUserscriptBadge() {
   try {
     const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
     const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
-    badge.textContent = count;
+    badge.textContent = String(count);
     badge.classList.toggle('hidden', count === 0);
   } catch (e) {
     badge.classList.add('hidden');

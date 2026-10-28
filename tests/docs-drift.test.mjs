@@ -56,7 +56,7 @@ test('文档说"已删除"的文件，代码里必须真的不在（否则就是
 });
 
 test('background.js 仍挂载桥接时，文档不得说该链路已移除', () => {
-  const bg = read('entries/background.js');
+  const bg = read('entries/background.ts');
   const mountsRelay = /startMcpRelay\s*\(/.test(bg);
   assert.ok(mountsRelay, 'background.js 应仍在启动桥接（若已移除，请同步更新文档与 relay.ts）');
   const status = read('docs/integration-status.md');

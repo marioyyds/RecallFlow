@@ -377,7 +377,7 @@ async function saveScript(script) {
   return script;
 }
 
-// lib/shared/store.js
+// lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
 var DB_VERSION = 1;
 var STORE_ENTRIES = "entries";
@@ -437,7 +437,7 @@ function normalizeBook(input) {
     if (!raw || typeof raw !== "object") continue;
     const id = String(raw.id || key);
     if (!id) continue;
-    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
+    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[String(raw.status)] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
     out[id] = {
       id,
       type: raw.type || "wrong",
@@ -592,7 +592,7 @@ async function deleteItem(id) {
   notifyChange();
 }
 
-// lib/shared/rag.js
+// lib/shared/rag.ts
 var CJK_RE = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
 function tokenizeQuery(query) {
   const raw = String(query || "").toLowerCase();
@@ -3498,7 +3498,7 @@ var TOOL_METADATA = {
   save_skill: { risk: "high", readOnly: false, alwaysAvailable: true, requiresApproval: true, alwaysRequireApproval: true, route: "background" }
 };
 
-// lib/shared/content-script-bridge.js
+// lib/shared/content-script-bridge.ts
 var INJECT_COOLDOWN_MS = 2e3;
 var lastInjectAt = /* @__PURE__ */ new Map();
 function normalizeFrameId(frameId) {
@@ -3539,7 +3539,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   try {
     return await sendOnce(chromeApi, tabId, message, frameId);
   } catch (e) {
-    if (!isContentScriptUnreachable(e && e.message)) throw e;
+    if (!isContentScriptUnreachable(e && e?.message)) throw e;
     const injected = await injectContentScript(chromeApi, tabId, frameId);
     if (!injected) throw e;
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -6500,8 +6500,9 @@ async function probeMcpServer(server) {
   }
 }
 
-// entries/options.js
+// entries/options.ts
 var $ = (id) => document.getElementById(id);
+var $q = (root, selector) => root.querySelector(selector);
 var settingsDirty = false;
 var settingsLoading = true;
 async function load() {
@@ -6550,7 +6551,7 @@ async function renderUserscriptSummary() {
     const enabled = list.filter((s) => s.enabled).length;
     if (meta) meta.textContent = `\u5DF2\u5B89\u88C5 ${list.length} \u4E2A \xB7 \u542F\u7528 ${enabled} \u4E2A \xB7 \u505C\u7528 ${list.length - enabled} \u4E2A`;
     if (navCount) {
-      navCount.textContent = list.length;
+      navCount.textContent = String(list.length);
       navCount.classList.toggle("hidden", list.length === 0);
     }
   } catch (e) {
@@ -6608,14 +6609,14 @@ function renderMcp(list) {
     const statusEl = document.createElement("div");
     setMcpStatusEl(statusEl, mcpLastStatus.get(mcpKeyOf(s)));
     row.appendChild(statusEl);
-    row.querySelector(".mcp-del").addEventListener("click", () => {
+    $q(row, ".mcp-del").addEventListener("click", () => {
       list.splice(i, 1);
       renderMcp(list);
       markDirty();
     });
-    row.querySelector(".mcp-test").addEventListener("click", async () => {
-      const cfg = { id: row.querySelector(".mcp-id").value.trim(), url: row.querySelector(".mcp-url").value.trim() };
-      const token = row.querySelector(".mcp-token").value.trim();
+    $q(row, ".mcp-test").addEventListener("click", async () => {
+      const cfg = { id: String($q(row, ".mcp-id").value).trim(), url: String($q(row, ".mcp-url").value).trim() };
+      const token = String($q(row, ".mcp-token").value).trim();
       if (token) cfg.headers = { Authorization: "Bearer " + token };
       statusEl.className = "mcp-status";
       statusEl.textContent = "\u8FDE\u63A5\u4E2D\u2026";
@@ -6710,9 +6711,9 @@ function collectMcp() {
   const rows = document.querySelectorAll("#mcp-list .mcp-row");
   const out = [];
   rows.forEach((r) => {
-    const id = r.querySelector(".mcp-id").value.trim();
-    const url = r.querySelector(".mcp-url").value.trim();
-    const token = r.querySelector(".mcp-token").value.trim();
+    const id = String($q(r, ".mcp-id").value).trim();
+    const url = String($q(r, ".mcp-url").value).trim();
+    const token = String($q(r, ".mcp-token").value).trim();
     if (!id || !url) return;
     const srv = { id, url };
     if (token) srv.headers = { Authorization: "Bearer " + token };
@@ -6732,8 +6733,9 @@ function syncApprovalPreset() {
   $("approval-preset").value = values.every(Boolean) ? "all" : values[0] && values.slice(1).every((v) => !v) ? "safe" : "custom";
 }
 $("approval-preset").addEventListener("change", (e) => {
-  if (e.target.value === "safe" || e.target.value === "all") {
-    const on = e.target.value === "all";
+  const picked = e.target.value;
+  if (picked === "safe" || picked === "all") {
+    const on = picked === "all";
     ["read", "edit", "commands", "browser", "mcp"].forEach((k) => {
       $("approval-" + k).checked = on || k === "read";
     });
@@ -6763,7 +6765,7 @@ $("test-connection").addEventListener("click", async () => {
     status.textContent = "\u8FDE\u63A5\u6210\u529F";
     status.classList.add("ok");
   } catch (err) {
-    status.textContent = err && err.name === "AbortError" ? "\u8FDE\u63A5\u8D85\u65F6" : "\u8FDE\u63A5\u5931\u8D25\uFF1A" + (err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF");
+    status.textContent = err.name === "AbortError" ? "\u8FDE\u63A5\u8D85\u65F6" : "\u8FDE\u63A5\u5931\u8D25\uFF1A" + (err.message ? err.message : "\u672A\u77E5\u9519\u8BEF");
     status.classList.add("error");
   } finally {
     clearTimeout(timer);
@@ -6771,7 +6773,7 @@ $("test-connection").addEventListener("click", async () => {
 });
 function initSettingsNav() {
   const links = [...document.querySelectorAll(".settings-sidebar a")];
-  const sections = links.map((link) => ({ link, section: document.querySelector(link.getAttribute("href")) })).filter((item) => item.section);
+  const sections = links.map((link) => ({ link, section: document.querySelector(String(link.getAttribute("href"))) })).filter((item) => Boolean(item.section));
   if (!sections.length || typeof IntersectionObserver !== "function") return;
   if (links[0]) links[0].classList.add("active");
   const observer = new IntersectionObserver(

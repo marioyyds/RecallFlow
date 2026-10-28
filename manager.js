@@ -237,7 +237,7 @@ function showToast(msg, opts) {
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
 }
 
-// lib/shared/store.js
+// lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
 var DB_VERSION = 1;
 var STORE_ENTRIES = "entries";
@@ -297,7 +297,7 @@ function normalizeBook(input) {
     if (!raw || typeof raw !== "object") continue;
     const id = String(raw.id || key);
     if (!id) continue;
-    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
+    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[String(raw.status)] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
     out[id] = {
       id,
       type: raw.type || "wrong",
@@ -642,7 +642,7 @@ function extractCiteNum(inner) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-// lib/shared/pagination.js
+// lib/shared/pagination.ts
 function clampPage(page, totalPages) {
   const total = Math.max(1, Math.floor(Number(totalPages) || 1));
   const wanted = Math.floor(Number(page) || 1);
@@ -673,7 +673,8 @@ function pageTokens(currentPage2, totalPages) {
   const numbers = [...wanted].filter((n) => n >= 1 && n <= total).sort((a, b) => a - b);
   const out = [];
   for (const n of numbers) {
-    if (out.length && typeof out[out.length - 1] === "number" && n - out[out.length - 1] > 1) {
+    const prev = out.length ? out[out.length - 1] : null;
+    if (typeof prev === "number" && n - prev > 1) {
       out.push("ellipsis");
     }
     out.push(n);
@@ -681,7 +682,9 @@ function pageTokens(currentPage2, totalPages) {
   return out;
 }
 
-// entries/manager.js
+// entries/manager.ts
+var $ = (id) => document.getElementById(id);
+var closestEl = (target, selector) => target ? target.closest(selector) : null;
 var bookCache = {};
 var currentType = "all";
 var currentTag = "all";
@@ -691,7 +694,6 @@ var KB_PAGE_SIZE = 12;
 var currentPage = 1;
 var editingNoteId = null;
 var selectedIds = /* @__PURE__ */ new Set();
-var $ = (id) => document.getElementById(id);
 var docItemId = "";
 var docPreviousFocus = null;
 var docKeyHandler = null;
@@ -771,7 +773,8 @@ function toggleSelect(id) {
   }
   renderBulkBar();
   document.querySelectorAll(".item-select").forEach((cb) => {
-    cb.checked = selectedIds.has(cb.closest(".item").dataset.id);
+    const box = cb;
+    box.checked = selectedIds.has(box.closest(".item").dataset.id);
   });
 }
 function itemHtml(it) {
@@ -856,7 +859,7 @@ function render() {
 function renderActiveFilters() {
   const el = $("active-filter-list");
   const labels = [];
-  if (currentType !== "all") labels.push("\u7C7B\u578B\uFF1A" + ((ITEM_TYPES.find((t) => t.id === currentType) || {}).name || currentType));
+  if (currentType !== "all") labels.push("\u7C7B\u578B\uFF1A" + (ITEM_TYPES.find((t) => t.id === currentType)?.name || currentType));
   if (currentTag !== "all") labels.push("\u6807\u7B7E\uFF1A" + currentTag);
   if (currentStar !== "all") labels.push("\u661F\u7EA7\uFF1A" + currentStar);
   const q = $("search").value.trim();
@@ -869,12 +872,13 @@ function renderActiveFilters() {
 }
 function renderStats() {
   const all = Object.values(bookCache);
-  $("st-total").textContent = all.length;
+  $("st-total").textContent = String(all.length);
   [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].forEach((s) => {
-    $("st-" + s).textContent = all.filter((i) => Number(i.status) === s).length;
+    $("st-" + s).textContent = String(all.filter((i) => Number(i.status) === s).length);
   });
   document.querySelectorAll(".stars-lbl").forEach((el) => {
-    el.innerHTML = starBarHtml(Number(el.dataset.stars), false) + " " + (STAR_LEVELS[Number(el.dataset.stars)] || {}).name;
+    const stars = Number(el.dataset.stars);
+    el.innerHTML = starBarHtml(stars, false) + " " + (STAR_LEVELS[stars] || {}).name;
   });
   document.querySelectorAll(".stat-card").forEach((el) => {
     el.classList.toggle("active", el.dataset.s === currentStar);
@@ -958,7 +962,7 @@ function showConfirm(msg) {
   });
 }
 function typeName(id) {
-  return (ITEM_TYPES.find((item) => item.id === id) || {}).name || id || "\u672A\u5206\u7C7B";
+  return ITEM_TYPES.find((item) => item.id === id)?.name || id || "\u672A\u5206\u7C7B";
 }
 function closeDocument() {
   const overlay = $("doc-overlay");
@@ -1045,14 +1049,14 @@ async function bulkDelete() {
   });
 }
 $("type-tabs").addEventListener("click", (e) => {
-  const btn = e.target.closest(".type-tab");
+  const btn = closestEl(e.target, ".type-tab");
   if (!btn) return;
   currentType = btn.dataset.type;
   currentPage = 1;
   render();
 });
 $("tag-filter").addEventListener("click", (e) => {
-  const chip = e.target.closest(".tag-filter-chip");
+  const chip = closestEl(e.target, ".tag-filter-chip");
   if (!chip) return;
   currentTag = chip.dataset.tag;
   currentPage = 1;
@@ -1090,7 +1094,7 @@ $("sort-select").addEventListener("change", (e) => {
 });
 $("add-note-btn").addEventListener("click", createNote);
 $("kb-pagination").addEventListener("click", (e) => {
-  const btn = e.target.closest(".kb-page-btn");
+  const btn = closestEl(e.target, ".kb-page-btn");
   if (!btn || btn.disabled) return;
   const page = Number(btn.dataset.page);
   if (!Number.isFinite(page) || page < 1) return;
@@ -1118,7 +1122,7 @@ $("doc-edit").addEventListener("click", () => {
   if (input) input.focus();
 });
 $("doc-content").addEventListener("click", (e) => {
-  const btn = e.target.closest(".code-copy");
+  const btn = closestEl(e.target, ".code-copy");
   if (!btn) return;
   const wrap = btn.closest(".code-wrap");
   const codeEl = wrap && wrap.querySelector("code");
@@ -1132,22 +1136,22 @@ $("doc-content").addEventListener("click", (e) => {
   });
 });
 $("list").addEventListener("click", async (e) => {
-  const itemEl = e.target.closest(".item");
+  const itemEl = closestEl(e.target, ".item");
   if (!itemEl) return;
   const id = itemEl.dataset.id;
-  const cb = e.target.closest(".item-select");
+  const cb = closestEl(e.target, ".item-select");
   if (cb) {
     toggleSelect(id);
     return;
   }
-  if (e.target.closest(".item-note")) {
+  if (closestEl(e.target, ".item-note")) {
     editingNoteId = id;
     render();
     const input = $("note-editor");
     if (input) input.focus();
     return;
   }
-  const starCell = e.target.closest(".star-cell[data-star]");
+  const starCell = closestEl(e.target, ".star-cell[data-star]");
   if (starCell) {
     const v = Number(starCell.dataset.star);
     bookCache[id].status = v;
@@ -1157,7 +1161,7 @@ $("list").addEventListener("click", async (e) => {
     updateItemStar(itemEl, v);
     return;
   }
-  const act = e.target.closest("[data-act]");
+  const act = closestEl(e.target, "[data-act]");
   if (act) {
     const a = act.dataset.act;
     if (a === "del") {
@@ -1197,7 +1201,7 @@ $("list").addEventListener("click", async (e) => {
     }
     return;
   }
-  if (e.target.closest(".item-title") && bookCache[id]) {
+  if (closestEl(e.target, ".item-title") && bookCache[id]) {
     if (bookCache[id].url) chrome.tabs.create({ url: bookCache[id].url });
     else if (bookCache[id].note) openDocument(id);
   }
@@ -1309,12 +1313,12 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("search").focus();
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === "a" && document.activeElement.tagName !== "INPUT") {
+  if ((e.ctrlKey || e.metaKey) && e.key === "a" && document.activeElement?.tagName !== "INPUT") {
     e.preventDefault();
     filtered().forEach((it) => selectedIds.add(it.id));
     render();
   }
-  if (e.key === "Delete" && selectedIds.size > 0 && document.activeElement.tagName !== "INPUT") {
+  if (e.key === "Delete" && selectedIds.size > 0 && document.activeElement?.tagName !== "INPUT") {
     bulkDelete();
   }
   if (e.key === "Escape") {
@@ -1369,7 +1373,7 @@ async function renderUserscriptBadge() {
   try {
     const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
     const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
-    badge.textContent = count;
+    badge.textContent = String(count);
     badge.classList.toggle("hidden", count === 0);
   } catch (e) {
     badge.classList.add("hidden");

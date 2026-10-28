@@ -5,9 +5,17 @@ import { getUserscriptSettings, saveUserscriptSettings } from '../lib/userscript
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 // 复用后台那一套握手（initialize → notifications/initialized → tools/list），
 // 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
-import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/assistant/mcp.js';
+import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/assistant/mcp.ts';
 
-const $ = (id) => document.getElementById(id);
+/** MCP 服务器配置 / 最近连接结果：字段由 mcp.js 与设置页共同约定。 */
+type Dyn = Record<string, any>;
+
+/** 按 id 取元素：id 全部写死在 options.html 里（取不到就是模板坏了，原代码也不检查）。 */
+const $ = (id: string): any => document.getElementById(id);
+
+/** 在某个子树里取元素（MCP 行是运行时拼出来的，没有 id）。 */
+const $q = (root: Element | Document, selector: string): any => root.querySelector(selector);
+
 let settingsDirty = false;
 let settingsLoading = true;
 
@@ -25,13 +33,13 @@ async function load() {
   $('trusted-sites').value = (s.trustedSites || []).join('\n');
   $('tool-approval').checked = s.toolApproval !== false;
   const policy = Object.assign({ read: true, edit: false, commands: false, browser: false, mcp: false }, s.toolApprovalPolicy || {});
-  ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!policy[k]; });
+  ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = !!(policy as Record<string, unknown>)[k]; });
   $('approval-notify').checked = s.toolApprovalNotify !== false;
   $('code-exec-approval').value = resolveCodeExecutionApproval(s);
   // 桥接 token：回填真实值，便于用户与 server 端环境变量核对/修改。
   $('bridge-token').value = s.bridgeToken || '';
   syncApprovalPreset();
-  const budget = s.agentBudget || {};
+  const budget: Dyn = (s.agentBudget || {}) as Dyn;
   // 工具调用次数与推理轮数上限已移除（对齐 DSH：不限制做了多少件事），
   // 因此那两个输入框不再存在 —— 留一个没人读的设置就是"静默无效"。
   $('budget-tokens').value = Number.isInteger(Number(budget.maxTotalTokens)) && Number(budget.maxTotalTokens) > 0 ? String(budget.maxTotalTokens) : '';
@@ -60,7 +68,7 @@ async function renderUserscriptSummary() {
     const enabled = list.filter((s) => s.enabled).length;
     if (meta) meta.textContent = `已安装 ${list.length} 个 · 启用 ${enabled} 个 · 停用 ${list.length - enabled} 个`;
     if (navCount) {
-      navCount.textContent = list.length;
+      navCount.textContent = String(list.length);
       navCount.classList.toggle('hidden', list.length === 0);
     }
   } catch (e) {
@@ -69,27 +77,27 @@ async function renderUserscriptSummary() {
 }
 
 // 最近一次连接结果（由后台 Agent 运行或本页「测试」写入），按 url|id 索引。
-let mcpLastStatus = new Map();
+let mcpLastStatus = new Map<string, Dyn>();
 
-function mcpKeyOf(s) {
+function mcpKeyOf(s: Dyn | null | undefined): string {
   return (s && (s.url || '') + '|' + (s.id || '')) || '';
 }
 
 async function loadMcpStatus() {
   try {
     const data = await chrome.storage.local.get(MCP_STATUS_STORAGE_KEY);
-    const rec = data && data[MCP_STATUS_STORAGE_KEY];
-    mcpLastStatus = new Map(((rec && rec.servers) || []).map((st) => [mcpKeyOf(st), st]));
+    const rec = (data && data[MCP_STATUS_STORAGE_KEY]) as Dyn | undefined;
+    mcpLastStatus = new Map<string, Dyn>(((rec && rec.servers) || []).map((st: Dyn) => [mcpKeyOf(st), st]));
   } catch (e) {
     mcpLastStatus = new Map();
   }
 }
 
-async function saveMcpStatus(st) {
+async function saveMcpStatus(st: Dyn) {
   try {
     const data = await chrome.storage.local.get(MCP_STATUS_STORAGE_KEY);
-    const rec = (data && data[MCP_STATUS_STORAGE_KEY]) || { ts: 0, servers: [] };
-    const servers = ((rec && rec.servers) || []).filter((x) => mcpKeyOf(x) !== mcpKeyOf(st));
+    const rec = ((data && data[MCP_STATUS_STORAGE_KEY]) || { ts: 0, servers: [] }) as Dyn;
+    const servers = ((rec && rec.servers) || []).filter((x: Dyn) => mcpKeyOf(x) !== mcpKeyOf(st));
     servers.push(st);
     await chrome.storage.local.set({ [MCP_STATUS_STORAGE_KEY]: { ts: Date.now(), servers } });
   } catch (e) {
@@ -99,7 +107,7 @@ async function saveMcpStatus(st) {
 
 // 失败要给出能动手的指引，而不是一句「连接失败」：MCP 端点没有登录页，
 // 403 绝大多数就是 token 没填或与服务端不一致。
-function setMcpStatusEl(el, st) {
+function setMcpStatusEl(el: HTMLElement, st: Dyn | null | undefined) {
   if (!st) {
     el.className = 'mcp-status';
     el.textContent = '尚未连接过（点「测试」，或跑一次对话后这里会显示结果）';
@@ -116,7 +124,7 @@ function setMcpStatusEl(el, st) {
     '。请检查地址是否可达，以及 Bearer Token 是否与服务端一致；MCP 端点用浏览器打开只会得到 401/403，它不是登录页。';
 }
 
-function renderMcp(list) {
+function renderMcp(list: Dyn[]) {
   const box = $('mcp-list');
   box.innerHTML = '';
   if (!list.length) {
@@ -135,16 +143,16 @@ function renderMcp(list) {
     const statusEl = document.createElement('div');
     setMcpStatusEl(statusEl, mcpLastStatus.get(mcpKeyOf(s)));
     row.appendChild(statusEl);
-    row.querySelector('.mcp-del').addEventListener('click', () => {
+    $q(row, '.mcp-del').addEventListener('click', () => {
       list.splice(i, 1);
       renderMcp(list);
       markDirty();
     });
-    row.querySelector('.mcp-test').addEventListener('click', async () => {
+    $q(row, '.mcp-test').addEventListener('click', async () => {
       // 直接读这一行的当前输入（而不是 collectMcp()[i]）：collectMcp 会跳过
       // 没填 id/url 的行，下标与行号并不一致，取错行会让「测 A 得到 B 的结果」。
-      const cfg = { id: row.querySelector('.mcp-id').value.trim(), url: row.querySelector('.mcp-url').value.trim() };
-      const token = row.querySelector('.mcp-token').value.trim();
+      const cfg: Dyn = { id: String($q(row, '.mcp-id').value).trim(), url: String($q(row, '.mcp-url').value).trim() };
+      const token = String($q(row, '.mcp-token').value).trim();
       if (token) cfg.headers = { Authorization: 'Bearer ' + token };
       statusEl.className = 'mcp-status';
       statusEl.textContent = '连接中…';
@@ -157,7 +165,7 @@ function renderMcp(list) {
   });
 }
 
-function toast(msg, ok) {
+function toast(msg: string, ok?: boolean) {
   const st = $('status');
   st.textContent = msg;
   st.className = 'status' + (ok ? ' ok' : '');
@@ -168,7 +176,7 @@ function toast(msg, ok) {
   }, 1800);
 }
 
-function setDirty(dirty) {
+function setDirty(dirty: unknown) {
   settingsDirty = Boolean(dirty);
   const state = $('save-state');
   if (!state) return;
@@ -192,13 +200,13 @@ function collectSettings() {
     cdpEnabled: $('cdp-enabled').checked,
     siteMemoryEnabled: $('site-memory').checked,
     verifierEnabled: $('verifier-enabled').checked,
-    trustedSites: $('trusted-sites').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
+    trustedSites: $('trusted-sites').value.split(/\r?\n/).map((x: string) => x.trim()).filter(Boolean),
     toolApproval: $('tool-approval').checked,
     toolApprovalPolicy: Object.fromEntries(['read', 'edit', 'commands', 'browser', 'mcp'].map((k) => [k, $('approval-' + k).checked])),
     toolApprovalNotify: $('approval-notify').checked,
     codeExecutionApproval: $('code-exec-approval').value || 'session',
     bridgeToken: $('bridge-token').value.trim(),
-    quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean).slice(0, 12),
+    quickPrompts: $('quick-prompts').value.split(/\r?\n/).map((x: string) => x.trim()).filter(Boolean).slice(0, 12),
     mcpServers: collectMcp(),
     agentBudget: {
       ...(Number.isInteger(Number($('budget-tokens').value)) && Number($('budget-tokens').value) > 0 ? { maxTotalTokens: Math.floor(Number($('budget-tokens').value)) } : {}),
@@ -222,8 +230,8 @@ $('save-btn').addEventListener('click', () => {
   saveSettings().catch((err) => toast('保存失败：' + (err && err.message ? err.message : '未知错误')));
 });
 
-document.querySelector('.settings-content').addEventListener('input', markDirty);
-document.querySelector('.settings-content').addEventListener('change', markDirty);
+document.querySelector('.settings-content')!.addEventListener('input', markDirty);
+document.querySelector('.settings-content')!.addEventListener('change', markDirty);
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -248,13 +256,13 @@ $('toggle-key').addEventListener('click', () => {
 
 function collectMcp() {
   const rows = document.querySelectorAll('#mcp-list .mcp-row');
-  const out = [];
+  const out: Dyn[] = [];
   rows.forEach((r) => {
-    const id = r.querySelector('.mcp-id').value.trim();
-    const url = r.querySelector('.mcp-url').value.trim();
-    const token = r.querySelector('.mcp-token').value.trim();
+    const id = String($q(r, '.mcp-id').value).trim();
+    const url = String($q(r, '.mcp-url').value).trim();
+    const token = String($q(r, '.mcp-token').value).trim();
     if (!id || !url) return;
-    const srv = { id, url };
+    const srv: Dyn = { id, url };
     if (token) srv.headers = { Authorization: 'Bearer ' + token };
     out.push(srv);
   });
@@ -273,9 +281,10 @@ function syncApprovalPreset() {
   const values = keys.map((k) => $('approval-' + k).checked);
   $('approval-preset').value = values.every(Boolean) ? 'all' : values[0] && values.slice(1).every((v) => !v) ? 'safe' : 'custom';
 }
-$('approval-preset').addEventListener('change', (e) => {
-  if (e.target.value === 'safe' || e.target.value === 'all') {
-    const on = e.target.value === 'all';
+$('approval-preset').addEventListener('change', (e: Event) => {
+  const picked = (e.target as HTMLSelectElement).value;
+  if (picked === 'safe' || picked === 'all') {
+    const on = picked === 'all';
     ['read', 'edit', 'commands', 'browser', 'mcp'].forEach((k) => { $('approval-' + k).checked = on || k === 'read'; });
   }
 });
@@ -304,9 +313,9 @@ $('test-connection').addEventListener('click', async () => {
     status.textContent = '连接成功';
     status.classList.add('ok');
   } catch (err) {
-    status.textContent = err && err.name === 'AbortError'
+    status.textContent = (err as Error).name === 'AbortError'
       ? '连接超时'
-      : '连接失败：' + (err && err.message ? err.message : '未知错误');
+      : '连接失败：' + ((err as Error).message ? (err as Error).message : '未知错误');
     status.classList.add('error');
   } finally {
     clearTimeout(timer);
@@ -316,8 +325,8 @@ $('test-connection').addEventListener('click', async () => {
 function initSettingsNav() {
   const links = [...document.querySelectorAll('.settings-sidebar a')];
   const sections = links
-    .map((link) => ({ link, section: document.querySelector(link.getAttribute('href')) }))
-    .filter((item) => item.section);
+    .map((link) => ({ link, section: document.querySelector(String(link.getAttribute('href'))) }))
+    .filter((item): item is { link: Element; section: Element } => Boolean(item.section));
   if (!sections.length || typeof IntersectionObserver !== 'function') return;
   if (links[0]) links[0].classList.add('active');
   const observer = new IntersectionObserver(

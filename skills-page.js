@@ -1185,7 +1185,7 @@ async function removeUserSkill(id) {
   return next;
 }
 
-// lib/shared/store.js
+// lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
 var DB_VERSION = 1;
 var STORE_ENTRIES = "entries";
@@ -1245,7 +1245,7 @@ function normalizeBook(input) {
     if (!raw || typeof raw !== "object") continue;
     const id = String(raw.id || key);
     if (!id) continue;
-    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
+    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[String(raw.status)] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
     out[id] = {
       id,
       type: raw.type || "wrong",
@@ -1400,7 +1400,7 @@ async function deleteItem(id) {
   notifyChange();
 }
 
-// lib/shared/rag.js
+// lib/shared/rag.ts
 var CJK_RE = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
 function tokenizeQuery(query) {
   const raw = String(query || "").toLowerCase();
@@ -3441,7 +3441,7 @@ var TOOL_METADATA = {
   save_skill: { risk: "high", readOnly: false, alwaysAvailable: true, requiresApproval: true, alwaysRequireApproval: true, route: "background" }
 };
 
-// lib/shared/content-script-bridge.js
+// lib/shared/content-script-bridge.ts
 var INJECT_COOLDOWN_MS = 2e3;
 var lastInjectAt = /* @__PURE__ */ new Map();
 function normalizeFrameId(frameId) {
@@ -3482,7 +3482,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   try {
     return await sendOnce(chromeApi, tabId, message, frameId);
   } catch (e) {
-    if (!isContentScriptUnreachable(e && e.message)) throw e;
+    if (!isContentScriptUnreachable(e && e?.message)) throw e;
     const injected = await injectContentScript(chromeApi, tabId, frameId);
     if (!injected) throw e;
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -6305,13 +6305,15 @@ function stripHtml(html) {
   return s.trim();
 }
 
-// entries/skills-page.js
+// entries/skills-page.ts
 var INTENT_LABEL = {
   browser_task: "\u6D4F\u89C8\u5668\u64CD\u4F5C",
   knowledge_task: "\u77E5\u8BC6\u5E93",
   research_task: "\u8D44\u6599\u7814\u7A76",
   chat_task: "\u5BF9\u8BDD"
 };
+var $ = (id) => document.getElementById(id);
+var closestEl = (target, selector) => target ? target.closest(selector) : null;
 var allSkills = [];
 var currentPage = 1;
 var editingName = null;
@@ -6331,7 +6333,7 @@ function describeKeywords(skill) {
 }
 function describeIntents(intents) {
   if (!Array.isArray(intents) || !intents.length) return "\u4E0D\u9650\u610F\u56FE";
-  return intents.map((i) => INTENT_LABEL[i] || i).join("\u3001");
+  return intents.map((i) => INTENT_LABEL[String(i)] || i).join("\u3001");
 }
 function renderSkill(skill) {
   const meta = [
@@ -6397,7 +6399,7 @@ function filteredSkills() {
   });
 }
 function renderCategoryFilter() {
-  const select = document.getElementById("skill-category-filter");
+  const select = $("skill-category-filter");
   if (!select) return;
   const categories = [...new Set(allSkills.map((skill) => skill.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (skillCategory !== "all" && !categories.includes(skillCategory)) skillCategory = "all";
@@ -6405,7 +6407,7 @@ function renderCategoryFilter() {
   select.value = skillCategory;
 }
 function renderPagination(totalPages) {
-  const nav = document.getElementById("skill-pagination");
+  const nav = $("skill-pagination");
   if (!nav) return;
   if (totalPages <= 1) {
     nav.innerHTML = "";
@@ -6419,12 +6421,12 @@ function renderPagination(totalPages) {
   nav.innerHTML = html;
 }
 function render() {
-  const wrap = document.getElementById("skill-list");
+  const wrap = $("skill-list");
   if (!wrap) return;
-  const count = document.getElementById("skill-count");
+  const count = $("skill-count");
   if (count) count.textContent = String(allSkills.length);
   const skills = filteredSkills();
-  const visibleCount = document.getElementById("skill-visible-count");
+  const visibleCount = $("skill-visible-count");
   if (visibleCount) visibleCount.textContent = "\u663E\u793A " + skills.length + " / " + allSkills.length;
   if (!skills.length) {
     const filtering = Boolean(skillQuery.trim()) || skillKind !== "all" || skillCategory !== "all";
@@ -6443,19 +6445,20 @@ function linesToArr(text) {
 }
 function skillToForm(skill) {
   const m = skill.match || {};
-  document.getElementById("f-name").value = skill.name || "";
-  document.getElementById("f-display").value = skill.title || "";
-  document.getElementById("f-desc").value = skill.description || "";
-  document.getElementById("f-version").value = skill.version || "1.0.0";
-  document.getElementById("f-category").value = skill.category || "";
-  document.getElementById("f-tags").value = Array.isArray(skill.tags) ? skill.tags.join(", ") : "";
-  document.getElementById("f-type").value = skill.skill_type || "prompt-template";
+  $("f-name").value = skill.name || "";
+  $("f-display").value = skill.title || "";
+  $("f-desc").value = skill.description || "";
+  $("f-version").value = skill.version || "1.0.0";
+  $("f-category").value = skill.category || "";
+  $("f-tags").value = Array.isArray(skill.tags) ? skill.tags.join(", ") : "";
+  $("f-type").value = skill.skill_type || "prompt-template";
   document.querySelectorAll(".skill-checks input[type=checkbox]").forEach((cb) => {
-    cb.checked = (m.intents || []).includes(cb.value);
+    const box = cb;
+    box.checked = (m.intents || []).includes(box.value);
   });
-  document.getElementById("f-keywords").value = (m.keywordStrings || []).join("\n");
-  document.getElementById("f-tools").value = Array.isArray(skill.tools) ? skill.tools.join(", ") : "";
-  document.getElementById("f-content").value = skill.content || "";
+  $("f-keywords").value = (m.keywordStrings || []).join("\n");
+  $("f-tools").value = Array.isArray(skill.tools) ? skill.tools.join(", ") : "";
+  $("f-content").value = skill.content || "";
 }
 function visibleOverlay() {
   return [...document.querySelectorAll(".confirm-overlay")].find((overlay) => !overlay.classList.contains("hidden")) || null;
@@ -6485,12 +6488,12 @@ function closeOverlay(overlay) {
   }
 }
 function showFormError(message) {
-  const error = document.getElementById("skill-form-error");
+  const error = $("skill-form-error");
   error.textContent = message;
   error.classList.remove("hidden");
 }
 function clearFormError() {
-  const error = document.getElementById("skill-form-error");
+  const error = $("skill-form-error");
   error.textContent = "";
   error.classList.add("hidden");
 }
@@ -6524,7 +6527,7 @@ document.addEventListener("keydown", (e) => {
 }, true);
 function openForm(skill) {
   editingName = skill ? skill.name : null;
-  document.getElementById("skill-form-title").textContent = skill ? "\u7F16\u8F91\u6280\u80FD" : "\u65B0\u5EFA\u6280\u80FD";
+  $("skill-form-title").textContent = skill ? "\u7F16\u8F91\u6280\u80FD" : "\u65B0\u5EFA\u6280\u80FD";
   skillToForm(
     skill || {
       name: "",
@@ -6540,26 +6543,26 @@ function openForm(skill) {
     }
   );
   clearFormError();
-  openOverlay(document.getElementById("skill-form-overlay"), "#f-name");
+  openOverlay($("skill-form-overlay"), "#f-name");
 }
 function closeForm() {
-  closeOverlay(document.getElementById("skill-form-overlay"));
+  closeOverlay($("skill-form-overlay"));
   editingName = null;
 }
 async function saveForm() {
   clearFormError();
-  const name = document.getElementById("f-name").value.trim();
+  const name = $("f-name").value.trim();
   if (!name) {
     showFormError("\u8BF7\u586B\u5199\u6807\u8BC6 name\uFF08kebab-case\uFF09\u3002");
-    document.getElementById("f-name").focus();
+    $("f-name").focus();
     return;
   }
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
     showFormError("name \u9700\u4E3A kebab-case\uFF08\u5C0F\u5199\u5B57\u6BCD/\u6570\u5B57\uFF0C\u8FDE\u5B57\u7B26\u5206\u9694\uFF09\uFF0C\u5982 highlight-key-points\u3002");
-    document.getElementById("f-name").focus();
+    $("f-name").focus();
     return;
   }
-  const tools = document.getElementById("f-tools").value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const tools = $("f-tools").value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
   const knownTools = new Set(TOOL_REGISTRY.map((t) => t.name));
   const badTools = tools.filter((tn) => !knownTools.has(tn));
   if (badTools.length) {
@@ -6570,16 +6573,16 @@ async function saveForm() {
   }
   const payload = {
     name,
-    displayName: document.getElementById("f-display").value.trim(),
-    description: document.getElementById("f-desc").value.trim(),
-    version: document.getElementById("f-version").value.trim() || "1.0.0",
-    category: document.getElementById("f-category").value.trim(),
-    tags: document.getElementById("f-tags").value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
-    skill_type: document.getElementById("f-type").value,
-    content: document.getElementById("f-content").value,
+    displayName: $("f-display").value.trim(),
+    description: $("f-desc").value.trim(),
+    version: $("f-version").value.trim() || "1.0.0",
+    category: $("f-category").value.trim(),
+    tags: $("f-tags").value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
+    skill_type: $("f-type").value,
+    content: $("f-content").value,
     x: {
       intents: Array.from(document.querySelectorAll(".skill-checks input[type=checkbox]:checked")).map((cb) => cb.value),
-      keywords: linesToArr(document.getElementById("f-keywords").value),
+      keywords: linesToArr($("f-keywords").value),
       tools
     }
   };
@@ -6592,7 +6595,7 @@ async function saveForm() {
     closeForm();
     await reload();
   } catch (err) {
-    showFormError("\u4FDD\u5B58\u5931\u8D25\uFF1A" + (err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF"));
+    showFormError("\u4FDD\u5B58\u5931\u8D25\uFF1A" + (err.message ? err.message : "\u672A\u77E5\u9519\u8BEF"));
   }
 }
 function runtimeToStandard(skill) {
@@ -6629,17 +6632,17 @@ var pendingDeleteName = null;
 function askDelete(name) {
   pendingDeleteName = name;
   const skill = allSkills.find((s) => s.name === name);
-  document.getElementById("skill-del-msg").textContent = "\u786E\u5B9A\u5220\u9664\u6280\u80FD\u300C" + (skill ? skill.title || skill.name : name) + "\u300D\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002";
-  openOverlay(document.getElementById("skill-del-overlay"), "#skill-del-no");
+  $("skill-del-msg").textContent = "\u786E\u5B9A\u5220\u9664\u6280\u80FD\u300C" + (skill ? skill.title || skill.name : name) + "\u300D\uFF1F\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002";
+  openOverlay($("skill-del-overlay"), "#skill-del-no");
 }
 async function confirmDelete() {
   if (pendingDeleteName) await removeUserSkill(pendingDeleteName);
   pendingDeleteName = null;
-  closeOverlay(document.getElementById("skill-del-overlay"));
+  closeOverlay($("skill-del-overlay"));
   await reload();
 }
 async function runImport(text) {
-  const msg = document.getElementById("import-msg");
+  const msg = $("import-msg");
   const skill = mdToSkill(text);
   if (!skill.name) {
     msg.textContent = "\u89E3\u6790\u5931\u8D25\uFF1ASKILL.md \u7F3A\u5C11\u5FC5\u9700\u7684 name \u5B57\u6BB5\u3002";
@@ -6664,29 +6667,29 @@ async function reload() {
   render();
 }
 function init() {
-  document.getElementById("new-skill-btn").addEventListener("click", () => openForm(null));
-  document.getElementById("skill-form-cancel").addEventListener("click", closeForm);
-  document.getElementById("skill-form-save").addEventListener("click", saveForm);
-  document.getElementById("skill-del-no").addEventListener("click", () => {
+  $("new-skill-btn").addEventListener("click", () => openForm(null));
+  $("skill-form-cancel").addEventListener("click", closeForm);
+  $("skill-form-save").addEventListener("click", saveForm);
+  $("skill-del-no").addEventListener("click", () => {
     pendingDeleteName = null;
-    closeOverlay(document.getElementById("skill-del-overlay"));
+    closeOverlay($("skill-del-overlay"));
   });
-  document.getElementById("skill-del-yes").addEventListener("click", confirmDelete);
+  $("skill-del-yes").addEventListener("click", confirmDelete);
   ["skill-form-overlay", "skill-del-overlay"].forEach((id) => {
-    const overlay = document.getElementById(id);
+    const overlay = $(id);
     overlay.addEventListener("click", (e) => {
       if (e.target !== overlay) return;
       if (id === "skill-form-overlay") closeForm();
       else closeOverlay(overlay);
     });
   });
-  document.getElementById("skill-search").addEventListener("input", (e) => {
+  $("skill-search").addEventListener("input", (e) => {
     skillQuery = e.target.value;
     currentPage = 1;
     render();
   });
-  document.getElementById("skill-kind-filters").addEventListener("click", (e) => {
-    const chip = e.target.closest("[data-kind]");
+  $("skill-kind-filters").addEventListener("click", (e) => {
+    const chip = closestEl(e.target, "[data-kind]");
     if (!chip) return;
     skillKind = chip.dataset.kind;
     currentPage = 1;
@@ -6697,35 +6700,36 @@ function init() {
     });
     render();
   });
-  document.getElementById("skill-category-filter").addEventListener("change", (e) => {
+  $("skill-category-filter").addEventListener("change", (e) => {
     skillCategory = e.target.value;
     currentPage = 1;
     render();
   });
-  document.getElementById("import-toggle").addEventListener("click", () => {
-    document.getElementById("import-section").classList.toggle("hidden");
+  $("import-toggle").addEventListener("click", () => {
+    $("import-section").classList.toggle("hidden");
   });
-  document.getElementById("import-run").addEventListener("click", () => {
-    const text = document.getElementById("import-textarea").value;
+  $("import-run").addEventListener("click", () => {
+    const text = $("import-textarea").value;
     if (!text.trim()) {
-      const msg = document.getElementById("import-msg");
+      const msg = $("import-msg");
       msg.textContent = "\u8BF7\u7C98\u8D34 SKILL.md \u6587\u672C\u6216\u9009\u62E9\u6587\u4EF6\u3002";
       msg.classList.remove("hidden");
       return;
     }
     runImport(text);
   });
-  document.getElementById("import-file").addEventListener("change", (e) => {
-    const file = e.target.files && e.target.files[0];
+  $("import-file").addEventListener("change", (e) => {
+    const input = e.target;
+    const file = input.files && input.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      document.getElementById("import-textarea").value = String(reader.result || "");
+      $("import-textarea").value = String(reader.result || "");
     };
     reader.readAsText(file);
   });
-  document.getElementById("skill-list").addEventListener("click", (e) => {
-    const btn = e.target.closest(".skill-act");
+  $("skill-list").addEventListener("click", (e) => {
+    const btn = closestEl(e.target, ".skill-act");
     if (!btn) return;
     const id = btn.dataset.id;
     const skill = allSkills.find((s) => s.name === id);
@@ -6734,8 +6738,8 @@ function init() {
     else if (btn.dataset.act === "delete") askDelete(id);
     else if (btn.dataset.act === "export") exportSkill(skill);
   });
-  document.getElementById("skill-pagination").addEventListener("click", (e) => {
-    const btn = e.target.closest(".page-btn");
+  $("skill-pagination").addEventListener("click", (e) => {
+    const btn = closestEl(e.target, ".page-btn");
     if (!btn || btn.disabled) return;
     const p = Number(btn.dataset.page);
     if (Number.isFinite(p) && p >= 1) {

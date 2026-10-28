@@ -1,24 +1,24 @@
 // Service Worker 入口（ES Module）：AI 请求 / Agent 编排 / 页面命令转发的消息监听
-import { getBook } from '../lib/shared/store.js';
+import { getBook } from '../lib/shared/store.ts';
 import { getAISettings } from '../lib/shared/settings.ts';
-import { buildAiMessages } from '../lib/shared/rag.js';
-import { callDeepSeek } from '../lib/assistant/llm.js';
-import { runAgentStream } from '../lib/assistant/agent.js';
+import { buildAiMessages } from '../lib/shared/rag.ts';
+import { callDeepSeek } from '../lib/assistant/llm.ts';
+import { runAgentStream } from '../lib/assistant/agent.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
-import { initTargetManager } from '../lib/assistant/target-manager.js';
+import { initTargetManager } from '../lib/assistant/target-manager.ts';
 import { logError, isOperableUrl } from '../lib/shared/utils.ts';
-import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.js';
+import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.ts';
 import { sanitizeMessages } from '../lib/shared/surrogates.ts';
-import { loadAgentSession } from '../lib/assistant/session-store.js';
+import { loadAgentSession } from '../lib/assistant/session-store.ts';
 import {
   PanelSessionStore,
   PSESS_INDEX_KEY,
   PSESS_ACTIVE_KEY,
   PSESS_SESSION_PREFIX,
-} from '../lib/shared/panel-sessions.js';
+} from '../lib/shared/panel-sessions.ts';
 import { RunStreamHub } from '../lib/assistant/run-hub.ts';
-import { RunChannel } from '../lib/assistant/run-channel.js';
-import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.js';
+import { RunChannel } from '../lib/assistant/run-channel.ts';
+import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.ts';
 import { removeSessionScreenshots } from '../lib/shared/screenshot-store.ts';
 import {
   listScripts,
@@ -36,18 +36,37 @@ import {
   syncUserscriptRegistrations,
 } from '../lib/userscript/manager.ts';
 
+/**
+ * 跨上下文消息载荷 / chrome.storage 的读写结果。
+ *
+ * 这些数据的形状由**发送方**（内容脚本、面板、MCP、旧版 storage）决定，
+ * 本文件只按 msg.type 分派 —— 给 40 多种消息各写一份 interface 只会把协议抄成两处，
+ * 而协议本身没有可校验的单一来源。因此统一用「任意 JSON 对象」：
+ * 字面量就是 chrome.storage 的契约（JSON 文档），不是放弃类型。
+ */
+type Dyn = Record<string, any>;
+
+/** AbortController 上额外挂的运行标记（run 收尾后置 true，防止重复 abort）。 */
+type RunController = AbortController & { __rfFinished?: boolean };
+
+interface PendingRunCleanup {
+  tabIds: Set<number>;
+  windowId: number | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 const persistentPanelStorage = createIndexedDbKeyValueStore({
   dbName: 'recallflow-history',
   storeName: 'panel-kv',
   version: 1,
 });
 
-function isPersistentPanelKey(key) {
+function isPersistentPanelKey(key: unknown): boolean {
   const k = String(key || '');
   return k === PSESS_INDEX_KEY || k === PSESS_ACTIVE_KEY || k.startsWith(PSESS_SESSION_PREFIX);
 }
 
-function splitPanelKeys(keys) {
+function splitPanelKeys(keys: unknown) {
   const list = keys == null ? [] : Array.isArray(keys) ? keys : [keys];
   return {
     persistent: list.filter(isPersistentPanelKey),
@@ -58,7 +77,7 @@ function splitPanelKeys(keys) {
 // 会话正文/索引/当前会话写 IndexedDB；面板开合与运行锁仍留在 storage.session，
 // 因为它们是浏览器会话级、重启后必须失效的临时状态。
 const panelStorage = {
-  async get(keys) {
+  async get(keys: string | string[] | null): Promise<Dyn> {
     if (keys == null) {
       const [sessionData, persistentData] = await Promise.all([
         chrome.storage.session.get(null),
@@ -67,7 +86,7 @@ const panelStorage = {
       return Object.assign({}, sessionData || {}, persistentData || {});
     }
     const parts = splitPanelKeys(keys);
-    const out = {};
+    const out: Dyn = {};
     if (parts.persistent.length) {
       try {
         Object.assign(out, await persistentPanelStorage.get(parts.persistent));
@@ -78,9 +97,9 @@ const panelStorage = {
     if (parts.session.length) Object.assign(out, await chrome.storage.session.get(parts.session));
     return out;
   },
-  async set(items) {
-    const persistent = {};
-    const session = {};
+  async set(items: Dyn) {
+    const persistent: Dyn = {};
+    const session: Dyn = {};
     for (const [key, value] of Object.entries(items || {})) {
       if (isPersistentPanelKey(key)) persistent[key] = value;
       else session[key] = value;
@@ -97,7 +116,7 @@ const panelStorage = {
     if (Object.keys(session).length) jobs.push(chrome.storage.session.set(session));
     await Promise.all(jobs);
   },
-  async remove(keys) {
+  async remove(keys: string | string[] | null) {
     const parts = splitPanelKeys(keys);
     const jobs = [];
     if (parts.persistent.length) jobs.push(persistentPanelStorage.remove(parts.persistent).catch(() => {}));
@@ -108,8 +127,8 @@ const panelStorage = {
 
 const panelSessions = new PanelSessionStore({
   storage: panelStorage,
-  isTabAlive: (tabId) =>
-    new Promise((resolve) => {
+  isTabAlive: (tabId: number) =>
+    new Promise<boolean>((resolve) => {
       try {
         chrome.tabs.get(Number(tabId), (tab) => {
           resolve(!chrome.runtime.lastError && Boolean(tab));
@@ -124,28 +143,28 @@ async function migratePanelStorageToIdb() {
   try {
     const existing = await persistentPanelStorage.get(PSESS_INDEX_KEY);
     if (existing && existing[PSESS_INDEX_KEY]) return;
-    const all = await chrome.storage.session.get(null);
+    const all = (await chrome.storage.session.get(null)) as Dyn;
     const persistentKeys = Object.keys(all || {}).filter(isPersistentPanelKey);
     if (!persistentKeys.length) return;
-    const items = {};
+    const items: Dyn = {};
     for (const key of persistentKeys) items[key] = all[key];
     await persistentPanelStorage.set(items);
     await chrome.storage.session.remove(persistentKeys);
   } catch (e) {
     // IndexedDB 暂不可用：保留 storage.session 数据作为降级，不阻断面板启动。
-    console.warn('[RecallFlow] IndexedDB 会话迁移失败，暂用 session storage:', e && e.message);
+    console.warn('[RecallFlow] IndexedDB 会话迁移失败，暂用 session storage:', (e as Error | null)?.message);
   }
 }
 
 // Service Worker 可能被回收后重新启动；bootstrap 本身是幂等的，但同一生命周期内
 // 多个标签页同时打开面板时只应扫描一次旧数据。
-let panelBootstrapPromise = null;
+let panelBootstrapPromise: Promise<unknown> | null = null;
 
-async function ensurePanelSessions() {
+async function ensurePanelSessions(): Promise<unknown> {
   if (!panelBootstrapPromise) {
     panelBootstrapPromise = (async () => {
       await migratePanelStorageToIdb();
-      const all = await chrome.storage.session.get(null);
+      const all = (await chrome.storage.session.get(null)) as Dyn;
       const legacyEntries = Object.keys(all || {})
         .filter((key) => /^recallflow\.conv\.\d+$/.test(key))
         .map((key) => ({
@@ -170,7 +189,7 @@ async function ensurePanelSessions() {
   return panelBootstrapPromise;
 }
 
-function panelSummary(state) {
+function panelSummary(state: Dyn) {
   const s = state || {};
   return {
     sessions: Array.isArray(s.sessions) ? s.sessions : [],
@@ -183,7 +202,7 @@ function panelSummary(state) {
  * 会话变更广播：只发摘要，收到消息的标签页按 activeId 再取正文。
  * 不回发给发起写入的标签页，避免它把自己的响应又当成一次远端更新。
  */
-function broadcastPanelSessions(state, sourceTabId) {
+function broadcastPanelSessions(state: Dyn, sourceTabId: number | null | undefined) {
   const payload = Object.assign({ type: 'panel:sessions-changed' }, panelSummary(state));
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs || []) {
@@ -194,7 +213,7 @@ function broadcastPanelSessions(state, sourceTabId) {
   });
 }
 
-function broadcastPanelUi(ui, sourceTabId) {
+function broadcastPanelUi(ui: Dyn, sourceTabId: number | null | undefined) {
   const payload = {
     type: 'panel:ui-changed',
     open: Boolean(ui && ui.open),
@@ -212,11 +231,11 @@ function broadcastPanelUi(ui, sourceTabId) {
 
 // tabId -> 当前订阅的 sessionId。跟随页只在面板打开/会话切换时登记一次，
 // SW 按 session 定向广播，避免把每个 token 发给所有网页。
-const runSubscriptions = new Map();
+const runSubscriptions = new Map<number, string>();
 // runId -> 待关闭的辅助页/Agent 窗口。必须等发起页确认最终消息已落盘后再清。
-const pendingRunCleanup = new Map();
+const pendingRunCleanup = new Map<string, PendingRunCleanup>();
 
-function registerRunCleanup(runId, event) {
+function registerRunCleanup(runId: unknown, event: Dyn) {
   const id = String(runId || '');
   if (!id) return;
   let item = pendingRunCleanup.get(id);
@@ -233,7 +252,7 @@ function registerRunCleanup(runId, event) {
   item.timer = setTimeout(() => finalizeRunCleanup(id), 15_000);
 }
 
-function finalizeRunCleanup(runId) {
+function finalizeRunCleanup(runId: unknown) {
   const id = String(runId || '');
   const item = pendingRunCleanup.get(id);
   if (!item) return;
@@ -252,7 +271,7 @@ function finalizeRunCleanup(runId) {
   }
 }
 
-function sendToRunSubscribers(sessionId, payload, excludeTabId) {
+function sendToRunSubscribers(sessionId: unknown, payload: Dyn, excludeTabId: number | null | undefined) {
   const wanted = String(sessionId || '');
   if (!wanted) return;
   for (const [tabId, subscribed] of [...runSubscriptions]) {
@@ -276,7 +295,7 @@ function sendToRunSubscribers(sessionId, payload, excludeTabId) {
 }
 
 const runHub = new RunStreamHub({
-  onStart: (snapshot) => {
+  onStart: (snapshot: Dyn) => {
     if (!snapshot) return;
     sendToRunSubscribers(
       snapshot.sessionId,
@@ -290,7 +309,7 @@ const runHub = new RunStreamHub({
       snapshot.ownerTabId
     );
   },
-  onDelta: (delta) => {
+  onDelta: (delta: Dyn) => {
     runStats.hubDeltas += 1;
     sendToRunSubscribers(
       delta.sessionId,
@@ -305,7 +324,7 @@ const runHub = new RunStreamHub({
       delta.ownerTabId
     );
   },
-  onEnd: (snapshot) => {
+  onEnd: (snapshot: Dyn) => {
     if (!snapshot) return;
     sendToRunSubscribers(
       snapshot.sessionId,
@@ -331,7 +350,7 @@ try {
   });
 } catch (e) {}
 
-async function handleAi(request) {
+async function handleAi(request: Dyn) {
   const settings = await getAISettings();
   if (!settings.apiKey) {
     return {
@@ -347,7 +366,8 @@ async function handleAi(request) {
     return { ok: false, error: '未知操作：' + request.action };
   }
 
-  const answer = await callDeepSeek(settings, messages);
+  // 第三个参数是中断信号；本路径没有可中断的 controller，显式传 undefined（与原来只传 2 个参数等价）。
+  const answer = await callDeepSeek(settings, messages, undefined);
   return { ok: true, answer };
 }
 
@@ -440,7 +460,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const targetTabId = Number.isInteger(requestedTabId) && requestedTabId > 0
       ? requestedTabId
       : sender.tab && sender.tab.id;
-    if (!Number.isInteger(targetTabId) || targetTabId <= 0) {
+    if (targetTabId == null || !Number.isInteger(targetTabId) || targetTabId <= 0) {
       sendResponse({ ok: false, error: '缺少目标标签页' });
       return false;
     }
@@ -484,10 +504,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 内容脚本只负责发消息与渲染，绝不直接写 storage.session。
   if (msg && /^panel:(state|get|create|save|activate|rename|delete|lock|unlock)$/.test(String(msg.type || ''))) {
     const sourceTabId = sender.tab && sender.tab.id;
-    const reply = (body) => sendResponse(Object.assign({ ok: true }, body || {}));
+    const reply = (body: Dyn) => sendResponse(Object.assign({ ok: true }, body || {}));
     (async () => {
       await ensurePanelSessions();
-      let result;
+      // 下面每个分支都会赋值；显式带上 `| undefined` 是为了让「对 const 赋值」门禁
+      // 能把它识别成 **let**（`let x!: T` 的 `!` 不在该门禁的声明正则里 —— 那样同名
+      // 的内层 `const result` 会被当成唯一声明，赋值就被误报成「对 const 赋值」）。
+      let result: Dyn | undefined;
       if (msg.type === 'panel:state') {
         result = await panelSessions.list();
         reply(panelSummary(result));
@@ -584,7 +607,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     chrome.storage.session
       .get('recallflow.conv.' + tabId)
-      .then((d) => sendResponse({ conversation: (d['recallflow.conv.' + tabId] || {}).conversation || [] }))
+      .then((d: Dyn) => sendResponse({ conversation: (d['recallflow.conv.' + tabId] || {}).conversation || [] }))
       .catch(() => sendResponse({ conversation: [] }));
     return true;
   }
@@ -628,7 +651,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         chrome.storage.local.set({
           'recallflow.lastPicked': Object.assign({}, list[0], { tabId, pageUrl, ts }),
-          'recallflow.lastPickedList': list.map((p) => Object.assign({}, p, { tabId, pageUrl, ts })),
+          'recallflow.lastPickedList': list.map((p: Dyn) => Object.assign({}, p, { tabId, pageUrl, ts })),
         });
       } catch (e) {}
     }
@@ -820,27 +843,34 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 //   · 整页刷新 → abort 落盘为 interrupted，新面板 query-run 后自动续跑；
 //   · 停止 → 面板显式发 {type:'stop'}，先标记不可续跑再 abort；
 //   · 标签页关闭 → tabs.onRemoved 兜底 abort。
-const tabControllers = new Map();
+const tabControllers = new Map<number, RunController>();
 // tabId -> 最近一次 run { runId, resumable }：整页刷新后，新面板据此自动续跑（query-run）。
-const tabRuns = new Map();
+const tabRuns = new Map<number, Dyn>();
 // runId -> RunChannel：run 的输出终端。页面刷新只换终端，不结束 run。
-const runChannels = new Map();
+const runChannels = new Map<string, RunChannel>();
 // runId -> 重连宽限定时器：端口断开后等新面板 reattach；超时才 abort。
-const runAbortTimers = new Map();
+const runAbortTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const REATTACH_GRACE_MS = 8000;
 // 运行生命周期计数（只读诊断；E2E 用它证明刷新走的是 reattach，而不是 abort+续跑）。
-const runStats = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0 };
+const runStats: {
+  starts: number;
+  reattaches: number;
+  aborts: number;
+  hubDeltas: number;
+  hubErrors?: number;
+  lastHubError?: string;
+} = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0 };
 try {
   // 只有 E2E 显式置 `__rfDebugStats=true` 时才暴露数据；生产环境读不到运行统计。
   Object.defineProperty(globalThis, '__rfRunStats', {
     configurable: true,
     get() {
-      return globalThis.__rfDebugStats === true ? runStats : undefined;
+      return (globalThis as unknown as { __rfDebugStats?: boolean }).__rfDebugStats === true ? runStats : undefined;
     },
   });
 } catch (e) {}
 
-function clearRunAbortTimer(runId) {
+function clearRunAbortTimer(runId: unknown) {
   const id = String(runId || '');
   const timer = runAbortTimers.get(id);
   if (timer) {
@@ -853,7 +883,7 @@ function clearRunAbortTimer(runId) {
  * 端口断开后的宽限：刷新通常会在一秒内 reattach；扩展被更新 / worker 被回收时
  * 不会有新 port，宽限到期再 abort 并落盘 interrupted，走原来的续跑路径。
  */
-function scheduleAbortIfNoReattach(runId, tabId) {
+function scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefined) {
   const id = String(runId || '');
   clearRunAbortTimer(id);
   const timer = setTimeout(() => {
@@ -876,11 +906,11 @@ function scheduleAbortIfNoReattach(runId, tabId) {
  * 请求停止一个正在运行的 run（owner 页自己点停止，或跟随页远程点停止）。
  * 返回失败时调用方应刷新会话，而不是继续显示「运行中」。
  */
-function requestRunStop(params, requesterTabId) {
+function requestRunStop(params: Dyn, requesterTabId: number | null | undefined) {
   const p = params || {};
   const wantedRunId = String(p.runId || '');
   const wantedSessionId = String(p.sessionId || '');
-  let owner = null;
+  let owner: { tabId: number; rec: Dyn } | null = null;
   for (const [tabId, rec] of tabRuns) {
     if (!rec) continue;
     if (wantedRunId && String(rec.runId || '') !== wantedRunId) continue;
@@ -944,11 +974,11 @@ chrome.runtime.onConnect.addListener((port) => {
   const senderTabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
   // 只有真正发起 run 的 port 才需要 controller。query-run / reattach 这类
   // 临时 port 若也建 controller，会在断开时把别人的 run abort 掉。
-  let controller = null;
+  let controller: RunController | null = null;
   let attachedRunId = '';
   const ensureController = () => {
     if (!controller) {
-      controller = new AbortController();
+      controller = new AbortController() as RunController;
       if (senderTabId) tabControllers.set(senderTabId, controller);
     }
     return controller;
@@ -975,6 +1005,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onMessage.addListener(async (payload) => {
+    let aborted = false;
     try {
       // 停止：面板显式请求中止 run，并标记为不可续跑。
       if (payload && payload.type === 'stop') {
@@ -992,7 +1023,7 @@ chrome.runtime.onConnect.addListener((port) => {
       // 整页刷新后的新面板：查询本 tab 是否有可续跑的 run。
       if (payload && payload.type === 'query-run') {
         const tr = senderTabId ? tabRuns.get(senderTabId) : null;
-        const reply = (m) => { try { port.postMessage(Object.assign({ type: 'run-state' }, m)); } catch (e) {} };
+        const reply = (m: Dyn) => { try { port.postMessage(Object.assign({ type: 'run-state' }, m)); } catch (e) {} };
         if (!tr || !tr.resumable || !tr.runId) {
           reply({ runId: '', resumable: false, live: false, pending: false, instruction: '' });
           return;
@@ -1040,7 +1071,7 @@ chrome.runtime.onConnect.addListener((port) => {
         const runId = String(payload.runId || '');
         const channel = runId ? runChannels.get(runId) : null;
         const snapshot = runId ? runHub.snapshot(runId) : null;
-        const attachFailed = (reason) => {
+        const attachFailed = (reason: string) => {
           try {
             port.postMessage({ type: 'reattach-failed', runId, reason, snapshot });
           } catch (e) {}
@@ -1141,7 +1172,7 @@ chrome.runtime.onConnect.addListener((port) => {
         const channel = existingChannel || new RunChannel();
         runChannels.set(String(runId), channel);
         const runController = ensureController();
-        if (!channel.attach(port)) {
+        if (!channel.attach(port, {})) {
           port.postMessage({ type: 'error', error: '无法绑定 Agent 输出通道。' });
           return;
         }
@@ -1163,14 +1194,14 @@ chrome.runtime.onConnect.addListener((port) => {
             book,
             runController.signal,
             tabId,
-            (event) => {
+            (event: Dyn) => {
               if (event && event.type === 'tabs-close-pending') registerRunCleanup(runId, event);
               if (sessionId) {
                 try {
                   runHub.push(runId, event);
                 } catch (e) {
                   runStats.hubErrors = (runStats.hubErrors || 0) + 1;
-                  runStats.lastHubError = String((e && e.message) || e);
+                  runStats.lastHubError = String((e as Error | null)?.message || e);
                 }
               }
             }
@@ -1183,13 +1214,13 @@ chrome.runtime.onConnect.addListener((port) => {
           runChannels.delete(String(runId));
           attachedRunId = '';
         } catch (e) {
-          const detail = e && e.stack ? e.stack : String(e);
+          const detail = (e as Error | null)?.stack || String(e);
           console.error('[RecallFlow] agent run error:', detail);
           // 把真实错误回传前端，避免只看到「转圈」或笼统报错。
-          try { port.postMessage({ type: 'error', error: 'Agent 运行出错：' + (e && e.message ? e.message : String(e)) }); } catch (err) {}
+          try { port.postMessage({ type: 'error', error: 'Agent 运行出错：' + ((e as Error | null)?.message || String(e)) }); } catch (err) {}
           try { port.postMessage({ type: 'end' }); } catch (err) {}
           if (sessionId) {
-            runHub.push(runId, { type: 'error', error: 'Agent 运行出错：' + (e && e.message ? e.message : String(e)) });
+            runHub.push(runId, { type: 'error', error: 'Agent 运行出错：' + ((e as Error | null)?.message || String(e)) });
             runHub.push(runId, { type: 'end' });
             runHub.finish(runId, runController.signal.aborted ? 'cancelled' : 'failed');
           }
@@ -1229,7 +1260,9 @@ chrome.runtime.onConnect.addListener((port) => {
           temperature: 0.3,
           stream: true,
         }),
-        signal: controller.signal,
+        // 非 agent 分支没有 ensureController()，这里保留原有行为（null 时照旧抛错），
+        // 类型迁移批不改语义；见交付评论的「已知遗留」。
+        signal: controller!.signal,
       });
 
       if (!resp.ok) {
@@ -1244,7 +1277,7 @@ chrome.runtime.onConnect.addListener((port) => {
         return;
       }
 
-      const reader = resp.body.getReader();
+      const reader = resp.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
@@ -1253,7 +1286,7 @@ chrome.runtime.onConnect.addListener((port) => {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop();
+        buffer = lines.pop() ?? '';
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith('data:')) continue;
@@ -1266,7 +1299,7 @@ chrome.runtime.onConnect.addListener((port) => {
               port.postMessage({ type: 'chunk', text: delta.content });
             }
           } catch (e) {
-            logError('Failed to parse SSE chunk', { data, error: e.message });
+            logError('Failed to parse SSE chunk', { data, error: (e as Error).message });
           }
         }
       }
@@ -1282,15 +1315,19 @@ chrome.runtime.onConnect.addListener((port) => {
                 port.postMessage({ type: 'chunk', text: delta.content });
               }
             } catch (e) {
-              logError('Failed to parse final SSE chunk', { data, error: e.message });
+              logError('Failed to parse final SSE chunk', { data, error: (e as Error).message });
             }
           }
         }
       }
+      // ⚠ 原名是未声明的 `aborted`（TS2304）：运行时走到这里必然 ReferenceError，
+      // 被下面的 catch 再吞一次。这里按显然的意图取 controller 的 aborted —— 这是本批
+      // **唯一**的运行时修复，交付评论单列（类型迁移批原则上不改语义）。
+      aborted = Boolean(controller && controller.signal.aborted);
       if (!aborted) port.postMessage({ type: 'end' });
     } catch (e) {
       if (aborted) return;
-      port.postMessage({ type: 'error', error: e.message });
+      port.postMessage({ type: 'error', error: (e as Error).message });
     }
   });
 });

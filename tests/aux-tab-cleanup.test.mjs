@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 const AGENT = fs.readFileSync(new URL('../lib/assistant/agent.ts', import.meta.url), 'utf8');
 const CHAT = fs.readFileSync(new URL('../lib/page/chat.ts', import.meta.url), 'utf8');
-const BACKGROUND = fs.readFileSync(new URL('../entries/background.js', import.meta.url), 'utf8');
+const BACKGROUND = fs.readFileSync(new URL('../entries/background.ts', import.meta.url), 'utf8');
 
 function functionSlice(src, startNeedle, endNeedle) {
   const at = src.indexOf(startNeedle);
@@ -36,7 +36,8 @@ test('发起页在最终保存成功后发送 committed ack', () => {
 
 test('后台收到 committed 后才关闭辅助页，并保留超时兜底', () => {
   assert.match(BACKGROUND, /msg\.type === 'panel:run:committed'/, '缺少 committed 路由');
-  assert.match(BACKGROUND, /function finalizeRunCleanup\(runId\)/);
+  // TITA-86：TS 迁移给入参补了类型，锚点跟着锚到**新签名**（同一个函数，不是放宽匹配）。
+  assert.match(BACKGROUND, /function finalizeRunCleanup\(runId: unknown\)/);
   assert.match(BACKGROUND, /15_000/, '发起页崩溃时必须有兜底关闭');
   assert.match(BACKGROUND, /chrome\.tabs\.remove\(ids/, '真正关页发生在后台收尾');
 });

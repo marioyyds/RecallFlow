@@ -7,6 +7,7 @@
 // 仅在扩展后台运行；不依赖 window，可用 chrome 桩单测。
 
 import { buildHandoffRecord, buildToolTrail, prepareHandoffTrail, updateHandoffIndex, normalizeHandoffId, fitRecordToBudget } from './handoff.ts';
+import type { HandoffRecord } from './handoff.ts';
 
 const KEY_PREFIX = 'recallflow.handoff.';
 // 全量轨迹单独存一个 key：它有自己的预算，不与记录的 160KB 抢空间（见 prepareHandoffTrail 的说明）。
@@ -14,9 +15,15 @@ const TRAIL_KEY_PREFIX = 'recallflow.handoffTrail.';
 const INDEX_KEY = 'recallflow.handoffIndex';
 const MAX_RECORDS = 30;
 
-function area() {
+type StorageArea = {
+  get(keys: string | string[] | null): Promise<Record<string, any>>;
+  set(items: Record<string, any>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+};
+
+function area(): StorageArea | null {
   if (typeof chrome === 'undefined' || !chrome.storage) return null;
-  return chrome.storage.local || null;
+  return (chrome.storage.local as unknown as StorageArea) || null;
 }
 
 /** 保存（或覆盖）一份交接包；返回 { ok, id, updatedAt, dropped }。
@@ -25,18 +32,18 @@ function area() {
  * （面板现在就是发 record：`background.js` 直接 `saveHandoff(msg.record)`）。
  * `extras.trailItems` 是**完整轨迹**（面板用 `prepareHandoffTrail(buildToolTrail(msgs)).items` 得到）。
  */
-export async function saveHandoff(input, extras = {}) {
+export async function saveHandoff(input: any, extras: { trailItems?: unknown } = {}) {
   const a = area();
   if (!a) return { ok: false, error: '本地存储不可用' };
   // ⚠ 上一版对"已经是 record"的入参也**再建一次** ⇒ 从 record 里那份**摘要**
   //   （`toolTrail` 只留最近 MAX_TOOL_TRAIL 步）重算"全量" ✗ ⇒ 完整轨迹**从来到不了这里**，
   //   `trailTotal` 变成摘要长度 —— "存全量"整体失效。⇒ 已是 record 就直接用，不再重建。
   const isRecord = !!input && typeof input.id === 'string' && input.trailTotal !== undefined;
-  let record;
+  let record: HandoffRecord;
   try {
     record = isRecord ? input : buildHandoffRecord(input);
   } catch (e) {
-    return { ok: false, error: (e && e.message) || String(e) };
+    return { ok: false, error: (e as Error | null)?.message || String(e) };
   }
   // 按字节预算收缩：条数上限（30 条）挡不住单条超长，而 chrome.storage.local
   // 默认配额约 10MB 由所有记录共享。收缩结果里带 truncated 标记，便于排查「内容为何变短」。
@@ -56,7 +63,7 @@ export async function saveHandoff(input, extras = {}) {
       ? input.toolTrail
       : buildToolTrail(input.messages);
   const prepared = prepareHandoffTrail(rawTrail);
-  let prev = null;
+  let prev: { createdAt?: number } | null = null;
   try {
     const existing = await a.get(key);
     prev = existing && existing[key];
@@ -66,7 +73,7 @@ export async function saveHandoff(input, extras = {}) {
   // 保留首次创建时间：同一会话多次快照时，createdAt 表示「这次会话是什么时候开始的」。
   if (prev && prev.createdAt) record.createdAt = prev.createdAt;
 
-  let index = [];
+  let index: any[] = [];
   try {
     const data = await a.get(INDEX_KEY);
     index = (data && data[INDEX_KEY]) || [];
@@ -78,7 +85,7 @@ export async function saveHandoff(input, extras = {}) {
   try {
     await a.set({ [key]: record, [TRAIL_KEY_PREFIX + record.id]: prepared.items, [INDEX_KEY]: nextIndex });
   } catch (e) {
-    return { ok: false, error: '写入失败：' + ((e && e.message) || String(e)) };
+    return { ok: false, error: '写入失败：' + ((e as Error | null)?.message || String(e)) };
   }
   // 超出上限的旧记录**连同它的轨迹 key 一起删**：
   // 只删记录会留下无主的轨迹（再也取不到，却一直占着配额），30 条一轮就攒出几 MB 垃圾。
@@ -100,7 +107,7 @@ export async function saveHandoff(input, extras = {}) {
  * 这是"存全量、交付按需取"的取回端：接手方看到 `trailStored > toolTrail.length`
  * 就知道"还有更早的探索"，再按区间来取，而不是一次把几百步全灌进上下文。
  */
-export async function getHandoff(id, opts = {}) {
+export async function getHandoff(id: unknown, opts: { trailFrom?: unknown; trailTo?: unknown } = {}) {
   const norm = normalizeHandoffId(id);
   if (!norm) {
     return { ok: false, error: '会话标识无效：' + JSON.stringify(String(id)) + '（应形如 RF-7K2M9X）' };
@@ -108,12 +115,12 @@ export async function getHandoff(id, opts = {}) {
   const a = area();
   if (!a) return { ok: false, error: '本地存储不可用' };
   const key = KEY_PREFIX + norm;
-  let rec = null;
+  let rec: HandoffRecord | null = null;
   try {
     const data = await a.get(key);
     rec = data && data[key];
   } catch (e) {
-    return { ok: false, error: '读取失败：' + ((e && e.message) || String(e)) };
+    return { ok: false, error: '读取失败：' + ((e as Error | null)?.message || String(e)) };
   }
   if (!rec) {
     return {
@@ -127,12 +134,12 @@ export async function getHandoff(id, opts = {}) {
   if (!wantsTrail) return { ok: true, record: rec };
 
   const trailKey = TRAIL_KEY_PREFIX + norm;
-  let all = [];
+  let all: unknown[] = [];
   try {
     const data = await a.get(trailKey);
     all = (data && data[trailKey]) || [];
   } catch (e) {
-    return { ok: false, error: '读取完整轨迹失败：' + ((e && e.message) || String(e)) };
+    return { ok: false, error: '读取完整轨迹失败：' + ((e as Error | null)?.message || String(e)) };
   }
   const total = Number(rec.trailTotal) || all.length;
   const start = Number.isFinite(Number(opts.trailFrom)) ? Math.max(0, Math.floor(Number(opts.trailFrom))) : 0;
@@ -162,15 +169,15 @@ export async function getHandoff(id, opts = {}) {
 }
 
 /** 列出最近的交接包（仅标识与时间，便于 agent 询问「最近有哪些会话」）。 */
-export async function listHandoffs(limit = 20) {
+export async function listHandoffs(limit: unknown = 20) {
   const a = area();
   if (!a) return { ok: false, error: '本地存储不可用', list: [] };
-  let index = [];
+  let index: any[] = [];
   try {
     const data = await a.get(INDEX_KEY);
     index = (data && data[INDEX_KEY]) || [];
   } catch (e) {
-    return { ok: false, error: '读取失败：' + ((e && e.message) || String(e)), list: [] };
+    return { ok: false, error: '读取失败：' + ((e as Error | null)?.message || String(e)), list: [] };
   }
   const n = Number(limit) > 0 ? Math.min(50, Math.floor(Number(limit))) : 20;
   return { ok: true, list: index.slice(0, n).map((e) => ({ id: e.id, at: e.at })) };

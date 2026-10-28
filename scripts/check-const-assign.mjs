@@ -59,6 +59,9 @@ const GENERATED = new Set([
   'skills-page.js',
   'userscripts.js',
   'lib/userscript/runner.js',
+  // TITA-86（Batch 5）：`lib/page/debug-hook.js` 的源码已改名 `debug-hook.ts`，
+  // manifest 仍按路径注入这个 `.js` —— 它现在是 `scripts/build-entries.mjs` 的产物。
+  'lib/page/debug-hook.js',
 ]);
 // TS 迁移期（TITA-73 / Batch 0）：必须把 .ts / .mts 纳入扫描集。
 //

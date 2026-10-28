@@ -47,7 +47,7 @@ test('非数字标签不会被重编号，也不会生成来源（它就是死�
 
 const DEMANDING = [
   { file: 'lib/assistant/intent-router.ts', label: 'agent 规则 3' },
-  { file: 'lib/shared/rag.js', label: '面板直答提示' },
+  { file: 'lib/shared/rag.ts', label: '面板直答提示' },
 ];
 
 test('提示不得要求「为当前页面标 [n]」——那是它没有的东西', () => {
@@ -79,7 +79,7 @@ test('提示必须明说「当前页面不编号」，并禁止自造非数字�
 });
 
 test('知识库条目的 [n] 要求必须保留（那是真有编号的）', () => {
-  const rag = read('lib/shared/rag.js');
+  const rag = read('lib/shared/rag.ts');
   assert.ok(
     /引用具体条目时使用 \[n\]|\[n\] 格式标注来源编号/.test(rag),
     '知识库条目确实有编号，提示仍应要求标注'

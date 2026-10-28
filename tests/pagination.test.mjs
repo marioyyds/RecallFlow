@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.js';
+import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.ts';
 
 test('clampPage: 页码始终落在有效范围', () => {
   assert.equal(clampPage(0, 5), 1);
@@ -34,7 +34,7 @@ test('pageTokens: 页数少时全列，页数多时用省略号收窄', () => {
 });
 
 test('知识库页面接入分页并按 12 条切页', () => {
-  const manager = fs.readFileSync('entries/manager.js', 'utf8');
+  const manager = fs.readFileSync('entries/manager.ts', 'utf8');
   const html = fs.readFileSync('manager.html', 'utf8');
   assert.match(html, /id="kb-pagination"/);
   assert.match(manager, /const KB_PAGE_SIZE = 12/);

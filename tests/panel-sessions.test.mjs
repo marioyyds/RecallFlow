@@ -9,7 +9,7 @@ import {
   panelSessionLockKey,
   deriveSessionTitle,
   estimateConversationStats,
-} from '../lib/shared/panel-sessions.js';
+} from '../lib/shared/panel-sessions.ts';
 
 function memoryStorage(initial) {
   const data = Object.assign({}, initial || {});

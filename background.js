@@ -324,7 +324,7 @@ function formatVisibilityReport(results) {
   return "\u3010\u53EF\u89C1\u6027\u6838\u67E5\u3011\u5224\u65AD\u300C\u6587\u6848\u662F\u5426\u8FD8\u770B\u5F97\u89C1\u300D\u53EA\u80FD\u770B**\u53EF\u89C1\u6B21\u6570**\uFF1BDOM \u6B21\u6570\u5305\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u7684\u6587\u5B57\u3002\n" + lines.join("\n");
 }
 
-// lib/shared/store.js
+// lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
 var DB_VERSION = 1;
 var STORE_ENTRIES = "entries";
@@ -384,7 +384,7 @@ function normalizeBook(input) {
     if (!raw || typeof raw !== "object") continue;
     const id = String(raw.id || key);
     if (!id) continue;
-    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
+    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[String(raw.status)] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
     out[id] = {
       id,
       type: raw.type || "wrong",
@@ -777,7 +777,7 @@ function collapseOldToolResults(messages, keepFull = 6, maxLen = 300, tailLen = 
   return collapsed;
 }
 
-// lib/shared/rag.js
+// lib/shared/rag.ts
 var CJK_RE2 = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
 function tokenizeQuery(query) {
   const raw = String(query || "").toLowerCase();
@@ -808,7 +808,7 @@ function buildKbOverview(book, limit) {
   const lines = shown.map((it, i) => {
     const parts = [`[${i + 1}] \u6807\u9898\uFF1A${it.title || "\u672A\u547D\u540D"}`];
     parts.push(`\u7C7B\u578B\uFF1A${typeInfo(it.type).name}`);
-    if (it.status) parts.push(`\u661F\u7EA7\uFF1A${(STAR_LEVELS[it.status] || {}).name || it.status}`);
+    if (it.status) parts.push(`\u661F\u7EA7\uFF1A${STAR_LEVELS[String(it.status)]?.name || it.status}`);
     if (Array.isArray(it.tags) && it.tags.length) parts.push(`\u6807\u7B7E\uFF1A${it.tags.join("\u3001")}`);
     if (it.note) parts.push(`\u5185\u5BB9\uFF1A${String(it.note).slice(0, 120)}`);
     return parts.join("\uFF5C");
@@ -862,7 +862,7 @@ function buildCitations(relevantItems, isOverview) {
   }));
 }
 function buildAiMessages(action, payload, settings, book) {
-  const text = payload.text || "";
+  const text = String(payload.text || "");
   if (action === "translate") {
     const t = payload.targetLang || settings.targetLang || "\u4E2D\u6587";
     return [
@@ -4120,7 +4120,7 @@ var TOOL_METADATA = {
   save_skill: { risk: "high", readOnly: false, alwaysAvailable: true, requiresApproval: true, alwaysRequireApproval: true, route: "background" }
 };
 
-// lib/shared/content-script-bridge.js
+// lib/shared/content-script-bridge.ts
 var INJECT_COOLDOWN_MS = 2e3;
 var lastInjectAt = /* @__PURE__ */ new Map();
 function normalizeFrameId(frameId) {
@@ -4161,7 +4161,7 @@ async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
   try {
     return await sendOnce(chromeApi, tabId, message, frameId);
   } catch (e) {
-    if (!isContentScriptUnreachable(e && e.message)) throw e;
+    if (!isContentScriptUnreachable(e && e?.message)) throw e;
     const injected = await injectContentScript(chromeApi, tabId, frameId);
     if (!injected) throw e;
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -10619,7 +10619,7 @@ function updateHandoffIndex(index, id, now, keep = 30) {
   return { index: next, dropped };
 }
 
-// lib/shared/handoff-store.js
+// lib/shared/handoff-store.ts
 var KEY_PREFIX = "recallflow.handoff.";
 var TRAIL_KEY_PREFIX = "recallflow.handoffTrail.";
 var INDEX_KEY2 = "recallflow.handoffIndex";
@@ -10636,7 +10636,7 @@ async function saveHandoff(input, extras = {}) {
   try {
     record = isRecord2 ? input : buildHandoffRecord(input);
   } catch (e) {
-    return { ok: false, error: e && e.message || String(e) };
+    return { ok: false, error: e?.message || String(e) };
   }
   const fitted = fitRecordToBudget(record);
   record = fitted.record;
@@ -10662,7 +10662,7 @@ async function saveHandoff(input, extras = {}) {
   try {
     await a.set({ [key]: record, [TRAIL_KEY_PREFIX + record.id]: prepared.items, [INDEX_KEY2]: nextIndex });
   } catch (e) {
-    return { ok: false, error: "\u5199\u5165\u5931\u8D25\uFF1A" + (e && e.message || String(e)) };
+    return { ok: false, error: "\u5199\u5165\u5931\u8D25\uFF1A" + (e?.message || String(e)) };
   }
   if (dropped.length) {
     try {
@@ -10685,7 +10685,7 @@ async function getHandoff(id, opts = {}) {
     const data = await a.get(key);
     rec = data && data[key];
   } catch (e) {
-    return { ok: false, error: "\u8BFB\u53D6\u5931\u8D25\uFF1A" + (e && e.message || String(e)) };
+    return { ok: false, error: "\u8BFB\u53D6\u5931\u8D25\uFF1A" + (e?.message || String(e)) };
   }
   if (!rec) {
     return {
@@ -10702,7 +10702,7 @@ async function getHandoff(id, opts = {}) {
     const data = await a.get(trailKey);
     all = data && data[trailKey] || [];
   } catch (e) {
-    return { ok: false, error: "\u8BFB\u53D6\u5B8C\u6574\u8F68\u8FF9\u5931\u8D25\uFF1A" + (e && e.message || String(e)) };
+    return { ok: false, error: "\u8BFB\u53D6\u5B8C\u6574\u8F68\u8FF9\u5931\u8D25\uFF1A" + (e?.message || String(e)) };
   }
   const total = Number(rec.trailTotal) || all.length;
   const start = Number.isFinite(Number(opts.trailFrom)) ? Math.max(0, Math.floor(Number(opts.trailFrom))) : 0;
@@ -10731,13 +10731,13 @@ async function listHandoffs(limit = 20) {
     const data = await a.get(INDEX_KEY2);
     index = data && data[INDEX_KEY2] || [];
   } catch (e) {
-    return { ok: false, error: "\u8BFB\u53D6\u5931\u8D25\uFF1A" + (e && e.message || String(e)), list: [] };
+    return { ok: false, error: "\u8BFB\u53D6\u5931\u8D25\uFF1A" + (e?.message || String(e)), list: [] };
   }
   const n = Number(limit) > 0 ? Math.min(50, Math.floor(Number(limit))) : 20;
   return { ok: true, list: index.slice(0, n).map((e) => ({ id: e.id, at: e.at })) };
 }
 
-// lib/shared/bridge-methods.js
+// lib/shared/bridge-methods.ts
 var BRIDGE_METHODS = Object.freeze([
   "browser_read",
   // C-4 合并：原 read_console / read_network 收敛为 read_diagnostics({ kind })。
@@ -10757,7 +10757,7 @@ var BRIDGE_METHODS = Object.freeze([
   "page_action"
 ]);
 
-// lib/shared/bridge-write-policy.js
+// lib/shared/bridge-write-policy.ts
 var BRIDGE_WRITE_TOOLS = Object.freeze([
   "click_element",
   "type_text",
@@ -10805,7 +10805,8 @@ function validateBridgeWrite(name, args) {
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     return { ok: false, code: "BAD_ARGS", error: "\u5DE5\u5177\u53C2\u6570\u5FC5\u987B\u662F JSON \u5BF9\u8C61\u3002" };
   }
-  const hasTarget = args.ref || args.selector || args.text || args.role || args.name || args.testid || Number.isFinite(Number(args.x)) || Number.isFinite(Number(args.y));
+  const target = args;
+  const hasTarget = target.ref || target.selector || target.text || target.role || target.name || target.testid || Number.isFinite(Number(target.x)) || Number.isFinite(Number(target.y));
   if (!hasTarget) {
     return {
       ok: false,
@@ -11196,7 +11197,7 @@ function startMcpRelay() {
   }
 }
 
-// lib/shared/panel-sessions.js
+// lib/shared/panel-sessions.ts
 var PSESS_INDEX_KEY = "recallflow.psess.index.v1";
 var PSESS_ACTIVE_KEY = "recallflow.psess.active.v1";
 var PSESS_UI_KEY = "recallflow.psess.ui.v1";
@@ -11282,17 +11283,21 @@ function messageJson(message) {
 }
 function isPrefixMessages(incoming, current) {
   if (!Array.isArray(incoming) || !Array.isArray(current) || incoming.length > current.length) return false;
-  for (let i = 0; i < incoming.length; i++) {
-    if (messageJson(incoming[i]) !== messageJson(current[i])) return false;
+  const next = incoming;
+  const prev = current;
+  for (let i = 0; i < next.length; i++) {
+    if (messageJson(next[i]) !== messageJson(prev[i])) return false;
   }
   return true;
 }
 function isMoreCompleteMessages(incoming, current) {
   if (!Array.isArray(incoming) || !Array.isArray(current)) return false;
-  if (incoming.length > current.length && isPrefixMessages(current, incoming)) return true;
-  if (incoming.length === current.length && current.length > 0) {
-    if (!isPrefixMessages(current.slice(0, -1), incoming.slice(0, -1))) return false;
-    return messageJson(incoming[incoming.length - 1]).length > messageJson(current[current.length - 1]).length;
+  const next = incoming;
+  const prev = current;
+  if (next.length > prev.length && isPrefixMessages(prev, next)) return true;
+  if (next.length === prev.length && prev.length > 0) {
+    if (!isPrefixMessages(prev.slice(0, -1), next.slice(0, -1))) return false;
+    return messageJson(next[next.length - 1]).length > messageJson(prev[prev.length - 1]).length;
   }
   return false;
 }
@@ -11817,7 +11822,7 @@ var PanelSessionStore = class {
   async _prune(index, activeId, extraProtectedKeys) {
     const ids = Object.keys(index.sessions);
     if (ids.length <= this.maxSessions) return;
-    const protectedKeys = new Set(extraProtectedKeys || []);
+    const protectedKeys = new Set(Array.isArray(extraProtectedKeys) ? extraProtectedKeys.map(String) : []);
     const candidates = Object.values(index.sessions).filter((s) => s.id !== activeId).sort((a, b) => a.updatedAt - b.updatedAt || a.seq - b.seq);
     const locked = await this._lockedIds(index, this.now());
     while (Object.keys(index.sessions).length > this.maxSessions) {
@@ -12262,7 +12267,7 @@ var RunChannel = class {
   }
 };
 
-// lib/shared/idb-kv.js
+// lib/shared/idb-kv.ts
 function requestResult2(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -12315,7 +12320,10 @@ function createIndexedDbKeyValueStore(options) {
     const store = tx.objectStore(storeName);
     let out;
     if (keys == null) {
-      const [allKeys, allValues] = await Promise.all([requestResult2(store.getAllKeys()), requestResult2(store.getAll())]);
+      const [allKeys, allValues] = await Promise.all([
+        requestResult2(store.getAllKeys()),
+        requestResult2(store.getAll())
+      ]);
       out = {};
       for (let i = 0; i < allKeys.length; i++) out[String(allKeys[i])] = allValues[i];
     } else if (Array.isArray(keys)) {
@@ -12350,7 +12358,7 @@ function createIndexedDbKeyValueStore(options) {
   return { get, set, remove };
 }
 
-// entries/background.js
+// entries/background.ts
 var persistentPanelStorage = createIndexedDbKeyValueStore({
   dbName: "recallflow-history",
   storeName: "panel-kv",
@@ -12439,7 +12447,7 @@ async function migratePanelStorageToIdb() {
     await persistentPanelStorage.set(items);
     await chrome.storage.session.remove(persistentKeys);
   } catch (e) {
-    console.warn("[RecallFlow] IndexedDB \u4F1A\u8BDD\u8FC1\u79FB\u5931\u8D25\uFF0C\u6682\u7528 session storage:", e && e.message);
+    console.warn("[RecallFlow] IndexedDB \u4F1A\u8BDD\u8FC1\u79FB\u5931\u8D25\uFF0C\u6682\u7528 session storage:", e?.message);
   }
 }
 var panelBootstrapPromise = null;
@@ -12626,7 +12634,7 @@ async function handleAi(request) {
   if (!messages) {
     return { ok: false, error: "\u672A\u77E5\u64CD\u4F5C\uFF1A" + request.action };
   }
-  const answer = await callDeepSeek(settings, messages);
+  const answer = await callDeepSeek(settings, messages, void 0);
   return { ok: true, answer };
 }
 chrome.commands.onCommand.addListener((command2) => {
@@ -12704,7 +12712,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "panel:open-active") {
     const requestedTabId = Number(msg.tabId);
     const targetTabId = Number.isInteger(requestedTabId) && requestedTabId > 0 ? requestedTabId : sender.tab && sender.tab.id;
-    if (!Number.isInteger(targetTabId) || targetTabId <= 0) {
+    if (targetTabId == null || !Number.isInteger(targetTabId) || targetTabId <= 0) {
       sendResponse({ ok: false, error: "\u7F3A\u5C11\u76EE\u6807\u6807\u7B7E\u9875" });
       return false;
     }
@@ -13164,6 +13172,7 @@ chrome.runtime.onConnect.addListener((port) => {
     }
   });
   port.onMessage.addListener(async (payload) => {
+    let aborted = false;
     try {
       if (payload && payload.type === "stop") {
         const tr = senderTabId ? tabRuns.get(senderTabId) : null;
@@ -13325,7 +13334,7 @@ chrome.runtime.onConnect.addListener((port) => {
         const channel = existingChannel || new RunChannel();
         runChannels.set(String(runId), channel);
         const runController = ensureController();
-        if (!channel.attach(port)) {
+        if (!channel.attach(port, {})) {
           port.postMessage({ type: "error", error: "\u65E0\u6CD5\u7ED1\u5B9A Agent \u8F93\u51FA\u901A\u9053\u3002" });
           return;
         }
@@ -13354,7 +13363,7 @@ chrome.runtime.onConnect.addListener((port) => {
                   runHub.push(runId, event);
                 } catch (e) {
                   runStats.hubErrors = (runStats.hubErrors || 0) + 1;
-                  runStats.lastHubError = String(e && e.message || e);
+                  runStats.lastHubError = String(e?.message || e);
                 }
               }
             }
@@ -13366,10 +13375,10 @@ chrome.runtime.onConnect.addListener((port) => {
           runChannels.delete(String(runId));
           attachedRunId = "";
         } catch (e) {
-          const detail = e && e.stack ? e.stack : String(e);
+          const detail = e?.stack || String(e);
           console.error("[RecallFlow] agent run error:", detail);
           try {
-            port.postMessage({ type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e && e.message ? e.message : String(e)) });
+            port.postMessage({ type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
           } catch (err) {
           }
           try {
@@ -13377,7 +13386,7 @@ chrome.runtime.onConnect.addListener((port) => {
           } catch (err) {
           }
           if (sessionId) {
-            runHub.push(runId, { type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e && e.message ? e.message : String(e)) });
+            runHub.push(runId, { type: "error", error: "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + (e?.message || String(e)) });
             runHub.push(runId, { type: "end" });
             runHub.finish(runId, runController.signal.aborted ? "cancelled" : "failed");
           }
@@ -13413,6 +13422,8 @@ chrome.runtime.onConnect.addListener((port) => {
           temperature: 0.3,
           stream: true
         }),
+        // 非 agent 分支没有 ensureController()，这里保留原有行为（null 时照旧抛错），
+        // 类型迁移批不改语义；见交付评论的「已知遗留」。
         signal: controller.signal
       });
       if (!resp.ok) {
@@ -13434,7 +13445,7 @@ chrome.runtime.onConnect.addListener((port) => {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop();
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed.startsWith("data:")) continue;
@@ -13468,6 +13479,7 @@ chrome.runtime.onConnect.addListener((port) => {
           }
         }
       }
+      aborted = Boolean(controller && controller.signal.aborted);
       if (!aborted) port.postMessage({ type: "end" });
     } catch (e) {
       if (aborted) return;

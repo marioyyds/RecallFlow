@@ -19,7 +19,7 @@ import fs from 'node:fs';
 
 import { previewArgsJson, formatOmittedItems, OMIT_MARK_START, OMIT_MARK_END, OMIT_ARGS_KEY, serializeConversationMessages } from '../lib/page/transcript.ts';
 
-const debugHookSrc = fs.readFileSync('lib/page/debug-hook.js', 'utf8');
+const debugHookSrc = fs.readFileSync('lib/page/debug-hook.ts', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/page/transcript.ts', 'utf8');
 
 test('① 省略标记用可辨形态，且**不**长得像普通数组元素', () => {

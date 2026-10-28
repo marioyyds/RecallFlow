@@ -23,17 +23,36 @@ const MIGRATION_META_KEY = 'chrome-storage-v2';
 const STORAGE_BACKUP_KEY = 'knowledgeBasePreIndexedDB';
 const CHANGE_CHANNEL = 'recallflow-knowledge-change';
 
-let dbPromise = null;
-let migrationPromise = null;
+/**
+ * 知识库条目（entries store 的 record）：列表/排序只读这一层，
+ * 正文放在 documents store。字段全部来自用户输入或旧 storage 数据，
+ * 因此入参侧一律按 unknown 收窄，落库前在这里定形。
+ */
+export interface KnowledgeItem {
+  id: string;
+  type: string;
+  title: string;
+  url: string;
+  platform: string;
+  platformName: string;
+  status: number | string;
+  note: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
 
-function requestResult(req) {
+let dbPromise: Promise<IDBDatabase> | null = null;
+let migrationPromise: Promise<void> | null = null;
+
+function requestResult<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error || new Error('IndexedDB request failed'));
   });
 }
 
-function transactionDone(tx) {
+function transactionDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
@@ -41,7 +60,7 @@ function transactionDone(tx) {
   });
 }
 
-function openDb() {
+function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -71,15 +90,15 @@ function openDb() {
   return dbPromise;
 }
 
-function normalizeBook(input) {
-  const source = input && typeof input === 'object' ? input : {};
-  const out = {};
+function normalizeBook(input: unknown): Record<string, KnowledgeItem> {
+  const source = input && typeof input === 'object' ? (input as Record<string, any>) : {};
+  const out: Record<string, KnowledgeItem> = {};
   for (const [key, raw] of Object.entries(source)) {
     if (!raw || typeof raw !== 'object') continue;
     const id = String(raw.id || key);
     if (!id) continue;
     const status = typeof raw.status === 'string'
-      ? (OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT)
+      ? ((OLD_STATUS_MIGRATION as Record<string, number>)[String(raw.status)] || STATUS.IMPORTANT)
       : ([STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT);
     out[id] = {
       id,
@@ -98,7 +117,7 @@ function normalizeBook(input) {
   return out;
 }
 
-function entryRecord(item) {
+function entryRecord(item: KnowledgeItem) {
   const note = String(item.note || '');
   return {
     id: item.id,
@@ -116,15 +135,30 @@ function entryRecord(item) {
   };
 }
 
-function documentRecord(item) {
+function documentRecord(item: KnowledgeItem) {
   return { id: item.id, markdown: String(item.note || '') };
 }
 
-function withNote(entry, doc) {
+type StoredEntry = {
+  id: string;
+  type: string;
+  title: string;
+  url: string;
+  platform: string;
+  platformName: string;
+  status: number | string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+  notePreview: string;
+  noteChars: number;
+};
+
+function withNote(entry: StoredEntry | Record<string, any>, doc: { markdown?: unknown } | null | undefined) {
   return Object.assign({}, entry, { note: String((doc && doc.markdown) || '') });
 }
 
-async function readMigrationMeta(db) {
+async function readMigrationMeta(db: IDBDatabase) {
   try {
     const tx = db.transaction(STORE_META, 'readonly');
     return await requestResult(tx.objectStore(STORE_META).get(MIGRATION_META_KEY));
@@ -133,14 +167,14 @@ async function readMigrationMeta(db) {
   }
 }
 
-async function migrateFromChromeStorage() {
+async function migrateFromChromeStorage(): Promise<void> {
   const db = await openDb();
   if (await readMigrationMeta(db)) return;
-  let stored = {};
-  let book = {};
+  let stored: Record<string, any> = {};
+  let book: Record<string, any> = {};
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      stored = await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY, DATA_VERSION_KEY]);
+      stored = (await chrome.storage.local.get([STORAGE_KEY, LEGACY_STORAGE_KEY, DATA_VERSION_KEY])) as Record<string, any>;
       book = stored[STORAGE_KEY];
       if (!book && stored[LEGACY_STORAGE_KEY]) {
         book = {};
@@ -182,7 +216,7 @@ async function migrateFromChromeStorage() {
   } catch (e) {}
 }
 
-async function ensureReady() {
+async function ensureReady(): Promise<IDBDatabase> {
   if (!migrationPromise) migrationPromise = migrateFromChromeStorage();
   await migrationPromise;
   return openDb();
@@ -196,31 +230,31 @@ function notifyChange() {
   } catch (e) {}
 }
 
-export function subscribeKnowledgeChanges(callback) {
+export function subscribeKnowledgeChanges(callback: (data: any) => void) {
   if (typeof callback !== 'function' || typeof BroadcastChannel === 'undefined') return () => {};
   const channel = new BroadcastChannel(CHANGE_CHANNEL);
   channel.onmessage = (event) => callback(event && event.data);
   return () => channel.close();
 }
 
-async function getBook() {
+async function getBook(): Promise<Record<string, any>> {
   const db = await ensureReady();
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readonly');
   const entryList = await requestResult(tx.objectStore(STORE_ENTRIES).getAll());
   const docList = await requestResult(tx.objectStore(STORE_DOCUMENTS).getAll());
-  const docs = new Map(docList.map((doc) => [String(doc.id), doc]));
-  const book = {};
+  const docs = new Map<string, any>(docList.map((doc: any) => [String(doc.id), doc] as [string, any]));
+  const book: Record<string, any> = {};
   for (const entry of entryList) book[entry.id] = withNote(entry, docs.get(String(entry.id)));
   return book;
 }
 
-async function getRecentItems(limit = 5) {
+async function getRecentItems(limit: unknown = 5) {
   const db = await ensureReady();
   const max = Math.max(1, Number(limit) || 5);
   const tx = db.transaction(STORE_ENTRIES, 'readonly');
   const index = tx.objectStore(STORE_ENTRIES).index('updatedAt');
-  const out = [];
-  await new Promise((resolve, reject) => {
+  const out: any[] = [];
+  await new Promise<void>((resolve, reject) => {
     const req = index.openCursor(null, 'prev');
     req.onerror = () => reject(req.error || new Error('IndexedDB cursor failed'));
     req.onsuccess = () => {
@@ -236,7 +270,7 @@ async function getRecentItems(limit = 5) {
   return out;
 }
 
-async function getKnowledgeItem(id) {
+async function getKnowledgeItem(id: unknown) {
   const db = await ensureReady();
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readonly');
   const entry = await requestResult(tx.objectStore(STORE_ENTRIES).get(String(id)));
@@ -245,7 +279,7 @@ async function getKnowledgeItem(id) {
   return withNote(entry, doc);
 }
 
-async function setBook(book) {
+async function setBook(book: unknown) {
   const db = await ensureReady();
   const normalized = normalizeBook(book || {});
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readwrite');
@@ -262,7 +296,19 @@ async function setBook(book) {
   notifyChange();
 }
 
-async function upsertItem({ id, type, title, url, platformId, platformName, status, note, tags }) {
+interface UpsertInput {
+  id: unknown;
+  type?: unknown;
+  title?: unknown;
+  url?: unknown;
+  platformId?: unknown;
+  platformName?: unknown;
+  status?: unknown;
+  note?: unknown;
+  tags?: unknown;
+}
+
+async function upsertItem({ id, type, title, url, platformId, platformName, status, note, tags }: UpsertInput) {
   const db = await ensureReady();
   const key = String(id);
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readwrite');
@@ -271,16 +317,18 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   const prevEntry = await requestResult(entryStore.get(key));
   const prevDoc = await requestResult(docStore.get(key));
   const now = Date.now();
-  const item = {
+  // ⚠ 这里的表达式与迁移前**逐字一致**，只在外面加类型断言（会被 esbuild 擦掉）：
+  // 换成 String(...) 包装会改变非字符串入参的运行时结果，不属于「只加类型」的批次。
+  const item: KnowledgeItem = {
     id: key,
-    type: type || (prevEntry && prevEntry.type) || 'wrong',
-    title: cleanTitle(title || '') || (prevEntry && prevEntry.title) || url || '未命名',
-    url: url || (prevEntry && prevEntry.url) || '',
-    platform: platformId || (prevEntry && prevEntry.platform) || '',
-    platformName: platformName || (prevEntry && prevEntry.platformName) || '',
-    status: status != null ? status : (prevEntry && prevEntry.status) || STATUS.IMPORTANT,
+    type: (type || (prevEntry && prevEntry.type) || 'wrong') as string,
+    title: (cleanTitle((title || '') as string) || (prevEntry && prevEntry.title) || url || '未命名') as string,
+    url: (url || (prevEntry && prevEntry.url) || '') as string,
+    platform: (platformId || (prevEntry && prevEntry.platform) || '') as string,
+    platformName: (platformName || (prevEntry && prevEntry.platformName) || '') as string,
+    status: (status != null ? status : (prevEntry && prevEntry.status) || STATUS.IMPORTANT) as number | string,
     note: typeof note === 'string' ? note.trim() : String((prevDoc && prevDoc.markdown) || ''),
-    tags: Array.isArray(tags) ? tags : ((prevEntry && prevEntry.tags) || []),
+    tags: Array.isArray(tags) ? (tags as string[]) : ((prevEntry && prevEntry.tags) || []),
     createdAt: Number(prevEntry && prevEntry.createdAt) || now,
     updatedAt: now,
   };
@@ -291,7 +339,7 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   return item;
 }
 
-async function updateStatus(id, status) {
+async function updateStatus(id: unknown, status: unknown) {
   const db = await ensureReady();
   const tx = db.transaction(STORE_ENTRIES, 'readwrite');
   const store = tx.objectStore(STORE_ENTRIES);
@@ -305,7 +353,7 @@ async function updateStatus(id, status) {
   notifyChange();
 }
 
-async function deleteItem(id) {
+async function deleteItem(id: unknown) {
   const db = await ensureReady();
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readwrite');
   tx.objectStore(STORE_ENTRIES).delete(String(id));

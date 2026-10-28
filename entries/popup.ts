@@ -21,14 +21,18 @@ import {
   platformColor,
   parseTags,
 } from '../lib/shared/utils.ts';
-import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from '../lib/shared/store.js';
+import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 
-let bookCache = {};
-let currentTab = null;
-let currentUrl = null;
-let currentTitle = null;
-let platform = null;
+/** 知识库条目：形状由 store 决定、页面只按需读字段（与 store 的 KnowledgeItem 同源，这里不重复声明）。 */
+type Dyn = Record<string, any>;
+
+let bookCache: Dyn = {};
+let currentTab: chrome.tabs.Tab | null = null;
+let currentUrl: string | null = null;
+let currentTitle: string | null = null;
+// 收录面板只在「当前页可收录」分支里读它；原代码同样不检查 null。
+let platform!: { id: string; name: string };
 let selectedType = 'wrong';
 let selectedStatus = STATUS.IMPORTANT;
 let currentFilter = 'all';
@@ -37,9 +41,18 @@ let listQuery = '';
 const ADD_COLLAPSED_KEY = 'recallflow-popup-add-collapsed';
 const POPUP_RECENT_LIMIT = 5;
 
-const $ = (id) => document.getElementById(id);
+/**
+ * 按 id 取元素。这些 id 全部写死在 popup.html 里，取不到就是模板坏了 ——
+ * 原代码不做 null 检查（直接 .value / .disabled），这里保持同一取舍，
+ * 用 `any` 承接「具体是 input 还是 button 由模板决定」这件事。
+ */
+const $ = (id: string): any => document.getElementById(id);
 
-function toast(msg, undoFn) {
+/** 事件目标 → 最近的匹配元素（原代码直接 e.target.closest(...)）。 */
+const closest = (target: EventTarget | null, selector: string): any =>
+  target ? (target as Element).closest(selector) : null;
+
+function toast(msg: string, undoFn?: (() => unknown) | null) {
   showToast(msg, { duration: 4000, undoFn });
 }
 
@@ -52,7 +65,7 @@ async function persist() {
 }
 
 function renderTypePicker() {
-  const el = document.querySelector('#add-panel .type-group');
+  const el = document.querySelector('#add-panel .type-group') as HTMLElement;
   el.innerHTML = ITEM_TYPES.map(
     (t) => `<button class="type-btn${selectedType === t.id ? ' active' : ''}" data-type="${t.id}" aria-pressed="${selectedType === t.id}" style="--t:${t.color}">${t.name}</button>`
   ).join('');
@@ -107,7 +120,7 @@ function renderList() {
   }
 }
 
-function itemHtml(it) {
+function itemHtml(it: Dyn): string {
   const type = it.type || 'wrong';
   const urlLink = it.url
     ? `<span class="item-title" title="${esc(it.url)}">${esc(it.title)}</span>`
@@ -158,8 +171,11 @@ async function init() {
   renderScriptsBadge();
   const shortcut = $('search-shortcut');
   if (shortcut) {
-    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
-    shortcut.textContent = /mac/i.test(platform) ? '⌘ K' : 'Ctrl K';
+    const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
+    // 名字刻意不叫 platform：模块级已有同名变量，同名 const 会让「对 const 赋值」门禁
+    // 把模块级的赋值误算到这条 const 上（TITA-86 实测）。
+    const uaPlatform = (uaData && uaData.platform) || navigator.platform || '';
+    shortcut.textContent = /mac/i.test(uaPlatform) ? '⌘ K' : 'Ctrl K';
   }
 
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -213,7 +229,7 @@ async function renderScriptsBadge() {
   try {
     const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
     const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
-    badge.textContent = count;
+    badge.textContent = String(count);
     badge.classList.toggle('hidden', count === 0);
   } catch (e) {
     badge.classList.add('hidden');
@@ -255,7 +271,7 @@ $('add-btn').addEventListener('click', async () => {
 });
 
 ['tags-input', 'note-input'].forEach((id) => {
-  $(id).addEventListener('keydown', (e) => {
+  $(id).addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       if (id === 'note-input' && !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
@@ -264,15 +280,15 @@ $('add-btn').addEventListener('click', async () => {
   });
 });
 
-document.querySelector('#add-panel .type-group').addEventListener('click', (e) => {
-  const btn = e.target.closest('.type-btn');
+document.querySelector('#add-panel .type-group')!.addEventListener('click', (e) => {
+  const btn = closest(e.target, '.type-btn');
   if (!btn) return;
   selectedType = btn.dataset.type;
   renderTypePicker();
 });
 
-document.querySelector('#add-panel .star-picker').addEventListener('click', (e) => {
-  const cell = e.target.closest('.star-cell[data-star]');
+document.querySelector('#add-panel .star-picker')!.addEventListener('click', (e) => {
+  const cell = closest(e.target, '.star-cell[data-star]');
   if (!cell) return;
   selectedStatus = Number(cell.dataset.star);
   syncStatusHighlight();
@@ -289,7 +305,7 @@ bindStarKeyboard(document, (v, cell) => {
   }
   const itemEl = cell.closest('.item');
   if (itemEl) {
-    const id = itemEl.dataset.id;
+    const id = (itemEl as HTMLElement).dataset.id as string;
     if (bookCache[id]) {
       bookCache[id].status = v;
       bookCache[id].updatedAt = Date.now();
@@ -302,7 +318,7 @@ bindStarKeyboard(document, (v, cell) => {
 
 document.querySelectorAll('.filter-chip').forEach((c) => {
   c.addEventListener('click', () => {
-    currentFilter = c.dataset.filter;
+    currentFilter = (c as HTMLElement).dataset.filter as string;
     document.querySelectorAll('.filter-chip').forEach((x) => {
       x.classList.toggle('active', x === c);
       x.setAttribute('aria-pressed', x === c ? 'true' : 'false');
@@ -311,8 +327,8 @@ document.querySelectorAll('.filter-chip').forEach((c) => {
   });
 });
 
-$('sort-select').addEventListener('change', (e) => {
-  sortBy = e.target.value;
+$('sort-select').addEventListener('change', (e: Event) => {
+  sortBy = (e.target as HTMLSelectElement).value;
   renderList();
 });
 
@@ -321,7 +337,7 @@ $('list-search').addEventListener('input', debounce(() => {
   renderList();
 }, 200));
 
-function setAddPanelCollapsed(collapsed, persist = true) {
+function setAddPanelCollapsed(collapsed: boolean, persist: boolean = true) {
   const addPanel = $('add-panel');
   const toggle = $('toggle-add-panel');
   addPanel.classList.toggle('is-collapsed', collapsed);
@@ -343,12 +359,12 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-$('list').addEventListener('click', async (e) => {
-  const itemEl = e.target.closest('.item');
+$('list').addEventListener('click', async (e: Event) => {
+  const itemEl = closest(e.target, '.item');
   if (!itemEl) return;
   const id = itemEl.dataset.id;
 
-  if (e.target.closest('.del')) {
+  if (closest(e.target, '.del')) {
     const removed = bookCache[id];
     delete bookCache[id];
     await persist();
@@ -363,12 +379,12 @@ $('list').addEventListener('click', async (e) => {
     return;
   }
 
-  if (e.target.closest('.open') && bookCache[id] && bookCache[id].url) {
+  if (closest(e.target, '.open') && bookCache[id] && bookCache[id].url) {
     chrome.tabs.create({ url: bookCache[id].url });
     return;
   }
 
-  const starCell = e.target.closest('.star-cell[data-star]');
+  const starCell = closest(e.target, '.star-cell[data-star]');
   if (starCell) {
     const a = Number(starCell.dataset.star);
     const validStatuses = [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT];
@@ -378,19 +394,19 @@ $('list').addEventListener('click', async (e) => {
       await persist();
       // 就地更新，避免整列表 renderList() 导致焦点 / 滚动丢失
       const bar = itemEl.querySelector('.star-bar');
-      if (bar) bar.querySelectorAll('.star-cell').forEach((c, i) => c.classList.toggle('on', i < a));
+      if (bar) bar.querySelectorAll('.star-cell').forEach((c: Element, i: number) => c.classList.toggle('on', i < a));
       const lvl = itemEl.querySelector('.level-name');
       if (lvl) lvl.outerHTML = levelNameHtml(a);
     }
     return;
   }
 
-  if (e.target.closest('.item-title') && bookCache[id] && bookCache[id].url) {
+  if (closest(e.target, '.item-title') && bookCache[id] && bookCache[id].url) {
     chrome.tabs.create({ url: bookCache[id].url });
   }
 });
 
-const openManager = (e) => {
+const openManager = (e: Event) => {
   e.preventDefault();
   // 带上当前条目 id，复用 manager 的 #focus 高亮定位，打通「收录→管理」闭环
   const id = currentUrl && bookCache[currentUrl] ? currentUrl : null;
@@ -401,18 +417,18 @@ $('open-manager').addEventListener('click', openManager);
 $('open-manager-top').addEventListener('click', openManager);
 $('open-manager-all').addEventListener('click', openManager);
 
-$('open-scripts').addEventListener('click', (e) => {
+$('open-scripts').addEventListener('click', (e: Event) => {
   e.preventDefault();
   chrome.tabs.create({ url: chrome.runtime.getURL('userscripts.html') });
 });
 
 const openSkillsBtn = $('open-skills');
-if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e) => {
+if (openSkillsBtn) openSkillsBtn.addEventListener('click', (e: Event) => {
   e.preventDefault();
   chrome.tabs.create({ url: chrome.runtime.getURL('skills.html') });
 });
 
-$('open-settings').addEventListener('click', (e) => {
+$('open-settings').addEventListener('click', (e: Event) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
 });
@@ -420,7 +436,7 @@ $('open-settings').addEventListener('click', (e) => {
 $('open-assistant').addEventListener('click', async () => {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    let tab = activeTab;
+    let tab: chrome.tabs.Tab | undefined = activeTab;
     // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
     // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {

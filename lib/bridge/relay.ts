@@ -5,9 +5,9 @@
 //
 // 说明：MCP server 由用户显式配置并启动；本中继只做「读页面」，不写数据、不执行代码。
 import { executeTool, closeAgentWindow, collectPageDiagnostics, collectElementSource, verifyPageTargets } from '../assistant/tools.ts';
-import { getHandoff, listHandoffs } from '../shared/handoff-store.js';
-import { BRIDGE_METHODS } from '../shared/bridge-methods.js';
-import { validateBridgeWrite } from '../shared/bridge-write-policy.js';
+import { getHandoff, listHandoffs } from '../shared/handoff-store.ts';
+import { BRIDGE_METHODS } from '../shared/bridge-methods.ts';
+import { validateBridgeWrite } from '../shared/bridge-write-policy.ts';
 import { getAISettings } from '../shared/settings.ts';
 import { screenshotAttempts } from '../shared/utils.ts';
 import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../assistant/screenshot-tool.ts';

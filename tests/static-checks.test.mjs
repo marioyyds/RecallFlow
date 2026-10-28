@@ -96,7 +96,7 @@ test('注释不许把下一行代码吃掉（注释里出现"紧贴着声明关�
     }
   };
   for (const r of roots) if (existsSync(r)) walk(r);
-  for (const f of ['entries/background.js', 'entries/popup.js', 'entries/options.js', 'entries/manager.js', 'entries/skills-page.js', 'entries/userscripts.js']) {
+  for (const f of ['entries/background.ts', 'entries/popup.ts', 'entries/options.ts', 'entries/manager.ts', 'entries/skills-page.ts', 'entries/userscripts.ts']) {
     if (existsSync(f)) files.push(f);
   }
   const bad = [];
@@ -132,7 +132,7 @@ test('扫描范围覆盖根目录文件与 .mjs（原先只有 lib/ 与 .js，�
   // 这里把「覆盖面」本身钉住 —— 否则将来有人把范围改回去，不会有人发现。
   const { files, scanned } = findConstAssignments();
   assert.ok(scanned > 100, '应扫描整个仓库（含根目录与 tests/scripts），实际 ' + scanned);
-  for (const expected of ['entries/background.js', 'entries/popup.js']) {
+  for (const expected of ['entries/background.ts', 'entries/popup.ts']) {
     assert.ok(files.includes(expected), '入口源码应被扫描：' + expected);
   }
   // content.js 现在是 scripts/build-content.mjs 的**构建产物**，源码在 entries/content.ts。
@@ -150,10 +150,12 @@ test('扫描范围覆盖根目录文件与 .mjs（原先只有 lib/ 与 .js，�
     'skills-page.js',
     'userscripts.js',
     'lib/userscript/runner.js',
+    // TITA-86（Batch 5）：debug-hook 也变成了入口产物（源码 `lib/page/debug-hook.ts`）。
+    'lib/page/debug-hook.js',
   ]) {
     assert.ok(!files.includes(artifact), '入口产物不应被扫描：' + artifact);
   }
-  assert.ok(files.includes('entries/userscript-runner.js'), '注入用运行时脚本的源码应被扫描');
+  assert.ok(files.includes('entries/userscript-runner.ts'), '注入用运行时脚本的源码应被扫描');
   assert.ok(files.some((f) => f.endsWith('.mjs')), '应扫描 .mjs 文件（门禁脚本与测试都是 .mjs）');
   assert.ok(files.some((f) => f.startsWith('scripts/')), '应扫描 scripts/');
   assert.ok(!files.some((f) => f.includes('node_modules')), '不应扫描 node_modules');

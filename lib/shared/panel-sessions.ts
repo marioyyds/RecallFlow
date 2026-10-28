@@ -11,6 +11,75 @@
 
 import { sliceSafe } from './surrogates.ts';
 
+/**
+ * 会话正文的消息形状由面板侧（chat.ts）决定，本模块只做搬运与统计 ——
+ * 这里不重复声明一份「消息有哪些字段」，否则两边会各自漂移。
+ */
+export type PanelMessage = Record<string, any>;
+
+/** 注入式存储（chrome.storage.session 或测试假存储），契约是 JSON 文档。 */
+export interface SessionStorage {
+  get(keys: string | string[] | null): Promise<Record<string, any>>;
+  set(items: Record<string, any>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+}
+
+/** 任意 JSON 形状的调用入参（各方法自己按需收窄）。 */
+export type JsonInput = Record<string, unknown>;
+
+export interface PanelSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+  charCount: number;
+  byteLength: number;
+  tokenEstimate: number;
+  storageWarning: boolean;
+  seq: number;
+  origin: string;
+  handoffId: string;
+  lastRunId: string;
+  writerTabId: number | null;
+  titleAuto: boolean;
+}
+
+export interface PanelSession extends Omit<PanelSummary, 'messageCount'> {
+  messages: PanelMessage[];
+}
+
+export interface PanelIndex {
+  version: number;
+  seq: number;
+  sessions: Record<string, PanelSummary>;
+}
+
+export interface ActiveRef {
+  id: string;
+  seq: number;
+  updatedAt: number;
+}
+
+export interface PanelLock {
+  runId: string;
+  tabId: number | null;
+  at: number;
+  previous?: { runId: string; tabId: number | null } | null;
+}
+
+export interface PanelSessionStoreOptions {
+  storage: SessionStorage;
+  now?: () => number;
+  maxSessions?: number;
+  lockTtlMs?: number;
+  isTabAlive?: (tabId: number) => Promise<boolean>;
+  idFactory?: () => string;
+}
+
+/** 只按「最近更新 + 序号」排序时需要的最小形状。 */
+type Sortable = { updatedAt: number; seq: number };
+
 export const PSESS_INDEX_KEY = 'recallflow.psess.index.v1';
 export const PSESS_ACTIVE_KEY = 'recallflow.psess.active.v1';
 export const PSESS_UI_KEY = 'recallflow.psess.ui.v1';
@@ -24,15 +93,15 @@ export const PSESS_DEFAULT_TITLE = '新会话';
 const MAX_TITLE_CHARS = 42;
 const LEGACY_CONV_RE = /^recallflow\.conv\.(\d+)$/;
 
-export function panelSessionKey(id) {
+export function panelSessionKey(id: unknown): string {
   return PSESS_SESSION_PREFIX + String(id || '');
 }
 
-export function panelSessionLockKey(id) {
+export function panelSessionLockKey(id: unknown): string {
   return PSESS_LOCK_PREFIX + String(id || '');
 }
 
-export function deriveSessionTitle(messages, fallback = PSESS_DEFAULT_TITLE) {
+export function deriveSessionTitle(messages: unknown, fallback: string = PSESS_DEFAULT_TITLE): string {
   const list = Array.isArray(messages) ? messages : [];
   const first = list.find((m) => m && m.role === 'user' && String(m.content || '').trim());
   const text = String((first && first.content) || '')
@@ -42,11 +111,11 @@ export function deriveSessionTitle(messages, fallback = PSESS_DEFAULT_TITLE) {
   return text.length > MAX_TITLE_CHARS ? sliceSafe(text, 0, MAX_TITLE_CHARS - 1) + '…' : text;
 }
 
-export function countConversationMessages(messages) {
+export function countConversationMessages(messages: unknown): number {
   return Array.isArray(messages) ? messages.length : 0;
 }
 
-export function estimateConversationStats(messages) {
+export function estimateConversationStats(messages: unknown) {
   let text = '';
   try {
     text = JSON.stringify(Array.isArray(messages) ? messages : []);
@@ -66,12 +135,12 @@ export function estimateConversationStats(messages) {
   };
 }
 
-function normalizeOrigin(value) {
+function normalizeOrigin(value: unknown): string {
   const text = String(value || '').trim();
   return text.slice(0, 2048);
 }
 
-function summarize(session) {
+function summarize(session: any): PanelSummary {
   return {
     id: session.id,
     title: session.title || PSESS_DEFAULT_TITLE,
@@ -96,11 +165,11 @@ function summarize(session) {
   };
 }
 
-function sortSummaries(a, b) {
+function sortSummaries(a: Sortable, b: Sortable): number {
   return b.updatedAt - a.updatedAt || b.seq - a.seq;
 }
 
-function messageJson(message) {
+function messageJson(message: unknown): string {
   try {
     return JSON.stringify(message);
   } catch (e) {
@@ -109,10 +178,12 @@ function messageJson(message) {
 }
 
 /** incoming 是否是 current 的严格前缀（用于识别“旧标签页回写了更短的快照”）。 */
-function isPrefixMessages(incoming, current) {
+function isPrefixMessages(incoming: unknown, current: unknown): boolean {
   if (!Array.isArray(incoming) || !Array.isArray(current) || incoming.length > current.length) return false;
-  for (let i = 0; i < incoming.length; i++) {
-    if (messageJson(incoming[i]) !== messageJson(current[i])) return false;
+  const next = incoming as unknown[];
+  const prev = current as unknown[];
+  for (let i = 0; i < next.length; i++) {
+    if (messageJson(next[i]) !== messageJson(prev[i])) return false;
   }
   return true;
 }
@@ -125,12 +196,14 @@ function isPrefixMessages(incoming, current) {
  * “current 是 incoming 前缀”或“除最后一条外完全相同、最后一条更长”的情形放行，
  * 不做模糊合并。
  */
-function isMoreCompleteMessages(incoming, current) {
+function isMoreCompleteMessages(incoming: unknown, current: unknown): boolean {
   if (!Array.isArray(incoming) || !Array.isArray(current)) return false;
-  if (incoming.length > current.length && isPrefixMessages(current, incoming)) return true;
-  if (incoming.length === current.length && current.length > 0) {
-    if (!isPrefixMessages(current.slice(0, -1), incoming.slice(0, -1))) return false;
-    return messageJson(incoming[incoming.length - 1]).length > messageJson(current[current.length - 1]).length;
+  const next = incoming as unknown[];
+  const prev = current as unknown[];
+  if (next.length > prev.length && isPrefixMessages(prev, next)) return true;
+  if (next.length === prev.length && prev.length > 0) {
+    if (!isPrefixMessages(prev.slice(0, -1), next.slice(0, -1))) return false;
+    return messageJson(next[next.length - 1]).length > messageJson(prev[prev.length - 1]).length;
   }
   return false;
 }
@@ -142,8 +215,17 @@ function isMoreCompleteMessages(incoming, current) {
  * 全部返回 Promise（chrome.storage.session 原生就满足）。
  */
 export class PanelSessionStore {
-  constructor(options) {
-    const opts = options || {};
+  // `declare`：只在类型层声明，构造函数里赋值 —— 不产生类字段初始化代码（产物零变化）。
+  declare storage: SessionStorage;
+  declare now: () => number;
+  declare maxSessions: number;
+  declare lockTtlMs: number;
+  declare isTabAlive: (tabId: number) => Promise<boolean>;
+  declare idFactory: () => string;
+  declare _tail: Promise<unknown>;
+
+  constructor(options: PanelSessionStoreOptions) {
+    const opts = options || ({} as PanelSessionStoreOptions);
     if (!opts.storage) throw new Error('PanelSessionStore requires storage');
     this.storage = opts.storage;
     this.now = typeof opts.now === 'function' ? opts.now : Date.now;
@@ -165,13 +247,13 @@ export class PanelSessionStore {
     this._tail = Promise.resolve();
   }
 
-  _enqueue(fn) {
+  _enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const run = this._tail.then(fn, fn);
     this._tail = run.catch(() => {});
     return run;
   }
 
-  async _readIndex() {
+  async _readIndex(): Promise<PanelIndex> {
     const data = await this.storage.get(PSESS_INDEX_KEY);
     const raw = (data && data[PSESS_INDEX_KEY]) || {};
     const sessions = raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {};
@@ -182,13 +264,13 @@ export class PanelSessionStore {
     };
   }
 
-  async _readActive() {
+  async _readActive(): Promise<ActiveRef> {
     const data = await this.storage.get(PSESS_ACTIVE_KEY);
     const active = (data && data[PSESS_ACTIVE_KEY]) || {};
     return { id: String(active.id || ''), seq: Number(active.seq) || 0, updatedAt: Number(active.updatedAt) || 0 };
   }
 
-  async _readSession(id) {
+  async _readSession(id: unknown): Promise<PanelSession | null> {
     if (!id) return null;
     const key = panelSessionKey(id);
     const data = await this.storage.get(key);
@@ -197,7 +279,7 @@ export class PanelSessionStore {
     return session;
   }
 
-  async _readLock(id, now) {
+  async _readLock(id: unknown, now: number): Promise<PanelLock | null> {
     if (!id) return null;
     const key = panelSessionLockKey(id);
     const data = await this.storage.get(key);
@@ -207,20 +289,20 @@ export class PanelSessionStore {
     return lock;
   }
 
-  async _writeIndex(index) {
+  async _writeIndex(index: PanelIndex) {
     await this.storage.set({ [PSESS_INDEX_KEY]: index });
   }
 
-  async _writeActive(id, seq, updatedAt) {
+  async _writeActive(id: string, seq: number, updatedAt: number) {
     await this.storage.set({ [PSESS_ACTIVE_KEY]: { id, seq, updatedAt } });
   }
 
-  async _lockedIds(index, now) {
+  async _lockedIds(index: PanelIndex, now: number): Promise<Set<string>> {
     const ids = Object.keys(index.sessions);
     if (!ids.length) return new Set();
     const keys = ids.map(panelSessionLockKey);
     const data = await this.storage.get(keys);
-    const locked = new Set();
+    const locked = new Set<string>();
     for (const id of ids) {
       const lock = data && data[panelSessionLockKey(id)];
       if (lock && lock.runId && Number(lock.at) + this.lockTtlMs > now) locked.add(id);
@@ -228,14 +310,14 @@ export class PanelSessionStore {
     return locked;
   }
 
-  async _summaries(index, now) {
+  async _summaries(index: PanelIndex, now: number) {
     const locked = await this._lockedIds(index, now);
     return Object.values(index.sessions)
       .map((s) => Object.assign(summarize(s), { locked: locked.has(s.id) }))
       .sort(sortSummaries);
   }
 
-  async _state(index, active) {
+  async _state(index: PanelIndex, active: ActiveRef) {
     return {
       sessions: await this._summaries(index, this.now()),
       activeId: active.id || '',
@@ -254,7 +336,7 @@ export class PanelSessionStore {
       const data = await this.storage.get(PSESS_UI_KEY);
       const raw = (data && data[PSESS_UI_KEY]) || {};
       const openTabs = Array.isArray(raw.openTabs)
-        ? [...new Set(raw.openTabs.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+        ? [...new Set((raw.openTabs as unknown[]).map(Number).filter((id) => Number.isInteger(id) && id > 0))]
         : [];
       return {
         open: raw.open === true,
@@ -269,7 +351,7 @@ export class PanelSessionStore {
    * scope=global：用户在本页明确打开/关闭，广播到所有 tab。
    * scope=membership：远端同步后回执本页已打开/关闭，只维护 openTabs，不产生新广播。
    */
-  setUi(input) {
+  setUi(input?: JsonInput | null) {
     const data = input || {};
     return this._enqueue(async () => {
       const currentData = await this.storage.get(PSESS_UI_KEY);
@@ -294,7 +376,7 @@ export class PanelSessionStore {
         openTabs = [];
         open = false;
       }
-      openTabs = [...new Set(openTabs.filter((id) => Number.isInteger(id) && id > 0))];
+      openTabs = [...new Set((openTabs as unknown[]).filter((id): id is number => Number.isInteger(id) && (id as number) > 0))];
       const seq = scope === 'global' ? current.seq + 1 : current.seq;
       const ui = {
         open,
@@ -308,7 +390,7 @@ export class PanelSessionStore {
   }
 
   /** 标签页关闭：仅移除它自己的面板成员，最后一个成员消失时把全局状态置为关闭。 */
-  removeTabFromUi(tabId) {
+  removeTabFromUi(tabId: unknown) {
     return this._enqueue(async () => {
       const wanted = tabId == null ? null : Number(tabId);
       const data = await this.storage.get(PSESS_UI_KEY);
@@ -336,7 +418,7 @@ export class PanelSessionStore {
           changed: false,
         };
       }
-      const openTabs = before.filter((id) => id !== wanted);
+      const openTabs = (before as unknown[]).filter((id) => id !== wanted);
       const open = raw.open === true && openTabs.length > 0;
       const changed = raw.open === true && !open;
       const ui = {
@@ -354,12 +436,12 @@ export class PanelSessionStore {
    * 首次访问时建立索引；旧版按 tab 保存的 `recallflow.conv.<tabId>` 会迁移为历史会话。
    * legacyEntries: [{ key, conversation, updatedAt }]，由 Service Worker 从 storage 读出。
    */
-  bootstrap(options) {
+  bootstrap(options?: JsonInput | null) {
     const opts = options || {};
     return this._enqueue(async () => {
       let index = await this._readIndex();
       let active = await this._readActive();
-      let migratedKeys = [];
+      let migratedKeys: string[] = [];
 
       if (!Object.keys(index.sessions).length) {
         const legacy = (Array.isArray(opts.legacyEntries) ? opts.legacyEntries : [])
@@ -412,7 +494,7 @@ export class PanelSessionStore {
     });
   }
 
-  get(id) {
+  get(id?: unknown) {
     return this._enqueue(async () => {
       const index = await this._readIndex();
       const active = await this._readActive();
@@ -426,7 +508,7 @@ export class PanelSessionStore {
     });
   }
 
-  create(input) {
+  create(input?: JsonInput | null) {
     const data = input || {};
     return this._enqueue(async () => {
       const index = await this._readIndex();
@@ -444,7 +526,7 @@ export class PanelSessionStore {
     });
   }
 
-  save(input) {
+  save(input?: JsonInput | null) {
     const data = input || {};
     return this._enqueue(async () => {
       const id = String(data.id || '');
@@ -518,7 +600,7 @@ export class PanelSessionStore {
     });
   }
 
-  activate(id) {
+  activate(id?: unknown) {
     return this._enqueue(async () => {
       const wanted = String(id || '');
       const index = await this._readIndex();
@@ -535,7 +617,7 @@ export class PanelSessionStore {
     });
   }
 
-  rename(id, title) {
+  rename(id: unknown, title: unknown) {
     return this._enqueue(async () => {
       const wanted = String(id || '');
       const nextTitle = sliceSafe(String(title || '').replace(/\s+/g, ' ').trim(), 0, MAX_TITLE_CHARS);
@@ -561,7 +643,7 @@ export class PanelSessionStore {
     });
   }
 
-  remove(id) {
+  remove(id?: unknown) {
     return this._enqueue(async () => {
       const wanted = String(id || '');
       const index = await this._readIndex();
@@ -595,7 +677,7 @@ export class PanelSessionStore {
     });
   }
 
-  lock(input) {
+  lock(input?: JsonInput | null) {
     const data = input || {};
     return this._enqueue(async () => {
       const id = String(data.id || '');
@@ -634,7 +716,7 @@ export class PanelSessionStore {
     });
   }
 
-  unlock(input) {
+  unlock(input?: JsonInput | null) {
     const data = input || {};
     return this._enqueue(async () => {
       const id = String(data.id || '');
@@ -650,7 +732,7 @@ export class PanelSessionStore {
   }
 
   /** 标签页关闭时释放它持有的所有锁（崩溃/强关不应阻塞同浏览器的其它标签页）。 */
-  releaseTabLocks(tabId) {
+  releaseTabLocks(tabId: unknown) {
     return this._enqueue(async () => {
       const wanted = tabId == null ? null : Number(tabId);
       if (wanted == null) return { ok: true, released: 0 };
@@ -659,7 +741,7 @@ export class PanelSessionStore {
       if (!ids.length) return { ok: true, released: 0 };
       const keys = ids.map(panelSessionLockKey);
       const data = await this.storage.get(keys);
-      const mine = [];
+      const mine: string[] = [];
       for (const id of ids) {
         const key = panelSessionLockKey(id);
         const lock = data && data[key];
@@ -670,7 +752,7 @@ export class PanelSessionStore {
     });
   }
 
-  async _createInIndex(index, input) {
+  async _createInIndex(index: PanelIndex, input: JsonInput): Promise<PanelSession> {
     const now = this.now();
     index.seq += 1;
     const messages = Array.isArray(input.messages) ? input.messages : [];
@@ -697,7 +779,7 @@ export class PanelSessionStore {
     return session;
   }
 
-  _newSession(input) {
+  _newSession(input: JsonInput): PanelSession {
     const messages = Array.isArray(input.messages) ? input.messages : [];
     const stats = estimateConversationStats(messages);
     return {
@@ -717,10 +799,10 @@ export class PanelSessionStore {
     };
   }
 
-  async _prune(index, activeId, extraProtectedKeys) {
+  async _prune(index: PanelIndex, activeId: string, extraProtectedKeys?: unknown) {
     const ids = Object.keys(index.sessions);
     if (ids.length <= this.maxSessions) return;
-    const protectedKeys = new Set(extraProtectedKeys || []);
+    const protectedKeys = new Set<string>(Array.isArray(extraProtectedKeys) ? extraProtectedKeys.map(String) : []);
     const candidates = Object.values(index.sessions)
       .filter((s) => s.id !== activeId)
       .sort((a, b) => a.updatedAt - b.updatedAt || a.seq - b.seq);

@@ -73,8 +73,9 @@ async function getUserscriptSettings() {
   return Object.assign({}, USERSCRIPT_SETTINGS_DEFAULTS, saved);
 }
 
-// entries/userscripts.js
+// entries/userscripts.ts
 var $ = (id) => document.getElementById(id);
+var closestEl = (target, selector) => target ? target.closest(selector) : null;
 var scriptsCache = [];
 var currentFilter = "all";
 var listQuery = "";
@@ -171,13 +172,13 @@ function emptyStateHtml(scriptsLen, filtered) {
 function renderInstalled() {
   const total = scriptsCache.length;
   const enabled = scriptsCache.filter((s) => s.enabled).length;
-  $("us-stat-all").textContent = total;
-  $("us-stat-enabled").textContent = enabled;
-  $("us-stat-disabled").textContent = total - enabled;
-  $("us-tab-installed-count").textContent = total;
+  $("us-stat-all").textContent = String(total);
+  $("us-stat-enabled").textContent = String(enabled);
+  $("us-stat-disabled").textContent = String(total - enabled);
+  $("us-tab-installed-count").textContent = String(total);
   const navCount = $("us-nav-count");
   if (navCount) {
-    navCount.textContent = total;
+    navCount.textContent = String(total);
     navCount.classList.toggle("hidden", total === 0);
   }
   let list = scriptsCache;
@@ -412,10 +413,10 @@ $("us-filter-input").addEventListener("input", (e) => {
   renderInstalled();
 });
 $("us-installed-list").addEventListener("click", async (e) => {
-  const card = e.target.closest(".us-card");
+  const card = closestEl(e.target, ".us-card");
   if (!card) return;
   const id = card.dataset.id;
-  const expandBtn = e.target.closest("[data-expand]");
+  const expandBtn = closestEl(e.target, "[data-expand]");
   if (expandBtn) {
     const s = findScript(id);
     const tags = card.querySelector(".us-tags");
@@ -424,7 +425,7 @@ $("us-installed-list").addEventListener("click", async (e) => {
     }
     return;
   }
-  const act = e.target.closest("[data-act]");
+  const act = closestEl(e.target, "[data-act]");
   if (!act) return;
   const action = act.dataset.act;
   if (action === "update") {
@@ -473,7 +474,7 @@ $("us-installed-list").addEventListener("click", async (e) => {
   }
 });
 $("us-installed-list").addEventListener("change", async (e) => {
-  const input = e.target.closest('input[data-act="toggle"]');
+  const input = closestEl(e.target, 'input[data-act="toggle"]');
   if (!input) return;
   const card = input.closest(".us-card");
   if (!card) return;
@@ -511,7 +512,7 @@ $("us-code-install-btn").addEventListener("click", () => {
   requestInstallCode(code);
 });
 $("us-search-list").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-url]");
+  const btn = closestEl(e.target, "[data-url]");
   if (btn) requestInstall(btn.dataset.url);
 });
 $("us-preview-yes").addEventListener("click", async () => {

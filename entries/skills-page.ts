@@ -6,9 +6,9 @@ import {
   updateUserSkill,
   removeUserSkill,
   PAGE_SIZE,
-} from '../lib/assistant/skill-store.js';
-import { mdToSkill, serializeSkillMd } from '../lib/assistant/skill-md.js';
-import { TOOL_REGISTRY, TOOL_RENAME_MAP } from '../lib/assistant/tools.js';
+} from '../lib/assistant/skill-store.ts';
+import { mdToSkill, serializeSkillMd } from '../lib/assistant/skill-md.ts';
+import { TOOL_REGISTRY, TOOL_RENAME_MAP } from '../lib/assistant/tools.ts';
 
 const INTENT_LABEL = {
   browser_task: '浏览器操作',
@@ -17,15 +17,28 @@ const INTENT_LABEL = {
   chat_task: '对话',
 };
 
-let allSkills = []; // 运行结构列表（含 builtin 标记）
+/**
+ * 技能条目：形状由 skill-store（SKILL.md 解析结果）决定，本页只按需读字段。
+ * 这些页面脚本是 DOM 胶水层，字段集合有二十多个且随技能格式演进 —— 不在这里复制一份 schema。
+ */
+type Dyn = Record<string, any>;
+
+/** 按 id 取元素：id 全部写死在 skills.html 里（取不到就是模板坏了，原代码也不做 null 检查）。 */
+const $ = (id: string): any => document.getElementById(id);
+
+/** 事件目标 → 最近的匹配元素（原代码直接 closestEl(e.target, ...)）。 */
+const closestEl = (target: EventTarget | null, selector: string): any =>
+  target ? (target as Element).closest(selector) : null;
+
+let allSkills: Dyn[] = []; // 运行结构列表（含 builtin 标记）
 let currentPage = 1;
-let editingName = null; // null=新建，否则为待编辑技能 name
+let editingName: string | null = null; // null=新建，否则为待编辑技能 name
 let skillQuery = '';
 let skillKind = 'all';
 let skillCategory = 'all';
-let modalPreviousFocus = null;
+let modalPreviousFocus: HTMLElement | null = null;
 
-function esc(s) {
+function esc(s: unknown): string {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -33,7 +46,7 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
-function describeKeywords(skill) {
+function describeKeywords(skill: Dyn): string {
   const strs = skill.match && skill.match.keywordStrings;
   if (Array.isArray(strs) && strs.length) return strs.join('；');
   const kws = skill.match && skill.match.keywords;
@@ -41,12 +54,12 @@ function describeKeywords(skill) {
   return '任意（按意图匹配）';
 }
 
-function describeIntents(intents) {
+function describeIntents(intents: unknown): string {
   if (!Array.isArray(intents) || !intents.length) return '不限意图';
-  return intents.map((i) => INTENT_LABEL[i] || i).join('、');
+  return intents.map((i) => (INTENT_LABEL as Record<string, string>)[String(i)] || i).join('、');
 }
 
-function renderSkill(skill) {
+function renderSkill(skill: Dyn): string {
   const meta = [
     skill.version ? 'v' + skill.version : '',
     skill.category || '',
@@ -116,7 +129,7 @@ function filteredSkills() {
 }
 
 function renderCategoryFilter() {
-  const select = document.getElementById('skill-category-filter');
+  const select = $('skill-category-filter');
   if (!select) return;
   const categories = [...new Set(allSkills.map((skill) => skill.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (skillCategory !== 'all' && !categories.includes(skillCategory)) skillCategory = 'all';
@@ -125,8 +138,8 @@ function renderCategoryFilter() {
   select.value = skillCategory;
 }
 
-function renderPagination(totalPages) {
-  const nav = document.getElementById('skill-pagination');
+function renderPagination(totalPages: number) {
+  const nav = $('skill-pagination');
   if (!nav) return;
   if (totalPages <= 1) {
     nav.innerHTML = '';
@@ -141,12 +154,12 @@ function renderPagination(totalPages) {
 }
 
 function render() {
-  const wrap = document.getElementById('skill-list');
+  const wrap = $('skill-list');
   if (!wrap) return;
-  const count = document.getElementById('skill-count');
+  const count = $('skill-count');
   if (count) count.textContent = String(allSkills.length);
   const skills = filteredSkills();
-  const visibleCount = document.getElementById('skill-visible-count');
+  const visibleCount = $('skill-visible-count');
   if (visibleCount) visibleCount.textContent = '显示 ' + skills.length + ' / ' + allSkills.length;
   if (!skills.length) {
     const filtering = Boolean(skillQuery.trim()) || skillKind !== 'all' || skillCategory !== 'all';
@@ -163,46 +176,47 @@ function render() {
   renderPagination(totalPages);
 }
 
-function linesToArr(text) {
+function linesToArr(text: unknown): string[] {
   return String(text || '')
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-function skillToForm(skill) {
+function skillToForm(skill: Dyn) {
   const m = skill.match || {};
-  document.getElementById('f-name').value = skill.name || '';
-  document.getElementById('f-display').value = skill.title || '';
-  document.getElementById('f-desc').value = skill.description || '';
-  document.getElementById('f-version').value = skill.version || '1.0.0';
-  document.getElementById('f-category').value = skill.category || '';
-  document.getElementById('f-tags').value = Array.isArray(skill.tags) ? skill.tags.join(', ') : '';
-  document.getElementById('f-type').value = skill.skill_type || 'prompt-template';
+  $('f-name').value = skill.name || '';
+  $('f-display').value = skill.title || '';
+  $('f-desc').value = skill.description || '';
+  $('f-version').value = skill.version || '1.0.0';
+  $('f-category').value = skill.category || '';
+  $('f-tags').value = Array.isArray(skill.tags) ? skill.tags.join(', ') : '';
+  $('f-type').value = skill.skill_type || 'prompt-template';
   document.querySelectorAll('.skill-checks input[type=checkbox]').forEach((cb) => {
-    cb.checked = (m.intents || []).includes(cb.value);
+    const box = cb as HTMLInputElement;
+    box.checked = (m.intents || []).includes(box.value);
   });
-  document.getElementById('f-keywords').value = (m.keywordStrings || []).join('\n');
-  document.getElementById('f-tools').value = Array.isArray(skill.tools) ? skill.tools.join(', ') : '';
-  document.getElementById('f-content').value = skill.content || '';
+  $('f-keywords').value = (m.keywordStrings || []).join('\n');
+  $('f-tools').value = Array.isArray(skill.tools) ? skill.tools.join(', ') : '';
+  $('f-content').value = skill.content || '';
 }
 
 function visibleOverlay() {
-  return [...document.querySelectorAll('.confirm-overlay')].find((overlay) => !overlay.classList.contains('hidden')) || null;
+  return ([...document.querySelectorAll('.confirm-overlay')] as HTMLElement[]).find((overlay) => !overlay.classList.contains('hidden')) || null;
 }
 
-function openOverlay(overlay, focusSelector) {
+function openOverlay(overlay: HTMLElement | null, focusSelector?: string | null) {
   if (!overlay) return;
-  modalPreviousFocus = document.activeElement;
+  modalPreviousFocus = document.activeElement as HTMLElement | null;
   overlay.classList.remove('hidden');
   document.body.classList.add('modal-open');
   const focusTarget = focusSelector ? overlay.querySelector(focusSelector) : overlay.querySelector('button:not([disabled])');
   setTimeout(() => {
-    if (focusTarget && focusTarget.isConnected) focusTarget.focus();
+    if (focusTarget && focusTarget.isConnected) (focusTarget as HTMLElement).focus();
   }, 0);
 }
 
-function closeOverlay(overlay) {
+function closeOverlay(overlay: HTMLElement | null) {
   if (!overlay) return;
   overlay.classList.add('hidden');
   if (!visibleOverlay()) {
@@ -214,14 +228,14 @@ function closeOverlay(overlay) {
   }
 }
 
-function showFormError(message) {
-  const error = document.getElementById('skill-form-error');
+function showFormError(message: string) {
+  const error = $('skill-form-error');
   error.textContent = message;
   error.classList.remove('hidden');
 }
 
 function clearFormError() {
-  const error = document.getElementById('skill-form-error');
+  const error = $('skill-form-error');
   error.textContent = '';
   error.classList.add('hidden');
 }
@@ -246,19 +260,19 @@ document.addEventListener('keydown', (e) => {
   const last = focusable[focusable.length - 1];
   if (!dialog.contains(document.activeElement)) {
     e.preventDefault();
-    first.focus();
+    (first as HTMLElement).focus();
   } else if (e.shiftKey && document.activeElement === first) {
     e.preventDefault();
-    last.focus();
+    (last as HTMLElement).focus();
   } else if (!e.shiftKey && document.activeElement === last) {
     e.preventDefault();
-    first.focus();
+    (first as HTMLElement).focus();
   }
 }, true);
 
-function openForm(skill) {
+function openForm(skill: Dyn | null) {
   editingName = skill ? skill.name : null;
-  document.getElementById('skill-form-title').textContent = skill ? '编辑技能' : '新建技能';
+  $('skill-form-title').textContent = skill ? '编辑技能' : '新建技能';
   skillToForm(
     skill || {
       name: '', title: '', description: '', version: '1.0.0', category: '', tags: [], skill_type: 'prompt-template',
@@ -266,49 +280,49 @@ function openForm(skill) {
     }
   );
   clearFormError();
-  openOverlay(document.getElementById('skill-form-overlay'), '#f-name');
+  openOverlay($('skill-form-overlay'), '#f-name');
 }
 
 function closeForm() {
-  closeOverlay(document.getElementById('skill-form-overlay'));
+  closeOverlay($('skill-form-overlay'));
   editingName = null;
 }
 
 async function saveForm() {
   clearFormError();
-  const name = document.getElementById('f-name').value.trim();
+  const name = $('f-name').value.trim();
   if (!name) {
     showFormError('请填写标识 name（kebab-case）。');
-    document.getElementById('f-name').focus();
+    $('f-name').focus();
     return;
   }
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
     showFormError('name 需为 kebab-case（小写字母/数字，连字符分隔），如 highlight-key-points。');
-    document.getElementById('f-name').focus();
+    $('f-name').focus();
     return;
   }
-  const tools = document.getElementById('f-tools').value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const tools = $('f-tools').value.split(/[,\n]/).map((s: string) => s.trim()).filter(Boolean);
   // 依赖工具校验：未识别工具在运行时会被 Agent 静默忽略，保存前提示（含旧名→新名迁移）。
   const knownTools = new Set(TOOL_REGISTRY.map((t) => t.name));
-  const badTools = tools.filter((tn) => !knownTools.has(tn));
+  const badTools = tools.filter((tn: string) => !knownTools.has(tn));
   if (badTools.length) {
-    const hint = badTools.map((tn) => TOOL_RENAME_MAP[tn] ? tn + ' → ' + TOOL_RENAME_MAP[tn] : tn).join('、');
+    const hint = badTools.map((tn: string) => TOOL_RENAME_MAP[tn] ? tn + ' → ' + TOOL_RENAME_MAP[tn] : tn).join('、');
     if (!confirm('依赖工具中存在未识别项：' + hint + '\n\n未识别工具在 Agent 运行时会被忽略，功能可能不完整。仍要保存吗？（可先返回修改）')) {
       return;
     }
   }
   const payload = {
     name,
-    displayName: document.getElementById('f-display').value.trim(),
-    description: document.getElementById('f-desc').value.trim(),
-    version: document.getElementById('f-version').value.trim() || '1.0.0',
-    category: document.getElementById('f-category').value.trim(),
-    tags: document.getElementById('f-tags').value.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
-    skill_type: document.getElementById('f-type').value,
-    content: document.getElementById('f-content').value,
+    displayName: $('f-display').value.trim(),
+    description: $('f-desc').value.trim(),
+    version: $('f-version').value.trim() || '1.0.0',
+    category: $('f-category').value.trim(),
+    tags: $('f-tags').value.split(/[,\n]/).map((s: string) => s.trim()).filter(Boolean),
+    skill_type: $('f-type').value,
+    content: $('f-content').value,
     x: {
-      intents: Array.from(document.querySelectorAll('.skill-checks input[type=checkbox]:checked')).map((cb) => cb.value),
-      keywords: linesToArr(document.getElementById('f-keywords').value),
+      intents: Array.from(document.querySelectorAll('.skill-checks input[type=checkbox]:checked')).map((cb) => (cb as HTMLInputElement).value),
+      keywords: linesToArr($('f-keywords').value),
       tools,
     },
   };
@@ -321,11 +335,11 @@ async function saveForm() {
     closeForm();
     await reload();
   } catch (err) {
-    showFormError('保存失败：' + (err && err.message ? err.message : '未知错误'));
+    showFormError('保存失败：' + ((err as Error).message ? (err as Error).message : '未知错误'));
   }
 }
 
-function runtimeToStandard(skill) {
+function runtimeToStandard(skill: Dyn) {
   const m = skill.match || {};
   return {
     name: skill.name,
@@ -344,7 +358,7 @@ function runtimeToStandard(skill) {
   };
 }
 
-function exportSkill(skill) {
+function exportSkill(skill: Dyn) {
   const md = serializeSkillMd(runtimeToStandard(skill));
   const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -357,23 +371,23 @@ function exportSkill(skill) {
   URL.revokeObjectURL(url);
 }
 
-let pendingDeleteName = null;
-function askDelete(name) {
+let pendingDeleteName: string | null = null;
+function askDelete(name: string) {
   pendingDeleteName = name;
   const skill = allSkills.find((s) => s.name === name);
-  document.getElementById('skill-del-msg').textContent = '确定删除技能「' + (skill ? skill.title || skill.name : name) + '」？此操作不可撤销。';
-  openOverlay(document.getElementById('skill-del-overlay'), '#skill-del-no');
+  $('skill-del-msg').textContent = '确定删除技能「' + (skill ? skill.title || skill.name : name) + '」？此操作不可撤销。';
+  openOverlay($('skill-del-overlay'), '#skill-del-no');
 }
 
 async function confirmDelete() {
   if (pendingDeleteName) await removeUserSkill(pendingDeleteName);
   pendingDeleteName = null;
-  closeOverlay(document.getElementById('skill-del-overlay'));
+  closeOverlay($('skill-del-overlay'));
   await reload();
 }
 
-async function runImport(text) {
-  const msg = document.getElementById('import-msg');
+async function runImport(text: string) {
+  const msg = $('import-msg');
   const skill = mdToSkill(text);
   if (!skill.name) {
     msg.textContent = '解析失败：SKILL.md 缺少必需的 name 字段。';
@@ -400,30 +414,30 @@ async function reload() {
 }
 
 function init() {
-  document.getElementById('new-skill-btn').addEventListener('click', () => openForm(null));
-  document.getElementById('skill-form-cancel').addEventListener('click', closeForm);
-  document.getElementById('skill-form-save').addEventListener('click', saveForm);
-  document.getElementById('skill-del-no').addEventListener('click', () => {
+  $('new-skill-btn').addEventListener('click', () => openForm(null));
+  $('skill-form-cancel').addEventListener('click', closeForm);
+  $('skill-form-save').addEventListener('click', saveForm);
+  $('skill-del-no').addEventListener('click', () => {
     pendingDeleteName = null;
-    closeOverlay(document.getElementById('skill-del-overlay'));
+    closeOverlay($('skill-del-overlay'));
   });
-  document.getElementById('skill-del-yes').addEventListener('click', confirmDelete);
+  $('skill-del-yes').addEventListener('click', confirmDelete);
   ['skill-form-overlay', 'skill-del-overlay'].forEach((id) => {
-    const overlay = document.getElementById(id);
-    overlay.addEventListener('click', (e) => {
+    const overlay = $(id);
+    overlay.addEventListener('click', (e: Event) => {
       if (e.target !== overlay) return;
       if (id === 'skill-form-overlay') closeForm();
       else closeOverlay(overlay);
     });
   });
 
-  document.getElementById('skill-search').addEventListener('input', (e) => {
-    skillQuery = e.target.value;
+  $('skill-search').addEventListener('input', (e: Event) => {
+    skillQuery = (e.target as HTMLInputElement).value;
     currentPage = 1;
     render();
   });
-  document.getElementById('skill-kind-filters').addEventListener('click', (e) => {
-    const chip = e.target.closest('[data-kind]');
+  $('skill-kind-filters').addEventListener('click', (e: Event) => {
+    const chip = closestEl(e.target, '[data-kind]');
     if (!chip) return;
     skillKind = chip.dataset.kind;
     currentPage = 1;
@@ -434,37 +448,38 @@ function init() {
     });
     render();
   });
-  document.getElementById('skill-category-filter').addEventListener('change', (e) => {
-    skillCategory = e.target.value;
+  $('skill-category-filter').addEventListener('change', (e: Event) => {
+    skillCategory = (e.target as HTMLSelectElement).value;
     currentPage = 1;
     render();
   });
 
-  document.getElementById('import-toggle').addEventListener('click', () => {
-    document.getElementById('import-section').classList.toggle('hidden');
+  $('import-toggle').addEventListener('click', () => {
+    $('import-section').classList.toggle('hidden');
   });
-  document.getElementById('import-run').addEventListener('click', () => {
-    const text = document.getElementById('import-textarea').value;
+  $('import-run').addEventListener('click', () => {
+    const text = $('import-textarea').value;
     if (!text.trim()) {
-      const msg = document.getElementById('import-msg');
+      const msg = $('import-msg');
       msg.textContent = '请粘贴 SKILL.md 文本或选择文件。';
       msg.classList.remove('hidden');
       return;
     }
     runImport(text);
   });
-  document.getElementById('import-file').addEventListener('change', (e) => {
-    const file = e.target.files && e.target.files[0];
+  $('import-file').addEventListener('change', (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files && input.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      document.getElementById('import-textarea').value = String(reader.result || '');
+      $('import-textarea').value = String(reader.result || '');
     };
     reader.readAsText(file);
   });
 
-  document.getElementById('skill-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('.skill-act');
+  $('skill-list').addEventListener('click', (e: Event) => {
+    const btn = closestEl(e.target, '.skill-act');
     if (!btn) return;
     const id = btn.dataset.id;
     const skill = allSkills.find((s) => s.name === id);
@@ -474,8 +489,8 @@ function init() {
     else if (btn.dataset.act === 'export') exportSkill(skill);
   });
 
-  document.getElementById('skill-pagination').addEventListener('click', (e) => {
-    const btn = e.target.closest('.page-btn');
+  $('skill-pagination').addEventListener('click', (e: Event) => {
+    const btn = closestEl(e.target, '.page-btn');
     if (!btn || btn.disabled) return;
     const p = Number(btn.dataset.page);
     if (Number.isFinite(p) && p >= 1) {

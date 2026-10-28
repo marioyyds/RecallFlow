@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { BRIDGE_METHODS, isBridgeMethod } from '../lib/shared/bridge-methods.js';
+import { BRIDGE_METHODS, isBridgeMethod } from '../lib/shared/bridge-methods.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MCP_INDEX = path.join(ROOT, 'integrations/opencode/recallflow-mcp/index.js');

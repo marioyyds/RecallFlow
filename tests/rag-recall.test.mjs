@@ -18,7 +18,7 @@
 //   · 非 CJK 短段完全不变 ⇒ 不把 "api" 这类缩写切碎成噪声。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tokenizeQuery, buildRagContext } from '../lib/shared/rag.js';
+import { tokenizeQuery, buildRagContext } from '../lib/shared/rag.ts';
 
 /** 造一个只有一条笔记的知识库。 */
 const bookWith = (note, title = '检索性能优化') => ({

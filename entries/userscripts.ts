@@ -2,17 +2,28 @@
 import { showToast, esc } from '../lib/shared/utils.ts';
 import { getUserscriptSettings } from '../lib/userscript/settings.ts';
 
-const $ = (id) => document.getElementById(id);
+/**
+ * 脚本条目 / 后台回包：形状由 lib/userscript/* 与 background 的消息处理器决定。
+ * 本页是 DOM 胶水层，字段集合随脚本格式演进 —— 不在这里复制 schema。
+ */
+type Dyn = Record<string, any>;
 
-let scriptsCache = [];
+/** 按 id 取元素：id 全部写死在 userscripts.html 里（取不到就是模板坏了，原代码也不检查）。 */
+const $ = (id: string): any => document.getElementById(id);
+
+/** 事件目标 → 最近的匹配元素（原代码直接 closestEl(e.target, ...)）。 */
+const closestEl = (target: EventTarget | null, selector: string): any =>
+  target ? (target as Element).closest(selector) : null;
+
+let scriptsCache: Dyn[] = [];
 let currentFilter = 'all';
 let listQuery = '';
-let pendingInstall = null;
-let confirmResolve = null;
+let pendingInstall: { type: string; source: string } | null = null;
+let confirmResolve: ((value: boolean) => void) | null = null;
 let updatingAll = false;
-let lastFocus = null;
+let lastFocus: HTMLElement | null = null;
 
-function send(type, payload) {
+function send(type: string, payload?: Dyn): Promise<Dyn> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type, ...payload }, (res) =>
       resolve(res || { ok: false, error: chrome.runtime.lastError ? chrome.runtime.lastError.message : '无响应' })
@@ -20,14 +31,14 @@ function send(type, payload) {
   });
 }
 
-function toast(msg) {
+function toast(msg: string) {
   showToast(msg, { duration: 4000 });
 }
 
 /* ---------- 视图切换 ---------- */
-function switchView(view) {
+function switchView(view: string) {
   document.querySelectorAll('.us-tab').forEach((tab) => {
-    const on = tab.dataset.view === view;
+    const on = (tab as HTMLElement).dataset.view === view;
     tab.classList.toggle('active', on);
     tab.setAttribute('aria-selected', String(on));
   });
@@ -37,14 +48,14 @@ function switchView(view) {
 }
 
 /* ---------- 已安装列表 ---------- */
-function scriptIconHtml(s) {
+function scriptIconHtml(s: Dyn): string {
   const letter = String(s.name || '?').trim().charAt(0).toUpperCase() || '?';
   const icon = s.icon ? `background-image:url("${esc(s.icon)}")` : '';
   return `<span class="us-card-icon${icon ? ' has-img' : ''}" style="${icon}" aria-hidden="true">${icon ? '' : esc(letter)}</span>`;
 }
 
-function matchesHtml(matches) {
-  const list = matches || [];
+function matchesHtml(matches: unknown): string {
+  const list = (matches || []) as string[];
   if (!list.length) return '';
   const shown = list.slice(0, 3);
   const more = list.slice(3);
@@ -53,7 +64,7 @@ function matchesHtml(matches) {
   }</div>`;
 }
 
-function installedCardHtml(s) {
+function installedCardHtml(s: Dyn): string {
   const warns = s.warnings || [];
   return `
   <div class="us-card${s.enabled ? '' : ' disabled'}" data-id="${esc(s.id)}">
@@ -92,7 +103,7 @@ function installedCardHtml(s) {
   </div>`;
 }
 
-function emptyStateHtml(scriptsLen, filtered) {
+function emptyStateHtml(scriptsLen: number, filtered: boolean) {
   if (!scriptsLen) {
     return {
       title: '还没有安装脚本',
@@ -113,13 +124,13 @@ function emptyStateHtml(scriptsLen, filtered) {
 function renderInstalled() {
   const total = scriptsCache.length;
   const enabled = scriptsCache.filter((s) => s.enabled).length;
-  $('us-stat-all').textContent = total;
-  $('us-stat-enabled').textContent = enabled;
-  $('us-stat-disabled').textContent = total - enabled;
-  $('us-tab-installed-count').textContent = total;
+  $('us-stat-all').textContent = String(total);
+  $('us-stat-enabled').textContent = String(enabled);
+  $('us-stat-disabled').textContent = String(total - enabled);
+  $('us-tab-installed-count').textContent = String(total);
   const navCount = $('us-nav-count');
   if (navCount) {
-    navCount.textContent = total;
+    navCount.textContent = String(total);
     navCount.classList.toggle('hidden', total === 0);
   }
 
@@ -153,7 +164,7 @@ async function refreshInstalled() {
   renderInstalled();
 }
 
-function findScript(id) {
+function findScript(id: unknown): Dyn | undefined {
   return scriptsCache.find((s) => s.id === id);
 }
 
@@ -191,7 +202,7 @@ async function updateAll() {
 }
 
 /* ---------- 导出 / 复制 ---------- */
-async function exportScript(id) {
+async function exportScript(id: unknown) {
   const s = findScript(id);
   if (!s || !s.code) {
     toast('该脚本没有可导出的代码');
@@ -207,7 +218,7 @@ async function exportScript(id) {
   toast('已导出脚本文件');
 }
 
-async function copyInstallUrl(id) {
+async function copyInstallUrl(id: unknown) {
   const s = findScript(id);
   if (!s) return;
   const url = s.sourceUrl || s.updateURL;
@@ -247,13 +258,13 @@ async function runSearch() {
     listEl.innerHTML = list.map(searchCardHtml).join('');
   } catch (e) {
     status.textContent = '';
-    toast('搜索失败：' + e.message);
+    toast('搜索失败：' + (e as Error).message);
   } finally {
     btn.disabled = false;
   }
 }
 
-function searchCardHtml(it) {
+function searchCardHtml(it: Dyn): string {
   const updated = it.updatedAt ? new Date(it.updatedAt) : null;
   const updatedText = updated && !Number.isNaN(updated.getTime()) ? '更新于 ' + updated.toLocaleDateString('zh-CN') : '';
   return `
@@ -277,7 +288,7 @@ function searchCardHtml(it) {
 }
 
 /* ---------- 安装：预览与确认 ---------- */
-async function requestInstall(sourceUrl) {
+async function requestInstall(sourceUrl: string) {
   const res = await send('userscript:preview', { url: sourceUrl });
   if (!res.ok || !res.preview) {
     toast(res.error || '无法解析该脚本');
@@ -287,7 +298,7 @@ async function requestInstall(sourceUrl) {
   showPreview(res.preview);
 }
 
-async function requestInstallCode(code) {
+async function requestInstallCode(code: string) {
   const res = await send('userscript:previewCode', { code });
   if (!res.ok || !res.preview) {
     toast(res.error || '无法解析该脚本');
@@ -297,20 +308,20 @@ async function requestInstallCode(code) {
   showPreview(res.preview);
 }
 
-function previewHtml(p) {
+function previewHtml(p: Dyn): string {
   const matches = p.matches || [];
   const grants = p.grants || [];
   const requires = p.requires || [];
   const warns = p.warnings || [];
   return `
-    ${matches.length ? `<div class="us-preview-section">访问的网站</div><div class="us-tags">${matches.map((m) => `<span class="us-tag">${esc(m)}</span>`).join('')}</div>` : ''}
-    ${grants.length ? `<div class="us-preview-section">申请的 GM API</div><div class="us-tags">${grants.map((g) => `<span class="us-tag">${esc(g)}</span>`).join('')}</div>` : ''}
-    ${requires.length ? `<div class="us-preview-section">外部依赖</div><div class="us-tags">${requires.map((r) => `<span class="us-tag">${esc(r)}</span>`).join('')}</div>` : ''}
+    ${matches.length ? `<div class="us-preview-section">访问的网站</div><div class="us-tags">${matches.map((m: string) => `<span class="us-tag">${esc(m)}</span>`).join('')}</div>` : ''}
+    ${grants.length ? `<div class="us-preview-section">申请的 GM API</div><div class="us-tags">${grants.map((g: string) => `<span class="us-tag">${esc(g)}</span>`).join('')}</div>` : ''}
+    ${requires.length ? `<div class="us-preview-section">外部依赖</div><div class="us-tags">${requires.map((r: string) => `<span class="us-tag">${esc(r)}</span>`).join('')}</div>` : ''}
     ${warns.length ? `<div class="us-warning">⚠ ${esc(warns.join('\n'))}</div>` : ''}
     <div class="us-preview-risk">脚本可以访问它匹配页面上的<b>所有内容</b>，请确认来源可信后再安装。</div>`;
 }
 
-function showPreview(p) {
+function showPreview(p: Dyn) {
   const iconEl = $('us-preview-icon');
   iconEl.className = 'us-card-icon' + (p.icon ? ' has-img' : '');
   iconEl.style.backgroundImage = p.icon ? `url("${esc(p.icon)}")` : '';
@@ -318,7 +329,7 @@ function showPreview(p) {
   $('us-preview-name').textContent = p.name + (p.version ? ' · v' + p.version : '');
   $('us-preview-meta').textContent = [p.author, p.homepageURL].filter(Boolean).join(' · ');
   $('us-preview-body').innerHTML = previewHtml(p);
-  lastFocus = document.activeElement;
+  lastFocus = document.activeElement as HTMLElement | null;
   $('us-preview-overlay').classList.remove('hidden');
   $('us-preview-yes').focus();
 }
@@ -330,10 +341,10 @@ function closePreview() {
 }
 
 /* ---------- 通用确认弹窗 ---------- */
-function openConfirm(message, yesText) {
+function openConfirm(message: string, yesText?: string): Promise<boolean> {
   $('us-confirm-msg').textContent = message;
   $('us-confirm-yes').textContent = yesText || '确认';
-  lastFocus = document.activeElement;
+  lastFocus = document.activeElement as HTMLElement | null;
   $('us-confirm-overlay').classList.remove('hidden');
   $('us-confirm-yes').focus();
   return new Promise((resolve) => {
@@ -341,7 +352,7 @@ function openConfirm(message, yesText) {
   });
 }
 
-function closeConfirm(result) {
+function closeConfirm(result: boolean) {
   $('us-confirm-overlay').classList.add('hidden');
   if (confirmResolve) {
     confirmResolve(result);
@@ -352,14 +363,14 @@ function closeConfirm(result) {
 
 /* ---------- 事件绑定 ---------- */
 document.querySelectorAll('.us-tab').forEach((tab) => {
-  tab.addEventListener('click', () => switchView(tab.dataset.view));
+  tab.addEventListener('click', () => switchView((tab as HTMLElement).dataset.view as string));
 });
 
 $('us-empty-discover').addEventListener('click', () => switchView('discover'));
 
 document.querySelectorAll('.us-stat').forEach((stat) => {
   stat.addEventListener('click', () => {
-    currentFilter = stat.dataset.filter;
+    currentFilter = (stat as HTMLElement).dataset.filter as string;
     document.querySelectorAll('.us-stat').forEach((x) => {
       const on = x === stat;
       x.classList.toggle('active', on);
@@ -369,27 +380,27 @@ document.querySelectorAll('.us-stat').forEach((stat) => {
   });
 });
 
-$('us-filter-input').addEventListener('input', (e) => {
-  listQuery = e.target.value;
+$('us-filter-input').addEventListener('input', (e: Event) => {
+  listQuery = (e.target as HTMLInputElement).value;
   renderInstalled();
 });
 
-$('us-installed-list').addEventListener('click', async (e) => {
-  const card = e.target.closest('.us-card');
+$('us-installed-list').addEventListener('click', async (e: Event) => {
+  const card = closestEl(e.target, '.us-card');
   if (!card) return;
   const id = card.dataset.id;
 
-  const expandBtn = e.target.closest('[data-expand]');
+  const expandBtn = closestEl(e.target, '[data-expand]');
   if (expandBtn) {
     const s = findScript(id);
     const tags = card.querySelector('.us-tags');
     if (s && tags) {
-      tags.innerHTML = (s.matches || []).map((m) => `<span class="us-tag">${esc(m)}</span>`).join('');
+      tags.innerHTML = (s.matches || []).map((m: string) => `<span class="us-tag">${esc(m)}</span>`).join('');
     }
     return;
   }
 
-  const act = e.target.closest('[data-act]');
+  const act = closestEl(e.target, '[data-act]');
   if (!act) return;
   const action = act.dataset.act;
 
@@ -439,8 +450,8 @@ $('us-installed-list').addEventListener('click', async (e) => {
   }
 });
 
-$('us-installed-list').addEventListener('change', async (e) => {
-  const input = e.target.closest('input[data-act="toggle"]');
+$('us-installed-list').addEventListener('change', async (e: Event) => {
+  const input = closestEl(e.target, 'input[data-act="toggle"]');
   if (!input) return;
   const card = input.closest('.us-card');
   if (!card) return;
@@ -458,7 +469,7 @@ $('us-installed-list').addEventListener('change', async (e) => {
 $('us-update-all-btn').addEventListener('click', updateAll);
 
 $('us-search-btn').addEventListener('click', runSearch);
-$('us-search-input').addEventListener('keydown', (e) => {
+$('us-search-input').addEventListener('keydown', (e: KeyboardEvent) => {
   if (e.key === 'Enter') runSearch();
 });
 
@@ -482,8 +493,8 @@ $('us-code-install-btn').addEventListener('click', () => {
   requestInstallCode(code);
 });
 
-$('us-search-list').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-url]');
+$('us-search-list').addEventListener('click', (e: Event) => {
+  const btn = closestEl(e.target, '[data-url]');
   if (btn) requestInstall(btn.dataset.url);
 });
 
@@ -517,7 +528,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Tab') {
     // 焦点陷阱：对话框打开时 Tab / Shift+Tab 在按钮间循环
-    const trap = (id) => {
+    const trap = (id: string) => {
       const ov = $(id);
       if (ov.classList.contains('hidden')) return;
       const f = ov.querySelectorAll('.confirm-dialog button:not([disabled])');
@@ -538,7 +549,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.querySelectorAll('.confirm-overlay').forEach((overlay) => {
-  overlay.addEventListener('click', (e) => {
+  overlay.addEventListener('click', (e: Event) => {
     if (e.target === overlay) {
       if (overlay.id === 'us-preview-overlay') closePreview();
       else closeConfirm(false);

@@ -7,17 +7,26 @@
 // 门禁看到的是过期内容却照样绿。这与 L-30 同族：读错文件比直接报错更难发现。
 //
 // 判据：迁移目录（`lib/`、`entries/`）内，同一目录下同名 `.js` 与 `.ts` 并存即红。
-// 不做路径豁免：真有「产物与源码同名同居」的需求，说明目录布局本身有歧义，应当改布局。
+//
+// **唯一例外（TITA-86）**：`lib/page/debug-hook` 是 manifest 按路径注入的 MAIN world 脚本，
+// 浏览器只认 `.js`，而源码必须叫 `.ts` —— 于是源码与产物**只能**同名同居。
+// 这里按 `scripts/build-entries.mjs` 的 `ENTRIES.out`（构建清单的单一来源）放行，
+// 不手抄路径；放行的语义是「.js 是产物、.ts 是源码」，因此**源码级门禁必须显式读 .ts**
+// （tests/omit-mark 与 tests/page-debug-hook 已改成读 .ts，见 TITA-86 交付评论）。
 //
 // 用法：node scripts/check-ts-duplicates.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENTRIES } from './build-entries.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** 迁移范围：这两棵树里的模块正在 `.js` → `.ts` 逐个改名。 */
 export const MIGRATION_DIRS = ['lib', 'entries'];
+
+/** 构建产物（相对仓库根）。产物与源码同名是声明过的关系，不算歧义双存。 */
+export const BUILT_OUTPUTS = new Set(ENTRIES.map((e) => e.out));
 
 function walk(dirAbs, relDir, out) {
   const byBase = new Map();
@@ -34,7 +43,7 @@ function walk(dirAbs, relDir, out) {
     byBase.set(m[1], pair);
   }
   for (const [base, pair] of byBase) {
-    if (pair.js && pair.ts) out.push({ base, js: pair.js, ts: pair.ts });
+    if (pair.js && pair.ts && !BUILT_OUTPUTS.has(pair.js)) out.push({ base, js: pair.js, ts: pair.ts });
   }
 }
 

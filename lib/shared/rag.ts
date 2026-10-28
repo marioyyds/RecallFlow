@@ -2,17 +2,37 @@
 import { STAR_LEVELS } from './constants.ts';
 import { typeInfo } from './utils.ts';
 import { normalizeHistory } from '../assistant/context.ts';
+import type { KnowledgeItem } from './store.ts';
+
+/** 知识库形数据：id → 条目。调用方传的是 store.getBook() 的结果。 */
+export type KnowledgeBook = Record<string, KnowledgeItem>;
+
+/** buildCitations() 的返回项（前端引用卡片直读）。 */
+export interface CitationMeta {
+  index: number;
+  source: string;
+  id: string;
+  title: string;
+  type: string;
+  url: string;
+  snippet: string;
+  isOverview: boolean;
+}
+
+type AiMessage = { role: string; content: string };
+/** 消息数组允许挂非标准字段 _citations（供调用方取引用元数据）。 */
+type AiMessages = AiMessage[] & { _citations?: CitationMeta[] | null };
 
 // 含 CJK（中日韩汉字/假名）即视为"没有词边界"的文本。
 // 中文查询不能指望用户写出逐字连续的片段，所以要用滑窗切分。
 const CJK_RE = /[\u3400-\u9fff\u3040-\u30ff\uf900-\ufaff]/;
 
-export function tokenizeQuery(query) {
+export function tokenizeQuery(query: unknown): string[] {
   const raw = String(query || '').toLowerCase();
   const segments = raw
     .split(/[\s,，。;；:：!！?？、/\\()[\]{}<>"'`~#@$%^&*+=|]+/)
     .filter((s) => s.length);
-  const tokens = [];
+  const tokens: string[] = [];
   for (const seg of segments) {
     if (seg.length <= 4) {
       // 原行为：短段整体保留（"api"/"rag" 这类缩写必须整段，切成 bigram 会变成噪声）
@@ -42,19 +62,19 @@ export function tokenizeQuery(query) {
   return tokens;
 }
 
-export function isKbOverviewQuery(q) {
+export function isKbOverviewQuery(q: unknown): boolean {
   const s = String(q || '').toLowerCase();
   return /知识库/.test(s) && /有什么|有哪些|内容|都有|全部|列出|list|看看|查看|里面|总结|汇总|概览/.test(s);
 }
 
-export function buildKbOverview(book, limit) {
+export function buildKbOverview(book: KnowledgeBook, limit?: number): string {
   const items = Object.values(book).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const shown = items.slice(0, limit || 30);
   const total = items.length;
   const lines = shown.map((it, i) => {
     const parts = [`[${i + 1}] 标题：${it.title || '未命名'}`];
     parts.push(`类型：${typeInfo(it.type).name}`);
-    if (it.status) parts.push(`星级：${(STAR_LEVELS[it.status] || {}).name || it.status}`);
+    if (it.status) parts.push(`星级：${(STAR_LEVELS as Record<string, { name?: string }>)[String(it.status)]?.name || it.status}`);
     if (Array.isArray(it.tags) && it.tags.length) parts.push(`标签：${it.tags.join('、')}`);
     if (it.note) parts.push(`内容：${String(it.note).slice(0, 120)}`);
     return parts.join('｜');
@@ -77,7 +97,7 @@ export function buildKbOverview(book, limit) {
  * @param {number} limit - 最大返回数量
  * @returns {Array} 匹配的条目数组
  */
-export function buildRagContext(book, query, limit) {
+export function buildRagContext(book: KnowledgeBook, query: unknown, limit?: number): KnowledgeItem[] {
   const terms = tokenizeQuery(query);
   if (!terms.length) return [];
 
@@ -92,7 +112,7 @@ export function buildRagContext(book, query, limit) {
     const platformLow = (it.platformName || '').toLowerCase();
 
     let score = 0;
-    const matched = new Set();
+    const matched = new Set<string>();
     for (const t of terms) {
       if (titleLow.includes(t)) {
         score += WEIGHTS.title;
@@ -127,7 +147,7 @@ export function buildRagContext(book, query, limit) {
  * @param {boolean} isOverview - 是否为知识库概览查询
  * @returns {Array|null} 引用元数据数组 [{index, id, title, type, url}]
  */
-export function buildCitations(relevantItems, isOverview) {
+export function buildCitations(relevantItems: KnowledgeItem[] | null | undefined, isOverview: unknown): CitationMeta[] | null {
   if (!relevantItems || !relevantItems.length) return null;
   return relevantItems.map((it, i) => ({
     index: i + 1,
@@ -141,8 +161,8 @@ export function buildCitations(relevantItems, isOverview) {
   }));
 }
 
-export function buildAiMessages(action, payload, settings, book) {
-  const text = payload.text || '';
+export function buildAiMessages(action: unknown, payload: Record<string, any>, settings: Record<string, any>, book: KnowledgeBook): AiMessages | null {
+  const text = String(payload.text || '');
 
   if (action === 'translate') {
     const t = payload.targetLang || settings.targetLang || '中文';
@@ -166,7 +186,7 @@ export function buildAiMessages(action, payload, settings, book) {
   if (action === 'ask') {
     const question = payload.question || text || '';
     let ctx = '';
-    let citations = null;
+    let citations: CitationMeta[] | null = null;
     if (settings.ragEnabled) {
       if (isKbOverviewQuery(question || text)) {
         ctx = buildKbOverview(book, 30);
@@ -188,7 +208,7 @@ export function buildAiMessages(action, payload, settings, book) {
         }
       }
     }
-    const messages = [
+    const messages: AiMessages = [
       {
         role: 'system',
         content:
@@ -212,7 +232,7 @@ export function buildAiMessages(action, payload, settings, book) {
     const page = payload.page || '';
     const history = normalizeHistory(payload.history, { maxMessages: 10, maxChars: 3000, maxTokens: 8000, noticeOnTruncation: true });
     let ctx = '';
-    let citations = null;
+    let citations: CitationMeta[] | null = null;
     if (settings.ragEnabled) {
       if (isKbOverviewQuery(instruction || text)) {
         ctx = buildKbOverview(book, 30);
@@ -230,13 +250,13 @@ export function buildAiMessages(action, payload, settings, book) {
       }
     }
     const hasText = !!text;
-    const userParts = [];
+    const userParts: string[] = [];
     if (hasText) userParts.push('选中的文本：\n' + text);
     if (page) userParts.push('当前页面的完整内容（作为背景上下文，回答时请结合整页内容，而不只限于选中文本）：\n' + page);
     if (ctx) userParts.push('知识库上下文（供参考，可选用）：\n' + ctx);
     if (instruction) userParts.push('用户指令：\n' + instruction);
     if (!hasText && !instruction) userParts.push('（无输入）');
-    const messages = [
+    const messages: AiMessages = [
       {
         role: 'system',
         content:

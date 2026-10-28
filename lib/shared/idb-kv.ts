@@ -4,14 +4,28 @@
 // 可以让持久化迁移不重写面板、Agent、测试的全部调用方；后续需要按 turn 分页时，
 // 再在这个模块内部升级成规范化 object store，外部协议保持不变。
 
-function requestResult(request) {
+export interface KeyValueStoreOptions {
+  dbName?: string;
+  storeName?: string;
+  version?: number;
+  /** 测试可注入假的 IDBFactory；不传则用全局 indexedDB。 */
+  indexedDB?: IDBFactory | null;
+}
+
+export interface KeyValueStore {
+  get(keys?: string | string[] | null): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown> | null | undefined): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
   });
 }
 
-function transactionDone(tx) {
+function transactionDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
@@ -19,15 +33,15 @@ function transactionDone(tx) {
   });
 }
 
-export function createIndexedDbKeyValueStore(options) {
+export function createIndexedDbKeyValueStore(options?: KeyValueStoreOptions | null): KeyValueStore {
   const opts = options || {};
   const dbName = String(opts.dbName || 'recallflow-history');
   const storeName = String(opts.storeName || 'kv');
   const version = Math.max(1, Number(opts.version) || 1);
   const factory = opts.indexedDB || (typeof indexedDB !== 'undefined' ? indexedDB : null);
-  let dbPromise = null;
+  let dbPromise: Promise<IDBDatabase> | null = null;
 
-  function open() {
+  function open(): Promise<IDBDatabase> {
     if (!factory) return Promise.reject(new Error('IndexedDB 不可用'));
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
@@ -52,14 +66,17 @@ export function createIndexedDbKeyValueStore(options) {
     return dbPromise;
   }
 
-  async function get(keys) {
+  async function get(keys?: string | string[] | null): Promise<Record<string, unknown>> {
     const db = await open();
     const tx = db.transaction(storeName, 'readonly');
     const done = transactionDone(tx);
     const store = tx.objectStore(storeName);
-    let out;
+    let out: Record<string, unknown>;
     if (keys == null) {
-      const [allKeys, allValues] = await Promise.all([requestResult(store.getAllKeys()), requestResult(store.getAll())]);
+      const [allKeys, allValues] = await Promise.all([
+        requestResult(store.getAllKeys() as IDBRequest<IDBValidKey[]>),
+        requestResult(store.getAll() as IDBRequest<unknown[]>),
+      ]);
       out = {};
       for (let i = 0; i < allKeys.length; i++) out[String(allKeys[i])] = allValues[i];
     } else if (Array.isArray(keys)) {
@@ -76,7 +93,7 @@ export function createIndexedDbKeyValueStore(options) {
     return out;
   }
 
-  async function set(items) {
+  async function set(items: Record<string, unknown> | null | undefined): Promise<void> {
     const db = await open();
     const tx = db.transaction(storeName, 'readwrite');
     const done = transactionDone(tx);
@@ -85,7 +102,7 @@ export function createIndexedDbKeyValueStore(options) {
     await done;
   }
 
-  async function remove(keys) {
+  async function remove(keys: string | string[]): Promise<void> {
     const db = await open();
     const tx = db.transaction(storeName, 'readwrite');
     const done = transactionDone(tx);

@@ -28,6 +28,6 @@ export const BRIDGE_METHODS = Object.freeze([
   'page_action',
 ]);
 
-export function isBridgeMethod(name) {
+export function isBridgeMethod(name: string) {
   return BRIDGE_METHODS.includes(String(name || ''));
 }

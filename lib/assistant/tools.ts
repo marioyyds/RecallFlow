@@ -3,8 +3,8 @@
 // 后台执行真实操作（检索/增删知识库），再把结果喂回模型，直到产出最终回复。
 import { STATUS, STAR_LEVELS } from '../shared/constants.ts';
 import { typeInfo, formatVisibilityReport, formatCurrentPageResult, trimElementsToBudget, isCspEvalBlockError, screenshotAttempts, formatScreenshotSummary } from '../shared/utils.ts';
-import { getBook, upsertItem, deleteItem } from '../shared/store.js';
-import { buildRagContext, buildCitations } from '../shared/rag.js';
+import { getBook, upsertItem, deleteItem } from '../shared/store.ts';
+import { buildRagContext, buildCitations } from '../shared/rag.ts';
 import { listScripts as listUserscripts, searchScripts, installFromUrl, runUserscriptOnTab } from '../userscript/manager.ts';
 import { getUserscriptSettings } from '../userscript/settings.ts';
 import { getMergedSkills, addUserSkill, updateUserSkill, getUserSkills, getDefaultSkills } from './skill-store.ts';
@@ -18,7 +18,7 @@ import { handleDialog, getPendingDialogs, getDownloads } from './target-manager.
 import { getTrace, listTraces } from './trace.ts';
 import { TOOL_SCHEMAS } from './tool-schemas.ts';
 import { TOOL_METADATA } from './tool-metadata.ts';
-import { sendTabMessageWithInjection } from '../shared/content-script-bridge.js';
+import { sendTabMessageWithInjection } from '../shared/content-script-bridge.ts';
 import { stripHtmlTags as stripTags, extractHtmlTitle, readBounded, decodeBuffer, searchWeb, isAbortLikeError, describeFetchError, citationTitleFor } from './net-parse.ts';
 // 页面动作的验证字段：从本模块抽出后在这里再导出（见文件的 export {...} from）。
 import { buildActionVerification, observedChange, verifyPageAction, snapshotChanged } from './page-action-verify.ts';

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
   sendTabMessageWithInjection,
   __resetContentScriptBridgeForTests,
-} from '../lib/shared/content-script-bridge.js';
+} from '../lib/shared/content-script-bridge.ts';
 
 function mkChrome(handler) {
   const chrome = {

@@ -17,22 +17,28 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENTRIES } from '../scripts/build-entries.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
 
+/** 构建产物（scripts/build-entries.mjs 的 ENTRIES.out）：不是源码，也永远不会被 import。 */
+const BUILT_OUTPUTS = new Set(ENTRIES.map((e) => e.out));
+
 /** 测试到不了、但有正当理由的模块。**新增条目必须写明"为什么不可能被测到"**。 */
 const ALLOWED = {
   // MAIN world 的裸脚本：由 manifest 的 content_scripts[].js 注入，**不是 ES 模块**（没有 export、
-  // 也不能 import）。它的正确性由 tests/omit-mark.test.mjs（读源码比对形态）与 E2E 保证。
-  'lib/page/debug-hook.js': 'MAIN world 裸脚本，由 manifest 注入，不是 ES 模块',
+  // 也不能 import）。它的正确性由 tests/omit-mark.test.mjs（读源码比对形态）、
+  // tests/page-debug-hook.test.mjs（vm 沙箱跑源码）与 E2E 保证。
+  // TITA-86：源码已改名 `.ts`，产物 `lib/page/debug-hook.js` 由 build-entries 生成（产物不在本清单候选集里）。
+  'lib/page/debug-hook.ts': 'MAIN world 裸脚本，由 manifest 注入，不是 ES 模块',
   // 同上，用 chrome.scripting.executeScript 以**路径**注入（见 lib/userscript/manager.js）。
   'lib/userscript/runner.js': '由 executeScript 以路径注入的裸脚本，不是 ES 模块',
   // 这两个只经 entries/content.ts 静态导入（内容脚本打包入口），页面侧行为由 E2E 覆盖。
   'lib/page/picker.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 的拾取用例覆盖',
   'lib/page/debug-capture.ts': '内容脚本侧，仅经 entries/content.ts 导入；行为由 E2E 覆盖',
   // service worker 入口 background.js 才 import 它，而测试从不 import 入口（会真起 chrome API）。
-  'lib/shared/idb-kv.js': '只被 background.js 导入；入口不能 import（会摸真 chrome API）',
+  'lib/shared/idb-kv.ts': '只被 background.js 导入；入口不能 import（会摸真 chrome API）',
 };
 
 const IMPORT_RE = /(?:from\s*|import\(\s*|require\(\s*)['"]([^'"]+)['"]/g;
@@ -100,7 +106,7 @@ function reachableFrom(roots) {
   return seen;
 }
 
-const LIB_FILES = walk(path.join(ROOT, 'lib')).map(rel);
+const LIB_FILES = walk(path.join(ROOT, 'lib')).map(rel).filter((f) => !BUILT_OUTPUTS.has(f));
 // roots 必须是**文件**（不是目录）：BFS 里读不到目录内容，静默跳过会让所有模块
 // 都变成"测试碰不到"（第一版就是这么错的，红了 88 条）。
 const FROM_TESTS = reachableFrom(walk(path.join(ROOT, 'tests')).map(rel));

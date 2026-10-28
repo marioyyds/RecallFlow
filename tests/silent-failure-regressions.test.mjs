@@ -21,8 +21,8 @@ import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.ts';
-import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.js';
-import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.js';
+import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.ts';
+import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.ts';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/page/citation.ts';
 import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/assistant/initial-messages.ts';
 import { SKILL_REGISTRY } from '../lib/assistant/skill-defs.ts';
@@ -200,7 +200,7 @@ test('options.js 里 $() 引用的每个 id 都必须真实存在于 options.htm
   // 因此改名/删除输入框而忘了改 JS，错误只会在用户打开设置页时才暴露。
   // 实测推动力：把 runjs-approval 改名为 code-exec-approval、并新增 bridge-token 时，
   // 两边必须同时改。这条断言把这个约束固化下来。
-  const js = readFileSync(new URL('../entries/options.js', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../entries/options.ts', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../options.html', import.meta.url), 'utf8');
   const ids = new Set();
   for (const m of js.matchAll(/\$\('([^']+)'\)/g)) ids.add(m[1]);
@@ -210,7 +210,7 @@ test('options.js 里 $() 引用的每个 id 都必须真实存在于 options.htm
 });
 
 test('设置页不再读写旧键 runJavascriptApproval（改用泛化后的 codeExecutionApproval）', () => {
-  const js = readFileSync(new URL('../entries/options.js', import.meta.url), 'utf8');
+  const js = readFileSync(new URL('../entries/options.ts', import.meta.url), 'utf8');
   assert.ok(!/runjs-approval/.test(js), 'options.js 不应再引用旧的下拉框 id');
   assert.match(js, /codeExecutionApproval:/, '保存时应写新键');
   assert.match(js, /bridgeToken:/, '必须能保存桥接 token，否则用户没有配置入口');

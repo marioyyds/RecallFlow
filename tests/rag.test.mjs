@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tokenizeQuery, buildRagContext, buildCitations, isKbOverviewQuery } from '../lib/shared/rag.js';
+import { tokenizeQuery, buildRagContext, buildCitations, isKbOverviewQuery } from '../lib/shared/rag.ts';
 
 const book = {
   a: { id: 'a', title: 'K8s 部署指南', type: 'article', tags: ['k8s', '部署'], note: '使用 helm', updatedAt: 2 },

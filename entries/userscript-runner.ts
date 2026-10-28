@@ -11,10 +11,30 @@
 // 也不再需要把 lib/userscript/* 暴露成可被网页取到的资源。
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 import { urlMatches } from '../lib/userscript/match.ts';
+import type { MatchRules } from '../lib/userscript/match.ts';
+
+/** 本文件在 window 上留一个「运行时已装」标记（重复注入时直接退出）。 */
+type RunnerWindow = Window & typeof globalThis & { __rfUserscriptRunner?: boolean };
+
+/** 已安装用户脚本（store 里存的那个形状；字段全部可选，缺了就按默认值走）。 */
+interface UserScript extends MatchRules {
+  id?: string;
+  name?: string;
+  enabled?: boolean;
+  code?: string;
+  version?: string;
+  namespace?: string;
+  description?: string;
+  author?: string;
+  matches?: string[];
+  resources?: Record<string, string>;
+  requiresCode?: string[];
+}
 
 (async function initRunner() {
-  if (window.__rfUserscriptRunner) return;
-  window.__rfUserscriptRunner = true;
+  const pageWindow = window as RunnerWindow;
+  if (pageWindow.__rfUserscriptRunner) return;
+  pageWindow.__rfUserscriptRunner = true;
   try {
     const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
     const map = data[USERSCRIPTS_KEY] || {};
@@ -44,18 +64,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
-function debounce(fn, ms) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
+function debounce<T extends unknown[]>(fn: (...args: T) => unknown, ms: number): (...args: T) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: T) => {
+    if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => fn(...args), ms);
   };
 }
 
-async function runScript(script) {
+async function runScript(script: UserScript) {
   const valuesKey = 'recallflow.userscript-values.' + script.id;
   const vd = await chrome.storage.local.get(valuesKey);
-  const values = vd[valuesKey] || {};
+  const values = (vd[valuesKey] || {}) as Record<string, unknown>;
   const persistValues = debounce(() => chrome.storage.local.set({ [valuesKey]: values }), 200);
 
   const name = script.name || script.id;
@@ -73,46 +93,46 @@ async function runScript(script) {
       scriptHandler: 'RecallFlow',
       version: '0.0.1',
     },
-    log: (...args) => console.log('[US:' + name + ']', ...args),
-    getValue: (key, def) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : def),
-    setValue: (key, value) => {
+    log: (...args: unknown[]) => console.log('[US:' + name + ']', ...args),
+    getValue: (key: string, def: unknown) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : def),
+    setValue: (key: string, value: unknown) => {
       values[key] = value;
       persistValues();
     },
-    deleteValue: (key) => {
+    deleteValue: (key: string) => {
       delete values[key];
       persistValues();
     },
     listValues: () => Object.keys(values),
-    addStyle: (css) => {
+    addStyle: (css: unknown) => {
       const style = document.createElement('style');
       style.textContent = String(css || '');
       (document.head || document.documentElement).appendChild(style);
       return style;
     },
-    addElement: (tag, attributes) => {
+    addElement: (tag: unknown, attributes: Record<string, unknown> | null | undefined) => {
       const el = document.createElement(String(tag || 'div'));
       if (attributes && typeof attributes === 'object') {
         for (const key of Object.keys(attributes)) {
-          if (key === 'textContent') el.textContent = attributes[key];
-          else if (key === 'innerHTML') el.innerHTML = attributes[key];
+          if (key === 'textContent') el.textContent = attributes[key] as string;
+          else if (key === 'innerHTML') el.innerHTML = attributes[key] as string;
           else el.setAttribute(key, String(attributes[key]));
         }
       }
       (document.body || document.documentElement).appendChild(el);
       return el;
     },
-    openInTab: (url, options) => {
+    openInTab: (url: unknown, options: { active?: boolean } | null | undefined) => {
       chrome.runtime.sendMessage({
         type: 'userscript:openTab',
         url,
         active: !(options && options.active === false),
       });
     },
-    registerMenuCommand: (caption) => {
+    registerMenuCommand: (caption: unknown) => {
       console.warn('[RecallFlow] GM_registerMenuCommand 暂不支持：' + caption);
     },
-    setClipboard: (text) => {
+    setClipboard: (text: unknown) => {
       const done = () => {};
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(String(text || '')).then(done, done);
@@ -127,16 +147,16 @@ async function runScript(script) {
         ta.remove();
       }
     },
-    notification: (title, text) => {
+    notification: (title: unknown, text: unknown) => {
       const payload =
         title && typeof title === 'object'
-          ? { title: title.title || '', text: title.text || '' }
+          ? { title: (title as { title?: string }).title || '', text: (title as { text?: string }).text || '' }
           : { title: String(title || ''), text: String(text || '') };
       chrome.runtime.sendMessage({ type: 'userscript:notify', ...payload });
     },
-    getResourceText: (resourceName) => (script.resources ? script.resources[resourceName] || null : null),
+    getResourceText: (resourceName: string) => (script.resources ? script.resources[resourceName] || null : null),
     getResourceURL: () => null,
-    xmlhttpRequest: (details) => {
+    xmlhttpRequest: (details: Record<string, any>) => {
       if (!details || typeof details !== 'object') return;
       chrome.runtime.sendMessage({ type: 'userscript:xhr', details }, (res) => {
         if (!res) return;

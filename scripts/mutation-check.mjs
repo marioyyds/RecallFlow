@@ -71,7 +71,7 @@ function report(name, expectFail, parsed, ok) {
 
 const TARGETS = [
   {
-    file: 'lib/page/debug-hook.js',
+    file: 'lib/page/debug-hook.ts',
     mode: 'env',
     envVar: 'RF_DEBUG_HOOK_SRC',
     test: 'tests/page-debug-hook.test.mjs',
@@ -82,8 +82,8 @@ const TARGETS = [
     mutations: [
       {
         name: '把 fetch 包装内联成匿名函数（页面栈里会显示成 window.fetch）',
-        from: '    window.fetch = rfFetchHook;',
-        to: '    window.fetch = function (input, init) { return rfFetchHook.apply(this, arguments); };',
+        from: '    window.fetch = fetchWrapper;',
+        to: '    window.fetch = function (input, init) { return fetchWrapper.apply(this, arguments); };',
         expectFail: 'fetch 包装函数是具名的',
       },
       {
@@ -106,8 +106,8 @@ const TARGETS = [
       },
       {
         name: '把 this 从 window 改回调用方 this（恢复对非严格模式的隐含依赖）',
-        from: '      var p = origFetch.apply(window, arguments);',
-        to: '      var p = origFetch.apply(this, arguments);',
+        from: '      var p = invoke(origFetch, window, arguments) as Promise<Response>;',
+        to: '      var p = invoke(origFetch, this, arguments) as Promise<Response>;',
         expectFail: 'this 为 undefined 时仍以 window 调用原始 fetch',
       },
     ],

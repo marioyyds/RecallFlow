@@ -30,7 +30,7 @@ export const BRIDGE_WRITE_TOOLS = Object.freeze([
  * 明确**不**经桥接开放的能力，以及原因。用于生成可读的拒绝信息。
  * 这些不是"忘了加"，而是有意的边界。
  */
-export const BRIDGE_DENIED_TOOLS = Object.freeze({
+export const BRIDGE_DENIED_TOOLS: Readonly<Record<string, string>> = Object.freeze({
   run_javascript: '任意代码执行只能由你在浏览器面板里当次批准，不开放给外部客户端。',
   run_userscript: '用户脚本执行需要面板内逐次批准。',
   install_userscript: '安装用户脚本需要面板内逐次批准。',
@@ -44,7 +44,7 @@ export const BRIDGE_DENIED_TOOLS = Object.freeze({
 });
 
 /** 是否为允许经桥接执行的写工具。 */
-export function isBridgeWriteTool(name) {
+export function isBridgeWriteTool(name: string) {
   return BRIDGE_WRITE_TOOLS.includes(String(name || ''));
 }
 
@@ -55,7 +55,7 @@ export function isBridgeWriteTool(name) {
  * @param {object} args 参数
  * @returns {{ok:true,name:string}|{ok:false,error:string,code:string}}
  */
-export function validateBridgeWrite(name, args) {
+export function validateBridgeWrite(name: string, args: unknown) {
   const tool = String(name || '').trim();
   if (!tool) return { ok: false, code: 'NO_TOOL', error: '缺少工具名。' };
   if (Object.prototype.hasOwnProperty.call(BRIDGE_DENIED_TOOLS, tool)) {
@@ -77,10 +77,11 @@ export function validateBridgeWrite(name, args) {
   if (args === null || typeof args !== 'object' || Array.isArray(args)) {
     return { ok: false, code: 'BAD_ARGS', error: '工具参数必须是 JSON 对象。' };
   }
+  const target = args as Record<string, unknown>;
   // 定位参数至少要有一个，否则动作无从下手（与 tools.js 的定位语义一致）。
   const hasTarget =
-    args.ref || args.selector || args.text || args.role || args.name || args.testid ||
-    Number.isFinite(Number(args.x)) || Number.isFinite(Number(args.y));
+    target.ref || target.selector || target.text || target.role || target.name || target.testid ||
+    Number.isFinite(Number(target.x)) || Number.isFinite(Number(target.y));
   if (!hasTarget) {
     return {
       ok: false,

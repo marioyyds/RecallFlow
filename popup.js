@@ -273,7 +273,7 @@ function showToast(msg, opts) {
   _toastTimer = setTimeout(() => el.classList.remove("show"), o.duration || 2e3);
 }
 
-// lib/shared/store.js
+// lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
 var DB_VERSION = 1;
 var STORE_ENTRIES = "entries";
@@ -333,7 +333,7 @@ function normalizeBook(input) {
     if (!raw || typeof raw !== "object") continue;
     const id = String(raw.id || key);
     if (!id) continue;
-    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[raw.status] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
+    const status = typeof raw.status === "string" ? OLD_STATUS_MIGRATION[String(raw.status)] || STATUS.IMPORTANT : [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(raw.status) ? raw.status : STATUS.IMPORTANT;
     out[id] = {
       id,
       type: raw.type || "wrong",
@@ -506,12 +506,12 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
-// entries/popup.js
+// entries/popup.ts
 var bookCache = {};
 var currentTab = null;
 var currentUrl = null;
 var currentTitle = null;
-var platform = null;
+var platform;
 var selectedType = "wrong";
 var selectedStatus = STATUS.IMPORTANT;
 var currentFilter = "all";
@@ -520,6 +520,7 @@ var listQuery = "";
 var ADD_COLLAPSED_KEY = "recallflow-popup-add-collapsed";
 var POPUP_RECENT_LIMIT = 5;
 var $ = (id) => document.getElementById(id);
+var closest = (target, selector) => target ? target.closest(selector) : null;
 function toast(msg, undoFn) {
   showToast(msg, { duration: 4e3, undoFn });
 }
@@ -614,8 +615,9 @@ async function init() {
   renderScriptsBadge();
   const shortcut = $("search-shortcut");
   if (shortcut) {
-    const platform2 = navigator.userAgentData && navigator.userAgentData.platform || navigator.platform || "";
-    shortcut.textContent = /mac/i.test(platform2) ? "\u2318 K" : "Ctrl K";
+    const uaData = navigator.userAgentData;
+    const uaPlatform = uaData && uaData.platform || navigator.platform || "";
+    shortcut.textContent = /mac/i.test(uaPlatform) ? "\u2318 K" : "Ctrl K";
   }
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
   const localFileBlocked = Boolean(t && t.url && isFileUrl(t.url) && !await isAllowedFileSchemeAccess());
@@ -662,7 +664,7 @@ async function renderScriptsBadge() {
   try {
     const data = await chrome.storage.local.get(USERSCRIPTS_KEY);
     const count = Object.keys(data[USERSCRIPTS_KEY] || {}).length;
-    badge.textContent = count;
+    badge.textContent = String(count);
     badge.classList.toggle("hidden", count === 0);
   } catch (e) {
     badge.classList.add("hidden");
@@ -713,13 +715,13 @@ $("add-btn").addEventListener("click", async () => {
   });
 });
 document.querySelector("#add-panel .type-group").addEventListener("click", (e) => {
-  const btn = e.target.closest(".type-btn");
+  const btn = closest(e.target, ".type-btn");
   if (!btn) return;
   selectedType = btn.dataset.type;
   renderTypePicker();
 });
 document.querySelector("#add-panel .star-picker").addEventListener("click", (e) => {
-  const cell = e.target.closest(".star-cell[data-star]");
+  const cell = closest(e.target, ".star-cell[data-star]");
   if (!cell) return;
   selectedStatus = Number(cell.dataset.star);
   syncStatusHighlight();
@@ -785,10 +787,10 @@ document.addEventListener("keydown", (e) => {
   }
 });
 $("list").addEventListener("click", async (e) => {
-  const itemEl = e.target.closest(".item");
+  const itemEl = closest(e.target, ".item");
   if (!itemEl) return;
   const id = itemEl.dataset.id;
-  if (e.target.closest(".del")) {
+  if (closest(e.target, ".del")) {
     const removed = bookCache[id];
     delete bookCache[id];
     await persist();
@@ -802,11 +804,11 @@ $("list").addEventListener("click", async (e) => {
     });
     return;
   }
-  if (e.target.closest(".open") && bookCache[id] && bookCache[id].url) {
+  if (closest(e.target, ".open") && bookCache[id] && bookCache[id].url) {
     chrome.tabs.create({ url: bookCache[id].url });
     return;
   }
-  const starCell = e.target.closest(".star-cell[data-star]");
+  const starCell = closest(e.target, ".star-cell[data-star]");
   if (starCell) {
     const a = Number(starCell.dataset.star);
     const validStatuses = [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT];
@@ -821,7 +823,7 @@ $("list").addEventListener("click", async (e) => {
     }
     return;
   }
-  if (e.target.closest(".item-title") && bookCache[id] && bookCache[id].url) {
+  if (closest(e.target, ".item-title") && bookCache[id] && bookCache[id].url) {
     chrome.tabs.create({ url: bookCache[id].url });
   }
 });

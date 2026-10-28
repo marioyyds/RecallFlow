@@ -37,16 +37,21 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  * `budget` 是逐入口的体积棘轮（字节，实测值向上取整留余量）。它防的是
  * 「误引入大依赖」与「重复内联同一份大模块」，不是精确预算。
  */
+// TS 迁移 Batch 5（TITA-86）：源码全部改成 `.ts`（`entries/*.js` 已不存在）。
+// `debug-hook` 是同一模式的第 8 个入口：manifest 的 content_scripts 按**路径**注入
+// `lib/page/debug-hook.js`，而浏览器不认 `.ts` —— 所以它也必须走构建，
+// 源码在 `lib/page/debug-hook.ts`，产物仍是 manifest 里写的那个文件名（manifest 零改动）。
 export const ENTRIES = [
-  { src: 'entries/background.js', out: 'background.js', format: 'esm', budget: 826 * 1024 },
-  { src: 'entries/popup.js', out: 'popup.js', format: 'esm', budget: 36 * 1024 },
-  { src: 'entries/options.js', out: 'options.js', format: 'esm', budget: 518 * 1024 },
-  { src: 'entries/manager.js', out: 'manager.js', format: 'esm', budget: 54 * 1024 },
-  { src: 'entries/skills-page.js', out: 'skills-page.js', format: 'esm', budget: 514 * 1024 },
-  { src: 'entries/userscripts.js', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
-  // 唯一一个产物不在仓库根的：`lib/userscript/manager.js:237` 与
-  // `module-references` 的豁免清单都按这个字面路径找它。
-  { src: 'entries/userscript-runner.js', out: 'lib/userscript/runner.js', format: 'iife', budget: 11 * 1024 },
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 826 * 1024 },
+  { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 36 * 1024 },
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 518 * 1024 },
+  { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 54 * 1024 },
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 514 * 1024 },
+  { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
+  // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
+  // 的豁免清单都按这两个字面路径找它们。
+  { src: 'entries/userscript-runner.ts', out: 'lib/userscript/runner.js', format: 'iife', budget: 11 * 1024 },
+  { src: 'lib/page/debug-hook.ts', out: 'lib/page/debug-hook.js', format: 'iife', budget: 13 * 1024 },
 ];
 
 export async function buildEntry(entry) {

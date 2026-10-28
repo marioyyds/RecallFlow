@@ -247,7 +247,7 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
   const paths = [
     ['lib/assistant/agent.ts', read('lib/assistant/agent.ts')],
     ['lib/assistant/llm.ts', read('lib/assistant/llm.ts')],
-    ['entries/background.js', read('entries/background.js')],
+    ['entries/background.ts', read('entries/background.ts')],
   ];
   for (const [name, src] of paths) {
     // 迁移期：specifier 可能是 `.js` 或 `.ts`（模块改名后 import 侧跟着改），两种都认。
