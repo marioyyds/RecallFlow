@@ -100,18 +100,22 @@ function markdownExcerpt(text, maxChars = 160) {
 }
 function sortItems(list, sortBy2) {
   const arr = list.slice();
+  const status = (item) => {
+    const value = Number(item.status);
+    return Number.isFinite(value) ? value : 0;
+  };
   switch (sortBy2) {
     case "created":
       arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       break;
     case "star-desc":
       arr.sort(
-        (a, b) => (b.status || 0) - (a.status || 0) || (b.updatedAt || 0) - (a.updatedAt || 0)
+        (a, b) => status(b) - status(a) || (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;
     case "star-asc":
       arr.sort(
-        (a, b) => (a.status || 0) - (b.status || 0) || (b.updatedAt || 0) - (a.updatedAt || 0)
+        (a, b) => status(a) - status(b) || (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;
     default:
@@ -438,6 +442,190 @@ async function setBook(book) {
   await transactionDone(tx);
   notifyChange();
 }
+async function upsertItem({ id, type, title, url, platformId, platformName, status, note, tags }) {
+  const db = await ensureReady();
+  const key = String(id);
+  const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], "readwrite");
+  const entryStore = tx.objectStore(STORE_ENTRIES);
+  const docStore = tx.objectStore(STORE_DOCUMENTS);
+  const prevEntry = await requestResult(entryStore.get(key));
+  const prevDoc = await requestResult(docStore.get(key));
+  const now = Date.now();
+  const item = {
+    id: key,
+    type: type || prevEntry && prevEntry.type || "wrong",
+    title: cleanTitle(title || "") || prevEntry && prevEntry.title || url || "\u672A\u547D\u540D",
+    url: url || prevEntry && prevEntry.url || "",
+    platform: platformId || prevEntry && prevEntry.platform || "",
+    platformName: platformName || prevEntry && prevEntry.platformName || "",
+    status: status != null ? status : prevEntry && prevEntry.status || STATUS.IMPORTANT,
+    note: typeof note === "string" ? note.trim() : String(prevDoc && prevDoc.markdown || ""),
+    tags: Array.isArray(tags) ? tags : prevEntry && prevEntry.tags || [],
+    createdAt: Number(prevEntry && prevEntry.createdAt) || now,
+    updatedAt: now
+  };
+  entryStore.put(entryRecord(item));
+  docStore.put(documentRecord(item));
+  await transactionDone(tx);
+  notifyChange();
+  return item;
+}
+
+// lib/shared/knowledge-repository.ts
+var defaultStore = {
+  getBook,
+  setBook,
+  upsertItem,
+  subscribeChanges: (listener) => subscribeKnowledgeChanges(() => listener())
+};
+function cloneItem(item) {
+  return { ...item, tags: Array.isArray(item.tags) ? item.tags.slice() : [] };
+}
+function cloneBook(book) {
+  const out = {};
+  for (const [id, item] of Object.entries(book)) out[id] = cloneItem(item);
+  return out;
+}
+var KnowledgeRepositoryImpl = class {
+  store;
+  listeners = /* @__PURE__ */ new Set();
+  unsubscribeStore;
+  cache = {};
+  loaded = false;
+  loadPromise = null;
+  writeChain = Promise.resolve();
+  disposed = false;
+  constructor(store = defaultStore) {
+    this.store = store;
+    this.unsubscribeStore = store.subscribeChanges(() => {
+      if (!this.disposed) void this.load(true).catch(() => {
+      });
+    });
+  }
+  get size() {
+    return Object.keys(this.cache).length;
+  }
+  snapshot() {
+    return cloneBook(this.cache);
+  }
+  get(id) {
+    const item = this.cache[String(id)];
+    return item ? cloneItem(item) : void 0;
+  }
+  list() {
+    return Object.values(this.cache).map(cloneItem);
+  }
+  async load(force = false) {
+    if (this.loadPromise) return this.loadPromise;
+    if (!force && this.loaded) return cloneBook(this.cache);
+    this.loadPromise = (async () => {
+      await this.writeChain;
+      const book = await this.store.getBook();
+      this.cache = book;
+      this.loaded = true;
+      this.notify();
+      return cloneBook(this.cache);
+    })().finally(() => {
+      this.loadPromise = null;
+    });
+    return this.loadPromise;
+  }
+  async replace(book) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const next = cloneBook(book);
+      await this.store.setBook(next);
+      this.cache = next;
+      this.loaded = true;
+      this.notify();
+      return cloneBook(this.cache);
+    });
+  }
+  async update(id, updater) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const key = String(id);
+      const current = this.cache[key];
+      if (!current) return null;
+      const updated = cloneItem(updater(cloneItem(current)));
+      const next = { ...this.cache, [key]: updated };
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return updated;
+    });
+  }
+  async put(item) {
+    const book = await this.putMany([item]);
+    return book[String(item.id)];
+  }
+  async putMany(items) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const next = cloneBook(this.cache);
+      for (const item of items) next[String(item.id)] = cloneItem(item);
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return cloneBook(this.cache);
+    });
+  }
+  async upsert(input) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const item = await this.store.upsertItem(input);
+      this.cache = { ...this.cache, [String(item.id)]: item };
+      this.notify();
+      return cloneItem(item);
+    });
+  }
+  async remove(id) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const key = String(id);
+      if (!this.cache[key]) return false;
+      const next = { ...this.cache };
+      delete next[key];
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return true;
+    });
+  }
+  subscribe(listener) {
+    if (typeof listener !== "function") return () => {
+    };
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  dispose() {
+    this.disposed = true;
+    this.listeners.clear();
+    this.unsubscribeStore();
+  }
+  enqueueWrite(task) {
+    const next = this.writeChain.then(task, task);
+    this.writeChain = next.then(
+      () => void 0,
+      () => void 0
+    );
+    return next;
+  }
+  notify() {
+    for (const listener of this.listeners) {
+      try {
+        listener(cloneBook(this.cache));
+      } catch (error) {
+        console.warn("[KnowledgeRepository] listener failed:", error);
+      }
+    }
+  }
+};
+function createKnowledgeRepository(store = defaultStore) {
+  return new KnowledgeRepositoryImpl(store);
+}
 
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
@@ -683,9 +871,9 @@ function pageTokens(currentPage2, totalPages) {
 }
 
 // entries/manager.ts
+var knowledge = createKnowledgeRepository();
 var $ = (id) => document.getElementById(id);
 var closestEl = (target, selector) => target ? target.closest(selector) : null;
-var bookCache = {};
 var currentType = "all";
 var currentTag = "all";
 var currentStar = "all";
@@ -697,15 +885,9 @@ var selectedIds = /* @__PURE__ */ new Set();
 var docItemId = "";
 var docPreviousFocus = null;
 var docKeyHandler = null;
-async function loadCache() {
-  bookCache = await getBook();
-}
-async function persist() {
-  await setBook(bookCache);
-}
 function allTags() {
   const map = {};
-  Object.values(bookCache).forEach((it) => {
+  knowledge.list().forEach((it) => {
     (it.tags || []).forEach((t) => {
       if (t) map[t] = (map[t] || 0) + 1;
     });
@@ -714,9 +896,10 @@ function allTags() {
 }
 function renderTypeTabs() {
   const el = $("type-tabs");
+  const all = knowledge.list();
   let h = `<button class="type-tab${currentType === "all" ? " active" : ""}" data-type="all">\u5168\u90E8</button>`;
   ITEM_TYPES.forEach((t) => {
-    const n = Object.values(bookCache).filter((i) => (i.type || "wrong") === t.id).length;
+    const n = all.filter((i) => (i.type || "wrong") === t.id).length;
     h += `<button class="type-tab${currentType === t.id ? " active" : ""}" data-type="${t.id}" style="--t:${t.color}">${t.name} <span class="cnt">${n}</span></button>`;
   });
   el.innerHTML = h;
@@ -735,7 +918,7 @@ function renderTagFilter() {
   el.innerHTML = h;
 }
 function filtered() {
-  let items = Object.values(bookCache);
+  let items = knowledge.list();
   if (currentType !== "all") {
     items = items.filter((i) => (i.type || "wrong") === currentType);
   }
@@ -844,7 +1027,7 @@ function render() {
   const emptyEl = $("empty");
   emptyEl.classList.toggle("hidden", items.length > 0);
   if (!items.length) {
-    const hasAny = Object.keys(bookCache).length > 0;
+    const hasAny = knowledge.size > 0;
     emptyEl.innerHTML = hasAny ? '<span class="empty-ico">\u{1F50D}</span><p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p>' : '<span class="empty-ico">\u{1F4DA}</span><p>\u77E5\u8BC6\u5E93\u8FD8\u662F\u7A7A\u7684</p><p class="empty-hint">\u70B9\u51FB\u300C\u65B0\u5EFA\u7B14\u8BB0\u300D\u6216\u6536\u85CF\u7F51\u9875\u5F00\u59CB\u6536\u5F55</p>';
   }
   listEl.innerHTML = paged.items.map(itemHtml).join("");
@@ -871,7 +1054,7 @@ function renderActiveFilters() {
   if (details && labels.length) details.open = true;
 }
 function renderStats() {
-  const all = Object.values(bookCache);
+  const all = knowledge.list();
   $("st-total").textContent = String(all.length);
   [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].forEach((s) => {
     $("st-" + s).textContent = String(all.filter((i) => Number(i.status) === s).length);
@@ -887,9 +1070,24 @@ function renderStats() {
 function genId() {
   return "note-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
 }
+async function saveEditingItem(id) {
+  const titleInput = $("title-editor");
+  const noteInput = $("note-editor");
+  const tagsInput = $("tag-editor");
+  if (!titleInput && !noteInput && !tagsInput) return;
+  await knowledge.update(id, (item) => ({
+    ...item,
+    title: titleInput?.value.trim() || item.title,
+    note: noteInput ? noteInput.value : item.note,
+    tags: tagsInput ? parseTags(tagsInput.value) : item.tags,
+    updatedAt: Date.now()
+  }));
+  editingNoteId = null;
+  render();
+}
 async function createNote() {
   const id = genId();
-  bookCache[id] = {
+  await knowledge.put({
     id,
     type: "note",
     title: "\u65B0\u7B14\u8BB0",
@@ -901,8 +1099,7 @@ async function createNote() {
     tags: [],
     createdAt: Date.now(),
     updatedAt: Date.now()
-  };
-  await persist();
+  });
   editingNoteId = id;
   currentPage = 1;
   render();
@@ -984,7 +1181,7 @@ function closeDocument() {
   docItemId = "";
 }
 function openDocument(id) {
-  const item = bookCache[id];
+  const item = knowledge.get(id);
   if (!item) return;
   docItemId = id;
   docPreviousFocus = document.activeElement;
@@ -1033,17 +1230,18 @@ async function bulkDelete() {
   if (!ok) return;
   const backup = {};
   for (const id of selectedIds) {
-    if (bookCache[id]) backup[id] = { ...bookCache[id] };
+    const item = knowledge.get(id);
+    if (item) backup[id] = { ...item, tags: item.tags.slice() };
   }
+  const next = { ...knowledge.snapshot() };
   for (const id of selectedIds) {
-    delete bookCache[id];
+    delete next[id];
   }
   selectedIds.clear();
-  await persist();
+  await knowledge.replace(next);
   render();
   toast(count + " \u9879\u5DF2\u5220\u9664", async () => {
-    Object.assign(bookCache, backup);
-    await persist();
+    await knowledge.putMany(Object.values(backup));
     render();
     toast("\u5DF2\u6062\u590D");
   });
@@ -1109,12 +1307,12 @@ $("doc-overlay").addEventListener("click", (e) => {
   if (e.target === $("doc-overlay")) closeDocument();
 });
 $("doc-open").addEventListener("click", () => {
-  const item = bookCache[docItemId];
+  const item = knowledge.get(docItemId);
   if (item && item.url) chrome.tabs.create({ url: item.url });
 });
 $("doc-edit").addEventListener("click", () => {
   const id = docItemId;
-  if (!id || !bookCache[id]) return;
+  if (!id || !knowledge.get(id)) return;
   closeDocument();
   editingNoteId = id;
   render();
@@ -1154,9 +1352,8 @@ $("list").addEventListener("click", async (e) => {
   const starCell = closestEl(e.target, ".star-cell[data-star]");
   if (starCell) {
     const v = Number(starCell.dataset.star);
-    bookCache[id].status = v;
-    bookCache[id].updatedAt = Date.now();
-    await persist();
+    if (!knowledge.get(id)) return;
+    await knowledge.update(id, (item2) => ({ ...item2, status: v, updatedAt: Date.now() }));
     renderStats();
     updateItemStar(itemEl, v);
     return;
@@ -1165,15 +1362,15 @@ $("list").addEventListener("click", async (e) => {
   if (act) {
     const a = act.dataset.act;
     if (a === "del") {
-      const backup = { ...bookCache[id] };
-      const title = bookCache[id].title || "\u6B64\u6761\u76EE";
-      delete bookCache[id];
+      const current = knowledge.get(id);
+      if (!current) return;
+      const backup = { ...current, tags: current.tags.slice() };
+      const title = current.title || "\u6B64\u6761\u76EE";
+      await knowledge.remove(id);
       if (editingNoteId === id) editingNoteId = null;
-      await persist();
       render();
       toast("\u5DF2\u5220\u9664\u300C" + title + "\u300D", async () => {
-        bookCache[id] = backup;
-        await persist();
+        await knowledge.put(backup);
         render();
         toast("\u5DF2\u6062\u590D");
       });
@@ -1185,35 +1382,25 @@ $("list").addEventListener("click", async (e) => {
       const input = $("title-editor") || $("note-editor");
       if (input) input.focus();
     } else if (a === "save") {
-      const t = $("title-editor");
-      const n = $("note-editor");
-      const g = $("tag-editor");
-      if (t) bookCache[id].title = t.value.trim() || bookCache[id].title;
-      if (n) bookCache[id].note = n.value;
-      if (g) bookCache[id].tags = parseTags(g.value);
-      bookCache[id].updatedAt = Date.now();
-      editingNoteId = null;
-      await persist();
-      render();
+      await saveEditingItem(id);
     } else if (a === "cancel") {
       editingNoteId = null;
       render();
     }
     return;
   }
-  if (closestEl(e.target, ".item-title") && bookCache[id]) {
-    if (bookCache[id].url) chrome.tabs.create({ url: bookCache[id].url });
-    else if (bookCache[id].note) openDocument(id);
+  const item = knowledge.get(id);
+  if (closestEl(e.target, ".item-title") && item) {
+    if (item.url) chrome.tabs.create({ url: item.url });
+    else if (item.note) openDocument(id);
   }
 });
 bindStarKeyboard($("list"), (v, cell) => {
   const itemEl = cell.closest(".item");
   if (!itemEl) return;
   const id = itemEl.dataset.id;
-  if (!bookCache[id]) return;
-  bookCache[id].status = v;
-  bookCache[id].updatedAt = Date.now();
-  persist();
+  if (!knowledge.get(id)) return;
+  void knowledge.update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() })).catch(() => toast("\u66F4\u65B0\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5"));
   renderStats();
   const lvl = itemEl.querySelector(".level-name");
   if (lvl) lvl.outerHTML = levelNameHtml(v);
@@ -1222,20 +1409,10 @@ $("list").addEventListener("keydown", async (e) => {
   if (e.key !== "Enter") return;
   if (e.target && e.target.tagName === "TEXTAREA" && !(e.ctrlKey || e.metaKey)) return;
   if (!editingNoteId) return;
-  const t = $("title-editor");
-  const n = $("note-editor");
-  const g = $("tag-editor");
-  if (!t && !n && !g) return;
-  if (t) bookCache[editingNoteId].title = t.value.trim() || bookCache[editingNoteId].title;
-  if (n) bookCache[editingNoteId].note = n.value;
-  if (g) bookCache[editingNoteId].tags = parseTags(g.value);
-  bookCache[editingNoteId].updatedAt = Date.now();
-  editingNoteId = null;
-  await persist();
-  render();
+  await saveEditingItem(editingNoteId);
 });
 $("export-btn").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(bookCache, null, 2)], {
+  const blob = new Blob([JSON.stringify(knowledge.snapshot(), null, 2)], {
     type: "application/json"
   });
   const a = document.createElement("a");
@@ -1249,14 +1426,15 @@ $("import-btn").addEventListener("click", () => {
 });
 function isValidImportItem(item) {
   if (!item || typeof item !== "object") return false;
-  if (typeof item.title !== "string" || !item.title.trim()) return false;
+  const candidate = item;
+  if (typeof candidate.title !== "string" || !candidate.title.trim()) return false;
   const validTypes = ITEM_TYPES.map((t) => t.id);
-  if (item.type && !validTypes.includes(item.type)) return false;
-  if (item.status !== void 0 && ![STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(Number(item.status))) {
+  if (candidate.type && !validTypes.includes(candidate.type)) return false;
+  if (candidate.status !== void 0 && ![STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(Number(candidate.status))) {
     return false;
   }
-  if (item.tags && !Array.isArray(item.tags)) return false;
-  if (item.url && typeof item.url !== "string") return false;
+  if (candidate.tags && !Array.isArray(candidate.tags)) return false;
+  if (candidate.url && typeof candidate.url !== "string") return false;
   return true;
 }
 $("import-file").addEventListener("change", async (e) => {
@@ -1269,22 +1447,32 @@ $("import-file").addEventListener("change", async (e) => {
       toast("\u65E0\u6548\u7684 JSON \u683C\u5F0F\uFF1A\u5E94\u4E3A\u5BF9\u8C61");
       return;
     }
-    let count = 0;
+    const imported = [];
     let skipped = 0;
     for (const [id, item] of Object.entries(data)) {
       if (isValidImportItem(item)) {
-        if (bookCache[id]) {
-          bookCache[id] = { ...bookCache[id], ...item, id, updatedAt: Date.now() };
-        } else {
-          bookCache[id] = { ...item, id, createdAt: item.createdAt || Date.now(), updatedAt: Date.now() };
-        }
-        count++;
+        const existing = knowledge.get(id);
+        const now = Date.now();
+        imported.push({
+          id,
+          type: item.type || existing?.type || "wrong",
+          title: String(item.title || "").trim() || existing?.title || "\u672A\u547D\u540D",
+          url: item.url || existing?.url || "",
+          platform: item.platform || existing?.platform || "",
+          platformName: item.platformName || existing?.platformName || "",
+          status: item.status ?? existing?.status ?? STATUS.IMPORTANT,
+          note: item.note ?? existing?.note ?? "",
+          tags: item.tags ?? (existing ? existing.tags.slice() : []),
+          createdAt: Number(item.createdAt) || existing?.createdAt || now,
+          updatedAt: now
+        });
       } else {
         skipped++;
         logError("Skipped invalid import item", { id, item });
       }
     }
-    await persist();
+    await knowledge.putMany(imported);
+    const count = imported.length;
     render();
     toast(skipped > 0 ? `\u5DF2\u5BFC\u5165 ${count} \u9879\uFF0C\u8DF3\u8FC7 ${skipped} \u9879\u65E0\u6548\u6570\u636E` : `\u5DF2\u5BFC\u5165 ${count} \u9879`);
   } catch (err) {
@@ -1337,7 +1525,7 @@ function focusItemFromHash() {
   const m = location.hash.match(/#focus=([^&]+)/);
   if (!m) return;
   const id = decodeURIComponent(m[1]);
-  if (!bookCache[id]) {
+  if (!knowledge.get(id)) {
     toast("\u672A\u627E\u5230\u8BE5\u6761\u76EE\uFF08\u53EF\u80FD\u5DF2\u88AB\u5220\u9664\uFF09");
     return;
   }
@@ -1357,16 +1545,18 @@ function focusItemFromHash() {
   if (history.replaceState) history.replaceState(null, "", location.pathname + location.search);
 }
 (async function init() {
-  await loadCache();
+  await knowledge.load();
   renderUserscriptBadge();
   render();
   focusItemFromHash();
-  subscribeKnowledgeChanges(async () => {
+  knowledge.subscribe(() => {
     if (editingNoteId) return;
-    await loadCache();
     render();
   });
 })();
+window.addEventListener("pagehide", (event) => {
+  if (!event.persisted) knowledge.dispose();
+});
 async function renderUserscriptBadge() {
   const badge = $("us-count-badge");
   if (!badge) return;

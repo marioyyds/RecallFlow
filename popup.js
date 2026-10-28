@@ -133,18 +133,22 @@ function markdownExcerpt(text, maxChars = 160) {
 }
 function sortItems(list, sortBy2) {
   const arr = list.slice();
+  const status = (item) => {
+    const value = Number(item.status);
+    return Number.isFinite(value) ? value : 0;
+  };
   switch (sortBy2) {
     case "created":
       arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       break;
     case "star-desc":
       arr.sort(
-        (a, b) => (b.status || 0) - (a.status || 0) || (b.updatedAt || 0) - (a.updatedAt || 0)
+        (a, b) => status(b) - status(a) || (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;
     case "star-asc":
       arr.sort(
-        (a, b) => (a.status || 0) - (b.status || 0) || (b.updatedAt || 0) - (a.updatedAt || 0)
+        (a, b) => status(a) - status(b) || (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;
     default:
@@ -503,11 +507,167 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   return item;
 }
 
+// lib/shared/knowledge-repository.ts
+var defaultStore = {
+  getBook,
+  setBook,
+  upsertItem,
+  subscribeChanges: (listener) => subscribeKnowledgeChanges(() => listener())
+};
+function cloneItem(item) {
+  return { ...item, tags: Array.isArray(item.tags) ? item.tags.slice() : [] };
+}
+function cloneBook(book) {
+  const out = {};
+  for (const [id, item] of Object.entries(book)) out[id] = cloneItem(item);
+  return out;
+}
+var KnowledgeRepositoryImpl = class {
+  store;
+  listeners = /* @__PURE__ */ new Set();
+  unsubscribeStore;
+  cache = {};
+  loaded = false;
+  loadPromise = null;
+  writeChain = Promise.resolve();
+  disposed = false;
+  constructor(store = defaultStore) {
+    this.store = store;
+    this.unsubscribeStore = store.subscribeChanges(() => {
+      if (!this.disposed) void this.load(true).catch(() => {
+      });
+    });
+  }
+  get size() {
+    return Object.keys(this.cache).length;
+  }
+  snapshot() {
+    return cloneBook(this.cache);
+  }
+  get(id) {
+    const item = this.cache[String(id)];
+    return item ? cloneItem(item) : void 0;
+  }
+  list() {
+    return Object.values(this.cache).map(cloneItem);
+  }
+  async load(force = false) {
+    if (this.loadPromise) return this.loadPromise;
+    if (!force && this.loaded) return cloneBook(this.cache);
+    this.loadPromise = (async () => {
+      await this.writeChain;
+      const book = await this.store.getBook();
+      this.cache = book;
+      this.loaded = true;
+      this.notify();
+      return cloneBook(this.cache);
+    })().finally(() => {
+      this.loadPromise = null;
+    });
+    return this.loadPromise;
+  }
+  async replace(book) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const next = cloneBook(book);
+      await this.store.setBook(next);
+      this.cache = next;
+      this.loaded = true;
+      this.notify();
+      return cloneBook(this.cache);
+    });
+  }
+  async update(id, updater) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const key = String(id);
+      const current = this.cache[key];
+      if (!current) return null;
+      const updated = cloneItem(updater(cloneItem(current)));
+      const next = { ...this.cache, [key]: updated };
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return updated;
+    });
+  }
+  async put(item) {
+    const book = await this.putMany([item]);
+    return book[String(item.id)];
+  }
+  async putMany(items) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const next = cloneBook(this.cache);
+      for (const item of items) next[String(item.id)] = cloneItem(item);
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return cloneBook(this.cache);
+    });
+  }
+  async upsert(input) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const item = await this.store.upsertItem(input);
+      this.cache = { ...this.cache, [String(item.id)]: item };
+      this.notify();
+      return cloneItem(item);
+    });
+  }
+  async remove(id) {
+    await this.load();
+    return this.enqueueWrite(async () => {
+      const key = String(id);
+      if (!this.cache[key]) return false;
+      const next = { ...this.cache };
+      delete next[key];
+      await this.store.setBook(next);
+      this.cache = next;
+      this.notify();
+      return true;
+    });
+  }
+  subscribe(listener) {
+    if (typeof listener !== "function") return () => {
+    };
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  dispose() {
+    this.disposed = true;
+    this.listeners.clear();
+    this.unsubscribeStore();
+  }
+  enqueueWrite(task) {
+    const next = this.writeChain.then(task, task);
+    this.writeChain = next.then(
+      () => void 0,
+      () => void 0
+    );
+    return next;
+  }
+  notify() {
+    for (const listener of this.listeners) {
+      try {
+        listener(cloneBook(this.cache));
+      } catch (error) {
+        console.warn("[KnowledgeRepository] listener failed:", error);
+      }
+    }
+  }
+};
+function createKnowledgeRepository(store = defaultStore) {
+  return new KnowledgeRepositoryImpl(store);
+}
+
 // lib/userscript/store.ts
 var USERSCRIPTS_KEY = "recallflow.userscripts.v1";
 
 // entries/popup.ts
-var bookCache = {};
+var knowledge = createKnowledgeRepository();
 var currentTab = null;
 var currentUrl = null;
 var currentTitle = null;
@@ -523,12 +683,6 @@ var $ = (id) => document.getElementById(id);
 var closest = (target, selector) => target ? target.closest(selector) : null;
 function toast(msg, undoFn) {
   showToast(msg, { duration: 4e3, undoFn });
-}
-async function loadCache() {
-  bookCache = await getBook();
-}
-async function persist() {
-  await setBook(bookCache);
 }
 function renderTypePicker() {
   const el = document.querySelector("#add-panel .type-group");
@@ -546,7 +700,7 @@ function syncStatusHighlight() {
 function renderList() {
   const listEl = $("list");
   const emptyEl = $("empty");
-  let items = Object.values(bookCache);
+  let items = knowledge.list();
   if (currentFilter !== "all") {
     items = items.filter((i) => (i.type || "wrong") === currentFilter);
   }
@@ -560,7 +714,7 @@ function renderList() {
   if (!items.length) {
     emptyEl.innerHTML = hasFilters ? '<span class="empty-ico">\u2315</span><p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p>' : '<span class="empty-ico">\u{1F4DA}</span><p>\u8FD8\u6CA1\u6709\u5185\u5BB9</p><p class="empty-hint">\u6253\u5F00\u7F51\u9875\u540E\u70B9\u5DE5\u5177\u680F\u56FE\u6807\u5373\u53EF\u5FEB\u901F\u6536\u5F55</p>';
   }
-  const total = Object.keys(bookCache).length;
+  const total = knowledge.size;
   const shown = items.slice(0, POPUP_RECENT_LIMIT);
   listEl.innerHTML = shown.map(itemHtml).join("");
   $("total-badge").textContent = total + " \u6761";
@@ -610,7 +764,7 @@ function isAllowedFileSchemeAccess() {
   });
 }
 async function init() {
-  await loadCache();
+  await knowledge.load();
   renderList();
   renderScriptsBadge();
   const shortcut = $("search-shortcut");
@@ -634,8 +788,8 @@ async function init() {
     pEl.textContent = platform.name;
     pEl.style.background = platformColor(platform.id);
     pEl.classList.remove("hidden");
-    if (bookCache[currentUrl]) {
-      const rec = bookCache[currentUrl];
+    const rec = knowledge.get(currentUrl);
+    if (rec) {
       $("add-exists").classList.remove("hidden");
       selectedType = rec.type || "wrong";
       selectedStatus = rec.status;
@@ -678,7 +832,7 @@ $("add-btn").addEventListener("click", async () => {
   btn.textContent = "\u4FDD\u5B58\u4E2D\u2026";
   try {
     const tags = parseTags($("tags-input").value);
-    await upsertItem({
+    await knowledge.upsert({
       id: currentUrl,
       type: selectedType,
       title: currentTitle,
@@ -689,7 +843,6 @@ $("add-btn").addEventListener("click", async () => {
       note: $("note-input").value,
       tags
     });
-    await loadCache();
     $("add-exists").classList.remove("hidden");
     btn.textContent = "\u5DF2\u4FDD\u5B58 \u2713";
     renderList();
@@ -737,10 +890,8 @@ bindStarKeyboard(document, (v, cell) => {
   const itemEl = cell.closest(".item");
   if (itemEl) {
     const id = itemEl.dataset.id;
-    if (bookCache[id]) {
-      bookCache[id].status = v;
-      bookCache[id].updatedAt = Date.now();
-      persist();
+    if (knowledge.get(id)) {
+      void knowledge.update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() })).catch(() => toast("\u66F4\u65B0\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5"));
       const lvl = itemEl.querySelector(".level-name");
       if (lvl) lvl.outerHTML = levelNameHtml(v);
     }
@@ -764,13 +915,13 @@ $("list-search").addEventListener("input", debounce(() => {
   listQuery = $("list-search").value;
   renderList();
 }, 200));
-function setAddPanelCollapsed(collapsed, persist2 = true) {
+function setAddPanelCollapsed(collapsed, persist = true) {
   const addPanel = $("add-panel");
   const toggle = $("toggle-add-panel");
   addPanel.classList.toggle("is-collapsed", collapsed);
   toggle.textContent = collapsed ? "\u5C55\u5F00" : "\u6536\u8D77";
   toggle.setAttribute("aria-expanded", String(!collapsed));
-  if (persist2) {
+  if (persist) {
     try {
       localStorage.setItem(ADD_COLLAPSED_KEY, collapsed ? "1" : "0");
     } catch (e) {
@@ -791,31 +942,28 @@ $("list").addEventListener("click", async (e) => {
   if (!itemEl) return;
   const id = itemEl.dataset.id;
   if (closest(e.target, ".del")) {
-    const removed = bookCache[id];
-    delete bookCache[id];
-    await persist();
+    const removed = knowledge.get(id);
+    await knowledge.remove(id);
     renderList();
     toast("\u5DF2\u5220\u9664", async () => {
       if (!removed) return;
-      bookCache[id] = removed;
-      await persist();
+      await knowledge.put({ ...removed, tags: removed.tags.slice() });
       renderList();
       toast("\u5DF2\u6062\u590D");
     });
     return;
   }
-  if (closest(e.target, ".open") && bookCache[id] && bookCache[id].url) {
-    chrome.tabs.create({ url: bookCache[id].url });
+  const item = knowledge.get(id);
+  if (closest(e.target, ".open") && item && item.url) {
+    chrome.tabs.create({ url: item.url });
     return;
   }
   const starCell = closest(e.target, ".star-cell[data-star]");
   if (starCell) {
     const a = Number(starCell.dataset.star);
     const validStatuses = [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT];
-    if (bookCache[id] && validStatuses.includes(a)) {
-      bookCache[id].status = a;
-      bookCache[id].updatedAt = Date.now();
-      await persist();
+    if (item && validStatuses.includes(a)) {
+      await knowledge.update(id, (current) => ({ ...current, status: a, updatedAt: Date.now() }));
       const bar = itemEl.querySelector(".star-bar");
       if (bar) bar.querySelectorAll(".star-cell").forEach((c, i) => c.classList.toggle("on", i < a));
       const lvl = itemEl.querySelector(".level-name");
@@ -823,13 +971,13 @@ $("list").addEventListener("click", async (e) => {
     }
     return;
   }
-  if (closest(e.target, ".item-title") && bookCache[id] && bookCache[id].url) {
-    chrome.tabs.create({ url: bookCache[id].url });
+  if (closest(e.target, ".item-title") && item && item.url) {
+    chrome.tabs.create({ url: item.url });
   }
 });
 var openManager = (e) => {
   e.preventDefault();
-  const id = currentUrl && bookCache[currentUrl] ? currentUrl : null;
+  const id = currentUrl && knowledge.get(currentUrl) ? currentUrl : null;
   const url = chrome.runtime.getURL("manager.html") + (id ? `#focus=${encodeURIComponent(id)}` : "");
   chrome.tabs.create({ url });
 };
@@ -869,8 +1017,10 @@ $("open-assistant").addEventListener("click", async () => {
     toast("\u65E0\u6CD5\u6253\u5F00\u52A9\u624B\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
   }
 });
-subscribeKnowledgeChanges(async () => {
-  await loadCache();
+knowledge.subscribe(() => {
   renderList();
+});
+window.addEventListener("pagehide", (event) => {
+  if (!event.persisted) knowledge.dispose();
 });
 init();

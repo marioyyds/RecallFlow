@@ -18,6 +18,7 @@ import {
 } from '../lib/shared/panel-sessions.ts';
 import { RunStreamHub } from '../lib/assistant/run-hub.ts';
 import { RunChannel } from '../lib/assistant/run-channel.ts';
+import { createTabRunRegistry, type RunControllerLike, type RunRecordLike } from '../lib/assistant/run-registry.ts';
 import { createIndexedDbKeyValueStore } from '../lib/shared/idb-kv.ts';
 import { removeSessionScreenshots } from '../lib/shared/screenshot-store.ts';
 import {
@@ -47,7 +48,7 @@ import {
 type Dyn = Record<string, any>;
 
 /** AbortController 上额外挂的运行标记（run 收尾后置 true，防止重复 abort）。 */
-type RunController = AbortController & { __rfFinished?: boolean };
+type RunController = RunControllerLike;
 
 interface PendingRunCleanup {
   tabIds: Set<number>;
@@ -804,20 +805,20 @@ chrome.runtime.onInstalled.addListener(() => {
 // 标签页关闭时清理其对话持久化数据。
 chrome.tabs.onRemoved.addListener((tabId) => {
   runSubscriptions.delete(tabId);
-  const runRec = tabRuns.get(tabId);
+  const runRec = runRegistry.runFor(tabId);
   if (runRec && runRec.runId) {
     clearRunAbortTimer(runRec.runId);
-    runChannels.delete(String(runRec.runId));
+    runRegistry.deleteChannel(runRec.runId);
   }
-  const c = tabControllers.get(tabId);
+  const c = runRegistry.controllerFor(tabId);
   if (c) {
     try {
       runStats.aborts += 1;
       c.abort();
     } catch (e) {}
-    tabControllers.delete(tabId);
+    runRegistry.deleteController(tabId);
   }
-  tabRuns.delete(tabId);
+  runRegistry.deleteRun(tabId);
   panelSessions
     .releaseTabLocks(tabId)
     .then(async (r) => {
@@ -838,18 +839,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   } catch (e) {}
 });
 
-// tabId -> AbortController：标签页关闭时中止其进行中的 run。
-// 端口断开会 abort（整页刷新 / 停止 / 标签页关闭都会断开端口）：
-//   · 整页刷新 → abort 落盘为 interrupted，新面板 query-run 后自动续跑；
-//   · 停止 → 面板显式发 {type:'stop'}，先标记不可续跑再 abort；
-//   · 标签页关闭 → tabs.onRemoved 兜底 abort。
-const tabControllers = new Map<number, RunController>();
-// tabId -> 最近一次 run { runId, resumable }：整页刷新后，新面板据此自动续跑（query-run）。
-const tabRuns = new Map<number, Dyn>();
-// runId -> RunChannel：run 的输出终端。页面刷新只换终端，不结束 run。
-const runChannels = new Map<string, RunChannel>();
-// runId -> 重连宽限定时器：端口断开后等新面板 reattach；超时才 abort。
-const runAbortTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// controller / 最近 run / 输出通道 / reattach 宽限定时器必须一起维护。
+const runRegistry = createTabRunRegistry();
 const REATTACH_GRACE_MS = 8000;
 // 运行生命周期计数（只读诊断；E2E 用它证明刷新走的是 reattach，而不是 abort+续跑）。
 const runStats: {
@@ -871,12 +862,7 @@ try {
 } catch (e) {}
 
 function clearRunAbortTimer(runId: unknown) {
-  const id = String(runId || '');
-  const timer = runAbortTimers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    runAbortTimers.delete(id);
-  }
+  runRegistry.clearAbortTimer(runId);
 }
 
 /**
@@ -885,12 +871,10 @@ function clearRunAbortTimer(runId: unknown) {
  */
 function scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefined) {
   const id = String(runId || '');
-  clearRunAbortTimer(id);
-  const timer = setTimeout(() => {
-    runAbortTimers.delete(id);
-    const rec = tabId == null ? null : tabRuns.get(tabId);
+  runRegistry.scheduleAbort(id, REATTACH_GRACE_MS, () => {
+    const rec = runRegistry.runFor(tabId);
     if (!rec || String(rec.runId || '') !== id) return;
-    const channel = runChannels.get(id);
+    const channel = runRegistry.channelFor(id);
     if (channel && channel.isAttached()) return;
     try {
       if (rec.controller && !rec.controller.__rfFinished) {
@@ -898,8 +882,7 @@ function scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefi
         rec.controller.abort();
       }
     } catch (e) {}
-  }, REATTACH_GRACE_MS);
-  runAbortTimers.set(id, timer);
+  });
 }
 
 /**
@@ -911,7 +894,7 @@ function requestRunStop(params: Dyn, requesterTabId: number | null | undefined) 
   const wantedRunId = String(p.runId || '');
   const wantedSessionId = String(p.sessionId || '');
   let owner: { tabId: number; rec: Dyn } | null = null;
-  for (const [tabId, rec] of tabRuns) {
+  for (const [tabId, rec] of runRegistry.runs) {
     if (!rec) continue;
     if (wantedRunId && String(rec.runId || '') !== wantedRunId) continue;
     if (!wantedRunId && wantedSessionId && String(rec.sessionId || '') !== wantedSessionId) continue;
@@ -922,7 +905,7 @@ function requestRunStop(params: Dyn, requesterTabId: number | null | undefined) 
     const snap = runHub.findBySession(wantedSessionId);
     if (snap && snap.ownerTabId != null) {
       const tabId = Number(snap.ownerTabId);
-      owner = { tabId, rec: tabRuns.get(tabId) || {} };
+      owner = { tabId, rec: runRegistry.runFor(tabId) || {} };
     }
   }
   const runId = String((owner && owner.rec && owner.rec.runId) || wantedRunId);
@@ -931,13 +914,13 @@ function requestRunStop(params: Dyn, requesterTabId: number | null | undefined) 
     return { ok: false, code: 'not-running', error: '该任务已结束，无需停止' };
   }
   if (!owner) return { ok: false, code: 'owner-missing', error: '找不到任务所属标签页' };
-  const controller = tabControllers.get(owner.tabId);
+  const controller = runRegistry.controllerFor(owner.tabId);
   if (!controller || controller.signal.aborted) {
     return { ok: false, code: 'already-stopping', error: '该任务已在停止中' };
   }
 
   if (owner.rec && typeof owner.rec === 'object') {
-    tabRuns.set(owner.tabId, Object.assign({}, owner.rec, { resumable: false }));
+    runRegistry.updateRun(owner.tabId, owner.rec, { resumable: false });
   }
   clearRunAbortTimer(runId);
   // 先广播「停止中」，再 abort：abort 后的收尾可能很快，不能让跟随页错过中间状态。
@@ -979,16 +962,16 @@ chrome.runtime.onConnect.addListener((port) => {
   const ensureController = () => {
     if (!controller) {
       controller = new AbortController() as RunController;
-      if (senderTabId) tabControllers.set(senderTabId, controller);
+      if (senderTabId) runRegistry.setController(senderTabId, controller);
     }
     return controller;
   };
   port.onDisconnect.addListener(() => {
     // 刷新/导航只摘终端，不结束 run；新页面会在宽限内 reattach。
     if (attachedRunId) {
-      const channel = runChannels.get(attachedRunId);
+      const channel = runRegistry.channelFor(attachedRunId);
       if (channel) channel.detach(port);
-      const rec = senderTabId == null ? null : tabRuns.get(senderTabId);
+      const rec = runRegistry.runFor(senderTabId);
       if (rec && String(rec.runId || '') === attachedRunId) {
         scheduleAbortIfNoReattach(attachedRunId, senderTabId);
         return;
@@ -1009,7 +992,7 @@ chrome.runtime.onConnect.addListener((port) => {
     try {
       // 停止：面板显式请求中止 run，并标记为不可续跑。
       if (payload && payload.type === 'stop') {
-        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const tr = runRegistry.runFor(senderTabId);
         const stopped = requestRunStop({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
         // 已经处于收尾/停止中的 run 仍要 abort 一次兜底，保证端口断开前的意图不丢。
         if (!stopped.ok && controller && !controller.__rfFinished) {
@@ -1022,7 +1005,7 @@ chrome.runtime.onConnect.addListener((port) => {
       }
       // 整页刷新后的新面板：查询本 tab 是否有可续跑的 run。
       if (payload && payload.type === 'query-run') {
-        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const tr = runRegistry.runFor(senderTabId);
         const reply = (m: Dyn) => { try { port.postMessage(Object.assign({ type: 'run-state' }, m)); } catch (e) {} };
         if (!tr || !tr.resumable || !tr.runId) {
           reply({ runId: '', resumable: false, live: false, pending: false, instruction: '' });
@@ -1030,7 +1013,7 @@ chrome.runtime.onConnect.addListener((port) => {
         }
         // 端口断开后 run 仍活着：新面板直接 reattach，不启动第二次 agent 请求。
         const liveSnapshot = runHub.snapshot(tr.runId);
-        const liveChannel = runChannels.get(String(tr.runId));
+        const liveChannel = runRegistry.channelFor(tr.runId);
         if (liveChannel && liveSnapshot && liveSnapshot.status === 'running') {
           reply({
             runId: String(tr.runId),
@@ -1069,7 +1052,7 @@ chrome.runtime.onConnect.addListener((port) => {
       // 新页面接管仍然活着的 run：把输出终端从旧 port 切到新 port。
       if (payload && payload.type === 'reattach') {
         const runId = String(payload.runId || '');
-        const channel = runId ? runChannels.get(runId) : null;
+        const channel = runId ? runRegistry.channelFor(runId) : null;
         const snapshot = runId ? runHub.snapshot(runId) : null;
         const attachFailed = (reason: string) => {
           try {
@@ -1149,7 +1132,7 @@ chrome.runtime.onConnect.addListener((port) => {
         // 同一个 run 已经活着：这是刷新后/断线重连的重复请求，不是新任务。
         // 直接接管到现有通道，绝不能并发启动第二个 runAgentStream。
         const liveSnapshot = runHub.snapshot(runId);
-        const existingChannel = runChannels.get(String(runId));
+        const existingChannel = runRegistry.channelFor(runId);
         if (existingChannel && liveSnapshot && liveSnapshot.status === 'running') {
           clearRunAbortTimer(runId);
           runStats.reattaches += 1;
@@ -1170,14 +1153,22 @@ chrome.runtime.onConnect.addListener((port) => {
         console.log('[RecallFlow] agent run start:', (payload.question || '').slice(0, 40), 'tabId=' + tabId, 'session=' + sessionId);
         runStats.starts += 1;
         const channel = existingChannel || new RunChannel();
-        runChannels.set(String(runId), channel);
+        runRegistry.setChannel(runId, channel);
         const runController = ensureController();
         if (!channel.attach(port, {})) {
           port.postMessage({ type: 'error', error: '无法绑定 Agent 输出通道。' });
           return;
         }
         attachedRunId = String(runId);
-        if (tabId) tabRuns.set(tabId, { runId, resumable: true, sessionId, channel, controller: runController });
+        if (tabId) {
+          runRegistry.setRun(tabId, {
+            runId,
+            resumable: true,
+            sessionId,
+            channel,
+            controller: runController,
+          });
+        }
         if (sessionId) {
           runHub.begin({
             runId,
@@ -1211,7 +1202,7 @@ chrome.runtime.onConnect.addListener((port) => {
           if (sessionId) runHub.finish(runId, runController.signal.aborted ? 'cancelled' : 'completed');
           runController.__rfFinished = true;
           clearRunAbortTimer(runId);
-          runChannels.delete(String(runId));
+          runRegistry.deleteChannel(runId);
           attachedRunId = '';
         } catch (e) {
           const detail = (e as Error | null)?.stack || String(e);
@@ -1226,7 +1217,7 @@ chrome.runtime.onConnect.addListener((port) => {
           }
           runController.__rfFinished = true;
           clearRunAbortTimer(runId);
-          runChannels.delete(String(runId));
+          runRegistry.deleteChannel(runId);
           attachedRunId = '';
         }
         return;

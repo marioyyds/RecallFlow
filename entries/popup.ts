@@ -21,20 +21,18 @@ import {
   platformColor,
   parseTags,
 } from '../lib/shared/utils.ts';
-import { getBook, setBook, upsertItem, subscribeKnowledgeChanges } from '../lib/shared/store.ts';
+import { createKnowledgeRepository } from '../lib/shared/knowledge-repository.ts';
+import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 
-/** 知识库条目：形状由 store 决定、页面只按需读字段（与 store 的 KnowledgeItem 同源，这里不重复声明）。 */
-type Dyn = Record<string, any>;
-
-let bookCache: Dyn = {};
+const knowledge = createKnowledgeRepository();
 let currentTab: chrome.tabs.Tab | null = null;
 let currentUrl: string | null = null;
 let currentTitle: string | null = null;
 // 收录面板只在「当前页可收录」分支里读它；原代码同样不检查 null。
 let platform!: { id: string; name: string };
 let selectedType = 'wrong';
-let selectedStatus = STATUS.IMPORTANT;
+let selectedStatus: number | string = STATUS.IMPORTANT;
 let currentFilter = 'all';
 let sortBy = 'updated';
 let listQuery = '';
@@ -56,14 +54,6 @@ function toast(msg: string, undoFn?: (() => unknown) | null) {
   showToast(msg, { duration: 4000, undoFn });
 }
 
-async function loadCache() {
-  bookCache = await getBook();
-}
-
-async function persist() {
-  await setBook(bookCache);
-}
-
 function renderTypePicker() {
   const el = document.querySelector('#add-panel .type-group') as HTMLElement;
   el.innerHTML = ITEM_TYPES.map(
@@ -82,7 +72,7 @@ function syncStatusHighlight() {
 function renderList() {
   const listEl = $('list');
   const emptyEl = $('empty');
-  let items = Object.values(bookCache);
+  let items = knowledge.list();
   if (currentFilter !== 'all') {
     items = items.filter((i) => (i.type || 'wrong') === currentFilter);
   }
@@ -99,7 +89,7 @@ function renderList() {
       ? '<span class="empty-ico">⌕</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>还没有内容</p><p class="empty-hint">打开网页后点工具栏图标即可快速收录</p>';
   }
-  const total = Object.keys(bookCache).length;
+  const total = knowledge.size;
   const shown = items.slice(0, POPUP_RECENT_LIMIT);
   listEl.innerHTML = shown.map(itemHtml).join('');
   $('total-badge').textContent = total + ' 条';
@@ -120,7 +110,7 @@ function renderList() {
   }
 }
 
-function itemHtml(it: Dyn): string {
+function itemHtml(it: KnowledgeItem): string {
   const type = it.type || 'wrong';
   const urlLink = it.url
     ? `<span class="item-title" title="${esc(it.url)}">${esc(it.title)}</span>`
@@ -166,7 +156,7 @@ function isAllowedFileSchemeAccess() {
 }
 
 async function init() {
-  await loadCache();
+  await knowledge.load();
   renderList();
   renderScriptsBadge();
   const shortcut = $('search-shortcut');
@@ -197,8 +187,8 @@ async function init() {
     pEl.style.background = platformColor(platform.id);
     pEl.classList.remove('hidden');
 
-    if (bookCache[currentUrl]) {
-      const rec = bookCache[currentUrl];
+    const rec = knowledge.get(currentUrl);
+    if (rec) {
       $('add-exists').classList.remove('hidden');
       selectedType = rec.type || 'wrong';
       selectedStatus = rec.status;
@@ -244,7 +234,7 @@ $('add-btn').addEventListener('click', async () => {
   btn.textContent = '保存中…';
   try {
     const tags = parseTags($('tags-input').value);
-    await upsertItem({
+    await knowledge.upsert({
       id: currentUrl,
       type: selectedType,
       title: currentTitle,
@@ -255,7 +245,6 @@ $('add-btn').addEventListener('click', async () => {
       note: $('note-input').value,
       tags,
     });
-    await loadCache();
     $('add-exists').classList.remove('hidden');
     btn.textContent = '已保存 ✓';
     renderList();
@@ -306,10 +295,10 @@ bindStarKeyboard(document, (v, cell) => {
   const itemEl = cell.closest('.item');
   if (itemEl) {
     const id = (itemEl as HTMLElement).dataset.id as string;
-    if (bookCache[id]) {
-      bookCache[id].status = v;
-      bookCache[id].updatedAt = Date.now();
-      persist();
+    if (knowledge.get(id)) {
+      void knowledge
+        .update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() }))
+        .catch(() => toast('更新失败，请重试'));
       const lvl = itemEl.querySelector('.level-name');
       if (lvl) lvl.outerHTML = levelNameHtml(v);
     }
@@ -365,22 +354,21 @@ $('list').addEventListener('click', async (e: Event) => {
   const id = itemEl.dataset.id;
 
   if (closest(e.target, '.del')) {
-    const removed = bookCache[id];
-    delete bookCache[id];
-    await persist();
+    const removed = knowledge.get(id);
+    await knowledge.remove(id);
     renderList();
     toast('已删除', async () => {
       if (!removed) return;
-      bookCache[id] = removed;
-      await persist();
+      await knowledge.put({ ...removed, tags: removed.tags.slice() });
       renderList();
       toast('已恢复');
     });
     return;
   }
 
-  if (closest(e.target, '.open') && bookCache[id] && bookCache[id].url) {
-    chrome.tabs.create({ url: bookCache[id].url });
+  const item = knowledge.get(id);
+  if (closest(e.target, '.open') && item && item.url) {
+    chrome.tabs.create({ url: item.url });
     return;
   }
 
@@ -388,10 +376,8 @@ $('list').addEventListener('click', async (e: Event) => {
   if (starCell) {
     const a = Number(starCell.dataset.star);
     const validStatuses = [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT];
-    if (bookCache[id] && validStatuses.includes(a)) {
-      bookCache[id].status = a;
-      bookCache[id].updatedAt = Date.now();
-      await persist();
+    if (item && validStatuses.includes(a)) {
+      await knowledge.update(id, (current) => ({ ...current, status: a, updatedAt: Date.now() }));
       // 就地更新，避免整列表 renderList() 导致焦点 / 滚动丢失
       const bar = itemEl.querySelector('.star-bar');
       if (bar) bar.querySelectorAll('.star-cell').forEach((c: Element, i: number) => c.classList.toggle('on', i < a));
@@ -401,15 +387,15 @@ $('list').addEventListener('click', async (e: Event) => {
     return;
   }
 
-  if (closest(e.target, '.item-title') && bookCache[id] && bookCache[id].url) {
-    chrome.tabs.create({ url: bookCache[id].url });
+  if (closest(e.target, '.item-title') && item && item.url) {
+    chrome.tabs.create({ url: item.url });
   }
 });
 
 const openManager = (e: Event) => {
   e.preventDefault();
   // 带上当前条目 id，复用 manager 的 #focus 高亮定位，打通「收录→管理」闭环
-  const id = currentUrl && bookCache[currentUrl] ? currentUrl : null;
+  const id = currentUrl && knowledge.get(currentUrl) ? currentUrl : null;
   const url = chrome.runtime.getURL('manager.html') + (id ? `#focus=${encodeURIComponent(id)}` : '');
   chrome.tabs.create({ url });
 };
@@ -456,9 +442,12 @@ $('open-assistant').addEventListener('click', async () => {
   }
 });
 
-subscribeKnowledgeChanges(async () => {
-  await loadCache();
+knowledge.subscribe(() => {
   renderList();
+});
+
+window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) knowledge.dispose();
 });
 
 init();

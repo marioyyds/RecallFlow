@@ -4591,7 +4591,7 @@
     }
     return out;
   }
-  function renderMarkdown(md, citations, streaming2) {
+  function renderMarkdown(md, citations, streaming) {
     const lines = md.split("\n");
     let html = "";
     let inCode = false;
@@ -4734,7 +4734,7 @@
     }
     flushList();
     flushTable();
-    if (streaming2) {
+    if (streaming) {
       if (html.endsWith("</p>")) {
         html = html.slice(0, -4) + '<span class="stream-cursor"></span></p>';
       } else {
@@ -4844,9 +4844,9 @@
       return url;
     }
   }
-  function renderAnswer(text, citations, streaming2) {
+  function renderAnswer(text, citations, streaming) {
     const ren = renumberCitations(text, citations);
-    return renderMarkdown(stripOptionsBlock(ren.text), ren.citations, streaming2);
+    return renderMarkdown(stripOptionsBlock(ren.text), ren.citations, streaming);
   }
   function buildCitationDeepLink(url, snippet) {
     try {
@@ -6080,6 +6080,277 @@
     };
   }
 
+  // lib/page/panel-visibility.ts
+  function asRecord(value) {
+    return value && typeof value === "object" ? value : null;
+  }
+  function readUi(value) {
+    const record = asRecord(value);
+    if (!record) return null;
+    const nextSeq = Number(record.seq);
+    if (!Number.isFinite(nextSeq)) return null;
+    return { seq: nextSeq, open: record.open === true };
+  }
+  var PanelVisibilityState = class {
+    deps;
+    seq = 0;
+    open = false;
+    suppressDepth = 0;
+    initPromise = null;
+    constructor(deps) {
+      this.deps = deps;
+    }
+    get isOpen() {
+      return this.open;
+    }
+    get canPublish() {
+      return this.suppressDepth === 0;
+    }
+    get ready() {
+      return this.initPromise;
+    }
+    snapshot() {
+      return { seq: this.seq, open: this.open };
+    }
+    async publish(open, scope = "global") {
+      this.open = open === true;
+      if (!this.canPublish) return null;
+      try {
+        const response = await this.deps.send("panel:ui:set", {
+          open: this.open,
+          scope: scope === "membership" ? "membership" : "global"
+        });
+        this.acceptResponse(response);
+        return response;
+      } catch (error) {
+        return null;
+      }
+    }
+    async apply(ui) {
+      const next = readUi(ui);
+      if (!next || next.seq < this.seq) return false;
+      this.seq = next.seq;
+      this.open = next.open;
+      if (this.open) {
+        if (!this.deps.isMounted()) {
+          await this.withSuppressed(() => this.deps.open());
+        }
+        await this.publish(true, "membership");
+      } else {
+        if (this.deps.isMounted()) {
+          await this.withSuppressed(() => this.deps.close());
+        }
+        await this.publish(false, "membership");
+      }
+      return true;
+    }
+    syncOnInit() {
+      if (this.initPromise) return this.initPromise;
+      this.initPromise = (async () => {
+        let response = null;
+        try {
+          response = await this.deps.send("panel:ui:get");
+        } catch (error) {
+          return;
+        }
+        const message = asRecord(response);
+        if (!message || message.ok !== true) return;
+        const next = readUi(message.ui);
+        if (!next || next.seq < this.seq) return;
+        this.seq = next.seq;
+        this.open = next.open;
+        if (this.open) await this.apply(message.ui);
+      })();
+      return this.initPromise;
+    }
+    async withSuppressed(task) {
+      this.suppressDepth += 1;
+      try {
+        return await task();
+      } finally {
+        this.suppressDepth -= 1;
+      }
+    }
+    acceptResponse(response) {
+      const message = asRecord(response);
+      if (!message || message.ok !== true) return;
+      const next = readUi(message.ui);
+      if (!next || next.seq < this.seq) return;
+      this.seq = next.seq;
+      this.open = next.open;
+    }
+  };
+  function createPanelVisibilityController(deps) {
+    return new PanelVisibilityState(deps);
+  }
+
+  // lib/page/panel-run-session.ts
+  var PanelRunSessionState = class {
+    running = false;
+    currentRunId = "";
+    currentPort = null;
+    runner = null;
+    interrupt = null;
+    get isRunning() {
+      return this.running;
+    }
+    get runId() {
+      return this.currentRunId;
+    }
+    get port() {
+      return this.currentPort;
+    }
+    get hasRunner() {
+      return Boolean(this.runner);
+    }
+    createRunId() {
+      return "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    }
+    setRunId(runId) {
+      this.currentRunId = String(runId || "");
+    }
+    setRunning(running) {
+      this.running = running === true;
+    }
+    finish() {
+      this.running = false;
+    }
+    setPort(port) {
+      this.currentPort = port || null;
+    }
+    /** 只在 expected 仍是当前端口时清除，避免旧端口的迟到 disconnect 摘掉新连接。 */
+    clearPort(expected = null) {
+      if (expected && this.currentPort !== expected) return false;
+      this.currentPort = null;
+      return true;
+    }
+    closePort() {
+      const activePort = this.currentPort;
+      this.currentPort = null;
+      if (!activePort) return;
+      try {
+        activePort.disconnect();
+      } catch (error) {
+      }
+    }
+    bindRunner(runner) {
+      this.runner = typeof runner === "function" ? runner : null;
+    }
+    invokeRunner(instruction, options) {
+      return this.runner ? this.runner(instruction, options) : null;
+    }
+    bindInterrupt(interrupt) {
+      this.interrupt = typeof interrupt === "function" ? interrupt : null;
+    }
+    requestStop(source) {
+      return this.interrupt ? this.interrupt(source) : void 0;
+    }
+    snapshot() {
+      return {
+        runId: this.currentRunId,
+        running: this.running,
+        hasPort: Boolean(this.currentPort)
+      };
+    }
+  };
+  function createPanelRunSession() {
+    return new PanelRunSessionState();
+  }
+
+  // lib/page/panel-stream-state.ts
+  var PanelStreamAccumulator = class {
+    contentValue = "";
+    narrationValue = "";
+    previousNarrationValue = "";
+    startedValue = false;
+    partsValue = [];
+    verifyPassValue = null;
+    budgetStoppedValue = false;
+    get content() {
+      return this.contentValue;
+    }
+    get narration() {
+      return this.narrationValue;
+    }
+    get previousNarration() {
+      return this.previousNarrationValue;
+    }
+    get started() {
+      return this.startedValue;
+    }
+    get parts() {
+      return this.partsValue;
+    }
+    get verifyPass() {
+      return this.verifyPassValue;
+    }
+    get budgetStopped() {
+      return this.budgetStoppedValue;
+    }
+    get responseText() {
+      return this.narrationValue || this.previousNarrationValue || this.contentValue;
+    }
+    reset() {
+      this.contentValue = "";
+      this.narrationValue = "";
+      this.previousNarrationValue = "";
+      this.startedValue = false;
+      this.partsValue = [];
+      this.verifyPassValue = null;
+      this.budgetStoppedValue = false;
+    }
+    beginNew() {
+      this.reset();
+    }
+    restore(snapshot) {
+      const source = snapshot || {};
+      this.contentValue = String(source.content || "");
+      this.narrationValue = String(source.narration || "");
+      this.partsValue = Array.isArray(source.parts) ? source.parts.map((part) => Object.assign({}, part)) : [];
+      this.previousNarrationValue = "";
+      this.startedValue = true;
+      this.verifyPassValue = null;
+      this.budgetStoppedValue = false;
+    }
+    appendChunk(text) {
+      const piece = String(text || "");
+      if (!piece) return;
+      this.contentValue += piece;
+      this.narrationValue += piece;
+      this.startedValue = true;
+    }
+    appendPart(part) {
+      if (!part) return;
+      this.partsValue.push(part);
+    }
+    /** 定稿最后一条正文之前的叙述段；返回被定稿的文本，没有则返回 null。 */
+    flushNarration() {
+      const text = this.narrationValue;
+      if (!text) return null;
+      this.previousNarrationValue = text;
+      this.partsValue.push({ type: "narration", text });
+      this.narrationValue = "";
+      return text;
+    }
+    setVerifyPass(part) {
+      this.verifyPassValue = part || null;
+    }
+    commitVerifyPass() {
+      if (!this.verifyPassValue) return;
+      this.partsValue.push(this.verifyPassValue);
+      this.verifyPassValue = null;
+    }
+    markBudgetStopped() {
+      this.budgetStoppedValue = true;
+    }
+    hasPartial() {
+      return Boolean(this.narrationValue.trim());
+    }
+  };
+  function createPanelStreamState() {
+    return new PanelStreamAccumulator();
+  }
+
   // lib/page/chat.ts
   function isExtContextAlive() {
     try {
@@ -6133,7 +6404,6 @@
   var panelBody = null;
   var lastText = "";
   var lastResponse = "";
-  var port = null;
   var dragState = null;
   var resizeState = null;
   var pageText = "";
@@ -6156,11 +6426,19 @@
   var deferredRemoteSessionId = "";
   var panelSessionLockHeld = false;
   var panelSessionLockRunId = "";
-  var activeInterruptFn = null;
-  var panelUiSeq = 0;
-  var panelUiOpen = false;
-  var suppressPanelUiPublish = false;
-  var panelUiReadyPromise = null;
+  var panelVisibility = createPanelVisibilityController({
+    send: (type, payload) => sendPanelMessage(type, payload),
+    isMounted: () => Boolean(panel),
+    open: () => {
+      ensureHost();
+      lastText = "";
+      pageText = pageContextEnabled ? extractPageText() : "";
+      openPanel(0, 0, true, true);
+    },
+    close: () => removePanel({ publish: false })
+  });
+  var runSession = createPanelRunSession();
+  var streamState = createPanelStreamState();
   var followedRunState = null;
   var followedRunId = "";
   var followedCursor = 0;
@@ -6171,8 +6449,6 @@
   var followStatusTimer = null;
   var stopBtn = null;
   var sendBtn = null;
-  var streaming = false;
-  var runAgent = null;
   function computeRunControls(input) {
     const src = input || {};
     const followingRunning = Boolean(src.followed && src.followed.status === "running");
@@ -6187,7 +6463,7 @@
     };
   }
   function updateRunControlState() {
-    const control = computeRunControls({ streaming, followed: followedRunState });
+    const control = computeRunControls({ streaming: runSession.isRunning, followed: followedRunState });
     if (stopBtn) {
       stopBtn.style.display = control.showStop ? "" : "none";
       stopBtn.disabled = control.stopDisabled;
@@ -6195,21 +6471,13 @@
     }
     if (sendBtn) sendBtn.disabled = control.sendDisabled;
   }
-  var pendingAcc = "";
   var pendingAiMsg = null;
   var pendingContentEl = null;
-  var pendingStarted = false;
-  var pendingParts = [];
-  var pendingVerifyPass = null;
-  var budgetStopped = false;
   var flowEl = null;
-  var pendingNarration = "";
-  var lastNarration = "";
   var typingEl = null;
   var thinkSeg = null;
   var thinkSegSeq = 0;
   var thinkExpandedManual = null;
-  var activeRunId = null;
   var planBar = null;
   var apiKeyBanner = null;
   var approvalSettingsEl = null;
@@ -6517,9 +6785,9 @@
         if (uiSuspended) return;
         if (host && !host.isConnected) {
           ensureHost();
-          if (panelUiOpen) {
+          if (panelVisibility.isOpen) {
             openPanel(0, 0, true, true);
-            if (streaming) restoreStreamingUI();
+            if (runSession.isRunning) restoreStreamingUI();
           }
         }
       } catch (e) {
@@ -6597,67 +6865,13 @@
       if (selection2) selection2.removeAllRanges();
     } catch (e) {
     }
-    if (opts.render !== false && panelBody && !streaming && !conversation.length && !followedMessages.length) {
+    if (opts.render !== false && panelBody && !runSession.isRunning && !conversation.length && !followedMessages.length) {
       renderConversation();
     }
     if (panel && opts.render !== false) fitPanelHeight();
   }
   function publishPanelUi(open, scope) {
-    panelUiOpen = open === true;
-    if (suppressPanelUiPublish) return Promise.resolve(null);
-    return sendPanelMessage("panel:ui:set", {
-      open: panelUiOpen,
-      scope: scope === "membership" ? "membership" : "global"
-    }).then((res) => {
-      if (res && res.ok && res.ui) {
-        const seq = Number(res.ui.seq) || 0;
-        if (seq >= panelUiSeq) {
-          panelUiSeq = seq;
-          panelUiOpen = res.ui.open === true;
-        }
-      }
-      return res;
-    }).catch(() => null);
-  }
-  async function applyPanelUiState(ui) {
-    if (!ui) return;
-    const seq = Number(ui.seq) || 0;
-    if (seq < panelUiSeq) return;
-    panelUiSeq = seq;
-    panelUiOpen = ui.open === true;
-    if (panelUiOpen) {
-      if (!panel) {
-        suppressPanelUiPublish = true;
-        try {
-          ensureHost();
-          lastText = "";
-          pageText = pageContextEnabled ? extractPageText() : "";
-          openPanel(0, 0, true, true);
-        } finally {
-          suppressPanelUiPublish = false;
-        }
-      }
-      await publishPanelUi(true, "membership");
-    } else {
-      if (panel) {
-        suppressPanelUiPublish = true;
-        try {
-          removePanel({ publish: false });
-        } finally {
-          suppressPanelUiPublish = false;
-        }
-      }
-      await publishPanelUi(false, "membership");
-    }
-  }
-  async function syncPanelUiOnInit() {
-    const res = await sendPanelMessage("panel:ui:get");
-    if (!res || !res.ok || !res.ui) return;
-    const seq = Number(res.ui.seq) || 0;
-    if (seq < panelUiSeq) return;
-    panelUiSeq = seq;
-    panelUiOpen = res.ui.open === true;
-    if (panelUiOpen) await applyPanelUiState(res.ui);
+    return panelVisibility.publish(open === true, scope === "membership" ? "membership" : "global");
   }
   function removePanel(options) {
     const hadPanel = Boolean(panel);
@@ -6669,7 +6883,7 @@
       picking = false;
       if (pickUi) pickUi.setActive(false);
     }
-    if (!streaming) closePort();
+    if (!runSession.isRunning) closePort();
     if (panelKeyHandler) {
       document.removeEventListener("keydown", panelKeyHandler, true);
       panelKeyHandler = null;
@@ -6697,13 +6911,7 @@
     }
   }
   function closePort() {
-    if (port) {
-      try {
-        port.disconnect();
-      } catch (e) {
-      }
-      port = null;
-    }
+    runSession.closePort();
   }
   function showBubble(x, y) {
     if (!shadow) return;
@@ -6916,7 +7124,7 @@
       else shotMissing.add(wanted);
     }).catch(() => shotMissing.add(wanted)).finally(() => {
       shotPending.delete(wanted);
-      if (!streaming && panelBody) {
+      if (!runSession.isRunning && panelBody) {
         try {
           renderConversation();
           fitPanelHeight();
@@ -7047,7 +7255,7 @@
   }
   function renderCommittedParts(flow) {
     flowEl = flow;
-    for (const p of pendingParts) {
+    for (const p of streamState.parts) {
       if (p.type === "thinking" && p.text) {
         mountThinkSegment({ text: p.text, done: true, block: null, body: null });
       } else if (p.type === "narration" && p.text) {
@@ -7075,7 +7283,7 @@
     }
   }
   function restoreStreamingUI() {
-    if (!panelBody || !streaming) return;
+    if (!panelBody || !runSession.isRunning) return;
     if (pendingContentEl && pendingContentEl.isConnected) return;
     const aiMsg = document.createElement("div");
     aiMsg.className = "msg ai";
@@ -7085,13 +7293,13 @@
     renderCommittedParts(flow);
     const contentEl = document.createElement("div");
     contentEl.className = "agent-content";
-    if (pendingNarration) {
-      contentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
+    if (streamState.narration) {
+      contentEl.innerHTML = renderAnswer(streamState.narration, currentCitations, false);
     } else {
       contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
     }
     flow.appendChild(contentEl);
-    if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
+    if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
     panelBody.appendChild(aiMsg);
     pendingAiMsg = aiMsg;
     pendingContentEl = contentEl;
@@ -7100,9 +7308,8 @@
       thinkSeg.body = null;
       mountThinkSegment(thinkSeg, thinkExpandedManual === true);
     }
-    typingEl = pendingNarration ? null : contentEl;
-    pendingStarted = pendingStarted || Boolean(pendingNarration || pendingAcc);
-    pendingAiMsg._raw = pendingAcc;
+    typingEl = streamState.narration ? null : contentEl;
+    pendingAiMsg._raw = streamState.content;
     if (progressEl) {
       if (!runStartedAt) runStartedAt = Date.now();
       progressEl.classList.add("on");
@@ -7194,7 +7401,7 @@
       b.textContent = opt.label;
       if (opt.desc) b.title = opt.desc;
       b.addEventListener("click", () => {
-        if (streaming) return;
+        if (runSession.isRunning) return;
         const fn = sendFn || activeSendFn;
         if (typeof fn === "function") {
           fn(opt.label + (opt.desc ? "\uFF1A" + opt.desc : ""), { continuation: true });
@@ -7654,7 +7861,7 @@
     followedMessages = [];
     followedLiveReady = false;
     followedDom = null;
-    if (!streaming) {
+    if (!runSession.isRunning) {
       stopProgress();
     }
     updateRunControlState();
@@ -7784,7 +7991,7 @@
   }
   function messagesForExport() {
     const list = Array.isArray(conversation) ? conversation.slice() : [];
-    const partial = buildPartialTurn(pendingParts, pendingNarration || pendingAcc);
+    const partial = buildPartialTurn(streamState.parts, streamState.responseText);
     if (partial) list.push(partial);
     return list;
   }
@@ -7985,14 +8192,14 @@
       if (followedRunCommitted()) resetFollowedRun();
       else rebuildFollowedMessages();
     }
-    if (panelBody && !streaming) {
+    if (panelBody && !runSession.isRunning) {
       renderConversation();
       renderHandoffChip();
       fitPanelHeight();
       pinToBottom();
     }
     renderSessionButton();
-    if (panel && !streaming) subscribePanelRun().catch(() => {
+    if (panel && !runSession.isRunning) subscribePanelRun().catch(() => {
     });
     return true;
   }
@@ -8002,7 +8209,7 @@
     if (!id) return Promise.resolve({ ok: false, skipped: true });
     const messages = serializeConversation();
     const baseSeq = panelSessionSeq;
-    const runId = activeRunId || "";
+    const runId = runSession.runId;
     const savedHandoffId = handoffId;
     panelSessionSaveChain = panelSessionSaveChain.catch(() => {
     }).then(async () => {
@@ -8022,7 +8229,7 @@
         renderSessionButton();
         renderSessionMenu();
       } else if (res && (res.conflict || res.stale) && res.session) {
-        if (id === panelSessionId && !streaming) {
+        if (id === panelSessionId && !runSession.isRunning) {
           adoptPanelSession(res.session, { activeId: res.activeId });
           showCitationHint(
             res.stale ? "\u68C0\u6D4B\u5230\u65E7\u6807\u7B7E\u9875\u7684\u56DE\u5199\uFF0C\u5DF2\u4FDD\u7559\u66F4\u5B8C\u6574\u7684\u4F1A\u8BDD\u5185\u5BB9\u3002" : "\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u5176\u4ED6\u6807\u7B7E\u9875\u66F4\u65B0\uFF0C\u5DF2\u4E3A\u4F60\u5237\u65B0\u5230\u6700\u65B0\u5185\u5BB9\u3002"
@@ -8203,7 +8410,7 @@
     const opts = options || {};
     const wanted = String(id || "");
     if (!wanted) return false;
-    if (streaming) {
+    if (runSession.isRunning) {
       showCitationHint("\u5F53\u524D\u4EFB\u52A1\u8FD8\u5728\u8FD0\u884C\uFF0C\u7ED3\u675F\u540E\u624D\u80FD\u5207\u6362\u4F1A\u8BDD\u3002");
       return false;
     }
@@ -8232,7 +8439,7 @@
       return true;
     } finally {
       panelSessionSwitchInFlight = false;
-      if (deferredRemoteSessionId && !streaming && deferredRemoteSessionId !== panelSessionId) {
+      if (deferredRemoteSessionId && !runSession.isRunning && deferredRemoteSessionId !== panelSessionId) {
         const next = deferredRemoteSessionId;
         deferredRemoteSessionId = "";
         setTimeout(() => {
@@ -8243,7 +8450,7 @@
     }
   }
   async function newPanelSession() {
-    if (streaming) {
+    if (runSession.isRunning) {
       showCitationHint("\u5F53\u524D\u4EFB\u52A1\u8FD8\u5728\u8FD0\u884C\uFF0C\u7ED3\u675F\u540E\u624D\u80FD\u65B0\u5EFA\u4F1A\u8BDD\u3002");
       return false;
     }
@@ -8392,7 +8599,7 @@
       if (res && res.locked && !res.ok) {
         panelSessionLockHeld = false;
         showCitationHint("\u8BE5\u4F1A\u8BDD\u5DF2\u5728\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u9875\u4EFB\u52A1\u5C06\u505C\u6B62\u3002");
-        if (activeInterruptFn) activeInterruptFn();
+        runSession.requestStop();
       }
     }).catch(() => {
     });
@@ -8402,7 +8609,7 @@
     applyPanelSessionSummaries(state);
     const nextActive = String(state.activeId || "");
     if (!nextActive) return;
-    if (streaming || panelSessionSwitchInFlight) {
+    if (runSession.isRunning || panelSessionSwitchInFlight) {
       if (nextActive !== panelSessionId) deferredRemoteSessionId = nextActive;
       return;
     }
@@ -8672,7 +8879,7 @@
       }
       const rewind = e.target.closest(".act-rewind");
       if (rewind) {
-        if (streaming) return;
+        if (runSession.isRunning) return;
         const index = Number(rewind.getAttribute("data-turn-index"));
         if (Number.isInteger(index) && conversation[index] && conversation[index].role === "user") {
           const undone = conversation[index];
@@ -8719,7 +8926,7 @@
       }
       const regen = e.target.closest(".act-regen");
       if (regen) {
-        if (streaming) return;
+        if (runSession.isRunning) return;
         let lastUser = -1;
         for (let i = conversation.length - 1; i >= 0; i--) {
           if (conversation[i] && conversation[i].role === "user") {
@@ -8879,7 +9086,7 @@
     sendBtn = document.createElement("button");
     sendBtn.className = "cmd-send";
     sendBtn.textContent = "\u53D1\u9001";
-    sendBtn.disabled = streaming === true;
+    sendBtn.disabled = runSession.isRunning;
     const pickBtn = document.createElement("button");
     pickBtn.type = "button";
     pickBtn.className = "cmd-pick";
@@ -8986,7 +9193,7 @@
         b.className = "quick-prompt";
         b.textContent = prompt;
         b.addEventListener("click", () => {
-          if (streaming) return;
+          if (runSession.isRunning) return;
           run(expandQuickPrompt(prompt));
         });
         quickWrap.appendChild(b);
@@ -9103,21 +9310,15 @@
     function endStream() {
       streamRender.cancel();
       cancelStreamPaintRetry();
-      const endedRunId = activeRunId || "";
+      const endedRunId = runSession.runId;
       const endedSessionId = panelSessionId;
-      streaming = false;
+      runSession.finish();
       stopProgress();
       updateRunControlState();
       pendingAiMsg = null;
       pendingContentEl = null;
-      pendingStarted = false;
-      pendingAcc = "";
-      pendingParts = [];
-      pendingVerifyPass = null;
-      budgetStopped = false;
       flowEl = null;
-      pendingNarration = "";
-      lastNarration = "";
+      streamState.reset();
       typingEl = null;
       clearInterval(keepAliveTimer);
       keepAliveTimer = null;
@@ -9132,7 +9333,7 @@
         }
       }).catch(() => {
       }).finally(() => {
-        if (!deferredRemoteSessionId || streaming) return;
+        if (!deferredRemoteSessionId || runSession.isRunning) return;
         const next = deferredRemoteSessionId;
         deferredRemoteSessionId = "";
         if (next !== panelSessionId) switchPanelSession(next, { activate: false, force: true }).catch(() => {
@@ -9179,7 +9380,7 @@
         refreshThinkHead(seg);
         pinToBottom();
       });
-      pendingParts.push({ type: "thinking", text: seg.text });
+      streamState.appendPart({ type: "thinking", text: seg.text });
       thinkSeg = null;
     }
     function resetReasoning() {
@@ -9189,14 +9390,12 @@
     function appendStep(step) {
       removeTypingEl();
       finishReasoning();
-      if (pendingNarration) {
-        lastNarration = pendingNarration;
-        pendingParts.push({ type: "narration", text: pendingNarration });
+      if (streamState.narration) {
+        const narration = streamState.flushNarration() || "";
         if (pendingContentEl) {
           removeStreamCursor(pendingContentEl);
-          pendingContentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
+          pendingContentEl.innerHTML = renderAnswer(narration, currentCitations, false);
         }
-        pendingNarration = "";
       }
       pendingContentEl = null;
       if (flowEl) flowEl.appendChild(step);
@@ -9209,12 +9408,10 @@
       if (color) step.style.color = color;
       step.textContent = value;
       appendStep(step);
-      pendingParts.push({ type: "notice", text: value, color: color || "" });
+      streamState.appendPart({ type: "notice", text: value, color: color || "" });
     }
     function commitPendingVerifyPass() {
-      if (!pendingVerifyPass) return;
-      pendingParts.push(pendingVerifyPass);
-      pendingVerifyPass = null;
+      streamState.commitVerifyPass();
     }
     async function stopFollowedRun() {
       if (!followedRunState || followedRunState.status !== "running" || followedRunState.stopping) return;
@@ -9231,7 +9428,7 @@
       scheduleFollowedRunRefresh();
     }
     async function interrupt(source) {
-      if (!streaming) {
+      if (!runSession.isRunning) {
         if (source === "remote") return;
         await stopFollowedRun();
         return;
@@ -9245,30 +9442,32 @@
         } catch (e) {
         }
       }
-      const acc = pendingAcc;
+      const acc = streamState.content;
       closePort();
       if (pendingAiMsg && pendingAiMsg.parentNode) {
-        lastResponse = pendingNarration || lastNarration || acc;
+        lastResponse = streamState.responseText;
         if (acc) {
           if (pendingContentEl) {
             removeStreamCursor(pendingContentEl);
-            pendingContentEl.innerHTML = renderAnswer(pendingNarration || lastResponse, currentCitations, false);
+            pendingContentEl.innerHTML = renderAnswer(streamState.narration || lastResponse, currentCitations, false);
           }
           pendingAiMsg._raw = acc;
-        } else if (!pendingParts.length) {
+        } else if (!streamState.parts.length) {
           if (pendingContentEl) {
             removeStreamCursor(pendingContentEl);
             pendingContentEl.textContent = "\uFF08\u5DF2\u505C\u6B62\uFF09";
             pendingContentEl.style.color = "#999";
           }
         }
-        if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) pendingParts.push({ type: "text", text: lastResponse });
-        if (acc || pendingParts.length) {
+        if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
+          streamState.appendPart({ type: "text", text: lastResponse });
+        }
+        if (acc || streamState.parts.length) {
           conversation.push({
             role: "assistant",
             content: acc,
-            toolSummary: summarizeToolParts(pendingParts),
-            parts: pendingParts.slice(),
+            toolSummary: summarizeToolParts(streamState.parts),
+            parts: streamState.parts.slice(),
             // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
             // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
             plan: lastPlan.slice()
@@ -9289,8 +9488,8 @@
       const last = conversation.length ? conversation[conversation.length - 1] : null;
       if (last && last.role === "assistant" && last.interrupted) return;
       commitPendingVerifyPass();
-      const turn = buildInterruptedTurn(pendingParts, pendingNarration || pendingAcc, reasonText);
-      if (!turn.parts.length && !String(pendingNarration || pendingAcc || "").trim()) return;
+      const turn = buildInterruptedTurn(streamState.parts, streamState.responseText, reasonText);
+      if (!turn.parts.length && !String(streamState.responseText || "").trim()) return;
       conversation.push(turn);
       saveConversation();
     }
@@ -9305,7 +9504,8 @@
       return new Promise((resolve) => {
         const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 4e3);
         const tick = () => {
-          if (!port || !streaming) {
+          const activePort = runSession.port;
+          if (!activePort || !runSession.isRunning) {
             resolve(false);
             return;
           }
@@ -9318,7 +9518,7 @@
             else setTimeout(tick, 250);
           };
           try {
-            port.postMessage({ type: "session-ready", runId: activeRunId });
+            activePort.postMessage({ type: "session-ready", runId: runSession.runId });
           } catch (e) {
             resolve(false);
           }
@@ -9327,11 +9527,11 @@
       });
     }
     function sendAgentRequest() {
-      if (!port || !activeConn) return;
+      if (!runSession.port || !activeConn) return;
       try {
         activeConn.postMessage({
           action: "agent",
-          runId: activeRunId,
+          runId: runSession.runId,
           sessionId: panelSessionId,
           question: activeInstruction,
           text: activeSelection,
@@ -9350,7 +9550,7 @@
     }
     async function run(instruction, opts) {
       const runOptions = opts || {};
-      activeRunId = runOptions.presetRunId || "run-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      runSession.setRunId(runOptions.presetRunId || runSession.createRunId());
       activeInstruction = String(instruction || "");
       activeSelection = String(lastText || "").trim();
       try {
@@ -9371,7 +9571,7 @@
           renderSessionMenu();
         }
       }
-      const acquired = await acquirePanelSessionLock(activeRunId, runOptions._lockTakeover === true);
+      const acquired = await acquirePanelSessionLock(runSession.runId, runOptions._lockTakeover === true);
       if (!acquired || !acquired.ok) {
         if (acquired && acquired.locked && !runOptions._lockConflictShown) {
           const owner = acquired.lock || {};
@@ -9451,10 +9651,7 @@
       const resumeSnapshot = runOptions.resumeSnapshot && typeof runOptions.resumeSnapshot === "object" ? runOptions.resumeSnapshot : null;
       const applyResumeSnapshot = (snapshot, approvalConn) => {
         if (!snapshot || typeof snapshot !== "object") return;
-        pendingAcc = String(snapshot.content || "");
-        pendingVerifyPass = null;
-        pendingParts = Array.isArray(snapshot.parts) ? snapshot.parts.map((p2) => Object.assign({}, p2)) : [];
-        pendingNarration = String(snapshot.narration || "");
+        streamState.restore(snapshot);
         currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
         const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
         renderPlan(plan);
@@ -9467,14 +9664,13 @@
           thinkSeg = { id: ++thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
           mountThinkSegment(thinkSeg);
         }
-        contentEl.innerHTML = pendingNarration ? renderAnswer(pendingNarration, currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
+        contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
         flowEl.appendChild(contentEl);
-        if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
-        typingEl = pendingNarration ? null : contentEl;
-        pendingStarted = true;
+        if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
+        typingEl = streamState.narration ? null : contentEl;
         pendingAiMsg = aiMsg;
         pendingContentEl = contentEl;
-        pendingAiMsg._raw = pendingAcc;
+        pendingAiMsg._raw = streamState.content;
         runStartedAt = Number(snapshot.startedAt) || runStartedAt || Date.now();
         const p = snapshot.progress || {};
         progressState = stateLabel(p.state) || "\u7EE7\u7EED\u8FD0\u884C";
@@ -9497,10 +9693,7 @@
         }
       };
       if (!resumeSnapshot) {
-        pendingAcc = "";
-        pendingVerifyPass = null;
-        pendingParts = [];
-        pendingNarration = "";
+        streamState.beginNew();
         if (usageEl) usageEl.textContent = "";
         renderPlan([]);
         lastPlan = [];
@@ -9508,9 +9701,8 @@
         pendingContentEl = contentEl;
         typingEl = contentEl;
         resetReasoning();
-        pendingStarted = false;
       }
-      streaming = true;
+      runSession.setRunning(true);
       startProgress();
       if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
       updateRunControlState();
@@ -9519,17 +9711,18 @@
         endStream();
         return;
       }
+      let conn;
       try {
-        port = chrome.runtime.connect({ name: "ai-stream" });
+        conn = chrome.runtime.connect({ name: "ai-stream" });
+        runSession.setPort(conn);
       } catch (e) {
         showCitationHint("\u6269\u5C55\u5DF2\u66F4\u65B0\uFF0C\u5F53\u524D\u9875\u9762\u7684\u52A9\u624B\u5DF2\u5931\u6548\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u3002");
         endStream();
         return;
       }
-      const conn = port;
       activeConn = conn;
       conn.onMessage.addListener((resp) => {
-        if (resp.runId && resp.runId !== activeRunId) return;
+        if (resp.runId && resp.runId !== runSession.runId) return;
         clearRespTimers();
         if (resp.type === "reattached") {
           applyResumeSnapshot(resp.snapshot, conn);
@@ -9543,7 +9736,7 @@
         } else if (resp.type === "citations") {
           currentCitations = resp.citations || null;
         } else if (resp.type === "tool-call") {
-          pendingParts.push({ type: "tool-call", callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || "unknown" });
+          streamState.appendPart({ type: "tool-call", callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || "unknown" });
           appendStep(
             toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3))
           );
@@ -9569,7 +9762,7 @@
               loginUrl: String(resp.loginUrl || "")
             };
           }
-          pendingParts.push(resultPart);
+          streamState.appendPart(resultPart);
           appendStep(
             toolStepElement(
               resp.status === "completed" ? "\u2713 \u5DE5\u5177\u5DF2\u5B8C\u6210\uFF1A" : resp.status === "failed" ? "\u2717 \u5DE5\u5177\u5931\u8D25\uFF1A" : "\u2014 \u5DE5\u5177\u672A\u6267\u884C\uFF1A",
@@ -9594,7 +9787,7 @@
           renderProgress();
         } else if (resp.type === "screenshot") {
           if (resp.id && resp.dataUrl) shotCache.set(resp.id, resp.dataUrl);
-          pendingParts.push({ type: "screenshot", id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
+          streamState.appendPart({ type: "screenshot", id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
           appendStep(screenshotElement(resp));
           fitPanelHeight();
           pinToBottom();
@@ -9607,7 +9800,7 @@
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "budget-exceeded") {
-          budgetStopped = true;
+          streamState.markBudgetStopped();
           appendNoticePart("\u23F9 " + (resp.message || "Agent \u5DF2\u8FBE\u5230\u5B89\u5168\u4E0A\u9650\u5E76\u505C\u6B62"), "#b91c1c");
           fitPanelHeight();
           pinToBottom();
@@ -9651,7 +9844,7 @@
             text = "\u26A0 \u6821\u9A8C\u672A\u901A\u8FC7\uFF1A" + (resp.reason || "\u76EE\u6807\u53EF\u80FD\u672A\u8FBE\u6210") + (resp.missing ? "\uFF08\u8FD8\u5DEE\uFF1A" + resp.missing + "\uFF09" : "");
           }
           if (resp.ok === true) {
-            pendingVerifyPass = { type: "notice", text, color: "#16a34a", terminal: true };
+            streamState.setVerifyPass({ type: "notice", text, color: "#16a34a", terminal: true });
           } else {
             appendNoticePart(text, "#b45309");
             fitPanelHeight();
@@ -9674,9 +9867,7 @@
         } else if (resp.type === "chunk") {
           removeTypingEl();
           finishReasoning();
-          pendingAcc += resp.text;
-          pendingNarration += resp.text;
-          pendingStarted = true;
+          streamState.appendChunk(resp.text);
           if (!pendingContentEl) {
             pendingContentEl = ensureTextEl();
             if (pendingContentEl) pendingContentEl.innerHTML = "";
@@ -9684,8 +9875,8 @@
           streamRender.schedule("answer", () => {
             const paintPendingAnswer = () => {
               const startedAt = Date.now();
-              if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
-              pendingAiMsg._raw = pendingAcc;
+              if (pendingContentEl) showStreamingAnswer(pendingContentEl, streamState.narration, currentCitations);
+              pendingAiMsg._raw = streamState.content;
               noteStreamPaint(startedAt);
             };
             if (throttleStreamPaint(paintPendingAnswer)) return;
@@ -9699,24 +9890,24 @@
           removeTypingEl();
           finishReasoning();
           streamRender.flush();
-          lastResponse = collapseImmediateRepeatedText(pendingNarration || lastNarration || "");
-          if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) {
-            pendingParts.push({ type: "text", text: lastResponse });
+          lastResponse = collapseImmediateRepeatedText(streamState.responseText);
+          if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
+            streamState.appendPart({ type: "text", text: lastResponse });
           }
-          const textParts = pendingParts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
+          const textParts = streamState.parts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
           const renumbered = renumberCitationsAcross(
             textParts.map((p) => p.text).concat([lastResponse]),
             currentCitations
           );
           const finalText = renumbered.apply(lastResponse);
           const finalCitations = renumbered.citations;
-          if (!pendingStarted) {
+          if (!streamState.started) {
             const el = ensureTextEl();
-            if (el) el.textContent = budgetStopped ? "\uFF08\u4EFB\u52A1\u5DF2\u505C\u6B62\uFF0C\u672A\u751F\u6210\u6700\u7EC8\u56DE\u590D\uFF09" : "\uFF08\u65E0\u8FD4\u56DE\u5185\u5BB9\uFF09";
+            if (el) el.textContent = streamState.budgetStopped ? "\uFF08\u4EFB\u52A1\u5DF2\u505C\u6B62\uFF0C\u672A\u751F\u6210\u6700\u7EC8\u56DE\u590D\uFF09" : "\uFF08\u65E0\u8FD4\u56DE\u5185\u5BB9\uFF09";
           } else if (pendingContentEl) {
             removeStreamCursor(pendingContentEl);
             pendingContentEl.innerHTML = renderAnswer(lastResponse, currentCitations, false);
-            pendingAiMsg._raw = pendingAcc;
+            pendingAiMsg._raw = streamState.content;
           }
           if (finalCitations.length) {
             const srcWrap = document.createElement("div");
@@ -9733,16 +9924,16 @@
             }).join("");
             pendingAiMsg.appendChild(srcWrap);
           }
-          if (pendingVerifyPass) {
+          if (streamState.verifyPass) {
             const verifyEl = document.createElement("div");
             verifyEl.className = "agent-step verify-final";
-            verifyEl.style.color = pendingVerifyPass.color || "#16a34a";
-            verifyEl.textContent = pendingVerifyPass.text;
+            verifyEl.style.color = streamState.verifyPass.color || "#16a34a";
+            verifyEl.textContent = streamState.verifyPass.text;
             pendingAiMsg.appendChild(verifyEl);
           }
           if (lastResponse) pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
           commitPendingVerifyPass();
-          const finalParts = dedupeAdjacentTextParts(pendingParts.map((p) => {
+          const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
               return p.text ? Object.assign({}, p, { text: renumbered.apply(collapseImmediateRepeatedText(p.text)) }) : p;
             }
@@ -9768,7 +9959,7 @@
         } else if (resp.type === "error") {
           removeTypingEl();
           const errText = String(resp.error || "\u4EFB\u52A1\u5931\u8D25\uFF08\u672A\u63D0\u4F9B\u9519\u8BEF\u4FE1\u606F\uFF09");
-          const hasPartial = Boolean(String(pendingNarration || "").trim());
+          const hasPartial = streamState.hasPartial();
           renderRunError(flowEl, pendingContentEl, errText, hasPartial);
           if (resp.needSetup) {
             refreshApiKeyBanner();
@@ -9778,7 +9969,7 @@
               anchor.appendChild(buildOpenSettingsButton());
             }
           }
-          conversation.push(buildFailedTurn(pendingParts, errText, pendingNarration || pendingAcc));
+          conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
           saveConversation();
           endStream();
           closePort();
@@ -9786,23 +9977,25 @@
       });
       conn.onDisconnect.addListener(() => {
         if (conn !== activeConn) return;
-        if (port === conn) port = null;
-        if (!streaming) return;
+        runSession.clearPort(conn);
+        if (!runSession.isRunning) return;
         if (portRetries >= MAX_PORT_RETRIES) {
           commitInterruptedTurn("\u4EFB\u52A1\u4E2D\u65AD\uFF1A\u4E0E\u6269\u5C55\u7684\u8FDE\u63A5\u53CD\u590D\u65AD\u5F00\uFF0C\u5DF2\u505C\u6B62\u91CD\u8FDE\u3002");
           endStream();
           return;
         }
         portRetries += 1;
+        let nextPort;
         try {
-          port = chrome.runtime.connect({ name: "ai-stream" });
+          nextPort = chrome.runtime.connect({ name: "ai-stream" });
+          runSession.setPort(nextPort);
         } catch (e) {
           endStream();
           return;
         }
-        activeConn = port;
-        port.onMessage.addListener((resp) => {
-          if (resp.runId && resp.runId !== activeRunId) return;
+        activeConn = nextPort;
+        nextPort.onMessage.addListener((resp) => {
+          if (resp.runId && resp.runId !== runSession.runId) return;
           if (resp.type === "session-ready") {
             if (readyWaiter) {
               const w = readyWaiter;
@@ -9811,11 +10004,11 @@
             }
             return;
           }
-          if (resp.type === "end" || resp.type === "error") streaming = false;
+          if (resp.type === "end" || resp.type === "error") runSession.finish();
         });
         (async () => {
           const ready = await waitSessionReady(6e3);
-          if (!streaming) return;
+          if (!runSession.isRunning) return;
           if (!ready) {
             removeTypingEl();
             showCitationHint("\u4EFB\u52A1\u88AB\u4E2D\u65AD\u4E14\u540E\u53F0\u672A\u80FD\u6062\u590D\u4F1A\u8BDD\uFF0C\u8BF7\u91CD\u65B0\u53D1\u9001\u6307\u4EE4\u3002");
@@ -9835,11 +10028,11 @@
         renewPanelSessionLock();
       }, 2e4);
       if (runOptions.reattach) {
-        conn.postMessage({ type: "reattach", runId: activeRunId, sessionId: panelSessionId });
+        conn.postMessage({ type: "reattach", runId: runSession.runId, sessionId: panelSessionId });
       } else {
         conn.postMessage({
           action: "agent",
-          runId: activeRunId,
+          runId: runSession.runId,
           sessionId: panelSessionId,
           question: instruction,
           text: activeSelection,
@@ -9860,13 +10053,13 @@
       }
       window.addEventListener("__RF_E2E__dropPort", () => {
         try {
-          if (port) port.postMessage({ type: "e2e-drop-port" });
+          runSession.port?.postMessage({ type: "e2e-drop-port" });
         } catch (e) {
         }
         window.dispatchEvent(new CustomEvent("__RF_E2E__dropped"));
       });
       respTimer = setTimeout(() => {
-        if (!streaming || respWarned) return;
+        if (!runSession.isRunning || respWarned) return;
         respWarned = true;
         if (pendingContentEl) {
           const note = document.createElement("div");
@@ -9876,7 +10069,7 @@
         }
       }, 15e3);
       respFailTimer = setTimeout(() => {
-        if (!streaming) return;
+        if (!runSession.isRunning) return;
         const el = pendingContentEl || ensureTextEl();
         if (el) {
           removeStreamCursor(el);
@@ -9889,7 +10082,7 @@
       }, 45e3);
     }
     function send() {
-      if (streaming) return;
+      if (runSession.isRunning) return;
       const cmd = cmdInput.value.trim();
       if (!cmd) return;
       run(expandQuickPrompt(cmd));
@@ -9960,14 +10153,14 @@
     });
     fitPanelHeight();
     pinToBottom();
-    runAgent = run;
-    activeInterruptFn = interrupt;
-    if (!suppressPanelUiPublish) publishPanelUi(true, "global");
+    runSession.bindRunner(run);
+    runSession.bindInterrupt(interrupt);
+    if (panelVisibility.canPublish) publishPanelUi(true, "global");
     subscribePanelRun().catch(() => {
     });
   }
   function refreshPanelForSelection() {
-    if (!streaming) closePort();
+    if (!runSession.isRunning) closePort();
     lastResponse = "";
     syncPanelSelectionPreview();
     renderConversation();
@@ -9995,7 +10188,7 @@
     msg.showCitations = true;
     conversation.push(msg);
     saveConversation();
-    if (panelBody && !streaming) {
+    if (panelBody && !runSession.isRunning) {
       renderConversation();
       fitPanelHeight();
       pinToBottom();
@@ -10006,7 +10199,7 @@
     let attempts = 0;
     const MAX_ATTEMPTS = 12;
     const tick = () => {
-      if (streaming) return;
+      if (runSession.isRunning) return;
       attempts += 1;
       if (attempts > MAX_ATTEMPTS) return;
       let p = null;
@@ -10020,19 +10213,19 @@
             p.disconnect();
           } catch (e) {
           }
-          if (!resp.resumable && resp.finished && resp.snapshot && !streaming) {
+          if (!resp.resumable && resp.finished && resp.snapshot && !runSession.isRunning) {
             try {
               if (conversationLoadPromise) await conversationLoadPromise;
             } catch (e) {
             }
             try {
-              if (panelUiReadyPromise) await panelUiReadyPromise;
+              if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
-            if (!streaming) adoptFinishedRunSnapshot(resp.snapshot);
+            if (!runSession.isRunning) adoptFinishedRunSnapshot(resp.snapshot);
             return;
           }
-          if (resp.resumable && resp.runId && resp.instruction && !streaming) {
+          if (resp.resumable && resp.runId && resp.instruction && !runSession.isRunning) {
             if (resp.live !== true) {
               showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
             }
@@ -10041,29 +10234,26 @@
             } catch (e) {
             }
             try {
-              if (panelUiReadyPromise) await panelUiReadyPromise;
+              if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
-            if (streaming) return;
-            const keepClosed = !panelUiOpen;
-            suppressPanelUiPublish = keepClosed;
-            openPanel(0, 0, true, true);
-            suppressPanelUiPublish = false;
+            if (runSession.isRunning) return;
+            const keepClosed = !panelVisibility.isOpen;
+            await panelVisibility.withSuppressed(async () => {
+              openPanel(0, 0, true, true);
+            });
             const last = conversation.length ? conversation[conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
-            let runPromise = null;
-            if (runAgent) {
-              runPromise = runAgent(String(resp.instruction), {
-                // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
-                continuation: resp.live !== true,
-                reattach: resp.live === true,
-                presetRunId: String(resp.runId),
-                skipUserTurn: Boolean(alreadyHas),
-                // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
-                // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
-                resumeSnapshot: resp.snapshot || null
-              });
-            }
+            const runPromise = runSession.hasRunner ? Promise.resolve(runSession.invokeRunner(String(resp.instruction), {
+              // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
+              continuation: resp.live !== true,
+              reattach: resp.live === true,
+              presetRunId: String(resp.runId),
+              skipUserTurn: Boolean(alreadyHas),
+              // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
+              // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
+              resumeSnapshot: resp.snapshot || null
+            })) : null;
             if (keepClosed && runPromise && typeof runPromise.finally === "function") {
               runPromise.finally(() => {
                 if (panel) removePanel({ publish: false });
@@ -10249,7 +10439,7 @@
           handleRemotePanelSessions(msg).catch(() => {
           });
         } else if (msg.type === "panel:ui-changed") {
-          applyPanelUiState(msg).catch(() => {
+          panelVisibility.apply(msg).catch(() => {
           });
         } else if (msg.type === "run:started") {
           handleRunStarted(msg);
@@ -10258,14 +10448,14 @@
         } else if (msg.type === "run:ended") {
           if (String(msg.sessionId || "") === panelSessionId) scheduleFollowedRunRefresh();
         } else if (msg.type === "run:stopped") {
-          if (String(msg.sessionId || "") === panelSessionId && String(msg.runId || "") === String(activeRunId || "")) {
-            if (activeInterruptFn) activeInterruptFn("remote");
+          if (String(msg.sessionId || "") === panelSessionId && String(msg.runId || "") === String(runSession.runId || "")) {
+            runSession.requestStop("remote");
           }
         } else if (msg.type === "panel:lock-lost") {
           if (String(msg.id || "") !== panelSessionId) return;
           if (String(msg.runId || "") && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
           showCitationHint("\u53E6\u4E00\u4E2A\u6807\u7B7E\u9875\u5DF2\u63A5\u7BA1\u8BE5\u4F1A\u8BDD\uFF0C\u672C\u9875\u4EFB\u52A1\u5DF2\u505C\u6B62\u3002");
-          if (activeInterruptFn) activeInterruptFn();
+          runSession.requestStop();
         } else if (msg.type === "panel:toggle") {
           togglePanelFromShortcut();
         }
@@ -10278,7 +10468,7 @@
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
-    panelUiReadyPromise = syncPanelUiOnInit();
+    panelVisibility.syncOnInit();
     maybeResumeRunAfterReload();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {

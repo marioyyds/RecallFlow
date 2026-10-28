@@ -15,13 +15,13 @@ import {
   parseTags,
   bindStarKeyboard,
 } from '../lib/shared/utils.ts';
-import { getBook, setBook, subscribeKnowledgeChanges } from '../lib/shared/store.ts';
+import { createKnowledgeRepository } from '../lib/shared/knowledge-repository.ts';
+import type { KnowledgeItem } from '../lib/shared/store.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 import { renderMarkdown } from '../lib/page/markdown.ts';
 import { clampPage, pageSlice, pageTokens } from '../lib/shared/pagination.ts';
 
-/** 知识库条目 / 导入数据：形状由 store 决定，本页只按需读字段。 */
-type Dyn = Record<string, any>;
+const knowledge = createKnowledgeRepository();
 
 /** 按 id 取元素：id 全部写死在 manager.html 里（取不到就是模板坏了，原代码也不检查）。 */
 const $ = (id: string): any => document.getElementById(id);
@@ -30,7 +30,6 @@ const $ = (id: string): any => document.getElementById(id);
 const closestEl = (target: EventTarget | null, selector: string): any =>
   target ? (target as Element).closest(selector) : null;
 
-let bookCache: Dyn = {};
 let currentType = 'all';
 let currentTag = 'all';
 let currentStar = 'all';
@@ -44,18 +43,10 @@ let docItemId = '';
 let docPreviousFocus: HTMLElement | null = null;
 let docKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 
-async function loadCache() {
-  bookCache = await getBook();
-}
-
-async function persist() {
-  await setBook(bookCache);
-}
-
 function allTags(): string[] {
   const map: Record<string, number> = {};
-  Object.values(bookCache).forEach((it) => {
-    (it.tags || []).forEach((t: string) => {
+  knowledge.list().forEach((it) => {
+    (it.tags || []).forEach((t) => {
       if (t) map[t] = (map[t] || 0) + 1;
     });
   });
@@ -64,9 +55,10 @@ function allTags(): string[] {
 
 function renderTypeTabs() {
   const el = $('type-tabs');
+  const all = knowledge.list();
   let h = `<button class="type-tab${currentType === 'all' ? ' active' : ''}" data-type="all">全部</button>`;
   ITEM_TYPES.forEach((t) => {
-    const n = Object.values(bookCache).filter((i) => (i.type || 'wrong') === t.id).length;
+    const n = all.filter((i) => (i.type || 'wrong') === t.id).length;
     h += `<button class="type-tab${currentType === t.id ? ' active' : ''}" data-type="${t.id}" style="--t:${t.color}">${t.name} <span class="cnt">${n}</span></button>`;
   });
   el.innerHTML = h;
@@ -86,8 +78,8 @@ function renderTagFilter() {
   el.innerHTML = h;
 }
 
-function filtered(): Dyn[] {
-  let items = Object.values(bookCache);
+function filtered(): KnowledgeItem[] {
+  let items = knowledge.list();
   if (currentType !== 'all') {
     items = items.filter((i) => (i.type || 'wrong') === currentType);
   }
@@ -133,7 +125,7 @@ function toggleSelect(id: string) {
   });
 }
 
-function itemHtml(it: Dyn): string {
+function itemHtml(it: KnowledgeItem): string {
   const editing = editingNoteId === it.id;
   const titleHtml = editing
     ? `<input id="title-editor" class="note-editor title-editor" value="${esc(it.title)}" placeholder="标题">`
@@ -221,7 +213,7 @@ function render() {
   const emptyEl = $('empty');
   emptyEl.classList.toggle('hidden', items.length > 0);
   if (!items.length) {
-    const hasAny = Object.keys(bookCache).length > 0;
+    const hasAny = knowledge.size > 0;
     emptyEl.innerHTML = hasAny
       ? '<span class="empty-ico">🔍</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
       : '<span class="empty-ico">📚</span><p>知识库还是空的</p><p class="empty-hint">点击「新建笔记」或收藏网页开始收录</p>';
@@ -252,7 +244,7 @@ function renderActiveFilters() {
 }
 
 function renderStats() {
-  const all = Object.values(bookCache);
+  const all = knowledge.list();
   $('st-total').textContent = String(all.length);
   [STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].forEach((s) => {
     $('st-' + s).textContent = String(all.filter((i) => Number(i.status) === s).length);
@@ -270,9 +262,26 @@ function genId() {
   return 'note-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
 }
 
+async function saveEditingItem(id: string) {
+  const titleInput = $('title-editor') as HTMLInputElement | null;
+  const noteInput = $('note-editor') as HTMLTextAreaElement | null;
+  const tagsInput = $('tag-editor') as HTMLInputElement | null;
+  if (!titleInput && !noteInput && !tagsInput) return;
+
+  await knowledge.update(id, (item) => ({
+    ...item,
+    title: titleInput?.value.trim() || item.title,
+    note: noteInput ? noteInput.value : item.note,
+    tags: tagsInput ? parseTags(tagsInput.value) : item.tags,
+    updatedAt: Date.now(),
+  }));
+  editingNoteId = null;
+  render();
+}
+
 async function createNote() {
   const id = genId();
-  bookCache[id] = {
+  await knowledge.put({
     id,
     type: 'note',
     title: '新笔记',
@@ -284,8 +293,7 @@ async function createNote() {
     tags: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
-  };
-  await persist();
+  });
   editingNoteId = id;
   currentPage = 1;
   render();
@@ -370,7 +378,7 @@ function closeDocument() {
 }
 
 function openDocument(id: string) {
-  const item = bookCache[id];
+  const item = knowledge.get(id);
   if (!item) return;
   docItemId = id;
   docPreviousFocus = document.activeElement as HTMLElement | null;
@@ -422,19 +430,20 @@ async function bulkDelete() {
   const ok = await showConfirm('确定删除 ' + count + ' 项？');
   if (!ok) return;
 
-  const backup: Dyn = {};
+  const backup: Record<string, KnowledgeItem> = {};
   for (const id of selectedIds) {
-    if (bookCache[id]) backup[id] = { ...bookCache[id] };
+    const item = knowledge.get(id);
+    if (item) backup[id] = { ...item, tags: item.tags.slice() };
   }
+  const next = { ...knowledge.snapshot() };
   for (const id of selectedIds) {
-    delete bookCache[id];
+    delete next[id];
   }
   selectedIds.clear();
-  await persist();
+  await knowledge.replace(next);
   render();
   toast(count + ' 项已删除', async () => {
-    Object.assign(bookCache, backup);
-    await persist();
+    await knowledge.putMany(Object.values(backup));
     render();
     toast('已恢复');
   });
@@ -501,12 +510,12 @@ $('doc-overlay').addEventListener('click', (e: Event) => {
   if (e.target === $('doc-overlay')) closeDocument();
 });
 $('doc-open').addEventListener('click', () => {
-  const item = bookCache[docItemId];
+  const item = knowledge.get(docItemId);
   if (item && item.url) chrome.tabs.create({ url: item.url });
 });
 $('doc-edit').addEventListener('click', () => {
   const id = docItemId;
-  if (!id || !bookCache[id]) return;
+  if (!id || !knowledge.get(id)) return;
   closeDocument();
   editingNoteId = id;
   render();
@@ -547,9 +556,8 @@ $('list').addEventListener('click', async (e: Event) => {
   const starCell = closestEl(e.target, '.star-cell[data-star]');
   if (starCell) {
     const v = Number(starCell.dataset.star);
-    bookCache[id].status = v;
-    bookCache[id].updatedAt = Date.now();
-    await persist();
+    if (!knowledge.get(id)) return;
+    await knowledge.update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() }));
     renderStats();
     updateItemStar(itemEl, v);
     return;
@@ -560,15 +568,15 @@ $('list').addEventListener('click', async (e: Event) => {
     const a = act.dataset.act;
     if (a === 'del') {
       // 与 popup 统一为「即时删除 + 强撤销」，不再二次确认（批量删除仍保留确认）
-      const backup = { ...bookCache[id] };
-      const title = bookCache[id].title || '此条目';
-      delete bookCache[id];
+      const current = knowledge.get(id);
+      if (!current) return;
+      const backup = { ...current, tags: current.tags.slice() };
+      const title = current.title || '此条目';
+      await knowledge.remove(id);
       if (editingNoteId === id) editingNoteId = null;
-      await persist();
       render();
       toast('已删除「' + title + '」', async () => {
-        bookCache[id] = backup;
-        await persist();
+        await knowledge.put(backup);
         render();
         toast('已恢复');
       });
@@ -580,16 +588,7 @@ $('list').addEventListener('click', async (e: Event) => {
       const input = $('title-editor') || $('note-editor');
       if (input) input.focus();
     } else if (a === 'save') {
-      const t = $('title-editor');
-      const n = $('note-editor');
-      const g = $('tag-editor');
-      if (t) bookCache[id].title = t.value.trim() || bookCache[id].title;
-      if (n) bookCache[id].note = n.value;
-      if (g) bookCache[id].tags = parseTags(g.value);
-      bookCache[id].updatedAt = Date.now();
-      editingNoteId = null;
-      await persist();
-      render();
+      await saveEditingItem(id);
     } else if (a === 'cancel') {
       editingNoteId = null;
       render();
@@ -597,9 +596,10 @@ $('list').addEventListener('click', async (e: Event) => {
     return;
   }
 
-  if (closestEl(e.target, '.item-title') && bookCache[id]) {
-    if (bookCache[id].url) chrome.tabs.create({ url: bookCache[id].url });
-    else if (bookCache[id].note) openDocument(id);
+  const item = knowledge.get(id);
+  if (closestEl(e.target, '.item-title') && item) {
+    if (item.url) chrome.tabs.create({ url: item.url });
+    else if (item.note) openDocument(id);
   }
 });
 
@@ -608,10 +608,10 @@ bindStarKeyboard($('list'), (v, cell) => {
   const itemEl = cell.closest('.item');
   if (!itemEl) return;
   const id = (itemEl as HTMLElement).dataset.id as string;
-  if (!bookCache[id]) return;
-  bookCache[id].status = v;
-  bookCache[id].updatedAt = Date.now();
-  persist();
+  if (!knowledge.get(id)) return;
+  void knowledge
+    .update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() }))
+    .catch(() => toast('更新失败，请重试'));
   renderStats();
   const lvl = itemEl.querySelector('.level-name');
   if (lvl) lvl.outerHTML = levelNameHtml(v);
@@ -622,21 +622,11 @@ $('list').addEventListener('keydown', async (e: KeyboardEvent) => {
   // 文档编辑框允许用 Enter 正常换行；Ctrl/Cmd+Enter 才是保存。
   if (e.target && (e.target as Element).tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
   if (!editingNoteId) return;
-  const t = $('title-editor');
-  const n = $('note-editor');
-  const g = $('tag-editor');
-  if (!t && !n && !g) return;
-  if (t) bookCache[editingNoteId].title = t.value.trim() || bookCache[editingNoteId].title;
-  if (n) bookCache[editingNoteId].note = n.value;
-  if (g) bookCache[editingNoteId].tags = parseTags(g.value);
-  bookCache[editingNoteId].updatedAt = Date.now();
-  editingNoteId = null;
-  await persist();
-  render();
+  await saveEditingItem(editingNoteId);
 });
 
 $('export-btn').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(bookCache, null, 2)], {
+  const blob = new Blob([JSON.stringify(knowledge.snapshot(), null, 2)], {
     type: 'application/json',
   });
   const a = document.createElement('a');
@@ -655,20 +645,24 @@ $('import-btn').addEventListener('click', () => {
  * @param {*} item - 待验证的数据项
  * @returns {boolean} 是否有效
  */
-function isValidImportItem(item: Dyn | null | undefined): boolean {
+function isValidImportItem(item: unknown): item is Partial<KnowledgeItem> {
   if (!item || typeof item !== 'object') return false;
-  if (typeof item.title !== 'string' || !item.title.trim()) return false;
+  const candidate = item as Partial<KnowledgeItem>;
+  if (typeof candidate.title !== 'string' || !candidate.title.trim()) return false;
   // 验证 type 是否合法
   const validTypes = ITEM_TYPES.map((t) => t.id);
-  if (item.type && !validTypes.includes(item.type)) return false;
+  if (candidate.type && !validTypes.includes(candidate.type)) return false;
   // 验证 status 是否合法
-  if (item.status !== undefined && ![STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(Number(item.status))) {
+  if (
+    candidate.status !== undefined &&
+    ![STATUS.GENERAL, STATUS.IMPORTANT, STATUS.FREQUENT].includes(Number(candidate.status))
+  ) {
     return false;
   }
   // 验证 tags 是否为数组
-  if (item.tags && !Array.isArray(item.tags)) return false;
+  if (candidate.tags && !Array.isArray(candidate.tags)) return false;
   // 验证 url 是否为字符串
-  if (item.url && typeof item.url !== 'string') return false;
+  if (candidate.url && typeof candidate.url !== 'string') return false;
   return true;
 }
 
@@ -683,22 +677,32 @@ $('import-file').addEventListener('change', async (e: Event) => {
       return;
     }
 
-    let count = 0;
+    const imported: KnowledgeItem[] = [];
     let skipped = 0;
-    for (const [id, item] of Object.entries(data) as Array<[string, Dyn]>) {
+    for (const [id, item] of Object.entries(data as Record<string, unknown>)) {
       if (isValidImportItem(item)) {
-        if (bookCache[id]) {
-          bookCache[id] = { ...bookCache[id], ...item, id, updatedAt: Date.now() };
-        } else {
-          bookCache[id] = { ...item, id, createdAt: item.createdAt || Date.now(), updatedAt: Date.now() };
-        }
-        count++;
+        const existing = knowledge.get(id);
+        const now = Date.now();
+        imported.push({
+          id,
+          type: item.type || existing?.type || 'wrong',
+          title: String(item.title || '').trim() || existing?.title || '未命名',
+          url: item.url || existing?.url || '',
+          platform: item.platform || existing?.platform || '',
+          platformName: item.platformName || existing?.platformName || '',
+          status: item.status ?? existing?.status ?? STATUS.IMPORTANT,
+          note: item.note ?? existing?.note ?? '',
+          tags: item.tags ?? (existing ? existing.tags.slice() : []),
+          createdAt: Number(item.createdAt) || existing?.createdAt || now,
+          updatedAt: now,
+        });
       } else {
         skipped++;
         logError('Skipped invalid import item', { id, item });
       }
     }
-    await persist();
+    await knowledge.putMany(imported);
+    const count = imported.length;
     render();
     toast(skipped > 0 ? `已导入 ${count} 项，跳过 ${skipped} 项无效数据` : `已导入 ${count} 项`);
   } catch (err) {
@@ -761,7 +765,7 @@ function focusItemFromHash() {
   const m = location.hash.match(/#focus=([^&]+)/);
   if (!m) return;
   const id = decodeURIComponent(m[1]);
-  if (!bookCache[id]) {
+  if (!knowledge.get(id)) {
     toast('未找到该条目（可能已被删除）');
     return;
   }
@@ -785,16 +789,19 @@ function focusItemFromHash() {
 }
 
 (async function init() {
-  await loadCache();
+  await knowledge.load();
   renderUserscriptBadge();
   render();
   focusItemFromHash();
-  subscribeKnowledgeChanges(async () => {
+  knowledge.subscribe(() => {
     if (editingNoteId) return;
-    await loadCache();
     render();
   });
 })();
+
+window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) knowledge.dispose();
+});
 
 async function renderUserscriptBadge() {
   const badge = $('us-count-badge');

@@ -38,7 +38,12 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 打包的意义之一是把体积变得**可见**：超过这个量级通常意味着误引入了大依赖
  * （例如把整个 markdown 渲染器或某个 polyfill 打进了内容脚本）。
  *
- * 这不是「随便定的上限」，而是一条**棘轮**：现在 444KB（本轮加入 FAB 收起 / 展开的
+ * 这不是「随便定的上限」，而是一条**棘轮**：现在 452KB（新增
+ * `panel-visibility.ts` / `panel-run-session.ts`，把面板广播序号、抑制计数、
+ * runId、端口和运行生命周期从 chat.ts 的模块级变量收进可测试控制器；
+ * `panel-stream-state.ts` 再接管正文、叙述、parts、校验与预算停止状态；三个
+ * 自包含模块合计增加约 5.7KB，实测 458500 字节，未引入第三方依赖）。
+ * 上一档 444KB 是 FAB 收起 / 展开的
  * `peek` 视图态 —— `lib/page/fab-position.js` 的 `resolveFabPeek` / `isPointerInFabZone`
  * 与 chat.js 侧的悬浮 / 聚焦 / 拖拽接线，加上 panel-css.js 里的 `.fab.peek` 与
  * `right` 过渡；实测产物 452306 字节 = 441.7KB，故在上一档 438KB 之上再抬一档，
@@ -53,7 +58,7 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-export const SIZE_BUDGET_BYTES = 444 * 1024;
+export const SIZE_BUDGET_BYTES = 452 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

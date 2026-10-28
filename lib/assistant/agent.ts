@@ -25,6 +25,7 @@ import { resolveCodeExecutionApproval } from '../shared/settings.ts';
 // 定位串的唯一实现（原先这里与 chat.js 各写一份，且其中一份有 bug —— 见该函数注释）。
 import { formatElementLocator } from '../shared/utils.ts';
 import { buildInitialMessagesPure } from './initial-messages.ts';
+import { createAgentRunContext } from './agent-run-context.ts';
 import { visionMessagesFor } from './vision.ts';
 // ⚠ 分两行导入：`vision-wiring.test.mjs` 会**钉住上面那一行的原文**
 //（`import { visionMessagesFor } from './vision.ts'`）—— 把新名字并进同一行会让那条门禁红 ✗。
@@ -1373,44 +1374,16 @@ export async function runAgentStream(port: any, payload: any, settings: any, boo
     keyword: detected.keyword,
     reason: detected.reason,
   });
-  const ctx: any = {
+  const ctx = createAgentRunContext({
     book,
     settings,
-    // 面板会话 id：截图归档按会话归属，切换会话/其它标签页可按 id 取回。
-    sessionId: String(payload.sessionId || ''),
-    page: canResume ? (persisted.page || '') : (payload.page || ''),
-    pageUrl: canResume ? (persisted.pageUrl || '') : (payload.pageUrl || ''),
-    pageTitle: canResume ? (persisted.pageTitle || '') : (payload.pageTitle || ''),
-    tabId: tabId || (canResume ? persisted.tabId : undefined),
-    originalTabId: canResume ? (persisted.originalTabId || tabId) : tabId,
-    openedTabs: canResume && Array.isArray(persisted.openedTabs) ? persisted.openedTabs.slice() : [],
-    openedTabCount: canResume ? Number(persisted.openedTabCount || 0) : 0,
-    maxOpenedTabs: budget.maxOpenedTabs,
-    tabSwitchCount: canResume ? Number(persisted.tabSwitchCount || 0) : 0,
-    maxTabSwitches: budget.maxTabSwitches,
-    // 记录已抓取失败的 URL，fetch_webpage 对同一 URL 重试时直接拒绝，避免反复猜 URL 空耗预算。
-    failedUrls: canResume && Array.isArray(persisted.failedUrls) ? persisted.failedUrls.slice() : [],
-    // 浏览隔离：浏览器操作类任务与用户共享窗口；研究/知识库/对话类任务用专用 Agent 窗口。
-    browsingMode: intent === INTENTS.BROWSER ? 'shared' : 'isolated',
-    agentWindowId: canResume && Number.isInteger(Number(persisted.agentWindowId)) ? Number(persisted.agentWindowId) : null,
-    // 本任务的可重放动作轨迹（供 save_macro 保存为宏）。
-    trace: canResume && Array.isArray(persisted.trace) ? persisted.trace.slice() : [],
-    // 本任务的执行计划（子目标清单，由 update_plan 维护）。
-    plan: canResume && Array.isArray(persisted.plan) ? persisted.plan.map((p: any) => Object.assign({}, p)) : [],
-    // 大工具结果的暂存（超出阈值时截断消息、把全文放这里，供 expand_result 读取）。
-    // 内容不跨恢复保留，但 id 会（resultIds）—— 这样恢复后能明确告知「该结果属于上一轮运行」，
-    // 而不是让模型以为记错了 id、反复重试。
-    resultStore: new Map(),
-    resultIds: new Set(canResume && Array.isArray(persisted.resultIds) ? persisted.resultIds : []),
-    // 最近一次页面证据（供完成前校验使用）。
-    lastSnapshot: null,
-    lastEvidence: '',
-    // 最近一次读类工具的**全文**（截断之前的原始结果）。
-    // 完成前校验不能只给页面前 N 个字：实测一次「提炼关键要点」任务页面 10398 字，
-    // 而结论依据的提交哈希散落在深处，校验方在前 2500 字里找不到就否决了。
-    // 有了全文，selectEvidence 才能按结论里的具体事实去定位片段。
-    lastReadFullText: '',
-  };
+    budget,
+    browserMode: intent === INTENTS.BROWSER,
+    canResume,
+    tabId,
+    payload,
+    persisted,
+  });
   trace({
     phase: 'start',
     intent,

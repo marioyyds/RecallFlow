@@ -42,6 +42,9 @@ export interface KnowledgeItem {
   updatedAt: number;
 }
 
+/** 按条目 id 索引的知识库快照。 */
+export type KnowledgeBook = Record<string, KnowledgeItem>;
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 let migrationPromise: Promise<void> | null = null;
 
@@ -90,9 +93,9 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function normalizeBook(input: unknown): Record<string, KnowledgeItem> {
+function normalizeBook(input: unknown): KnowledgeBook {
   const source = input && typeof input === 'object' ? (input as Record<string, any>) : {};
-  const out: Record<string, KnowledgeItem> = {};
+  const out: KnowledgeBook = {};
   for (const [key, raw] of Object.entries(source)) {
     if (!raw || typeof raw !== 'object') continue;
     const id = String(raw.id || key);
@@ -154,8 +157,11 @@ type StoredEntry = {
   noteChars: number;
 };
 
-function withNote(entry: StoredEntry | Record<string, any>, doc: { markdown?: unknown } | null | undefined) {
-  return Object.assign({}, entry, { note: String((doc && doc.markdown) || '') });
+function withNote(
+  entry: StoredEntry | Record<string, any>,
+  doc: { markdown?: unknown } | null | undefined
+): KnowledgeItem {
+  return Object.assign({}, entry, { note: String((doc && doc.markdown) || '') }) as KnowledgeItem;
 }
 
 async function readMigrationMeta(db: IDBDatabase) {
@@ -230,20 +236,20 @@ function notifyChange() {
   } catch (e) {}
 }
 
-export function subscribeKnowledgeChanges(callback: (data: any) => void) {
+export function subscribeKnowledgeChanges(callback: (data: unknown) => void) {
   if (typeof callback !== 'function' || typeof BroadcastChannel === 'undefined') return () => {};
   const channel = new BroadcastChannel(CHANGE_CHANNEL);
   channel.onmessage = (event) => callback(event && event.data);
   return () => channel.close();
 }
 
-async function getBook(): Promise<Record<string, any>> {
+async function getBook(): Promise<KnowledgeBook> {
   const db = await ensureReady();
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readonly');
   const entryList = await requestResult(tx.objectStore(STORE_ENTRIES).getAll());
   const docList = await requestResult(tx.objectStore(STORE_DOCUMENTS).getAll());
   const docs = new Map<string, any>(docList.map((doc: any) => [String(doc.id), doc] as [string, any]));
-  const book: Record<string, any> = {};
+  const book: KnowledgeBook = {};
   for (const entry of entryList) book[entry.id] = withNote(entry, docs.get(String(entry.id)));
   return book;
 }
@@ -270,7 +276,7 @@ async function getRecentItems(limit: unknown = 5) {
   return out;
 }
 
-async function getKnowledgeItem(id: unknown) {
+async function getKnowledgeItem(id: unknown): Promise<KnowledgeItem | null> {
   const db = await ensureReady();
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readonly');
   const entry = await requestResult(tx.objectStore(STORE_ENTRIES).get(String(id)));
@@ -279,7 +285,7 @@ async function getKnowledgeItem(id: unknown) {
   return withNote(entry, doc);
 }
 
-async function setBook(book: unknown) {
+async function setBook(book: KnowledgeBook) {
   const db = await ensureReady();
   const normalized = normalizeBook(book || {});
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readwrite');
@@ -296,7 +302,7 @@ async function setBook(book: unknown) {
   notifyChange();
 }
 
-interface UpsertInput {
+export interface KnowledgeUpsertInput {
   id: unknown;
   type?: unknown;
   title?: unknown;
@@ -308,7 +314,7 @@ interface UpsertInput {
   tags?: unknown;
 }
 
-async function upsertItem({ id, type, title, url, platformId, platformName, status, note, tags }: UpsertInput) {
+async function upsertItem({ id, type, title, url, platformId, platformName, status, note, tags }: KnowledgeUpsertInput): Promise<KnowledgeItem> {
   const db = await ensureReady();
   const key = String(id);
   const tx = db.transaction([STORE_ENTRIES, STORE_DOCUMENTS], 'readwrite');

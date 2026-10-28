@@ -4,6 +4,7 @@
 import { TOOL_REGISTRY, executeTool, validateToolCall } from './tools.ts';
 import { logError } from '../shared/utils.ts';
 import type { Caught } from './errors.ts';
+import type { McpServerStatus } from './types.ts';
 
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 const MCP_TTL = 5 * 60 * 1000; // 工具列表缓存 5 分钟
@@ -315,7 +316,7 @@ export async function collectAgentTools(settings: any, options: Record<string, a
  * 模型只能看到「自己没有这类工具」，于是如实回答「我没有 MCP」——
  * 用户看到的是「配置没生效」，实际是「连不上但没人告诉它」。
  */
-export function buildMcpStatusSection(mcpStatus = []) {
+export function buildMcpStatusSection(mcpStatus: McpServerStatus[] = []) {
   const list = (Array.isArray(mcpStatus) ? mcpStatus.filter(Boolean) : []) as Array<{ serverId?: string; url?: string; ok?: boolean; toolCount?: number; error?: string }>;
   if (!list.length) return '';
   const lines = ['【MCP 服务器（用户自己配置的外部能力）】工具名规则：`mcp__<serverId>__<工具名>`（serverId 里的空格等字符会替换成 `_`）。'];

@@ -77,6 +77,9 @@ import {
   FAB_POSITION_KEY,
   normalizeFabRatio as normFabRatio,
 } from './fab-position.ts';
+import { createPanelVisibilityController } from './panel-visibility.ts';
+import { createPanelRunSession } from './panel-run-session.ts';
+import { createPanelStreamState } from './panel-stream-state.ts';
 
 
 /**
@@ -138,7 +141,6 @@ let panel: any = null;
 let panelBody: any = null;
 let lastText = '';
 let lastResponse = '';
-let port: any = null;
 let dragState: any = null;
 let resizeState: any = null;
 let pageText = '';
@@ -162,13 +164,21 @@ let panelSessionSwitchInFlight = false;
 let deferredRemoteSessionId = '';
 let panelSessionLockHeld = false;
 let panelSessionLockRunId = '';
-let activeInterruptFn: any = null;
-// 全浏览器共享的面板开合状态。openTabs 由 Service Worker 维护，内容脚本只发
-// “全局切换”或“本页已同步”的回执，避免远端应用状态时又触发一轮广播。
-let panelUiSeq = 0;
-let panelUiOpen = false;
-let suppressPanelUiPublish = false;
-let panelUiReadyPromise: any = null;
+// 全浏览器共享的面板开合状态。序号、权威开合值与广播抑制由独立控制器封装；
+// 内容脚本只负责把 DOM 的 open/close 动作注入进来。
+const panelVisibility = createPanelVisibilityController({
+  send: (type, payload) => sendPanelMessage(type, payload),
+  isMounted: () => Boolean(panel),
+  open: () => {
+    ensureHost();
+    lastText = '';
+    pageText = pageContextEnabled ? extractPageText() : '';
+    openPanel(0, 0, true, true);
+  },
+  close: () => removePanel({ publish: false }),
+});
+const runSession = createPanelRunSession();
+const streamState = createPanelStreamState();
 // 跟随另一个标签页的运行流。状态归约与 SW 使用同一份纯函数。
 let followedRunState: any = null;
 let followedRunId = '';
@@ -186,10 +196,6 @@ let followStatusTimer: any = null;
 // 而所有静态门禁都看不到这个作用域错误，只有真浏览器重开面板才暴露（本轮踩到）。
 let stopBtn: any = null;
 let sendBtn: any = null;
-let streaming = false;
-// openPanel 执行时把内部的 run 函数挂到这里，供模块级的自动续跑入口调用。
-// （run 是 openPanel 里的闭包，模块级函数拿不到它 —— 用这个引用桥接。）
-let runAgent: any = null;
 
 // 「当前该把发送/停止按钮画成什么样」—— 纯函数，不碰 DOM。
 //
@@ -219,7 +225,7 @@ export function computeRunControls(input: any) {
  * 否则会出现「B 页看得到任务在跑，却没有停止按钮」这种状态分裂。
  */
 function updateRunControlState() {
-  const control = computeRunControls({ streaming, followed: followedRunState });
+  const control = computeRunControls({ streaming: runSession.isRunning, followed: followedRunState });
   if (stopBtn) {
     stopBtn.style.display = control.showStop ? '' : 'none';
     stopBtn.disabled = control.stopDisabled;
@@ -228,16 +234,9 @@ function updateRunControlState() {
   if (sendBtn) sendBtn.disabled = control.sendDisabled;
 }
 
-let pendingAcc = '';
 let pendingAiMsg: any = null;
 let pendingContentEl: any = null;
-let pendingStarted = false;
-let pendingParts: any = [];
-let pendingVerifyPass: any = null;
-let budgetStopped = false;
 let flowEl: any = null;
-let pendingNarration = '';
-let lastNarration = '';
 let typingEl: any = null;
 // ---- 思考记录（思维链）----
 // **每段思考一块，按发生顺序穿插在对话流里**（思考 → 叙述 → 工具 → 思考 → …）。
@@ -265,7 +264,6 @@ let thinkSegSeq = 0;            // 段序号：给渲染合并器当 key 用（�
 //   `thinkExpandedManual === null` 守卫的写。**流式路径（pushReasoning）一个字都不写**，
 //   所以新到的增量在结构上不可能把用户手动展开/折叠的状态改回去。
 let thinkExpandedManual: any = null;
-let activeRunId: any = null;
 let planBar: any = null;
 let apiKeyBanner: any = null;
 let approvalSettingsEl: any = null;
@@ -684,9 +682,9 @@ function watchHostKeepalive() {
         ensureHost();
         // SPA（Turbo 等）导航会连面板 DOM 一起换掉：若此刻任务仍在跑，
         // 重新打开面板并恢复流式 UI，否则用户只能看到一个没有输出的空面板/关闭状态。
-        if (panelUiOpen) {
+        if (panelVisibility.isOpen) {
           openPanel(0, 0, true, true);
-          if (streaming) restoreStreamingUI();
+          if (runSession.isRunning) restoreStreamingUI();
         }
       }
     } catch (e: any) {}
@@ -786,73 +784,14 @@ function clearSelectedText(options?: any) {
     const selection = window.getSelection();
     if (selection) selection.removeAllRanges();
   } catch (e: any) {}
-  if (opts.render !== false && panelBody && !streaming && !conversation.length && !followedMessages.length) {
+  if (opts.render !== false && panelBody && !runSession.isRunning && !conversation.length && !followedMessages.length) {
     renderConversation();
   }
   if (panel && opts.render !== false) fitPanelHeight();
 }
 
 function publishPanelUi(open: any, scope: any) {
-  panelUiOpen = open === true;
-  if (suppressPanelUiPublish) return Promise.resolve(null);
-  return sendPanelMessage('panel:ui:set', {
-    open: panelUiOpen,
-    scope: scope === 'membership' ? 'membership' : 'global',
-  })
-    .then((res) => {
-      if (res && res.ok && res.ui) {
-        const seq = Number(res.ui.seq) || 0;
-        // 快速“开→关”时两个响应可能乱序；只接受不比本页已见版本更旧的权威值。
-        if (seq >= panelUiSeq) {
-          panelUiSeq = seq;
-          panelUiOpen = res.ui.open === true;
-        }
-      }
-      return res;
-    })
-    .catch(() => null);
-}
-
-async function applyPanelUiState(ui: any) {
-  if (!ui) return;
-  const seq = Number(ui.seq) || 0;
-  if (seq < panelUiSeq) return;
-  panelUiSeq = seq;
-  panelUiOpen = ui.open === true;
-  if (panelUiOpen) {
-    if (!panel) {
-      suppressPanelUiPublish = true;
-      try {
-        ensureHost();
-        lastText = '';
-        pageText = pageContextEnabled ? extractPageText() : '';
-        openPanel(0, 0, true, true);
-      } finally {
-        suppressPanelUiPublish = false;
-      }
-    }
-    await publishPanelUi(true, 'membership');
-  } else {
-    if (panel) {
-      suppressPanelUiPublish = true;
-      try {
-        removePanel({ publish: false });
-      } finally {
-        suppressPanelUiPublish = false;
-      }
-    }
-    await publishPanelUi(false, 'membership');
-  }
-}
-
-async function syncPanelUiOnInit() {
-  const res = await sendPanelMessage('panel:ui:get');
-  if (!res || !res.ok || !res.ui) return;
-  const seq = Number(res.ui.seq) || 0;
-  if (seq < panelUiSeq) return;
-  panelUiSeq = seq;
-  panelUiOpen = res.ui.open === true;
-  if (panelUiOpen) await applyPanelUiState(res.ui);
+  return panelVisibility.publish(open === true, scope === 'membership' ? 'membership' : 'global');
 }
 
 function removePanel(options?: any) {
@@ -865,7 +804,7 @@ function removePanel(options?: any) {
   }
   // 流式中关闭面板只是「隐藏」：不关 port、不 endStream，让助手继续生成，
   // 重新打开时能恢复正在输出的内容（见 restoreStreamingUI）。
-  if (!streaming) closePort();
+  if (!runSession.isRunning) closePort();
   // 解除 document 级 Esc 监听，避免面板关闭后仍捕获按键。
   if (panelKeyHandler) {
     document.removeEventListener('keydown', panelKeyHandler, true);
@@ -900,12 +839,7 @@ function removePanel(options?: any) {
 }
 
 function closePort() {
-  if (port) {
-    try {
-      port.disconnect();
-    } catch (e: any) {}
-    port = null;
-  }
+  runSession.closePort();
 }
 
 function showBubble(x: any, y: any) {
@@ -1339,7 +1273,7 @@ function hydrateScreenshot(id: any) {
       shotPending.delete(wanted);
       // 静态会话需要重绘一次才能把占位符换成图片；发起页流式期间图片本来就在缓存里，
       // 这里不会触发额外重绘。
-      if (!streaming && panelBody) {
+      if (!runSession.isRunning && panelBody) {
         try {
           renderConversation();
           fitPanelHeight();
@@ -1579,7 +1513,7 @@ function renderCommittedParts(flow: any) {
   // `mountThinkSegment()` 往**模块级 flowEl** 追加；调用方可能刚建了一个新 flow，
   // 而关面板时 `removePanel()` 并不清空 flowEl，所以这里必须先指过去。
   flowEl = flow;
-  for (const p of pendingParts) {
+  for (const p of streamState.parts) {
     if (p.type === 'thinking' && p.text) {
       // 思考记录也是 flow 的一环，必须按原位置还原 ——
       // 否则重开面板后所有思考都会挤到最前面，与它前后步骤的对应关系就没了。
@@ -1610,7 +1544,7 @@ function renderCommittedParts(flow: any) {
 }
 
 function restoreStreamingUI() {
-  if (!panelBody || !streaming) return;
+  if (!panelBody || !runSession.isRunning) return;
   if (pendingContentEl && pendingContentEl.isConnected) return; // 已恢复过
   const aiMsg = document.createElement('div');
   aiMsg.className = 'msg ai';
@@ -1621,13 +1555,13 @@ function restoreStreamingUI() {
   renderCommittedParts(flow);
   const contentEl = document.createElement('div');
   contentEl.className = 'agent-content';
-  if (pendingNarration) {
-    contentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
+  if (streamState.narration) {
+    contentEl.innerHTML = renderAnswer(streamState.narration, currentCitations, false);
   } else {
     contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
   }
   flow.appendChild(contentEl);
-  if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
+  if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
   panelBody.appendChild(aiMsg);
   pendingAiMsg = aiMsg;
   pendingContentEl = contentEl;
@@ -1640,9 +1574,8 @@ function restoreStreamingUI() {
     thinkSeg.body = null;
     mountThinkSegment(thinkSeg, thinkExpandedManual === true);
   }
-  typingEl = pendingNarration ? null : contentEl;
-  pendingStarted = pendingStarted || Boolean(pendingNarration || pendingAcc);
-  pendingAiMsg._raw = pendingAcc;
+  typingEl = streamState.narration ? null : contentEl;
+  pendingAiMsg._raw = streamState.content;
   // 重开面板时把进度条也恢复上（保留原计时，不重置已用时）。
   if (progressEl) {
     if (!runStartedAt) runStartedAt = Date.now();
@@ -1787,7 +1720,7 @@ function renderSuggestionButtons(container: any, text: any, sendFn: any) {
     b.textContent = opt.label;
     if (opt.desc) b.title = opt.desc;
     b.addEventListener('click', () => {
-      if (streaming) return;
+      if (runSession.isRunning) return;
       const fn = sendFn || activeSendFn;
       if (typeof fn === 'function') {
         fn(opt.label + (opt.desc ? '：' + opt.desc : ''), { continuation: true });
@@ -2400,7 +2333,7 @@ function resetFollowedRun(options?: any) {
   followedMessages = [];
   followedLiveReady = false;
   followedDom = null;
-  if (!streaming) {
+  if (!runSession.isRunning) {
     stopProgress();
   }
   updateRunControlState();
@@ -2568,7 +2501,7 @@ function summarizeToolParts(parts: any) {
 // 恰恰是这个功能最典型的使用时刻，交出去一个空包毫无意义。
 function messagesForExport() {
   const list = Array.isArray(conversation) ? conversation.slice() : [];
-  const partial = buildPartialTurn(pendingParts, pendingNarration || pendingAcc);
+  const partial = buildPartialTurn(streamState.parts, streamState.responseText);
   if (partial) list.push(partial);
   return list;
 }
@@ -2809,14 +2742,14 @@ function adoptPanelSession(session: any, options: any) {
     if (followedRunCommitted()) resetFollowedRun();
     else rebuildFollowedMessages();
   }
-  if (panelBody && !streaming) {
+  if (panelBody && !runSession.isRunning) {
     renderConversation();
     renderHandoffChip();
     fitPanelHeight();
     pinToBottom();
   }
   renderSessionButton();
-  if (panel && !streaming) subscribePanelRun().catch(() => {});
+  if (panel && !runSession.isRunning) subscribePanelRun().catch(() => {});
   return true;
 }
 
@@ -2827,7 +2760,7 @@ function saveConversation(options?: any) {
   // 快照必须在调用当下取：流式/撤销连续触发时，队列里排着的是各自那一刻的内容。
   const messages = serializeConversation();
   const baseSeq = panelSessionSeq;
-  const runId = activeRunId || '';
+  const runId = runSession.runId;
   const savedHandoffId = handoffId;
   panelSessionSaveChain = panelSessionSaveChain
     .catch(() => {})
@@ -2850,7 +2783,7 @@ function saveConversation(options?: any) {
       } else if (res && (res.conflict || res.stale) && res.session) {
         // 旧标签页的回写不能覆盖完整会话；远端更新时也不覆盖当前未完成输出。
         // 空闲时切到存储里的版本，正在输出时保留当前 DOM，等结束后再同步。
-        if (id === panelSessionId && !streaming) {
+        if (id === panelSessionId && !runSession.isRunning) {
           adoptPanelSession(res.session, { activeId: res.activeId });
           showCitationHint(
             res.stale
@@ -3035,7 +2968,7 @@ async function switchPanelSession(id: any, options?: any) {
   const opts = options || {};
   const wanted = String(id || '');
   if (!wanted) return false;
-  if (streaming) {
+  if (runSession.isRunning) {
     showCitationHint('当前任务还在运行，结束后才能切换会话。');
     return false;
   }
@@ -3064,7 +2997,7 @@ async function switchPanelSession(id: any, options?: any) {
     return true;
   } finally {
     panelSessionSwitchInFlight = false;
-    if (deferredRemoteSessionId && !streaming && deferredRemoteSessionId !== panelSessionId) {
+    if (deferredRemoteSessionId && !runSession.isRunning && deferredRemoteSessionId !== panelSessionId) {
       const next = deferredRemoteSessionId;
       deferredRemoteSessionId = '';
       setTimeout(() => {
@@ -3075,7 +3008,7 @@ async function switchPanelSession(id: any, options?: any) {
 }
 
 async function newPanelSession() {
-  if (streaming) {
+  if (runSession.isRunning) {
     showCitationHint('当前任务还在运行，结束后才能新建会话。');
     return false;
   }
@@ -3229,7 +3162,7 @@ function renewPanelSessionLock() {
     if (res && res.locked && !res.ok) {
       panelSessionLockHeld = false;
       showCitationHint('该会话已在另一个标签页接管，本页任务将停止。');
-      if (activeInterruptFn) activeInterruptFn();
+      runSession.requestStop();
     }
   }).catch(() => {});
 }
@@ -3239,7 +3172,7 @@ async function handleRemotePanelSessions(state: any) {
   applyPanelSessionSummaries(state);
   const nextActive = String(state.activeId || '');
   if (!nextActive) return;
-  if (streaming || panelSessionSwitchInFlight) {
+  if (runSession.isRunning || panelSessionSwitchInFlight) {
     if (nextActive !== panelSessionId) deferredRemoteSessionId = nextActive;
     return;
   }
@@ -3594,7 +3527,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     }
     const rewind = e.target.closest('.act-rewind');
       if (rewind) {
-        if (streaming) return;
+        if (runSession.isRunning) return;
         const index = Number(rewind.getAttribute('data-turn-index'));
         if (Number.isInteger(index) && conversation[index] && conversation[index].role === 'user') {
           const undone = conversation[index];
@@ -3644,7 +3577,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     // 重新生成：截断到最后一条用户消息之前，用同一条指令再跑一次。
     const regen = e.target.closest('.act-regen');
     if (regen) {
-      if (streaming) return;
+      if (runSession.isRunning) return;
       let lastUser = -1;
       for (let i = conversation.length - 1; i >= 0; i--) {
         if (conversation[i] && conversation[i].role === 'user') {
@@ -3831,7 +3764,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   sendBtn.className = 'cmd-send';
   sendBtn.textContent = '发送';
   // 流式中重开面板时它必须是禁用的（run() 起始与 endStream() 也各自维护这条状态）。
-  sendBtn.disabled = streaming === true;
+  sendBtn.disabled = runSession.isRunning;
   const pickBtn = document.createElement('button');
   pickBtn.type = 'button';
   pickBtn.className = 'cmd-pick';
@@ -3944,7 +3877,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       b.className = 'quick-prompt';
       b.textContent = prompt;
       b.addEventListener('click', () => {
-        if (streaming) return;
+        if (runSession.isRunning) return;
         run(expandQuickPrompt(prompt));
       });
       quickWrap.appendChild(b);
@@ -4085,21 +4018,15 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     streamRender.cancel();
     // 连同"下一次补帧"的兜底定时器一起取消：收尾有自己的最终渲染，晚到的补画只会重复做一次。
     cancelStreamPaintRetry();
-    const endedRunId = activeRunId || '';
+    const endedRunId = runSession.runId;
     const endedSessionId = panelSessionId;
-    streaming = false;
+    runSession.finish();
     stopProgress();
     updateRunControlState();
     pendingAiMsg = null;
     pendingContentEl = null;
-    pendingStarted = false;
-    pendingAcc = '';
-    pendingParts = [];
-    pendingVerifyPass = null;
-    budgetStopped = false;
     flowEl = null;
-    pendingNarration = '';
-    lastNarration = '';
+    streamState.reset();
     typingEl = null;
     // 刻意**不**清空计划条：它已固定在输入框上方，任务结束后保留最终状态，
     // 便于回头确认「哪几步做完了」。下一轮开始时才清掉（见 newRun 处）。
@@ -4122,7 +4049,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       })
       .catch(() => {})
       .finally(() => {
-        if (!deferredRemoteSessionId || streaming) return;
+        if (!deferredRemoteSessionId || runSession.isRunning) return;
         const next = deferredRemoteSessionId;
         deferredRemoteSessionId = '';
         if (next !== panelSessionId) switchPanelSession(next, { activate: false, force: true }).catch(() => {});
@@ -4207,7 +4134,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     // 记进 flow 记录：位置由 push 顺序天然决定，面板重建时据此还原到原来的位置。
     // 注意 transcript.js 只认 narration / text / tool-* / screenshot，
     // 因此思考记录**不会**进入导出给外部 AI 的交接文本（它是展示层，不是证据）。
-    pendingParts.push({ type: 'thinking', text: seg.text });
+    streamState.appendPart({ type: 'thinking', text: seg.text });
     // 关键：断掉「进行中的段」指针，下一段思考就会另起一块 —— 这是"穿插"的实现要点。
     thinkSeg = null;
   }
@@ -4224,15 +4151,13 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     removeTypingEl();
     // 进入工具步骤：本次思考到此为止（该轮答案可能没有正文，只有工具调用）。
     finishReasoning();
-    if (pendingNarration) {
-      lastNarration = pendingNarration;
-      pendingParts.push({ type: 'narration', text: pendingNarration });
+    if (streamState.narration) {
+      const narration = streamState.flushNarration() || '';
       // 叙述段结束时用非流式模式重渲染，去掉末尾一直在闪烁的 stream-cursor。
       if (pendingContentEl) {
         removeStreamCursor(pendingContentEl);
-        pendingContentEl.innerHTML = renderAnswer(pendingNarration, currentCitations, false);
+        pendingContentEl.innerHTML = renderAnswer(narration, currentCitations, false);
       }
-      pendingNarration = '';
     }
     pendingContentEl = null;
     if (flowEl) flowEl.appendChild(step);
@@ -4249,13 +4174,11 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     if (color) step.style.color = color;
     step.textContent = value;
     appendStep(step);
-    pendingParts.push({ type: 'notice', text: value, color: color || '' });
+    streamState.appendPart({ type: 'notice', text: value, color: color || '' });
   }
 
   function commitPendingVerifyPass() {
-    if (!pendingVerifyPass) return;
-    pendingParts.push(pendingVerifyPass);
-    pendingVerifyPass = null;
+    streamState.commitVerifyPass();
   }
 
   /** 跟随页点「停止」：不碰 owner 的 port，向 SW 发一条按会话定向的停止请求。 */
@@ -4276,7 +4199,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   }
 
   async function interrupt(source: any) {
-    if (!streaming) {
+    if (!runSession.isRunning) {
       if (source === 'remote') return;
       await stopFollowedRun();
       return;
@@ -4294,17 +4217,17 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         if (activeConn) activeConn.postMessage({ type: 'stop' });
       } catch (e: any) {}
     }
-    const acc = pendingAcc;
+    const acc = streamState.content;
     closePort();
     if (pendingAiMsg && pendingAiMsg.parentNode) {
-      lastResponse = pendingNarration || lastNarration || acc;
+      lastResponse = streamState.responseText;
       if (acc) {
         if (pendingContentEl) {
           removeStreamCursor(pendingContentEl);
-          pendingContentEl.innerHTML = renderAnswer(pendingNarration || lastResponse, currentCitations, false);
+          pendingContentEl.innerHTML = renderAnswer(streamState.narration || lastResponse, currentCitations, false);
         }
         pendingAiMsg._raw = acc;
-      } else if (!pendingParts.length) {
+      } else if (!streamState.parts.length) {
         // 连一段思考都没收到：只在界面上说「已停止」，不往对话里塞一条空记录。
         if (pendingContentEl) {
           removeStreamCursor(pendingContentEl);
@@ -4313,17 +4236,19 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         }
       }
       // 与 'end' 路径同样的去重：若本段已作为叙述段固化，就不再重复记一条文本。
-      if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) pendingParts.push({ type: 'text', text: lastResponse });
+      if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
+        streamState.appendPart({ type: 'text', text: lastResponse });
+      }
       // ⚠ **必须带 parts**：思考（type:'thinking'）与工具步骤只存在 parts 里。
       // 原先这里只写 content + toolSummary ⇒ 停止过的轮次在重开面板后思考与步骤整块消失，
       // 而正文还在 —— 所以症状看起来像"只有思考丢了"。
       // 另外：原先只在 `acc` 非空时入栈，"只思考到一半就停止"的那一轮**什么都没留下**。
-      if (acc || pendingParts.length) {
+      if (acc || streamState.parts.length) {
         conversation.push({
           role: 'assistant',
           content: acc,
-          toolSummary: summarizeToolParts(pendingParts),
-          parts: pendingParts.slice(),
+          toolSummary: summarizeToolParts(streamState.parts),
+          parts: streamState.parts.slice(),
           // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
           // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
           plan: lastPlan.slice(),
@@ -4356,8 +4281,8 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     const last = conversation.length ? conversation[conversation.length - 1] : null;
     if (last && last.role === 'assistant' && last.interrupted) return;
     commitPendingVerifyPass();
-    const turn = buildInterruptedTurn(pendingParts, pendingNarration || pendingAcc, reasonText);
-    if (!turn.parts!.length && !String(pendingNarration || pendingAcc || '').trim()) return;
+    const turn = buildInterruptedTurn(streamState.parts, streamState.responseText, reasonText);
+    if (!turn.parts!.length && !String(streamState.responseText || '').trim()) return;
     conversation.push(turn);
     saveConversation();
   }
@@ -4378,10 +4303,11 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     return new Promise((resolve) => {
       const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 4000);
       const tick = () => {
-        if (!port || !streaming) { resolve(false); return; }
+        const activePort = runSession.port;
+        if (!activePort || !runSession.isRunning) { resolve(false); return; }
         if (Date.now() > deadline) { resolve(false); return; }
         readyWaiter = (ok: any) => { if (ok) resolve(true); else setTimeout(tick, 250); };
-        try { port.postMessage({ type: 'session-ready', runId: activeRunId }); } catch (e: any) { resolve(false); }
+        try { activePort.postMessage({ type: 'session-ready', runId: runSession.runId }); } catch (e: any) { resolve(false); }
       };
       tick();
     });
@@ -4392,11 +4318,11 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   //（agent.js 的 AbortError 分支 persist({phase:'interrupted'}) 并把 messages 回滚到
   // 最近一个完整 tool turn），只有同 runId + continuation 才会被当成"接着跑"。
   function sendAgentRequest() {
-    if (!port || !activeConn) return;
+    if (!runSession.port || !activeConn) return;
     try {
       activeConn.postMessage({
         action: 'agent',
-        runId: activeRunId,
+        runId: runSession.runId,
         sessionId: panelSessionId,
         question: activeInstruction,
         text: activeSelection,
@@ -4418,7 +4344,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   async function run(instruction: any, opts?: any) {
     const runOptions = opts || {};
     // 整页刷新后自动续跑：沿用 SW 侧已持久化的 runId（见 maybeResumeRunAfterReload）。
-    activeRunId = runOptions.presetRunId || ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7));
+    runSession.setRunId(runOptions.presetRunId || runSession.createRunId());
     activeInstruction = String(instruction || '');
     // 每轮固定一份选文快照：首次请求发出后会清掉待发送预览，但断线重连
     // 仍必须把同一段原文带给后台，不能因为 lastText 已清空而丢上下文。
@@ -4441,7 +4367,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         renderSessionMenu();
       }
     }
-    const acquired = await acquirePanelSessionLock(activeRunId, runOptions._lockTakeover === true);
+    const acquired = await acquirePanelSessionLock(runSession.runId, runOptions._lockTakeover === true);
     if (!acquired || !acquired.ok) {
       if (acquired && acquired.locked && !runOptions._lockConflictShown) {
         const owner = acquired.lock || {};
@@ -4541,12 +4467,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
      */
     const applyResumeSnapshot = (snapshot: any, approvalConn?: any) => {
       if (!snapshot || typeof snapshot !== 'object') return;
-      pendingAcc = String(snapshot.content || '');
-      pendingVerifyPass = null;
-      pendingParts = Array.isArray(snapshot.parts)
-        ? snapshot.parts.map((p: any) => Object.assign({}, p))
-        : [];
-      pendingNarration = String(snapshot.narration || '');
+      streamState.restore(snapshot);
       currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
       const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
       renderPlan(plan);
@@ -4560,16 +4481,15 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         thinkSeg = { id: ++thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
         mountThinkSegment(thinkSeg);
       }
-      contentEl.innerHTML = pendingNarration
-        ? renderAnswer(pendingNarration, currentCitations, false)
+      contentEl.innerHTML = streamState.narration
+        ? renderAnswer(streamState.narration, currentCitations, false)
         : '<span class="typing"><span></span><span></span><span></span></span>';
       flowEl.appendChild(contentEl);
-      if (pendingNarration) showStreamingAnswer(contentEl, pendingNarration, currentCitations);
-      typingEl = pendingNarration ? null : contentEl;
-      pendingStarted = true;
+      if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, currentCitations);
+      typingEl = streamState.narration ? null : contentEl;
       pendingAiMsg = aiMsg;
       pendingContentEl = contentEl;
-      pendingAiMsg._raw = pendingAcc;
+      pendingAiMsg._raw = streamState.content;
       // 进度条接着刷新前的计时与步骤走，不要从 0 重新开始。
       runStartedAt = Number(snapshot.startedAt) || runStartedAt || Date.now();
       const p = snapshot.progress || {};
@@ -4594,10 +4514,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       }
     };
     if (!resumeSnapshot) {
-      pendingAcc = '';
-      pendingVerifyPass = null;
-      pendingParts = [];
-      pendingNarration = '';
+      streamState.beginNew();
       if (usageEl) usageEl.textContent = '';
       // 新一轮开始：先清掉上一轮的计划条，等本轮的 update_plan 到达再显示。
       renderPlan([]);
@@ -4607,9 +4524,8 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       typingEl = contentEl;
       // 新一轮：上一轮的思考记录已成为历史，这里只清指针，不动那块 DOM。
       resetReasoning();
-      pendingStarted = false;
     }
-    streaming = true;
+    runSession.setRunning(true);
     startProgress();
     if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
     updateRunControlState();
@@ -4619,17 +4535,18 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       endStream();
       return;
     }
+    let conn: any;
     try {
-      port = chrome.runtime.connect({ name: 'ai-stream' });
+      conn = chrome.runtime.connect({ name: 'ai-stream' });
+      runSession.setPort(conn);
     } catch (e: any) {
       showCitationHint('扩展已更新，当前页面的助手已失效，请刷新页面后重试。');
       endStream();
       return;
     }
-    const conn = port;
     activeConn = conn;
     conn.onMessage.addListener((resp: any) => {
-      if (resp.runId && resp.runId !== activeRunId) return;
+      if (resp.runId && resp.runId !== runSession.runId) return;
       clearRespTimers();
       if (resp.type === 'reattached') {
         // 后台补发的最新快照：覆盖 query-run 时那份，补齐 attach 之前的事件。
@@ -4643,7 +4560,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       } else if (resp.type === 'citations') {
         currentCitations = resp.citations || null;
       } else if (resp.type === 'tool-call') {
-        pendingParts.push({ type: 'tool-call', callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || 'unknown' });
+        streamState.appendPart({ type: 'tool-call', callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || 'unknown' });
         appendStep(
           toolStepElement('🔧 ', resp.name, argHint(resp.args), '参数', clipDetail(JSON.stringify(resp.args || {}, null, 2), 2000))
         );
@@ -4672,7 +4589,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
                   loginUrl: String(resp.loginUrl || ''),
                 };
         }
-        pendingParts.push(resultPart);
+        streamState.appendPart(resultPart);
         appendStep(
           toolStepElement(
             resp.status === 'completed' ? '✓ 工具已完成：' : resp.status === 'failed' ? '✗ 工具失败：' : '— 工具未执行：',
@@ -4702,7 +4619,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         // 不写进 pendingParts（否则会话持久化会背着几百 KB 的图到处走）；
         // 图片本体已按 id 共享落盘，其它标签页/历史会话会按需取回。
         if (resp.id && resp.dataUrl) shotCache.set(resp.id, resp.dataUrl);
-        pendingParts.push({ type: 'screenshot', id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
+        streamState.appendPart({ type: 'screenshot', id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
         appendStep(screenshotElement(resp));
         fitPanelHeight();
         pinToBottom();
@@ -4715,7 +4632,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'budget-exceeded') {
-        budgetStopped = true;
+        streamState.markBudgetStopped();
         appendNoticePart('⏹ ' + (resp.message || 'Agent 已达到安全上限并停止'), '#b91c1c');
         fitPanelHeight();
         pinToBottom();
@@ -4766,7 +4683,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
           // 校验通过发生在 complete_task 之后、最终回答之前。若立刻插进时间线，
           // 它会停在「工具已完成：complete_task」后面，看起来像任务中间状态。
           // 先暂存，等 end 事件把最终回答与来源渲染完，再作为收尾状态放在最后。
-          pendingVerifyPass = { type: 'notice', text, color: '#16a34a', terminal: true };
+          streamState.setVerifyPass({ type: 'notice', text, color: '#16a34a', terminal: true });
         } else {
           appendNoticePart(text, '#b45309');
           fitPanelHeight();
@@ -4793,9 +4710,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         // 正文开始 → 思考记录定稿（它**本来就是折叠的**；用户手动展开过则保持展开，
         // 「定稿」不改变用户的选择）。
         finishReasoning();
-        pendingAcc += resp.text;
-        pendingNarration += resp.text;
-        pendingStarted = true;
+        streamState.appendChunk(resp.text);
         if (!pendingContentEl) {
           pendingContentEl = ensureTextEl();
           if (pendingContentEl) pendingContentEl.innerHTML = '';
@@ -4807,8 +4722,8 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
             const startedAt = Date.now();
             // 流式过程中也统一重编号引用，保证正文始终从 [1] 连续
             //（生成结束后会再次校正，幂等）。
-            if (pendingContentEl) showStreamingAnswer(pendingContentEl, pendingNarration, currentCitations);
-            pendingAiMsg._raw = pendingAcc;
+            if (pendingContentEl) showStreamingAnswer(pendingContentEl, streamState.narration, currentCitations);
+            pendingAiMsg._raw = streamState.content;
             noteStreamPaint(startedAt);
           };
           // 上一次重绘很贵时让位一帧（说明见 throttleStreamPaint）—— 画得越贵，间隔越长，
@@ -4828,31 +4743,31 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         finishReasoning();
         // 收尾前先 flush：否则下面设好的最终渲染会被一个仍在排队的流式渲染覆盖掉。
         streamRender.flush();
-        lastResponse = collapseImmediateRepeatedText(pendingNarration || lastNarration || '');
+        lastResponse = collapseImmediateRepeatedText(streamState.responseText);
         // 去重必须在引文重编号**之前**。重编号会改变 `[n]`，若拿重编号后的 finalText
         // 去和 parts 里的原始文本比较，同一段答案会被误判成新内容并再追加一份。
-        if (lastResponse && !alreadyCommittedAsText(pendingParts, lastResponse)) {
-          pendingParts.push({ type: 'text', text: lastResponse });
+        if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
+          streamState.appendPart({ type: 'text', text: lastResponse });
         }
         // 最终回复统一重编号引用：正文从 [1] 开始，参考来源只保留被引用的文章。
         //
         // **必须跨整条消息算**：渲染时每一段文字（narration / text）都按位置对齐同一份
         // citations，若只重编号最终答复那一段，其余段落里的 [n] 仍是全局编号，
         // 会指到错误的来源（实测症状：「参考来源」列的东西与正文说的不是一回事）。
-        const textParts = pendingParts.filter((p: any) => (p.type === 'narration' || p.type === 'text') && p.text);
+        const textParts = streamState.parts.filter((p: any) => (p.type === 'narration' || p.type === 'text') && p.text);
         const renumbered = renumberCitationsAcross(
           textParts.map((p: any) => p.text).concat([lastResponse]),
           currentCitations
         );
         const finalText = renumbered.apply(lastResponse);
         const finalCitations = renumbered.citations;
-        if (!pendingStarted) {
+        if (!streamState.started) {
           const el = ensureTextEl();
-          if (el) el.textContent = budgetStopped ? '（任务已停止，未生成最终回复）' : '（无返回内容）';
+          if (el) el.textContent = streamState.budgetStopped ? '（任务已停止，未生成最终回复）' : '（无返回内容）';
         } else if (pendingContentEl) {
           removeStreamCursor(pendingContentEl);
           pendingContentEl.innerHTML = renderAnswer(lastResponse, currentCitations, false);
-          pendingAiMsg._raw = pendingAcc;
+          pendingAiMsg._raw = streamState.content;
         }
         // 最终文本只在此处统一追加一次（见下方 dedupe），这里不再 push，避免重复记录。
 
@@ -4878,11 +4793,11 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         }
         // 校验通过的提示是收尾状态：放在最终正文与参考来源之后，
         // 而不是紧跟 complete_task 的工具结果。
-        if (pendingVerifyPass) {
+        if (streamState.verifyPass) {
           const verifyEl = document.createElement('div');
           verifyEl.className = 'agent-step verify-final';
-          verifyEl.style.color = pendingVerifyPass.color || '#16a34a';
-          verifyEl.textContent = pendingVerifyPass.text;
+          verifyEl.style.color = streamState.verifyPass.color || '#16a34a';
+          verifyEl.textContent = streamState.verifyPass.text;
           pendingAiMsg.appendChild(verifyEl);
         }
         // 刚结束的这条就是最后一条消息，直接给出「重新生成」入口
@@ -4890,7 +4805,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         if (lastResponse) pendingAiMsg.insertAdjacentHTML('beforeend', msgActionsHtml(true));
         commitPendingVerifyPass();
         // 整条消息的每一段都过同一张映射表，保证正文、工具结果与参考来源区三者一致。
-        const finalParts = dedupeAdjacentTextParts(pendingParts.map((p: any) => {
+        const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p: any) => {
           if (p.type === 'narration' || p.type === 'text') {
             return p.text
               ? Object.assign({}, p, { text: renumbered.apply(collapseImmediateRepeatedText(p.text)) })
@@ -4922,7 +4837,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         removeTypingEl();
         const errText = String(resp.error || '任务失败（未提供错误信息）');
         // 已经流出正文时错误追加在后面（不能覆盖 —— 见 renderRunError 的说明）。
-        const hasPartial = Boolean(String(pendingNarration || '').trim());
+        const hasPartial = streamState.hasPartial();
         renderRunError(flowEl, pendingContentEl, errText, hasPartial);
         if (resp.needSetup) {
           refreshApiKeyBanner();
@@ -4939,7 +4854,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         // 原实现只把错误写进 DOM：于是「导出记录」与「会话交接」都看不到它，
         // 面板一刷新更是彻底消失 —— 而失败正是最需要交接给外部 AI 的时刻。
         // 必须赶在 endStream() 之前取 pendingParts：它会把进行中的状态全部清空。
-        conversation.push(buildFailedTurn(pendingParts, errText, pendingNarration || pendingAcc));
+        conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
         saveConversation();
         endStream();
         closePort();
@@ -4952,8 +4867,8 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       //      若在那里置空，新连接的 activeConn 仍为 null，这一条就恒成立、永不重连。
       //   ② 不是当前 port → 说明是正常结束（closePort 已置空），不重连。
       if (conn !== activeConn) return; // 旧的/已被替换的连接，忽略
-      if (port === conn) port = null;
-      if (!streaming) return; // 正常结束后 closePort() 也会触发这里，不该重连
+      runSession.clearPort(conn);
+      if (!runSession.isRunning) return; // 正常结束后 closePort() 也会触发这里，不该重连
       // 后台在端口断开时刻意保留会话（agent.js 的 AbortError 分支），
       // 这里用**同一个 runId** 重连即可接着跑 —— 否则一次几分钟的任务会直接丢失，
       // 而完整的恢复机制永远不被触发（此前就是这样：恢复逻辑是死代码）。
@@ -4964,20 +4879,22 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
         return;
       }
       portRetries += 1;
+      let nextPort: any;
       try {
-        port = chrome.runtime.connect({ name: 'ai-stream' });
+        nextPort = chrome.runtime.connect({ name: 'ai-stream' });
+        runSession.setPort(nextPort);
       } catch (e: any) {
         endStream();
         return;
       }
-      activeConn = port;
-      port.onMessage.addListener((resp: any) => {
-        if (resp.runId && resp.runId !== activeRunId) return;
+      activeConn = nextPort;
+      nextPort.onMessage.addListener((resp: any) => {
+        if (resp.runId && resp.runId !== runSession.runId) return;
         if (resp.type === 'session-ready') {
           if (readyWaiter) { const w = readyWaiter; readyWaiter = null; w(resp.ready === true); }
           return;
         }
-        if (resp.type === 'end' || resp.type === 'error') streaming = false;
+        if (resp.type === 'end' || resp.type === 'error') runSession.finish();
       });
       // 重连前确认「后台已把中断的会话落盘」。
       // 只延迟固定时间是不够的：persist 是异步的，若重连早于落盘，
@@ -4986,7 +4903,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       // 因此轮询就绪探针；若始终不就绪，则如实收尾而不是盲目重发。
       (async () => {
         const ready = await waitSessionReady(6000);
-        if (!streaming) return;
+        if (!runSession.isRunning) return;
         if (!ready) {
           removeTypingEl();
           showCitationHint('任务被中断且后台未能恢复会话，请重新发送指令。');
@@ -5005,11 +4922,11 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     }, 20000);
     if (runOptions.reattach) {
       // 直接挂到仍然活着的 run 上：不启动第二次 agent 请求，也不重新执行工具。
-      conn.postMessage({ type: 'reattach', runId: activeRunId, sessionId: panelSessionId });
+      conn.postMessage({ type: 'reattach', runId: runSession.runId, sessionId: panelSessionId });
     } else {
       conn.postMessage({
         action: 'agent',
-        runId: activeRunId,
+        runId: runSession.runId,
         sessionId: panelSessionId,
         question: instruction,
         text: activeSelection,
@@ -5040,12 +4957,12 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       // 注意：**必须由后台侧断开**。实测面板自己调用 port.disconnect() 不会触发
       // 它自己的 onDisconnect（本端主动断开不走该事件），因此那条路测不到重连。
       // 后台侧断开才是真实场景（MV3 worker 被回收）。见 background.js 的 e2e-drop-port。
-      try { if (port) port.postMessage({ type: 'e2e-drop-port' }); } catch (e: any) {}
+      try { runSession.port?.postMessage({ type: 'e2e-drop-port' }); } catch (e: any) {}
       window.dispatchEvent(new CustomEvent('__RF_E2E__dropped'));
     });
     // 15 秒无任何回流 → 提示等待；45 秒仍无 → 报错结束，避免无限转圈。
     respTimer = setTimeout(() => {
-      if (!streaming || respWarned) return;
+      if (!runSession.isRunning || respWarned) return;
       respWarned = true;
       if (pendingContentEl) {
         const note = document.createElement('div');
@@ -5055,7 +4972,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
       }
     }, 15000);
     respFailTimer = setTimeout(() => {
-      if (!streaming) return;
+      if (!runSession.isRunning) return;
       const el = pendingContentEl || ensureTextEl();
       if (el) {
         removeStreamCursor(el);
@@ -5070,7 +4987,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   }
 
   function send() {
-    if (streaming) return;
+    if (runSession.isRunning) return;
     const cmd = cmdInput.value.trim();
     if (!cmd) return;
     run(expandQuickPrompt(cmd));
@@ -5164,16 +5081,16 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   pinToBottom();
 
   // 把 run 挂到模块级引用，供整页刷新后的自动续跑入口调用（见 maybeResumeRunAfterReload）。
-  runAgent = run;
-  activeInterruptFn = interrupt;
-  if (!suppressPanelUiPublish) publishPanelUi(true, 'global');
+  runSession.bindRunner(run);
+  runSession.bindInterrupt(interrupt);
+  if (panelVisibility.canPublish) publishPanelUi(true, 'global');
   subscribePanelRun().catch(() => {});
 }
 
 // 选中新内容时，刷新已打开的对话框
 function refreshPanelForSelection() {
   // 流式中不打断当前生成，仅刷新选中文本预览；正在输出的回复通过 restoreStreamingUI 恢复。
-  if (!streaming) closePort();
+  if (!runSession.isRunning) closePort();
   lastResponse = '';
   syncPanelSelectionPreview();
   renderConversation();
@@ -5210,7 +5127,7 @@ function adoptFinishedRunSnapshot(snapshot: any) {
   msg.showCitations = true;
   conversation.push(msg);
   saveConversation();
-  if (panelBody && !streaming) {
+  if (panelBody && !runSession.isRunning) {
     renderConversation();
     fitPanelHeight();
     pinToBottom();
@@ -5224,7 +5141,7 @@ function maybeResumeRunAfterReload() {
   let attempts = 0;
   const MAX_ATTEMPTS = 12;
   const tick = () => {
-    if (streaming) return;
+    if (runSession.isRunning) return;
     attempts += 1;
     if (attempts > MAX_ATTEMPTS) return;
     let p: any = null;
@@ -5235,17 +5152,17 @@ function maybeResumeRunAfterReload() {
         if (handled || !resp || resp.type !== 'run-state') return;
         handled = true;
         try { p.disconnect(); } catch (e: any) {}
-        if (!resp.resumable && resp.finished && resp.snapshot && !streaming) {
+        if (!resp.resumable && resp.finished && resp.snapshot && !runSession.isRunning) {
           try {
             if (conversationLoadPromise) await conversationLoadPromise;
           } catch (e: any) {}
           try {
-            if (panelUiReadyPromise) await panelUiReadyPromise;
+            if (panelVisibility.ready) await panelVisibility.ready;
           } catch (e: any) {}
-          if (!streaming) adoptFinishedRunSnapshot(resp.snapshot);
+          if (!runSession.isRunning) adoptFinishedRunSnapshot(resp.snapshot);
           return;
         }
-        if (resp.resumable && resp.runId && resp.instruction && !streaming) {
+        if (resp.resumable && resp.runId && resp.instruction && !runSession.isRunning) {
           if (resp.live !== true) {
             showCitationHint('后台连接曾中断，已从已保存的进度继续本轮任务。');
           }
@@ -5256,20 +5173,19 @@ function maybeResumeRunAfterReload() {
             if (conversationLoadPromise) await conversationLoadPromise;
           } catch (e: any) {}
           try {
-            if (panelUiReadyPromise) await panelUiReadyPromise;
+            if (panelVisibility.ready) await panelVisibility.ready;
           } catch (e: any) {}
-          if (streaming) return;
+          if (runSession.isRunning) return;
           // 面板全局关闭时，续跑仍要启动，但不能把其他标签页的面板重新拉开。
-          const keepClosed = !panelUiOpen;
-          suppressPanelUiPublish = keepClosed;
-          openPanel(0, 0, true, true); // 先让 openPanel 把 run 挂到 runAgent
-          suppressPanelUiPublish = false;
+          const keepClosed = !panelVisibility.isOpen;
+          await panelVisibility.withSuppressed(async () => {
+            openPanel(0, 0, true, true); // 先让 openPanel 把 run 挂到 runAgent
+          });
           // 对话历史若已恢复出这条用户消息，就跳过重复 push（见 run 的 skipUserTurn）。
           const last = conversation.length ? conversation[conversation.length - 1] : null;
           const alreadyHas = last && last.role === 'user' && String(last.content || '').trim() === String(resp.instruction).trim();
-          let runPromise = null;
-          if (runAgent) {
-            runPromise = runAgent(String(resp.instruction), {
+          const runPromise = runSession.hasRunner
+            ? Promise.resolve(runSession.invokeRunner(String(resp.instruction), {
               // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
               continuation: resp.live !== true,
               reattach: resp.live === true,
@@ -5278,8 +5194,8 @@ function maybeResumeRunAfterReload() {
               // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
               // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
               resumeSnapshot: resp.snapshot || null,
-            });
-          }
+            }))
+            : null;
           if (keepClosed && runPromise && typeof runPromise.finally === 'function') {
             runPromise.finally(() => {
               if (panel) removePanel({ publish: false });
@@ -5490,7 +5406,7 @@ export function initAssistant() {
       } else if (msg.type === 'panel:sessions-changed') {
         handleRemotePanelSessions(msg).catch(() => {});
       } else if (msg.type === 'panel:ui-changed') {
-        applyPanelUiState(msg).catch(() => {});
+        panelVisibility.apply(msg).catch(() => {});
       } else if (msg.type === 'run:started') {
         handleRunStarted(msg);
       } else if (msg.type === 'run:delta') {
@@ -5501,15 +5417,15 @@ export function initAssistant() {
         // 跟随页发起的停止：owner 不在 runHub 的 delta 接收者里，必须由 SW 直接通知。
         if (
           String(msg.sessionId || '') === panelSessionId &&
-          String(msg.runId || '') === String(activeRunId || '')
+          String(msg.runId || '') === String(runSession.runId || '')
         ) {
-          if (activeInterruptFn) activeInterruptFn('remote');
+          runSession.requestStop('remote');
         }
       } else if (msg.type === 'panel:lock-lost') {
         if (String(msg.id || '') !== panelSessionId) return;
         if (String(msg.runId || '') && panelSessionLockRunId && String(msg.runId) !== panelSessionLockRunId) return;
         showCitationHint('另一个标签页已接管该会话，本页任务已停止。');
-        if (activeInterruptFn) activeInterruptFn();
+        runSession.requestStop();
       } else if (msg.type === 'panel:toggle') {
         togglePanelFromShortcut();
       }
@@ -5531,7 +5447,7 @@ export function initAssistant() {
   // 保存 promise 供 snapshotHandoff 等待，避免「对话还没读回来就打包交接包」的竞态。
   conversationLoadPromise = loadConversation();
   // 新页面继承全浏览器面板开合状态；远端切换时由 onMessage 的 panel:ui-changed 应用。
-  panelUiReadyPromise = syncPanelUiOnInit();
+  panelVisibility.syncOnInit();
   // 整页刷新后自动接管"被中断的任务"：问 SW 本 tab 是否有可续跑的 run，
   // 有则重开面板、用同一 runId 续跑（SW 从持久化消息恢复，不重新执行）。
   maybeResumeRunAfterReload();

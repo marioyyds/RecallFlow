@@ -8785,6 +8785,47 @@ function buildInitialMessagesPure(input = {}) {
   return messages;
 }
 
+// lib/assistant/agent-run-context.ts
+function arrayCopy(value) {
+  return Array.isArray(value) ? value.slice() : [];
+}
+function finiteInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
+}
+function createAgentRunContext(input) {
+  const payload = input.payload || {};
+  const persisted = input.persisted || {};
+  const resumed = input.canResume === true;
+  return {
+    book: input.book,
+    settings: input.settings,
+    sessionId: String(payload.sessionId || ""),
+    page: resumed ? String(persisted.page || "") : String(payload.page || ""),
+    pageUrl: resumed ? String(persisted.pageUrl || "") : String(payload.pageUrl || ""),
+    pageTitle: resumed ? String(persisted.pageTitle || "") : String(payload.pageTitle || ""),
+    tabId: input.tabId || (resumed ? persisted.tabId : void 0),
+    originalTabId: resumed ? Number(persisted.originalTabId || input.tabId) : input.tabId,
+    openedTabs: resumed ? arrayCopy(persisted.openedTabs) : [],
+    openedTabCount: resumed ? Number(persisted.openedTabCount || 0) : 0,
+    maxOpenedTabs: input.budget.maxOpenedTabs || 0,
+    tabSwitchCount: resumed ? Number(persisted.tabSwitchCount || 0) : 0,
+    maxTabSwitches: input.budget.maxTabSwitches || 0,
+    failedUrls: resumed ? arrayCopy(persisted.failedUrls) : [],
+    browsingMode: input.browserMode ? "shared" : "isolated",
+    agentWindowId: resumed ? finiteInteger(persisted.agentWindowId) : null,
+    trace: resumed ? arrayCopy(persisted.trace) : [],
+    plan: resumed ? arrayCopy(persisted.plan) : [],
+    resultStore: /* @__PURE__ */ new Map(),
+    resultIds: new Set(resumed ? arrayCopy(persisted.resultIds) : []),
+    lastSnapshot: null,
+    lastEvidence: "",
+    lastReadFullText: "",
+    mcpIndex: /* @__PURE__ */ new Map(),
+    mcpStatus: []
+  };
+}
+
 // lib/assistant/vision.ts
 var MAX_IMAGES_PER_TASK = 3;
 function shouldSendImage(sentCount, cap = MAX_IMAGES_PER_TASK) {
@@ -9713,44 +9754,16 @@ async function runAgentStream(port, payload, settings, book, signal, tabId, obse
     keyword: detected.keyword,
     reason: detected.reason
   });
-  const ctx = {
+  const ctx = createAgentRunContext({
     book,
     settings,
-    // 面板会话 id：截图归档按会话归属，切换会话/其它标签页可按 id 取回。
-    sessionId: String(payload.sessionId || ""),
-    page: canResume ? persisted.page || "" : payload.page || "",
-    pageUrl: canResume ? persisted.pageUrl || "" : payload.pageUrl || "",
-    pageTitle: canResume ? persisted.pageTitle || "" : payload.pageTitle || "",
-    tabId: tabId || (canResume ? persisted.tabId : void 0),
-    originalTabId: canResume ? persisted.originalTabId || tabId : tabId,
-    openedTabs: canResume && Array.isArray(persisted.openedTabs) ? persisted.openedTabs.slice() : [],
-    openedTabCount: canResume ? Number(persisted.openedTabCount || 0) : 0,
-    maxOpenedTabs: budget.maxOpenedTabs,
-    tabSwitchCount: canResume ? Number(persisted.tabSwitchCount || 0) : 0,
-    maxTabSwitches: budget.maxTabSwitches,
-    // 记录已抓取失败的 URL，fetch_webpage 对同一 URL 重试时直接拒绝，避免反复猜 URL 空耗预算。
-    failedUrls: canResume && Array.isArray(persisted.failedUrls) ? persisted.failedUrls.slice() : [],
-    // 浏览隔离：浏览器操作类任务与用户共享窗口；研究/知识库/对话类任务用专用 Agent 窗口。
-    browsingMode: intent === INTENTS.BROWSER ? "shared" : "isolated",
-    agentWindowId: canResume && Number.isInteger(Number(persisted.agentWindowId)) ? Number(persisted.agentWindowId) : null,
-    // 本任务的可重放动作轨迹（供 save_macro 保存为宏）。
-    trace: canResume && Array.isArray(persisted.trace) ? persisted.trace.slice() : [],
-    // 本任务的执行计划（子目标清单，由 update_plan 维护）。
-    plan: canResume && Array.isArray(persisted.plan) ? persisted.plan.map((p) => Object.assign({}, p)) : [],
-    // 大工具结果的暂存（超出阈值时截断消息、把全文放这里，供 expand_result 读取）。
-    // 内容不跨恢复保留，但 id 会（resultIds）—— 这样恢复后能明确告知「该结果属于上一轮运行」，
-    // 而不是让模型以为记错了 id、反复重试。
-    resultStore: /* @__PURE__ */ new Map(),
-    resultIds: new Set(canResume && Array.isArray(persisted.resultIds) ? persisted.resultIds : []),
-    // 最近一次页面证据（供完成前校验使用）。
-    lastSnapshot: null,
-    lastEvidence: "",
-    // 最近一次读类工具的**全文**（截断之前的原始结果）。
-    // 完成前校验不能只给页面前 N 个字：实测一次「提炼关键要点」任务页面 10398 字，
-    // 而结论依据的提交哈希散落在深处，校验方在前 2500 字里找不到就否决了。
-    // 有了全文，selectEvidence 才能按结论里的具体事实去定位片段。
-    lastReadFullText: ""
-  };
+    budget,
+    browserMode: intent === INTENTS.BROWSER,
+    canResume,
+    tabId,
+    payload,
+    persisted
+  });
   trace({
     phase: "start",
     intent,
@@ -12267,6 +12280,69 @@ var RunChannel = class {
   }
 };
 
+// lib/assistant/run-registry.ts
+var TabRunRegistryState = class {
+  controllers = /* @__PURE__ */ new Map();
+  tabRecords = /* @__PURE__ */ new Map();
+  channels = /* @__PURE__ */ new Map();
+  abortTimers = /* @__PURE__ */ new Map();
+  get runs() {
+    return this.tabRecords.entries();
+  }
+  controllerFor(tabId) {
+    return this.controllers.get(tabId) || null;
+  }
+  setController(tabId, controller) {
+    this.controllers.set(tabId, controller);
+  }
+  deleteController(tabId) {
+    this.controllers.delete(tabId);
+  }
+  runFor(tabId) {
+    if (tabId == null) return null;
+    return this.tabRecords.get(tabId) || null;
+  }
+  setRun(tabId, record) {
+    this.tabRecords.set(tabId, record);
+  }
+  updateRun(tabId, record, patch) {
+    const next = Object.assign({}, record, patch);
+    this.tabRecords.set(tabId, next);
+    return next;
+  }
+  deleteRun(tabId) {
+    this.tabRecords.delete(tabId);
+  }
+  channelFor(runId) {
+    return this.channels.get(String(runId || "")) || null;
+  }
+  setChannel(runId, channel) {
+    this.channels.set(String(runId || ""), channel);
+  }
+  deleteChannel(runId) {
+    this.channels.delete(String(runId || ""));
+  }
+  clearAbortTimer(runId) {
+    const key = String(runId || "");
+    const timer = this.abortTimers.get(key);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.abortTimers.delete(key);
+  }
+  scheduleAbort(runId, delayMs, callback) {
+    const key = String(runId || "");
+    this.clearAbortTimer(key);
+    const timer = setTimeout(() => {
+      this.abortTimers.delete(key);
+      callback();
+    }, delayMs);
+    this.abortTimers.set(key, timer);
+  }
+};
+function createTabRunRegistry() {
+  return new TabRunRegistryState();
+}
+
 // lib/shared/idb-kv.ts
 function requestResult2(request) {
   return new Promise((resolve, reject) => {
@@ -13011,21 +13087,21 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => {
   runSubscriptions.delete(tabId);
-  const runRec = tabRuns.get(tabId);
+  const runRec = runRegistry.runFor(tabId);
   if (runRec && runRec.runId) {
     clearRunAbortTimer(runRec.runId);
-    runChannels.delete(String(runRec.runId));
+    runRegistry.deleteChannel(runRec.runId);
   }
-  const c = tabControllers.get(tabId);
+  const c = runRegistry.controllerFor(tabId);
   if (c) {
     try {
       runStats.aborts += 1;
       c.abort();
     } catch (e) {
     }
-    tabControllers.delete(tabId);
+    runRegistry.deleteController(tabId);
   }
-  tabRuns.delete(tabId);
+  runRegistry.deleteRun(tabId);
   panelSessions.releaseTabLocks(tabId).then(async (r) => {
     if (r && r.released) {
       const state2 = await panelSessions.list();
@@ -13042,10 +13118,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   } catch (e) {
   }
 });
-var tabControllers = /* @__PURE__ */ new Map();
-var tabRuns = /* @__PURE__ */ new Map();
-var runChannels = /* @__PURE__ */ new Map();
-var runAbortTimers = /* @__PURE__ */ new Map();
+var runRegistry = createTabRunRegistry();
 var REATTACH_GRACE_MS = 8e3;
 var runStats = { starts: 0, reattaches: 0, aborts: 0, hubDeltas: 0 };
 try {
@@ -13058,21 +13131,14 @@ try {
 } catch (e) {
 }
 function clearRunAbortTimer(runId) {
-  const id = String(runId || "");
-  const timer = runAbortTimers.get(id);
-  if (timer) {
-    clearTimeout(timer);
-    runAbortTimers.delete(id);
-  }
+  runRegistry.clearAbortTimer(runId);
 }
 function scheduleAbortIfNoReattach(runId, tabId) {
   const id = String(runId || "");
-  clearRunAbortTimer(id);
-  const timer = setTimeout(() => {
-    runAbortTimers.delete(id);
-    const rec = tabId == null ? null : tabRuns.get(tabId);
+  runRegistry.scheduleAbort(id, REATTACH_GRACE_MS, () => {
+    const rec = runRegistry.runFor(tabId);
     if (!rec || String(rec.runId || "") !== id) return;
-    const channel = runChannels.get(id);
+    const channel = runRegistry.channelFor(id);
     if (channel && channel.isAttached()) return;
     try {
       if (rec.controller && !rec.controller.__rfFinished) {
@@ -13081,15 +13147,14 @@ function scheduleAbortIfNoReattach(runId, tabId) {
       }
     } catch (e) {
     }
-  }, REATTACH_GRACE_MS);
-  runAbortTimers.set(id, timer);
+  });
 }
 function requestRunStop(params, requesterTabId) {
   const p = params || {};
   const wantedRunId = String(p.runId || "");
   const wantedSessionId = String(p.sessionId || "");
   let owner = null;
-  for (const [tabId, rec] of tabRuns) {
+  for (const [tabId, rec] of runRegistry.runs) {
     if (!rec) continue;
     if (wantedRunId && String(rec.runId || "") !== wantedRunId) continue;
     if (!wantedRunId && wantedSessionId && String(rec.sessionId || "") !== wantedSessionId) continue;
@@ -13100,7 +13165,7 @@ function requestRunStop(params, requesterTabId) {
     const snap = runHub.findBySession(wantedSessionId);
     if (snap && snap.ownerTabId != null) {
       const tabId = Number(snap.ownerTabId);
-      owner = { tabId, rec: tabRuns.get(tabId) || {} };
+      owner = { tabId, rec: runRegistry.runFor(tabId) || {} };
     }
   }
   const runId = String(owner && owner.rec && owner.rec.runId || wantedRunId);
@@ -13109,12 +13174,12 @@ function requestRunStop(params, requesterTabId) {
     return { ok: false, code: "not-running", error: "\u8BE5\u4EFB\u52A1\u5DF2\u7ED3\u675F\uFF0C\u65E0\u9700\u505C\u6B62" };
   }
   if (!owner) return { ok: false, code: "owner-missing", error: "\u627E\u4E0D\u5230\u4EFB\u52A1\u6240\u5C5E\u6807\u7B7E\u9875" };
-  const controller = tabControllers.get(owner.tabId);
+  const controller = runRegistry.controllerFor(owner.tabId);
   if (!controller || controller.signal.aborted) {
     return { ok: false, code: "already-stopping", error: "\u8BE5\u4EFB\u52A1\u5DF2\u5728\u505C\u6B62\u4E2D" };
   }
   if (owner.rec && typeof owner.rec === "object") {
-    tabRuns.set(owner.tabId, Object.assign({}, owner.rec, { resumable: false }));
+    runRegistry.updateRun(owner.tabId, owner.rec, { resumable: false });
   }
   clearRunAbortTimer(runId);
   runHub.push(runId, {
@@ -13149,15 +13214,15 @@ chrome.runtime.onConnect.addListener((port) => {
   const ensureController = () => {
     if (!controller) {
       controller = new AbortController();
-      if (senderTabId) tabControllers.set(senderTabId, controller);
+      if (senderTabId) runRegistry.setController(senderTabId, controller);
     }
     return controller;
   };
   port.onDisconnect.addListener(() => {
     if (attachedRunId) {
-      const channel = runChannels.get(attachedRunId);
+      const channel = runRegistry.channelFor(attachedRunId);
       if (channel) channel.detach(port);
-      const rec = senderTabId == null ? null : tabRuns.get(senderTabId);
+      const rec = runRegistry.runFor(senderTabId);
       if (rec && String(rec.runId || "") === attachedRunId) {
         scheduleAbortIfNoReattach(attachedRunId, senderTabId);
         return;
@@ -13175,7 +13240,7 @@ chrome.runtime.onConnect.addListener((port) => {
     let aborted = false;
     try {
       if (payload && payload.type === "stop") {
-        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const tr = runRegistry.runFor(senderTabId);
         const stopped = requestRunStop({ runId: tr && tr.runId, sessionId: tr && tr.sessionId }, senderTabId);
         if (!stopped.ok && controller && !controller.__rfFinished) {
           try {
@@ -13187,7 +13252,7 @@ chrome.runtime.onConnect.addListener((port) => {
         return;
       }
       if (payload && payload.type === "query-run") {
-        const tr = senderTabId ? tabRuns.get(senderTabId) : null;
+        const tr = runRegistry.runFor(senderTabId);
         const reply = (m) => {
           try {
             port.postMessage(Object.assign({ type: "run-state" }, m));
@@ -13199,7 +13264,7 @@ chrome.runtime.onConnect.addListener((port) => {
           return;
         }
         const liveSnapshot = runHub.snapshot(tr.runId);
-        const liveChannel = runChannels.get(String(tr.runId));
+        const liveChannel = runRegistry.channelFor(tr.runId);
         if (liveChannel && liveSnapshot && liveSnapshot.status === "running") {
           reply({
             runId: String(tr.runId),
@@ -13236,7 +13301,7 @@ chrome.runtime.onConnect.addListener((port) => {
       }
       if (payload && payload.type === "reattach") {
         const runId = String(payload.runId || "");
-        const channel = runId ? runChannels.get(runId) : null;
+        const channel = runId ? runRegistry.channelFor(runId) : null;
         const snapshot = runId ? runHub.snapshot(runId) : null;
         const attachFailed = (reason) => {
           try {
@@ -13310,7 +13375,7 @@ chrome.runtime.onConnect.addListener((port) => {
         payload.runId = runId;
         const sessionId = String(payload.sessionId || "");
         const liveSnapshot = runHub.snapshot(runId);
-        const existingChannel = runChannels.get(String(runId));
+        const existingChannel = runRegistry.channelFor(runId);
         if (existingChannel && liveSnapshot && liveSnapshot.status === "running") {
           clearRunAbortTimer(runId);
           runStats.reattaches += 1;
@@ -13332,14 +13397,22 @@ chrome.runtime.onConnect.addListener((port) => {
         console.log("[RecallFlow] agent run start:", (payload.question || "").slice(0, 40), "tabId=" + tabId, "session=" + sessionId);
         runStats.starts += 1;
         const channel = existingChannel || new RunChannel();
-        runChannels.set(String(runId), channel);
+        runRegistry.setChannel(runId, channel);
         const runController = ensureController();
         if (!channel.attach(port, {})) {
           port.postMessage({ type: "error", error: "\u65E0\u6CD5\u7ED1\u5B9A Agent \u8F93\u51FA\u901A\u9053\u3002" });
           return;
         }
         attachedRunId = String(runId);
-        if (tabId) tabRuns.set(tabId, { runId, resumable: true, sessionId, channel, controller: runController });
+        if (tabId) {
+          runRegistry.setRun(tabId, {
+            runId,
+            resumable: true,
+            sessionId,
+            channel,
+            controller: runController
+          });
+        }
         if (sessionId) {
           runHub.begin({
             runId,
@@ -13372,7 +13445,7 @@ chrome.runtime.onConnect.addListener((port) => {
           if (sessionId) runHub.finish(runId, runController.signal.aborted ? "cancelled" : "completed");
           runController.__rfFinished = true;
           clearRunAbortTimer(runId);
-          runChannels.delete(String(runId));
+          runRegistry.deleteChannel(runId);
           attachedRunId = "";
         } catch (e) {
           const detail = e?.stack || String(e);
@@ -13392,7 +13465,7 @@ chrome.runtime.onConnect.addListener((port) => {
           }
           runController.__rfFinished = true;
           clearRunAbortTimer(runId);
-          runChannels.delete(String(runId));
+          runRegistry.deleteChannel(runId);
           attachedRunId = "";
         }
         return;

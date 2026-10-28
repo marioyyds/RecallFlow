@@ -45,7 +45,9 @@ export const ENTRIES = [
   { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 826 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 36 * 1024 },
   { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 518 * 1024 },
-  { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 54 * 1024 },
+  // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
+  // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
+  { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
   { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 514 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`

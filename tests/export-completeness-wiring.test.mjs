@@ -48,7 +48,7 @@ test('错误分支必须把失败轮次写进对话并落盘（否则刷新即�
   assert.match(errorBranch, /saveConversation\(\)/, '错误分支没有 saveConversation —— 面板一刷新错误就没了');
 });
 
-test('错误分支必须在 endStream() 之前取 pendingParts（它会把状态清空）', () => {
+test('错误分支必须在 endStream() 之前取流式 parts（它会把状态清空）', () => {
   const pushAt = errorBranch.indexOf('buildFailedTurn');
   const endAt = errorBranch.indexOf('endStream()');
   assert.ok(pushAt !== -1 && endAt !== -1);
@@ -56,7 +56,7 @@ test('错误分支必须在 endStream() 之前取 pendingParts（它会把状态
 });
 
 test('错误分支必须保留失败前已发生的工具轨迹', () => {
-  assert.match(errorBranch, /buildFailedTurn\(\s*pendingParts/, '失败轮次应带上 pendingParts，否则交接包里看不到它试过什么');
+  assert.match(errorBranch, /buildFailedTurn\(\s*streamState\.parts/, '失败轮次应带上流式 parts，否则交接包里看不到它试过什么');
 });
 
 test('导出必须带上进行中的轮次，而不是只读已入库的 conversation', () => {

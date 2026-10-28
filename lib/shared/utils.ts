@@ -8,8 +8,7 @@ import { sliceSafe } from './surrogates.ts';
 export interface SortableItem {
   createdAt?: number;
   updatedAt?: number;
-  status?: number;
-  [key: string]: unknown;
+  status?: number | string;
 }
 
 /**
@@ -162,8 +161,12 @@ export function markdownExcerpt(text: unknown, maxChars = 160) {
   return s.length > limit ? sliceSafe(s, 0, limit).trimEnd() + '…' : s;
 }
 
-export function sortItems(list: SortableItem[], sortBy: string) {
+export function sortItems<T extends SortableItem>(list: T[], sortBy: string): T[] {
   const arr = list.slice();
+  const status = (item: SortableItem) => {
+    const value = Number(item.status);
+    return Number.isFinite(value) ? value : 0;
+  };
   switch (sortBy) {
     case 'created':
       arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -171,14 +174,14 @@ export function sortItems(list: SortableItem[], sortBy: string) {
     case 'star-desc':
       arr.sort(
         (a, b) =>
-          (b.status || 0) - (a.status || 0) ||
+          status(b) - status(a) ||
           (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;
     case 'star-asc':
       arr.sort(
         (a, b) =>
-          (a.status || 0) - (b.status || 0) ||
+          status(a) - status(b) ||
           (b.updatedAt || 0) - (a.updatedAt || 0)
       );
       break;

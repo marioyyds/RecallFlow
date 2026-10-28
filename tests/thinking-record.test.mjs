@@ -76,10 +76,10 @@ test('chat.js：**每段思考单独一块并追加**（穿插在对话里，不
   assert.match(finishBody, /thinkSeg = null;/, '定稿后必须断掉进行中的段指针 —— 否则下一段会写回同一块');
 });
 
-test('chat.js：定稿的思考记录进 pendingParts（面板重建时按原位置还原）', () => {
+test('chat.js：定稿的思考记录进入流式状态 parts（面板重建时按原位置还原）', () => {
   const finish = chatSrc.slice(chatSrc.indexOf('function finishReasoning('));
   const finishBody = finish.slice(0, finish.indexOf('\n  }'));
-  assert.match(finishBody, /pendingParts\.push\(\{\s*type:\s*'thinking'/, '定稿时应记入 flow 记录');
+  assert.match(finishBody, /streamState\.appendPart\(\{\s*type:\s*'thinking'/, '定稿时应记入 flow 记录');
   // 恢复路径要认得这个类型，否则重开面板后思考全挤到最前（或直接消失）
   const restore = chatSrc.slice(chatSrc.indexOf('function renderCommittedParts('));
   const restoreBody = restore.slice(0, 1800);
@@ -260,13 +260,13 @@ test('chat.js：点「停止」也要把思考与步骤入库（interrupt 必须
   assert.ok(at >= 0);
   const body = chatSrc.slice(at, at + 2600);
   assert.match(body, /finishReasoning\(\);/, '停止前必须把**进行中**的那段思考定稿，否则它只活在 DOM 里');
-  assert.match(body, /parts: pendingParts\.slice\(\)/, '入栈必须带 parts（思考/工具步骤只存在这里）');
+  assert.match(body, /parts: streamState\.parts\.slice\(\)/, '入栈必须带 parts（思考/工具步骤只存在这里）');
   // 反向样张：原先那种"只带 content + toolSummary"的写法必须被判为不合格
   assert.ok(
     !/conversation\.push\(\{ role: 'assistant', content: acc, toolSummary: [^}]*\}\);/.test(body),
     '不得再出现"不带 parts"的入栈（那正是思考消失的原因）'
   );
-  assert.match(body, /pendingParts\.length/, '要有"连思考都没有"时的分支（不塞空记录）');
+  assert.match(body, /streamState\.parts\.length/, '要有"连思考都没有"时的分支（不塞空记录）');
 });
 
 test('chat.js：三条"半途收尾"的路都必须先入库再 endStream（否则整轮只活在 DOM 里）', () => {

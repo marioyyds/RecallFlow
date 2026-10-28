@@ -28,8 +28,17 @@ test('知识库写操作使用单条事务并广播变更', () => {
   assert.match(store, /async function updateStatus/);
   assert.match(store, /async function deleteItem/);
   assert.match(store, /subscribeKnowledgeChanges/);
-  assert.match(manager, /subscribeKnowledgeChanges/);
-  assert.match(popup, /subscribeKnowledgeChanges/);
+  assert.match(manager, /knowledge\.subscribe/);
+  assert.match(popup, /knowledge\.subscribe/);
+});
+
+test('popup 与 manager 不再各自维护知识库缓存和持久化函数', () => {
+  for (const source of [manager, popup]) {
+    assert.doesNotMatch(source, /let bookCache/);
+    assert.doesNotMatch(source, /async function loadCache/);
+    assert.doesNotMatch(source, /async function persist/);
+    assert.match(source, /createKnowledgeRepository\(/);
+  }
 });
 
 test('E2E 直接读 IndexedDB，而不是旧 knowledgeBase key', () => {
