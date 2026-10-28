@@ -17,17 +17,9 @@ const STEPS = [
   {
     name: '单元测试（含 MCP）',
     cmd: process.execPath,
-    // `--import ./scripts/ts-resolve-reg.mjs`：TS 迁移期挂上 resolve hook，
-    // 让 importer 里仍写 `.js` 的 specifier 能解析到已改名的 `.ts`（详见该文件头注释）。
-    // 没有它，「A 把文件改成 .ts、B 还没改 import 后缀」的中间态会直接
-    // ERR_MODULE_NOT_FOUND —— 而那正是两个 Dev 并行迁移时的常态。
-    // 放在 `--test` 前面：node --test 会为每个测试文件起子进程，
-    // 实测 execArgv（含 --import）会传下去（2026-10-26 用临时样本验证过）。
-    // ⚠ 迁移期脚手架：Batch 5 收口（全部 specifier 改成真实后缀）时连同
-    //   scripts/ts-resolve.mjs / ts-resolve-reg.mjs 一起删掉这一项。
+    // Batch 6 收口后全仓 specifier 都是真实后缀（`.ts` / `.mjs`），Node 直接解析即可，
+    // 不再需要迁移期的 `--import ./scripts/ts-resolve-reg.mjs` resolve hook。
     args: [
-      '--import',
-      './scripts/ts-resolve-reg.mjs',
       '--test',
       'tests/*.test.mjs',
       'integrations/opencode/recallflow-mcp/test/*.test.mjs',

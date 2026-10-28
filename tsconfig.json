@@ -1,14 +1,15 @@
 {
-  // 迁移期类型基础设施。目标形态：**新增/迁移的模块可以是 .ts，存量 .js 一律不动**。
+  // 类型基础设施（Batch 6 收口后的最终形态：全仓源码已是 .ts）。
   //
   // 用法：
-  //   npm run check:types        # = tsc --noEmit（当前**不**进 run-all-checks，见文件末尾）
+  //   npm run check:types        # = tsc --noEmit（已进 run-all-checks.mjs 的 STEPS）
   //
   // 三条硬约束，改之前先看：
-  //   1. `allowJs: true` + `checkJs: false`：存量 .js 只被**解析**（为了让 .ts 能推断它们的形状），
-  //      不做类型检查。这是 allowJs 渐进迁移的全部意义 —— 存量 JS 不会因为接上 tsc 而整片变红。
-  //   2. `noEmit: true`：产物只有 esbuild 那一条路（`scripts/build-content.mjs`）。
-  //      类型检查永远不参与出包，tsc 与 esbuild 各管一段，互不干扰。
+  //   1. `allowJs: true` + `checkJs: true`：允许 .js 被解析，且**检查**其中能被 include
+  //      到的 .js。Batch 6 之后源码已无 .js，仅剩两个构建产物（见 exclude）；打开 checkJs
+  //      是为了让后来新增的 .js 不再带着未检查的类型进仓库。
+  //   2. `noEmit: true`：产物只有 esbuild 那一条路（`scripts/build-content.mjs` /
+  //      `scripts/build-entries.mjs`）。类型检查永远不参与出包，tsc 与 esbuild 各管一段。
   //   3. `allowImportingTsExtensions: true`（只有 noEmit 下才允许）：让模块之间可以用
   //      真实扩展名互引（`import { x } from './table.ts'`）。理由见下。
   //
@@ -17,6 +18,7 @@
   //     `./x.ts`，写 `.js` 会直接 ERR_MODULE_NOT_FOUND（2026-10-26 实测）；
   //   - esbuild 拿 `./x.ts` 也能正常解析（它按真实路径找文件）。
   //   两条链路唯一共用的写法，就是写真实扩展名。
+  //   Batch 6 已把全仓 specifier 统一成真实后缀，迁移期的 resolve hook 已删除。
   //
   // ⚠ `exclude` 必须显式带上 node_modules：一旦写了 `exclude`，TS 就不再套用默认的
   // node_modules 排除，上千个依赖 .js 会被 allowJs 拉进 program（实测直接把 tsc 拖崩）。
@@ -35,50 +37,42 @@
     "strict": true,
     // ⚠ **必须显式关掉，否则产物会变**。`strict: true` 会让 TS 把 `alwaysStrict` 也视为 true，
     // 而 esbuild 读 tsconfig 时认这一项 —— 于是它会在 IIFE 产物头部补一行 `"use strict";`，
-    // 实测 `content.js` 凭空多 14 字节、对 `entries/content.js` 一字未改而言就是一次假变更，
+    // 实测 `content.js` 凭空多 14 字节、对 `entries/content.ts` 一字未改而言就是一次假变更，
     // 会把体积棘轮、新鲜度门禁和 `git diff -- content.js` 全部卷进来。
     // 关掉它不会丢语义：本仓库源码全是 ESM（package.json 的 "type": "module"），
     // ESM 本来就是严格模式，不需要这条指令；它只是 esbuild 在把 ESM 降级成 IIFE 时补的。
-    // 迁移期判定「接上 tsc 对产物零影响」的唯一口径，就是这条 + `git diff -- content.js` 为空。
+    // 判定「纯类型改动对产物零影响」的看门狗，就是这条 + `git diff -- <artifact>` 为空。
     "alwaysStrict": false,
     "allowJs": true,
-    "checkJs": false,
+    // Batch 6：源码全部迁完后打开。当前唯一能被 include 到的 .js 是两件构建产物，
+    // 已在 exclude 里显式排除（它们是 esbuild 输出，不是源码；检查它们只会引入噪音）。
+    "checkJs": true,
     "noEmit": true,
     // @types/* 内部的问题不关我们的事，别让它们挡住自己的报错。
     "skipLibCheck": true,
     // 只自动引入 MV3 的 chrome.* 与 Node 类型，不让 @types/* 里的其他东西混进全局。
     //
     // 与 TITA-70 报告 §4.4 Batch 0 项 1 的 delta：报告写的是 `types: ["chrome"]`，
-    // 这里多一个 "node"。保留理由（TITA-71 的既有选择，本批不动）：
+    // 这里多一个 "node"。保留理由（TITA-71 的既有选择）：
     //   include 里的 `entries/**` 与 `lib/shared/**` 有模块同时被 Node 侧脚本
     //   （scripts/、tests/）与浏览器侧引用，缺 node 类型会在这些文件出现
     //   `Cannot find name 'process'` 一类噪音。加了不引入额外全局语义
     //   （`types` 只控制**自动引入**哪些 @types/*，不影响 lib 与模块解析）。
     //
-    // ⚠ 已知的**版本差**（本批刻意未动，属 Batch 5 收口项）：
-    //   package.json 里 `@types/node` 钉的是 `^22.x`，而 CI 的 setup-node 已改为
-    //   `'24'`（见 .github/workflows/checks.yml）。即「用 Node 22 的类型检查跑在
-    //   Node 24 上」。当前 include 不含 `scripts/**` / `tests/**`，所以 tsc 结果
-    //   不受影响（实测 exit 0）；等 include 扩到这两处时，应先把 @types/node 抬到 ^24。
+    // Batch 6 收口：`@types/node` 已抬到 `^24`，与 CI 的 setup-node `'24'` 对齐
+    //   （原先钉 `^22` 属于「用 Node 22 的类型跑 Node 24」，见 .github/workflows/checks.yml）。
     "types": ["chrome", "node"],
     "forceConsistentCasingInFileNames": true
   },
-  // 口径随迁移批次扩（每迁一批往里加一个目录）。
-  // 别图省事一步 include 到 ["lib/**", "*.js"]：那会在迁移批次之外拉进上万行存量 JS，
-  // 让 tsc 的启动时间与后续排查面都失控。
+  // 口径：逐目录列出**源码**，不写 `["lib/**", "*.js"]` 这种把产物和脚本一起拉进来的写法。
   //
-  // Batch 1a（TITA-74）把 `lib/page/**` 加了进来：本批 12 个文件里 10 个在 `lib/page`，
-  // 靠 entries/content.js **间接**拉进 program 也能覆盖到，但那层依赖是隐式的 ——
-  // 谁改了 content 的 import，哪天某个文件就悄悄退出类型检查了。写进来是显式化。
-  // `checkJs: false` 的含义不变：这个目录里**还没迁**的 .js 只被解析，不被检查。
-  // Batch 2（TITA-78）再加三处：`lib/assistant/**`（run-hub 在浏览器图与内容图交集里）、
-  // `lib/userscript/**`（user runner 与脚本管理）、`entries/**`（已在列，产物入口的源码）。
-  // 同样只对**已迁移的 .ts** 生效，目录里其余 .js 仍只被解析。
+  // Batch 1a（TITA-74）加 `lib/page/**`；Batch 2（TITA-78）加 `lib/assistant/**`、
+  // `lib/userscript/**`、`entries/**`；Batch 4（TITA-84）加 `lib/backend/**`、`lib/bridge/**`。
+  // Batch 6 时 `lib/` 与 `entries/` 下的源码已全部是 `.ts`。
   "include": ["entries/**/*", "lib/shared/**/*", "lib/page/**/*", "lib/assistant/**/*", "lib/userscript/**/*", "lib/backend/**/*", "lib/bridge/**/*"],
-  "exclude": ["node_modules"]
-  // ▼ `npm run check:types`（= `tsc --noEmit`）**刻意没有**挂进 scripts/run-all-checks.mjs。
-  // 上面这个 include 里现在一个 .ts 都没有，纳入门禁就是一条「永远为绿」的假闸 ——
-  // 门禁不运行等于不存在，但运行了却永远绿，比不运行更坏：它会让后面的人以为有网接着。
-  // 纳入门禁的时点：第一批 .ts 落地之后，且必须先在**坏样本**上证明它会红（自证有牙齿），
-  // 再把这一条补进 run-all-checks.mjs 的 STEPS。
+  // node_modules：见文件顶部 ⚠；后两项是 esbuild 产物，与源码同名但不是源码
+  // （`lib/page/debug-hook.js` 由 debug-hook.ts 生成，`lib/userscript/runner.js` 由
+  // entries/userscript-runner.ts 生成，清单在 scripts/build-entries.mjs 的 ENTRIES）。
+  "exclude": ["node_modules", "lib/page/debug-hook.js", "lib/userscript/runner.js"]
+  // ▼ `tsc --noEmit` 已在 scripts/run-all-checks.mjs 的 STEPS 里（Batch 1a 起）。
 }

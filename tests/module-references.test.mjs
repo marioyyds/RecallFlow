@@ -51,19 +51,13 @@ export function stripQuery(spec) {
 }
 
 /** 相对路径 specifier → 真实文件（含 .js / .mjs / index.js 三种省略写法）。 */
-/** 迁移期的后缀互换：`importer 写 .js、文件已是 .ts` 由 scripts/ts-resolve.mjs 兜住，
- *  静态分析这里也得认，否则「改名」会被误判成「没人引用它」/「它是死代码」。
- *  Batch 5 收口（所有 specifier 都写真实后缀）后可删掉 swapExt。 */
-function swapExt(file) {
-  return file.replace(/\.(js|mjs|ts|mts)$/, (ext) =>
-    ext === '.js' ? '.ts' : ext === '.mjs' ? '.mts' : ext === '.ts' ? '.js' : '.mjs');
-}
-
 function resolveImport(fromFile, spec) {
   const s = stripQuery(spec);
   if (!s.startsWith('.')) return null;
   const base = path.resolve(path.dirname(fromFile), s);
-  for (const cand of [base, base + '.js', base + '.mjs', swapExt(base), path.join(base, 'index.js')]) {
+  // Batch 6 收口后 specifier 一律写真实后缀（`.ts` / `.mjs`），换后缀的兜底已删除：
+  // 再保留 swapExt 会让「importer 写 .js、文件已改名 .ts」的旧形态继续静默通过。
+  for (const cand of [base, base + '.js', base + '.mjs', path.join(base, 'index.js')]) {
     try {
       if (fs.statSync(cand).isFile()) return cand;
     } catch (e) {
@@ -172,8 +166,8 @@ test('被豁免的模块必须真的被**生产代码**用到（否则它是死�
       }
     })
     .join('\n');
-  // 同一个原因的另一处：产品代码里的 specifier 可能还写着 .js，而文件已是 .ts。
-  // 两种后缀任一出现就算「被用到」，否则改名会把活模块误判成死代码。
-  const dead = Object.keys(ALLOWED).filter((f) => !haystack.includes(f) && !haystack.includes(swapExt(f)));
+  // Batch 6 收口后 specifier 一律是真实后缀，不再做后缀互换兜底：
+  // 否则「活模块被改名」会继续被静默判成「有人引用」。
+  const dead = Object.keys(ALLOWED).filter((f) => !haystack.includes(f));
   assert.deepEqual(dead, [], '这些被豁免的模块在产品代码里也找不到任何引用：是死代码，请删除或接回去');
 });

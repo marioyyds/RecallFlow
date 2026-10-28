@@ -1,7 +1,7 @@
 // 「同名 .js + .ts 双存」门禁（TITA-78 返工，评审 N1）。
 //
 // 为什么需要它：迁移期同一个模块会逐个从 `.js` 改名成 `.ts`，而两套解析规则并不一致：
-//   · `scripts/ts-resolve.mjs`（Node 跑测试时）把 specifier 的 `.js` 优先解析成 `.ts`；
+//   · 迁移期的 `scripts/ts-resolve.mjs`（Batch 6 已回收）曾把 specifier 的 `.js` 优先解析成 `.ts`；
 //   · `tests/source-path.mjs` 的规则是「先按写的那样找，找不到再试另一个后缀」。
 // 一旦同名 `.js` 与 `.ts` 同时存在，`source-path` 就可能静默读到**旧副本** ——
 // 门禁看到的是过期内容却照样绿。这与 L-30 同族：读错文件比直接报错更难发现。
