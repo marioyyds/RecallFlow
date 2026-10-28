@@ -59,7 +59,7 @@ test('纯行尾差异：diff 有、ignore-cr-at-eol 没有 ⇒ 命中', () => {
   assert.deepEqual(findEolOnlyDiffs(['a.ts'], ['a.ts']), [], '内容差异不算行尾差异');
 });
 
-test('autocrlf=true/input：整条门禁跳过（磁盘 CRLF 是合法检出形态）', () => {
+test('autocrlf=true/input：只跳过行尾判定，磁盘 CRLF 不算差异', () => {
   const state = collectState({
     autocrlf: 'true',
     eolRows: [row('lib/a.ts', 'lf', 'crlf')],
@@ -70,7 +70,49 @@ test('autocrlf=true/input：整条门禁跳过（磁盘 CRLF 是合法检出形�
   assert.equal(state.enforced, false);
   const r = compareStates(null, state);
   assert.equal(r.ok, true);
-  assert.equal(r.skipped, true);
+  assert.equal(r.eolSkipped, true);
+  assert.deepEqual(r.newEol, []);
+});
+
+test('R1：**未设置** core.autocrlf 必须判定（CI ubuntu runner 就是这种形态）', () => {
+  // GitHub Actions 的 ubuntu runner 没有设置 core.autocrlf；未设置时 git **不归一化**行尾，
+  // 所以「未设置 → 跳过」会让这条门禁在 CI 上恒绿 = 没有门禁（TITA-91 R1）。
+  for (const value of ['', '   ', undefined, null, 'false']) {
+    assert.equal(
+      collectState({ autocrlf: value, eolRows: [], dirty: [], plainDiff: [], ignoringCrDiff: [] }).enforced,
+      true,
+      'autocrlf=' + JSON.stringify(value) + ' 必须判定'
+    );
+  }
+  // 未设置 + 一个 LF→CRLF 的文件：跑前干净、跑后新增 ⇒ 必须红
+  const before = collectState({ autocrlf: '', eolRows: [row('lib/a.ts', 'lf', 'lf')], dirty: [], plainDiff: [], ignoringCrDiff: [] });
+  const after = collectState({
+    autocrlf: '',
+    eolRows: [row('lib/a.ts', 'lf', 'crlf')],
+    dirty: [{ status: 'M', path: 'lib/a.ts' }],
+    plainDiff: ['lib/a.ts'],
+    ignoringCrDiff: [],
+  });
+  const r = compareStates(before, after);
+  assert.equal(r.ok, false, '未设置 autocrlf 时，新增行尾差异必须判红（评审的复现场景）');
+  assert.deepEqual(r.newEol.map((e) => e.path), ['lib/a.ts']);
+});
+
+test('R1：autocrlf=true/input 下「新增内容改动」仍然判红（不能一起跳过）', () => {
+  for (const value of ['true', 'input']) {
+    const before = collectState({ autocrlf: value, eolRows: [], dirty: [], plainDiff: [], ignoringCrDiff: [] });
+    const after = collectState({
+      autocrlf: value,
+      eolRows: [],
+      dirty: [{ status: 'M', path: 'lib/assistant/agent.ts' }],
+      plainDiff: ['lib/assistant/agent.ts'],
+      ignoringCrDiff: ['lib/assistant/agent.ts'],
+    });
+    const r = compareStates(before, after);
+    assert.equal(r.ok, false, 'autocrlf=' + value + ' 只跳过行尾判定，内容改动仍必须红');
+    assert.equal(r.eolSkipped, true);
+    assert.deepEqual(r.newDirty.map((d) => d.path), ['lib/assistant/agent.ts']);
+  }
 });
 
 test('autocrlf=false：跑前就有的差异不算门禁的锅（只报新增）', () => {

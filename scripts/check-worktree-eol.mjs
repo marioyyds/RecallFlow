@@ -79,10 +79,14 @@ export function findEolOnlyDiffs(plainPaths, ignoringCrPaths) {
 export function collectState({ autocrlf, eolRows, dirty, plainDiff, ignoringCrDiff }) {
   const eolMismatches = findEolMismatches(eolRows);
   const eolOnly = findEolOnlyDiffs(plainDiff, ignoringCrDiff);
+  const value = String(autocrlf || '').trim();
   return {
-    autocrlf: String(autocrlf || '').trim(),
-    // autocrlf=true/input：git 会把磁盘 CRLF 归一化后与索引比较，CRLF 是合法检出形态。
-    enforced: String(autocrlf || '').trim() === 'false',
+    autocrlf: value,
+    // 只有 `true` / `input` 是「git 认可磁盘 CRLF」的形态：checkout 时 smudge、status 时 normalize，
+    // 所以磁盘 CRLF 不能算差异。**`false` 与「未设置」都必须判定** —— 未设置时 git 不做归一化，
+    // 而 GitHub ubuntu runner 正是未设置（.github/workflows/checks.yml 没有设 core.autocrlf），
+    // 把未设置当成"合法 CRLF"会让这条门禁在 CI 上恒绿 = 没有门禁（L-25 / 03 §2.5）。
+    enforced: value !== 'true' && value !== 'input',
     dirty,
     eolMismatches,
     eolOnly: eolOnly.map((p) => {
@@ -95,12 +99,14 @@ export function collectState({ autocrlf, eolRows, dirty, plainDiff, ignoringCrDi
 /**
  * 比较前后两份状态，只报**新增**的问题。
  *
- * 返回 { ok, newEol: [...], newDirty: [...] }。
+ * 返回 { ok, eolSkipped, newEol, newDirty:[...], generated:[...] }。
  * 为什么只报新增：开发者带着未提交改动跑门禁是常态；把"本来就脏"判成门禁的锅，
  * 就会重演这条门禁想解决的误归因（L-44）。
+ *
+ * `autocrlf=true/input` 时**只跳过行尾判定**：那种形态下 git 自己会归一化行尾，
+ * 磁盘 CRLF 不是差异；但「门禁新增了内容改动」仍然必须红（否则这半条门禁在 CI 上形同虚设）。
  */
 export function compareStates(before, after) {
-  if (!after.enforced) return { ok: true, skipped: true, newEol: [], newDirty: [] };
   const beforeEolPaths = new Set([
     ...((before && before.eolOnly) || []).map((e) => e.path),
     ...((before && before.eolMismatches) || []).map((e) => e.path),
@@ -110,11 +116,17 @@ export function compareStates(before, after) {
   // 前者对「本来就脏的文件被门禁改了行尾」仍然有效（diff 那条会漏，因为 ignore-cr 也非空）。
   const allEol = new Map();
   for (const e of [...(after.eolOnly || []), ...(after.eolMismatches || [])]) allEol.set(e.path, e);
-  const newEol = [...allEol.values()].filter((e) => !beforeEolPaths.has(e.path));
+  const newEol = after.enforced ? [...allEol.values()].filter((e) => !beforeEolPaths.has(e.path)) : [];
   const newDirty = (after.dirty || []).filter((d) => !beforeDirty.has(d.path));
   const generated = newDirty.filter((d) => DECLARED_GENERATED.has(d.path));
   const unexpected = newDirty.filter((d) => !DECLARED_GENERATED.has(d.path));
-  return { ok: newEol.length === 0 && unexpected.length === 0, skipped: false, newEol, newDirty: unexpected, generated };
+  return {
+    ok: newEol.length === 0 && unexpected.length === 0,
+    eolSkipped: !after.enforced,
+    newEol,
+    newDirty: unexpected,
+    generated,
+  };
 }
 
 function snapshotNow() {
@@ -160,13 +172,20 @@ function main() {
     return 0;
   }
 
-  if (!state.enforced) {
-    console.log('工作树行尾检查：core.autocrlf=' + (state.autocrlf || '(未设置)') + '，git 会归一化行尾，跳过');
-    return 0;
-  }
+  // 注意：这里**不再整条 early-return**。autocrlf=true/input 只是「磁盘 CRLF 被 git 认可」，
+  // 不表示可以放过门禁新增的内容改动（R1，TITA-91 评审）。
+  const eolNotice = state.enforced
+    ? ''
+    : '工作树行尾检查：core.autocrlf=' +
+      state.autocrlf +
+      '（git 会归一化行尾：只跳过行尾判定，仍检查新增内容改动）';
 
   if (argv.includes('--snapshot')) {
     fs.writeFileSync(snapshotPath, JSON.stringify(state), 'utf8');
+    if (!state.enforced) {
+      console.log(eolNotice + '；已记快照 ' + snapshotPath);
+      return 0;
+    }
     if (state.eolMismatches.length) {
       console.log(
         '工作树行尾检查：跑前已有 ' + state.eolMismatches.length + ' 个文件行尾不一致（记为检出状态，不计到门禁头上）\n' +
@@ -199,6 +218,8 @@ function main() {
             r.generated.map((g) => g.path).join(', ') +
             ' 由门禁按实测重写，属预期生成物 —— 记得提交）'
         );
+      } else if (r.eolSkipped) {
+        console.log('工作树行尾检查：core.autocrlf=' + state.autocrlf + '，行尾判定已跳过；跑完没有新增内容改动 ✓');
       } else {
         console.log('工作树行尾检查：跑完没有新增行尾差异 / 新增改动 ✓');
       }
@@ -208,12 +229,16 @@ function main() {
     describe(r.newDirty, '门禁跑完后新增的未提交改动');
     console.error(
       '\n这说明**门禁自己**把工作树改脏了（跑前并没有）。优先查就地改写源码的步骤（变异测试 / 自愈）。\n' +
-        '如果只是行尾，恢复：git checkout-index -f -- <上面列出的文件>'
+        (r.eolSkipped ? '' : '如果只是行尾，恢复：git checkout-index -f -- <上面列出的文件>')
     );
     return 1;
   }
 
   // 单看当前状态
+  if (!state.enforced) {
+    console.log(eolNotice + '；当前 CRLF 检出属合法形态');
+    return 0;
+  }
   if (state.eolMismatches.length) {
     describe(state.eolMismatches, '当前检出存在行尾不一致');
     console.error(
