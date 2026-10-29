@@ -64,3 +64,20 @@ test('ChromeStorageAdapter：Chrome lastError 转化为 rejection', async () => 
   await assert.rejects(() => adapter.set({ alpha: 1 }), /quota exceeded/);
   await assert.rejects(() => adapter.remove('alpha'), /quota exceeded/);
 });
+
+test('ChromeStorageAdapter：兼容只返回 Promise 的 MV3 存储实现', async () => {
+  const adapter = new ChromeStorageAdapter(
+    {
+      async get() {
+        return { alpha: 1 };
+      },
+      async set() {},
+      async remove() {},
+    },
+    { runtime: { lastError: null } }
+  );
+
+  assert.deepEqual(await adapter.get('alpha'), { alpha: 1 });
+  await adapter.set({ beta: 2 });
+  await adapter.remove('beta');
+});

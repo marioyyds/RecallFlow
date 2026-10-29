@@ -103,6 +103,8 @@ function runE2E() {
     { name: '存档零痕迹', spec: 'save-clean.spec.mjs', hold: '', visionShot: '' },
     { name: '设置提示', spec: 'settings-ui.spec.mjs', hold: '', visionShot: '' },
     { name: '登录拦截提示', spec: 'auth-challenge.spec.mjs', hold: '', visionShot: '' },
+    // 面板布局存在扩展级存储：跨 origin 也必须恢复同一位置与尺寸。
+    { name: '全局面板布局', spec: 'panel-layout.spec.mjs', hold: '', visionShot: '' },
     // 会话共享/运行锁：需要真实的“生成中”窗口，否则两个标签页的请求会瞬间结束，
     // 根本撞不上同一把锁。这里单独把分片间隔拉长。
     { name: '会话共享', spec: 'sessions.spec.mjs', hold: '', visionShot: '', chunkDelay: '1200' },

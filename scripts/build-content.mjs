@@ -58,10 +58,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  * 「跑一下脚本才可能看到」的提示：此前它 exit 1 却**照样写盘**，
  * 于是体积早就超了、却没有任何门禁红过。
  */
-// 2026-10-29: layered page/chat migration and injected DOM/session collaborators
-// add small adapter boundaries but no third-party dependency. Measured size is
-// 462KB after the state/controller split; keep ~2KB of headroom.
-export const SIZE_BUDGET_BYTES = 464 * 1024;
+// 2026-10-30: panel layout moved from per-origin localStorage to the injected
+// chrome.storage.local adapter so position/size are shared across the browser.
+// Measured 469KB (480196 bytes); keep ~3KB of headroom. No new dependency.
+export const SIZE_BUDGET_BYTES = 472 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

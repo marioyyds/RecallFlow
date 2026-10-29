@@ -13,9 +13,10 @@ import assert from 'node:assert/strict';
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
 import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
+import { createChromeStorageAdapter } from '../lib/adapters/chrome/storage.ts';
+import { PANEL_LAYOUT_STORAGE_KEY } from '../lib/ui/page/panel-layout.ts';
 
 const POS_KEY = 'recallflow-panel-pos';
-const SIZE_KEY = 'recallflow-panel-size';
 
 let seq = 0;
 
@@ -23,7 +24,10 @@ async function boot() {
   const dom = installDomStub();
   const prevChrome = installChrome();
   const mod = await import('../lib/ui/page/chat.ts?case=pos' + (seq += 1));
-  mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
+  mod.initAssistant({
+    runtime: createChromeRuntimeAdapter(),
+    storage: createChromeStorageAdapter(globalThis.chrome.storage.local, globalThis.chrome),
+  });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
   const panel = () => {
@@ -82,8 +86,12 @@ async function waitFor(predicate, label, timeoutMs = 400) {
   assert.fail('等待超时：' + label);
 }
 
-function seed(json) {
-  for (const [k, v] of Object.entries(json)) globalThis.localStorage.setItem(k, JSON.stringify(v));
+async function seed(value) {
+  await globalThis.chrome.storage.local.set({ [PANEL_LAYOUT_STORAGE_KEY]: value });
+}
+
+function savedLayout() {
+  return globalThis.chrome.storage.local._dump()[PANEL_LAYOUT_STORAGE_KEY];
 }
 
 // 快捷键有 250ms 去抖（防手抖双按），同一用例里连按两次会被吞掉 —— 等过去再按。
@@ -95,7 +103,7 @@ async function shortcutAgain(app) {
 test('默认停靠面板：关闭时也必须落盘（旧代码这条路径一个字节都不写）', async () => {
   const app = await boot();
   try {
-    assert.equal(globalThis.localStorage.getItem(POS_KEY), null, '前提：打开前没有存档');
+    assert.equal(savedLayout(), undefined, '前提：打开前没有全局存档');
     app.shortcut();
     const panel = wireLayout(await waitFor(app.panel, '快捷键应打开面板'));
     assert.ok(panel.classList.contains('docked'), '前提：快捷键打开的是停靠面板');
@@ -103,13 +111,17 @@ test('默认停靠面板：关闭时也必须落盘（旧代码这条路径一�
     panel.querySelector('.close').emit('click', {});
     assert.equal(app.panel(), null, '前提：面板已关闭');
 
-    const raw = globalThis.localStorage.getItem(POS_KEY);
-    assert.ok(raw, '关闭时必须写入位置存档 —— 否则重开只能靠 CSS 默认值，「位置没保存」就是这个');
-    const saved = JSON.parse(raw);
+    const saved = await waitFor(
+      () => {
+        const value = savedLayout();
+        return value && value.width > 0 && value.height > 0 ? value : null;
+      },
+      '关闭时必须写入完整的扩展级布局存档'
+    );
     assert.equal(saved.docked, true, '必须记录停靠态：停靠面板的位置由 bottom/right 决定，不是像素');
     assert.equal(saved.left, null, '停靠未拖动 = 没有像素位置，要如实记 null 而不是当时算出来的坐标');
     assert.equal(saved.top, null);
-    assert.ok(globalThis.localStorage.getItem(SIZE_KEY), '尺寸照旧要存');
+    assert.ok(saved.width > 0 && saved.height > 0, '尺寸要一并写入同一个全局存档');
   } finally {
     app.close();
   }
@@ -120,7 +132,7 @@ test('关掉再开：停靠面板回到同一个「停靠位」，且仍是停�
   try {
     // 固定尺寸，让两次打开的高度一致 —— 桩不做真实布局（子元素 offsetHeight 都是常量），
     // 否则「底部留白」会被桩的假几何算成不同数值，测的就不是被测代码了。
-    seed({ [SIZE_KEY]: { version: 2, width: 400, height: 480 } });
+    await seed({ version: 2, docked: true, left: null, top: null, width: 400, height: 480 });
     app.shortcut();
     const first = wireLayout(await waitFor(app.panel, '第一次打开'));
     const firstBottom = first.style.bottom;
@@ -141,10 +153,7 @@ test('从划词气泡打开：沿用关闭前的位置，而不是按鼠标点�
   const app = await boot();
   try {
     // 用户上次把面板摆在 (300,140) 后关掉（浮动状态）。
-    seed({
-      [POS_KEY]: { version: 2, docked: false, left: 300, top: 140 },
-      [SIZE_KEY]: { version: 2, width: 400, height: 480 },
-    });
+    await seed({ version: 2, docked: false, left: 300, top: 140, width: 400, height: 480 });
     app.shortcut();
     wireLayout(await waitFor(app.panel, '预热：先建出宿主与面板'));
     app.panel().querySelector('.close').emit('click', {});
@@ -166,7 +175,7 @@ test('从划词气泡打开：沿用关闭前的位置，而不是按鼠标点�
 test('评审退回项：上次是气泡关掉的（存档 docked:false），按 Alt+Shift+R 打开仍是停靠面板', async () => {
   const app = await boot();
   try {
-    seed({ [POS_KEY]: { version: 2, docked: false, left: 300, top: 140 } });
+    await seed({ version: 2, docked: false, left: 300, top: 140, width: null, height: null });
     app.shortcut();
     const panel = wireLayout(await waitFor(app.panel, '快捷键打开面板'));
     assert.ok(panel.classList.contains('docked'), '快捷键/FAB 的意图是停靠，存档不得把它变成浮动');
@@ -189,7 +198,13 @@ test('Esc 关闭也要落盘（与 ✕ 同一路径）', async () => {
     app.dom.document.emit('keydown', { key: 'Escape', code: 'Escape', repeat: false });
     await waitFor(() => !app.panel(), 'Esc 应关闭面板');
 
-    const saved = JSON.parse(globalThis.localStorage.getItem(POS_KEY));
+    const saved = await waitFor(
+      () => {
+        const value = savedLayout();
+        return value && value.left === 240 && value.top === 160 ? value : null;
+      },
+      'Esc 关闭后应写入全局布局'
+    );
     assert.equal(saved.left, 240, 'Esc 关闭同样必须把位置写进存档');
     assert.equal(saved.top, 160);
   } finally {
@@ -200,7 +215,7 @@ test('Esc 关闭也要落盘（与 ✕ 同一路径）', async () => {
 test('窗口变小后重开：位置被夹回可视区，不会露在屏幕外', async () => {
   const app = await boot();
   try {
-    seed({ [POS_KEY]: { version: 2, docked: false, left: 5000, top: 5000 } });
+    await seed({ version: 2, docked: false, left: 5000, top: 5000, width: null, height: null });
     app.shortcut();
     const panel = wireLayout(await waitFor(app.panel, '打开面板'));
     // 桩固定视口 1200×800、面板 320×480 ⇒ 最大 left=880 / top=320
@@ -211,14 +226,17 @@ test('窗口变小后重开：位置被夹回可视区，不会露在屏幕外',
   }
 });
 
-test('旧版存档（只有裸 left/top）仍能恢复位置，不会因为升级而丢', async () => {
+test('旧版网页存档会迁移到全局扩展存储，升级后位置不丢', async () => {
   const app = await boot();
   try {
-    seed({ [POS_KEY]: { left: 120, top: 90 } });
+    globalThis.localStorage.setItem(POS_KEY, JSON.stringify({ left: 120, top: 90 }));
     app.shortcut();
     const panel = wireLayout(await waitFor(app.panel, '打开面板'));
     assert.equal(panel.style.left, '120px');
     assert.equal(panel.style.top, '90px');
+    const migrated = await waitFor(savedLayout, '旧网页布局应迁移到扩展存储');
+    assert.equal(migrated.left, 120);
+    assert.equal(migrated.top, 90);
   } finally {
     app.close();
   }
@@ -235,7 +253,13 @@ test('拖动 → 关闭 → 重开：位置与「已手动定位」状态都保�
     assert.equal(panel.style.left, '300px', '前提：拖动确实移动了面板');
 
     panel.querySelector('.close').emit('click', {});
-    const saved = JSON.parse(globalThis.localStorage.getItem(POS_KEY));
+    const saved = await waitFor(
+      () => {
+        const value = savedLayout();
+        return value && value.left === 300 && value.top === 140 ? value : null;
+      },
+      '拖动结束后应写入全局布局'
+    );
     assert.equal(saved.left, 300, '拖动后的像素位置必须落盘');
     assert.equal(saved.top, 140);
 
@@ -251,7 +275,7 @@ test('拖动 → 关闭 → 重开：位置与「已手动定位」状态都保�
 test('SPA 换掉 DOM：面板被移除后自动重挂，位置仍取关闭前/打开前的存档', async () => {
   const app = await boot();
   try {
-    seed({ [POS_KEY]: { version: 2, docked: false, left: 300, top: 140 } });
+    await seed({ version: 2, docked: false, left: 300, top: 140, width: null, height: null });
     app.shortcut();
     let panel = wireLayout(await waitFor(app.panel, '打开面板'));
     assert.equal(panel.style.left, '300px', '前提：打开时按存档摆位');

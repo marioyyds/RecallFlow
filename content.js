@@ -5864,6 +5864,7 @@
   // lib/ui/page/panel-layout.ts
   var PANEL_POS_KEY = "recallflow-panel-pos";
   var PANEL_SIZE_KEY = "recallflow-panel-size";
+  var PANEL_LAYOUT_STORAGE_KEY = "recallflow.panel.layout.v1";
   var PANEL_MIN_WIDTH = 280;
   var PANEL_MIN_HEIGHT = 320;
   var PANEL_VIEWPORT_INSET = 24;
@@ -5892,6 +5893,21 @@
   function emptySnapshot() {
     return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
   }
+  function snapshotFromParts(pos, size) {
+    const out = emptySnapshot();
+    if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
+    if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
+    if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
+      out.left = pos.left;
+      out.top = pos.top;
+      out.hasPos = true;
+    }
+    if (pos && typeof pos.docked === "boolean") out.docked = pos.docked;
+    return out;
+  }
+  function snapshotHasLayout(snapshot) {
+    return snapshot.hasPos || snapshot.width != null || snapshot.height != null || snapshot.docked != null;
+  }
   function readPanelLayout(storage) {
     if (!storage) return emptySnapshot();
     let pos = null;
@@ -5906,16 +5922,11 @@
     } catch (e) {
       size = null;
     }
-    const out = emptySnapshot();
-    if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
-    if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
-    if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
-      out.left = pos.left;
-      out.top = pos.top;
-      out.hasPos = true;
-    }
-    if (pos && typeof pos.docked === "boolean") out.docked = pos.docked;
-    return out;
+    return snapshotFromParts(pos, size);
+  }
+  function readGlobalPanelLayout(value) {
+    if (!value || typeof value !== "object") return emptySnapshot();
+    return snapshotFromParts(value, value);
   }
   function writePanelLayout(storage, snapshot) {
     if (!storage) return null;
@@ -5944,6 +5955,68 @@
       return null;
     }
     return record;
+  }
+  function globalPanelLayoutRecord(snapshot) {
+    const s = snapshot || {};
+    const width = Number(s.width);
+    const height = Number(s.height);
+    return {
+      version: PANEL_LAYOUT_VERSION,
+      docked: s.docked === true,
+      left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
+      top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+      width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : null
+    };
+  }
+  async function loadGlobalPanelLayout(storage, legacyStorage) {
+    if (!storage) return readPanelLayout(legacyStorage);
+    let data = {};
+    try {
+      data = await storage.get(PANEL_LAYOUT_STORAGE_KEY);
+    } catch (e) {
+      return readPanelLayout(legacyStorage);
+    }
+    const current = readGlobalPanelLayout(data && data[PANEL_LAYOUT_STORAGE_KEY]);
+    if (snapshotHasLayout(current)) return current;
+    const legacy = readPanelLayout(legacyStorage);
+    if (!snapshotHasLayout(legacy)) return emptySnapshot();
+    const record = globalPanelLayoutRecord({
+      width: legacy.width == null ? void 0 : legacy.width,
+      height: legacy.height == null ? void 0 : legacy.height,
+      left: legacy.left == null ? void 0 : legacy.left,
+      top: legacy.top == null ? void 0 : legacy.top,
+      docked: legacy.docked === true,
+      manualPos: legacy.hasPos
+    });
+    try {
+      await storage.set({ [PANEL_LAYOUT_STORAGE_KEY]: record });
+    } catch (e) {
+    }
+    return legacy;
+  }
+  async function saveGlobalPanelLayout(storage, snapshot) {
+    if (!storage) return null;
+    let current = emptySnapshot();
+    try {
+      const data = await storage.get(PANEL_LAYOUT_STORAGE_KEY);
+      current = readGlobalPanelLayout(data && data[PANEL_LAYOUT_STORAGE_KEY]);
+    } catch (e) {
+      return null;
+    }
+    const s = snapshot || {};
+    const writeSize = s.writeSize !== false;
+    const record = globalPanelLayoutRecord({
+      ...s,
+      width: writeSize ? s.width : current.width == null ? void 0 : current.width,
+      height: writeSize ? s.height : current.height == null ? void 0 : current.height
+    });
+    try {
+      await storage.set({ [PANEL_LAYOUT_STORAGE_KEY]: record });
+    } catch (e) {
+      return null;
+    }
+    return readGlobalPanelLayout(record);
   }
   function resolvePanelPlacement(options) {
     const opts = options || {};
@@ -7234,6 +7307,7 @@
     return panelVisibility.publish(open === true, scope === "membership" ? "membership" : "global");
   }
   function removePanel(options) {
+    if (!(options && options.invalidateOpen === false)) panelOpenGeneration += 1;
     const hadPanel = Boolean(panel);
     if (streamView.picking) {
       try {
@@ -7417,6 +7491,10 @@
     }
   });
   var layoutTimer = null;
+  var panelLayoutStorage = null;
+  var panelLayoutWriteChain = Promise.resolve();
+  var panelLayoutWriteWarned = false;
+  var panelOpenGeneration = 0;
   function persistPanelLayoutThrottled() {
     if (layoutTimer || !panel) return;
     layoutTimer = setTimeout(() => {
@@ -7424,24 +7502,48 @@
       persistPanelLayoutNow();
     }, 200);
   }
+  function queuePanelLayoutWrite(snapshot) {
+    if (!panelLayoutStorage) {
+      try {
+        return Promise.resolve(writePanelLayout(localStorage, snapshot));
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+    }
+    const write = panelLayoutWriteChain.catch(() => null).then(() => saveGlobalPanelLayout(panelLayoutStorage, snapshot)).then((record) => {
+      if (!record && !panelLayoutWriteWarned) {
+        panelLayoutWriteWarned = true;
+        try {
+          console.warn("RecallFlow: \u65E0\u6CD5\u4FDD\u5B58\u5168\u6D4F\u89C8\u5668\u9762\u677F\u5E03\u5C40\uFF0C\u8BF7\u68C0\u67E5\u6269\u5C55\u5B58\u50A8\u6743\u9650\u3002");
+        } catch (e) {
+        }
+      }
+      return record;
+    });
+    panelLayoutWriteChain = write.catch(() => null);
+    return write;
+  }
   function persistPanelLayoutNow(opts) {
-    if (!panel) return;
-    if (!panel.offsetWidth || !panel.offsetHeight) return;
+    if (!panel) return Promise.resolve(null);
+    if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
     const r = panel.getBoundingClientRect();
     const docked = panel.classList.contains("docked");
-    try {
-      writePanelLayout(localStorage, {
-        width: panel.offsetWidth,
-        height: panel.offsetHeight,
-        left: r.left,
-        top: r.top,
-        docked,
-        // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
-        manualPos: docked ? Boolean(panel._manualPos) : true,
-        writeSize: !(opts && opts.size === false)
-      });
-    } catch (e) {
-    }
+    return queuePanelLayoutWrite({
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+      left: r.left,
+      top: r.top,
+      docked,
+      // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
+      manualPos: docked ? Boolean(panel._manualPos) : true,
+      writeSize: !(opts && opts.size === false)
+    });
+  }
+  function loadPanelLayoutForOpen() {
+    return panelLayoutWriteChain.catch(() => null).then(() => {
+      if (!panelLayoutStorage) return readPanelLayout(localStorage);
+      return loadGlobalPanelLayout(panelLayoutStorage, localStorage);
+    }).catch(() => readPanelLayout(localStorage));
   }
   function clampPanelToViewport() {
     if (!panel) return;
@@ -8889,10 +8991,20 @@
       return;
     }
     removeBubble();
-    removePanel({ publish: false });
+    removePanel({ publish: false, invalidateOpen: false });
+    const openGeneration = ++panelOpenGeneration;
     if (fab) fab.classList.add("hidden");
     fabPeek.setPanelOpen(true);
-    const layout = readPanelLayout(localStorage);
+    if (!panelLayoutStorage) {
+      createPanelWithLayout(x, y, docked, restore, readPanelLayout(localStorage), openGeneration);
+      return;
+    }
+    return loadPanelLayoutForOpen().then((layout) => {
+      createPanelWithLayout(x, y, docked, restore, layout, openGeneration);
+    });
+  }
+  function createPanelWithLayout(x, y, docked, restore, layout, openGeneration) {
+    if (openGeneration !== panelOpenGeneration || !isExtContextAlive()) return;
     const dockedIntent = restore ? null : docked === true;
     panel = document.createElement("div");
     panel.className = "panel" + (themeController.preferred() === "dark" ? " dark" : "");
@@ -9484,7 +9596,7 @@
     panel.style.left = placement.left == null ? "auto" : placement.left + "px";
     panel.style.top = placement.top == null ? "auto" : placement.top + "px";
     panel._manualPos = placement.manualPos;
-    writePanelLayout(globalThis.localStorage, {
+    void queuePanelLayoutWrite({
       docked: placement.docked,
       manualPos: placement.manualPos,
       left: placement.left,
@@ -10462,6 +10574,7 @@
   function initAssistant(options = {}) {
     if (options.runtime) runtimePort = options.runtime;
     if (options.dom) screenshotView.setDom(options.dom);
+    if (options.storage) panelLayoutStorage = options.storage;
     try {
       window.addEventListener("pagehide", () => {
         if (followedRun.followedRunState || followedRun.followedMessages.length) return;
@@ -10703,6 +10816,91 @@
     return new ChromeRuntimeAdapter(api);
   }
 
+  // lib/adapters/chrome/storage.ts
+  var ChromeStorageAdapter = class {
+    area;
+    api;
+    constructor(area, api = {}) {
+      this.area = area;
+      this.api = api;
+    }
+    get(keys = null) {
+      return new Promise((resolve, reject) => {
+        try {
+          let settled = false;
+          const finish = (items) => {
+            if (settled) return;
+            settled = true;
+            const error = this.api.runtime?.lastError;
+            if (error) reject(new Error(error.message || "\u8BFB\u53D6\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+            else resolve(items || {});
+          };
+          const pending = this.area.get(keys, finish);
+          if (pending && typeof pending.then === "function") {
+            pending.then(finish, (error) => {
+              if (settled) return;
+              settled = true;
+              reject(error);
+            });
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+    set(items) {
+      return new Promise((resolve, reject) => {
+        try {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            const error = this.api.runtime?.lastError;
+            if (error) reject(new Error(error.message || "\u5199\u5165\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+            else resolve();
+          };
+          const pending = this.area.set(items, finish);
+          if (pending && typeof pending.then === "function") {
+            pending.then(finish, (error) => {
+              if (settled) return;
+              settled = true;
+              reject(error);
+            });
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+    remove(keys) {
+      return new Promise((resolve, reject) => {
+        try {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            const error = this.api.runtime?.lastError;
+            if (error) reject(new Error(error.message || "\u5220\u9664\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
+            else resolve();
+          };
+          const pending = this.area.remove(keys, finish);
+          if (pending && typeof pending.then === "function") {
+            pending.then(finish, (error) => {
+              if (settled) return;
+              settled = true;
+              reject(error);
+            });
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }
+  };
+  function createChromeStorageAdapter(area, api = typeof chrome !== "undefined" ? chrome : {}) {
+    return new ChromeStorageAdapter(area, api);
+  }
+
   // lib/adapters/dom/document.ts
   var BrowserDocumentAdapter = class {
     documentApi;
@@ -10858,6 +11056,7 @@
     if (isTopFrame) {
       initAssistant({
         runtime: createChromeRuntimeAdapter(),
+        storage: createChromeStorageAdapter(chrome.storage.local, chrome),
         dom: createBrowserDocumentAdapter()
       });
     }

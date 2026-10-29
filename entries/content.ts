@@ -16,6 +16,7 @@ import * as picker from '../lib/ui/page/picker.ts';
 import * as debugCapture from '../lib/ui/page/debug-capture.ts';
 import * as chat from '../lib/ui/page/chat.ts';
 import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
+import { createChromeStorageAdapter } from '../lib/adapters/chrome/storage.ts';
 import { createBrowserDocumentAdapter } from '../lib/adapters/dom/document.ts';
 
 // 入口在 window 上挂的三样东西：本文件自己约定的全局槽位。
@@ -168,6 +169,7 @@ export function initContentScript() {
   if (isTopFrame) {
     chat.initAssistant({
       runtime: createChromeRuntimeAdapter(),
+      storage: createChromeStorageAdapter(chrome.storage.local, chrome),
       dom: createBrowserDocumentAdapter(),
     });
   }

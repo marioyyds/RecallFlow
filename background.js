@@ -13903,11 +13903,22 @@ var ChromeStorageAdapter = class {
   get(keys = null) {
     return new Promise((resolve, reject) => {
       try {
-        this.area.get(keys, (items) => {
+        let settled = false;
+        const finish = (items) => {
+          if (settled) return;
+          settled = true;
           const error = this.api.runtime?.lastError;
           if (error) reject(new Error(error.message || "\u8BFB\u53D6\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
           else resolve(items || {});
-        });
+        };
+        const pending = this.area.get(keys, finish);
+        if (pending && typeof pending.then === "function") {
+          pending.then(finish, (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          });
+        }
       } catch (error) {
         reject(error);
       }
@@ -13916,11 +13927,22 @@ var ChromeStorageAdapter = class {
   set(items) {
     return new Promise((resolve, reject) => {
       try {
-        this.area.set(items, () => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
           const error = this.api.runtime?.lastError;
           if (error) reject(new Error(error.message || "\u5199\u5165\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
           else resolve();
-        });
+        };
+        const pending = this.area.set(items, finish);
+        if (pending && typeof pending.then === "function") {
+          pending.then(finish, (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          });
+        }
       } catch (error) {
         reject(error);
       }
@@ -13929,11 +13951,22 @@ var ChromeStorageAdapter = class {
   remove(keys) {
     return new Promise((resolve, reject) => {
       try {
-        this.area.remove(keys, () => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
           const error = this.api.runtime?.lastError;
           if (error) reject(new Error(error.message || "\u5220\u9664\u6269\u5C55\u5B58\u50A8\u5931\u8D25"));
           else resolve();
-        });
+        };
+        const pending = this.area.remove(keys, finish);
+        if (pending && typeof pending.then === "function") {
+          pending.then(finish, (error) => {
+            if (settled) return;
+            settled = true;
+            reject(error);
+          });
+        }
       } catch (error) {
         reject(error);
       }

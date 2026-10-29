@@ -82,10 +82,13 @@ import { PANEL_CSS } from './panel-css.ts';
 import {
   clampPanelSize,
   clampPanelIntoView,
+  loadGlobalPanelLayout,
   readPanelLayout,
+  saveGlobalPanelLayout,
   writePanelLayout,
   resolvePanelPlacement,
 } from './panel-layout.ts';
+import type { PanelLayoutStorage } from './panel-layout.ts';
 import { applyRunEvent, runStateToAssistantMessage } from '../../application/agent/run-hub.ts';
 import { loadScreenshot } from '../../shared/screenshot-store.ts';
 import {
@@ -98,6 +101,7 @@ import { createPanelVisibilityController } from '../../application/panel/visibil
 import { createPanelRunSession } from '../../application/panel/run-session.ts';
 import { createPanelStreamState } from '../../application/panel/stream-state.ts';
 import { UNAVAILABLE_RUNTIME_PORT, type RuntimePort } from '../../application/ports/runtime.ts';
+import type { StoragePort } from '../../application/ports/storage.ts';
 import {
   describeApprovalRequest as describeApprovalRequestView,
   renderApprovalPrompt as renderApprovalPromptView,
@@ -621,6 +625,7 @@ function publishPanelUi(open: any, scope: any) {
 }
 
 function removePanel(options?: any) {
+  if (!(options && options.invalidateOpen === false)) panelOpenGeneration += 1;
   const hadPanel = Boolean(panel);
   // 关闭面板时若仍在拾取模式，通知后台让所有 frame 停止拾取。
   if (streamView.picking) {
@@ -971,6 +976,10 @@ const screenshotView = new PanelScreenshotView({
 });
 
 let layoutTimer: any = null;
+let panelLayoutStorage: PanelLayoutStorage | null = null;
+let panelLayoutWriteChain: Promise<unknown> = Promise.resolve();
+let panelLayoutWriteWarned = false;
+let panelOpenGeneration = 0;
 
 // 节流持久化面板布局（避免拖拽/拉伸 mousemove 高频写入）。
 function persistPanelLayoutThrottled() {
@@ -988,24 +997,57 @@ function persistPanelLayoutThrottled() {
 // `opts.size === false`：只写位置。打开面板时用这个 —— 那一刻的高度是 `fitPanelHeight()`
 // 刚算出来的**自动高度**，若连同它一起存，下次打开会被当成用户手动尺寸（`_manualSize`）
 // 而不再随内容伸缩。尺寸仍由「关闭 / 拖拽 / 拉伸结束」三条路径记录。
-function persistPanelLayoutNow(opts?: any) {
-  if (!panel) return;
+function queuePanelLayoutWrite(snapshot: any): Promise<any> {
+  if (!panelLayoutStorage) {
+    try {
+      return Promise.resolve(writePanelLayout(localStorage, snapshot));
+    } catch (e: any) {
+      return Promise.resolve(null);
+    }
+  }
+  const write = panelLayoutWriteChain
+    .catch(() => null)
+    .then(() => saveGlobalPanelLayout(panelLayoutStorage, snapshot))
+    .then((record: any) => {
+      if (!record && !panelLayoutWriteWarned) {
+        panelLayoutWriteWarned = true;
+        try {
+          console.warn('RecallFlow: 无法保存全浏览器面板布局，请检查扩展存储权限。');
+        } catch (e: any) {}
+      }
+      return record;
+    });
+  panelLayoutWriteChain = write.catch(() => null);
+  return write;
+}
+
+function persistPanelLayoutNow(opts?: any): Promise<any> {
+  if (!panel) return Promise.resolve(null);
   // 面板脱离文档时 offset 全是 0：此时写盘会把用户存的尺寸覆盖成 0×0（见 resetDetachedHostState）。
-  if (!panel.offsetWidth || !panel.offsetHeight) return;
+  if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
   const r = panel.getBoundingClientRect();
   const docked = panel.classList.contains('docked');
-  try {
-    writePanelLayout(localStorage, {
-      width: panel.offsetWidth,
-      height: panel.offsetHeight,
-      left: r.left,
-      top: r.top,
-      docked,
-      // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
-      manualPos: docked ? Boolean(panel._manualPos) : true,
-      writeSize: !(opts && opts.size === false),
-    });
-  } catch (e: any) {}
+  return queuePanelLayoutWrite({
+    width: panel.offsetWidth,
+    height: panel.offsetHeight,
+    left: r.left,
+    top: r.top,
+    docked,
+    // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
+    manualPos: docked ? Boolean(panel._manualPos) : true,
+    writeSize: !(opts && opts.size === false),
+  });
+}
+
+/** 等本页最后一次布局写入完成，再从扩展存储读全局布局，避免关闭后立刻重开读到旧值。 */
+function loadPanelLayoutForOpen(): Promise<any> {
+  return panelLayoutWriteChain
+    .catch(() => null)
+    .then(() => {
+      if (!panelLayoutStorage) return readPanelLayout(localStorage);
+      return loadGlobalPanelLayout(panelLayoutStorage, localStorage);
+    })
+    .catch(() => readPanelLayout(localStorage));
 }
 
 // 面板越出可视区时夹回来：手动定位动 left/top；停靠态收窄底部留白。
@@ -2807,20 +2849,39 @@ async function snapshotHandoff() {
   });
 }
 
-function openPanel(x: any, y: any, docked?: any, restore?: any) {
+function openPanel(x: any, y: any, docked?: any, restore?: any): void | Promise<void> {
   if (!isExtContextAlive()) {
     warnExtDead();
     return;
   }
   removeBubble();
-  removePanel({ publish: false });
+  removePanel({ publish: false, invalidateOpen: false });
+  const openGeneration = ++panelOpenGeneration;
   if (fab) fab.classList.add('hidden');
   // 面板开着 ⇒ 气泡不收起（它此刻是 hidden，收起状态只会留下一闪而过的残影）。
   fabPeek.setPanelOpen(true);
 
-  // ⚠ 读档必须在 removePanel 之后：上一个面板关闭时刚把最新布局写进去，
-  //   提前读会拿到「关闭前更早」的那一份。
-  const layout = readPanelLayout(localStorage);
+  if (!panelLayoutStorage) {
+    createPanelWithLayout(x, y, docked, restore, readPanelLayout(localStorage), openGeneration);
+    return;
+  }
+  return loadPanelLayoutForOpen().then((layout) => {
+    createPanelWithLayout(x, y, docked, restore, layout, openGeneration);
+  });
+}
+
+function createPanelWithLayout(
+  x: any,
+  y: any,
+  docked: any,
+  restore: any,
+  layout: any,
+  openGeneration: number
+) {
+  // ⚠ 读档必须在 removePanel 之后：上一个面板关闭时刚把最新布局写进去。
+  // 扩展存储写入是异步的，因此 loadPanelLayoutForOpen 会先排空本页写入队列。
+  // 等待存储期间面板可能被关闭、远端同步关闭，或又被另一次打开请求取代。
+  if (openGeneration !== panelOpenGeneration || !isExtContextAlive()) return;
   // 「停靠还是浮动」看**调用方意图**，存档只还位置与尺寸（评审退回项）：
   //   · FAB / Alt+Shift+R → docked=true，始终停靠；
   //   · 划词气泡 → docked=false，始终浮动；
@@ -3519,7 +3580,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
   //    否则重开只能靠 CSS 默认值，窗口一变位置就跟着变。
   // ⚠ 这里**直接用 placement 的数值**，不回读 rect：宿主刚被 SPA 重挂时 rect 可能还是 0,0，
   //   回读会把刚恢复的位置就地写成 0,0（实测复现）。
-  writePanelLayout(globalThis.localStorage, {
+  void queuePanelLayoutWrite({
     docked: placement.docked,
     manualPos: placement.manualPos,
     left: placement.left,
@@ -3527,7 +3588,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any) {
     width: panel.offsetWidth,
     height: panel.offsetHeight,
     writeSize: false,
-  } as any);
+  });
 
   function endStream() {
     // 先丢弃仍在排队的流式渲染：下面的重置会把 pendingContentEl / pendingNarration
@@ -4729,9 +4790,10 @@ function maybeResumeRunAfterReload() {
 }
 
 // ---- 事件绑定与初始化 ----
-export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort } = {}) {
+export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; storage?: StoragePort } = {}) {
   if (options.runtime) runtimePort = options.runtime;
   if (options.dom) screenshotView.setDom(options.dom);
+  if (options.storage) panelLayoutStorage = options.storage;
   // 页面即将卸载（整页跳转 / 返回）前把对话落盘：这是用户消息"进对话即落盘"之外的
   // 一道兜底，盖住"刚发完立刻跳转"这类极小窗口。sendMessage 是尽力而为，不阻塞卸载。
   try {

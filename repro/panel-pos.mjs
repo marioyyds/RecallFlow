@@ -6,7 +6,7 @@
 //   位置真的还在"。这条 bug 原始报告就是"用起来位置乱跑"，只能在真浏览器里钉。
 //
 // 覆盖：
-//   A 冷启动：默认停靠，且落盘（docked:true）
+//   A 冷启动：默认停靠，且写入全浏览器统一的扩展存储（docked:true）
 //   B 拖动 → ✕ 关闭 → 悬浮球重开：位置/尺寸保持，仍停靠
 //   C Esc 关闭：与 ✕ 同一路径，位置同样落盘
 //   D 评审退回项：存档是 docked:false（上次气泡关的）时按 Alt+Shift+R，仍是停靠面板
@@ -16,8 +16,7 @@
 // 退出码：0 全过；1 有失败；2 环境缺依赖。
 import { launchExtension, closeExtension, openFixturePage, openPanel } from '../tests/e2e/helpers.mjs';
 
-const POS_KEY = 'recallflow-panel-pos';
-const SIZE_KEY = 'recallflow-panel-size';
+const LAYOUT_KEY = 'recallflow.panel.layout.v1';
 
 const results = [];
 function check(name, ok, detail) {
@@ -60,20 +59,27 @@ async function settled(page, timeout = 2500) {
   return await panelState(page);
 }
 
-async function saved(page) {
-  return await page.evaluate((keys) => ({
-    pos: JSON.parse(localStorage.getItem(keys.pos) || 'null'),
-    size: JSON.parse(localStorage.getItem(keys.size) || 'null'),
-  }), { pos: POS_KEY, size: SIZE_KEY });
+async function saved() {
+  const [sw] = context.serviceWorkers();
+  return await sw.evaluate(async (key) => {
+    const data = await chrome.storage.local.get(key);
+    const layout = data[key] || null;
+    return { pos: layout, size: layout };
+  }, LAYOUT_KEY);
 }
 
-async function seed(page, pos, size) {
-  await page.evaluate((a) => {
-    if (a.pos) localStorage.setItem(a.keys.pos, JSON.stringify(a.pos));
-    else localStorage.removeItem(a.keys.pos);
-    if (a.size) localStorage.setItem(a.keys.size, JSON.stringify(a.size));
-    else localStorage.removeItem(a.keys.size);
-  }, { pos, size, keys: { pos: POS_KEY, size: SIZE_KEY } });
+async function clearLayout() {
+  const [sw] = context.serviceWorkers();
+  await sw.evaluate(async (key) => {
+    await chrome.storage.local.remove(key);
+  }, LAYOUT_KEY);
+}
+
+async function seed(layout) {
+  const [sw] = context.serviceWorkers();
+  await sw.evaluate(async ({ key, value }) => {
+    await chrome.storage.local.set({ [key]: value });
+  }, { key: LAYOUT_KEY, value: layout });
 }
 
 async function closeVia(page, how) {
@@ -110,12 +116,15 @@ try {
   const page = await openFixturePage(context);
 
   // ---- A 冷启动 -------------------------------------------------------
-  await page.evaluate((keys) => { localStorage.removeItem(keys.pos); localStorage.removeItem(keys.size); },
-    { pos: POS_KEY, size: SIZE_KEY });
+  await clearLayout();
+  await page.evaluate(() => {
+    localStorage.removeItem('recallflow-panel-pos');
+    localStorage.removeItem('recallflow-panel-size');
+  });
   await page.reload();
   await openPanel(page);
   const a = await settled(page);
-  const aSaved = await saved(page);
+  const aSaved = await saved();
   check('A1 冷启动默认停靠', a && a.docked === true, JSON.stringify(a));
   check('A2 冷启动落盘 docked:true', aSaved.pos && aSaved.pos.docked === true, JSON.stringify(aSaved.pos));
 
@@ -123,7 +132,7 @@ try {
   await drag(page, 140, 90);
   const bMoved = await panelState(page);
   await closeVia(page, 'close');
-  const bSaved = await saved(page);
+  const bSaved = await saved();
   check('B1 关闭时位置落盘', near(bSaved.pos && bSaved.pos.left, bMoved.rect.left, 2) && near(bSaved.pos && bSaved.pos.top, bMoved.rect.top, 2),
     'saved=' + JSON.stringify(bSaved.pos) + ' rect=' + JSON.stringify(bMoved.rect));
 
@@ -137,22 +146,20 @@ try {
   await drag(page, -70, 40);
   const cMoved = await panelState(page);
   await closeVia(page, 'esc');
-  const cSaved = await saved(page);
+  const cSaved = await saved();
   check('C1 Esc 关闭也落盘', near(cSaved.pos && cSaved.pos.left, cMoved.rect.left, 2) && near(cSaved.pos && cSaved.pos.top, cMoved.rect.top, 2),
     'saved=' + JSON.stringify(cSaved.pos) + ' rect=' + JSON.stringify(cMoved.rect));
 
   // ---- D 存档 docked:false + 快捷键 ------------------------------------
-  await page.evaluate((pos) => { localStorage.removeItem('recallflow-panel-pos'); localStorage.setItem('recallflow-panel-pos', JSON.stringify(pos)); },
-    { version: 2, docked: false, left: 300, top: 140 });
+  await seed({ version: 2, docked: false, left: 300, top: 140, width: null, height: null });
   await page.keyboard.press('Alt+Shift+R');
   const d = await settled(page);
   check('D1 存档说浮动，快捷键打开仍是停靠', d && d.docked === true, JSON.stringify(d));
   check('D2 但位置从存档恢复', d && near(d.rect.left, 300, 2) && near(d.rect.top, 140, 2), JSON.stringify(d && d.rect));
 
   // ---- E 视口变小 ------------------------------------------------------
-  await page.evaluate((pos) => { localStorage.setItem('recallflow-panel-pos', JSON.stringify(pos)); },
-    { version: 2, docked: false, left: 5000, top: 5000 });
   await closeVia(page, 'esc');
+  await seed({ version: 2, docked: false, left: 5000, top: 5000, width: 640, height: 342 });
   await page.setViewportSize({ width: 900, height: 620 });
   await openPanel(page);
   const e = await settled(page);

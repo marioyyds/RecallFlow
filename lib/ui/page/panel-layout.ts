@@ -12,15 +12,21 @@
 // 抽成纯函数（storage / viewport / 尺寸全部显式注入）以后，node:test 能直接跑
 // 存档格式与摆放规则，而不是再对着源码做正则断言。
 //
-// 存档协议（v2）：
+// 网页级旧存档协议（v2，只用于迁移）：
 //   `recallflow-panel-pos`  = { version: 2, docked: boolean, left: number|null, top: number|null }
 //   `recallflow-panel-size` = { version: 2, width: number, height: number }
+// 全浏览器统一布局（v2，运行时的权威来源）：
+//   `recallflow.panel.layout.v1` =
+//     { version: 2, docked: boolean, left: number|null, top: number|null,
+//       width: number|null, height: number|null }
+// 扩展存储不按网页 origin 隔离，也不会被网站自己的 localStorage 清理影响。
 // `left/top` 为 null 表示「自动停靠」——位置由 CSS 的 bottom/right 决定，会随视口变化；
 // 有值表示用户手动摆放过的像素位置。这样两种状态都能精确还原，不再靠 `top:auto` 猜。
 // 旧版（v1，只有裸 `{left, top}`）读档时按「手动位置」兼容，`docked` 留 null 由打开路径决定。
 
 export const PANEL_POS_KEY = 'recallflow-panel-pos';
 export const PANEL_SIZE_KEY = 'recallflow-panel-size';
+export const PANEL_LAYOUT_STORAGE_KEY = 'recallflow.panel.layout.v1';
 export const PANEL_MIN_WIDTH = 280;
 export const PANEL_MIN_HEIGHT = 320;
 // 与 CSS 的 `max-width: calc(100vw - 24px)` / `max-height: calc(100vh - 24px)` 同一个口径。
@@ -77,10 +83,38 @@ export interface LayoutStorageLike {
   setItem(key: string, value: string): void;
 }
 
+/** 面板布局异步存储端口。扩展存储与测试内存实现都满足这个最小接口。 */
+export interface PanelLayoutStorage {
+  get(key: string): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+}
+
 /** 读档的初始形态：四个字段都还没值。抽成函数是为了让返回类型一次说清，
  *  不必给一个模块级 const 补标注（本批的口径是「先给导出签名加类型」）。 */
 function emptySnapshot(): PanelLayoutSnapshot {
   return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+}
+
+function snapshotFromParts(pos: any, size: any): PanelLayoutSnapshot {
+  const out = emptySnapshot();
+  if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
+  if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
+  if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
+    out.left = pos.left;
+    out.top = pos.top;
+    out.hasPos = true;
+  }
+  if (pos && typeof pos.docked === 'boolean') out.docked = pos.docked;
+  return out;
+}
+
+function snapshotHasLayout(snapshot: PanelLayoutSnapshot): boolean {
+  return (
+    snapshot.hasPos ||
+    snapshot.width != null ||
+    snapshot.height != null ||
+    snapshot.docked != null
+  );
 }
 
 export function readPanelLayout(storage: LayoutStorageLike | null | undefined): PanelLayoutSnapshot {
@@ -97,16 +131,13 @@ export function readPanelLayout(storage: LayoutStorageLike | null | undefined): 
   } catch (e) {
     size = null;
   }
-  const out = emptySnapshot();
-  if (size && isFiniteNumber(Number(size.width)) && Number(size.width) > 0) out.width = Number(size.width);
-  if (size && isFiniteNumber(Number(size.height)) && Number(size.height) > 0) out.height = Number(size.height);
-  if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
-    out.left = pos.left;
-    out.top = pos.top;
-    out.hasPos = true;
-  }
-  if (pos && typeof pos.docked === 'boolean') out.docked = pos.docked;
-  return out;
+  return snapshotFromParts(pos, size);
+}
+
+/** 解析扩展存储里的统一布局记录；损坏或旧形状返回空快照。 */
+export function readGlobalPanelLayout(value: unknown): PanelLayoutSnapshot {
+  if (!value || typeof value !== 'object') return emptySnapshot();
+  return snapshotFromParts(value, value);
 }
 
 /**
@@ -153,6 +184,107 @@ export function writePanelLayout(
     return null;
   }
   return record;
+}
+
+function globalPanelLayoutRecord(snapshot: {
+  width?: number;
+  height?: number;
+  left?: number;
+  top?: number;
+  docked?: boolean;
+  manualPos?: boolean;
+} | null) {
+  const s = snapshot || {};
+  const width = Number(s.width);
+  const height = Number(s.height);
+  return {
+    version: PANEL_LAYOUT_VERSION,
+    docked: s.docked === true,
+    left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
+    top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+  };
+}
+
+/**
+ * 读取全浏览器统一布局。
+ *
+ * `legacyStorage` 是当前网页的 localStorage：只有扩展存储里还没有布局时才读取并迁移。
+ * 迁移后，网页自己的 localStorage 清理、同域多标签页和无痕/跨站页面都不会再影响布局。
+ */
+export async function loadGlobalPanelLayout(
+  storage: PanelLayoutStorage | null | undefined,
+  legacyStorage?: LayoutStorageLike | null
+): Promise<PanelLayoutSnapshot> {
+  if (!storage) return readPanelLayout(legacyStorage);
+  let data: Record<string, unknown> = {};
+  try {
+    data = await storage.get(PANEL_LAYOUT_STORAGE_KEY);
+  } catch (e) {
+    // 扩展存储偶发不可用时，至少保留当前页的旧布局，不要把面板直接重置。
+    return readPanelLayout(legacyStorage);
+  }
+  const current = readGlobalPanelLayout(data && data[PANEL_LAYOUT_STORAGE_KEY]);
+  if (snapshotHasLayout(current)) return current;
+
+  const legacy = readPanelLayout(legacyStorage);
+  if (!snapshotHasLayout(legacy)) return emptySnapshot();
+  const record = globalPanelLayoutRecord({
+    width: legacy.width == null ? undefined : legacy.width,
+    height: legacy.height == null ? undefined : legacy.height,
+    left: legacy.left == null ? undefined : legacy.left,
+    top: legacy.top == null ? undefined : legacy.top,
+    docked: legacy.docked === true,
+    manualPos: legacy.hasPos,
+  });
+  try {
+    await storage.set({ [PANEL_LAYOUT_STORAGE_KEY]: record });
+  } catch (e) {
+    // 迁移写入失败仍可用旧布局开启本次面板；下一次打开会再尝试。
+  }
+  return legacy;
+}
+
+/**
+ * 写入全浏览器统一布局。
+ *
+ * `writeSize=false` 用于打开面板时只更新位置：先合入扩展存储里已有的用户尺寸，
+ * 避免把刚算出的自动高度固化成用户尺寸。
+ */
+export async function saveGlobalPanelLayout(
+  storage: PanelLayoutStorage | null | undefined,
+  snapshot: {
+    width?: number;
+    height?: number;
+    left?: number;
+    top?: number;
+    docked?: boolean;
+    manualPos?: boolean;
+    writeSize?: boolean;
+  } | null
+): Promise<ReturnType<typeof readGlobalPanelLayout> | null> {
+  if (!storage) return null;
+  let current = emptySnapshot();
+  try {
+    const data = await storage.get(PANEL_LAYOUT_STORAGE_KEY);
+    current = readGlobalPanelLayout(data && data[PANEL_LAYOUT_STORAGE_KEY]);
+  } catch (e) {
+    return null;
+  }
+  const s = snapshot || {};
+  const writeSize = s.writeSize !== false;
+  const record = globalPanelLayoutRecord({
+    ...s,
+    width: writeSize ? s.width : current.width == null ? undefined : current.width,
+    height: writeSize ? s.height : current.height == null ? undefined : current.height,
+  });
+  try {
+    await storage.set({ [PANEL_LAYOUT_STORAGE_KEY]: record });
+  } catch (e) {
+    return null;
+  }
+  return readGlobalPanelLayout(record);
 }
 
 /**

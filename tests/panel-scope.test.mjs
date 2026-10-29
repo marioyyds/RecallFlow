@@ -138,16 +138,17 @@ test('思考记录的挂载函数必须在模块顶层（restoreStreamingUI 要�
 // 所有静态门禁都看不到它，只有真浏览器里"流式输出中途重开面板"才暴露
 //（本轮就是靠新加的 E2E 抓到的）。这条把该类错误变成加载即红。
 
-test('面板脚本：模块级代码不得引用只在 openPanel 内声明的局部变量', () => {
+test('面板脚本：模块级代码不得引用只在面板构建函数内声明的局部变量', () => {
   const lines = fs.readFileSync(SRC, 'utf8').split('\n');
   const fns = collectFns(lines);
-  const open = fns.find((f) => f.name === 'openPanel');
-  assert.ok(open, '应能找到 openPanel');
+  // 面板 DOM 构建从 openPanel 抽成 createPanelWithLayout；作用域边界随实际构建函数移动。
+  const open = fns.find((f) => f.name === 'createPanelWithLayout');
+  assert.ok(open, '应能找到 createPanelWithLayout');
   const startIdx = open.line - 1;
   const bodyLines = bodyOf(lines, fns, open).split('\n');
   const endIdx = startIdx + bodyLines.length - 1;
 
-  // ① openPanel 内声明的"元素类"局部变量（最典型的跨作用域误用形态）
+  // ① 面板构建函数内声明的"元素类"局部变量（最典型的跨作用域误用形态）
   const openLocal = new Set();
   for (const l of bodyLines) {
     const m = l.match(/^[ \t]+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*document\.createElement\(/);

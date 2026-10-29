@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   PANEL_POS_KEY,
   PANEL_SIZE_KEY,
+  PANEL_LAYOUT_STORAGE_KEY,
   PANEL_LAYOUT_VERSION,
   PANEL_MIN_WIDTH,
   PANEL_MIN_HEIGHT,
@@ -18,6 +19,9 @@ import {
   clampPanelIntoView,
   readPanelLayout,
   writePanelLayout,
+  readGlobalPanelLayout,
+  loadGlobalPanelLayout,
+  saveGlobalPanelLayout,
   resolvePanelPlacement,
 } from '../lib/ui/page/panel-layout.ts';
 
@@ -29,6 +33,19 @@ function memoryStorage(seed) {
     removeItem: (k) => map.delete(k),
     _map: map,
     _json: (k) => JSON.parse(map.get(k)),
+  };
+}
+
+function asyncStorage(seed) {
+  const map = new Map(Object.entries(seed || {}));
+  return {
+    async get(key) {
+      return map.has(key) ? { [key]: structuredClone(map.get(key)) } : {};
+    },
+    async set(items) {
+      for (const [key, value] of Object.entries(items)) map.set(key, structuredClone(value));
+    },
+    _dump: (key) => structuredClone(map.get(key)),
   };
 }
 
@@ -66,6 +83,91 @@ test('readPanelLayout：读回 writePanelLayout 写的内容（往返一致）',
   const s = memoryStorage();
   writePanelLayout(s, { width: 410, height: 520, left: 120, top: 90, docked: false, manualPos: true });
   assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, docked: false, hasPos: true });
+});
+
+test('全局布局：位置和尺寸写在同一个扩展存储记录里', async () => {
+  const storage = asyncStorage();
+  const saved = await saveGlobalPanelLayout(storage, {
+    width: 430,
+    height: 510,
+    left: 310,
+    top: 120,
+    docked: true,
+    manualPos: true,
+  });
+  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, docked: true, hasPos: true });
+  assert.deepEqual(storage._dump(PANEL_LAYOUT_STORAGE_KEY), {
+    version: PANEL_LAYOUT_VERSION,
+    docked: true,
+    left: 310,
+    top: 120,
+    width: 430,
+    height: 510,
+  });
+  assert.deepEqual(await loadGlobalPanelLayout(storage), saved);
+});
+
+test('全局布局：只更新位置时保留已有用户尺寸', async () => {
+  const storage = asyncStorage();
+  await saveGlobalPanelLayout(storage, {
+    width: 400,
+    height: 480,
+    left: 10,
+    top: 20,
+    docked: false,
+    manualPos: true,
+  });
+  await saveGlobalPanelLayout(storage, {
+    width: 999,
+    height: 888,
+    left: 300,
+    top: 140,
+    docked: false,
+    manualPos: true,
+    writeSize: false,
+  });
+  assert.deepEqual(await loadGlobalPanelLayout(storage), {
+    width: 400,
+    height: 480,
+    left: 300,
+    top: 140,
+    docked: false,
+    hasPos: true,
+  });
+});
+
+test('全局布局：扩展存储为空时迁移网页旧布局，之后不再依赖网页 localStorage', async () => {
+  const storage = asyncStorage();
+  const legacy = memoryStorage({
+    [PANEL_POS_KEY]: JSON.stringify({ version: 2, docked: false, left: 300, top: 140 }),
+    [PANEL_SIZE_KEY]: JSON.stringify({ version: 2, width: 420, height: 500 }),
+  });
+  assert.deepEqual(await loadGlobalPanelLayout(storage, legacy), {
+    width: 420,
+    height: 500,
+    left: 300,
+    top: 140,
+    docked: false,
+    hasPos: true,
+  });
+  assert.deepEqual(readGlobalPanelLayout(storage._dump(PANEL_LAYOUT_STORAGE_KEY)), {
+    width: 420,
+    height: 500,
+    left: 300,
+    top: 140,
+    docked: false,
+    hasPos: true,
+  });
+
+  const anotherOrigin = memoryStorage();
+  assert.deepEqual(await loadGlobalPanelLayout(storage, anotherOrigin), {
+    width: 420,
+    height: 500,
+    left: 300,
+    top: 140,
+    docked: false,
+    hasPos: true,
+  });
 });
 
 test('resolvePanelPlacement：有存档位置时，所有打开路径都以存档为准', () => {
