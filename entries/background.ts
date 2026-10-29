@@ -71,7 +71,7 @@ const persistentPanelStorage = createIndexedDbKeyValueStore({
   storeName: 'panel-kv',
   version: 1,
 });
-const chromeSessionStorage = createChromeStorageAdapter(chrome.storage.session, chrome);
+const chromeSessionStorage = createChromeStorageAdapter(chrome.storage.session, chrome, 'session');
 const chromeLocalStorage = createChromeStorageAdapter(chrome.storage.local, chrome);
 
 function isPersistentPanelKey(key: unknown): boolean {

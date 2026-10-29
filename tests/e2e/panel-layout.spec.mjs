@@ -114,3 +114,45 @@ test('面板位置和尺寸跨 origin 使用同一份扩展存储布局', async 
   await first.close();
   await second.close();
 });
+
+test('两个标签页实时同步布局，关闭任一标签页不会用旧布局覆盖新值', async () => {
+  await clearLayout();
+  const first = await openFixturePage(context, '/');
+  await openPanel(first);
+  const second = await openFixturePage(context, '/?second=1');
+  await openPanel(second);
+  await expect(second.locator(PANEL + ' .panel')).toBeVisible();
+
+  await drag(first, 90, 50);
+  await resize(first, 70, 55);
+  const edited = await panelRect(first);
+
+  // 已打开的另一标签页必须在不关闭/重开的情况下实时跟上。
+  await expect.poll(async () => {
+    const rect = await panelRect(second);
+    return Math.abs(rect.left - edited.left) <= 1 &&
+      Math.abs(rect.top - edited.top) <= 1 &&
+      Math.abs(rect.width - edited.width) <= 1 &&
+      Math.abs(rect.height - edited.height) <= 1;
+  }).toBe(true);
+  const savedBeforeClose = await readLayout();
+
+  // 从一个布局未变化的面板关闭；全局关闭会让所有标签页一起关闭，
+  // 但关闭动作本身不得回写各标签页的旧尺寸。
+  await second.locator(PANEL + ' .close').click();
+  await expect(first.locator(PANEL + ' .panel')).toHaveCount(0);
+  await expect(second.locator(PANEL + ' .panel')).toHaveCount(0);
+  expect(await readLayout()).toEqual(savedBeforeClose);
+
+  await openPanel(first);
+  await expect.poll(async () => {
+    const rect = await panelRect(first);
+    return Math.abs(rect.left - edited.left) <= 1 &&
+      Math.abs(rect.top - edited.top) <= 1 &&
+      Math.abs(rect.width - edited.width) <= 1 &&
+      Math.abs(rect.height - edited.height) <= 1;
+  }).toBe(true);
+
+  await first.close();
+  await second.close();
+});

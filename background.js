@@ -13896,9 +13896,11 @@ function createIndexedDbKeyValueStore(options) {
 var ChromeStorageAdapter = class {
   area;
   api;
-  constructor(area3, api = {}) {
+  areaName;
+  constructor(area3, api = {}, areaName = "local") {
     this.area = area3;
     this.api = api;
+    this.areaName = areaName;
   }
   get(keys = null) {
     return new Promise((resolve, reject) => {
@@ -13972,9 +13974,26 @@ var ChromeStorageAdapter = class {
       }
     });
   }
+  /** 订阅本存储区的变化；返回幂等取消函数。 */
+  onChanged(listener) {
+    const events = this.api.storage?.onChanged;
+    if (!events || typeof listener !== "function") return () => {
+    };
+    const wrapped = (changes, areaName) => {
+      if (areaName && areaName !== this.areaName) return;
+      listener(changes || {});
+    };
+    events.addListener(wrapped);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      events.removeListener(wrapped);
+    };
+  }
 };
-function createChromeStorageAdapter(area3, api = typeof chrome !== "undefined" ? chrome : {}) {
-  return new ChromeStorageAdapter(area3, api);
+function createChromeStorageAdapter(area3, api = typeof chrome !== "undefined" ? chrome : {}, areaName = "local") {
+  return new ChromeStorageAdapter(area3, api, areaName);
 }
 
 // entries/background.ts
@@ -13984,7 +14003,7 @@ var persistentPanelStorage = createIndexedDbKeyValueStore({
   storeName: "panel-kv",
   version: 1
 });
-var chromeSessionStorage = createChromeStorageAdapter(chrome.storage.session, chrome);
+var chromeSessionStorage = createChromeStorageAdapter(chrome.storage.session, chrome, "session");
 var chromeLocalStorage = createChromeStorageAdapter(chrome.storage.local, chrome);
 function isPersistentPanelKey(key) {
   const k = String(key || "");

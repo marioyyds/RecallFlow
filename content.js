@@ -7325,7 +7325,6 @@
     screenshotView.lightboxOpen = false;
     clearCiteHighlight();
     if (panel) {
-      persistPanelLayoutNow();
       panel.remove();
       panel = null;
       panelBody = null;
@@ -7495,6 +7494,7 @@
   var panelLayoutWriteChain = Promise.resolve();
   var panelLayoutWriteWarned = false;
   var panelOpenGeneration = 0;
+  var unsubscribePanelLayoutChanges = null;
   function persistPanelLayoutThrottled() {
     if (layoutTimer || !panel) return;
     layoutTimer = setTimeout(() => {
@@ -7544,6 +7544,60 @@
       if (!panelLayoutStorage) return readPanelLayout(localStorage);
       return loadGlobalPanelLayout(panelLayoutStorage, localStorage);
     }).catch(() => readPanelLayout(localStorage));
+  }
+  function applyPanelPlacement(placement) {
+    if (!panel) return;
+    if (placement.docked) panel.classList.add("docked");
+    else panel.classList.remove("docked");
+    panel.style.right = placement.right == null ? "auto" : placement.right + "px";
+    panel.style.bottom = placement.bottom == null ? "auto" : placement.bottom + "px";
+    panel.style.left = placement.left == null ? "auto" : placement.left + "px";
+    panel.style.top = placement.top == null ? "auto" : placement.top + "px";
+    panel._manualPos = placement.manualPos;
+  }
+  function applyGlobalPanelLayoutChange(value) {
+    if (!panel) return;
+    const layout = readGlobalPanelLayout(value);
+    const savedSize = clampPanelSize(layout, { width: window.innerWidth, height: window.innerHeight });
+    if (savedSize) {
+      panel.style.width = savedSize.width + "px";
+      panel.style.height = savedSize.height + "px";
+      panel._manualSize = true;
+      if (panelBody) {
+        panelBody.style.flex = "1 1 auto";
+        panelBody.style.height = "auto";
+        panelBody.style.overflowY = "auto";
+      }
+    } else if (layout.docked === false && !layout.hasPos) {
+      panel.classList.remove("docked");
+      panel._manualPos = false;
+      return;
+    }
+    const placement = resolvePanelPlacement({
+      layout,
+      docked: layout.docked == null ? panel.classList.contains("docked") : layout.docked,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      size: { width: panel.offsetWidth, height: panel.offsetHeight },
+      dockGap: getDockGap()
+    });
+    applyPanelPlacement(placement);
+  }
+  function installPanelLayoutSync() {
+    if (unsubscribePanelLayoutChanges) {
+      try {
+        unsubscribePanelLayoutChanges();
+      } catch (e) {
+      }
+      unsubscribePanelLayoutChanges = null;
+    }
+    const subscribe = panelLayoutStorage && panelLayoutStorage.onChanged;
+    if (typeof subscribe !== "function") return;
+    unsubscribePanelLayoutChanges = subscribe.call(panelLayoutStorage, (changes) => {
+      const change = changes && changes[PANEL_LAYOUT_STORAGE_KEY];
+      if (!change || typeof change !== "object" || !Object.prototype.hasOwnProperty.call(change, "newValue")) return;
+      if (dragState || resizeState) return;
+      applyGlobalPanelLayoutChange(change.newValue);
+    });
   }
   function clampPanelToViewport() {
     if (!panel) return;
@@ -9589,13 +9643,7 @@
       size: { width: panel.offsetWidth, height: panel.offsetHeight },
       dockGap: getDockGap()
     });
-    if (placement.docked) panel.classList.add("docked");
-    else panel.classList.remove("docked");
-    panel.style.right = placement.right == null ? "auto" : placement.right + "px";
-    panel.style.bottom = placement.bottom == null ? "auto" : placement.bottom + "px";
-    panel.style.left = placement.left == null ? "auto" : placement.left + "px";
-    panel.style.top = placement.top == null ? "auto" : placement.top + "px";
-    panel._manualPos = placement.manualPos;
+    applyPanelPlacement(placement);
     void queuePanelLayoutWrite({
       docked: placement.docked,
       manualPos: placement.manualPos,
@@ -10575,15 +10623,12 @@
     if (options.runtime) runtimePort = options.runtime;
     if (options.dom) screenshotView.setDom(options.dom);
     if (options.storage) panelLayoutStorage = options.storage;
+    installPanelLayoutSync();
     try {
       window.addEventListener("pagehide", () => {
         if (followedRun.followedRunState || followedRun.followedMessages.length) return;
         try {
           saveConversation();
-        } catch (e) {
-        }
-        try {
-          persistPanelLayoutNow();
         } catch (e) {
         }
       });
@@ -10820,9 +10865,11 @@
   var ChromeStorageAdapter = class {
     area;
     api;
-    constructor(area, api = {}) {
+    areaName;
+    constructor(area, api = {}, areaName = "local") {
       this.area = area;
       this.api = api;
+      this.areaName = areaName;
     }
     get(keys = null) {
       return new Promise((resolve, reject) => {
@@ -10896,9 +10943,26 @@
         }
       });
     }
+    /** 订阅本存储区的变化；返回幂等取消函数。 */
+    onChanged(listener) {
+      const events = this.api.storage?.onChanged;
+      if (!events || typeof listener !== "function") return () => {
+      };
+      const wrapped = (changes, areaName) => {
+        if (areaName && areaName !== this.areaName) return;
+        listener(changes || {});
+      };
+      events.addListener(wrapped);
+      let active2 = true;
+      return () => {
+        if (!active2) return;
+        active2 = false;
+        events.removeListener(wrapped);
+      };
+    }
   };
-  function createChromeStorageAdapter(area, api = typeof chrome !== "undefined" ? chrome : {}) {
-    return new ChromeStorageAdapter(area, api);
+  function createChromeStorageAdapter(area, api = typeof chrome !== "undefined" ? chrome : {}, areaName = "local") {
+    return new ChromeStorageAdapter(area, api, areaName);
   }
 
   // lib/adapters/dom/document.ts

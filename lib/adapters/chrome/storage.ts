@@ -9,18 +9,26 @@ export interface ChromeStorageAreaLike {
   remove(keys: string | string[], callback: () => void): void | Promise<void>;
 }
 
+export interface ChromeStorageOnChangedLike {
+  addListener(listener: (changes: StorageDocument, areaName?: string) => void): void;
+  removeListener(listener: (changes: StorageDocument, areaName?: string) => void): void;
+}
+
 export interface ChromeStorageAdapterApi {
   runtime?: { lastError?: { message?: string } | null };
+  storage?: { onChanged?: ChromeStorageOnChangedLike };
 }
 
 /** Promise adapter for chrome.storage.local / chrome.storage.session. */
 export class ChromeStorageAdapter implements StoragePort {
   private readonly area: ChromeStorageAreaLike;
   private readonly api: ChromeStorageAdapterApi;
+  private readonly areaName: string;
 
-  constructor(area: ChromeStorageAreaLike, api: ChromeStorageAdapterApi = {}) {
+  constructor(area: ChromeStorageAreaLike, api: ChromeStorageAdapterApi = {}, areaName = 'local') {
     this.area = area;
     this.api = api;
+    this.areaName = areaName;
   }
 
   get(keys: StorageKeys = null): Promise<StorageDocument> {
@@ -99,11 +107,29 @@ export class ChromeStorageAdapter implements StoragePort {
       }
     });
   }
+
+  /** 订阅本存储区的变化；返回幂等取消函数。 */
+  onChanged(listener: (changes: StorageDocument) => void): () => void {
+    const events = this.api.storage?.onChanged;
+    if (!events || typeof listener !== 'function') return () => {};
+    const wrapped = (changes: StorageDocument, areaName?: string) => {
+      if (areaName && areaName !== this.areaName) return;
+      listener(changes || {});
+    };
+    events.addListener(wrapped);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      events.removeListener(wrapped);
+    };
+  }
 }
 
 export function createChromeStorageAdapter(
   area: ChromeStorageAreaLike,
-  api: ChromeStorageAdapterApi = typeof chrome !== 'undefined' ? chrome : {}
+  api: ChromeStorageAdapterApi = typeof chrome !== 'undefined' ? chrome : {},
+  areaName = 'local'
 ): StoragePort {
-  return new ChromeStorageAdapter(area, api);
+  return new ChromeStorageAdapter(area, api, areaName);
 }

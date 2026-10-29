@@ -87,6 +87,7 @@ export interface LayoutStorageLike {
 export interface PanelLayoutStorage {
   get(key: string): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
+  onChanged?(listener: (changes: Record<string, unknown>) => void): () => void;
 }
 
 /** 读档的初始形态：四个字段都还没值。抽成函数是为了让返回类型一次说清，

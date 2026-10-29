@@ -81,3 +81,25 @@ test('ChromeStorageAdapter：兼容只返回 Promise 的 MV3 存储实现', asyn
   await adapter.set({ beta: 2 });
   await adapter.remove('beta');
 });
+
+test('ChromeStorageAdapter：onChanged 只转发对应存储区，并可取消订阅', () => {
+  let listener = null;
+  const events = {
+    addListener(fn) { listener = fn; },
+    removeListener(fn) { if (listener === fn) listener = null; },
+  };
+  const adapter = new ChromeStorageAdapter(
+    { get(_keys, cb) { cb({}); }, set(_items, cb) { cb(); }, remove(_keys, cb) { cb(); } },
+    { runtime: { lastError: null }, storage: { onChanged: events } },
+    'local'
+  );
+  const seen = [];
+  const unsubscribe = adapter.onChanged((changes) => seen.push(changes));
+
+  listener({ alpha: { newValue: 1 } }, 'session');
+  listener({ alpha: { newValue: 2 } }, 'local');
+  assert.deepEqual(seen, [{ alpha: { newValue: 2 } }]);
+
+  unsubscribe();
+  assert.equal(listener, null);
+});

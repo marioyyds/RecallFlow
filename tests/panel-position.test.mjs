@@ -100,7 +100,7 @@ async function shortcutAgain(app) {
   app.shortcut();
 }
 
-test('默认停靠面板：关闭时也必须落盘（旧代码这条路径一个字节都不写）', async () => {
+test('默认停靠面板：打开时写入全局停靠状态，关闭不会覆盖已保存布局', async () => {
   const app = await boot();
   try {
     assert.equal(savedLayout(), undefined, '前提：打开前没有全局存档');
@@ -108,20 +108,21 @@ test('默认停靠面板：关闭时也必须落盘（旧代码这条路径一�
     const panel = wireLayout(await waitFor(app.panel, '快捷键应打开面板'));
     assert.ok(panel.classList.contains('docked'), '前提：快捷键打开的是停靠面板');
 
-    panel.querySelector('.close').emit('click', {});
-    assert.equal(app.panel(), null, '前提：面板已关闭');
-
     const saved = await waitFor(
       () => {
         const value = savedLayout();
-        return value && value.width > 0 && value.height > 0 ? value : null;
+        return value && value.docked === true ? value : null;
       },
-      '关闭时必须写入完整的扩展级布局存档'
+      '打开时必须写入扩展级停靠布局'
     );
     assert.equal(saved.docked, true, '必须记录停靠态：停靠面板的位置由 bottom/right 决定，不是像素');
     assert.equal(saved.left, null, '停靠未拖动 = 没有像素位置，要如实记 null 而不是当时算出来的坐标');
     assert.equal(saved.top, null);
-    assert.ok(saved.width > 0 && saved.height > 0, '尺寸要一并写入同一个全局存档');
+    const beforeClose = JSON.stringify(saved);
+    panel.querySelector('.close').emit('click', {});
+    assert.equal(app.panel(), null, '前提：面板已关闭');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(JSON.stringify(savedLayout()), beforeClose, '关闭动作不得回写旧布局');
   } finally {
     app.close();
   }

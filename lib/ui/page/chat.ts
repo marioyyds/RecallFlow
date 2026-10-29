@@ -83,7 +83,9 @@ import {
   clampPanelSize,
   clampPanelIntoView,
   loadGlobalPanelLayout,
+  PANEL_LAYOUT_STORAGE_KEY,
   readPanelLayout,
+  readGlobalPanelLayout,
   saveGlobalPanelLayout,
   writePanelLayout,
   resolvePanelPlacement,
@@ -644,10 +646,8 @@ function removePanel(options?: any) {
   screenshotView.lightboxOpen = false; // 放大层随面板一起移除，标记必须复位，否则下次 Esc 关不掉面板
   clearCiteHighlight();
   if (panel) {
-    // 所有关闭方式（标题栏 ✕ / Esc / FAB / 快捷键 / 跨标签页同步 / SPA 移除前）都经过这里。
-    // 位置与尺寸**无条件**落盘：默认停靠面板没有像素 left/top，靠 `docked` 记录还原，
-    // 不再依赖 `_manualPos` —— 见 persistPanelLayoutNow 的说明。
-    persistPanelLayoutNow();
+    // 布局在拖动/缩放结束、窗口夹取和打开时已经写入全局存储。关闭本身不再回写：
+    // 全局关闭会同时关闭所有标签页，旧标签页若在这里落盘，会用旧布局覆盖刚编辑的布局。
     panel.remove();
     panel = null;
     panelBody = null;
@@ -980,6 +980,7 @@ let panelLayoutStorage: PanelLayoutStorage | null = null;
 let panelLayoutWriteChain: Promise<unknown> = Promise.resolve();
 let panelLayoutWriteWarned = false;
 let panelOpenGeneration = 0;
+let unsubscribePanelLayoutChanges: (() => void) | null = null;
 
 // 节流持久化面板布局（避免拖拽/拉伸 mousemove 高频写入）。
 function persistPanelLayoutThrottled() {
@@ -1048,6 +1049,68 @@ function loadPanelLayoutForOpen(): Promise<any> {
       return loadGlobalPanelLayout(panelLayoutStorage, localStorage);
     })
     .catch(() => readPanelLayout(localStorage));
+}
+
+function applyPanelPlacement(placement: any) {
+  if (!panel) return;
+  if (placement.docked) panel.classList.add('docked');
+  else panel.classList.remove('docked');
+  panel.style.right = placement.right == null ? 'auto' : placement.right + 'px';
+  panel.style.bottom = placement.bottom == null ? 'auto' : placement.bottom + 'px';
+  panel.style.left = placement.left == null ? 'auto' : placement.left + 'px';
+  panel.style.top = placement.top == null ? 'auto' : placement.top + 'px';
+  panel._manualPos = placement.manualPos;
+}
+
+/**
+ * 把另一个标签页写入的全局布局实时应用到当前面板。
+ *
+ * 尺寸来自全局记录，位置仍按当前视口夹取；因此不同窗口尺寸下不会跑到屏幕外，
+ * 但用户看到的宽高与布局模式保持一致。
+ */
+function applyGlobalPanelLayoutChange(value: unknown) {
+  if (!panel) return;
+  const layout = readGlobalPanelLayout(value);
+  const savedSize = clampPanelSize(layout as any, { width: window.innerWidth, height: window.innerHeight });
+  if (savedSize) {
+    panel.style.width = savedSize.width + 'px';
+    panel.style.height = savedSize.height + 'px';
+    panel._manualSize = true;
+    if (panelBody) {
+      panelBody.style.flex = '1 1 auto';
+      panelBody.style.height = 'auto';
+      panelBody.style.overflowY = 'auto';
+    }
+  } else if (layout.docked === false && !layout.hasPos) {
+    // 没有用户尺寸/位置时只有停靠态可同步；浮动气泡仍按自己的打开点摆放。
+    panel.classList.remove('docked');
+    panel._manualPos = false;
+    return;
+  }
+  const placement = resolvePanelPlacement({
+    layout,
+    docked: layout.docked == null ? panel.classList.contains('docked') : layout.docked,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    size: { width: panel.offsetWidth, height: panel.offsetHeight },
+    dockGap: getDockGap(),
+  });
+  applyPanelPlacement(placement);
+}
+
+function installPanelLayoutSync() {
+  if (unsubscribePanelLayoutChanges) {
+    try { unsubscribePanelLayoutChanges(); } catch (e: any) {}
+    unsubscribePanelLayoutChanges = null;
+  }
+  const subscribe = panelLayoutStorage && panelLayoutStorage.onChanged;
+  if (typeof subscribe !== 'function') return;
+  unsubscribePanelLayoutChanges = subscribe.call(panelLayoutStorage, (changes) => {
+    const change = changes && changes[PANEL_LAYOUT_STORAGE_KEY];
+    if (!change || typeof change !== 'object' || !Object.prototype.hasOwnProperty.call(change, 'newValue')) return;
+    // 本标签页正在拖拽/拉伸时不抢控制权；松手后的写入会成为新的全局布局。
+    if (dragState || resizeState) return;
+    applyGlobalPanelLayoutChange((change as any).newValue);
+  });
 }
 
 // 面板越出可视区时夹回来：手动定位动 left/top；停靠态收窄底部留白。
@@ -3566,13 +3629,7 @@ function createPanelWithLayout(
     size: { width: panel.offsetWidth, height: panel.offsetHeight },
     dockGap: getDockGap(),
   });
-  if (placement.docked) panel.classList.add('docked');
-  else panel.classList.remove('docked');
-  panel.style.right = placement.right == null ? 'auto' : placement.right + 'px';
-  panel.style.bottom = placement.bottom == null ? 'auto' : placement.bottom + 'px';
-  panel.style.left = placement.left == null ? 'auto' : placement.left + 'px';
-  panel.style.top = placement.top == null ? 'auto' : placement.top + 'px';
-  panel._manualPos = placement.manualPos;
+  applyPanelPlacement(placement);
 
   // 打开即落盘（只写位置，不写刚算出的自动高度）：
   // ① 用户拖过之后即使页面被 SPA 整棵换掉、扩展被重载、标签页崩溃，下次打开也回到原位；
@@ -4794,6 +4851,7 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
   if (options.runtime) runtimePort = options.runtime;
   if (options.dom) screenshotView.setDom(options.dom);
   if (options.storage) panelLayoutStorage = options.storage;
+  installPanelLayoutSync();
   // 页面即将卸载（整页跳转 / 返回）前把对话落盘：这是用户消息"进对话即落盘"之外的
   // 一道兜底，盖住"刚发完立刻跳转"这类极小窗口。sendMessage 是尽力而为，不阻塞卸载。
   try {
@@ -4803,9 +4861,6 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       // 会被 reset，此时再保存才是安全的。
       if (followedRun.followedRunState || followedRun.followedMessages.length) return;
       try { saveConversation(); } catch (e: any) {}
-      // 面板位置也顺手落一次（打开/拖拽/关闭时已经写过，这里是整页跳转的兜底；
-      // 面板脱离文档时 persistPanelLayoutNow 会自行跳过，不会写坏存档）。
-      try { persistPanelLayoutNow(); } catch (e: any) {}
     });
   } catch (e: any) {}
 
