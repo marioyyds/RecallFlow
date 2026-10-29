@@ -82,10 +82,13 @@ test('⑤ 两类"没取到"必须分开说（否则模型会反复重试同一�
 });
 
 test('⑥ 跨模块的格式耦合必须有单一来源（防止改成一处、另一处静默失效）', () => {
-  const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+  const [agentSrc, pipelineSrc] = [
+    'lib/application/agent/agent-messages.ts',
+    'lib/application/agent/tool-call-pipeline.ts',
+  ].map((file) => fs.readFileSync(file, 'utf8'));
   const ctxSrc = fs.readFileSync('lib/application/agent/context.ts', 'utf8');
   assert.match(agentSrc, /export function formatTruncationNotice/, '通知格式要由本函数提供');
-  assert.match(agentSrc, /formatTruncationNotice\(res\.result\.length, rid\)/, '截断处必须用它，不许再手拼字符串');
+  assert.match(pipelineSrc, /formatTruncationNotice\(result\.result\.length, resultId\)/, '截断处必须用它，不许再手拼字符串');
   // context.js 仍然靠正则解析这条通知 —— 这正是需要"单一来源 + 用真实字符串测"的原因
   assert.match(ctxSrc, /ID_NOTICE_RE/, 'context.js 仍会解析通知里的 id');
   // 真字符串必须能被 context.js 的正则认出来（等价于 §② 的断言，但直接盯正则）

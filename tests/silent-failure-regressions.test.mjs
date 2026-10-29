@@ -595,13 +595,18 @@ test('evaluateLiveness：上限为 0/负数/非数字表示不启用（沿用高
 });
 
 test('存活看门狗必须已接入主循环（不能只定义不调用）', () => {
-  const src = readFileSync(new URL('../lib/application/agent/agent.ts', import.meta.url), 'utf8');
+  const [src, pipeline, bootstrap, persistence] = [
+    '../lib/application/agent/agent-loop.ts',
+    '../lib/application/agent/tool-call-pipeline.ts',
+    '../lib/application/agent/agent-bootstrap.ts',
+    '../lib/application/agent/agent-run-state.ts',
+  ].map((relative) => readFileSync(new URL(relative, import.meta.url), 'utf8'));
   assert.match(src, /const liveness = evaluateLiveness\(/, '主循环必须调用看门狗');
   assert.match(src, /if \(liveness\.stalled\)/, '必须对判定结果做处理');
-  assert.match(src, /if \(progress\) lastProgressIter = iter/, '有进展必须重置基准');
+  assert.match(pipeline, /if \(progress\) state\.markProgress\(iter\)/, '有进展必须重置基准');
   // 恢复运行时必须沿用持久化的基准，否则恢复后看门狗形同虚设。
-  assert.match(src, /lastProgressIter = canResume && Number\.isFinite/, '恢复路径必须读回基准');
-  assert.match(src, /lastProgressIter,/, '必须写入会话，否则恢复后基准丢失');
+  assert.match(bootstrap, /lastProgressIter = canResume && Number\.isFinite/, '恢复路径必须读回基准');
+  assert.match(persistence, /lastProgressIter: this\.lastProgressIter/, '必须写入会话，否则恢复后基准丢失');
 });
 
 // ---------------- 元素收集 vs 正文抽取：两份排除名单绝不能混用 ----------------

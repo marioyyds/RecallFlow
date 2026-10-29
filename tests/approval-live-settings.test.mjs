@@ -16,7 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+const agentSrc = fs.readFileSync('lib/application/agent/tool-call-pipeline.ts', 'utf8');
 
 // `lib/application/agent/agent.ts` 在模块顶层会 import 一堆东西，但不会在 import 期访问 chrome，
 // 因此这里可以直接导入纯函数（另有测试用同样的方式导入它）。
@@ -87,15 +87,15 @@ test('缺省 loader 在没有 chrome 的环境里也不会抛（单元测试场�
 // ---------------- 源码级门禁：审批判断不许再用那份运行开始时的快照 ----------------
 
 test('串行路径：审批判断前必须现读，且判断用的是现读结果', () => {
-  const at = agentSrc.indexOf('toolNeedsApproval(tc.name,');
+  const at = agentSrc.indexOf('toolNeedsApproval(toolCall.name,');
   assert.ok(at > -1, '应能找到循环里的审批判断');
   const before = agentSrc.slice(Math.max(0, at - 900), at);
   assert.match(
     before,
-    /approvalSettings = await readLiveApprovalSettings\(settings\)/,
+    /approvalSettings = await readLiveApprovalSettings\(state\.settings\)/,
     '审批判断前必须现读设置 —— 否则用户中途打开自动批准不会生效'
   );
-  assert.match(agentSrc.slice(at, at + 120), /toolNeedsApproval\(tc\.name, approvalSettings,/, '判断必须用现读结果');
+  assert.match(agentSrc.slice(at, at + 160), /toolNeedsApproval\(toolCall\.name, approvalSettings,/, '判断必须用现读结果');
   // 反例：直接用运行开始时的快照必须被判为不合格
   const bad = "if (settings.toolApproval !== false && toolNeedsApproval(tc.name, settings, ctx.pageUrl)) {";
   assert.ok(!/approvalSettings = await readLiveApprovalSettings/.test(bad), '朴素写法不含现读，应判不合格');

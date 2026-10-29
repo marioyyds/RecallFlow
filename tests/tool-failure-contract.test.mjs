@@ -31,8 +31,8 @@ const read = (p) => fs.readFileSync(sourcePath(p), 'utf8');
 
 test('不许有「裸失败返回」：以失败文案为 result 的 return 必须带 ok:false', () => {
   const files = fs
-    .readdirSync('lib/assistant')
-    .filter((f) => f.endsWith('.js'))
+    .readdirSync('lib/application/agent')
+    .filter((f) => f.endsWith('.ts'))
     .map((f) => 'lib/application/agent/' + f)
     .concat([
       'lib/shared/diagnostics.ts',

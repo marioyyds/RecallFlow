@@ -63,13 +63,13 @@ test('工具名为空也不崩（不能因为少个标签就丢掉整条说明�
 // ---------------------------------------------------------------- 接线
 
 test('接线：withTimeout 必须给超时错误打标，调用点必须走 describeToolFailure', async () => {
-  const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+  const agentSrc = fs.readFileSync('lib/application/agent/tool-call-pipeline.ts', 'utf8');
   const timedOut = await withTimeout(() => new Promise(() => {}), 5, undefined, 'slow_tool').then(
     () => null,
     (error) => error
   );
   assert.equal(timedOut && timedOut.rfToolTimeout, true, 'withTimeout 要给超时错误打标');
-  assert.ok(/describeToolFailure\(e, tc\.name\)/.test(agentSrc), '调用点要统一走 describeToolFailure');
+  assert.ok(/describeToolFailure\(error, toolCall\.name\)/.test(agentSrc), '调用点要统一走 describeToolFailure');
   assert.ok(!/result: e\.name === 'AbortError' \? '任务已取消。' : e\.message/.test(agentSrc), '旧的内联写法应当已被替换');
   // timer 必须先声明为 null：否则 finish 里引用后面才 const 的 timer 会撞 TDZ。
   assert.equal(timedOut.toolName, 'slow_tool');

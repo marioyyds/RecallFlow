@@ -26,7 +26,7 @@ test('不再存在任何进度上限：轮数 / 工具数 / 任务时长', () =>
 });
 
 test('主循环不设轮数上限，而是无限循环 + 靠结束条件退出', () => {
-  const src = readSource('lib/application/agent/agent.ts');
+  const src = readSource('lib/application/agent/agent-loop.ts');
   assert.match(src, /for \(let iter = resumeIteration; ; iter\+\+\)/, '主循环应为无限循环');
   assert.ok(!/iter < effectiveModelTurns/.test(src), '不该再有轮数上界');
   assert.ok(!/reason: 'maxModelTurns'/.test(src), '不该再有「达到最大推理轮数」的终止路径');
@@ -104,22 +104,22 @@ test('tokenBudgetExceeded: 字符串数字按数值处理', () => {
 });
 
 test('成本兜底的提示语必须说清它是**花费**而非「额度用完」', () => {
-  const src = readSource('lib/application/agent/agent.ts');
+  const src = readSource('lib/application/agent/agent-loop.ts');
   assert.match(src, /这与「做了多少事」无关 —— 它是花费兜底/, '否则用户会以为又是「工具额度」那种墙');
 });
 
 // ---------------------------------------------------------------- 接线
 
 test('接线：守卫只有 ok / reflect 两种消费分支，不得再摘除工具或终止任务', () => {
-  const src = readSource('lib/application/agent/agent.ts');
-  assert.match(src, /decision\.level === 'reflect'/, '应保留 reflect 分支');
+  const src = readSource('lib/application/agent/tool-call-pipeline.ts');
+  assert.match(src, /guardDecision\.level === 'reflect'/, '应保留 reflect 分支');
   assert.ok(!/decision\.level === 'disable'/.test(src), '不该再摘除工具');
   assert.ok(!/decision\.level === 'stop'/.test(src), '不该再因守卫终止任务');
 
   // 唯一允许的摘除是**资源型工具自己声明触顶**（如 open_tab 开新页预算用尽，res.blocked=true）——
   // 那对应 DSH 的「每个工具分别提供自己的限时」，是工具自己的边界，不是守卫替模型做决定。
   // 因此只断言**守卫那条分支**里不出现摘除。
-  const at = src.indexOf("decision.level === 'reflect'");
+  const at = src.indexOf("guardDecision.level === 'reflect'");
   const guardBlock = src.slice(at, at + 900);
   assert.ok(!/disabledTools\.add/.test(guardBlock), '守卫分支里不该摘除工具');
   assert.ok(!/RUN_STATUS\.TIMEOUT/.test(guardBlock), '守卫分支里不该终止任务');

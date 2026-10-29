@@ -44,7 +44,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ENTRIES = [
   // Background 增加 RunLifecycleService（停止、abort 宽限、标签页统一清理）。
   // Popup 增加 ChromeTabsAdapter；两者均为小型自包含状态/Port 适配，无新依赖。
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 828 * 1024 },
+  // 850 KB：agent 拆分为 run state、tool pipeline、completion coordinator 与
+  // finalizer 后，保留了清晰的对象边界与可读产物；新增约 12 KB 自包含代码，
+  // 未引入新依赖。预算是防误引入依赖的棘轮，不是要求压扁职责边界。
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 850 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 518 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。

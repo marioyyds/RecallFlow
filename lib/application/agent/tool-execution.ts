@@ -163,3 +163,36 @@ export async function runParallelBatch(toolCalls: any, o: any) {
   }
   return precomputed;
 }
+
+
+function waitForToolApproval(port: any, callId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, runId: string, allowSession: any, emit: any) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (approved: any) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      port.onMessage.removeListener(onMessage);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve(approved);
+    };
+    const onMessage = (message: any) => {
+      if (message && message.type === 'tool-approval' && message.callId === callId) {
+        finish(message.decision || (message.approved === true ? 'once' : 'reject'));
+      }
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(false), 60000);
+    port.onMessage.addListener(onMessage);
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      const event = { type: 'tool-call', runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false };
+      if (typeof emit === 'function') emit(event);
+      else port.postMessage(event);
+    } catch (e) {
+      finish(false);
+    }
+  });
+}
+
+export { waitForToolApproval };

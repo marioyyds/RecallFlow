@@ -23,7 +23,7 @@ import { sourcePath } from './source-path.mjs';
 
 const chatSrc = fs.readFileSync('lib/ui/page/chat.ts', 'utf8');
 const transcriptSrc = fs.readFileSync('lib/ui/page/transcript.ts', 'utf8');
-const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+const agentSrc = fs.readFileSync('lib/application/agent/agent-bootstrap.ts', 'utf8');
 
 /**
  * 取一个顶层函数的**函数体**（按花括号配对），用于源码级门禁。
@@ -199,7 +199,7 @@ test('定位串只有一处实现：三处调用点都走 formatElementLocator',
   assert.match(pickedSrc, /export function formatElementLocator\(/);
   // 三处调用：给模型的元数据（agent.js）、chip 文案与"复制定位"（chat.js）、
   // 存进会话的那一行（utils.js 内的 summarizePickedForMessage）
-  assert.match(agentSrc, /formatElementLocator\(\s*l\b/, 'agent.js 应走共用实现');
+  assert.match(agentSrc, /formatElementLocator\(\s*locator\b/, 'agent.js 应走共用实现');
   assert.match(chatSrc, /formatElementLocator\(p && p\.locator/, 'chat.js 应走共用实现');
   // 锚点钉"这一处仍调用共用实现"，不钉它外面套了什么：
   // 2026-10-16 外面包了一层 sliceSafe（截断不许切裂代理对），钉死外层写法会把门禁钉红。

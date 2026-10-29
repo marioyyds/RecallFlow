@@ -137,20 +137,23 @@ test('循环内 splice / 循环内再次注入计划，加了类型标注也必�
 test('TARGET 按存在性二选一：.ts 优先，都不在时回落到 .js（改名后不至于直接 ENOENT）', () => {
   assert.equal(typeof prefixGate.pickTarget, 'function', '缺少 pickTarget 导出（旧实现会在这里失败）');
   const candidates = prefixGate.TARGET_CANDIDATES;
-  assert.deepEqual(candidates, ['lib/application/agent/agent.ts', 'lib/application/agent/agent.js']);
+  assert.deepEqual(candidates, [
+    'lib/application/agent/agent-loop.ts',
+    'lib/application/agent/agent-loop.js',
+  ]);
   assert.equal(
     prefixGate.pickTarget((f) => f.endsWith('.ts')),
-    'lib/application/agent/agent.ts',
+    'lib/application/agent/agent-loop.ts',
     '改名后应自动选中 .ts'
   );
   assert.equal(
-    prefixGate.pickTarget((f) => f === 'lib/application/agent/agent.js'),
-    'lib/application/agent/agent.js',
+    prefixGate.pickTarget((f) => f === 'lib/application/agent/agent-loop.js'),
+    'lib/application/agent/agent-loop.js',
     '只有 .js 时选中 .js'
   );
   assert.equal(
     prefixGate.pickTarget(() => false),
-    'lib/application/agent/agent.js',
+    'lib/application/agent/agent-loop.js',
     '两个都不在时回落，且回落后仍指向真实文件名（随后会由 R0 报「目标文件不存在」）'
   );
 });

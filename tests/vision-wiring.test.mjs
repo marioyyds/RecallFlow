@@ -13,21 +13,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const AGENT = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+const AGENT = fs.readFileSync('lib/application/agent/tool-call-pipeline.ts', 'utf8');
 
 test('agent.js 必须导入并调用 visionMessagesFor（接线真的接上了，而不是只写了个模块）', () => {
   assert.match(AGENT, /import \{ visionMessagesFor \} from '\.\/vision\.(?:js|ts)'/, '要导入装配函数');
-  assert.match(AGENT, /visionMessagesFor\(\[res\.screenshot\]/, '要在截图结果处调用它');
+  assert.match(AGENT, /visionMessagesFor\(\[result\.screenshot\]/, '要在截图结果处调用它');
 });
 
 test('图片消息必须是**追加到 messages**（而不是塞进 tool 消息）', () => {
-  // 取调用点附近的一小段，断言它 push 的是 vision 消息、且与 tool 消息是**分开的两条**
-  const at = AGENT.indexOf('visionMessagesFor([res.screenshot]');
+  // 两处 push 各自只负责一种消息，并保持为两条独立记录。
+  const at = AGENT.indexOf('visionMessagesFor([result.screenshot]');
   assert.ok(at > 0, '找不到接线点');
-  const near = AGENT.slice(Math.max(0, at - 900), at + 200);
-  assert.match(near, /messages\.push\(\{ role: 'tool', tool_call_id: tc\.id, content: res\.result \}\)/, 'tool 消息仍只放文本');
-  assert.match(near, /messages\.push\(vm\)/, '视觉消息是另起一条 push');
-  assert.ok(!/content:\s*\[\s*\{\s*type: 'image_url'/.test(near), '不许把图片数组塞进 tool 消息 ✗');
+  assert.match(AGENT, /state\.messages\.push\(\{\s*role: 'tool',\s*tool_call_id: toolCall\.id,\s*content: result\.result,?\s*\}\)/, 'tool 消息仍只放文本');
+  assert.match(AGENT, /state\.messages\.push\(message\)/, '视觉消息是另起一条 push');
+  assert.ok(!/content:\s*\[\s*\{\s*type: 'image_url'/.test(AGENT), '不许把图片数组塞进 tool 消息 ✗');
 });
 
 test('接线必须受开关约束（开关**打开**时才产出；关着时一律空数组）', () => {

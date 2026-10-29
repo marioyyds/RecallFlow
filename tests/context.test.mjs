@@ -172,7 +172,7 @@ test('normalizeHistory: 条数上限裁掉更早历史时，开关打开就必�
 test('normalizeHistory: 生产调用方必须打开"裁剪要说"的开关（源码级门禁）', () => {
   // 光有开关没用：这个 flag 曾经**只有测试传过**，生产两处调用都没打开
   // ⇒ 提示在生产里一次也没出现过。这里直接把两处调用点钉住。
-  const agentSrc = fs.readFileSync('lib/application/agent/agent.ts', 'utf8');
+  const agentSrc = fs.readFileSync('lib/application/agent/agent-bootstrap.ts', 'utf8');
   const ragSrc = fs.readFileSync('lib/shared/rag.ts', 'utf8');
   assert.match(agentSrc, /normalizeHistory\(history, \{[\s\S]{0,200}?noticeOnTruncation: true/, 'agent.js 必须显式打开');
   assert.match(ragSrc, /normalizeHistory\(payload\.history, \{[\s\S]{0,200}?noticeOnTruncation: true/, 'rag.js 必须显式打开');

@@ -257,7 +257,7 @@ test('⑤ 静态契约：三条出站路径都过消毒，五个高风险切片�
 
   // 这几个点是**按码元下标截断页面原文**的地方，是事故的高发区。
   // 用正则钉住"不许再出现裸 slice"：改回去就会红（和 vision-wiring 那类门禁同款）。
-  assert.doesNotMatch(read('lib/application/agent/agent.ts'), /\.slice\(0,\s*3000\)/, 'agent.js 的两处 3000 字截断都要走 sliceSafe');
+  assert.doesNotMatch(read('lib/application/agent/tool-call-pipeline.ts'), /\.slice\(0,\s*3000\)/, '工具管线的截断必须走 sliceSafe');
   assert.doesNotMatch(read('lib/shared/table.ts'), /\.slice\(0,\s*maxCellChars\)/, '表格单元格截断必须走 sliceSafe（本次事故的触发点）');
   assert.doesNotMatch(read('lib/application/agent/context.ts'), /body\.slice\(/, '折叠的头尾切片必须走 sliceSafe');
   assert.doesNotMatch(read('lib/application/agent/run-state-tools.ts'), /String\(text\)\.slice\(/, 'expand_result 必须走 rangeSafe（offset 由模型给）');

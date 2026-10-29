@@ -7,7 +7,7 @@
 // 这类改动功能上完全正确、测试也全绿，唯一的症状是「越跑越慢」—— 属于
 // 和 check-const-assign 同一类「静态可查但没人查」的问题，所以在这里钉死。
 //
-// 本检查强制的不变式（针对 lib/application/agent/agent.js）：
+// 本检查强制的不变式（针对 agent-loop.ts 与 agent-bootstrap.ts）：
 //   R1  绝不出现 `messages[0] = ...`：messages[0] 是前缀起点，改写它等于全量失效。
 //       曾经 promoteToResearch 就是这么干的，改为在末尾追加 system 消息。
 //   R2  绝不出现 unshift / shift / pop / sort / reverse：这些都会移动或删除已有位置。
@@ -31,11 +31,15 @@ import { stripStringsAndComments } from './check-const-assign.mjs';
 // 检查的应该是**正在用**的那一份。
 // 抽成纯函数是为了能在测试里直接喂 exists 谓词 —— 否则「改名后选中哪一份」
 // 这个行为只能靠真去改仓库文件才能验证。
-export const TARGET_CANDIDATES = ['lib/application/agent/agent.ts', 'lib/application/agent/agent.js'];
+export const TARGET_CANDIDATES = [
+  'lib/application/agent/agent-loop.ts',
+  'lib/application/agent/agent-loop.js',
+];
 export function pickTarget(exists) {
   return TARGET_CANDIDATES.find(exists) || TARGET_CANDIDATES[TARGET_CANDIDATES.length - 1];
 }
 export const TARGET = pickTarget((f) => fs.existsSync(f));
+export const PLAN_TARGET = 'lib/application/agent/agent-bootstrap.ts';
 
 // 两个锚点正则都允许一个可选的 `: 类型` 片段：
 // `let iter: number = resumeIteration` / `const injectPlanMessage: () => void = ...`。
@@ -65,7 +69,7 @@ function findBlockEnd(lines, startIdx) {
   return lines.length - 1;
 }
 
-export function findPrefixMutations(target = TARGET) {
+function findInFile(target, requireLoop) {
   const findings = [];
   const push = (line, rule, text) => findings.push({ line, rule, text: String(text).trim().slice(0, 110) });
 
@@ -76,12 +80,12 @@ export function findPrefixMutations(target = TARGET) {
   const lines = stripStringsAndComments(fs.readFileSync(target, 'utf8'));
 
   const loopStart = lines.findIndex((l) => LOOP_RE.test(l));
-  if (loopStart < 0) {
+  if (requireLoop && loopStart < 0) {
     // 主循环改名/重构后这里会失效 —— 必须报错而不是静默通过，否则门禁形同虚设。
     push(0, 'R0', '未找到主循环（' + LOOP_RE + '），检查已失效，请同步更新 scripts/check-prefix-stability.mjs');
     return { findings, scanned: lines.length };
   }
-  const loopEnd = findBlockEnd(lines, loopStart);
+  const loopEnd = requireLoop ? findBlockEnd(lines, loopStart) : -1;
 
   const planFnStart = lines.findIndex((l) => PLAN_FN_RE.test(l));
 
@@ -102,7 +106,7 @@ export function findPrefixMutations(target = TARGET) {
     if (/messages\s*\.\s*splice\s*\(/.test(code)) {
       if (planFnStart < 0 || i < planFnStart) {
         push(lineNo, 'R3', 'splice 出现在 injectPlanMessage 之外：' + code);
-      } else if (i >= loopStart && i <= loopEnd) {
+      } else if (requireLoop && i >= loopStart && i <= loopEnd) {
         push(lineNo, 'R3', 'splice 出现在主循环内：' + code);
       }
     }
@@ -115,23 +119,44 @@ export function findPrefixMutations(target = TARGET) {
   }
 
   // R4：计划注入只能在主循环之前调用
-  for (let i = 0; i < lines.length; i++) {
-    if (/injectPlanMessage\s*\(\s*\)/.test(lines[i])) {
-      if (i >= loopStart && i <= loopEnd) push(i + 1, 'R4', '主循环内再次注入计划：' + lines[i]);
+  if (requireLoop) {
+    for (let i = 0; i < lines.length; i++) {
+      if (/injectPlanMessage\s*\(\s*\)/.test(lines[i])) {
+        if (i >= loopStart && i <= loopEnd) push(i + 1, 'R4', '主循环内再次注入计划：' + lines[i]);
+      }
     }
   }
 
   return { findings, scanned: lines.length };
 }
 
+export function findPrefixMutations(target) {
+  if (target) {
+    const result = findInFile(target, true);
+    return {
+      ...result,
+      findings: result.findings.map((finding) => ({ ...finding, file: target })),
+    };
+  }
+  const loop = findInFile(TARGET, true);
+  const plan = findInFile(PLAN_TARGET, false);
+  return {
+    findings: [
+      ...loop.findings.map((finding) => ({ ...finding, file: TARGET })),
+      ...plan.findings.map((finding) => ({ ...finding, file: PLAN_TARGET })),
+    ],
+    scanned: loop.scanned + plan.scanned,
+  };
+}
+
 // CLI：仅在直接执行时输出报告并设定退出码（被测试 import 时不产生副作用）
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const { findings } = findPrefixMutations();
   if (!findings.length) {
-    console.log('请求前缀稳定性检查通过 ✓（' + TARGET + '）');
+    console.log('请求前缀稳定性检查通过 ✓（' + TARGET + ' + ' + PLAN_TARGET + '）');
   } else {
     console.log('发现 ' + findings.length + ' 处可能破坏请求前缀缓存的写法：');
-    for (const f of findings) console.log('  ' + TARGET + ':' + f.line + '  [' + f.rule + ']  ' + f.text);
+    for (const f of findings) console.log('  ' + (f.file || TARGET) + ':' + f.line + '  [' + f.rule + ']  ' + f.text);
   }
   process.exit(findings.length ? 1 : 0);
 }
