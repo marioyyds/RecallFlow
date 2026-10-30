@@ -12,7 +12,6 @@ import fs from 'node:fs';
 
 import { AGENT_BUDGET_DEFAULTS, tokenBudgetExceeded } from '../lib/application/agent/agent.ts';
 import { TOOL_REGISTRY } from '../lib/application/agent/tools.ts';
-import { resolveIntent, INTENTS } from '../lib/application/agent/intent-router.ts';
 import { estimateTokens } from '../lib/application/agent/context.ts';
 
 const readSource = (p) => fs.readFileSync(p, 'utf8').split('\n').map((l) => l.replace(/\r$/, '')).join('\n');
@@ -39,6 +38,21 @@ test('按意图分配轮数/工具数的表已移除（留一个没人读的表�
   assert.ok(!/export const INTENT_TURN_DEFAULTS/.test(src), '不该再导出轮数默认值表');
 });
 
+test('生产装配不按意图筛选工具，也不在运行中修改 tools', () => {
+  const bootstrap = readSource('lib/application/agent/agent-bootstrap.ts');
+  const pipeline = readSource('lib/application/agent/tool-call-pipeline.ts');
+  assert.doesNotMatch(
+    bootstrap,
+    /collectAgentTools\(settings,\s*\{[\s\S]{0,240}?allowedTools/,
+    'Bootstrap 不得按意图筛选下发的 function schema'
+  );
+  assert.doesNotMatch(
+    pipeline,
+    /state\.tools\.(push|splice|unshift|shift|pop|sort|reverse)\(/,
+    '运行中修改 tools 会让整个请求前缀从 token 0 失配'
+  );
+});
+
 test('设置页不再暴露已失效的「工具调用上限 / 推理轮数上限」输入框', () => {
   const html = readSource('options.html');
   assert.ok(!/id="budget-tools"/.test(html), '输入框还在，但值已经没人读了 —— 那是"静默无效"的设置');
@@ -58,13 +72,10 @@ test('成本上限必须高于「正常任务的实际累计」——按实测�
   // totalTokens 累加的是每次请求的用量，而每轮都重发整段上下文 →
   // 正常任务的累计就远超「单轮用量 × 轮数」的直觉。
   // 这里用实测的工具定义体积推导一个下限：工具每轮都发，是每轮请求的**确定**组成部分。
-  const byName = new Map(TOOL_REGISTRY.map((t) => [t.name, t]));
-  const browserTools = (resolveIntent(INTENTS.BROWSER).allowedTools || [])
-    .map((n) => byName.get(n))
-    .filter(Boolean)
-    .map((t) => t.openai);
-  const toolsPerTurn = estimateTokens(JSON.stringify(browserTools));
-  assert.ok(toolsPerTurn > 5000, '前置：浏览器工具定义应有可观体积，实测 ' + toolsPerTurn);
+  // 工具面现在跨意图共享，所以成本下限必须按完整稳定集合计算，而不是某个意图旧白名单。
+  const stableTools = TOOL_REGISTRY.map((t) => t.openai);
+  const toolsPerTurn = estimateTokens(JSON.stringify(stableTools));
+  assert.ok(toolsPerTurn > 5000, '前置：稳定工具定义应有可观体积，实测 ' + toolsPerTurn);
 
   // 没有轮数上限之后，正常任务的轮数不再有已知上界 —— 因此只用一个保守的
   // 「长任务」轮数（60 轮）推下限，保证正常的长任务不会被成本墙半路掐断。

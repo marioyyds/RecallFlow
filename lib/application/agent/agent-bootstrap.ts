@@ -4,7 +4,8 @@ import { AgentEventSink } from './agent-events.ts';
 import { createRun, RUN_STATUS } from './agent-state.ts';
 import { createToolGuard } from './tool-guard.ts';
 import {
-  buildSystemPrompt,
+  buildStableSystemPrompt,
+  buildTaskPolicyPrompt,
   INTENTS,
   resolveIntent,
   resolveIntentForAgent,
@@ -15,7 +16,6 @@ import { createAgentRunContext } from './run-context.ts';
 import { loadAgentSession } from './session-store.ts';
 import { getSiteHints } from './site-memory.ts';
 import { listMacros } from './macro-store.ts';
-import { TOOL_REGISTRY } from './tools.ts';
 import {
   isDuplicateInstruction,
   normalizeHistory,
@@ -25,7 +25,17 @@ import { sanitizeToolPairing } from './history-policy.ts';
 import { buildInitialMessagesPure } from './initial-messages.ts';
 import { formatElementLocator } from '../../shared/format/picked.ts';
 
-function buildInitialMessages(instruction: string, selectedText: any, page: any, pageUrl: any, history: any, emit: any, systemPrompt: any, pickedElements: any) {
+function buildInitialMessages(
+  instruction: string,
+  selectedText: any,
+  page: any,
+  pageUrl: any,
+  history: any,
+  emit: any,
+  systemPrompt: any,
+  taskSystemPrompt: any,
+  pickedElements: any
+) {
   let normalized = normalizeHistory(history, {
     maxMessages: 10,
     maxChars: HISTORY_MAX_CHARS,
@@ -61,6 +71,7 @@ function buildInitialMessages(instruction: string, selectedText: any, page: any,
     messages: buildInitialMessagesPure({
       systemPrompt,
       history: normalized,
+      taskSystemPrompt,
       instruction: instr,
       selectedText,
       page,
@@ -159,7 +170,8 @@ export async function prepareAgentRun(options: {
   const intentInfo = resolveIntent(intent);
   const allSkills = await getMergedSkills();
   // 进阶版 A：技能不再预先注入正文，而是把全部技能做成「目录」交给模型自选；
-  // 模型判断相关时通过常驻工具 load_skill 按需加载完整说明，加载后再把该技能声明的工具并入白名单。
+  // 模型判断相关时通过常驻工具 load_skill 按需加载完整说明；技能声明的工具已在稳定
+  // capability surface 中，加载只影响执行期权限与提示正文。
   const loadedSkillNames = canResume && Array.isArray(persisted.skills) ? persisted.skills.slice() : [];
   const budget = canResume ? persisted.budget : getBudget(payload, settings, intent);
   // CHAT 任务是否已就地提升为 RESEARCH 画像（工具 + 系统提示 + complete_task 收尾）。
@@ -269,13 +281,13 @@ export async function prepareAgentRun(options: {
     pageUrl: ctx.pageUrl,
     budget: { maxTotalTokens: budget.maxTotalTokens, toolTimeoutMs: budget.toolTimeoutMs },
   });
-  const allowedTools = intentInfo.allowedTools;
   const disabledTools = new Set<string>(
     canResume && Array.isArray(persisted.disabledTools) ? persisted.disabledTools : []
   );
   const collected = await collectAgentTools(settings, {
-    allowedTools,
-    includeMcp: intentInfo.includeMcp,
+    // capability surface 必须跨意图、跨用户回合保持一致。意图白名单只用于执行期
+    // 权限判断（isToolAllowedForIntent），不能再筛选这里下发的 function schema。
+    includeMcp: true,
   });
   // MCP 工具索引随运行上下文传递（不再用模块级全局态，避免并发运行互相清空）。
   ctx.mcpIndex = collected.mcpIndex;
@@ -283,25 +295,15 @@ export async function prepareAgentRun(options: {
   // 而不是笼统的「未知 MCP 工具」。同时异步落一份到 storage 供设置页展示最近一次结果。
   ctx.mcpStatus = collected.mcpStatus || [];
   persistMcpStatus(ctx.mcpStatus);
-  let tools = collected.tools.filter((t) => t && t.function && !disabledTools.has(t.function.name));
-  // 恢复时把已加载技能声明过的工具重新并入可用集合
-  if (canResume) {
-    for (const n of loadedSkillNames) {
-      const sk = allSkills.find((s: any) => s.name === n || s.id === n);
-      for (const tn of (sk && sk.tools) || []) {
-        const def = TOOL_REGISTRY.find((t) => t.name === tn);
-        if (def && !tools.some((t) => t.function && t.function.name === tn)) tools.push(def.openai);
-      }
-    }
-  }
-  const basePrompt = buildSystemPrompt(
-    intent,
-    detected.sourceText || instruction,
+  // disabledTools 只影响执行，不从 schema 中摘除：中途改变 tools 会让服务端
+  // 从 token 0 开始重新 prefill，而审批/停用判定本来就不依赖模型是否看见定义。
+  let tools = collected.tools.filter((t) => t && t.function);
+  const basePrompt = buildStableSystemPrompt(
     tools.map((t) => t.function && t.function.name),
     allSkills
   );
-  // 「附加段」单独累积：CHAT→RESEARCH 画像提升时只重建基础系统提示，
-  // 若不把附加段一并带上，站点记忆与宏目录会在最需要它们的时候被静默丢掉。
+  // 「附加段」只进入本轮任务策略，不进入稳定系统前缀：站点记忆、宏目录和 MCP
+  // 连接状态都可能随页面或连接变化，放进 messages[0] 会让跨回合缓存从 token 0 失配。
   let promptExtras = '';
   // MCP 服务器状态：告诉模型「配了哪些服务器、工具名前缀是什么、哪台连不上」。
   // 缺了这一段，工具列表里没有 MCP 工具时模型只会看到自己没有这类工具，
@@ -326,7 +328,9 @@ export async function prepareAgentRun(options: {
         macros.map((m) => '- ' + m.name + (m.description ? '：' + m.description : '') + '（' + m.steps.length + ' 步）').join('\n');
     }
   }
-  let systemPrompt = basePrompt + promptExtras;
+  const systemPrompt = basePrompt;
+  const taskSystemPrompt =
+    buildTaskPolicyPrompt(intent, detected.sourceText || instruction) + promptExtras;
   let messages;
   if (canResume && Array.isArray(persisted.messages)) {
     // 恢复时丢弃上一轮注入的计划消息，避免重复；计划由 ctx.plan 重新注入。
@@ -337,7 +341,17 @@ export async function prepareAgentRun(options: {
     const pickedList = canResume
       ? persisted.pickedElements || (persisted.pickedElement ? [persisted.pickedElement] : [])
       : payload.pickedElements || (payload.pickedElement ? [payload.pickedElement] : []);
-    const built = buildInitialMessages(instruction, selectedText, ctx.page, ctx.pageUrl, payload.history, emit, systemPrompt, pickedList);
+    const built = buildInitialMessages(
+      instruction,
+      selectedText,
+      ctx.page,
+      ctx.pageUrl,
+      payload.history,
+      emit,
+      systemPrompt,
+      taskSystemPrompt,
+      pickedList
+    );
     messages = built.messages;
   }
   // 计划消息：以独立 system 消息插在系统提示之后，**整个 run 只注入一次**。

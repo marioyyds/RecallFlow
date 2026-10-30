@@ -100,8 +100,9 @@ export async function runParallelBatch(toolCalls: any, o: any) {
   const groups = planParallelGroups(calls.slice(0, limit), {
     isParallelSafe: (name: string) => getToolMetadata(name).parallelSafe === true,
     shouldSkip: (name: string, args: Record<string, unknown>) => {
-      // 三条安全边界：停用 / 参数非法 / 需要审批，任一命中就退回串行路径。
+      // 四条安全边界：任务权限 / 停用 / 参数非法 / 需要审批，任一命中就退回串行路径。
       // 判定条件与下面循环里的完全一致，避免"预执行了但循环会拒绝"的空转。
+      if (typeof o.isToolAllowed === 'function' && !o.isToolAllowed(name)) return true;
       if (o.disabledTools.has(name)) return true;
       if (!validateToolCall(name, args).ok) return true;
       return (

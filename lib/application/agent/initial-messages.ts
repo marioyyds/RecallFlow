@@ -85,8 +85,9 @@ export function instructionLabel(token: any) {
  * 组装首轮消息。
  *
  * @param {Object} input
- * @param {string} input.systemPrompt 已构建好的系统提示
+ * @param {string} input.systemPrompt 稳定的基础系统提示（跨回合必须逐字节一致）
  * @param {Array}  [input.history] 归一化后的历史
+ * @param {string} [input.taskSystemPrompt] 本轮任务策略；追加在历史之后，不属于稳定前缀
  * @param {string} [input.instruction] 用户指令（**唯一可信**的指令来源）
  * @param {string} [input.selectedText] 用户选中的文本（不可信）
  * @param {string} [input.page] 当前页面正文（不可信）
@@ -99,6 +100,8 @@ export function buildInitialMessagesPure(input: Record<string, any> = {}) {
   for (const h of Array.isArray(input.history) ? input.history : []) {
     if (h && h.role && typeof h.content === 'string') messages.push({ role: h.role, content: h.content });
   }
+  const taskSystemPrompt = String(input.taskSystemPrompt || '').trim();
+  if (taskSystemPrompt) messages.push({ role: 'system', content: taskSystemPrompt });
 
   const parts = [];
   // 1) 用户选取的元素（不可信：元素文本来自页面，可能被页面控制）

@@ -118,8 +118,10 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 ## 10. 数量与可见性
 
 - 内置工具总量目标 **≤ 25 个**；超出时优先合并重叠工具，而不是堆新工具。
-- 模型实际可见的工具 = **意图白名单**（`intent-router.js` `allowedTools`），新工具必须明确加入至少一个意图，且说明理由；普通对话（`chat_task`）默认只给只读集。
-- 逃生舱类工具（`run_javascript`）只在需要时出现，并在 description 明确"仅当内置工具无法表达时使用"。
+- 模型实际可见的工具 = **跨意图稳定的完整 capability surface**。工具定义位于消息之前，若随意图切换会破坏请求前缀缓存；因此所有意图下发同一份、确定性排序的工具 schema。
+- `intent-router.ts` 的 `allowedTools` 是**执行期权限**，不是 schema 白名单。新工具必须明确加入允许使用它的意图；普通对话默认仍禁止页面写操作，但模型可以看到 schema，调用时由执行层拒绝。
+- 工具停用、技能加载和 `CHAT → RESEARCH` 画像提升都不得增删 `state.tools`；它们只能改变执行权限，并以追加消息/tool result 的形式反映到上下文。
+- 逃生舱类工具（`run_javascript`）的 schema 保持稳定可见，但只允许在明确需要它的意图中执行，并在 description 明确"仅当内置工具无法表达时使用"。
 
 ## 11. 新增工具 Checklist
 
@@ -133,8 +135,8 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 - [ ] 返回值有截断/上限约定
 - [ ] `ok:false` 的错误信息包含替代路径
 - [ ] `TOOL_METADATA` 的 `risk` 分级正确，`readOnly` / `alwaysRequireApproval` 已标注
-- [ ] 已加入合适意图的白名单（并考虑是否该出现在 `chat_task`）
-- [ ] `buildSystemPrompt`（`intent-router.js`）的能力清单/工具名已同步（系统提示按意图动态生成）
+- [ ] 已加入合适意图的执行权限（并考虑是否该出现在 `chat_task`）
+- [ ] `buildStableSystemPrompt` 的工具名清单来自同一份稳定工具面（不得再按意图动态生成）
 - [ ] 批量参数聚合返回，一次调用可完成重复子任务
 
 ## 12. 与现状的差距（待办）

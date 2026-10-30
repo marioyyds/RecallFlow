@@ -20,7 +20,7 @@ const lastMessage = (messages) => messages[messages.length - 1];
 
 test('promoteToResearch: 保留附加段（站点记忆 / 宏目录）', () => {
   const messages = [{ role: 'system', content: '基础系统提示' }];
-  promoteToResearch([], messages, '打开页面', [], EXTRAS);
+  promoteToResearch(messages, '打开页面', EXTRAS);
   const content = lastMessage(messages).content;
   assert.ok(content.includes('【本站点记忆】'), content);
   assert.ok(content.includes('【本站点已保存的宏】'), content);
@@ -29,27 +29,15 @@ test('promoteToResearch: 保留附加段（站点记忆 / 宏目录）', () => {
 
 test('promoteToResearch: 无附加段时不引入 undefined 或多余换行', () => {
   const messages = [{ role: 'system', content: '基础系统提示' }];
-  promoteToResearch([], messages, 'x', [], '');
+  promoteToResearch(messages, 'x', '');
   assert.ok(!lastMessage(messages).content.includes('undefined'), lastMessage(messages).content);
   assert.ok(lastMessage(messages).content.length > 3);
-});
-
-test('promoteToResearch: 补齐 RESEARCH 工具，且重复调用不重复添加', () => {
-  const messages = [{ role: 'system', content: 's' }];
-  const tools = [];
-  promoteToResearch(tools, messages, 'x', [], '');
-  const names = tools.map((t) => t.function && t.function.name);
-  assert.ok(names.includes('fetch_webpage'), names.join(','));
-  assert.ok(names.includes('open_tab'), names.join(','));
-  const before = tools.length;
-  promoteToResearch(tools, messages, 'x', [], '');
-  assert.equal(tools.length, before, '已是 RESEARCH 工具集时不应再增长');
 });
 
 test('promoteToResearch: 追加 RESEARCH 画像，不改写 messages[0]', () => {
   const original = { role: 'system', content: '旧提示' };
   const messages = [original, { role: 'user', content: '你好' }];
-  promoteToResearch([], messages, 'x', [], '');
+  promoteToResearch(messages, 'x', '');
   assert.equal(messages.length, 3, '应追加一条而不是替换');
   assert.equal(messages[0], original, 'messages[0] 是请求前缀起点，必须原样保留');
   assert.equal(messages[0].content, '旧提示');
@@ -60,7 +48,7 @@ test('promoteToResearch: 追加 RESEARCH 画像，不改写 messages[0]', () => 
 
 test('promoteToResearch: 首条不是 system 时同样只追加', () => {
   const messages = [{ role: 'user', content: '你好' }];
-  promoteToResearch([], messages, 'x', [], '');
+  promoteToResearch(messages, 'x', '');
   assert.equal(messages[0].role, 'user');
   assert.equal(messages[0].content, '你好');
   assert.equal(messages.length, 2);

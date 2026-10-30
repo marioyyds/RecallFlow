@@ -2,7 +2,6 @@ import { executeAnyTool } from './mcp.ts';
 import {
   getToolMetadata,
   recordTraceStep,
-  TOOL_REGISTRY,
   validateToolCall,
 } from './tools.ts';
 import { toolNeedsApproval } from './approval-policy.ts';
@@ -10,7 +9,11 @@ import { detectAuthChallenge, authChallengeNotice } from './auth-challenge.ts';
 import { resolveCodeExecutionApproval } from '../../shared/settings.ts';
 import { RUN_STATUS, TOOL_STATUS } from './agent-state.ts';
 import { CONTEXT_TUNING } from './context-tuning.ts';
-import { INTENTS, resolveIntent } from './intent-router.ts';
+import {
+  INTENTS,
+  isToolAllowedForIntent,
+  resolveIntent,
+} from './intent-router.ts';
 import { promoteToResearch } from './intent-policy.ts';
 import { buildStuckReflection } from './verifier.ts';
 import { EVIDENCE_READ_TOOLS, evidenceAfter } from './verification-policy.ts';
@@ -97,6 +100,7 @@ export class ToolCallPipeline {
       settings: state.settings,
       ctx: state.ctx,
       sessionApprovedTools: state.sessionApprovedTools,
+      isToolAllowed: (name: string) => this.isToolAllowed(name),
       budget: state.budget,
       signal: this.signal,
       emit: state.emit,
@@ -117,10 +121,8 @@ export class ToolCallPipeline {
         state.promotedToResearch = true;
         pendingResearchPromotion = () =>
           promoteToResearch(
-            state.tools,
             state.messages,
             state.detected.sourceText || state.instruction,
-            state.allSkills,
             state.promptExtras
           );
         state.emit({
@@ -153,6 +155,24 @@ export class ToolCallPipeline {
 
       if (!result && state.disabledTools.has(toolCall.name)) {
         const blocked = this.disabledMessage(toolCall.name);
+        state.emit({
+          type: 'tool-result',
+          callId,
+          name: toolCall.name,
+          status: 'failed',
+          result: blocked,
+        });
+        state.messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: blocked,
+        });
+        continue;
+      }
+
+      if (!result && !this.isToolAllowed(toolCall.name)) {
+        const blocked = this.policyBlockedMessage(toolCall.name);
+        toolState.status = TOOL_STATUS.FAILED;
         state.emit({
           type: 'tool-result',
           callId,
@@ -434,6 +454,37 @@ export class ToolCallPipeline {
     );
   }
 
+  private policyBlockedMessage(name: string): string {
+    const effectiveIntent =
+      this.state.intent === INTENTS.CHAT && this.state.promotedToResearch
+        ? INTENTS.RESEARCH
+        : this.state.intent;
+    const label = resolveIntent(effectiveIntent).label;
+    return (
+      '工具「' + name + '」不属于当前「' + label + '」任务的执行权限。' +
+      '请按当前用户请求改用已允许的工具；不要假设该操作已经执行。'
+    );
+  }
+
+  private isToolAllowed(name: string): boolean {
+    const state = this.state;
+    const effectiveIntent =
+      state.intent === INTENTS.CHAT && state.promotedToResearch
+        ? INTENTS.RESEARCH
+        : state.intent;
+    const loadedTools: string[] = [];
+    for (const skillName of state.loadedSkillNames) {
+      const skill = state.allSkills.find(
+        (candidate: any) =>
+          candidate.name === skillName || candidate.id === skillName
+      );
+      for (const toolName of Array.isArray(skill?.tools) ? skill.tools : []) {
+        loadedTools.push(String(toolName));
+      }
+    }
+    return isToolAllowedForIntent(effectiveIntent, name, loadedTools);
+  }
+
   private applyAuthChallenge(name: string, result: any, beforeUrl: string): void {
     const challenge =
       (result.authChallenge && result.authChallenge.required === true
@@ -495,17 +546,8 @@ export class ToolCallPipeline {
     if (!state.loadedSkillNames.includes(loaded.name)) {
       state.loadedSkillNames.push(loaded.name);
     }
-    for (const toolName of Array.isArray(loaded.tools) ? loaded.tools : []) {
-      const definition = TOOL_REGISTRY.find((tool) => tool.name === toolName);
-      if (
-        definition &&
-        !state.tools.some(
-          (tool) => tool.function && tool.function.name === toolName
-        )
-      ) {
-        state.tools.push(definition.openai);
-      }
-    }
+    // 技能依赖的工具已经在稳定 capability surface 中下发；加载技能只影响执行期
+    // 权限与提示正文，绝不再 push 到 state.tools（那会让请求前缀从 token 0 失配）。
   }
 
   private applyCitations(result: any): void {

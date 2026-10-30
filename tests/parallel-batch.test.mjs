@@ -114,6 +114,20 @@ test('非 parallelSafe 的调用必须一个都不预执行（退回串行路径
   assert.equal(queryCalls, 0, '既然没有预执行，就不该有任何一次真实工具调用发生');
 });
 
+test('任务权限拒绝的调用不得被并行预执行（schema 可见不等于可执行）', async () => {
+  reset();
+  const calls = [
+    { name: 'list_tabs', args: {} },
+    { name: 'list_tabs', args: {} },
+  ];
+  const got = await runParallelBatch(
+    calls,
+    makeOpts({ isToolAllowed: () => false })
+  );
+  assert.equal(got.size, 0, '被任务策略拒绝的工具不得提前执行');
+  assert.equal(queryCalls, 0, '权限拒绝必须在副作用发生前生效');
+});
+
 test('enabled 为 false 时不预执行 —— 证明上面三条断言真的有牙齿', async () => {
   reset();
   const calls = [

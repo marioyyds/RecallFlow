@@ -60,11 +60,15 @@ export { SKILL_REGISTRY, getMergedSkills };
 export function buildSkillCatalog(skills: SkillLike[] = []) {
   const list = (Array.isArray(skills) ? skills : []) as Array<{ name?: string; description?: string; content?: string }>;
   if (!list.length) return '';
-  const items = list.map((s) => {
-    const name = s.name || '';
-    const desc = s.description || (s.content ? String(s.content).replace(/\s+/g, ' ').trim().slice(0, 80) : '');
-    return '- ' + name + (desc ? '：' + desc : '');
-  });
+  // 技能目录是稳定系统前缀的一部分：按 name 做确定性排序，避免存储键序或合并顺序
+  // 在不同运行间变化，导致整段 function-calling 请求从 token 0 开始失配。
+  const items = list
+    .map((s) => ({
+      name: s.name || '',
+      desc: s.description || (s.content ? String(s.content).replace(/\s+/g, ' ').trim().slice(0, 80) : ''),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((s) => '- ' + s.name + (s.desc ? '：' + s.desc : ''));
   return [
     '可用技能（专家手册）：',
     items.join('\n'),

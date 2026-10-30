@@ -231,38 +231,21 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 //   手工累加、只读第一页"。read_table 是只读、route=content，给报表任务一条结构化路径。
 //   按上面的原则先精简了 schema 描述；仍超出原 39000 → 本次**显式**上调合计到 41000。
 //   browser_task 也相应上调（见下方数字）；这是有意的契约变化，不是无声膨胀。
-const SCHEMA_BYTES_BUDGET = {
-  合计: 41000,
-  browser_task: 38000,
-  research_task: 28500,
-  chat_task: 9700,
-  knowledge_task: 5100,
-};
+// 2026-10：工具 schema 改为跨意图共享的稳定 capability surface。
+// 每轮请求都携带同一份完整定义，不能再按意图持有四份体积预算。
+const SCHEMA_BYTES_BUDGET = 41000;
 
 test('工具定义体积不得超出预算（防 prompt 无声膨胀）', () => {
   const bytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
   const total = bytes(BUILTIN_TOOLS);
-  const report = ['全量 ' + total + ' 字符（预算 ' + SCHEMA_BYTES_BUDGET['合计'] + '）'];
+  const report = ['稳定工具面 ' + total + ' 字符（预算 ' + SCHEMA_BYTES_BUDGET + '）'];
   assert.ok(
-    total <= SCHEMA_BYTES_BUDGET['合计'],
+    total <= SCHEMA_BYTES_BUDGET,
     '工具定义总量超出预算：' + report.join('；') + '。请精简描述，或有意识地调高预算。'
   );
-
-  const byName = new Map(TOOL_REGISTRY.map((t) => [t.name, t]));
-  for (const [intent, budget] of Object.entries(SCHEMA_BYTES_BUDGET)) {
-    if (intent === '合计') continue;
-    const info = resolveIntent(intent);
-    const names = Array.isArray(info.allowedTools) ? info.allowedTools : [];
-    const used = names.map((n) => byName.get(n)).filter(Boolean).map((t) => t.openai);
-    const c = bytes(used);
-    assert.ok(
-      c <= budget,
-      intent + ' 每轮下发的工具定义超出预算：' + c + ' > ' + budget + ' 字符（' + used.length + ' 个工具）'
-    );
-  }
 });
 
-test('每个意图下发的工具都必须真实存在（白名单不得指向已删/改名的工具）', () => {
+test('每个意图的执行权限都必须指向真实存在的工具', () => {
   const known = new Set(TOOL_REGISTRY.map((t) => t.name));
   const bad = [];
   for (const intent of Object.values(INTENTS)) {
@@ -271,5 +254,5 @@ test('每个意图下发的工具都必须真实存在（白名单不得指向�
       if (!known.has(n)) bad.push(intent + ' → ' + n);
     }
   }
-  assert.deepEqual(bad, [], '意图白名单指向了不存在的工具：' + bad.join('、'));
+  assert.deepEqual(bad, [], '意图执行策略指向了不存在的工具：' + bad.join('、'));
 });

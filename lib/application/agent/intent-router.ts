@@ -1,6 +1,7 @@
 // 意图路由：在 Agent 执行前把用户指令归类为浏览器操作 / 知识库查询 / 资料研究 / 普通对话，
-// 并为每类意图提供工具白名单、预算、系统提示与完成指引。
-// 目的：避免模型“所有工具都试一遍”，减少 knowledge_read + fetch_webpage 之类的绕路调用。
+// 并为每类意图提供**执行权限**、预算、追加任务策略与完成指引。
+// 工具 schema 不随意图变化：所有意图共享同一份稳定 capability surface，避免多轮换任务时
+// 破坏 function-calling 请求前缀；避免绕路调用改由任务规则、执行期拒绝与工具守卫负责。
 // 意图判定优先交给模型（LLM 分类，few-shot），关键词打分降级为无 API/调用失败时的兜底，
 // 解决“关键词 whack-a-mole 难调”的问题。
 import { TOOL_REGISTRY } from './tools.ts';
@@ -15,6 +16,9 @@ export const INTENTS: Record<string, any> = Object.freeze({
 });
 
 const ALL_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
+const ALWAYS_AVAILABLE_TOOL_NAMES = new Set(
+  TOOL_REGISTRY.filter((tool) => tool.alwaysAvailable).map((tool) => tool.name)
+);
 
 // 明显寒暄：整句只有问候/道谢等，直接按普通对话，不浪费一次 LLM 分类调用。
 const PURE_CHITCHAT_RE = /^(你好|您好|谢谢|感谢|再见|拜拜|在吗|嗨|hi|hello|hey|嗯|好|可以|好的|行)[，。！？!?,\s]*$/i;
@@ -50,6 +54,7 @@ const INTENT_ROUTER_SYSTEM = `你是 RecallFlow 的意图路由器。根据用�
 // 轮数上限已整体移除（对齐 DSH：不限制「做了多少件事」），因此该表不再存在 ——
 // 留着一个没人读的默认值表只会让人以为轮数仍受控。
 
+// allowedTools 是执行期权限，不是下发给模型的 schema 白名单。
 const INTENT_DEFS: Record<string, any> = Object.freeze({
   [INTENTS.BROWSER]: {
     label: '浏览器操作',
@@ -443,26 +448,55 @@ export function resolveIntent(intent: string) {
   return INTENT_DEFS[intent] || INTENT_DEFS[INTENTS.CHAT];
 }
 
-export function buildIntentSystemPrompt(intent: string, instruction = '') {
+/**
+ * 当前任务意图是否允许调用某个工具。
+ *
+ * 这是**执行期策略**，不再是工具 schema 的白名单。工具定义在一个会话内保持稳定，
+ * 意图切换只改变这里的结果；因此请求前缀不会因为换任务类型而失效。
+ * alwaysAvailable 工具与已加载技能声明的工具仍可显式放行。
+ */
+export function isToolAllowedForIntent(intent: string, name: string, extraAllowed: any[] = []) {
+  const toolName = String(name || '');
+  if (!toolName) return false;
+  if (ALWAYS_AVAILABLE_TOOL_NAMES.has(toolName)) return true;
+  const info = resolveIntent(intent);
+  if (toolName.startsWith('mcp__')) return info.includeMcp === true;
+  if (info.allowedTools.includes(toolName)) return true;
+  return Array.isArray(extraAllowed) && extraAllowed.includes(toolName);
+}
+
+/**
+ * 每轮任务策略：可以随意图、指令和当前页面变化，必须追加在稳定前缀之后。
+ */
+export function buildTaskPolicyPrompt(intent: string, instruction = '') {
   const info = resolveIntent(intent);
   const keyword = extractKeyword(instruction);
+  const completesWithTool = info.allowedTools.includes('complete_task');
   const lines = [
-    '【本次任务意图】' + info.label + '：' + info.description,
+    '【本次任务策略】' + info.label + '：' + info.description,
+    '这些策略只约束当前任务，不代表其他任务能力被移除；换任务时以最新策略为准。',
     '规则：',
     ...info.rules,
     keyword ? '目标关键词可能是：' + keyword : '',
-    '任务完成后必须调用 complete_task 声明完成，不要在完成后继续调用其他工具。',
+    completesWithTool
+      ? '任务完成后必须调用 complete_task 声明完成，不要在完成后继续调用其他工具。'
+      : '本任务自然回答结束即可，不需要调用 complete_task；不要执行与当前请求无关的写操作。',
   ].filter(Boolean);
   return lines.join('\n');
 }
 
+export function buildIntentSystemPrompt(intent: string, instruction = '') {
+  return buildTaskPolicyPrompt(intent, instruction);
+}
+
 /**
- * 生成完整的 Agent 系统提示：可用工具列表按意图白名单动态生成，
- * 并明确禁止在文本里模拟 XML/JSON 工具调用（避免模型在无工具时“假装调用”）。
+ * 稳定的系统提示前缀。
+ *
+ * 只能包含部署级配置（完整工具目录、技能目录）与不随任务变化的基础规则。
+ * 意图、当前关键词、站点记忆、MCP 状态等必须在历史之后追加，不能在每个新回合
+ * 改写 messages[0]，否则 function-calling 模板会从 token 0 开始失配。
  */
-export function buildSystemPrompt(intent: string, instruction = '', toolNames: any[] = [], skills: any[] = []) {
-  const info = resolveIntent(intent);
-  const keyword = extractKeyword(instruction);
+export function buildStableSystemPrompt(toolNames: any[] = [], skills: any[] = []) {
   const availableTools = (Array.isArray(toolNames) ? toolNames.filter(Boolean) : []) as string[];
   const toolList = availableTools.length
     ? availableTools.map((name) => '- ' + name).join('\n')
@@ -488,11 +522,19 @@ export function buildSystemPrompt(intent: string, instruction = '', toolNames: a
     '13. 要把某处内容带入视口时用 scroll_page（支持按 text 定位），**不要用 click_element 代替滚动**——点击是对用户页面的真实副作用，看起来是纯文本的段落也可能绑定了事件。若 scroll_page 报「滚动已派发但位置未变化」，说明滚动发生在**内部容器**：用 scroll_page({selector:"<该容器>", y:600}) 直接滚它（结果会回报实际 scrollTop），不要靠点击去「顶动」页面，也不要为此调用 run_javascript。',
     '14. 标签页要克制：优先在当前绑定页完成操作；只有确实缺数据时才 switch_tab / open_tab。禁止为了“验证一下”“对比一下”反复 A→B→A 切换。同一 tab 的 switch_tab 是 no-op；达到本任务切换上限后会拒绝继续切换，此时应留在当前页、复用已有快照/结果或改用 fetch_webpage。',
     '15. 如果工具结果提示“操作被登录拦截 / 权限限制”：立即停止继续点击、猜 URL 或切换标签页，把结果里的真实登录入口告诉用户，等待用户完成登录后再继续。',
-    ...info.rules,
-    keyword ? '目标关键词：' + keyword : '',
-    availableTools.includes('complete_task') ? '任务完成后必须调用 complete_task 声明完成，不要在完成后继续调用其他工具。' : '',
   ].filter(Boolean);
   // 全部技能以「目录」形式列出（name + 用途），供模型判断是否需 load_skill 加载完整说明。
   const skillCatalog = Array.isArray(skills) && skills.length ? buildSkillCatalog(skills) : '';
   return [lines.join('\n'), skillCatalog].filter(Boolean).join('\n\n');
+}
+
+/**
+ * 完整系统提示（兼容既有调用/测试）。生产 Bootstrap 会把稳定部分放进 messages[0]，
+ * 把任务策略放到历史之后；不要在跨回合请求里直接使用这个拼接结果作为 messages[0]。
+ */
+export function buildSystemPrompt(intent: string, instruction = '', toolNames: any[] = [], skills: any[] = []) {
+  return [
+    buildStableSystemPrompt(toolNames, skills),
+    buildTaskPolicyPrompt(intent, instruction),
+  ].filter(Boolean).join('\n\n');
 }

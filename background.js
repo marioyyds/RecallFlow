@@ -7765,11 +7765,10 @@ function stripHtml(html) {
 function buildSkillCatalog(skills = []) {
   const list = Array.isArray(skills) ? skills : [];
   if (!list.length) return "";
-  const items = list.map((s) => {
-    const name = s.name || "";
-    const desc = s.description || (s.content ? String(s.content).replace(/\s+/g, " ").trim().slice(0, 80) : "");
-    return "- " + name + (desc ? "\uFF1A" + desc : "");
-  });
+  const items = list.map((s) => ({
+    name: s.name || "",
+    desc: s.description || (s.content ? String(s.content).replace(/\s+/g, " ").trim().slice(0, 80) : "")
+  })).sort((a, b) => a.name.localeCompare(b.name)).map((s) => "- " + s.name + (s.desc ? "\uFF1A" + s.desc : ""));
   return [
     "\u53EF\u7528\u6280\u80FD\uFF08\u4E13\u5BB6\u624B\u518C\uFF09\uFF1A",
     items.join("\n"),
@@ -7785,6 +7784,9 @@ var INTENTS = Object.freeze({
   CHAT: "chat_task"
 });
 var ALL_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
+var ALWAYS_AVAILABLE_TOOL_NAMES = new Set(
+  TOOL_REGISTRY.filter((tool) => tool.alwaysAvailable).map((tool) => tool.name)
+);
 var PURE_CHITCHAT_RE = /^(你好|您好|谢谢|感谢|再见|拜拜|在吗|嗨|hi|hello|hey|嗯|好|可以|好的|行)[，。！？!?,\s]*$/i;
 var INTENT_ROUTER_SYSTEM = `\u4F60\u662F RecallFlow \u7684\u610F\u56FE\u8DEF\u7531\u5668\u3002\u6839\u636E\u7528\u6237\u6307\u4EE4\u5224\u65AD\u5B83\u5C5E\u4E8E\u54EA\u4E00\u7C7B\u4EFB\u52A1\uFF0C\u53EA\u8F93\u51FA\u4E00\u4E2A JSON\u3002
 
@@ -8148,9 +8150,30 @@ async function resolveIntentForAgent(instruction, history, settings, opts = {}, 
 function resolveIntent(intent) {
   return INTENT_DEFS[intent] || INTENT_DEFS[INTENTS.CHAT];
 }
-function buildSystemPrompt(intent, instruction = "", toolNames = [], skills = []) {
+function isToolAllowedForIntent(intent, name, extraAllowed = []) {
+  const toolName = String(name || "");
+  if (!toolName) return false;
+  if (ALWAYS_AVAILABLE_TOOL_NAMES.has(toolName)) return true;
+  const info = resolveIntent(intent);
+  if (toolName.startsWith("mcp__")) return info.includeMcp === true;
+  if (info.allowedTools.includes(toolName)) return true;
+  return Array.isArray(extraAllowed) && extraAllowed.includes(toolName);
+}
+function buildTaskPolicyPrompt(intent, instruction = "") {
   const info = resolveIntent(intent);
   const keyword = extractKeyword(instruction);
+  const completesWithTool = info.allowedTools.includes("complete_task");
+  const lines = [
+    "\u3010\u672C\u6B21\u4EFB\u52A1\u7B56\u7565\u3011" + info.label + "\uFF1A" + info.description,
+    "\u8FD9\u4E9B\u7B56\u7565\u53EA\u7EA6\u675F\u5F53\u524D\u4EFB\u52A1\uFF0C\u4E0D\u4EE3\u8868\u5176\u4ED6\u4EFB\u52A1\u80FD\u529B\u88AB\u79FB\u9664\uFF1B\u6362\u4EFB\u52A1\u65F6\u4EE5\u6700\u65B0\u7B56\u7565\u4E3A\u51C6\u3002",
+    "\u89C4\u5219\uFF1A",
+    ...info.rules,
+    keyword ? "\u76EE\u6807\u5173\u952E\u8BCD\u53EF\u80FD\u662F\uFF1A" + keyword : "",
+    completesWithTool ? "\u4EFB\u52A1\u5B8C\u6210\u540E\u5FC5\u987B\u8C03\u7528 complete_task \u58F0\u660E\u5B8C\u6210\uFF0C\u4E0D\u8981\u5728\u5B8C\u6210\u540E\u7EE7\u7EED\u8C03\u7528\u5176\u4ED6\u5DE5\u5177\u3002" : "\u672C\u4EFB\u52A1\u81EA\u7136\u56DE\u7B54\u7ED3\u675F\u5373\u53EF\uFF0C\u4E0D\u9700\u8981\u8C03\u7528 complete_task\uFF1B\u4E0D\u8981\u6267\u884C\u4E0E\u5F53\u524D\u8BF7\u6C42\u65E0\u5173\u7684\u5199\u64CD\u4F5C\u3002"
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+function buildStableSystemPrompt(toolNames = [], skills = []) {
   const availableTools = Array.isArray(toolNames) ? toolNames.filter(Boolean) : [];
   const toolList = availableTools.length ? availableTools.map((name) => "- " + name).join("\n") : "\u672C\u8F6E\u4E0D\u63D0\u4F9B\u4EFB\u4F55\u5DE5\u5177\uFF0C\u8BF7\u76F4\u63A5\u56DE\u7B54\u3002";
   const lines = [
@@ -8173,10 +8196,7 @@ function buildSystemPrompt(intent, instruction = "", toolNames = [], skills = []
     '12. \u4E00\u8F6E\u53EF\u4EE5\u53D1\u51FA**\u591A\u4E2A**\u5DE5\u5177\u8C03\u7528\uFF1A\u5F53\u82E5\u5E72\u64CD\u4F5C\u4E92\u4E0D\u4F9D\u8D56\u65F6\uFF08\u4F8B\u5982\u540C\u65F6\u8BFB\u53D6\u4E24\u4E2A\u533A\u5757\u3001\u540C\u65F6\u7ED9\u4E24\u5904\u5143\u7D20\u8BBE\u6837\u5F0F\u3001\u540C\u65F6\u53D6\u5FEB\u7167\u4E0E\u9875\u9762\u6587\u672C\uFF09\uFF0C\u8BF7\u5728**\u540C\u4E00\u8F6E**\u91CC\u4E00\u5E76\u53D1\u51FA\uFF0C\u4E0D\u8981\u4E00\u6B21\u4E00\u4E2A\u5730\u4E32\u884C\u8C03\u7528\u2014\u2014\u4E32\u884C\u4F1A\u6210\u500D\u62C9\u957F\u8017\u65F6\u3002\u53EA\u6709\u540E\u4E00\u6B65\u9700\u8981\u524D\u4E00\u6B65\u7ED3\u679C\u65F6\u624D\u5206\u8F6E\u3002\u9690\u85CF\u591A\u4E2A\u5143\u7D20\u8BF7\u4F18\u5148\u7528 annotate({op:"style", selectors:[\u2026]}) \u4E00\u6B21\u5B8C\u6210\u3002',
     '13. \u8981\u628A\u67D0\u5904\u5185\u5BB9\u5E26\u5165\u89C6\u53E3\u65F6\u7528 scroll_page\uFF08\u652F\u6301\u6309 text \u5B9A\u4F4D\uFF09\uFF0C**\u4E0D\u8981\u7528 click_element \u4EE3\u66FF\u6EDA\u52A8**\u2014\u2014\u70B9\u51FB\u662F\u5BF9\u7528\u6237\u9875\u9762\u7684\u771F\u5B9E\u526F\u4F5C\u7528\uFF0C\u770B\u8D77\u6765\u662F\u7EAF\u6587\u672C\u7684\u6BB5\u843D\u4E5F\u53EF\u80FD\u7ED1\u5B9A\u4E86\u4E8B\u4EF6\u3002\u82E5 scroll_page \u62A5\u300C\u6EDA\u52A8\u5DF2\u6D3E\u53D1\u4F46\u4F4D\u7F6E\u672A\u53D8\u5316\u300D\uFF0C\u8BF4\u660E\u6EDA\u52A8\u53D1\u751F\u5728**\u5185\u90E8\u5BB9\u5668**\uFF1A\u7528 scroll_page({selector:"<\u8BE5\u5BB9\u5668>", y:600}) \u76F4\u63A5\u6EDA\u5B83\uFF08\u7ED3\u679C\u4F1A\u56DE\u62A5\u5B9E\u9645 scrollTop\uFF09\uFF0C\u4E0D\u8981\u9760\u70B9\u51FB\u53BB\u300C\u9876\u52A8\u300D\u9875\u9762\uFF0C\u4E5F\u4E0D\u8981\u4E3A\u6B64\u8C03\u7528 run_javascript\u3002',
     "14. \u6807\u7B7E\u9875\u8981\u514B\u5236\uFF1A\u4F18\u5148\u5728\u5F53\u524D\u7ED1\u5B9A\u9875\u5B8C\u6210\u64CD\u4F5C\uFF1B\u53EA\u6709\u786E\u5B9E\u7F3A\u6570\u636E\u65F6\u624D switch_tab / open_tab\u3002\u7981\u6B62\u4E3A\u4E86\u201C\u9A8C\u8BC1\u4E00\u4E0B\u201D\u201C\u5BF9\u6BD4\u4E00\u4E0B\u201D\u53CD\u590D A\u2192B\u2192A \u5207\u6362\u3002\u540C\u4E00 tab \u7684 switch_tab \u662F no-op\uFF1B\u8FBE\u5230\u672C\u4EFB\u52A1\u5207\u6362\u4E0A\u9650\u540E\u4F1A\u62D2\u7EDD\u7EE7\u7EED\u5207\u6362\uFF0C\u6B64\u65F6\u5E94\u7559\u5728\u5F53\u524D\u9875\u3001\u590D\u7528\u5DF2\u6709\u5FEB\u7167/\u7ED3\u679C\u6216\u6539\u7528 fetch_webpage\u3002",
-    "15. \u5982\u679C\u5DE5\u5177\u7ED3\u679C\u63D0\u793A\u201C\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A / \u6743\u9650\u9650\u5236\u201D\uFF1A\u7ACB\u5373\u505C\u6B62\u7EE7\u7EED\u70B9\u51FB\u3001\u731C URL \u6216\u5207\u6362\u6807\u7B7E\u9875\uFF0C\u628A\u7ED3\u679C\u91CC\u7684\u771F\u5B9E\u767B\u5F55\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u540E\u518D\u7EE7\u7EED\u3002",
-    ...info.rules,
-    keyword ? "\u76EE\u6807\u5173\u952E\u8BCD\uFF1A" + keyword : "",
-    availableTools.includes("complete_task") ? "\u4EFB\u52A1\u5B8C\u6210\u540E\u5FC5\u987B\u8C03\u7528 complete_task \u58F0\u660E\u5B8C\u6210\uFF0C\u4E0D\u8981\u5728\u5B8C\u6210\u540E\u7EE7\u7EED\u8C03\u7528\u5176\u4ED6\u5DE5\u5177\u3002" : ""
+    "15. \u5982\u679C\u5DE5\u5177\u7ED3\u679C\u63D0\u793A\u201C\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A / \u6743\u9650\u9650\u5236\u201D\uFF1A\u7ACB\u5373\u505C\u6B62\u7EE7\u7EED\u70B9\u51FB\u3001\u731C URL \u6216\u5207\u6362\u6807\u7B7E\u9875\uFF0C\u628A\u7ED3\u679C\u91CC\u7684\u771F\u5B9E\u767B\u5F55\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u540E\u518D\u7EE7\u7EED\u3002"
   ].filter(Boolean);
   const skillCatalog = Array.isArray(skills) && skills.length ? buildSkillCatalog(skills) : "";
   return [lines.join("\n"), skillCatalog].filter(Boolean).join("\n\n");
@@ -9304,6 +9324,8 @@ function buildInitialMessagesPure(input = {}) {
   for (const h of Array.isArray(input.history) ? input.history : []) {
     if (h && h.role && typeof h.content === "string") messages.push({ role: h.role, content: h.content });
   }
+  const taskSystemPrompt = String(input.taskSystemPrompt || "").trim();
+  if (taskSystemPrompt) messages.push({ role: "system", content: taskSystemPrompt });
   const parts = [];
   const picks = Array.isArray(input.pickedBlocks) ? input.pickedBlocks.filter(Boolean) : [];
   if (picks.length) {
@@ -9323,7 +9345,7 @@ function buildInitialMessagesPure(input = {}) {
 }
 
 // lib/application/agent/agent-bootstrap.ts
-function buildInitialMessages(instruction, selectedText, page, pageUrl, history, emit, systemPrompt, pickedElements) {
+function buildInitialMessages(instruction, selectedText, page, pageUrl, history, emit, systemPrompt, taskSystemPrompt, pickedElements) {
   let normalized = normalizeHistory(history, {
     maxMessages: 10,
     maxChars: HISTORY_MAX_CHARS,
@@ -9357,6 +9379,7 @@ function buildInitialMessages(instruction, selectedText, page, pageUrl, history,
     messages: buildInitialMessagesPure({
       systemPrompt,
       history: normalized,
+      taskSystemPrompt,
       instruction: instr,
       selectedText,
       page,
@@ -9470,30 +9493,19 @@ async function prepareAgentRun(options) {
     pageUrl: ctx.pageUrl,
     budget: { maxTotalTokens: budget.maxTotalTokens, toolTimeoutMs: budget.toolTimeoutMs }
   });
-  const allowedTools = intentInfo.allowedTools;
   const disabledTools = new Set(
     canResume && Array.isArray(persisted.disabledTools) ? persisted.disabledTools : []
   );
   const collected = await collectAgentTools(settings, {
-    allowedTools,
-    includeMcp: intentInfo.includeMcp
+    // capability surface 必须跨意图、跨用户回合保持一致。意图白名单只用于执行期
+    // 权限判断（isToolAllowedForIntent），不能再筛选这里下发的 function schema。
+    includeMcp: true
   });
   ctx.mcpIndex = collected.mcpIndex;
   ctx.mcpStatus = collected.mcpStatus || [];
   persistMcpStatus(ctx.mcpStatus);
-  let tools = collected.tools.filter((t) => t && t.function && !disabledTools.has(t.function.name));
-  if (canResume) {
-    for (const n of loadedSkillNames) {
-      const sk = allSkills.find((s) => s.name === n || s.id === n);
-      for (const tn of sk && sk.tools || []) {
-        const def = TOOL_REGISTRY.find((t) => t.name === tn);
-        if (def && !tools.some((t) => t.function && t.function.name === tn)) tools.push(def.openai);
-      }
-    }
-  }
-  const basePrompt = buildSystemPrompt(
-    intent,
-    detected.sourceText || instruction,
+  let tools = collected.tools.filter((t) => t && t.function);
+  const basePrompt = buildStableSystemPrompt(
     tools.map((t) => t.function && t.function.name),
     allSkills
   );
@@ -9512,7 +9524,8 @@ async function prepareAgentRun(options) {
       promptExtras += '\n\n\u3010\u672C\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\u3011\u7528\u6237\u8981\u6C42\u6267\u884C\u8FD9\u4E9B\u6D41\u7A0B\u65F6\uFF0C\u4F18\u5148\u7528 run_macro("\u540D\u79F0") \u4E00\u952E\u56DE\u653E\uFF0C\u4E0D\u8981\u91CD\u65B0\u9010\u6B65\u64CD\u4F5C\uFF1A\n' + macros.map((m) => "- " + m.name + (m.description ? "\uFF1A" + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
     }
   }
-  let systemPrompt = basePrompt + promptExtras;
+  const systemPrompt = basePrompt;
+  const taskSystemPrompt = buildTaskPolicyPrompt(intent, detected.sourceText || instruction) + promptExtras;
   let messages;
   if (canResume && Array.isArray(persisted.messages)) {
     messages = sanitizeToolPairing(persisted.messages.filter(
@@ -9520,7 +9533,17 @@ async function prepareAgentRun(options) {
     ));
   } else {
     const pickedList = canResume ? persisted.pickedElements || (persisted.pickedElement ? [persisted.pickedElement] : []) : payload.pickedElements || (payload.pickedElement ? [payload.pickedElement] : []);
-    const built = buildInitialMessages(instruction, selectedText, ctx.page, ctx.pageUrl, payload.history, emit, systemPrompt, pickedList);
+    const built = buildInitialMessages(
+      instruction,
+      selectedText,
+      ctx.page,
+      ctx.pageUrl,
+      payload.history,
+      emit,
+      systemPrompt,
+      taskSystemPrompt,
+      pickedList
+    );
     messages = built.messages;
   }
   const injectPlanMessage = () => {
@@ -9933,6 +9956,7 @@ async function runParallelBatch(toolCalls, o) {
   const groups = planParallelGroups(calls.slice(0, limit), {
     isParallelSafe: (name) => getToolMetadata(name).parallelSafe === true,
     shouldSkip: (name, args) => {
+      if (typeof o.isToolAllowed === "function" && !o.isToolAllowed(name)) return true;
       if (o.disabledTools.has(name)) return true;
       if (!validateToolCall(name, args).ok) return true;
       return o.approvalSettings.toolApproval !== false && toolNeedsApproval(name, o.approvalSettings, o.ctx.pageUrl) && !o.sessionApprovedTools.has(name);
@@ -10641,15 +10665,8 @@ var CompletionCoordinator = class {
 };
 
 // lib/application/agent/intent-policy.ts
-function promoteToResearch(tools, messages, instruction, allSkills, promptExtras) {
-  const researchInfo = resolveIntent(INTENTS.RESEARCH);
-  for (const name of researchInfo.allowedTools) {
-    if (tools.some((t) => t.function && t.function.name === name)) continue;
-    const def = TOOL_REGISTRY.find((t) => t.name === name);
-    if (def) tools.push(def.openai);
-  }
-  const names = tools.map((t) => t.function && t.function.name).filter(Boolean);
-  const newPrompt = buildSystemPrompt(INTENTS.RESEARCH, instruction, names, allSkills);
+function promoteToResearch(messages, instruction, promptExtras) {
+  const newPrompt = buildTaskPolicyPrompt(INTENTS.RESEARCH, instruction);
   const content = promptExtras ? newPrompt + promptExtras : newPrompt;
   messages.push({ role: "system", content });
   return content;
@@ -10807,6 +10824,7 @@ var ToolCallPipeline = class {
       settings: state2.settings,
       ctx: state2.ctx,
       sessionApprovedTools: state2.sessionApprovedTools,
+      isToolAllowed: (name) => this.isToolAllowed(name),
       budget: state2.budget,
       signal: this.signal,
       emit: state2.emit,
@@ -10820,10 +10838,8 @@ var ToolCallPipeline = class {
       if (RESEARCH_TRIGGER_TOOLS.has(toolCall.name) && state2.intent === INTENTS.CHAT && !state2.promotedToResearch) {
         state2.promotedToResearch = true;
         pendingResearchPromotion = () => promoteToResearch(
-          state2.tools,
           state2.messages,
           state2.detected.sourceText || state2.instruction,
-          state2.allSkills,
           state2.promptExtras
         );
         state2.emit({
@@ -10854,6 +10870,23 @@ var ToolCallPipeline = class {
       }
       if (!result && state2.disabledTools.has(toolCall.name)) {
         const blocked = this.disabledMessage(toolCall.name);
+        state2.emit({
+          type: "tool-result",
+          callId,
+          name: toolCall.name,
+          status: "failed",
+          result: blocked
+        });
+        state2.messages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: blocked
+        });
+        continue;
+      }
+      if (!result && !this.isToolAllowed(toolCall.name)) {
+        const blocked = this.policyBlockedMessage(toolCall.name);
+        toolState.status = TOOL_STATUS.FAILED;
         state2.emit({
           type: "tool-result",
           callId,
@@ -11104,6 +11137,25 @@ var ToolCallPipeline = class {
   disabledMessage(name) {
     return "\u5DE5\u5177\u300C" + name + "\u300D\u5DF2\u5728\u672C\u4EFB\u52A1\u4E2D\u505C\u7528\uFF08\u8FDE\u7EED\u5931\u8D25\u6216\u65E0\u8FDB\u5C55\uFF09\uFF0C\u8BF7\u6539\u7528\u5176\u4ED6\u65B9\u5F0F\u5B8C\u6210\u76EE\u6807\u3002";
   }
+  policyBlockedMessage(name) {
+    const effectiveIntent = this.state.intent === INTENTS.CHAT && this.state.promotedToResearch ? INTENTS.RESEARCH : this.state.intent;
+    const label = resolveIntent(effectiveIntent).label;
+    return "\u5DE5\u5177\u300C" + name + "\u300D\u4E0D\u5C5E\u4E8E\u5F53\u524D\u300C" + label + "\u300D\u4EFB\u52A1\u7684\u6267\u884C\u6743\u9650\u3002\u8BF7\u6309\u5F53\u524D\u7528\u6237\u8BF7\u6C42\u6539\u7528\u5DF2\u5141\u8BB8\u7684\u5DE5\u5177\uFF1B\u4E0D\u8981\u5047\u8BBE\u8BE5\u64CD\u4F5C\u5DF2\u7ECF\u6267\u884C\u3002";
+  }
+  isToolAllowed(name) {
+    const state2 = this.state;
+    const effectiveIntent = state2.intent === INTENTS.CHAT && state2.promotedToResearch ? INTENTS.RESEARCH : state2.intent;
+    const loadedTools = [];
+    for (const skillName of state2.loadedSkillNames) {
+      const skill = state2.allSkills.find(
+        (candidate) => candidate.name === skillName || candidate.id === skillName
+      );
+      for (const toolName of Array.isArray(skill?.tools) ? skill.tools : []) {
+        loadedTools.push(String(toolName));
+      }
+    }
+    return isToolAllowedForIntent(effectiveIntent, name, loadedTools);
+  }
   applyAuthChallenge(name, result, beforeUrl) {
     const challenge = (result.authChallenge && result.authChallenge.required === true ? result.authChallenge : null) || detectAuthChallenge({
       beforeUrl,
@@ -11148,14 +11200,6 @@ var ToolCallPipeline = class {
     });
     if (!state2.loadedSkillNames.includes(loaded.name)) {
       state2.loadedSkillNames.push(loaded.name);
-    }
-    for (const toolName of Array.isArray(loaded.tools) ? loaded.tools : []) {
-      const definition = TOOL_REGISTRY.find((tool) => tool.name === toolName);
-      if (definition && !state2.tools.some(
-        (tool) => tool.function && tool.function.name === toolName
-      )) {
-        state2.tools.push(definition.openai);
-      }
     }
   }
   applyCitations(result) {
