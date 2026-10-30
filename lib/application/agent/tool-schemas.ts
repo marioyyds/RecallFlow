@@ -106,12 +106,14 @@ export const TOOL_SCHEMAS = [
     function: {
       name: 'get_page_snapshot',
       description:
-        '读取当前网页的结构化 DOM 快照：URL、标题、正文摘要、可交互元素与滚动状态。视口内元素优先返回；每个元素带稳定 ref、selector 与视口坐标 center（合成点击无效时可用 click_at 按坐标点击）。页面操作前后可用它判断动作是否生效。',
+        '读取当前网页的结构化 DOM 快照：URL、标题、正文摘要、区域轮廓与代表性可交互元素。默认是低体积轮廓；每个元素带稳定 ref、selector 与视口坐标 center。已知目标词时传 query 提高相关元素排序；还有元素未展示时用 nextCursor 继续读取。页面操作前后可用它判断动作是否生效。',
       parameters: {
         type: 'object',
         properties: {
-          maxElements: { type: 'integer', description: '最多返回多少个可交互元素，默认 60，最大 120' },
-          maxText: { type: 'integer', description: '正文摘要最大字符数，默认 4000，最大 8000' },
+          maxElements: { type: 'integer', description: '本次分页最多返回多少个可交互元素，默认 40，最大 120' },
+          maxText: { type: 'integer', description: '正文摘要最大字符数，默认 3000，最大 8000；cursor>0 时默认 0，避免重复发送正文' },
+          query: { type: 'string', description: '可选：目标词或任务描述，用于把相关元素排到本轮前面；不会替代精确的 inspect_element 查询' },
+          cursor: { type: 'integer', description: '分页游标。last snapshot 返回 nextCursor 时原样传入，读取下一批；页面导航或大幅重渲染后重新从 0 开始' },
           frameId: { type: 'integer', description: '只读取指定 iframe 的快照（frameId 来自 list_frames）；元素 ref 会自动带 f<frameId>: 前缀' },
           includeFrames: { type: 'boolean', description: '是否合并所有子框架（含跨域 iframe）的可交互元素，默认 false' },
         },
@@ -517,7 +519,7 @@ export const TOOL_SCHEMAS = [
       description:
         '侦查元素（只读）。op：inspect 结构 / text 文本 / styles 计算样式 / table 表格 / options 下拉选项 / query 候选查询。' +
         'inspect 返回 count（真实命中数，matches 最多 8 条）、visibleCount、selector/visible/shadowDepth/尺寸/祖先链；count 为准，不要用 matches.length。' +
-        'query 按 selector/text/role+name/testid 返回候选的 ref/rect/center/role/name/customElement/shadowDepth；ref 可直接用于后续动作，替代探索性 run_javascript。' +
+        'query 按 selector/text/role+name/testid 返回候选的 ref/rect/center/role/name/customElement/shadowDepth，支持 region 限定与 cursor 分页；ref 可直接用于后续动作，替代探索性 run_javascript。' +
         'styles 用于验证样式真的生效（!important/非法值会让“已修改”假成功）。' +
         'table 会正确展开 rowspan/colspan；选项清单用 options。',
       parameters: {
@@ -546,6 +548,8 @@ export const TOOL_SCHEMAS = [
             description: 'op=table：合并单元格的延续格是否重复填入同一文本（默认 true，便于按列读取）。设 false 可保留「此处是合并延续」的忠实形态（延续格为空）。',
           },
           limit: { type: 'integer', description: 'op=query：最多返回多少个候选，默认 20，上限 50' },
+          cursor: { type: 'integer', description: 'op=query：候选分页游标；上次结果有 nextCursor 时原样传入' },
+          region: { type: 'string', description: 'op=query：可选 CSS 选择器，只在匹配的容器内查询；也可单独使用来枚举该区域内的交互元素' },
           includeHidden: { type: 'boolean', description: 'op=query：是否包含不可见元素，默认 false' },
           // --- 仅 op=styles ---
           props: {

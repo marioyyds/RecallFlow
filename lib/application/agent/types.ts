@@ -112,6 +112,22 @@ export interface PageSnapshotLike {
   text?: string;
   fingerprint?: string;
   elements?: SnapshotElementLike[];
+  outline?: {
+    regions?: Array<{
+      selector?: string;
+      tag?: string;
+      role?: string;
+      label?: string;
+      interactive?: number;
+      inViewport?: number;
+      textLength?: number;
+    }>;
+    totalRegions?: number;
+    omittedRegions?: number;
+  };
+  query?: string;
+  cursor?: number;
+  nextCursor?: number | null;
   scroll?: { x: number; y: number; height?: number; viewport?: number } | null;
   capabilities?: Record<string, CapabilityBucketLike>;
   mainContent?: { selector?: string; textLength?: number; tag?: string; note?: string } | null;
@@ -119,6 +135,7 @@ export interface PageSnapshotLike {
     interactive?: number;
     shown?: number;
     omittedBySize?: number;
+    omittedByLimit?: number;
     inViewport?: number;
     forms?: number;
   };

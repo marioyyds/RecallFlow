@@ -104,6 +104,23 @@ export interface MainContentHint {
   note: string;
 }
 
+/** 页面轮廓中的一个语义区域。只用于导航，不包含区域内的完整元素列表。 */
+export interface PageRegionHint {
+  selector: string;
+  tag: string;
+  role?: string;
+  label: string;
+  interactive: number;
+  inViewport: number;
+  textLength: number;
+}
+
+export interface PageOutline {
+  regions: PageRegionHint[];
+  totalRegions: number;
+  omittedRegions: number;
+}
+
 /** extractPageSnapshot 的产物。**坐标与 ref 都不进指纹**，见 snapshot.fingerprint 的说明。 */
 export interface PageSnapshot {
   version: number;
@@ -111,6 +128,11 @@ export interface PageSnapshot {
   title: string;
   text: string;
   elements: SnapshotElement[];
+  /** 首轮导航用的区域轮廓；完整元素通过 query + cursor 增量读取 */
+  outline?: PageOutline;
+  query?: string;
+  cursor?: number;
+  nextCursor?: number | null;
   mainContent?: MainContentHint | null;
   /** 只含命中的类别，空则整个字段不给 */
   capabilities?: Record<string, { count: number; samples: unknown[] }>;
@@ -118,6 +140,7 @@ export interface PageSnapshot {
     interactive: number;
     shown: number;
     omittedBySize: number;
+    omittedByLimit: number;
     inViewport: number;
     forms: number;
     headings: number;
@@ -271,7 +294,7 @@ export function checkTextVisibility(
 
 // 可交互元素：原生控件 + 常见 ARIA role + tabindex + contenteditable + 带 onclick/href 的元素。
 // 覆盖复杂组件（下拉菜单项、日期选择器、开关、滑块、树节点、标签页等）。
-const INTERACTIVE_SELECTOR = [
+export const INTERACTIVE_SELECTOR = [
   'a[href]', 'button', 'input', 'textarea', 'select', 'summary', 'details > summary',
   'label', 'option',
   '[contenteditable=""]', '[contenteditable="true"]', '[contenteditable="plaintext-only"]',
@@ -306,6 +329,160 @@ function isVisibleElement(el: Element): boolean {
   if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
   const rect = el.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
+}
+
+const OUTLINE_REGION_SELECTOR =
+  'main,article,section,nav,aside,header,footer,form,table,' +
+  '[role="main"],[role="navigation"],[role="search"],[role="region"]';
+const OUTLINE_REGION_LIMIT = 8;
+
+function elementLabelForRanking(el: Element) {
+  const ctl = el as MaybeFormControl;
+  return normalizeSnapshotText(
+    el.getAttribute('aria-label') ||
+      el.getAttribute('title') ||
+      el.getAttribute('placeholder') ||
+      el.getAttribute('alt') ||
+      ctl.innerText ||
+      el.textContent ||
+      el.getAttribute('name') ||
+      '',
+    180
+  );
+}
+
+/** 找最近的语义区域；Shadow DOM 中继续沿 host 向上找。 */
+function nearestOutlineRegion(el: Element): Element | null {
+  let node: Element | null = el;
+  while (node) {
+    try {
+      const region = node.closest(OUTLINE_REGION_SELECTOR);
+      if (region) return region;
+    } catch {}
+    try {
+      let root: Node | null = null;
+      root = node.getRootNode();
+      const host: Element | null =
+        root && 'host' in root ? (root as ShadowRoot).host : null;
+      node = host || null;
+    } catch {
+      node = null;
+    }
+  }
+  return el.ownerDocument && el.ownerDocument.body ? el.ownerDocument.body : null;
+}
+
+function regionLabel(region: Element) {
+  const explicit = normalizeSnapshotText(
+    region.getAttribute('aria-label') || region.getAttribute('data-label') || '',
+    80
+  );
+  if (explicit) return explicit;
+  let heading = '';
+  try {
+    const h = region.querySelector('h1,h2,h3,[role="heading"]');
+    heading = normalizeSnapshotText(h && (h as HTMLElement).innerText, 80);
+  } catch {}
+  if (heading) return heading;
+  const id = String(region.id || '').trim();
+  if (id) return id.slice(0, 80);
+  const role = String(region.getAttribute('role') || '').trim();
+  const tag = String(region.tagName || '').toLowerCase();
+  return role ? role + ' · ' + tag : tag;
+}
+
+/** 生成低体积页面轮廓：只报区域、控件数和大致文本量，不发送区域内部 DOM。 */
+function buildPageOutline(nodes: Element[]): PageOutline | undefined {
+  if (!nodes.length) return undefined;
+  const buckets = new Map<Element, PageRegionHint>();
+  for (const el of nodes) {
+    const region = nearestOutlineRegion(el);
+    if (!region) continue;
+    let item = buckets.get(region);
+    if (!item) {
+      item = {
+        selector: (() => {
+          try {
+            return elementSelector(region);
+          } catch {
+            return String(region.tagName || '').toLowerCase();
+          }
+        })(),
+        tag: String(region.tagName || '').toLowerCase(),
+        role: String(region.getAttribute('role') || '').trim() || undefined,
+        label: regionLabel(region),
+        interactive: 0,
+        inViewport: 0,
+        textLength: String(region.textContent || '').length,
+      };
+      buckets.set(region, item);
+    }
+    item.interactive += 1;
+    try {
+      if (inViewport(el.getBoundingClientRect())) item.inViewport += 1;
+    } catch {}
+  }
+  const all = Array.from(buckets.values()).sort(
+    (a, b) =>
+      b.interactive - a.interactive ||
+      b.inViewport - a.inViewport ||
+      a.selector.localeCompare(b.selector)
+  );
+  const regions = all.slice(0, OUTLINE_REGION_LIMIT);
+  return {
+    regions,
+    totalRegions: all.length,
+    omittedRegions: Math.max(0, all.length - regions.length),
+  };
+}
+
+function snapshotRelevance(el: Element, query: string) {
+  if (!query) return 0;
+  const label = elementLabelForRanking(el).toLowerCase();
+  const role = String(el.getAttribute('role') || '').toLowerCase();
+  const tag = String(el.tagName || '').toLowerCase();
+  const body = normalizeSnapshotText(el.textContent, 240).toLowerCase();
+  if (label === query) return 6_000_000;
+  if (label.startsWith(query)) return 4_000_000;
+  if (label.includes(query)) return 3_000_000;
+  if (role.includes(query) || tag.includes(query)) return 2_000_000;
+  if (body.includes(query)) return 1_500_000;
+  return 0;
+}
+
+/**
+ * 视口只决定“默认先看哪里”，显式 query 则优先；重复控件会轻微降权，
+ * 避免一屏几十个同名“加入购物车”挤掉导航、筛选和结果摘要。
+ */
+function rankSnapshotNodes(nodes: Element[], query = '') {
+  const vw = window.innerWidth || document.documentElement.clientWidth;
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  const cx = vw / 2;
+  const cy = vh / 2;
+  const q = normalizeSnapshotText(query, 200).toLowerCase();
+  const repetitions = new Map<string, number>();
+  return nodes
+    .map((el, order) => {
+      const rect = el.getBoundingClientRect();
+      const visible = inViewport(rect);
+      const dx = Math.max(0, Math.max(rect.left - vw, -rect.right));
+      const dy = Math.max(0, Math.max(rect.top - vh, -rect.bottom));
+      const dist = Math.hypot(dx, dy);
+      const inViewDist = Math.hypot(rect.x + rect.width / 2 - cx, rect.y + rect.height / 2 - cy);
+      const label = elementLabelForRanking(el);
+      const role = String(el.getAttribute('role') || '');
+      const signature = el.tagName.toLowerCase() + '|' + role + '|' + label.slice(0, 60);
+      const repeatIndex = repetitions.get(signature) || 0;
+      repetitions.set(signature, repeatIndex + 1);
+      const repeatPenalty = repeatIndex < 2 ? 0 : Math.min(240_000, repeatIndex * 6_000);
+      const visual = visible ? inViewDist : 1_000_000 + dist;
+      return {
+        el,
+        order,
+        sortKey: visual + repeatPenalty - snapshotRelevance(el, q),
+      };
+    })
+    .sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
 }
 
 function cssEscape(value: unknown): string {
@@ -830,13 +1007,19 @@ export function isElementRendered(el: Element | null): boolean {
   }
 }
 
-export function extractPageSnapshot(options: { maxElements?: number; maxText?: number } = {}): PageSnapshot {
+export function extractPageSnapshot(
+  options: { maxElements?: number; maxText?: number; query?: string; cursor?: number } = {}
+): PageSnapshot {
   try {
     const body = document.body;
     if (!body) return { version: 2, url: location.href, title: document.title || '', elements: [], text: '', fingerprint: 'empty' };
     pruneRefs();
-    const maxElements = Math.min(150, Math.max(1, Number(options.maxElements) || 60));
-    const maxText = Math.min(8000, Math.max(500, Number(options.maxText) || 4000));
+    const maxElements = Math.min(120, Math.max(1, Number(options.maxElements) || 40));
+    const cursor = Math.max(0, Math.floor(Number(options.cursor) || 0));
+    const requestedText =
+      options.maxText === undefined ? (cursor > 0 ? 0 : 3000) : Number(options.maxText);
+    const maxText = Math.min(8000, Math.max(0, Number.isFinite(requestedText) ? requestedText : 3000));
+    const query = normalizeSnapshotText(options.query, 200);
     const capabilities = createPageCapabilities();
     const nodes = collectInteractiveInFrames(document, [], capabilities);
     // 只挂**确实存在**的类别：绝大多数页面这几项都是空的，全量输出等于每份快照
@@ -851,43 +1034,62 @@ export function extractPageSnapshot(options: { maxElements?: number; maxText?: n
       }
     }
     const capabilityChars = Object.keys(capabilitySummary).length ? JSON.stringify(capabilitySummary).length : 0;
-    // 视口优先：在视口内 → 距离视口中心越近越靠前；视口外 → 距离越近越靠前。
-    const vw = window.innerWidth || document.documentElement.clientWidth;
-    const vh = window.innerHeight || document.documentElement.clientHeight;
-    const cx = vw / 2;
-    const cy = vh / 2;
-    const ranked = nodes
-      .map((el) => {
-        const r = el.getBoundingClientRect();
-        const visible = inViewport(r);
-        const dx = Math.max(0, Math.max(r.left - vw, -r.right));
-        const dy = Math.max(0, Math.max(r.top - vh, -r.bottom));
-        const dist = Math.hypot(dx, dy);
-        const inViewDist = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
-        return { el, visible, sortKey: visible ? inViewDist : 1e6 + dist };
-      })
-      .sort((a, b) => a.sortKey - b.sortKey)
-      .slice(0, maxElements)
-      .map((x) => x.el);
-    // 全部入围元素都算描述：ref 的发放顺序与指纹覆盖面都不因体积裁剪而改变。
-    const describedAll = ranked.map((el, index) => describeElement(el, index));
-    const text = extractPageText().slice(0, maxText);
+    const outline = buildPageOutline(nodes);
+    const outlineChars = outline ? JSON.stringify(outline).length : 0;
+    // query 优先于视口距离；cursor 在排序结果上稳定翻页。
+    const ranked = rankSnapshotNodes(nodes, query);
+    const windowed = ranked.slice(cursor, cursor + maxElements).map((x) => x.el);
+    const describedAll = windowed.map((el, index) => describeElement(el, cursor + index));
+    // cursor 翻页默认 maxText=0：不要再克隆整页正文，也不要让子框架为未使用的文本
+    // 做一轮抽取。动作校验路径会显式传 maxText，因此不影响变化检测。
+    const fullText = maxText > 0 ? extractPageText() : '';
+    const text = maxText > 0 ? fullText.slice(0, maxText) : '';
     // 体积预算：见 SNAPSHOT_CHAR_BUDGET 与 trimElementsToBudget 的说明。
-    // capabilities 也要计入同一个体积预算：它和 elements 一样随快照发给模型。
+    // capabilities / outline 也要计入同一个体积预算：它们和 elements 一样随快照发给模型。
     // 不把这一项算进去，元素列表就会以为自己还有整整一份预算而膨胀。
-    const { elements, omittedBySize } = trimElementsToBudget(describedAll, text.length + capabilityChars);
+    const { elements, omittedBySize } = trimElementsToBudget(
+      describedAll,
+      text.length + capabilityChars + outlineChars
+    );
+    const nextCursor =
+      cursor + elements.length < nodes.length ? cursor + elements.length : null;
+    const omittedByLimit = Math.max(0, nodes.length - cursor - windowed.length);
+    const fingerprintElements = nodes.map((el) => {
+      const rect = el.getBoundingClientRect();
+      const ctl = el as MaybeFormControl;
+      let selector = '';
+      try {
+        selector = elementSelector(el);
+      } catch {}
+      return [
+        el.tagName.toLowerCase(),
+        el.getAttribute('role') || '',
+        el.getAttribute('type') || '',
+        elementLabelForRanking(el),
+        selector,
+        Boolean(ctl.disabled || el.getAttribute('aria-disabled') === 'true'),
+        typeof ctl.checked === 'boolean' ? ctl.checked : undefined,
+        ['INPUT', 'TEXTAREA'].includes(el.tagName) ? Boolean(ctl.value) : undefined,
+        rect.width > 0 && rect.height > 0,
+      ];
+    });
     const snapshot: PageSnapshot = {
       version: 2,
       url: location.href,
       title: document.title || '',
       text,
       elements,
+      outline,
+      query: query || undefined,
+      cursor,
+      nextCursor,
       mainContent: findMainContent(),
       capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : undefined,
       counts: {
         interactive: nodes.length,
         shown: elements.length,
         omittedBySize,
+        omittedByLimit,
         inViewport: elements.filter((e) => e.inViewport).length,
         forms: document.forms ? document.forms.length : 0,
         headings: document.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
@@ -900,17 +1102,18 @@ export function extractPageSnapshot(options: { maxElements?: number; maxText?: n
       },
     };
     // 指纹忽略坐标和动态 ref，只关注页面可观察内容及元素结构。
-    // 刻意覆盖**全部**入围元素（describedAll）且不把体积裁剪相关的计数算进去：
+    // 刻意覆盖**全部**元素且不把 query / cursor / 体积裁剪算进去：
     // 否则同一次动作前后两次快照的裁剪边界一旦不同，指纹就会因为「省略了几个」
     // 而变化，被 verifyPageAction 误判成页面内容变了。
     snapshot.fingerprint = hashSnapshot(JSON.stringify({
       url: snapshot.url,
       title: snapshot.title,
-      text: snapshot.text,
-      elements: describedAll.map((e) => [e.tag, e.role, e.type, e.label, e.selector, e.disabled, e.checked, e.valuePresent, e.selectedIndex, e.selectedLabel]),
+      textLength: fullText.length,
+      textSample: fullText.slice(0, 4000),
+      elements: fingerprintElements,
       counts: {
         interactive: nodes.length,
-        inViewport: describedAll.filter((e) => e.inViewport).length,
+        inViewport: fingerprintElements.filter((e) => e[8] === true).length,
         forms: document.forms ? document.forms.length : 0,
         headings: document.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
       },

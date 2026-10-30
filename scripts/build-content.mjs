@@ -64,7 +64,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // read_table implementation also adds automatic main-table selection and
 // pagination parsing to the content bundle. Measured 479KB; keep ~5KB of
 // headroom. No new dependency.
-export const SIZE_BUDGET_BYTES = 484 * 1024;
+// 2026-10-31: progressive page snapshot / query cursor adds page outline,
+// relevance ranking and paginated query code to the content script. Measured
+// 488KB after rebuild; raise by 4KB. No new dependency or duplicated module.
+export const SIZE_BUDGET_BYTES = 488 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

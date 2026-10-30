@@ -12,11 +12,12 @@
 //   2. **404 / 无内容页不登记为参考来源**：否则模型真正引用的内容会被推到高序号。
 //      无标题页面的引用标题**不能回落到正文开头**（见 citationTitleFor 的说明）。
 //   3. `get_page_snapshot` 的 **includeFrames 合并后仍要过体积预算**：
-//      否则最多 150 个元素一起塞进来，绕开快照本身的 SNAPSHOT_CHAR_BUDGET。
+//      否则多个框架的元素一起塞进来，绕开快照本身的 SNAPSHOT_CHAR_BUDGET。
 
 // 纯函数直接 import，不走 deps 注入：它没有"需要替换"的场景，
 // 而走 deps 会让**所有**既有调用方（含本仓库两条既有测试）都得补这个依赖，破坏面大于收益。
 import { describeContentScriptUnreachable } from '../../shared/diagnostics.ts';
+import { formatSnapshotOutline } from '../../shared/format/page-results.ts';
 import type { Caught } from './errors.ts';
 import type {
   PageSnapshotLike,
@@ -283,16 +284,30 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
     // 指定 frameId：只读该框架（跨域 iframe 内容也能读，内容脚本已注入所有框架）。
     if (explicitFrame) {
       const fid = Number(args.frameId);
-      const snapshot = await deps.getPageSnapshot(tabId, { maxElements: args.maxElements, maxText: args.maxText, frameId: fid });
+      const snapshot = await deps.getPageSnapshot(tabId, {
+        maxElements: args.maxElements,
+        maxText: args.maxText,
+        query: args.query,
+        cursor: args.cursor,
+        frameId: fid,
+      });
       if (!snapshot) return { ok: false, result: '未能读取该框架的 DOM 快照（frameId=' + fid + '，可能无内容脚本）。' };
       const tagged = prefixFrameRefs(snapshot, fid);
-      return { ok: true, hadEffect: false, snapshot: tagged, result: '框架 ' + fid + ' 的 DOM 快照：\n' + JSON.stringify(tagged) };
+      return {
+        ok: true,
+        hadEffect: false,
+        snapshot: tagged,
+        result:
+          '框架 ' + fid + ' 的 DOM 快照：\n' + JSON.stringify(tagged) +
+          formatSnapshotOutline(tagged),
+      };
     }
     const snapshot = await deps.getPageSnapshot(tabId, args);
     if (!snapshot) return { ok: false, result: '未能读取 DOM 快照（内容脚本未注入或页面不支持）。' };
     // 能力提示：快照 JSON 里已有 capabilities，但长文里容易被跳过。
     // 这里只回答「下一步该用哪个工具」，不重复整份清单。
     const capHint = formatCapabilityHint(snapshot.capabilities);
+    const outlineHint = formatSnapshotOutline(snapshot);
     // 正文容器提醒：隐藏广告/推广时若连带隐藏它（或它的祖先），会把文章正文一起藏起来。
     const mainHint =
       snapshot.mainContent && snapshot.mainContent.selector
@@ -319,14 +334,25 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         : '';
     // includeFrames：合并所有子框架（含跨域 iframe）的可交互元素，ref 带 f<frameId>: 前缀。
     if (args.includeFrames === true) {
-      const maxElements = Math.min(150, Math.max(1, Number(args.maxElements) || 60));
-      let elements = (snapshot.elements || []).slice();
+      const maxElements = Math.min(120, Math.max(1, Number(args.maxElements) || 40));
       const frames = await listFramesRaw(deps, tabId);
       const childFrames = frames.filter((f) => Number(f.frameId) !== 0);
+      const crossOriginFrames = childFrames.filter((f) =>
+        isCrossOriginFrame(snapshot.url, f.href)
+      );
+      const sameOriginFrameIds = childFrames
+        .filter((f) => !crossOriginFrames.includes(f))
+        .map((f) => Number(f.frameId));
+      // 顶层快照已经穿透同源 iframe。这里只补跨源框架，并给它们预留部分名额，
+      // 避免顶层元素先占满 maxElements 后一个子框架也读不到。
+      const topLimit = crossOriginFrames.length
+        ? Math.max(1, Math.min(maxElements, Math.floor(maxElements * 0.6)))
+        : maxElements;
+      let elements = (snapshot.elements || []).slice(0, topLimit);
       const readFrameIds = [];
       const failedFrameIds = [];
       const perFrameCapabilities = [];
-      for (const f of childFrames) {
+      for (const f of crossOriginFrames) {
         if (elements.length >= maxElements) break;
         const s = await deps.getPageSnapshot(tabId, { maxElements: Math.max(1, maxElements - elements.length), maxText: 0, frameId: f.frameId }).catch(() => null);
         if (s) readFrameIds.push(Number(f.frameId));
@@ -341,7 +367,7 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         }
       }
       const capped = elements.slice(0, maxElements);
-      // 合并子框架后同样要过体积预算：否则 maxElements 最多 150 个元素一起塞进来，
+      // 合并子框架后同样要过体积预算：否则 maxElements 最多 120 个元素一起塞进来，
       // 又会绕开快照本身的 SNAPSHOT_CHAR_BUDGET。
       // 能力元数据同样计入：子框架的能力样本也是随快照发给模型的正文。
       const mergedCapabilities = mergeFrameCapabilities(snapshot.capabilities, perFrameCapabilities);
@@ -350,8 +376,10 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
       const merged = Object.assign({}, snapshot, {
         elements: trimmed.elements,
         capabilities: mergedCapabilities || undefined,
+        nextCursor: null,
         counts: Object.assign({}, snapshot.counts, {
           shown: trimmed.elements.length,
+          omittedByLimit: 0,
           omittedBySize: (snapshot.counts && snapshot.counts.omittedBySize ? snapshot.counts.omittedBySize : 0) + trimmed.omittedBySize,
         }),
         frames: frames.map((f) => ({ frameId: f.frameId, url: f.href, title: f.title, isTop: !!f.isTop })),
@@ -378,14 +406,20 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         result:
           '当前页面 DOM 快照（已合并 ' + readFrameIds.length + ' 个子框架）：\n' + JSON.stringify(merged) +
           '\n提示：带 f<frameId>: 前缀的 ref 属于对应 iframe，动作时直接原样传回 ref 即可。' +
-          formatCapabilityHint(merged.capabilities) + frameWarning + mainHint + omitHint,
+          formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) +
+          frameWarning + mainHint + omitHint +
+          (sameOriginFrameIds.length
+            ? '\n同源框架 ' + sameOriginFrameIds.join('、') + ' 已由顶层快照穿透读取，未重复合并。'
+            : ''),
       };
     }
     return {
       ok: true,
       hadEffect: false,
       snapshot,
-      result: '当前页面 DOM 快照：\n' + JSON.stringify(snapshot) + capHint + mainHint + omitHint,
+      result:
+        '当前页面 DOM 快照：\n' + JSON.stringify(snapshot) +
+        outlineHint + capHint + mainHint + omitHint,
     };
   } catch (e) {
     return { ok: false, result: describeContentScriptUnreachable((e as Caught).message, '读取 DOM 快照失败：') };

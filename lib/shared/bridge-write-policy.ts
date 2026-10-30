@@ -34,7 +34,7 @@ export const BRIDGE_PAGE_TOOLS = Object.freeze([
  *
  * 为什么必须单独分组（这是一个实测出来的缺陷，不是洁癖）：
  * 这三个工具的 schema 里**根本没有** ref / selector / text ——
- * `get_page_snapshot` 收的是 maxElements / maxText / frameId / includeFrames，
+ * `get_page_snapshot` 收的是 maxElements / maxText / query / cursor / frameId / includeFrames，
  * `list_frames` 与 `get_ax_snapshot` 连参数都几乎没有。
  * 此前它们被并进页面动作组，于是无参调用会被 NO_TARGET 拒绝 ——
  * **而 ref 的唯一来源恰恰是 get_page_snapshot**：

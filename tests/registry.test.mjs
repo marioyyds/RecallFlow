@@ -233,7 +233,9 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 //   browser_task 也相应上调（见下方数字）；这是有意的契约变化，不是无声膨胀。
 // 2026-10：工具 schema 改为跨意图共享的稳定 capability surface。
 // 每轮请求都携带同一份完整定义，不能再按意图持有四份体积预算。
-const SCHEMA_BYTES_BUDGET = 41000;
+// 同日新增快照 query / cursor / region 参数（分页读取，避免首轮塞满 DOM），
+// 稳定工具面增加约 542 字符，因此显式上调到 42000。
+const SCHEMA_BYTES_BUDGET = 42000;
 
 test('工具定义体积不得超出预算（防 prompt 无声膨胀）', () => {
   const bytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');

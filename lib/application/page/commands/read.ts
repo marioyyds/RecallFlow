@@ -6,6 +6,7 @@ import {
   shadowDepth,
   ancestorPath,
   resolveElementRef,
+  INTERACTIVE_SELECTOR,
 } from '../page-text.ts';
 import { normalizeCitationText, isElementCollectExcluded } from '../citation.ts';
 import { expandTableGrid, formatTableText, parseGridPagination } from '../../../shared/table.ts';
@@ -17,12 +18,11 @@ import {
   formatInvalidControls,
   formatSelectOptions,
   formatStylesSummary,
+  paginateQueryResults,
 } from '../../../shared/format/page-results.ts';
 import {
   accessibleName,
   describeTargetState,
-  findElementsByRoleName,
-  findElementsByTestId,
   findElementsFor,
   findRangeFor,
   normName,
@@ -263,7 +263,16 @@ function cmdInspectElement(params: any) {
 function cmdQueryElements(params: any) {
   const p = params || {};
   const limit = Math.min(50, Math.max(1, Number(p.limit) || 20));
+  let cursor = Math.max(0, Math.floor(Number(p.cursor) || 0));
   const includeHidden = p.includeHidden === true;
+  let scopeRoot: any = document;
+  if (p.region) {
+    const regions = findElementsFor({ selector: p.region });
+    if (!regions.length) {
+      return { ok: false, error: 'region 没有命中任何容器：' + p.region };
+    }
+    scopeRoot = regions[0];
+  }
   const seen = new Set();
   const all: any[] = [];
   // 有多少命中因为「不可见」被筛掉。零命中时这是最有用的诊断：
@@ -280,14 +289,22 @@ function cmdQueryElements(params: any) {
     all.push(el);
   };
 
+  const inScope = (selector: string) => queryAllInFrames(scopeRoot, selector);
+
   if (p.selector) {
-    try { queryAllInFrames(document, p.selector).forEach(push); } catch (e: any) {}
+    try { inScope(p.selector).forEach(push); } catch (e: any) {}
   } else if (p.role || p.name) {
-    findElementsByRoleName(p.role, p.name).forEach(push);
+    const wantRole = normName(p.role);
+    const wantName = normName(p.name);
+    inScope(INTERACTIVE_SELECTOR).forEach((el) => {
+      if (wantRole && roleOf(el) !== wantRole) return;
+      if (wantName && normName(accessibleName(el)).indexOf(wantName) === -1) return;
+      push(el);
+    });
     // custom element 未必有 role：按可访问名再补一轮，解决 xhs-publish-btn 这类目标。
     if (p.name) {
       try {
-        queryAllInFrames(document, '*').forEach((el) => {
+        inScope('*').forEach((el) => {
           const tag = String(el.tagName || '').toLowerCase();
           if (!tag.includes('-')) return;
           if (normName(accessibleName(el)).indexOf(normName(p.name)) === -1) return;
@@ -296,7 +313,12 @@ function cmdQueryElements(params: any) {
       } catch (e: any) {}
     }
   } else if (p.testid) {
-    findElementsByTestId(p.testid).forEach(push);
+    const want = normName(p.testid);
+    inScope('[data-testid],[data-test-id],[data-test],[data-cy],[data-name]').forEach((el) => {
+      const hit = ['data-testid', 'data-test-id', 'data-test', 'data-cy', 'data-name']
+        .some((attribute) => normName(el.getAttribute(attribute)) === want);
+      if (hit) push(el);
+    });
   } else if (p.text) {
     const q = normalizeCitationText(p.text);
     if (q) {
@@ -306,7 +328,7 @@ function cmdQueryElements(params: any) {
       // 查「隐藏操作」只返回 body，零命中诊断就永远触发不了）。
       const raw: any[] = [];
       try {
-        queryAllInFrames(document, '*').forEach((el) => {
+        inScope('*').forEach((el) => {
           if (isElementCollectExcluded(el)) return;
           const text = normalizeCitationText(el.textContent);
           if (!text.includes(q)) return;
@@ -354,10 +376,14 @@ function cmdQueryElements(params: any) {
       seen.clear();
       deepest.forEach(push);
     }
+  } else if (p.region) {
+    // region-only：枚举该容器里的交互元素，用于从页面轮廓进入具体区域。
+    inScope(INTERACTIVE_SELECTOR).forEach(push);
   } else {
-    return { ok: false, error: 'query 需要 selector、role/name、testid 或 text 之一作为查询条件' };
+    return { ok: false, error: 'query 需要 selector、role/name、testid、text 或 region 之一作为查询条件' };
   }
 
+  const wantedText = normName(p.text || p.name);
   const sorted = all
     .slice()
     .sort((a, b) => {
@@ -365,9 +391,19 @@ function cmdQueryElements(params: any) {
       const rb = b.getBoundingClientRect();
       const va = ra.width > 0 && ra.height > 0 ? 0 : 1;
       const vb = rb.width > 0 && rb.height > 0 ? 0 : 1;
-      return va - vb || ra.top - rb.top || ra.left - rb.left;
+      const na = normName(accessibleName(a));
+      const nb = normName(accessibleName(b));
+      const sa = wantedText
+        ? na === wantedText ? 3 : na.startsWith(wantedText) ? 2 : na.includes(wantedText) ? 1 : 0
+        : 0;
+      const sb = wantedText
+        ? nb === wantedText ? 3 : nb.startsWith(wantedText) ? 2 : nb.includes(wantedText) ? 1 : 0
+        : 0;
+      return va - vb || sb - sa || ra.top - rb.top || ra.left - rb.left;
     });
-  const listed = sorted.slice(0, limit);
+  const page = paginateQueryResults(sorted, cursor, limit);
+  cursor = page.cursor;
+  const listed = page.rows;
   const items = listed.map((el) => {
     const rect = el.getBoundingClientRect();
     const tag = String(el.tagName || '').toLowerCase();
@@ -391,7 +427,7 @@ function cmdQueryElements(params: any) {
     };
   });
   const lines = items.map((it, i) =>
-    '[' + (i + 1) + '] ref=' + it.ref + ' tag=' + it.tag +
+    '[' + (cursor + i + 1) + '] ref=' + it.ref + ' tag=' + it.tag +
     ' selector=' + it.selector +
     (it.role ? ' role=' + it.role : '') +
     (it.name ? ' name=' + JSON.stringify(it.name) : '') +
@@ -401,6 +437,21 @@ function cmdQueryElements(params: any) {
     (it.text ? ' text=' + JSON.stringify(it.text.slice(0, 60)) : '')
   );
   if (!items.length) {
+    if (all.length) {
+      return {
+        ok: true,
+        count: all.length,
+        listed: 0,
+        cursor,
+        nextCursor: null,
+        truncated: false,
+        hiddenSkipped,
+        elements: [],
+        result:
+          '元素查询共命中 ' + all.length + ' 个，cursor=' + cursor +
+          ' 已到末尾。需要从头重查时传 cursor:0。',
+      };
+    }
     // 零命中不是「答案为空」，而是一个需要给出下一步的分叉。
     // 不返回 ok:false：查询本身成功执行了，零结果也是有效结果；
     // 但必须说清是「隐藏」「没渲染」还是「这里根本看不到它」。
@@ -427,7 +478,7 @@ function cmdQueryElements(params: any) {
         '选择器当前没有命中：确认它是否在开放 shadow root 内（本工具会穿透），或先用 wait_for_element({selector, state:"attached"}) 等它挂载。'
       );
     } else {
-      reasons.push('可换 role+name / testid / text 再查，或先用 get_page_snapshot 看页面上有哪些可交互元素。');
+      reasons.push('可换 role+name / testid / text / region 再查，或先用 get_page_snapshot 看页面区域轮廓。');
     }
     if (!hiddenSkipped && (p.selector || p.role || p.name || p.testid)) {
       reasons.push('若目标在跨域 iframe，用 list_frames 找到 frameId 后先 get_page_snapshot({frameId}) 再操作。');
@@ -436,22 +487,31 @@ function cmdQueryElements(params: any) {
       ok: true,
       count: 0,
       listed: 0,
+      cursor,
+      nextCursor: null,
       truncated: false,
       hiddenSkipped,
       elements: [],
       result: '元素查询命中 0 个。\n诊断：\n- ' + reasons.join('\n- '),
     };
   }
+  const nextCursor = page.nextCursor;
   return {
     ok: true,
     count: all.length,
     listed: items.length,
-    truncated: all.length > items.length,
+    cursor,
+    nextCursor,
+    truncated: nextCursor !== null,
     elements: items,
     result:
-      '元素查询命中 ' + all.length + ' 个（列出 ' + items.length + ' 个）：\n' +
+      '元素查询命中 ' + all.length + ' 个（cursor=' + cursor +
+      '，本次列出 ' + items.length + ' 个）：\n' +
       (lines.join('\n') || '（无）') +
-      '\n提示：可直接把 ref 传给 click_element / type_text / get_attribute；custom=true 表示自定义元素，center 可用于 click_at 降级。',
+      '\n提示：可直接把 ref 传给 click_element / type_text / get_attribute；custom=true 表示自定义元素，center 可用于 click_at 降级。' +
+      (nextCursor !== null
+        ? '\n还有未列出的命中：inspect_element({op:"query",...,cursor:' + nextCursor + '})。'
+        : ''),
   };
 }
 

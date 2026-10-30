@@ -3,8 +3,8 @@
 // ## 起因（一次真实的排查）
 //
 // 日期选择器的 E2E 里，「已订满」怎么都进不了上下文。逐项排除后定位到机制：
-//   · `page-text.js` 的 `elements` **不是文档顺序**，而是按"离视口中心的远近"排序后
-//     取前 `maxElements`（默认 60，上限 150）；
+//   · `page-text.ts` 的 `elements` **不是文档顺序**，而是按任务相关性 / 视口距离排序后
+//     取 `maxElements` 窗口（默认 40，上限 120），剩余内容通过 cursor 继续读取；
 //   · 再过 `trimElementsToBudget` 按**体积预算**裁剪（返回 `omittedBySize`）。
 // 日历格子在视口外 ⇒ 排在最后 ⇒ 先被裁。而 `counts.omittedBySize` 只是个数字，
 // **模型看不出"被裁了什么、该怎么办"** ✗ —— 它会以为页面上就这些元素。
@@ -30,8 +30,8 @@ test('提示必须给出**下一步**（滚进视口 / 直接按选择器操作�
 
 test('排序机制有代码依据：elements 按键值排序后截断（不是文档顺序）', () => {
   assert.match(PAGE, /inViewDist/, 'page-text.js 里确实按"离视口中心远近"排序');
-  assert.match(PAGE, /\.slice\(0, maxElements\)/, '也确实按 maxElements 截断');
-  assert.match(PAGE, /trimElementsToBudget\(describedAll, text\.length \+ capabilityChars\)/, '并再过体积预算');
+  assert.match(PAGE, /ranked\.slice\(cursor, cursor \+ maxElements\)/, '也确实按 cursor + maxElements 分页');
+  assert.match(PAGE, /trimElementsToBudget\(\s*describedAll,\s*text\.length \+ capabilityChars \+ outlineChars\s*\)/, '并再过体积预算');
 });
 
 test('capabilities 也占同一个快照预算（不能绕过体积裁剪）', () => {

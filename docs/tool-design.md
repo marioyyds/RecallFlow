@@ -74,7 +74,8 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 ```
 
 - **写操作**必须提供 `changed` / `alreadySatisfied`（或 `hadEffect`），供 `verifyPageAction` 与 stuck detector 判断"有没有进展"。
-- **读操作**的返回值必须截断（长文本、JSON 化结果约定上限，如正文 8000、快照 4000、JS 结果 2000），防止爆 token。
+- **读操作**的返回值必须截断（长文本、JSON 化结果约定上限，如正文 8000、DOM 快照 8000、JS 结果 2000），防止爆 token。
+- `get_page_snapshot` 采用渐进披露：首轮发送区域轮廓和代表性元素（默认 40 个、正文 3000 字符），剩余元素通过 `query` 相关性排序、`nextCursor` 分页或 `inspect_element({op:"query",region,cursor})` 精确读取。省略必须带数量和恢复路径。
 - 不返回 `undefined` 裸值；无内容返回 `（空）` 或 `（空内容）`。
 
 ## 7. 错误信息：必须给「替代路径」

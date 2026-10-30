@@ -1103,7 +1103,7 @@ function formatCurrentPageResult(input) {
   }
   return out;
 }
-var SNAPSHOT_CHAR_BUDGET = 12e3;
+var SNAPSHOT_CHAR_BUDGET = 8e3;
 var SNAPSHOT_FIXED_ALLOWANCE = 600;
 function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
   const list = Array.isArray(described) ? described : [];
@@ -1122,6 +1122,38 @@ function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDG
     used += size;
   }
   return { elements, omittedBySize: list.length - elements.length };
+}
+function formatSnapshotOutline(snapshot) {
+  const s = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const outline = s.outline && typeof s.outline === "object" ? s.outline : null;
+  const regions = outline && Array.isArray(outline.regions) ? outline.regions : [];
+  const lines = [];
+  if (regions.length) {
+    lines.push("\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\uFF1A");
+    for (const r of regions) {
+      if (!r || typeof r !== "object") continue;
+      const label = String(r.label || r.tag || "\u533A\u57DF");
+      const selector = String(r.selector || "");
+      const interactive = Number(r.interactive) || 0;
+      const visible = Number(r.inViewport) || 0;
+      lines.push(
+        "- " + label + (selector ? "\uFF08" + selector + "\uFF09" : "") + "\uFF1A" + interactive + " \u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20" + (visible ? "\uFF0C\u5F53\u524D\u89C6\u53E3 " + visible + " \u4E2A" : "")
+      );
+    }
+    if (Number(outline.omittedRegions) > 0) {
+      lines.push("- \u53E6\u6709 " + Number(outline.omittedRegions) + " \u4E2A\u6B21\u8981\u533A\u57DF\u672A\u5217\u51FA");
+    }
+  }
+  const omittedByLimit = Number(s.counts && s.counts.omittedByLimit) || 0;
+  if (omittedByLimit > 0) {
+    lines.push("\u53E6\u6709 " + omittedByLimit + " \u4E2A\u4EA4\u4E92\u5143\u7D20\u5C1A\u672A\u8FDB\u5165\u5F53\u524D\u5206\u9875\u3002");
+  }
+  if (s.nextCursor !== null && s.nextCursor !== void 0) {
+    lines.push(
+      "\u7EE7\u7EED\u8BFB\u53D6\uFF1Aget_page_snapshot({cursor:" + Number(s.nextCursor) + (s.query ? ", query:" + JSON.stringify(String(s.query)) : "") + '})\uFF1B\u5DF2\u77E5\u76EE\u6807\u65F6\u4F18\u5148\u7528 inspect_element({op:"query",...})\u3002'
+    );
+  }
+  return lines.length ? "\n" + lines.join("\n") : "";
 }
 function formatVisibilityReport(results) {
   const list = Array.isArray(results) ? results : [];
@@ -2643,12 +2675,14 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "get_page_snapshot",
-      description: "\u8BFB\u53D6\u5F53\u524D\u7F51\u9875\u7684\u7ED3\u6784\u5316 DOM \u5FEB\u7167\uFF1AURL\u3001\u6807\u9898\u3001\u6B63\u6587\u6458\u8981\u3001\u53EF\u4EA4\u4E92\u5143\u7D20\u4E0E\u6EDA\u52A8\u72B6\u6001\u3002\u89C6\u53E3\u5185\u5143\u7D20\u4F18\u5148\u8FD4\u56DE\uFF1B\u6BCF\u4E2A\u5143\u7D20\u5E26\u7A33\u5B9A ref\u3001selector \u4E0E\u89C6\u53E3\u5750\u6807 center\uFF08\u5408\u6210\u70B9\u51FB\u65E0\u6548\u65F6\u53EF\u7528 click_at \u6309\u5750\u6807\u70B9\u51FB\uFF09\u3002\u9875\u9762\u64CD\u4F5C\u524D\u540E\u53EF\u7528\u5B83\u5224\u65AD\u52A8\u4F5C\u662F\u5426\u751F\u6548\u3002",
+      description: "\u8BFB\u53D6\u5F53\u524D\u7F51\u9875\u7684\u7ED3\u6784\u5316 DOM \u5FEB\u7167\uFF1AURL\u3001\u6807\u9898\u3001\u6B63\u6587\u6458\u8981\u3001\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u53EF\u4EA4\u4E92\u5143\u7D20\u3002\u9ED8\u8BA4\u662F\u4F4E\u4F53\u79EF\u8F6E\u5ED3\uFF1B\u6BCF\u4E2A\u5143\u7D20\u5E26\u7A33\u5B9A ref\u3001selector \u4E0E\u89C6\u53E3\u5750\u6807 center\u3002\u5DF2\u77E5\u76EE\u6807\u8BCD\u65F6\u4F20 query \u63D0\u9AD8\u76F8\u5173\u5143\u7D20\u6392\u5E8F\uFF1B\u8FD8\u6709\u5143\u7D20\u672A\u5C55\u793A\u65F6\u7528 nextCursor \u7EE7\u7EED\u8BFB\u53D6\u3002\u9875\u9762\u64CD\u4F5C\u524D\u540E\u53EF\u7528\u5B83\u5224\u65AD\u52A8\u4F5C\u662F\u5426\u751F\u6548\u3002",
       parameters: {
         type: "object",
         properties: {
-          maxElements: { type: "integer", description: "\u6700\u591A\u8FD4\u56DE\u591A\u5C11\u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\uFF0C\u9ED8\u8BA4 60\uFF0C\u6700\u5927 120" },
-          maxText: { type: "integer", description: "\u6B63\u6587\u6458\u8981\u6700\u5927\u5B57\u7B26\u6570\uFF0C\u9ED8\u8BA4 4000\uFF0C\u6700\u5927 8000" },
+          maxElements: { type: "integer", description: "\u672C\u6B21\u5206\u9875\u6700\u591A\u8FD4\u56DE\u591A\u5C11\u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\uFF0C\u9ED8\u8BA4 40\uFF0C\u6700\u5927 120" },
+          maxText: { type: "integer", description: "\u6B63\u6587\u6458\u8981\u6700\u5927\u5B57\u7B26\u6570\uFF0C\u9ED8\u8BA4 3000\uFF0C\u6700\u5927 8000\uFF1Bcursor>0 \u65F6\u9ED8\u8BA4 0\uFF0C\u907F\u514D\u91CD\u590D\u53D1\u9001\u6B63\u6587" },
+          query: { type: "string", description: "\u53EF\u9009\uFF1A\u76EE\u6807\u8BCD\u6216\u4EFB\u52A1\u63CF\u8FF0\uFF0C\u7528\u4E8E\u628A\u76F8\u5173\u5143\u7D20\u6392\u5230\u672C\u8F6E\u524D\u9762\uFF1B\u4E0D\u4F1A\u66FF\u4EE3\u7CBE\u786E\u7684 inspect_element \u67E5\u8BE2" },
+          cursor: { type: "integer", description: "\u5206\u9875\u6E38\u6807\u3002last snapshot \u8FD4\u56DE nextCursor \u65F6\u539F\u6837\u4F20\u5165\uFF0C\u8BFB\u53D6\u4E0B\u4E00\u6279\uFF1B\u9875\u9762\u5BFC\u822A\u6216\u5927\u5E45\u91CD\u6E32\u67D3\u540E\u91CD\u65B0\u4ECE 0 \u5F00\u59CB" },
           frameId: { type: "integer", description: "\u53EA\u8BFB\u53D6\u6307\u5B9A iframe \u7684\u5FEB\u7167\uFF08frameId \u6765\u81EA list_frames\uFF09\uFF1B\u5143\u7D20 ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00" },
           includeFrames: { type: "boolean", description: "\u662F\u5426\u5408\u5E76\u6240\u6709\u5B50\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF09\u7684\u53EF\u4EA4\u4E92\u5143\u7D20\uFF0C\u9ED8\u8BA4 false" }
         }
@@ -3027,7 +3061,7 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "inspect_element",
-      description: "\u4FA6\u67E5\u5143\u7D20\uFF08\u53EA\u8BFB\uFF09\u3002op\uFF1Ainspect \u7ED3\u6784 / text \u6587\u672C / styles \u8BA1\u7B97\u6837\u5F0F / table \u8868\u683C / options \u4E0B\u62C9\u9009\u9879 / query \u5019\u9009\u67E5\u8BE2\u3002inspect \u8FD4\u56DE count\uFF08\u771F\u5B9E\u547D\u4E2D\u6570\uFF0Cmatches \u6700\u591A 8 \u6761\uFF09\u3001visibleCount\u3001selector/visible/shadowDepth/\u5C3A\u5BF8/\u7956\u5148\u94FE\uFF1Bcount \u4E3A\u51C6\uFF0C\u4E0D\u8981\u7528 matches.length\u3002query \u6309 selector/text/role+name/testid \u8FD4\u56DE\u5019\u9009\u7684 ref/rect/center/role/name/customElement/shadowDepth\uFF1Bref \u53EF\u76F4\u63A5\u7528\u4E8E\u540E\u7EED\u52A8\u4F5C\uFF0C\u66FF\u4EE3\u63A2\u7D22\u6027 run_javascript\u3002styles \u7528\u4E8E\u9A8C\u8BC1\u6837\u5F0F\u771F\u7684\u751F\u6548\uFF08!important/\u975E\u6CD5\u503C\u4F1A\u8BA9\u201C\u5DF2\u4FEE\u6539\u201D\u5047\u6210\u529F\uFF09\u3002table \u4F1A\u6B63\u786E\u5C55\u5F00 rowspan/colspan\uFF1B\u9009\u9879\u6E05\u5355\u7528 options\u3002",
+      description: "\u4FA6\u67E5\u5143\u7D20\uFF08\u53EA\u8BFB\uFF09\u3002op\uFF1Ainspect \u7ED3\u6784 / text \u6587\u672C / styles \u8BA1\u7B97\u6837\u5F0F / table \u8868\u683C / options \u4E0B\u62C9\u9009\u9879 / query \u5019\u9009\u67E5\u8BE2\u3002inspect \u8FD4\u56DE count\uFF08\u771F\u5B9E\u547D\u4E2D\u6570\uFF0Cmatches \u6700\u591A 8 \u6761\uFF09\u3001visibleCount\u3001selector/visible/shadowDepth/\u5C3A\u5BF8/\u7956\u5148\u94FE\uFF1Bcount \u4E3A\u51C6\uFF0C\u4E0D\u8981\u7528 matches.length\u3002query \u6309 selector/text/role+name/testid \u8FD4\u56DE\u5019\u9009\u7684 ref/rect/center/role/name/customElement/shadowDepth\uFF0C\u652F\u6301 region \u9650\u5B9A\u4E0E cursor \u5206\u9875\uFF1Bref \u53EF\u76F4\u63A5\u7528\u4E8E\u540E\u7EED\u52A8\u4F5C\uFF0C\u66FF\u4EE3\u63A2\u7D22\u6027 run_javascript\u3002styles \u7528\u4E8E\u9A8C\u8BC1\u6837\u5F0F\u771F\u7684\u751F\u6548\uFF08!important/\u975E\u6CD5\u503C\u4F1A\u8BA9\u201C\u5DF2\u4FEE\u6539\u201D\u5047\u6210\u529F\uFF09\u3002table \u4F1A\u6B63\u786E\u5C55\u5F00 rowspan/colspan\uFF1B\u9009\u9879\u6E05\u5355\u7528 options\u3002",
       parameters: {
         type: "object",
         properties: {
@@ -3053,6 +3087,8 @@ var TOOL_SCHEMAS = [
             description: "op=table\uFF1A\u5408\u5E76\u5355\u5143\u683C\u7684\u5EF6\u7EED\u683C\u662F\u5426\u91CD\u590D\u586B\u5165\u540C\u4E00\u6587\u672C\uFF08\u9ED8\u8BA4 true\uFF0C\u4FBF\u4E8E\u6309\u5217\u8BFB\u53D6\uFF09\u3002\u8BBE false \u53EF\u4FDD\u7559\u300C\u6B64\u5904\u662F\u5408\u5E76\u5EF6\u7EED\u300D\u7684\u5FE0\u5B9E\u5F62\u6001\uFF08\u5EF6\u7EED\u683C\u4E3A\u7A7A\uFF09\u3002"
           },
           limit: { type: "integer", description: "op=query\uFF1A\u6700\u591A\u8FD4\u56DE\u591A\u5C11\u4E2A\u5019\u9009\uFF0C\u9ED8\u8BA4 20\uFF0C\u4E0A\u9650 50" },
+          cursor: { type: "integer", description: "op=query\uFF1A\u5019\u9009\u5206\u9875\u6E38\u6807\uFF1B\u4E0A\u6B21\u7ED3\u679C\u6709 nextCursor \u65F6\u539F\u6837\u4F20\u5165" },
+          region: { type: "string", description: "op=query\uFF1A\u53EF\u9009 CSS \u9009\u62E9\u5668\uFF0C\u53EA\u5728\u5339\u914D\u7684\u5BB9\u5668\u5185\u67E5\u8BE2\uFF1B\u4E5F\u53EF\u5355\u72EC\u4F7F\u7528\u6765\u679A\u4E3E\u8BE5\u533A\u57DF\u5185\u7684\u4EA4\u4E92\u5143\u7D20" },
           includeHidden: { type: "boolean", description: "op=query\uFF1A\u662F\u5426\u5305\u542B\u4E0D\u53EF\u89C1\u5143\u7D20\uFF0C\u9ED8\u8BA4 false" },
           // --- 仅 op=styles ---
           props: {
@@ -5257,26 +5293,43 @@ async function getPageSnapshotTool(deps, args) {
     const explicitFrame = args.frameId !== void 0 && args.frameId !== null && args.frameId !== "";
     if (explicitFrame) {
       const fid = Number(args.frameId);
-      const snapshot2 = await deps.getPageSnapshot(tabId, { maxElements: args.maxElements, maxText: args.maxText, frameId: fid });
+      const snapshot2 = await deps.getPageSnapshot(tabId, {
+        maxElements: args.maxElements,
+        maxText: args.maxText,
+        query: args.query,
+        cursor: args.cursor,
+        frameId: fid
+      });
       if (!snapshot2) return { ok: false, result: "\u672A\u80FD\u8BFB\u53D6\u8BE5\u6846\u67B6\u7684 DOM \u5FEB\u7167\uFF08frameId=" + fid + "\uFF0C\u53EF\u80FD\u65E0\u5185\u5BB9\u811A\u672C\uFF09\u3002" };
       const tagged = prefixFrameRefs(snapshot2, fid);
-      return { ok: true, hadEffect: false, snapshot: tagged, result: "\u6846\u67B6 " + fid + " \u7684 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(tagged) };
+      return {
+        ok: true,
+        hadEffect: false,
+        snapshot: tagged,
+        result: "\u6846\u67B6 " + fid + " \u7684 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(tagged) + formatSnapshotOutline(tagged)
+      };
     }
     const snapshot = await deps.getPageSnapshot(tabId, args);
     if (!snapshot) return { ok: false, result: "\u672A\u80FD\u8BFB\u53D6 DOM \u5FEB\u7167\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
     const capHint = formatCapabilityHint(snapshot.capabilities);
+    const outlineHint = formatSnapshotOutline(snapshot);
     const mainHint = snapshot.mainContent && snapshot.mainContent.selector ? "\n\u26A0 \u7591\u4F3C\u6B63\u6587\u5BB9\u5668\uFF1A" + snapshot.mainContent.selector + "\uFF08\u7EA6 " + snapshot.mainContent.textLength + " \u5B57\uFF09\u2014\u2014 \u9690\u85CF\u5E7F\u544A/\u63A8\u5E7F\u65F6\u4E0D\u8981\u6574\u4F53\u9690\u85CF\u5B83\u6216\u5176\u7956\u5148\u3002" : "";
     const omittedBySize = Number(snapshot.counts && snapshot.counts.omittedBySize || 0);
     const omitHint = omittedBySize > 0 ? "\n\u26A0 \u53E6\u6709 " + omittedBySize + ' \u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\u56E0**\u5FEB\u7167\u4F53\u79EF\u9884\u7B97**\u672A\u5217\u51FA\uFF08elements \u6309"\u79BB\u89C6\u53E3\u4E2D\u5FC3\u8FDC\u8FD1"\u6392\u5E8F\uFF0C\u89C6\u53E3\u5916\u7684\u6392\u5728\u540E\u9762\u3001\u5148\u88AB\u88C1\uFF09\u3002\u9700\u8981\u5B83\u4EEC\u65F6\uFF1A\u5148\u7528 scroll_page \u628A\u5B83\u6EDA\u8FDB\u89C6\u53E3\u518D\u8BFB\u4E00\u6B21\uFF0C\u6216\u76F4\u63A5\u6309 selector / role+name \u64CD\u4F5C\uFF08\u4E0D\u5FC5\u5148"\u770B\u5230"\uFF09\u3002' : "";
     if (args.includeFrames === true) {
-      const maxElements = Math.min(150, Math.max(1, Number(args.maxElements) || 60));
-      let elements = (snapshot.elements || []).slice();
+      const maxElements = Math.min(120, Math.max(1, Number(args.maxElements) || 40));
       const frames = await listFramesRaw(deps, tabId);
       const childFrames = frames.filter((f) => Number(f.frameId) !== 0);
+      const crossOriginFrames = childFrames.filter(
+        (f) => isCrossOriginFrame(snapshot.url, f.href)
+      );
+      const sameOriginFrameIds = childFrames.filter((f) => !crossOriginFrames.includes(f)).map((f) => Number(f.frameId));
+      const topLimit = crossOriginFrames.length ? Math.max(1, Math.min(maxElements, Math.floor(maxElements * 0.6))) : maxElements;
+      let elements = (snapshot.elements || []).slice(0, topLimit);
       const readFrameIds = [];
       const failedFrameIds = [];
       const perFrameCapabilities = [];
-      for (const f of childFrames) {
+      for (const f of crossOriginFrames) {
         if (elements.length >= maxElements) break;
         const s = await deps.getPageSnapshot(tabId, { maxElements: Math.max(1, maxElements - elements.length), maxText: 0, frameId: f.frameId }).catch(() => null);
         if (s) readFrameIds.push(Number(f.frameId));
@@ -5295,8 +5348,10 @@ async function getPageSnapshotTool(deps, args) {
       const merged = Object.assign({}, snapshot, {
         elements: trimmed.elements,
         capabilities: mergedCapabilities || void 0,
+        nextCursor: null,
         counts: Object.assign({}, snapshot.counts, {
           shown: trimmed.elements.length,
+          omittedByLimit: 0,
           omittedBySize: (snapshot.counts && snapshot.counts.omittedBySize ? snapshot.counts.omittedBySize : 0) + trimmed.omittedBySize
         }),
         frames: frames.map((f) => ({ frameId: f.frameId, url: f.href, title: f.title, isTop: !!f.isTop })),
@@ -5311,14 +5366,14 @@ async function getPageSnapshotTool(deps, args) {
         ok: true,
         hadEffect: false,
         snapshot: merged,
-        result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF08\u5DF2\u5408\u5E76 " + readFrameIds.length + " \u4E2A\u5B50\u6846\u67B6\uFF09\uFF1A\n" + JSON.stringify(merged) + "\n\u63D0\u793A\uFF1A\u5E26 f<frameId>: \u524D\u7F00\u7684 ref \u5C5E\u4E8E\u5BF9\u5E94 iframe\uFF0C\u52A8\u4F5C\u65F6\u76F4\u63A5\u539F\u6837\u4F20\u56DE ref \u5373\u53EF\u3002" + formatCapabilityHint(merged.capabilities) + frameWarning + mainHint + omitHint
+        result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF08\u5DF2\u5408\u5E76 " + readFrameIds.length + " \u4E2A\u5B50\u6846\u67B6\uFF09\uFF1A\n" + JSON.stringify(merged) + "\n\u63D0\u793A\uFF1A\u5E26 f<frameId>: \u524D\u7F00\u7684 ref \u5C5E\u4E8E\u5BF9\u5E94 iframe\uFF0C\u52A8\u4F5C\u65F6\u76F4\u63A5\u539F\u6837\u4F20\u56DE ref \u5373\u53EF\u3002" + formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) + frameWarning + mainHint + omitHint + (sameOriginFrameIds.length ? "\n\u540C\u6E90\u6846\u67B6 " + sameOriginFrameIds.join("\u3001") + " \u5DF2\u7531\u9876\u5C42\u5FEB\u7167\u7A7F\u900F\u8BFB\u53D6\uFF0C\u672A\u91CD\u590D\u5408\u5E76\u3002" : "")
       };
     }
     return {
       ok: true,
       hadEffect: false,
       snapshot,
-      result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(snapshot) + capHint + mainHint + omitHint
+      result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(snapshot) + outlineHint + capHint + mainHint + omitHint
     };
   } catch (e) {
     return { ok: false, result: describeContentScriptUnreachable(e.message, "\u8BFB\u53D6 DOM \u5FEB\u7167\u5931\u8D25\uFF1A") };

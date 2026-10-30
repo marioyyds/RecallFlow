@@ -201,9 +201,10 @@ export function formatCurrentPageResult(input: any) {
  * maxText 只约束 text 字段，elements 是另算的：每个元素含 tag/role/label/selector/
  * 坐标等十余个字段，最坏约 480 字符。没有总量上限时，maxText:8000 + maxElements:40
  * 会产出约 27k 字符的结果 —— 调用方无法预估体积，只能靠 expand_result 逐段翻页
- * （实测翻了 4 次）。取 12000：约为最坏情况的四成，远大于常规页面的实际体积。
+ * （实测翻了 4 次）。首轮改为「轮廓 + 分页查询」后取 8000：
+ * 约覆盖常规页面一屏到两屏的代表元素，其余内容通过 query / nextCursor 增量读取。
  */
-export const SNAPSHOT_CHAR_BUDGET = 12000;
+export const SNAPSHOT_CHAR_BUDGET = 8000;
 
 // 快照固定字段（url / title / counts / scroll / mainContent / fingerprint）的预留量。
 const SNAPSHOT_FIXED_ALLOWANCE = 600;
@@ -236,6 +237,66 @@ export function trimElementsToBudget(described: any, textLength: number, budget 
     used += size;
   }
   return { elements, omittedBySize: list.length - elements.length };
+}
+
+/**
+ * 把页面轮廓压成一段导航提示。
+ *
+ * 快照 JSON 里虽然有 outline，但长 JSON 中的结构容易被模型略过；这段只回答
+ * 「页面有哪些区域、还有多少元素未展开、下一次怎么取」，不重复元素字段。
+ */
+export function formatSnapshotOutline(snapshot: any) {
+  const s = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const outline = s.outline && typeof s.outline === 'object' ? s.outline : null;
+  const regions = outline && Array.isArray(outline.regions) ? outline.regions : [];
+  const lines = [];
+  if (regions.length) {
+    lines.push('页面区域轮廓：');
+    for (const r of regions) {
+      if (!r || typeof r !== 'object') continue;
+      const label = String(r.label || r.tag || '区域');
+      const selector = String(r.selector || '');
+      const interactive = Number(r.interactive) || 0;
+      const visible = Number(r.inViewport) || 0;
+      lines.push(
+        '- ' + label +
+        (selector ? '（' + selector + '）' : '') +
+        '：' + interactive + ' 个可交互元素' +
+        (visible ? '，当前视口 ' + visible + ' 个' : '')
+      );
+    }
+    if (Number(outline.omittedRegions) > 0) {
+      lines.push('- 另有 ' + Number(outline.omittedRegions) + ' 个次要区域未列出');
+    }
+  }
+  const omittedByLimit = Number(s.counts && s.counts.omittedByLimit) || 0;
+  if (omittedByLimit > 0) {
+    lines.push('另有 ' + omittedByLimit + ' 个交互元素尚未进入当前分页。');
+  }
+  if (s.nextCursor !== null && s.nextCursor !== undefined) {
+    lines.push(
+      '继续读取：get_page_snapshot({cursor:' + Number(s.nextCursor) +
+      (s.query ? ', query:' + JSON.stringify(String(s.query)) : '') +
+      '})；已知目标时优先用 inspect_element({op:"query",...})。'
+    );
+  }
+  return lines.length ? '\n' + lines.join('\n') : '';
+}
+
+/** 查询结果的稳定游标分页；游标表示“已经看过多少条”，不是页码。 */
+export function paginateQueryResults(items: any, cursor: any, limit: any) {
+  const list = Array.isArray(items) ? items : [];
+  const start = Math.max(0, Math.floor(Number(cursor) || 0));
+  const size = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)));
+  const rows = list.slice(start, start + size);
+  const nextCursor = start + rows.length < list.length ? start + rows.length : null;
+  return {
+    total: list.length,
+    cursor: start,
+    rows,
+    nextCursor,
+    truncated: nextCursor !== null,
+  };
 }
 
 /**

@@ -221,7 +221,10 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   cb9c895ea5bae48f — **有意改动**：新增 `read_table`（报表/网格结构化查询，read/readOnly/parallelSafe）。
   //                       480 条 WebArena 实测显示 admin 报表/top-N/count/日期过滤需要"自动选主表 +
   //                       where/sort/count/sum + 分页摘要"，因此单独成一个只读工具；其余工具契约未变。
-  const EXPECTED = 'cb9c895ea5bae48f';
+  //   197de68d980b3f32 — **有意改动**：get_page_snapshot 增加 query/cursor，inspect_element.query
+  //                       增加 region/cursor。首轮快照改为低体积轮廓，未展示元素通过稳定游标
+  //                       或精确元素查询增量读取；工具数量、工具名与权限均未变化。
+  const EXPECTED = '197de68d980b3f32';
   assert.equal(
     fp,
     EXPECTED,

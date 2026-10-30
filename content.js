@@ -426,7 +426,7 @@
     }
     return s;
   }
-  var SNAPSHOT_CHAR_BUDGET = 12e3;
+  var SNAPSHOT_CHAR_BUDGET = 8e3;
   var SNAPSHOT_FIXED_ALLOWANCE = 600;
   function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
     const list = Array.isArray(described) ? described : [];
@@ -445,6 +445,20 @@
       used += size;
     }
     return { elements, omittedBySize: list.length - elements.length };
+  }
+  function paginateQueryResults(items, cursor, limit) {
+    const list = Array.isArray(items) ? items : [];
+    const start = Math.max(0, Math.floor(Number(cursor) || 0));
+    const size = Math.min(50, Math.max(1, Math.floor(Number(limit) || 20)));
+    const rows = list.slice(start, start + size);
+    const nextCursor = start + rows.length < list.length ? start + rows.length : null;
+    return {
+      total: list.length,
+      cursor: start,
+      rows,
+      nextCursor,
+      truncated: nextCursor !== null
+    };
   }
   function formatHighlightResult(input) {
     const o = input || {};
@@ -646,6 +660,135 @@
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  }
+  var OUTLINE_REGION_SELECTOR = 'main,article,section,nav,aside,header,footer,form,table,[role="main"],[role="navigation"],[role="search"],[role="region"]';
+  var OUTLINE_REGION_LIMIT = 8;
+  function elementLabelForRanking(el) {
+    const ctl = el;
+    return normalizeSnapshotText(
+      el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("placeholder") || el.getAttribute("alt") || ctl.innerText || el.textContent || el.getAttribute("name") || "",
+      180
+    );
+  }
+  function nearestOutlineRegion(el) {
+    let node = el;
+    while (node) {
+      try {
+        const region = node.closest(OUTLINE_REGION_SELECTOR);
+        if (region) return region;
+      } catch {
+      }
+      try {
+        let root = null;
+        root = node.getRootNode();
+        const host2 = root && "host" in root ? root.host : null;
+        node = host2 || null;
+      } catch {
+        node = null;
+      }
+    }
+    return el.ownerDocument && el.ownerDocument.body ? el.ownerDocument.body : null;
+  }
+  function regionLabel(region) {
+    const explicit = normalizeSnapshotText(
+      region.getAttribute("aria-label") || region.getAttribute("data-label") || "",
+      80
+    );
+    if (explicit) return explicit;
+    let heading = "";
+    try {
+      const h = region.querySelector('h1,h2,h3,[role="heading"]');
+      heading = normalizeSnapshotText(h && h.innerText, 80);
+    } catch {
+    }
+    if (heading) return heading;
+    const id = String(region.id || "").trim();
+    if (id) return id.slice(0, 80);
+    const role = String(region.getAttribute("role") || "").trim();
+    const tag = String(region.tagName || "").toLowerCase();
+    return role ? role + " \xB7 " + tag : tag;
+  }
+  function buildPageOutline(nodes) {
+    if (!nodes.length) return void 0;
+    const buckets = /* @__PURE__ */ new Map();
+    for (const el of nodes) {
+      const region = nearestOutlineRegion(el);
+      if (!region) continue;
+      let item = buckets.get(region);
+      if (!item) {
+        item = {
+          selector: (() => {
+            try {
+              return elementSelector(region);
+            } catch {
+              return String(region.tagName || "").toLowerCase();
+            }
+          })(),
+          tag: String(region.tagName || "").toLowerCase(),
+          role: String(region.getAttribute("role") || "").trim() || void 0,
+          label: regionLabel(region),
+          interactive: 0,
+          inViewport: 0,
+          textLength: String(region.textContent || "").length
+        };
+        buckets.set(region, item);
+      }
+      item.interactive += 1;
+      try {
+        if (inViewport(el.getBoundingClientRect())) item.inViewport += 1;
+      } catch {
+      }
+    }
+    const all = Array.from(buckets.values()).sort(
+      (a, b) => b.interactive - a.interactive || b.inViewport - a.inViewport || a.selector.localeCompare(b.selector)
+    );
+    const regions = all.slice(0, OUTLINE_REGION_LIMIT);
+    return {
+      regions,
+      totalRegions: all.length,
+      omittedRegions: Math.max(0, all.length - regions.length)
+    };
+  }
+  function snapshotRelevance(el, query) {
+    if (!query) return 0;
+    const label = elementLabelForRanking(el).toLowerCase();
+    const role = String(el.getAttribute("role") || "").toLowerCase();
+    const tag = String(el.tagName || "").toLowerCase();
+    const body = normalizeSnapshotText(el.textContent, 240).toLowerCase();
+    if (label === query) return 6e6;
+    if (label.startsWith(query)) return 4e6;
+    if (label.includes(query)) return 3e6;
+    if (role.includes(query) || tag.includes(query)) return 2e6;
+    if (body.includes(query)) return 15e5;
+    return 0;
+  }
+  function rankSnapshotNodes(nodes, query = "") {
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const cx = vw / 2;
+    const cy = vh / 2;
+    const q = normalizeSnapshotText(query, 200).toLowerCase();
+    const repetitions = /* @__PURE__ */ new Map();
+    return nodes.map((el, order) => {
+      const rect = el.getBoundingClientRect();
+      const visible = inViewport(rect);
+      const dx = Math.max(0, Math.max(rect.left - vw, -rect.right));
+      const dy = Math.max(0, Math.max(rect.top - vh, -rect.bottom));
+      const dist = Math.hypot(dx, dy);
+      const inViewDist = Math.hypot(rect.x + rect.width / 2 - cx, rect.y + rect.height / 2 - cy);
+      const label = elementLabelForRanking(el);
+      const role = String(el.getAttribute("role") || "");
+      const signature = el.tagName.toLowerCase() + "|" + role + "|" + label.slice(0, 60);
+      const repeatIndex = repetitions.get(signature) || 0;
+      repetitions.set(signature, repeatIndex + 1);
+      const repeatPenalty = repeatIndex < 2 ? 0 : Math.min(24e4, repeatIndex * 6e3);
+      const visual = visible ? inViewDist : 1e6 + dist;
+      return {
+        el,
+        order,
+        sortKey: visual + repeatPenalty - snapshotRelevance(el, q)
+      };
+    }).sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
   }
   function cssEscape(value) {
     const text = String(value || "");
@@ -1085,8 +1228,11 @@
       const body = document.body;
       if (!body) return { version: 2, url: location.href, title: document.title || "", elements: [], text: "", fingerprint: "empty" };
       pruneRefs();
-      const maxElements = Math.min(150, Math.max(1, Number(options.maxElements) || 60));
-      const maxText = Math.min(8e3, Math.max(500, Number(options.maxText) || 4e3));
+      const maxElements = Math.min(120, Math.max(1, Number(options.maxElements) || 40));
+      const cursor = Math.max(0, Math.floor(Number(options.cursor) || 0));
+      const requestedText = options.maxText === void 0 ? cursor > 0 ? 0 : 3e3 : Number(options.maxText);
+      const maxText = Math.min(8e3, Math.max(0, Number.isFinite(requestedText) ? requestedText : 3e3));
+      const query = normalizeSnapshotText(options.query, 200);
       const capabilities = createPageCapabilities();
       const nodes = collectInteractiveInFrames(document, [], capabilities);
       const capabilitySummary = {};
@@ -1099,34 +1245,56 @@
         }
       }
       const capabilityChars = Object.keys(capabilitySummary).length ? JSON.stringify(capabilitySummary).length : 0;
-      const vw = window.innerWidth || document.documentElement.clientWidth;
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const cx = vw / 2;
-      const cy = vh / 2;
-      const ranked = nodes.map((el) => {
-        const r = el.getBoundingClientRect();
-        const visible = inViewport(r);
-        const dx = Math.max(0, Math.max(r.left - vw, -r.right));
-        const dy = Math.max(0, Math.max(r.top - vh, -r.bottom));
-        const dist = Math.hypot(dx, dy);
-        const inViewDist = Math.hypot(r.x + r.width / 2 - cx, r.y + r.height / 2 - cy);
-        return { el, visible, sortKey: visible ? inViewDist : 1e6 + dist };
-      }).sort((a, b) => a.sortKey - b.sortKey).slice(0, maxElements).map((x) => x.el);
-      const describedAll = ranked.map((el, index) => describeElement(el, index));
-      const text = extractPageText().slice(0, maxText);
-      const { elements, omittedBySize } = trimElementsToBudget(describedAll, text.length + capabilityChars);
+      const outline2 = buildPageOutline(nodes);
+      const outlineChars = outline2 ? JSON.stringify(outline2).length : 0;
+      const ranked = rankSnapshotNodes(nodes, query);
+      const windowed = ranked.slice(cursor, cursor + maxElements).map((x) => x.el);
+      const describedAll = windowed.map((el, index) => describeElement(el, cursor + index));
+      const fullText = maxText > 0 ? extractPageText() : "";
+      const text = maxText > 0 ? fullText.slice(0, maxText) : "";
+      const { elements, omittedBySize } = trimElementsToBudget(
+        describedAll,
+        text.length + capabilityChars + outlineChars
+      );
+      const nextCursor = cursor + elements.length < nodes.length ? cursor + elements.length : null;
+      const omittedByLimit = Math.max(0, nodes.length - cursor - windowed.length);
+      const fingerprintElements = nodes.map((el) => {
+        const rect = el.getBoundingClientRect();
+        const ctl = el;
+        let selector = "";
+        try {
+          selector = elementSelector(el);
+        } catch {
+        }
+        return [
+          el.tagName.toLowerCase(),
+          el.getAttribute("role") || "",
+          el.getAttribute("type") || "",
+          elementLabelForRanking(el),
+          selector,
+          Boolean(ctl.disabled || el.getAttribute("aria-disabled") === "true"),
+          typeof ctl.checked === "boolean" ? ctl.checked : void 0,
+          ["INPUT", "TEXTAREA"].includes(el.tagName) ? Boolean(ctl.value) : void 0,
+          rect.width > 0 && rect.height > 0
+        ];
+      });
       const snapshot = {
         version: 2,
         url: location.href,
         title: document.title || "",
         text,
         elements,
+        outline: outline2,
+        query: query || void 0,
+        cursor,
+        nextCursor,
         mainContent: findMainContent(),
         capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : void 0,
         counts: {
           interactive: nodes.length,
           shown: elements.length,
           omittedBySize,
+          omittedByLimit,
           inViewport: elements.filter((e) => e.inViewport).length,
           forms: document.forms ? document.forms.length : 0,
           headings: document.querySelectorAll("h1,h2,h3,h4,h5,h6").length
@@ -1141,11 +1309,12 @@
       snapshot.fingerprint = hashSnapshot(JSON.stringify({
         url: snapshot.url,
         title: snapshot.title,
-        text: snapshot.text,
-        elements: describedAll.map((e) => [e.tag, e.role, e.type, e.label, e.selector, e.disabled, e.checked, e.valuePresent, e.selectedIndex, e.selectedLabel]),
+        textLength: fullText.length,
+        textSample: fullText.slice(0, 4e3),
+        elements: fingerprintElements,
         counts: {
           interactive: nodes.length,
-          inViewport: describedAll.filter((e) => e.inViewport).length,
+          inViewport: fingerprintElements.filter((e) => e[8] === true).length,
           forms: document.forms ? document.forms.length : 0,
           headings: document.querySelectorAll("h1,h2,h3,h4,h5,h6").length
         }
@@ -1795,7 +1964,16 @@
   function cmdQueryElements(params) {
     const p = params || {};
     const limit = Math.min(50, Math.max(1, Number(p.limit) || 20));
+    let cursor = Math.max(0, Math.floor(Number(p.cursor) || 0));
     const includeHidden = p.includeHidden === true;
+    let scopeRoot = document;
+    if (p.region) {
+      const regions = findElementsFor({ selector: p.region });
+      if (!regions.length) {
+        return { ok: false, error: "region \u6CA1\u6709\u547D\u4E2D\u4EFB\u4F55\u5BB9\u5668\uFF1A" + p.region };
+      }
+      scopeRoot = regions[0];
+    }
     const seen = /* @__PURE__ */ new Set();
     const all = [];
     let hiddenSkipped = 0;
@@ -1809,16 +1987,23 @@
       seen.add(el);
       all.push(el);
     };
+    const inScope = (selector) => queryAllInFrames(scopeRoot, selector);
     if (p.selector) {
       try {
-        queryAllInFrames(document, p.selector).forEach(push);
+        inScope(p.selector).forEach(push);
       } catch (e) {
       }
     } else if (p.role || p.name) {
-      findElementsByRoleName(p.role, p.name).forEach(push);
+      const wantRole = normName(p.role);
+      const wantName = normName(p.name);
+      inScope(INTERACTIVE_SELECTOR).forEach((el) => {
+        if (wantRole && roleOf(el) !== wantRole) return;
+        if (wantName && normName(accessibleName(el)).indexOf(wantName) === -1) return;
+        push(el);
+      });
       if (p.name) {
         try {
-          queryAllInFrames(document, "*").forEach((el) => {
+          inScope("*").forEach((el) => {
             const tag = String(el.tagName || "").toLowerCase();
             if (!tag.includes("-")) return;
             if (normName(accessibleName(el)).indexOf(normName(p.name)) === -1) return;
@@ -1828,13 +2013,17 @@
         }
       }
     } else if (p.testid) {
-      findElementsByTestId(p.testid).forEach(push);
+      const want = normName(p.testid);
+      inScope("[data-testid],[data-test-id],[data-test],[data-cy],[data-name]").forEach((el) => {
+        const hit = ["data-testid", "data-test-id", "data-test", "data-cy", "data-name"].some((attribute) => normName(el.getAttribute(attribute)) === want);
+        if (hit) push(el);
+      });
     } else if (p.text) {
       const q = normalizeCitationText(p.text);
       if (q) {
         const raw = [];
         try {
-          queryAllInFrames(document, "*").forEach((el) => {
+          inScope("*").forEach((el) => {
             if (isElementCollectExcluded(el)) return;
             const text = normalizeCitationText(el.textContent);
             if (!text.includes(q)) return;
@@ -1877,17 +2066,26 @@
         seen.clear();
         deepest.forEach(push);
       }
+    } else if (p.region) {
+      inScope(INTERACTIVE_SELECTOR).forEach(push);
     } else {
-      return { ok: false, error: "query \u9700\u8981 selector\u3001role/name\u3001testid \u6216 text \u4E4B\u4E00\u4F5C\u4E3A\u67E5\u8BE2\u6761\u4EF6" };
+      return { ok: false, error: "query \u9700\u8981 selector\u3001role/name\u3001testid\u3001text \u6216 region \u4E4B\u4E00\u4F5C\u4E3A\u67E5\u8BE2\u6761\u4EF6" };
     }
+    const wantedText = normName(p.text || p.name);
     const sorted = all.slice().sort((a, b) => {
       const ra = a.getBoundingClientRect();
       const rb = b.getBoundingClientRect();
       const va = ra.width > 0 && ra.height > 0 ? 0 : 1;
       const vb = rb.width > 0 && rb.height > 0 ? 0 : 1;
-      return va - vb || ra.top - rb.top || ra.left - rb.left;
+      const na = normName(accessibleName(a));
+      const nb = normName(accessibleName(b));
+      const sa = wantedText ? na === wantedText ? 3 : na.startsWith(wantedText) ? 2 : na.includes(wantedText) ? 1 : 0 : 0;
+      const sb = wantedText ? nb === wantedText ? 3 : nb.startsWith(wantedText) ? 2 : nb.includes(wantedText) ? 1 : 0 : 0;
+      return va - vb || sb - sa || ra.top - rb.top || ra.left - rb.left;
     });
-    const listed = sorted.slice(0, limit);
+    const page = paginateQueryResults(sorted, cursor, limit);
+    cursor = page.cursor;
+    const listed = page.rows;
     const items = listed.map((el) => {
       const rect = el.getBoundingClientRect();
       const tag = String(el.tagName || "").toLowerCase();
@@ -1911,9 +2109,22 @@
       };
     });
     const lines = items.map(
-      (it, i) => "[" + (i + 1) + "] ref=" + it.ref + " tag=" + it.tag + " selector=" + it.selector + (it.role ? " role=" + it.role : "") + (it.name ? " name=" + JSON.stringify(it.name) : "") + (it.customElement ? " custom=true" : "") + " " + it.rect.width + "\xD7" + it.rect.height + " center=(" + it.center.x + "," + it.center.y + ")" + (it.text ? " text=" + JSON.stringify(it.text.slice(0, 60)) : "")
+      (it, i) => "[" + (cursor + i + 1) + "] ref=" + it.ref + " tag=" + it.tag + " selector=" + it.selector + (it.role ? " role=" + it.role : "") + (it.name ? " name=" + JSON.stringify(it.name) : "") + (it.customElement ? " custom=true" : "") + " " + it.rect.width + "\xD7" + it.rect.height + " center=(" + it.center.x + "," + it.center.y + ")" + (it.text ? " text=" + JSON.stringify(it.text.slice(0, 60)) : "")
     );
     if (!items.length) {
+      if (all.length) {
+        return {
+          ok: true,
+          count: all.length,
+          listed: 0,
+          cursor,
+          nextCursor: null,
+          truncated: false,
+          hiddenSkipped,
+          elements: [],
+          result: "\u5143\u7D20\u67E5\u8BE2\u5171\u547D\u4E2D " + all.length + " \u4E2A\uFF0Ccursor=" + cursor + " \u5DF2\u5230\u672B\u5C3E\u3002\u9700\u8981\u4ECE\u5934\u91CD\u67E5\u65F6\u4F20 cursor:0\u3002"
+        };
+      }
       const reasons = [];
       if (hiddenSkipped) {
         reasons.push(
@@ -1935,7 +2146,7 @@
           '\u9009\u62E9\u5668\u5F53\u524D\u6CA1\u6709\u547D\u4E2D\uFF1A\u786E\u8BA4\u5B83\u662F\u5426\u5728\u5F00\u653E shadow root \u5185\uFF08\u672C\u5DE5\u5177\u4F1A\u7A7F\u900F\uFF09\uFF0C\u6216\u5148\u7528 wait_for_element({selector, state:"attached"}) \u7B49\u5B83\u6302\u8F7D\u3002'
         );
       } else {
-        reasons.push("\u53EF\u6362 role+name / testid / text \u518D\u67E5\uFF0C\u6216\u5148\u7528 get_page_snapshot \u770B\u9875\u9762\u4E0A\u6709\u54EA\u4E9B\u53EF\u4EA4\u4E92\u5143\u7D20\u3002");
+        reasons.push("\u53EF\u6362 role+name / testid / text / region \u518D\u67E5\uFF0C\u6216\u5148\u7528 get_page_snapshot \u770B\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\u3002");
       }
       if (!hiddenSkipped && (p.selector || p.role || p.name || p.testid)) {
         reasons.push("\u82E5\u76EE\u6807\u5728\u8DE8\u57DF iframe\uFF0C\u7528 list_frames \u627E\u5230 frameId \u540E\u5148 get_page_snapshot({frameId}) \u518D\u64CD\u4F5C\u3002");
@@ -1944,19 +2155,24 @@
         ok: true,
         count: 0,
         listed: 0,
+        cursor,
+        nextCursor: null,
         truncated: false,
         hiddenSkipped,
         elements: [],
         result: "\u5143\u7D20\u67E5\u8BE2\u547D\u4E2D 0 \u4E2A\u3002\n\u8BCA\u65AD\uFF1A\n- " + reasons.join("\n- ")
       };
     }
+    const nextCursor = page.nextCursor;
     return {
       ok: true,
       count: all.length,
       listed: items.length,
-      truncated: all.length > items.length,
+      cursor,
+      nextCursor,
+      truncated: nextCursor !== null,
       elements: items,
-      result: "\u5143\u7D20\u67E5\u8BE2\u547D\u4E2D " + all.length + " \u4E2A\uFF08\u5217\u51FA " + items.length + " \u4E2A\uFF09\uFF1A\n" + (lines.join("\n") || "\uFF08\u65E0\uFF09") + "\n\u63D0\u793A\uFF1A\u53EF\u76F4\u63A5\u628A ref \u4F20\u7ED9 click_element / type_text / get_attribute\uFF1Bcustom=true \u8868\u793A\u81EA\u5B9A\u4E49\u5143\u7D20\uFF0Ccenter \u53EF\u7528\u4E8E click_at \u964D\u7EA7\u3002"
+      result: "\u5143\u7D20\u67E5\u8BE2\u547D\u4E2D " + all.length + " \u4E2A\uFF08cursor=" + cursor + "\uFF0C\u672C\u6B21\u5217\u51FA " + items.length + " \u4E2A\uFF09\uFF1A\n" + (lines.join("\n") || "\uFF08\u65E0\uFF09") + "\n\u63D0\u793A\uFF1A\u53EF\u76F4\u63A5\u628A ref \u4F20\u7ED9 click_element / type_text / get_attribute\uFF1Bcustom=true \u8868\u793A\u81EA\u5B9A\u4E49\u5143\u7D20\uFF0Ccenter \u53EF\u7528\u4E8E click_at \u964D\u7EA7\u3002" + (nextCursor !== null ? '\n\u8FD8\u6709\u672A\u5217\u51FA\u7684\u547D\u4E2D\uFF1Ainspect_element({op:"query",...,cursor:' + nextCursor + "})\u3002" : "")
     };
   }
   function cmdReadOptions(params) {

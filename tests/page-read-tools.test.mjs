@@ -314,8 +314,41 @@ test('get_page_snapshot：正文容器提醒（隐藏广告时别把正文一起
   assert.match(r.result, /不要整体隐藏它或其祖先/);
 });
 
+test('get_page_snapshot：透传 query / cursor，并输出区域轮廓与继续读取提示', async () => {
+  const deps = mkDeps({
+    snapshot: {
+      elements: [{ ref: 'rf-1' }],
+      text: '',
+      counts: { omittedByLimit: 9 },
+      outline: {
+        regions: [
+          {
+            selector: '#results',
+            tag: 'section',
+            label: '搜索结果',
+            interactive: 18,
+            inViewport: 3,
+            textLength: 900,
+          },
+        ],
+        totalRegions: 1,
+        omittedRegions: 0,
+      },
+      nextCursor: 20,
+    },
+  });
+  const r = await getPageSnapshotTool(deps, { query: '价格', cursor: 20, maxText: 0 });
+  const call = deps.calls.find((c) => c.op === 'getPageSnapshot');
+  assert.equal(call.opts.query, '价格');
+  assert.equal(call.opts.cursor, 20);
+  assert.equal(call.opts.maxText, 0);
+  assert.match(r.result, /页面区域轮廓/);
+  assert.match(r.result, /get_page_snapshot\(\{cursor:20/);
+  assert.match(r.result, /inspect_element\(\{op:"query"/);
+});
+
 test('**关键**：includeFrames 合并子框架后仍要过体积预算', async () => {
-  // 否则最多 150 个元素一起塞进来，会绕开快照自身的 SNAPSHOT_CHAR_BUDGET。
+  // 否则多个框架的元素一起塞进来，会绕开快照自身的 SNAPSHOT_CHAR_BUDGET。
   let trimmedWith = null;
   const deps = mkDeps({
     snapshot: { elements: [{ ref: 'a' }], text: 'y'.repeat(500), counts: { omittedBySize: 2 }, mainContent: null },
@@ -334,6 +367,27 @@ test('**关键**：includeFrames 合并子框架后仍要过体积预算', async
   assert.equal(r.snapshot.frames.length, 2, '应把框架清单也附回去');
   assert.match(r.result, /已合并 1 个子框架/);
   assert.match(r.result, /f<frameId>: 前缀/);
+});
+
+test('includeFrames：同源框架已由顶层穿透，不重复合并或重复发正文请求', async () => {
+  const deps = mkDeps({
+    framesResult: [
+      { frameId: 0, result: { href: 'https://a.test/', title: '主站', isTop: true } },
+      { frameId: 3, result: { href: 'https://a.test/frame', title: '同源', isTop: false } },
+    ],
+    snapshot: {
+      url: 'https://a.test/',
+      elements: [{ ref: 'rf-1' }],
+      text: '',
+      counts: {},
+      mainContent: null,
+    },
+  });
+  const r = await getPageSnapshotTool(deps, { includeFrames: true });
+  const frameReads = deps.calls.filter((c) => c.op === 'getPageSnapshot' && c.opts.frameId === 3);
+  assert.equal(frameReads.length, 0, '顶层已穿透同源框架，不应再单独读一次');
+  assert.equal(r.snapshot.elements.length, 1, '同源元素不得以两个 ref 重复出现');
+  assert.match(r.result, /同源框架 3 已由顶层快照穿透读取/);
 });
 
 test('includeFrames：子框架读不到时如实报告，不把"未读"说成"已合并"', async () => {

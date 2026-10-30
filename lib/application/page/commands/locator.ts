@@ -134,7 +134,7 @@ export function normName(value: any) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-const TARGET_CANDIDATE_SELECTOR =
+export const TARGET_CANDIDATE_SELECTOR =
   'a,button,input,textarea,select,summary,option,[role],[contenteditable="true"]';
 
 export function findElementsByRoleName(role: any, name: any) {
