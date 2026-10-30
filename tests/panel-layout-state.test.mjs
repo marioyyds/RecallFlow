@@ -17,6 +17,8 @@ import {
   PANEL_MIN_HEIGHT,
   clampPanelSize,
   clampPanelIntoView,
+  clampPanelAnchoredIntoView,
+  panelAnchoredOffsets,
   readPanelLayout,
   writePanelLayout,
   readGlobalPanelLayout,
@@ -52,13 +54,13 @@ function asyncStorage(seed) {
 test('writePanelLayout：手动位置记像素，停靠自动位置记 null（两者都能精确还原）', () => {
   const manual = memoryStorage();
   writePanelLayout(manual, { width: 420, height: 500, left: 300.4, top: 140.6, docked: false, manualPos: true });
-  assert.deepEqual(manual._json(PANEL_POS_KEY), { version: PANEL_LAYOUT_VERSION, docked: false, left: 300, top: 141 });
+  assert.deepEqual(manual._json(PANEL_POS_KEY), { version: PANEL_LAYOUT_VERSION, docked: false, left: 300, top: 141, right: null, bottom: null });
   assert.deepEqual(manual._json(PANEL_SIZE_KEY), { version: PANEL_LAYOUT_VERSION, width: 420, height: 500 });
 
   const docked = memoryStorage();
   writePanelLayout(docked, { width: 400, height: 480, left: 900, top: 12, docked: true, manualPos: false });
   // 停靠且未拖动：位置交给 CSS（bottom/right），必须记 null 而不是把当时的像素写死。
-  assert.deepEqual(docked._json(PANEL_POS_KEY), { version: PANEL_LAYOUT_VERSION, docked: true, left: null, top: null });
+  assert.deepEqual(docked._json(PANEL_POS_KEY), { version: PANEL_LAYOUT_VERSION, docked: true, left: null, top: null, right: null, bottom: null });
 });
 
 test('writePanelLayout：writeSize=false 只更新位置，不把自动高度当用户尺寸存下来', () => {
@@ -70,7 +72,7 @@ test('writePanelLayout：writeSize=false 只更新位置，不把自动高度当
 
 test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，不抛', () => {
   const broken = memoryStorage({ [PANEL_POS_KEY]: '{not json', [PANEL_SIZE_KEY]: '{"width":"x"}' });
-  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, docked: null, hasPos: false });
+  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false });
   assert.equal(readPanelLayout(null).hasPos, false);
 
   const partial = memoryStorage({ [PANEL_POS_KEY]: JSON.stringify({ left: 50, top: 60 }) });
@@ -82,7 +84,7 @@ test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，�
 test('readPanelLayout：读回 writePanelLayout 写的内容（往返一致）', () => {
   const s = memoryStorage();
   writePanelLayout(s, { width: 410, height: 520, left: 120, top: 90, docked: false, manualPos: true });
-  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, docked: false, hasPos: true });
+  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, right: null, bottom: null, docked: false, hasPos: true });
 });
 
 test('全局布局：位置和尺寸写在同一个扩展存储记录里', async () => {
@@ -95,12 +97,14 @@ test('全局布局：位置和尺寸写在同一个扩展存储记录里', async
     docked: true,
     manualPos: true,
   });
-  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, docked: true, hasPos: true });
+  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, right: null, bottom: null, docked: true, hasPos: true });
   assert.deepEqual(storage._dump(PANEL_LAYOUT_STORAGE_KEY), {
     version: PANEL_LAYOUT_VERSION,
     docked: true,
     left: 310,
     top: 120,
+    right: null,
+    bottom: null,
     width: 430,
     height: 510,
   });
@@ -131,6 +135,8 @@ test('全局布局：只更新位置时保留已有用户尺寸', async () => {
     height: 480,
     left: 300,
     top: 140,
+    right: null,
+    bottom: null,
     docked: false,
     hasPos: true,
   });
@@ -147,6 +153,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     height: 500,
     left: 300,
     top: 140,
+    right: null,
+    bottom: null,
     docked: false,
     hasPos: true,
   });
@@ -155,6 +163,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     height: 500,
     left: 300,
     top: 140,
+    right: null,
+    bottom: null,
     docked: false,
     hasPos: true,
   });
@@ -165,6 +175,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     height: 500,
     left: 300,
     top: 140,
+    right: null,
+    bottom: null,
     docked: false,
     hasPos: true,
   });
@@ -260,4 +272,81 @@ test('clampPanelSize：不低于 280×320，也不超过视口减 24', () => {
   assert.deepEqual(clampPanelSize({ width: 5000, height: 5000 }, viewport), { width: 1176, height: 776 });
   assert.equal(clampPanelSize({ width: 0, height: 400 }, viewport), null);
   assert.equal(clampPanelSize(null, viewport), null);
+});
+
+test('resolvePanelPlacement：停靠手动位置按右下角基准还原（换屏贴住右下角）', () => {
+  const layout = { hasPos: true, left: 1760, top: 320, right: 40, bottom: 200, docked: true };
+  const placement = resolvePanelPlacement({
+    layout,
+    docked: null,
+    viewport: { width: 1200, height: 800 },
+    size: { width: 400, height: 480 },
+    dockGap: 180,
+  });
+  assert.deepEqual(placement, { docked: true, manualPos: true, left: null, top: null, right: 40, bottom: 200 });
+});
+
+test('resolvePanelPlacement：右下角间距越界时夹回，不把面板顶出屏幕', () => {
+  const layout = { hasPos: true, left: 100, top: 100, right: 900, bottom: 700, docked: true };
+  const placement = resolvePanelPlacement({
+    layout,
+    docked: true,
+    viewport: { width: 1000, height: 600 },
+    size: { width: 400, height: 480 },
+  });
+  assert.deepEqual(placement, { docked: true, manualPos: true, left: null, top: null, right: 600, bottom: 120 });
+});
+
+test('resolvePanelPlacement：停靠手动位置逐轴锚定（left+bottom / right+top）', () => {
+  const viewport = { width: 1200, height: 800 };
+  const size = { width: 400, height: 480 };
+  assert.deepEqual(
+    resolvePanelPlacement({
+      layout: { hasPos: true, left: 200, top: null, right: null, bottom: 120, docked: true },
+      docked: true,
+      viewport,
+      size,
+    }),
+    { docked: true, manualPos: true, left: 200, top: null, right: null, bottom: 120 }
+  );
+  assert.deepEqual(
+    resolvePanelPlacement({
+      layout: { hasPos: true, left: null, top: 60, right: 40, bottom: null, docked: true },
+      docked: true,
+      viewport,
+      size,
+    }),
+    { docked: true, manualPos: true, left: null, top: 60, right: 40, bottom: null }
+  );
+});
+
+test('clampPanelAnchoredIntoView：正常右下角间距保持不变', () => {
+  assert.deepEqual(
+    clampPanelAnchoredIntoView({ width: 320, height: 320, right: 680, bottom: 440 }, { width: 800, height: 600 }),
+    { right: 120, bottom: 160 }
+  );
+});
+
+test('clampPanelAnchoredIntoView：面板越出右/下边缘时把间距夹回 0', () => {
+  assert.deepEqual(
+    clampPanelAnchoredIntoView({ width: 320, height: 320, right: 900, bottom: 700 }, { width: 800, height: 600 }),
+    { right: 0, bottom: 0 }
+  );
+});
+
+test('panelAnchoredOffsets：右下角间距往返不漂移（必须用布局视口，不含滚动条）', () => {
+  const viewport = { width: 1185, height: 785 };
+  // 面板右/下边缘正好贴住布局视口右下角 ⇒ 间距必须是 0，而不是滚动条宽度 15。
+  assert.deepEqual(panelAnchoredOffsets({ right: 1185, bottom: 785 }, viewport), { right: 0, bottom: 0 });
+
+  const placement = resolvePanelPlacement({
+    layout: { hasPos: true, left: 865, top: 205, right: 0, bottom: 0, docked: true },
+    docked: true,
+    viewport,
+    size: { width: 320, height: 480 },
+  });
+  assert.equal(placement.right, 0);
+  assert.equal(placement.bottom, 0);
+  // 再反算一次仍是 0（第二次开合不累加）。
+  assert.deepEqual(panelAnchoredOffsets({ right: 1185, bottom: 785 }, viewport), { right: 0, bottom: 0 });
 });

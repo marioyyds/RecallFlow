@@ -82,6 +82,8 @@ import { PANEL_CSS } from './panel-css.ts';
 import {
   clampPanelSize,
   clampPanelIntoView,
+  clampPanelAnchoredIntoView,
+  panelAnchoredOffsets,
   loadGlobalPanelLayout,
   PANEL_LAYOUT_STORAGE_KEY,
   readPanelLayout,
@@ -816,8 +818,9 @@ export function fitPanelHeight() {
   // ② chrome 签名（标签/类名/内容长度/内联高度/子节点数）+ panel 类名 + 视口尺寸
   //   任一变化就落回下面的全量测量；③ 签名再全也有漏网的（内容等长改写、
   //   子元素自身高度变化），因此再加 500ms 的时间上限兜底：最坏情况是错最多半秒后自愈。
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const vp = panelViewport();
+  const vw = vp.width;
+  const vh = vp.height;
   const now = Date.now();
   const sig = fitChromeSignature();
   const reusable =
@@ -838,13 +841,13 @@ export function fitPanelHeight() {
 
   // 使用视口比例避免 4K 屏幕上面板贴得过低；桌面端限制上下限保证稳定。
   const dockGap = getDockGap();
-  const topLimit = Math.max(12, Math.round(window.innerHeight * 0.10));
+  const topLimit = Math.max(12, Math.round(vh * 0.10));
   // 停靠模式以底部为锚点，最大高度不超过顶部安全区；增长时只向上扩展。
-  let maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
+  let maxH = Math.max(320, vh - dockGap - topLimit);
   // 底部固定控件（审批/自动批准/输入区/底栏）可能本身就很高。此时若仍坚持
   // “对话区至少 120px”并锁死上面算出的 maxH，溢出内容会被 `overflow:hidden` 裁掉，
   // 底部 resize 手柄还会盖住原本可见的按钮。允许向视口内继续扩展，优先保证控件可点。
-  const hardMaxH = Math.max(320, window.innerHeight - 24);
+  const hardMaxH = Math.max(320, vh - 24);
   panel.style.height = 'auto';
   panelBody.style.height = 'auto';
   panelBody.style.flex = '';
@@ -873,7 +876,7 @@ export function fitPanelHeight() {
     panel.style.top = 'auto';
     // 面板比「视口 - 留白」还高时（底部控件占太多 / 窗口很矮），留白会把顶部顶出屏幕。
     // 正常视口下 Math.min 取到的仍是 dockGap，观感不变。
-    panel.style.bottom = Math.min(dockGap, Math.max(0, window.innerHeight - totalH - 8)) + 'px';
+    panel.style.bottom = Math.min(dockGap, Math.max(0, vh - totalH - 8)) + 'px';
   }
   // ⚠ 收尾：**如果本来贴着底，改完高度要再置底一次** —— 否则上面那次高度重算导致的归零就留在那儿了 ✗
   //   只认"**本来贴底**"（`wasPinned` 在入口处算好 ✓）：用户自己滚上去看历史时，这里**不许**把他拽回来 ✓
@@ -891,9 +894,25 @@ export function fitPanelHeight() {
   if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
 }
 
+/**
+ * 面板 fixed 定位使用的布局视口（不含滚动条）。
+ *
+ * ⚠ 必须用 `documentElement.clientWidth/clientHeight` 而不是 `window.innerWidth/innerHeight`：
+ * CSS 的 `right`/`bottom` 相对布局视口，用 inner* 会把滚动条宽度算进去 ——
+ * 右下角间距每开合一次就累加一次滚动条宽度，表现为面板持续向左/上漂。
+ */
+function panelViewport() {
+  const el = typeof document !== 'undefined' ? document.documentElement : null;
+  return {
+    width: (el && el.clientWidth) || window.innerWidth,
+    height: (el && el.clientHeight) || window.innerHeight,
+  };
+}
+
 // 停靠模式使用相对视口高度的底部留白：大屏幕适当上移，小屏幕保持紧凑。
 function getDockGap() {
-  return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.30)));
+  const vp = panelViewport();
+  return vp.width <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(vp.height * 0.30)));
 }
 
 /**
@@ -1028,15 +1047,48 @@ function persistPanelLayoutNow(opts?: any): Promise<any> {
   if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
   const r = panel.getBoundingClientRect();
   const docked = panel.classList.contains('docked');
+  const manualPos = docked ? Boolean(panel._manualPos) : true;
+  // 停靠面板手动拖过之后，按「离哪条边更近」逐轴记录锚点：明显靠近右边记 right、
+  // 明显靠近下边记 bottom，其余方向记 left / top。这样中间的会话面板换页后仍从左上角
+  // 生长，不会因为内容变高而顶到右上；拖到右下角的面板则仍按右下角间距还原（换屏不漂）。
+  // ⚠ 必须用布局视口（不含滚动条）反算：用 innerWidth 会把滚动条宽度算进间距，
+  //   每开合一次就向左/上多漂一截。
+  const vp = panelViewport();
+  const anchored = docked && manualPos ? panelAnchoredOffsets(r, vp) : null;
+  let left: number | undefined;
+  let top: number | undefined;
+  let right: number | undefined;
+  let bottom: number | undefined;
+  if (docked && manualPos) {
+    // 只有**明显更靠近**右/下边时才按对应边锚定；中间大区域默认 left/top。
+    // 阈值用「另一侧没有面板的路程」的 60% 做比较，等价于间距小于可移动路程的 37.5%：
+    // 中间位置不会被判定成右下角，内容变高时继续向下生长，不会顶到右上。
+    const gapRight = Math.max(0, vp.width - r.right);
+    const gapBottom = Math.max(0, vp.height - r.bottom);
+    const anchorRight = Boolean(anchored) && gapRight < Math.max(0, r.left) * 0.6;
+    const anchorBottom = Boolean(anchored) && gapBottom < Math.max(0, r.top) * 0.6;
+    if (anchorRight) right = anchored ? anchored.right : undefined;
+    else left = r.left;
+    if (anchorBottom) bottom = anchored ? anchored.bottom : undefined;
+    else top = r.top;
+  } else if (!docked) {
+    // 浮动面板按划词点打开，保持左上角基准。
+    left = r.left;
+    top = r.top;
+  }
   return queuePanelLayoutWrite({
     width: panel.offsetWidth,
     height: panel.offsetHeight,
-    left: r.left,
-    top: r.top,
+    left,
+    top,
+    right,
+    bottom,
     docked,
     // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
-    manualPos: docked ? Boolean(panel._manualPos) : true,
-    writeSize: !(opts && opts.size === false),
+    manualPos,
+    // 只拖动（没拉伸过）时不要把自动高度固化成用户尺寸；否则重开会把拖动瞬间的
+    // 内容高度当成手动尺寸，内容一变面板顶部就跟着漂。
+    writeSize: opts && opts.size === false ? false : panel._manualSize === true,
   });
 }
 
@@ -1071,7 +1123,8 @@ function applyPanelPlacement(placement: any) {
 function applyGlobalPanelLayoutChange(value: unknown) {
   if (!panel) return;
   const layout = readGlobalPanelLayout(value);
-  const savedSize = clampPanelSize(layout as any, { width: window.innerWidth, height: window.innerHeight });
+  const viewport = panelViewport();
+  const savedSize = clampPanelSize(layout as any, viewport);
   if (savedSize) {
     panel.style.width = savedSize.width + 'px';
     panel.style.height = savedSize.height + 'px';
@@ -1090,7 +1143,7 @@ function applyGlobalPanelLayoutChange(value: unknown) {
   const placement = resolvePanelPlacement({
     layout,
     docked: layout.docked == null ? panel.classList.contains('docked') : layout.docked,
-    viewport: { width: window.innerWidth, height: window.innerHeight },
+    viewport,
     size: { width: panel.offsetWidth, height: panel.offsetHeight },
     dockGap: getDockGap(),
   });
@@ -1113,13 +1166,14 @@ function installPanelLayoutSync() {
   });
 }
 
-// 面板越出可视区时夹回来：手动定位动 left/top；停靠态收窄底部留白。
+// 面板越出可视区时夹回来：按各轴实际锚点（left/right、top/bottom）分别收窄。
 // 重开后窗口变小、或开着时缩窗口都走这里。
 function clampPanelToViewport() {
   if (!panel) return;
   if (!panel.offsetWidth || !panel.offsetHeight) return;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const vp = panelViewport();
+  const vw = vp.width;
+  const vh = vp.height;
   const docked = panel.classList.contains('docked');
   if (docked && !panel._manualPos) {
     // 停靠面板的高度是用户尺寸，可能比"视口 - 底部留白"还高 —— 只有真的越界时才收窄留白，
@@ -1130,12 +1184,23 @@ function clampPanelToViewport() {
   }
   if (!panel._manualPos) return;
   const r = panel.getBoundingClientRect();
-  const next = clampPanelIntoView(
-    { left: r.left, top: r.top, width: panel.offsetWidth, height: panel.offsetHeight },
-    { width: vw, height: vh }
-  );
-  if (Math.round(next.left) !== Math.round(r.left)) panel.style.left = next.left + 'px';
-  if (Math.round(next.top) !== Math.round(r.top)) panel.style.top = next.top + 'px';
+  // 逐轴夹取：right/bottom 锚定的轴按右/下边缘收窄，left/top 锚定的轴按左上角收窄；
+  // 两者可以混合（例如 right + top），不要整块换算成 left/top。
+  const rightAnchored = panel.style.right !== 'auto';
+  const bottomAnchored = panel.style.bottom !== 'auto';
+  if (rightAnchored || bottomAnchored) {
+    const anchored = clampPanelAnchoredIntoView(r, { width: vw, height: vh });
+    if (rightAnchored && panel.style.right !== anchored.right + 'px') panel.style.right = anchored.right + 'px';
+    if (bottomAnchored && panel.style.bottom !== anchored.bottom + 'px') panel.style.bottom = anchored.bottom + 'px';
+  }
+  if (!rightAnchored || !bottomAnchored) {
+    const next = clampPanelIntoView(
+      { left: r.left, top: r.top, width: panel.offsetWidth, height: panel.offsetHeight },
+      { width: vw, height: vh }
+    );
+    if (!rightAnchored && Math.round(next.left) !== Math.round(r.left)) panel.style.left = next.left + 'px';
+    if (!bottomAnchored && Math.round(next.top) !== Math.round(r.top)) panel.style.top = next.top + 'px';
+  }
 }
 
 // 若会话最后一条是含 <options> 的触底决策建议，渲染可点击方案按钮（防重复渲染）。
@@ -2961,7 +3026,7 @@ function createPanelWithLayout(
   // 尺寸：恢复上次的宽高（夹在视口内）。停靠面板被自动高度撑大后，重开会把它当成
   // 用户尺寸（`_manualSize`）—— 这是既有语义，本次不改，但它意味着重开后
   // `fitPanelHeight()` 不再重算高度，所以下面摆放位置时用的是**恢复后的尺寸**。
-  const savedSize = clampPanelSize(layout as any, { width: window.innerWidth, height: window.innerHeight });
+  const savedSize = clampPanelSize(layout as any, panelViewport());
   if (savedSize) {
     panel.style.width = savedSize.width + 'px';
     panel.style.height = savedSize.height + 'px';
@@ -3625,7 +3690,7 @@ function createPanelWithLayout(
     layout,
     docked: dockedIntent,
     point: { x, y },
-    viewport: { width: window.innerWidth, height: window.innerHeight },
+    viewport: panelViewport(),
     size: { width: panel.offsetWidth, height: panel.offsetHeight },
     dockGap: getDockGap(),
   });
@@ -3642,6 +3707,8 @@ function createPanelWithLayout(
     manualPos: placement.manualPos,
     left: placement.left,
     top: placement.top,
+    right: placement.right,
+    bottom: placement.bottom,
     width: panel.offsetWidth,
     height: panel.offsetHeight,
     writeSize: false,
@@ -4796,9 +4863,6 @@ function maybeResumeRunAfterReload() {
           return;
         }
         if (resp.resumable && resp.runId && resp.instruction && !runSession.isRunning) {
-          if (resp.live !== true) {
-            showCitationHint('后台连接曾中断，已从已保存的进度继续本轮任务。');
-          }
           // ⚠ 必须先等对话恢复完成再起跑：否则 run 函数会基于**空 conversation** 起一轮，
           // 随后 loadConversation 落地时 renderConversation 把正在流式输出的面板整块重建 ——
           // 用户看到的就是"跳转后模型输出不见了、回退又出现"（实测反馈）。
@@ -4809,16 +4873,31 @@ function maybeResumeRunAfterReload() {
             if (panelVisibility.ready) await panelVisibility.ready;
           } catch (e: any) {}
           if (runSession.isRunning) return;
-          // 面板全局关闭时，续跑仍要启动，但不能把其他标签页的面板重新拉开。
-          const keepClosed = !panelVisibility.isOpen;
+          // 面板被用户主动关过：刷新后**不得**再把面板拉开。后台 run 因整页刷新已经失去
+          // 本页 port，这里显式停止，避免 8s 宽限期后无声 abort、或再次触发自动重开。
+          if (!panelVisibility.isOpen) {
+            try {
+              await sendPanelMessage('panel:run:stop', {
+                runId: String(resp.runId),
+                sessionId: panelSessionState.panelSessionId,
+              });
+            } catch (e: any) {}
+            try {
+              await loadConversation();
+            } catch (e: any) {}
+            return;
+          }
+          if (resp.live !== true) {
+            showCitationHint('后台连接曾中断，已从已保存的进度继续本轮任务。');
+          }
           await panelVisibility.withSuppressed(async () => {
             openPanel(0, 0, true, true); // 先让 openPanel 把 run 挂到 runAgent
           });
           // 对话历史若已恢复出这条用户消息，就跳过重复 push（见 run 的 skipUserTurn）。
           const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
           const alreadyHas = last && last.role === 'user' && String(last.content || '').trim() === String(resp.instruction).trim();
-          const runPromise = runSession.hasRunner
-            ? Promise.resolve(runSession.invokeRunner(String(resp.instruction), {
+          if (runSession.hasRunner) {
+            runSession.invokeRunner(String(resp.instruction), {
               // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
               continuation: resp.live !== true,
               reattach: resp.live === true,
@@ -4827,12 +4906,7 @@ function maybeResumeRunAfterReload() {
               // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
               // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
               resumeSnapshot: resp.snapshot || null,
-            }))
-            : null;
-          if (keepClosed && runPromise && typeof runPromise.finally === 'function') {
-            runPromise.finally(() => {
-              if (panel) removePanel({ publish: false });
-            }).catch(() => {});
+            });
           }
         } else if (resp.pending) {
           setTimeout(tick, 300);
@@ -4927,8 +5001,9 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       // 避免被拖出视口后无法再交互（尤其拖出底部后输入区不可达）。
       const pw = panel.offsetWidth;
       const ph = panel.offsetHeight;
-      const maxLeft = Math.max(0, window.innerWidth - Math.min(pw, window.innerWidth - 24));
-      const maxTop = Math.max(0, window.innerHeight - Math.min(ph, window.innerHeight - 24));
+      const vp = panelViewport();
+      const maxLeft = Math.max(0, vp.width - Math.min(pw, vp.width - 24));
+      const maxTop = Math.max(0, vp.height - Math.min(ph, vp.height - 24));
       left = Math.min(Math.max(0, left), maxLeft);
       top = Math.min(Math.max(0, top), maxTop);
       panel.style.left = left + 'px';
@@ -4939,8 +5014,9 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       const dw = e.clientX - resizeState.startX;
       const dh = e.clientY - resizeState.startY;
       const minW = 280, minH = 320;
-      const maxW = Math.max(minW, window.innerWidth - 24);
-      const maxH = Math.max(minH, window.innerHeight - 24);
+      const vp = panelViewport();
+      const maxW = Math.max(minW, vp.width - 24);
+      const maxH = Math.max(minH, vp.height - 24);
       const leftSide = resizeState.origin.includes('left');
       const topSide = resizeState.origin.includes('top');
       const rightSide = resizeState.origin.includes('right');
@@ -4955,8 +5031,8 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       if (topSide) top = r.bottom - h;
       // clamp 到视口内：面板完整可见（高度已被 maxH 限制，不会超过视口），
       // 避免拉伸导致面板底部/顶部被拖出视口后无法交互（“底部复位”问题）。
-      left = Math.min(Math.max(0, left), Math.max(0, window.innerWidth - w));
-      top = Math.min(Math.max(0, top), Math.max(0, window.innerHeight - h));
+      left = Math.min(Math.max(0, left), Math.max(0, vp.width - w));
+      top = Math.min(Math.max(0, top), Math.max(0, vp.height - h));
       panel.style.left = left + 'px';
       panel.style.top = top + 'px';
       panel.style.right = 'auto';

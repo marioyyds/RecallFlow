@@ -205,7 +205,10 @@ test('fitPanelHeight：视口变化必须让缓存失效（不是永久跳过）
     app.mod.fitPanelHeight();
 
     const after = instrument(app);
-    globalThis.window.innerHeight = 801; // 视口变了 ⇒ maxH / dockGap 都跟着变，结论可能不同
+    // 视口变了 ⇒ maxH / dockGap 都跟着变，结论可能不同。
+    // 面板布局用的是布局视口（clientHeight，不含滚动条），两处要一起改。
+    globalThis.window.innerHeight = 801;
+    globalThis.document.documentElement.clientHeight = 801;
     app.mod.fitPanelHeight();
     assert.ok(after.reads() > 0, '视口变了却还在用上一次的测量 —— 那会把面板尺寸算错');
   } finally {

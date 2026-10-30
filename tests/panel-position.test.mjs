@@ -76,6 +76,26 @@ function wireLayout(panel) {
   return panel;
 }
 
+/**
+ * 更真实的几何桩：右下角基准的面板只写 right/bottom，这里按给定布局视口反推
+ * left/top，用来验证「开合 + resize 持久化」不会把滚动条宽度累加进间距。
+ */
+function wireLayoutAnchored(panel, viewport) {
+  const px = (v) => (typeof v === 'string' && v.endsWith('px') ? parseFloat(v) : null);
+  panel.getBoundingClientRect = () => {
+    const width = panel.offsetWidth;
+    const height = panel.offsetHeight;
+    const leftPx = px(panel.style.left);
+    const topPx = px(panel.style.top);
+    const rightPx = px(panel.style.right);
+    const bottomPx = px(panel.style.bottom);
+    const left = leftPx ?? (rightPx != null ? viewport.width - rightPx - width : 0);
+    const top = topPx ?? (bottomPx != null ? viewport.height - bottomPx - height : 0);
+    return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top };
+  };
+  return panel;
+}
+
 async function waitFor(predicate, label, timeoutMs = 400) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -263,11 +283,80 @@ test('拖动 → 关闭 → 重开：位置与「已手动定位」状态都保�
     );
     assert.equal(saved.left, 300, '拖动后的像素位置必须落盘');
     assert.equal(saved.top, 140);
+    assert.equal(saved.right, null, '左上象限应逐轴记 left/top，不记右下角间距');
+    assert.equal(saved.bottom, null);
 
     await shortcutAgain(app);
     panel = wireLayout(await waitFor(app.panel, '重开面板'));
+    // 拖动目标在视口左上象限 ⇒ 逐轴按 left/top 锚定；内容变高时向下生长，
+    // 不会因为底边固定而被顶到右上。
     assert.equal(panel.style.left, '300px', '重开必须回到拖动后的位置');
     assert.equal(panel.style.top, '140px');
+    assert.equal(panel.style.right, 'auto');
+    assert.equal(panel.style.bottom, 'auto');
+  } finally {
+    app.close();
+  }
+});
+
+test('拖动到右下角：保存为 right/bottom 锚点，重开仍贴右下角', async () => {
+  const app = await boot();
+  try {
+    app.shortcut();
+    let panel = wireLayout(await waitFor(app.panel, '打开面板'));
+    panel.querySelector('.p-head').emit('mousedown', { clientX: 0, clientY: 0 });
+    // 桩视口 1200×800、面板 320×480：拖到最右下角。
+    app.dom.document.emit('mousemove', { clientX: 880, clientY: 320 });
+    app.dom.document.emit('mouseup', {});
+
+    const saved = await waitFor(
+      () => {
+        const value = savedLayout();
+        return value && value.right === 0 && value.bottom === 0 ? value : null;
+      },
+      '拖到右下角应记 right/bottom 间距'
+    );
+    assert.equal(saved.left, null, '右下象限不再写死 left');
+    assert.equal(saved.top, null, '右下象限不再写死 top');
+
+    panel.querySelector('.close').emit('click', {});
+    await shortcutAgain(app);
+    panel = wireLayout(await waitFor(app.panel, '重开面板'));
+    assert.equal(panel.style.right, '0px');
+    assert.equal(panel.style.bottom, '0px');
+    assert.equal(panel.style.left, 'auto');
+    assert.equal(panel.style.top, 'auto');
+  } finally {
+    app.close();
+  }
+});
+
+test('有滚动条时连续开合 + resize 不漂移（右下角间距不累加滚动条宽度）', async () => {
+  const app = await boot();
+  try {
+    // 模拟 Windows 经典滚动条：window.innerWidth 比布局视口多 15px。
+    app.dom.window.innerWidth = 1200;
+    app.dom.window.innerHeight = 800;
+    app.dom.document.documentElement.clientWidth = 1185;
+    app.dom.document.documentElement.clientHeight = 785;
+    const viewport = { width: 1185, height: 785 };
+
+    await seed({ version: 2, docked: true, left: 865, top: 205, right: 0, bottom: 100, width: 320, height: 480 });
+    app.shortcut();
+    let panel = wireLayoutAnchored(await waitFor(app.panel, '打开面板'), viewport);
+    assert.equal(panel.style.right, '0px');
+    assert.equal(panel.style.bottom, '100px');
+
+    // resize 会触发 clamp + 持久化：这里旧实现会把 innerWidth 与 clientWidth 之差
+    // 算进间距，下一次重开就整体左/上漂 15px。
+    app.dom.window.emit('resize', {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    panel.querySelector('.close').emit('click', {});
+
+    await shortcutAgain(app);
+    panel = wireLayoutAnchored(await waitFor(app.panel, '第二次打开'), viewport);
+    assert.equal(panel.style.right, '0px', '连续开合后 right 间距不得累加滚动条宽度');
+    assert.equal(panel.style.bottom, '100px', '连续开合后 bottom 间距不得累加滚动条宽度');
   } finally {
     app.close();
   }
@@ -293,6 +382,32 @@ test('SPA 换掉 DOM：面板被移除后自动重挂，位置仍取关闭前/�
     );
     assert.equal(panel.style.left, '300px', '重挂后位置不能被重置成 0,0');
     assert.equal(panel.style.top, '140px');
+  } finally {
+    app.close();
+  }
+});
+
+test('SPA 换掉 DOM：中间的停靠面板重挂后仍按 left/top，不跳到右上', async () => {
+  const app = await boot();
+  try {
+    // 视口 1200×800、面板 320×480：left/top=440/160 正好居中。
+    await seed({ version: 2, docked: true, left: 440, top: 160, right: null, bottom: null, width: 320, height: 480 });
+    app.shortcut();
+    let panel = wireLayout(await waitFor(app.panel, '打开面板'));
+    assert.equal(panel.style.left, '440px');
+    assert.equal(panel.style.top, '160px');
+
+    app.host().remove();
+    panel = wireLayout(
+      await waitFor(() => {
+        const p = app.panel();
+        return p && p !== panel ? p : null;
+      }, '宿主被保活重建后面板重新挂回', 3000)
+    );
+    assert.equal(panel.style.left, '440px', '中间位置不能被换成 right 锚定');
+    assert.equal(panel.style.top, '160px', '中间位置不能被换成 bottom 锚定');
+    assert.equal(panel.style.right, 'auto');
+    assert.equal(panel.style.bottom, 'auto');
   } finally {
     app.close();
   }

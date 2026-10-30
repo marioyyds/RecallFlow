@@ -73,6 +73,8 @@ export interface PanelLayoutSnapshot {
   height: number | null;
   left: number | null;
   top: number | null;
+  right: number | null;
+  bottom: number | null;
   docked: boolean | null;
   hasPos: boolean;
 }
@@ -90,10 +92,10 @@ export interface PanelLayoutStorage {
   onChanged?(listener: (changes: Record<string, unknown>) => void): () => void;
 }
 
-/** 读档的初始形态：四个字段都还没值。抽成函数是为了让返回类型一次说清，
+/** 读档的初始形态：所有字段都还没值。抽成函数是为了让返回类型一次说清，
  *  不必给一个模块级 const 补标注（本批的口径是「先给导出签名加类型」）。 */
 function emptySnapshot(): PanelLayoutSnapshot {
-  return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+  return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false };
 }
 
 function snapshotFromParts(pos: any, size: any): PanelLayoutSnapshot {
@@ -103,8 +105,13 @@ function snapshotFromParts(pos: any, size: any): PanelLayoutSnapshot {
   if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
     out.left = pos.left;
     out.top = pos.top;
-    out.hasPos = true;
   }
+  if (pos && isFiniteNumber(pos.right) && isFiniteNumber(pos.bottom)) {
+    out.right = pos.right;
+    out.bottom = pos.bottom;
+  }
+  // 逐轴锚定：水平方向有 left 或 right、垂直方向有 top 或 bottom 就算有位置。
+  out.hasPos = (out.left != null || out.right != null) && (out.top != null || out.bottom != null);
   if (pos && typeof pos.docked === 'boolean') out.docked = pos.docked;
   return out;
 }
@@ -154,11 +161,13 @@ export function writePanelLayout(
     height?: number;
     left?: number;
     top?: number;
+    right?: number;
+    bottom?: number;
     docked?: boolean;
     manualPos?: boolean;
     writeSize?: boolean;
   } | null
-): { width: number | null; height: number | null; left: number | null; top: number | null; docked: boolean } | null {
+): { width: number | null; height: number | null; left: number | null; top: number | null; right: number | null; bottom: number | null; docked: boolean } | null {
   if (!storage) return null;
   const s = snapshot || {};
   const width = Number(s.width);
@@ -168,6 +177,8 @@ export function writePanelLayout(
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
     left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
     top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+    right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
+    bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
     docked: s.docked === true,
   };
   try {
@@ -179,7 +190,7 @@ export function writePanelLayout(
     }
     storage.setItem(
       PANEL_POS_KEY,
-      JSON.stringify({ version: PANEL_LAYOUT_VERSION, docked: record.docked, left: record.left, top: record.top })
+      JSON.stringify({ version: PANEL_LAYOUT_VERSION, docked: record.docked, left: record.left, top: record.top, right: record.right, bottom: record.bottom })
     );
   } catch (e) {
     return null;
@@ -192,6 +203,8 @@ function globalPanelLayoutRecord(snapshot: {
   height?: number;
   left?: number;
   top?: number;
+  right?: number;
+  bottom?: number;
   docked?: boolean;
   manualPos?: boolean;
 } | null) {
@@ -203,6 +216,8 @@ function globalPanelLayoutRecord(snapshot: {
     docked: s.docked === true,
     left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
     top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+    right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
+    bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
   };
@@ -236,6 +251,8 @@ export async function loadGlobalPanelLayout(
     height: legacy.height == null ? undefined : legacy.height,
     left: legacy.left == null ? undefined : legacy.left,
     top: legacy.top == null ? undefined : legacy.top,
+    right: legacy.right == null ? undefined : legacy.right,
+    bottom: legacy.bottom == null ? undefined : legacy.bottom,
     docked: legacy.docked === true,
     manualPos: legacy.hasPos,
   });
@@ -260,6 +277,8 @@ export async function saveGlobalPanelLayout(
     height?: number;
     left?: number;
     top?: number;
+    right?: number;
+    bottom?: number;
     docked?: boolean;
     manualPos?: boolean;
     writeSize?: boolean;
@@ -300,10 +319,14 @@ export async function saveGlobalPanelLayout(
  * 只有 `docked == null`（自动恢复：SPA 保活重挂 / 跨标签页同步 / run 恢复）才沿用存档，
  * 因为那条路径要的正是「还原关闭前的样子」。
  *
+ * 手动位置按「离哪条边更近」**逐轴**锚定：停靠面板明显靠近右边时记 right、明显靠近下边时
+ * 记 bottom，其余方向记 left / top。这样把面板拖到中间时它仍按左上角生长（内容变高不会
+ * 顶到右上），而拖到右下角时换屏仍贴住右下角。
+ *
  * @param options
- * @returns 摆放结果：四条边里只有一对有值（left/top 手动位置，或 right/bottom 停靠）
+ * @returns 摆放结果：每个轴取 left 或 right、top 或 bottom，允许混合（如 left + bottom）
  */
-/** 摆放结果。left/top 与 right/bottom 互斥：前者是手动像素位置，后者是 CSS 侧停靠。 */
+/** 摆放结果。每个轴独立锚定，允许 left+bottom、right+top 这类混合组合。 */
 export interface PanelPlacement {
   docked: boolean;
   manualPos: boolean;
@@ -330,15 +353,30 @@ export function resolvePanelPlacement(options: {
   const savedDocked = layout && typeof layout.docked === 'boolean' ? layout.docked : null;
   const docked = opts.docked == null ? savedDocked === true : opts.docked === true;
 
-  if (layout && layout.hasPos && isFiniteNumber(layout.left) && isFiniteNumber(layout.top)) {
-    return {
-      docked,
-      manualPos: true,
-      left: Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, layout.left)),
-      top: Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, layout.top)),
-      right: null,
-      bottom: null,
-    };
+  if (layout && layout.hasPos) {
+    const hasLeft = isFiniteNumber(layout.left);
+    const hasTop = isFiniteNumber(layout.top);
+    const hasRight = isFiniteNumber(layout.right);
+    const hasBottom = isFiniteNumber(layout.bottom);
+    // 停靠面板逐轴按存档里实际记录的边还原；浮动面板仍保持左上角基准（它按划词点打开）。
+    // 旧版只有 left/top 的存档自然落到 left/top。
+    const useRight = hasRight && (docked || !hasLeft);
+    const useBottom = hasBottom && (docked || !hasTop);
+    const left = !useRight && hasLeft
+      ? Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, Number(layout.left)))
+      : null;
+    const top = !useBottom && hasTop
+      ? Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, Number(layout.top)))
+      : null;
+    const right = useRight
+      ? Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, Number(layout.right)))
+      : null;
+    const bottom = useBottom
+      ? Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, Number(layout.bottom)))
+      : null;
+    if (left != null || top != null || right != null || bottom != null) {
+      return { docked, manualPos: true, left, top, right, bottom };
+    }
   }
   if (docked) {
     return {
@@ -381,5 +419,52 @@ export function clampPanelIntoView(rect: { width?: number; height?: number; left
   return {
     left: Math.min(Math.max(0, vw - width), Math.max(0, Number.isFinite(left) ? left : 0)),
     top: Math.min(Math.max(0, vh - height), Math.max(0, Number.isFinite(top) ? top : 0)),
+  };
+}
+
+/**
+ * 把「右下角基准」的面板夹回可视区（只动 right/bottom 间距）。
+ *
+ * 与 `clampPanelIntoView` 对应：手动拖过的停靠面板用 `right/bottom` 定位，窗口变小后
+ * 需要按右/下边缘夹取，而不是把它重新换算成 left/top。
+ */
+export function clampPanelAnchoredIntoView(
+  rect: { width?: number; height?: number; right?: number; bottom?: number } | null | undefined,
+  viewport: Viewport | null | undefined
+): { right: number; bottom: number } {
+  const { width: vw, height: vh } = normalizeViewport(viewport);
+  const r = rect || {};
+  const width = Math.max(0, Number(r.width) || 0);
+  const height = Math.max(0, Number(r.height) || 0);
+  const rightEdge = Number(r.right);
+  const bottomEdge = Number(r.bottom);
+  const gapRight = Number.isFinite(rightEdge) ? vw - rightEdge : 0;
+  const gapBottom = Number.isFinite(bottomEdge) ? vh - bottomEdge : 0;
+  return {
+    right: Math.min(Math.max(0, vw - width), Math.max(0, gapRight)),
+    bottom: Math.min(Math.max(0, vh - height), Math.max(0, gapBottom)),
+  };
+}
+
+/**
+ * 由面板矩形反算「右下角基准」的间距（面板右/下边缘距布局视口右/下边缘）。
+ *
+ * ⚠ `viewport` 必须是**布局视口**（`documentElement.clientWidth/clientHeight`，不含滚动条），
+ * 与 `position: fixed` 的 `right/bottom` 同一个坐标系。若传 `window.innerWidth`（含滚动条），
+ * 会把滚动条宽度算进间距，恢复时面板就向左/上偏一截，而且**每次开合都累加**。
+ */
+export function panelAnchoredOffsets(
+  rect: { right?: number; bottom?: number } | null | undefined,
+  viewport: Viewport | null | undefined
+): { right: number; bottom: number } | null {
+  const { width: vw, height: vh } = normalizeViewport(viewport);
+  if (!vw || !vh) return null;
+  const r = rect || {};
+  const rightEdge = Number(r.right);
+  const bottomEdge = Number(r.bottom);
+  if (!Number.isFinite(rightEdge) || !Number.isFinite(bottomEdge)) return null;
+  return {
+    right: Math.max(0, vw - rightEdge),
+    bottom: Math.max(0, vh - bottomEdge),
   };
 }

@@ -5891,7 +5891,7 @@
     };
   }
   function emptySnapshot() {
-    return { width: null, height: null, left: null, top: null, docked: null, hasPos: false };
+    return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false };
   }
   function snapshotFromParts(pos, size) {
     const out = emptySnapshot();
@@ -5900,8 +5900,12 @@
     if (pos && isFiniteNumber(pos.left) && isFiniteNumber(pos.top)) {
       out.left = pos.left;
       out.top = pos.top;
-      out.hasPos = true;
     }
+    if (pos && isFiniteNumber(pos.right) && isFiniteNumber(pos.bottom)) {
+      out.right = pos.right;
+      out.bottom = pos.bottom;
+    }
+    out.hasPos = (out.left != null || out.right != null) && (out.top != null || out.bottom != null);
     if (pos && typeof pos.docked === "boolean") out.docked = pos.docked;
     return out;
   }
@@ -5938,6 +5942,8 @@
       height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
       left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
       top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+      right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
+      bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
       docked: s.docked === true
     };
     try {
@@ -5949,7 +5955,7 @@
       }
       storage.setItem(
         PANEL_POS_KEY,
-        JSON.stringify({ version: PANEL_LAYOUT_VERSION, docked: record.docked, left: record.left, top: record.top })
+        JSON.stringify({ version: PANEL_LAYOUT_VERSION, docked: record.docked, left: record.left, top: record.top, right: record.right, bottom: record.bottom })
       );
     } catch (e) {
       return null;
@@ -5965,6 +5971,8 @@
       docked: s.docked === true,
       left: s.manualPos === true && isFiniteNumber(s.left) ? Math.round(s.left) : null,
       top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
+      right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
+      bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
       width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
       height: Number.isFinite(height) && height > 0 ? Math.round(height) : null
     };
@@ -5986,6 +5994,8 @@
       height: legacy.height == null ? void 0 : legacy.height,
       left: legacy.left == null ? void 0 : legacy.left,
       top: legacy.top == null ? void 0 : legacy.top,
+      right: legacy.right == null ? void 0 : legacy.right,
+      bottom: legacy.bottom == null ? void 0 : legacy.bottom,
       docked: legacy.docked === true,
       manualPos: legacy.hasPos
     });
@@ -6027,15 +6037,20 @@
     const layout = opts.layout || null;
     const savedDocked = layout && typeof layout.docked === "boolean" ? layout.docked : null;
     const docked = opts.docked == null ? savedDocked === true : opts.docked === true;
-    if (layout && layout.hasPos && isFiniteNumber(layout.left) && isFiniteNumber(layout.top)) {
-      return {
-        docked,
-        manualPos: true,
-        left: Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, layout.left)),
-        top: Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, layout.top)),
-        right: null,
-        bottom: null
-      };
+    if (layout && layout.hasPos) {
+      const hasLeft = isFiniteNumber(layout.left);
+      const hasTop = isFiniteNumber(layout.top);
+      const hasRight = isFiniteNumber(layout.right);
+      const hasBottom = isFiniteNumber(layout.bottom);
+      const useRight = hasRight && (docked || !hasLeft);
+      const useBottom = hasBottom && (docked || !hasTop);
+      const left = !useRight && hasLeft ? Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, Number(layout.left))) : null;
+      const top = !useBottom && hasTop ? Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, Number(layout.top))) : null;
+      const right = useRight ? Math.min(Math.max(0, viewport.width - sizeWidth), Math.max(0, Number(layout.right))) : null;
+      const bottom = useBottom ? Math.min(Math.max(0, viewport.height - sizeHeight), Math.max(0, Number(layout.bottom))) : null;
+      if (left != null || top != null || right != null || bottom != null) {
+        return { docked, manualPos: true, left, top, right, bottom };
+      }
     }
     if (docked) {
       return {
@@ -6076,6 +6091,32 @@
     return {
       left: Math.min(Math.max(0, vw - width), Math.max(0, Number.isFinite(left) ? left : 0)),
       top: Math.min(Math.max(0, vh - height), Math.max(0, Number.isFinite(top) ? top : 0))
+    };
+  }
+  function clampPanelAnchoredIntoView(rect, viewport) {
+    const { width: vw, height: vh } = normalizeViewport(viewport);
+    const r = rect || {};
+    const width = Math.max(0, Number(r.width) || 0);
+    const height = Math.max(0, Number(r.height) || 0);
+    const rightEdge = Number(r.right);
+    const bottomEdge = Number(r.bottom);
+    const gapRight = Number.isFinite(rightEdge) ? vw - rightEdge : 0;
+    const gapBottom = Number.isFinite(bottomEdge) ? vh - bottomEdge : 0;
+    return {
+      right: Math.min(Math.max(0, vw - width), Math.max(0, gapRight)),
+      bottom: Math.min(Math.max(0, vh - height), Math.max(0, gapBottom))
+    };
+  }
+  function panelAnchoredOffsets(rect, viewport) {
+    const { width: vw, height: vh } = normalizeViewport(viewport);
+    if (!vw || !vh) return null;
+    const r = rect || {};
+    const rightEdge = Number(r.right);
+    const bottomEdge = Number(r.bottom);
+    if (!Number.isFinite(rightEdge) || !Number.isFinite(bottomEdge)) return null;
+    return {
+      right: Math.max(0, vw - rightEdge),
+      bottom: Math.max(0, vh - bottomEdge)
     };
   }
 
@@ -7406,8 +7447,9 @@
     if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const vp = panelViewport();
+    const vw = vp.width;
+    const vh = vp.height;
     const now = Date.now();
     const sig = fitChromeSignature();
     const reusable = chromeMeasure && chromeMeasure.sig === sig && chromeMeasure.vw === vw && chromeMeasure.vh === vh && now - chromeMeasure.measuredAt < CHROME_MEASURE_TTL_MS;
@@ -7418,9 +7460,9 @@
       return;
     }
     const dockGap = getDockGap();
-    const topLimit = Math.max(12, Math.round(window.innerHeight * 0.1));
-    let maxH = Math.max(320, window.innerHeight - dockGap - topLimit);
-    const hardMaxH = Math.max(320, window.innerHeight - 24);
+    const topLimit = Math.max(12, Math.round(vh * 0.1));
+    let maxH = Math.max(320, vh - dockGap - topLimit);
+    const hardMaxH = Math.max(320, vh - 24);
     panel.style.height = "auto";
     panelBody.style.height = "auto";
     panelBody.style.flex = "";
@@ -7443,13 +7485,21 @@
     panel.style.height = totalH + "px";
     if (panel.classList.contains("docked") && !panel._manualPos) {
       panel.style.top = "auto";
-      panel.style.bottom = Math.min(dockGap, Math.max(0, window.innerHeight - totalH - 8)) + "px";
+      panel.style.bottom = Math.min(dockGap, Math.max(0, vh - totalH - 8)) + "px";
     }
     markSelfScroll();
     if (wasPinned) panelBody.scrollTop = BOTTOM_SCROLL_PX;
   }
+  function panelViewport() {
+    const el = typeof document !== "undefined" ? document.documentElement : null;
+    return {
+      width: el && el.clientWidth || window.innerWidth,
+      height: el && el.clientHeight || window.innerHeight
+    };
+  }
   function getDockGap() {
-    return window.innerWidth <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(window.innerHeight * 0.3)));
+    const vp = panelViewport();
+    return vp.width <= 640 ? 12 : Math.min(520, Math.max(120, Math.round(vp.height * 0.3)));
   }
   function pinToBottom() {
     if (!followedRun.observerAutoScroll) return false;
@@ -7528,15 +7578,39 @@
     if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
     const r = panel.getBoundingClientRect();
     const docked = panel.classList.contains("docked");
+    const manualPos = docked ? Boolean(panel._manualPos) : true;
+    const vp = panelViewport();
+    const anchored = docked && manualPos ? panelAnchoredOffsets(r, vp) : null;
+    let left;
+    let top;
+    let right;
+    let bottom;
+    if (docked && manualPos) {
+      const gapRight = Math.max(0, vp.width - r.right);
+      const gapBottom = Math.max(0, vp.height - r.bottom);
+      const anchorRight = Boolean(anchored) && gapRight < Math.max(0, r.left) * 0.6;
+      const anchorBottom = Boolean(anchored) && gapBottom < Math.max(0, r.top) * 0.6;
+      if (anchorRight) right = anchored ? anchored.right : void 0;
+      else left = r.left;
+      if (anchorBottom) bottom = anchored ? anchored.bottom : void 0;
+      else top = r.top;
+    } else if (!docked) {
+      left = r.left;
+      top = r.top;
+    }
     return queuePanelLayoutWrite({
       width: panel.offsetWidth,
       height: panel.offsetHeight,
-      left: r.left,
-      top: r.top,
+      left,
+      top,
+      right,
+      bottom,
       docked,
       // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
-      manualPos: docked ? Boolean(panel._manualPos) : true,
-      writeSize: !(opts && opts.size === false)
+      manualPos,
+      // 只拖动（没拉伸过）时不要把自动高度固化成用户尺寸；否则重开会把拖动瞬间的
+      // 内容高度当成手动尺寸，内容一变面板顶部就跟着漂。
+      writeSize: opts && opts.size === false ? false : panel._manualSize === true
     });
   }
   function loadPanelLayoutForOpen() {
@@ -7558,7 +7632,8 @@
   function applyGlobalPanelLayoutChange(value) {
     if (!panel) return;
     const layout = readGlobalPanelLayout(value);
-    const savedSize = clampPanelSize(layout, { width: window.innerWidth, height: window.innerHeight });
+    const viewport = panelViewport();
+    const savedSize = clampPanelSize(layout, viewport);
     if (savedSize) {
       panel.style.width = savedSize.width + "px";
       panel.style.height = savedSize.height + "px";
@@ -7576,7 +7651,7 @@
     const placement = resolvePanelPlacement({
       layout,
       docked: layout.docked == null ? panel.classList.contains("docked") : layout.docked,
-      viewport: { width: window.innerWidth, height: window.innerHeight },
+      viewport,
       size: { width: panel.offsetWidth, height: panel.offsetHeight },
       dockGap: getDockGap()
     });
@@ -7602,8 +7677,9 @@
   function clampPanelToViewport() {
     if (!panel) return;
     if (!panel.offsetWidth || !panel.offsetHeight) return;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const vp = panelViewport();
+    const vw = vp.width;
+    const vh = vp.height;
     const docked = panel.classList.contains("docked");
     if (docked && !panel._manualPos) {
       const top = panel.getBoundingClientRect().top;
@@ -7612,12 +7688,21 @@
     }
     if (!panel._manualPos) return;
     const r = panel.getBoundingClientRect();
-    const next = clampPanelIntoView(
-      { left: r.left, top: r.top, width: panel.offsetWidth, height: panel.offsetHeight },
-      { width: vw, height: vh }
-    );
-    if (Math.round(next.left) !== Math.round(r.left)) panel.style.left = next.left + "px";
-    if (Math.round(next.top) !== Math.round(r.top)) panel.style.top = next.top + "px";
+    const rightAnchored = panel.style.right !== "auto";
+    const bottomAnchored = panel.style.bottom !== "auto";
+    if (rightAnchored || bottomAnchored) {
+      const anchored = clampPanelAnchoredIntoView(r, { width: vw, height: vh });
+      if (rightAnchored && panel.style.right !== anchored.right + "px") panel.style.right = anchored.right + "px";
+      if (bottomAnchored && panel.style.bottom !== anchored.bottom + "px") panel.style.bottom = anchored.bottom + "px";
+    }
+    if (!rightAnchored || !bottomAnchored) {
+      const next = clampPanelIntoView(
+        { left: r.left, top: r.top, width: panel.offsetWidth, height: panel.offsetHeight },
+        { width: vw, height: vh }
+      );
+      if (!rightAnchored && Math.round(next.left) !== Math.round(r.left)) panel.style.left = next.left + "px";
+      if (!bottomAnchored && Math.round(next.top) !== Math.round(r.top)) panel.style.top = next.top + "px";
+    }
   }
   function renderDecisionButtonsIfPresent() {
     if (!panelBody || !panel) return;
@@ -9065,7 +9150,7 @@
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "false");
     panel.setAttribute("aria-label", "RecallFlow \u6D4F\u89C8\u5668\u52A9\u624B");
-    const savedSize = clampPanelSize(layout, { width: window.innerWidth, height: window.innerHeight });
+    const savedSize = clampPanelSize(layout, panelViewport());
     if (savedSize) {
       panel.style.width = savedSize.width + "px";
       panel.style.height = savedSize.height + "px";
@@ -9639,7 +9724,7 @@
       layout,
       docked: dockedIntent,
       point: { x, y },
-      viewport: { width: window.innerWidth, height: window.innerHeight },
+      viewport: panelViewport(),
       size: { width: panel.offsetWidth, height: panel.offsetHeight },
       dockGap: getDockGap()
     });
@@ -9649,6 +9734,8 @@
       manualPos: placement.manualPos,
       left: placement.left,
       top: placement.top,
+      right: placement.right,
+      bottom: placement.bottom,
       width: panel.offsetWidth,
       height: panel.offsetHeight,
       writeSize: false
@@ -10571,9 +10658,6 @@
             return;
           }
           if (resp.resumable && resp.runId && resp.instruction && !runSession.isRunning) {
-            if (resp.live !== true) {
-              showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
-            }
             try {
               if (conversationLoadPromise) await conversationLoadPromise;
             } catch (e) {
@@ -10583,26 +10667,38 @@
             } catch (e) {
             }
             if (runSession.isRunning) return;
-            const keepClosed = !panelVisibility.isOpen;
+            if (!panelVisibility.isOpen) {
+              try {
+                await sendPanelMessage("panel:run:stop", {
+                  runId: String(resp.runId),
+                  sessionId: panelSessionState.panelSessionId
+                });
+              } catch (e) {
+              }
+              try {
+                await loadConversation();
+              } catch (e) {
+              }
+              return;
+            }
+            if (resp.live !== true) {
+              showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
+            }
             await panelVisibility.withSuppressed(async () => {
               openPanel(0, 0, true, true);
             });
             const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
-            const runPromise = runSession.hasRunner ? Promise.resolve(runSession.invokeRunner(String(resp.instruction), {
-              // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
-              continuation: resp.live !== true,
-              reattach: resp.live === true,
-              presetRunId: String(resp.runId),
-              skipUserTurn: Boolean(alreadyHas),
-              // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
-              // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
-              resumeSnapshot: resp.snapshot || null
-            })) : null;
-            if (keepClosed && runPromise && typeof runPromise.finally === "function") {
-              runPromise.finally(() => {
-                if (panel) removePanel({ publish: false });
-              }).catch(() => {
+            if (runSession.hasRunner) {
+              runSession.invokeRunner(String(resp.instruction), {
+                // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。
+                continuation: resp.live !== true,
+                reattach: resp.live === true,
+                presetRunId: String(resp.runId),
+                skipUserTurn: Boolean(alreadyHas),
+                // 刷新前已经发生的工具步骤/叙述都在 SW 的运行快照里。没有它，
+                // 新面板只能从"续跑之后"开始画，前半轮会凭空消失。
+                resumeSnapshot: resp.snapshot || null
               });
             }
           } else if (resp.pending) {
@@ -10679,8 +10775,9 @@
         let top = dragState.origTop + dy;
         const pw = panel.offsetWidth;
         const ph = panel.offsetHeight;
-        const maxLeft = Math.max(0, window.innerWidth - Math.min(pw, window.innerWidth - 24));
-        const maxTop = Math.max(0, window.innerHeight - Math.min(ph, window.innerHeight - 24));
+        const vp = panelViewport();
+        const maxLeft = Math.max(0, vp.width - Math.min(pw, vp.width - 24));
+        const maxTop = Math.max(0, vp.height - Math.min(ph, vp.height - 24));
         left = Math.min(Math.max(0, left), maxLeft);
         top = Math.min(Math.max(0, top), maxTop);
         panel.style.left = left + "px";
@@ -10690,8 +10787,9 @@
         const dw = e.clientX - resizeState.startX;
         const dh = e.clientY - resizeState.startY;
         const minW = 280, minH = 320;
-        const maxW = Math.max(minW, window.innerWidth - 24);
-        const maxH = Math.max(minH, window.innerHeight - 24);
+        const vp = panelViewport();
+        const maxW = Math.max(minW, vp.width - 24);
+        const maxH = Math.max(minH, vp.height - 24);
         const leftSide = resizeState.origin.includes("left");
         const topSide = resizeState.origin.includes("top");
         const rightSide = resizeState.origin.includes("right");
@@ -10703,8 +10801,8 @@
         let top = r.top;
         if (leftSide) left = r.right - w;
         if (topSide) top = r.bottom - h;
-        left = Math.min(Math.max(0, left), Math.max(0, window.innerWidth - w));
-        top = Math.min(Math.max(0, top), Math.max(0, window.innerHeight - h));
+        left = Math.min(Math.max(0, left), Math.max(0, vp.width - w));
+        top = Math.min(Math.max(0, top), Math.max(0, vp.height - h));
         panel.style.left = left + "px";
         panel.style.top = top + "px";
         panel.style.right = "auto";
