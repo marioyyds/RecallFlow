@@ -18,7 +18,7 @@ import { RUN_STATUS } from './agent-state.ts';
 import {
   evaluateLiveness,
 } from './verification-policy.ts';
-import { tokenBudgetExceeded } from './budget.ts';
+import { deadlineDecision, tokenBudgetExceeded } from './budget.ts';
 import { streamAgentStep } from './stream-step.ts';
 import { prepareAgentRun } from './agent-bootstrap.ts';
 import { AgentRunState } from './agent-run-state.ts';
@@ -64,7 +64,53 @@ export async function runAgentLoop(
     nextIteration: resumeIteration,
   }).catch(() => {});
 
+  let deadlineWrapUpSent = false;
   for (let iter = resumeIteration; ; iter++) {
+    const deadline = deadlineDecision({
+      now: Date.now(),
+      deadlineAt: settings && settings.deadlineAt,
+      wrapUpAt: settings && settings.wrapUpAt,
+      wrapUpSent: deadlineWrapUpSent,
+    });
+    if (deadline === 'stop') {
+      state.emitState(RUN_STATUS.TIMEOUT, { reason: 'timeBudget' });
+      state.trace({
+        phase: 'timeout',
+        reason: 'timeBudget',
+        toolCalls: state.toolCallCount,
+        totalTokens: state.totalTokens,
+      });
+      state.emit({
+        type: 'budget-exceeded',
+        reason: 'timeBudget',
+        message:
+          '本任务的实际耗时已到外部评测给的墙钟上限，已停止；已完成的工具结果仍会保留。',
+      });
+      await finalizer.timeBudgetExceeded();
+      return;
+    }
+    if (deadline === 'wrap-up') {
+      deadlineWrapUpSent = true;
+      state.trace({
+        phase: 'budget-warning',
+        reason: 'timeBudget',
+        toolCalls: state.toolCallCount,
+        totalTokens: state.totalTokens,
+      });
+      state.emit({
+        type: 'budget-warning',
+        reason: 'timeBudget',
+        message: '时间预算快到了：立即收尾，不再开始新的流程或新的搜索。',
+      });
+      state.messages.push({
+        role: 'user',
+        content:
+          '时间预算快到了。**不要开始新的流程或新的搜索**；基于已有证据立即收尾：' +
+          '有把握就按终态契约输出最终 JSON；确实查不到就返回 NOT_FOUND_ERROR；没完成就返回 UNKNOWN_ERROR。' +
+          '不要再反复核验或重读页面。',
+      });
+    }
+
     if (tokenBudgetExceeded(state.totalTokens, state.budget)) {
       state.emitState(RUN_STATUS.TIMEOUT, { reason: 'maxTotalTokens' });
       state.trace({

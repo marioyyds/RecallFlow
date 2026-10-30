@@ -88,6 +88,7 @@ installation and configuration are in [recallflow-mcp/README.md](integrations/op
 | How panel sessions are shared, switched and run-locked | [docs/panel-sessions.md](docs/panel-sessions.md) |
 | How to write real-browser E2E | [docs/e2e-testing-guide.md](docs/e2e-testing-guide.md) (cheat sheet: [tests/e2e/README.md](tests/e2e/README.md)) |
 | How to run a real-model eval, and past results | [docs/real-model-eval-log.md](docs/real-model-eval-log.md) |
+| How to run and score the WebArena task-level benchmark | [docs/webarena-eval.md](docs/webarena-eval.md) (results: [docs/webarena-eval-report.md](docs/webarena-eval-report.md)) |
 | What the integration roadmap actually delivered (single source of truth) | [docs/integration-status.md](docs/integration-status.md) |
 | Rules you must follow when adding / refactoring tools | [docs/tool-design.md](docs/tool-design.md) |
 | Taking over development (what is left, why it was skipped, how to start) | [docs/next-steps-handoff.md](docs/next-steps-handoff.md) |

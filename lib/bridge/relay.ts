@@ -4,11 +4,15 @@
 // 服务端收到 MCP 工具调用后，优先经 WebSocket 推送；无 WS 时排队等扩展长轮询取走。
 //
 // 说明：MCP server 由用户显式配置并启动；本中继只做「读页面」，不写数据、不执行代码。
-import { executeTool, closeAgentWindow, collectPageDiagnostics, collectElementSource, verifyPageTargets } from '../application/agent/tools.ts';
+import { executeTool, closeAgentWindow, collectPageDiagnostics, collectElementSource, verifyPageTargets, getToolMetadata, TOOL_REGISTRY } from '../application/agent/tools.ts';
 import { getHandoff, listHandoffs } from '../shared/handoff-store.ts';
 import { BRIDGE_METHODS } from '../shared/bridge-methods.ts';
 import { validateBridgeWrite } from '../shared/bridge-write-policy.ts';
+import { normalizeAllowRisk, checkAgentToolBudget, preApprovedToolNames } from '../shared/bridge-agent-policy.ts';
+import { AgentJobStore, JOB_STATE } from './agent-job.ts';
 import { getAISettings } from '../shared/settings.ts';
+import { getBook } from '../shared/store.ts';
+import { runAgentStream } from '../application/agent/agent.ts';
 import { screenshotAttempts } from '../shared/vision-copy.ts';
 import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../application/agent/screenshot-tool.ts';
 import * as cdp from '../backend/cdp.ts';
@@ -17,6 +21,11 @@ const RELAY_HOST = '127.0.0.1:7801';
 const RELAY_HTTP = 'http://' + RELAY_HOST;
 
 type BridgeParams = Record<string, unknown>;
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error ?? '');
+}
 
 interface RelayMessage {
   id?: string | number;
@@ -84,7 +93,6 @@ function relayWsUrl(): string {
 // 覆盖方式：设置页「桥接 Token」填自定义值，server 侧设同一个 RECALLFLOW_BRIDGE_TOKEN。
 export const DEFAULT_BRIDGE_TOKEN = 'recallflow-local-bridge-v1';
 let relayToken = '';
-let tokenLoaded = false;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -92,7 +100,6 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let httpLoopRunning = false;
 
 async function loadRelayToken(): Promise<string> {
-  if (tokenLoaded) return relayToken;
   try {
     const settings = await getAISettings();
     relayToken = String((settings && settings.bridgeToken) || '').trim();
@@ -101,7 +108,6 @@ async function loadRelayToken(): Promise<string> {
   }
   // 留空即用内置默认值（与 server 的默认值一致，因此无需任何配置即可连通）。
   if (!relayToken) relayToken = DEFAULT_BRIDGE_TOKEN;
-  tokenLoaded = true;
   return relayToken;
 }
 
@@ -197,6 +203,11 @@ async function httpLoop(): Promise<void> {
   httpLoopRunning = true;
   while (httpLoopRunning) {
     try {
+      // 每轮重读 token：设置页改了「桥接 Token」后无需重启扩展即可生效。
+      // 这也让评测可以为每次运行生成一次性 token（只让本次启动的扩展连上 7801，
+      // 避免本机另一个浏览器里的扩展把请求抢走 —— 两个扩展同时连同一个 server 时，
+      // 请求可能被路由到版本不同的那个，症状是 "unknown method: agent_task_status"）。
+      await loadRelayToken();
       const res = await fetch(RELAY_HTTP + '/poll', { cache: 'no-store', headers: authHeaders() });
       const data = (await res.json()) as { requests?: RelayRequest[] } | null;
       const requests = (data && data.requests) || [];
@@ -227,7 +238,15 @@ async function httpLoop(): Promise<void> {
 }
 
 // ---------------- 请求分发 ----------------
-async function dispatch(method: string, params: BridgeParams): Promise<unknown> {
+/**
+ * 桥接请求分发：MCP 服务端发来的每条请求都进这里。
+ *
+ * 导出是为了**可测**：本文件此前没有任何测试 import 过它（它引用 chrome / WebSocket
+ * 等浏览器全局），于是"分支指向不存在的函数""参数校验写反"这类错误只能在
+ * **重载扩展之后**才炸 —— 而那时的现象很容易被误判成"服务端没实现"。
+ * 测试里用桩替换浏览器全局后即可直接调用本函数（见 tests/relay-dispatch.test.mjs）。
+ */
+export async function dispatch(method: string, params: BridgeParams): Promise<unknown> {
   if (method === 'browser_read') return await browserRead(params);
   // 诊断类统一入口：kind 由 params 指定（桥接方法名 == 扩展工具名，因此参数形状也一致）。
   if (method === 'read_diagnostics') return await readActiveTab('read_diagnostics', params);
@@ -240,8 +259,298 @@ async function dispatch(method: string, params: BridgeParams): Promise<unknown> 
   if (method === 'handoff_get') return await getHandoff(params && params.id);
   if (method === 'handoff_list') return await listHandoffs((params && params.limit) as number | undefined);
   if (method === 'screenshot_capture') return await screenshotCapture(params);
+  if (method === 'open_tab') return await openTabViaBridge(params);
+  if (method === 'agent_task') return await agentTaskStart(params);
+  if (method === 'agent_task_status') return await agentTaskStatus(params);
+  if (method === 'agent_task_cancel') return await agentTaskCancel(params);
   if (method === 'page_action') return await pageAction(params);
   throw new Error('unknown method: ' + method);
+}
+
+// ---------------- agent 任务（agent_task）：把一整条任务交给扩展内 agent ----------------
+//
+// 为什么要这条通道：用 page_action 串完一条流程，每一步都要一次 MCP 往返、
+// 每一步的快照都进调用方的上下文。整任务交给扩展内 agent 后，
+// 快照只在扩展内流转，往返从"每步一次"降到"一次启动 + 轮询进度"。
+//
+// **为什么必须异步**：桥接等扩展响应默认 60000ms、DSH 的 MCP 调用 90000ms，
+// 而一条真实流程是分钟级。同步等必然超时，所以这里立刻返回 jobId，
+// 进度用 agent_task_status 按游标轮询（见 lib/bridge/agent-job.js）。
+//
+// **授权形态**：桥接场景没有面板，没人能点审批（agent 循环等的就是面板应答），
+// 因此授权改为「开工前声明 allowRisk」+「执行前逐个判定」：
+//   · 判定在 executeAnyTool 的唯一汇合点（ctx.agentBudgetGuard），覆盖串行与并行两条路径；
+//   · 同时把已声明类别里"本身会走审批"的工具预填进 sessionApprovedTools，
+//     否则 agent 会卡在等一个永远不会有人回答的审批上（见 preApprovedToolNames 的说明）。
+const agentJobs = new AgentJobStore();
+// jobId -> AbortController。取消要能真的传到 agent 循环（它接受 signal），
+// 否则"取消"只是把状态标一下，任务照跑 —— 那比不提供取消更糟。
+const cancelControllers = new Map<string, AbortController>();
+
+// 扩展内 agent 的运行入口。**测试注入点**（刻意很小、只在测试里用）：
+// 真实实现要调模型（需要 API Key、会产生费用、且耗时不可控），
+// 而"并发拒绝""取消""任务期间禁止外部动页面"这几条恰恰需要任务**稳定处于 running** 才测得了。
+// 注入后即可确定性地驱动这些路径，不必真调模型。
+// 注意：生产路径不做任何注入，`agentRunner` 始终是 runAgentStream。
+type AgentRunner = (
+  port: unknown,
+  payload: unknown,
+  settings: unknown,
+  book: unknown,
+  signal: AbortSignal,
+  tabId: number | null,
+  observeEvent?: unknown
+) => Promise<void>;
+
+let agentRunner: AgentRunner = runAgentStream as AgentRunner;
+
+/** 仅供测试：替换 agent 运行入口。传 null 恢复真实实现。 */
+export function __setAgentRunnerForTests(fn: unknown): void {
+  agentRunner = typeof fn === 'function' ? (fn as AgentRunner) : (runAgentStream as AgentRunner);
+}
+
+/** 创建 job 的假 port：把 agent 的 emit 落进 job，审批请求一概不放行。 */
+function agentJobPort(jobId: string) {
+  return {
+    postMessage(msg: Record<string, unknown>) {
+      agentJobs.append(jobId, msg);
+    },
+    onMessage: {
+      addListener() {},
+      removeListener() {},
+    },
+    // 桥接没有面板可弹，审批一律不批准（即"不许执行"）。
+    // 正常情况下走不到这里：已声明类别的工具已被预放行，未声明的在执行前就被 guard 拒了。
+    requestApproval() {
+      return Promise.resolve('reject');
+    },
+  };
+}
+
+/** 供 page_action / open_tab 判断"现在能不能动页面"。 */
+function agentJobConflict(): Record<string, unknown> | null {
+  const running = agentJobs.running();
+  if (!running) return null;
+  return {
+    ok: false,
+    code: 'AGENT_TASK_RUNNING',
+    error:
+      '已有一个 agent 任务在操作浏览器（jobId=' + running.id + '），因此页面动作被暂时拒绝。' +
+      '两个执行者同时动手会互相踩标签页（表现为"两边都点了一下"）。',
+    hint: '用 agent_task_status 查看它的进度；需要中止就先 agent_task_cancel。',
+  };
+}
+
+async function agentTaskStart(params: BridgeParams): Promise<Record<string, unknown>> {
+  const p = params || {};
+  const instruction = String(p.instruction || '').trim();
+  if (!instruction) {
+    return { ok: false, error: 'agent_task 需要 instruction（要让扩展内 agent 完成的任务）。' };
+  }
+  // 授权先归一化：high 与未知类别在这里就被拒（而不是等它跑到一半才失败）。
+  const norm = normalizeAllowRisk(p.allowRisk);
+  if (!norm.ok) return { ok: false, error: norm.error, code: 'BAD_ALLOW_RISK' };
+
+  // 并发：单任务串行（见 agent-job.js 的说明）。第二个任务被明确拒绝并给出当前 jobId。
+  const created = agentJobs.create({ instruction, allowRisk: [...norm.set], tabId: p.tabId });
+  if (!created.ok) {
+    return { ok: false, error: created.error, code: 'AGENT_TASK_BUSY', runningJobId: created.runningJobId };
+  }
+  const job = created.job;
+
+  const controller = new AbortController();
+  cancelControllers.set(job.id, controller);
+  const port = agentJobPort(job.id);
+  const guard = (name: string) => checkAgentToolBudget(name, norm.set, { getMetadata: getToolMetadata });
+  const approved = preApprovedToolNames(norm.set, TOOL_REGISTRY.map((t) => t.name), {
+    getMetadata: getToolMetadata,
+  });
+
+  // **后台跑，不 await** —— 这是让分钟级任务活过 60s 桥接超时的关键。
+  (async () => {
+    try {
+      const settings = await getAISettings();
+      // API Key 前置检查：不查的话任务会开工即失败，而错误来自 LLM 层，容易被看成本地故障。
+      if (!settings.apiKey) {
+        agentJobs.finish(job.id, JOB_STATE.FAILED, {
+          error: '尚未配置 API Key（扩展设置页填写后重试）。扩展内 agent 需要它才能规划与执行。',
+        });
+        return;
+      }
+      const book = await getBook().catch((e: unknown) => {
+        // 知识库（IndexedDB）坏了不应该让整条浏览器任务直接失败：
+        // agent 没有知识也能跑，而 IndexedDB 不可用的原因（测试桩、隐私模式）与任务本身无关。
+        // 只记录，不静默吞掉。真正的任务失败仍由后面的 agentRunner 决定。
+        try { console.warn('[relay] 读取知识库失败，本次任务以空知识库启动：' + errorMessage(e)); } catch (_) {}
+        return {} as any;
+      });
+      const tab = p.tabId ? await chrome.tabs.get(Number(p.tabId)).catch(() => null) : await activeTab();
+      // 风险预算判定必须**经 settings 传进去**：runAgentStream 自己造 ctx，
+      // 调用方没有参数能塞进 ctx。挂错地方不会报错，只会静默放行 —— 见 agent.js 里该键的说明。
+      // settings 只作为只读快照使用，绝不写回 storage，所以这个函数不会被序列化落盘。
+      const settingsWithGuard = Object.assign({}, settings, { agentBudgetGuard: guard });
+      const payload = {
+        action: 'agent',
+        question: instruction,
+        runId: job.id,
+        // 预放行清单：让 agent 循环跳过"等面板点同意"那一步（见上方 授权形态 说明）。
+        sessionApprovedTools: approved,
+      };
+      await agentRunner(
+        port,
+        payload,
+        settingsWithGuard,
+        book,
+        controller.signal,
+        tab && tab.id ? tab.id : null,
+        undefined
+      );
+      // 已经落过终态（例如 cancel 抢先标记）就不要覆盖它。
+      const cur = agentJobs.get(job.id);
+      if (cur && cur.state === JOB_STATE.RUNNING) {
+        agentJobs.finish(job.id, JOB_STATE.COMPLETED, { result: String(cur.result || '') });
+      }
+    } catch (e: unknown) {
+      // 取消会以 abort 异常的形式冒出来。若不区分，取消就会被记成"失败"，
+      // 调用方据此会去查一个不存在的故障。
+      const cur = agentJobs.get(job.id);
+      const cancelled = cur && (cur.state === JOB_STATE.CANCELLED || cur.cancelRequested);
+      agentJobs.finish(job.id, cancelled ? JOB_STATE.CANCELLED : JOB_STATE.FAILED, {
+        error: cancelled ? '任务已按请求取消。' : 'Agent 运行出错：' + errorMessage(e),
+      });
+    } finally {
+      cancelControllers.delete(job.id);
+    }
+  })();
+
+  return {
+    ok: true,
+    jobId: job.id,
+    state: job.state,
+    approvedTools: approved,
+    allowRisk: [...norm.set],
+    note:
+      '任务已在后台启动。用 agent_task_status(jobId, sinceSeq) 按游标读进度；' +
+      '任务期间 page_action 会被拒绝（避免两个执行者抢同一个标签页）。',
+  };
+}
+
+async function agentTaskStatus(params: BridgeParams): Promise<Record<string, unknown>> {
+  const p = params || {};
+  // 先收割"卡住"的任务：扩展侧没有超时兜底（等审批会永远挂住），
+  // 不收割的话调用方会一直轮询一个永远不会出终态的 job，且看不出是卡住还是在干活。
+  agentJobs.reapStale();
+  const jobId = String(p.jobId || '').trim();
+  if (!jobId) {
+    // 不传 jobId 时给一个可用的清单，而不是报错 —— 调用方多半只是想知道"现在有没有在跑"。
+    const running = agentJobs.running();
+    return {
+      ok: true,
+      runningJobId: running ? running.id : '',
+      jobs: [...agentJobs.jobs.values()].map((j) => ({
+        jobId: j.id,
+        state: j.state,
+        instruction: j.instruction.slice(0, 80),
+        startedAt: j.startedAt,
+      })),
+    };
+  }
+  const r = agentJobs.read(jobId, Number(p.sinceSeq) || 0);
+  if (!r) return { ok: false, error: '未找到该 job：' + jobId, jobId };
+  return Object.assign({ ok: true }, r);
+}
+
+async function agentTaskCancel(params: BridgeParams): Promise<Record<string, unknown>> {
+  const p = params || {};
+  const jobId = String(p.jobId || '').trim();
+  const job = jobId ? agentJobs.get(jobId) : agentJobs.running();
+  if (!job) return { ok: false, error: '没有可取消的 agent 任务' };
+  agentJobs.requestCancel(job.id);
+  // 真正终止由 agent 循环响应 AbortSignal 完成；这里不假装已经停了。
+  try {
+    cancelControllers.get(job.id)?.abort();
+  } catch (e) {}
+  return {
+    ok: true,
+    jobId: job.id,
+    state: agentJobs.get(job.id)?.state || JOB_STATE.CANCELLED,
+    note: '已发出取消信号。用 agent_task_status 确认最终状态（取消是异步的，不会立刻变 cancelled）。',
+  };
+}
+
+// 导航通道：由外部客户端打开一个页面，作为「驱动一次完整流程」的第一步。
+//
+// 与 pageAction 同样**不经过** agent 循环的审批（桥接是独立入口），因此必须自己过
+// bridge-write-policy：它只放行 http(s)、并明确拒绝 chrome:// 与 file://。
+//
+// 一条实测出来的坑：`openTab` 的标签页预算靠 `ctx.openedTabCount` 累计，
+// 而桥接每次请求都新建 ctx（与面板里那个跨轮存活的 ctx 不同）——
+// 于是「累计上限 5」永远不会触发，模型反复开页也拦不住，白烧往返。
+// 桥接是**无状态**入口，没法跨请求累计，所以这里改成**单次调用即硬上限**：
+// 一次只允许开一个（newTab 的语义本来就是"新开一个"），
+// 复用已开页面那条路不受限（它不新增标签页）。
+async function openTabViaBridge(params: BridgeParams): Promise<Record<string, unknown>> {
+  const p = params || {};
+  // 同 pageAction：agent 任务在跑时不要再插进来一个新页面。
+  const conflict = agentJobConflict();
+  if (conflict) return conflict;
+  const verdict = validateBridgeWrite('open_tab', p);
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      error: (verdict as { error: string }).error,
+      code: (verdict as { code: string }).code,
+    };
+  }
+  try {
+    const res = await executeTool(
+      'open_tab',
+      { url: p.url, newTab: p.newTab === true },
+      {
+        // 与 pageAction 同源的活动标签页上下文：让 openTab 的"隔离模式/绑定会话"照常工作。
+        tabId: null,
+        pageUrl: '',
+        pageTitle: '',
+        openedTabCount: 0,
+        maxOpenedTabs: 1,
+      }
+    );
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        error: (res && res.result) || '打开标签页失败',
+        blocked: Boolean(res && res.blocked),
+      };
+    }
+    return {
+      ok: true,
+      tabId: res.targetTabId,
+      reused: Boolean(res.reused),
+      pageUrl: (res.targetTab && res.targetTab.url) || p.url,
+      pageTitle: (res.targetTab && res.targetTab.title) || '',
+      ready: Boolean(res.targetTab && res.targetTab.ready),
+      result: res.result || '',
+    };
+  } catch (e: unknown) {
+    return { ok: false, error: '打开标签页失败：' + errorMessage(e) };
+  }
+}
+
+// 页面动作的目标标签页。
+//
+// 为什么不能只用"当前活动标签页"：外部客户端驱动流程时，用户随时可能切走窗口，
+// 下一步动作就会打在**错误的页面**上；而这类错误看起来像"点击没生效"，
+// 比报错更难查。因此允许调用方显式指定 tabId（通常来自 open_tab 的返回值）。
+async function resolveActionTab(explicitTabId: unknown) {
+  const id = Number(explicitTabId);
+  if (Number.isInteger(id) && id > 0) {
+    const t = await chrome.tabs.get(id).catch(() => null);
+    if (t && t.id) return t;
+    // 指定的标签页已不存在 → 明确报错，不静默退回活动标签页。
+    // 静默退回是危险的：动作会落到用户当前正在看的页面上。
+    throw new Error('指定的标签页不存在或已关闭：tabId=' + id + '。请重新 open_tab 获取新的 tabId。');
+  }
+  return await activeTab();
 }
 
 // 写入通道：外部客户端驱动的页面动作。
@@ -250,19 +559,33 @@ async function dispatch(method: string, params: BridgeParams): Promise<unknown> 
 // 但此前 MCP 面只有 12 个**只读**工具 —— 外部 agent 无法点击/输入，
 // 于是既复现不了 bug（没有交互就没有请求），也验证不了修复（触发不了动作）。
 //
+// 目标标签页：默认打在当前活动标签页上（前端调试场景就是"用户正在看的那个页面"）；
+// 调用方也可以显式传 tabId 锁定目标 —— 驱动多步流程时必须这样，
+// 否则用户一切走窗口，动作就会落到别的页面上（见 resolveActionTab）。
+//
 // 安全边界：本函数**不**复用 agent 循环的审批（那条路在 agent.js 里），
 // 因此必须自己过一遍 bridge-write-policy 的白名单；未列出的工具一律拒绝并给出替代路径。
 async function pageAction(params: BridgeParams): Promise<Record<string, unknown>> {
   const p = params || {};
+  // 有 agent 任务在跑时拒绝外部页面动作：两个执行者同时动手会互相踩标签页。
+  const conflict = agentJobConflict();
+  if (conflict) return conflict;
   const verdict = validateBridgeWrite(p.tool as string, p.args || {});
-  if (!verdict.ok) return { ok: false, error: verdict.error, code: verdict.code };
-  const tab = await activeTab();
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      error: (verdict as { error: string }).error,
+      code: (verdict as { code: string }).code,
+    };
+  }
+  // 目标标签页优先取调用方显式给的 tabId（见 resolveActionTab 的取舍说明）。
+  const tab = await resolveActionTab(p.tabId);
   if (!tab || !tab.id) return { ok: false, error: '未找到活动标签页（请先让用户切到要调试的页面）', code: 'NO_ACTIVE_TAB' };
   const ctx = { tabId: tab.id, pageUrl: tab.url || '', pageTitle: tab.title || '' };
-  const res = await executeTool(verdict.name as string, (p.args || {}) as Record<string, unknown>, ctx);
+  const res = await executeTool((verdict as { name: string }).name, (p.args || {}) as Record<string, unknown>, ctx);
   return {
     ok: res && res.ok !== false,
-    tool: verdict.name,
+    tool: (verdict as { name: string }).name,
     result: (res && res.result) || '',
     // 把观测到的验证字段原样带出去：外部 agent 判断"这一步真的生效了吗"靠的就是它。
     verification: (res && res.verification) || null,

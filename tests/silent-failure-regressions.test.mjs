@@ -21,8 +21,9 @@ import { resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
 import { computeContentClosure } from '../scripts/compute-content-war.mjs';
 import { readSnapshot } from '../scripts/test-count.mjs';
 import { truncateEvidenceText } from '../lib/bridge/relay.ts';
-import { validateBridgeWrite } from '../lib/shared/bridge-write-policy.ts';
+import { validateBridgeWrite, BRIDGE_INSPECT_TOOLS } from '../lib/shared/bridge-write-policy.ts';
 import { BRIDGE_METHODS } from '../lib/shared/bridge-methods.ts';
+import { TOOL_METADATA } from '../lib/application/agent/tool-metadata.ts';
 import { PAGE_TEXT_EXCLUDE, ELEMENT_COLLECT_EXCLUDE } from '../lib/application/page/citation.ts';
 import { buildInitialMessagesPure, UNTRUSTED_BEGIN, UNTRUSTED_END, containsForgedDelimiter, instructionLabel } from '../lib/application/agent/initial-messages.ts';
 import { SKILL_REGISTRY } from '../lib/application/agent/skill-defs.ts';
@@ -459,6 +460,86 @@ test('桥接写入：缺定位参数时拒绝并给出获取 ref 的路径', () 
   assert.equal(validateBridgeWrite('click_element', { x: 10, y: 20 }).ok, true);
   // 参数形状非法也要挡住。
   assert.equal(validateBridgeWrite('click_element', null).ok, false);
+});
+
+// ---------------- 导航（open_tab）：多步流程的第一步 ----------------
+//
+// 背景：外部客户端要跑完一次完整流程（如"发一条内容"），第一步就是**到达目标页面**。
+// 此前只能让用户手动打开并保持为活动标签页，多步流程在第一步就断了。
+// 放开它换来的是「新开一个标签页」这一件事，因此边界必须钉死：
+//   · 只放行 http(s) —— chrome:// / file:// / javascript: 会越过浏览器安全边界；
+//   · 它**不需要**定位参数（判据是"这个工具需要什么"，不是"它在不在白名单里"）——
+//     若沿用页面动作的 NO_TARGET 校验，open_tab 会被自己的校验误拒。
+
+test('桥接导航：open_tab 允许 http(s)，且不因缺少定位参数被误拒', () => {
+  const ok = validateBridgeWrite('open_tab', { url: 'https://example.com/publish' });
+  assert.equal(ok.ok, true, '合法 http(s) 地址应放行：' + ok.error);
+  assert.equal(ok.name, 'open_tab');
+  // 关键回归：导航类工具没有 ref/selector，不能被定位校验挡住。
+  assert.notEqual(ok.code, 'NO_TARGET');
+});
+
+test('桥接导航：非 http(s) 一律拒绝，并说明越过了什么边界', () => {
+  for (const url of ['chrome://settings', 'file:///C:/secret.txt', 'javascript:alert(1)', 'data:text/html,x']) {
+    const v = validateBridgeWrite('open_tab', { url });
+    assert.equal(v.ok, false, url + ' 不得放行');
+    assert.equal(v.code, 'BAD_URL');
+    assert.match(v.error, /http/, '拒绝信息应说明只支持 http(s)');
+  }
+  // 缺 url 与非法 url 要能区分：前者是"没给"，后者是"给了但不允许"。
+  const missing = validateBridgeWrite('open_tab', {});
+  assert.equal(missing.ok, false);
+  assert.equal(missing.code, 'NO_URL');
+});
+
+test('桥接导航：switch_tab 仍不开放（它会改变用户当前视图）', () => {
+  const v = validateBridgeWrite('switch_tab', { tabId: 12 });
+  assert.equal(v.ok, false, 'switch_tab 不得经桥接开放');
+  assert.equal(v.code, 'TOOL_NOT_EXPOSED');
+  assert.match(v.error, /open_tab/, '拒绝信息应给出替代路径（open_tab 可复用已开页面）');
+});
+
+test('桥接导航放开后，上传与任意代码执行仍必须被拒', () => {
+  // 放开一个导航能力，绝不能顺带把这两个高风险能力一起放开。
+  assert.equal(validateBridgeWrite('upload_file', { selector: '#f', path: 'C:/x.png' }).ok, false);
+  assert.equal(validateBridgeWrite('run_javascript', { code: 'alert(1)' }).ok, false);
+});
+
+// ---------------- 只读观测：ref 的来源不能要求先有 ref ----------------
+//
+// 实测缺陷：get_page_snapshot / list_frames / get_ax_snapshot 的 schema 里**没有**定位参数，
+// 但它们此前被并进"页面动作"组，于是无参调用被 NO_TARGET 拒绝。后果是死循环 ——
+//   要拿 ref → 必须调 get_page_snapshot
+//   调 get_page_snapshot → 被要求提供 ref → 拒
+// 即外部 agent 连"取快照"这一步都做不到，而文档把这条路径写成标准闭环。
+
+test('桥接只读观测：三个无参观测工具必须能不带定位参数调用', () => {
+  for (const t of ['get_page_snapshot', 'list_frames', 'get_ax_snapshot']) {
+    const v = validateBridgeWrite(t, {});
+    assert.equal(v.ok, true, t + ' 不应因缺少定位参数被拒：' + v.error);
+    assert.notEqual(v.code, 'NO_TARGET');
+  }
+  // 带可选参数（如 frameId / maxElements）同样要放行。
+  assert.equal(validateBridgeWrite('get_page_snapshot', { frameId: 3, maxElements: 20 }).ok, true);
+});
+
+test('桥接只读观测：真正的写动作仍然必须带定位参数（放开观测没放宽写）', () => {
+  for (const t of ['click_element', 'type_text', 'press_key', 'scroll_page', 'select_option', 'check_box']) {
+    const v = validateBridgeWrite(t, {});
+    assert.equal(v.ok, false, t + ' 缺定位参数时必须被拒');
+    assert.equal(v.code, 'NO_TARGET', t + ' 应按定位校验拒绝');
+  }
+});
+
+test('分组不变式：只读观测组里的每个工具在元数据里都必须是 readOnly', () => {
+  // 分组的意义是"不需要定位参数"，这个放行前提是**它们不改变页面**。
+  // 若将来有人把一个写工具塞进 BRIDGE_INSPECT_TOOLS，它就绕过了定位校验 —— 这里拦住。
+  for (const t of BRIDGE_INSPECT_TOOLS) {
+    const meta = TOOL_METADATA[t];
+    assert.ok(meta, t + ' 必须有风险元数据');
+    assert.equal(meta.readOnly, true, t + ' 在只读观测组里，必须 readOnly: true');
+    assert.equal(meta.risk, 'read', t + ' 在只读观测组里，risk 必须是 read');
+  }
 });
 
 test('桥接方法清单必须包含 page_action（清单与 dispatch 分支不得漂移）', () => {

@@ -257,6 +257,10 @@ export async function prepareAgentRun(options: {
     payload,
     persisted,
   });
+  ctx.agentBudgetGuard =
+    settings && typeof settings.agentBudgetGuard === 'function'
+      ? settings.agentBudgetGuard
+      : undefined;
   trace({
     phase: 'start',
     intent,

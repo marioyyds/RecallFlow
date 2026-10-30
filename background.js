@@ -494,7 +494,7 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
   const docStore = tx.objectStore(STORE_DOCUMENTS);
   const prevEntry = await requestResult(entryStore.get(key));
   const prevDoc = await requestResult(docStore.get(key));
-  const now = Date.now();
+  const now2 = Date.now();
   const item = {
     id: key,
     type: type || prevEntry && prevEntry.type || "wrong",
@@ -505,8 +505,8 @@ async function upsertItem({ id, type, title, url, platformId, platformName, stat
     status: status != null ? status : prevEntry && prevEntry.status || STATUS.IMPORTANT,
     note: typeof note === "string" ? note.trim() : String(prevDoc && prevDoc.markdown || ""),
     tags: Array.isArray(tags) ? tags : prevEntry && prevEntry.tags || [],
-    createdAt: Number(prevEntry && prevEntry.createdAt) || now,
-    updatedAt: now
+    createdAt: Number(prevEntry && prevEntry.createdAt) || now2,
+    updatedAt: now2
   };
   entryStore.put(entryRecord(item));
   docStore.put(documentRecord(item));
@@ -1400,8 +1400,8 @@ function transition(run, next, meta = {}) {
   return Object.assign({ state: next }, meta);
 }
 function createRun(runId, budget) {
-  const now = Date.now();
-  return { id: runId, status: RUN_STATUS.CREATED, budget, currentStep: 0, createdAt: now, updatedAt: now };
+  const now2 = Date.now();
+  return { id: runId, status: RUN_STATUS.CREATED, budget, currentStep: 0, createdAt: now2, updatedAt: now2 };
 }
 var TOOL_STATUS = Object.freeze({ PENDING: "pending", APPROVAL_REQUIRED: "approval_required", APPROVED: "approved", REJECTED: "rejected", RUNNING: "running", SUCCEEDED: "succeeded", FAILED: "failed", TIMEOUT: "timeout" });
 
@@ -1878,6 +1878,7 @@ async function userscriptXhr(details) {
 
 // lib/application/agent/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
+  "query-report-table": "\u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\u662F\u300Cread_table + \u9875\u9762\u8FC7\u6EE4\u300D\u7684\u7EC4\u5408\u80FD\u529B\uFF1B\u5F53\u524D\u6CA1\u6709\u72EC\u7ACB\u5939\u5177\u9875\uFF08WebArena admin \u7F51\u683C\u5DF2\u7528\u4E8E\u771F\u6A21\u578B\u9A8C\u8BC1\uFF09\uFF0C\u9875\u9762\u4FA7\u4E0D\u53D8\u91CF\uFF08\u5217/\u5206\u9875\uFF09\u7531 tests/table-query.test.mjs \u4E0E read_table \u5DE5\u5177\u6D4B\u8BD5\u8986\u76D6\u3002",
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
   "dialog-handling": "**\u573A\u666F\u672A\u6536\u655B**\uFF1A/dialog \u5939\u5177\u9875\u5DF2\u5C31\u7EEA\uFF0C\u4F46 Playwright \u7684\u5BF9\u8BDD\u6846\u7BA1\u7406\u4E0E\u5916\u90E8 attach \u7684 debugger \u51B2\u7A81\uFF08\u9875\u9762\u4F1A\u76F4\u63A5\u6B7B\u6389\uFF09\uFF0C\u9700\u8981\u6362\u4E00\u5957\u9A71\u52A8\u65B9\u5F0F\u3002\u73B0\u72B6\u4E0E\u5DF2\u6392\u9664\u7684\u539F\u56E0\u89C1 docs/next-steps-handoff.md\u3002",
@@ -2132,6 +2133,21 @@ var SKILL_REGISTRY = Object.freeze([
       keywords: ["\u8868\u683C|\u8868|\u6570\u636E\u8868|\u5217\u8868\u6570\u636E", "\u63D0\u53D6|\u6574\u7406|\u5BFC\u51FA|\u8F6C\u6210"],
       tools: ["get_page_snapshot", "inspect_element", "complete_task"],
       playbook: "extract-merged-table"
+    }
+  },
+  {
+    name: "query-report-table",
+    displayName: "\u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\uFF08\u5148\u8BFB\u8868\uFF0C\u518D\u7B5B\u9009/\u8BA1\u6570/\u6C42\u548C\uFF09",
+    description: "\u5728\u7F51\u9875\u62A5\u8868\u3001\u540E\u53F0\u7F51\u683C\u6216\u6570\u636E\u8868\u91CC\u56DE\u7B54\u95EE\u9898\uFF08top-N\u3001\u591A\u5C11\u4E2A\u3001\u591A\u5C11\u94B1\u3001\u67D0\u65E5\u671F\u8303\u56F4\uFF09\u3002\u5148\u8BFB\u8868\uFF0C\u518D\u6309\u5217\u7B5B\u9009/\u6392\u5E8F/\u8BA1\u6570/\u6C42\u548C\uFF1B\u4E0D\u8981\u4ECE\u9875\u9762\u5FEB\u7167\u91CC\u624B\u6284\u5355\u5143\u683C\uFF0C\u4E5F\u4E0D\u8981\u624B\u5DE5\u7D2F\u52A0\u660E\u7EC6\u884C\u3002",
+    version: "1.0.0",
+    category: "browser",
+    tags: ["\u62A5\u8868", "\u8868\u683C", "\u7F51\u683C", "\u7B5B\u9009", "\u8BA1\u6570", "\u6C42\u548C", "top-N"],
+    skill_type: "prompt-template",
+    content: '# \u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\n\n## \u6B65\u9AA4\n1. \u5148\u7528 `read_table` \u8BFB\u5F53\u524D\u9875\u9762\u7684\u4E3B\u8868\uFF08\u9ED8\u8BA4\u81EA\u52A8\u9009"\u53EF\u89C1\u4E14\u884C\u6570\u6700\u591A"\u7684\u90A3\u5F20\uFF09\u3002\n   \u5982\u679C\u9009\u9519\uFF08\u5E03\u5C40\u8868/\u7B5B\u9009\u8868\uFF09\uFF0C\u7528\u8FD4\u56DE\u7684 `tableCount`/`tableIndex` \u6216 `selector` \u6307\u5B9A\u3002\n2. **\u5148\u8BBE\u7F6E\u9875\u9762\u8FC7\u6EE4\u518D\u8BFB**\uFF1APeriod / From-To / Status / \u5173\u952E\u8BCD / \u6BCF\u9875\u6761\u6570\u3002\n   \u5F88\u591A\u62A5\u8868\u9ED8\u8BA4\u53EA\u663E\u793A\u5F53\u524D\u9875\u6216\u9ED8\u8BA4\u5468\u671F\uFF0C\u76F4\u63A5\u8BFB\u4F1A\u5C11\u6570\u636E\u3002\n3. \u7528\u5DE5\u5177\u53C2\u6570\u505A\u7ED3\u6784\u5316\u67E5\u8BE2\uFF0C\u800C\u4E0D\u662F\u624B\u7B97\uFF1A\n   - \u8BA1\u6570\uFF1A`count:true`\uFF08\u6216 `where` \u540E\u770B `query.count`\uFF09\uFF1B\n   - \u6C42\u548C\uFF1A`sum:"Grand Total"`\uFF1B\n   - top-N\uFF1A`sort:{column:"Quantity", dir:"desc"}`\uFF0C\u7136\u540E\u53EA\u53D6\u524D N\uFF1B\n   - \u72B6\u6001/\u65E5\u671F\uFF1A`where:[{column:"Status",op:"eq",value:"Complete"}]`\u3002\n4. **\u4EE5\u9875\u9762\u81EA\u5E26\u7684 total \u4E3A\u51C6**\uFF1A\u8FD4\u56DE\u7684 `pagination.total` \u662F\u9875\u9762\u62A5\u544A\u7684\u603B\u6761\u6570\uFF1B\n   \u5B83\u6BD4"\u672C\u9875\u884C\u6570"\u53EF\u4FE1\u3002`pagination.hasNext` \u4E3A true \u65F6\u4E0D\u8981\u7528\u7B2C\u4E00\u9875\u5192\u5145\u5168\u91CF\u3002\n5. top-N \u53EA\u8F93\u51FA N \u4E2A\uFF1B\u51FA\u73B0\u5E76\u5217\u65F6\u7528\u62A5\u8868\u81EA\u5E26\u6392\u540D/\u6392\u5E8F\u53D6\u524D N\uFF0C\u4E0D\u8981\u6269\u5C55\u5230 N+1\u3002\n6. \u95EE\u6570\u91CF/\u91D1\u989D\u65F6\u53EA\u8F93\u51FA\u6570\u5B57\u6216 schema \u6307\u5B9A\u7684\u805A\u5408\u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA\u5339\u914D\u5230\u7684\u8BB0\u5F55\u5217\u8868\u3002\n7. \u95EE `product type` \u65F6\u4F18\u5148\u7528\u80FD\u7ED9\u51FA\u5177\u4F53\u4E1A\u52A1\u5206\u7C7B\u7684\u5217\uFF1B\n   `Simple Product / Configurable Product` \u662F Magento \u7CFB\u7EDF\u7C7B\u578B\uFF0C\u901A\u5E38\u4E0D\u662F\u4E1A\u52A1\u7C7B\u578B\u3002\n8. \u6536\u5C3E\u524D\u6838\u5BF9\uFF1A\u8868\u5934\u5217\u6570\u3001\u5206\u9875 total\u3001\u8FC7\u6EE4\u6761\u4EF6\u4E0E\u7B54\u6848\u53E3\u5F84\uFF08\u6570\u91CF/\u91D1\u989D\u3001\u65E5\u671F\u8FB9\u754C\uFF09\u3002\n\n## \u4E0D\u8981\u505A\u7684\u4E8B\n- \u4E0D\u8981\u4ECE `get_page_snapshot` \u7684\u6B63\u6587\u91CC\u9010\u884C\u6284\u8868\u683C\uFF08\u4F1A\u6F0F\u5217/\u9519\u4F4D/\u6F0F\u9875\uFF09\uFF1B\n- \u4E0D\u8981\u624B\u5DE5\u7D2F\u52A0\u660E\u7EC6\u884C\uFF08configurable/child \u884C\u5BB9\u6613\u91CD\u590D\uFF09\uFF1B\n- \u4E0D\u8981\u5728\u53EA\u8BFB\u4E86\u7B2C\u4E00\u9875\u65F6\u5C31\u56DE\u7B54"\u5171\u6709 N \u6761"\u3002',
+    x: {
+      intents: ["browser_task"],
+      keywords: ["\u62A5\u8868|best.?selling|top.?\\d+|\u9500\u91CF|\u8BA2\u5355|\u8BC4\u8BBA\u7F51\u683C|\u8868\u683C|grid|count|total|\u7B5B\u9009|\u65E5\u671F\u8303\u56F4"],
+      tools: ["read_table", "get_page_snapshot", "inspect_element", "click_element", "select_option", "type_text", "complete_task"]
     }
   },
   {
@@ -3382,11 +3398,11 @@ async function recallTrace(url, opts = {}) {
   const origin = originOf2(url);
   if (!origin) return null;
   const maxAgeMs = Number.isFinite(Number(opts.maxAgeMs)) ? Number(opts.maxAgeMs) : LAST_TRACE_TTL_MS;
-  const now = Number.isFinite(Number(opts.now)) ? Number(opts.now) : Date.now();
+  const now2 = Number.isFinite(Number(opts.now)) ? Number(opts.now) : Date.now();
   const all = await readLastTraces();
   const rec = all[origin];
   if (!rec || !Array.isArray(rec.steps) || !rec.steps.length) return null;
-  const ageMs = Math.max(0, now - Number(rec.updatedAt || 0));
+  const ageMs = Math.max(0, now2 - Number(rec.updatedAt || 0));
   if (ageMs >= maxAgeMs) return null;
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
@@ -3447,7 +3463,7 @@ function area() {
   return chrome.storage.session || chrome.storage.local;
 }
 var indexCache = null;
-function pruneIndex(index, now = Date.now()) {
+function pruneIndex(index, now2 = Date.now()) {
   const entries = Object.entries(index || {}).sort((a, b) => Number(b[1] && b[1].updatedAt || 0) - Number(a[1] && a[1].updatedAt || 0)).slice(0, MAX_RUNS);
   return Object.fromEntries(entries);
 }
@@ -4089,6 +4105,49 @@ var TOOL_SCHEMAS = [
   {
     type: "function",
     function: {
+      name: "read_table",
+      description: '\u8BFB\u53D6\u5F53\u524D\u9875\u9762\u7684\u4E3B\u6570\u636E\u8868\u683C/\u7F51\u683C\uFF08\u53EA\u8BFB\uFF09\u3002\u9ED8\u8BA4\u81EA\u52A8\u9009"\u6700\u50CF\u4E3B\u8868"\u7684\u90A3\u5F20\uFF08\u53EF\u89C1\u4F18\u5148\u3001\u884C\u6570\u6700\u591A\uFF09\uFF1B\u591A\u8868\u65F6\u7528 selector/index\u3002\u8FD4\u56DE headers/rows/pagination\uFF0C\u5E76\u53EF\u76F4\u63A5 where \u7B5B\u9009\u3001sort \u6392\u5E8F\u3001count \u8BA1\u6570\u3001sum \u6C42\u548C\u3002\u62A5\u8868/\u8BA2\u5355/\u8BC4\u8BBA\u7F51\u683C\u4F18\u5148\u7528\u5B83\uFF0C\u4E0D\u8981\u4ECE\u5FEB\u7167\u91CC\u9010\u884C\u624B\u6284\u6216\u624B\u7B97\u3002\u5206\u9875\u53EA\u8BFB\u5F53\u524D\u9875\uFF1Apagination \u4F1A\u7ED9\u51FA\u603B\u6761\u6570\u4E0E\u662F\u5426\u8FD8\u6709\u4E0B\u4E00\u9875\u3002',
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "\u53EF\u9009\uFF1ACSS \u9009\u62E9\u5668\u5B9A\u4F4D\u8868\u683C\u6216\u5176\u5BB9\u5668" },
+          index: { type: "integer", description: "\u53EF\u9009\uFF1A\u9875\u9762\u4E0A\u7B2C N \u4E2A\u8868\u683C\uFF1B\u4E0D\u4F20\u4E14\u65E0 selector \u65F6\u81EA\u52A8\u9009\u4E3B\u8868" },
+          maxRows: { type: "integer", description: "\u6700\u591A\u63D0\u53D6\u591A\u5C11\u884C\uFF0C\u9ED8\u8BA4 200" },
+          maxCols: { type: "integer", description: "\u6700\u591A\u63D0\u53D6\u591A\u5C11\u5217\uFF0C\u9ED8\u8BA4\u4E0D\u9650" },
+          fillMerged: { type: "boolean", description: "\u5408\u5E76\u5355\u5143\u683C\u7684\u5EF6\u7EED\u683C\u662F\u5426\u91CD\u590D\u586B\u5165\u540C\u4E00\u6587\u672C\uFF08\u9ED8\u8BA4 true\uFF09" },
+          where: {
+            type: "array",
+            description: '\u6309\u5217\u7B5B\u9009\uFF0C\u53EF\u591A\u6B21\u3002\u4F8B\u5982 [{"column":"Status","op":"eq","value":"Complete"}]',
+            items: {
+              type: "object",
+              properties: {
+                column: { type: "string", description: "\u8868\u5934\u540D\uFF08\u7CBE\u786E\u6216\u5305\u542B\u5339\u914D\uFF09" },
+                op: { type: "string", enum: ["eq", "neq", "contains", "gt", "gte", "lt", "lte"] },
+                value: { description: "\u6BD4\u8F83\u503C\uFF1B\u6570\u5B57\u4F1A\u81EA\u52A8\u53BB\u6389\u8D27\u5E01\u7B26\u53F7/\u5343\u5206\u4F4D" }
+              },
+              required: ["column", "op", "value"]
+            }
+          },
+          sort: {
+            type: "object",
+            description: "\u6309\u5217\u6392\u5E8F\uFF1Btop-N \u524D\u5148\u6309\u6307\u6807\u5217 desc \u6392\u5E8F",
+            properties: {
+              column: { type: "string", description: "\u8868\u5934\u540D" },
+              dir: { type: "string", enum: ["asc", "desc"], description: "\u9ED8\u8BA4 asc" }
+            },
+            required: ["column"]
+          },
+          count: { type: "boolean", description: "\u53EA\u8FD4\u56DE\u5339\u914D\u884C\u6570\uFF08\u4E0D\u8FD4\u56DE rows\uFF09" },
+          sum: { type: "string", description: "\u5BF9\u6307\u5B9A\u5217\u6C42\u548C\uFF08\u81EA\u52A8\u53BB\u6389\u8D27\u5E01\u7B26\u53F7/\u5343\u5206\u4F4D\uFF09" },
+          includeRows: { type: "boolean", description: "\u9ED8\u8BA4 true\uFF1Bfalse \u65F6\u53EA\u8FD4\u56DE\u8BA1\u6570/\u6C42\u548C\u6458\u8981" }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "take_screenshot",
       description: "\u7ED9\u5F53\u524D\u9875\u9762\u622A\u56FE\uFF08\u53EA\u8BFB\uFF0C\u9700 CDP\uFF09\u3002" + // 视觉能力开关（单一来源 `VISION_ENABLED`）：**整句**二选一 ——
       // 关闭时那段与**引入开关之前逐字节相同**（纯重构 ⇒ 不需要测量 ✓）；
@@ -4442,6 +4501,9 @@ var TOOL_METADATA = {
   // ⚠ 本档**没有**并入 get_attribute 与 get_element_source：它们走各自不同的执行路径
   //（独立消息 / 源码映射链路），且后者被 MCP 的「页面元素 → 源码文件」闭环直接使用。
   inspect_element: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
+  // 读取表格/网格并做筛选/计数/求和：只读，不需要审批。与 inspect_element 同走内容脚本，
+  // 但多一层"自动选主表 + 结构化查询"，因此单独成一个工具（面向模型的边界按执行路径+权限分组）。
+  read_table: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
   // 截图刻意不标记：它重、会向 UI 推图，且同批截图没有实际收益
   take_screenshot: { risk: "read", readOnly: true, route: "background" },
   scroll_page: { risk: "page", requiresApproval: true, route: "content" },
@@ -4512,9 +4574,9 @@ async function injectContentScript(chromeApi, tabId, frameId) {
     return false;
   }
   const key = String(tabId) + ":" + normalizeFrameId(frameId);
-  const now = Date.now();
-  if (now - Number(lastInjectAt.get(key) || 0) < INJECT_COOLDOWN_MS) return false;
-  lastInjectAt.set(key, now);
+  const now2 = Date.now();
+  if (now2 - Number(lastInjectAt.get(key) || 0) < INJECT_COOLDOWN_MS) return false;
+  lastInjectAt.set(key, now2);
   try {
     await chromeApi.scripting.executeScript({
       target: { tabId: Number(tabId), frameIds: [normalizeFrameId(frameId)] },
@@ -6666,6 +6728,137 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
+// lib/shared/table.ts
+function formatTableText(table, options = {}) {
+  const maxRows = Math.max(1, Number(options.maxRows) || 40);
+  const maxCellChars = Math.max(4, Number(options.maxCellChars) || 60);
+  const headers = table && Array.isArray(table.headers) ? table.headers : [];
+  const rows = table && Array.isArray(table.rows) ? table.rows : [];
+  const cell = (v) => {
+    const s = String(v === void 0 || v === null ? "" : v).replace(/\s+/g, " ").trim();
+    return s.length > maxCellChars ? sliceSafe(s, 0, maxCellChars) + "\u2026" : s;
+  };
+  const lines = [];
+  if (headers.length) {
+    lines.push("| " + headers.map(cell).join(" | ") + " |");
+    lines.push("|" + headers.map(() => "---").join("|") + "|");
+  }
+  for (const row of rows.slice(0, maxRows)) {
+    lines.push("| " + (Array.isArray(row) ? row : []).map(cell).join(" | ") + " |");
+  }
+  if (rows.length > maxRows) {
+    lines.push("\u2026\uFF08\u5171 " + rows.length + " \u884C\uFF0C\u4EC5\u663E\u793A\u524D " + maxRows + " \u884C\uFF09");
+  }
+  return lines.join("\n");
+}
+
+// lib/shared/table-query.ts
+function toTableNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  let s = String(value === void 0 || value === null ? "" : value).trim();
+  if (!s) return null;
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) {
+    negative = true;
+    s = s.slice(1, -1);
+  }
+  s = s.replace(/[,\s]/g, "").replace(/[$€£¥￥]/g, "");
+  let percent = false;
+  if (/%$/.test(s)) {
+    percent = true;
+    s = s.slice(0, -1);
+  }
+  if (!/^-?\d+(?:\.\d+)?$/.test(s)) return null;
+  let n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  if (percent) n = n / 100;
+  return negative ? -n : n;
+}
+function findTableColumn(headers, name) {
+  const list = Array.isArray(headers) ? headers : [];
+  const want = String(name === void 0 || name === null ? "" : name).trim().toLowerCase();
+  if (!want) return -1;
+  for (let i = 0; i < list.length; i++) {
+    if (String(list[i] || "").trim().toLowerCase() === want) return i;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const h = String(list[i] || "").trim().toLowerCase();
+    if (h && (h.includes(want) || want.includes(h))) return i;
+  }
+  return -1;
+}
+function cellMatches(cell, op, value) {
+  const c = String(cell === void 0 || cell === null ? "" : cell).trim();
+  const v = String(value === void 0 || value === null ? "" : value).trim();
+  const cn = toTableNumber(c);
+  const vn = toTableNumber(v);
+  const bothNumeric = cn !== null && vn !== null;
+  switch (String(op || "eq")) {
+    case "eq":
+      return bothNumeric ? cn === vn : c.toLowerCase() === v.toLowerCase();
+    case "neq":
+      return bothNumeric ? cn !== vn : c.toLowerCase() !== v.toLowerCase();
+    case "contains":
+      return c.toLowerCase().includes(v.toLowerCase());
+    case "gt":
+      return bothNumeric && cn > vn;
+    case "gte":
+      return bothNumeric && cn >= vn;
+    case "lt":
+      return bothNumeric && cn < vn;
+    case "lte":
+      return bothNumeric && cn <= vn;
+    default:
+      return false;
+  }
+}
+function queryTableData(table, options = {}) {
+  const headers = Array.isArray(table?.headers) ? table.headers.map((value) => String(value ?? "")) : [];
+  const source = Array.isArray(table?.rows) ? table.rows.slice() : [];
+  const errors = [];
+  let rows = source;
+  const where = Array.isArray(options.where) ? options.where : [];
+  for (const f of where) {
+    if (!f || typeof f !== "object") continue;
+    const idx = findTableColumn(headers, f.column);
+    if (idx < 0) {
+      errors.push("\u627E\u4E0D\u5230\u5217\u300C" + f.column + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+      continue;
+    }
+    rows = rows.filter((row) => cellMatches(Array.isArray(row) ? row[idx] : "", f.op, f.value));
+  }
+  if (options.sort && options.sort.column) {
+    const idx = findTableColumn(headers, options.sort.column);
+    if (idx < 0) {
+      errors.push("\u6392\u5E8F\u627E\u4E0D\u5230\u5217\u300C" + options.sort.column + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+    } else {
+      const dir = String(options.sort.dir || "asc").toLowerCase() === "desc" ? -1 : 1;
+      rows = rows.slice().sort((a, b) => {
+        const av = Array.isArray(a) ? a[idx] : "";
+        const bv = Array.isArray(b) ? b[idx] : "";
+        const an = toTableNumber(av);
+        const bn = toTableNumber(bv);
+        if (an !== null && bn !== null) return (an - bn) * dir;
+        return String(av || "").localeCompare(String(bv || "")) * dir;
+      });
+    }
+  }
+  let sum = null;
+  const sumColumn = String(options.sum || "");
+  if (sumColumn) {
+    const idx = findTableColumn(headers, sumColumn);
+    if (idx < 0) {
+      errors.push("\u6C42\u548C\u627E\u4E0D\u5230\u5217\u300C" + sumColumn + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+    } else {
+      sum = rows.reduce((acc, row) => {
+        const n = toTableNumber(Array.isArray(row) ? row[idx] : "");
+        return n === null ? acc : acc + n;
+      }, 0);
+    }
+  }
+  return { ok: errors.length === 0, errors, headers, rows, count: rows.length, totalRows: source.length, sum, sumColumn };
+}
+
 // lib/application/agent/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
@@ -6714,6 +6907,59 @@ async function inspectElement(deps, args) {
   delete rest.op;
   return await deps.executePageTool(deps.ctx.tabId, cmd, rest, deps.ctx);
 }
+async function readTable(deps, args) {
+  const p = args || {};
+  const params = {
+    selector: p.selector,
+    index: p.index !== void 0 ? p.index : p.selector ? void 0 : "auto",
+    maxRows: p.maxRows,
+    maxCols: p.maxCols,
+    fillMerged: p.fillMerged
+  };
+  const res = await deps.executePageTool(deps.ctx.tabId, "extract_table", params, deps.ctx);
+  if (!res || res.ok === false) return res;
+  const q = queryTableData(
+    { headers: res.headers, rows: res.rows },
+    {
+      where: Array.isArray(p.where) ? p.where : void 0,
+      sort: p.sort && typeof p.sort === "object" ? p.sort : void 0,
+      sum: p.sum
+    }
+  );
+  if (!q.ok) {
+    return deps.toolError("BAD_ARGS", q.errors.join("\uFF1B"));
+  }
+  const includeRows = p.includeRows !== false && p.count !== true;
+  const rows = includeRows ? q.rows : [];
+  const markdown = includeRows ? formatTableText({ headers: q.headers, rows }, { maxRows: 40 }) : "";
+  const pagination = res.pagination || {};
+  const bits = [
+    "\u8868\u683C\u300C" + (res.selector || "") + "\u300D\uFF1A\u672C\u9875 " + res.rowCount + " \u884C" + (res.widths ? " \xD7 " + res.widths + " \u5217" : "")
+  ];
+  if (q.totalRows !== res.rowCount) bits.push("\u7B5B\u9009\u524D " + q.totalRows + " \u884C");
+  bits.push("\u5339\u914D " + q.count + " \u884C");
+  if (p.sum) bits.push("\u300C" + q.sumColumn + "\u300D\u5408\u8BA1 " + q.sum);
+  if (pagination.total !== null && pagination.total !== void 0) bits.push("\u9875\u9762\u62A5\u544A\u5171 " + pagination.total + " \u6761");
+  if (pagination.currentPage !== null && pagination.totalPages !== null) {
+    bits.push("\u7B2C " + pagination.currentPage + "/" + pagination.totalPages + " \u9875");
+  }
+  if (pagination.hasNext) bits.push("\u8FD8\u6709\u66F4\u591A\u9875");
+  bits.push("\u8868\u5934\uFF1A" + (q.headers.length ? q.headers.join(" / ") : "\u65E0"));
+  return Object.assign({}, res, {
+    ok: true,
+    query: {
+      count: q.count,
+      totalRows: q.totalRows,
+      sum: q.sum,
+      sumColumn: q.sumColumn,
+      where: p.where || [],
+      sort: p.sort || null
+    },
+    rows,
+    markdown,
+    result: bits.join("\uFF1B") + (markdown ? "\n" + markdown : "")
+  });
+}
 async function scrollPage(deps, args) {
   const params = args || {};
   const hasTarget = Boolean(params.ref || params.selector || params.text);
@@ -6740,6 +6986,7 @@ async function undoLastAction(deps, args) {
 async function handlePageCommandTool(name, args, deps) {
   if (name === "annotate") return await annotate(deps, args);
   if (name === "inspect_element") return await inspectElement(deps, args);
+  if (name === "read_table") return await readTable(deps, args);
   if (name === "scroll_page") return await scrollPage(deps, args);
   if (name === "get_element_source") return await getElementSource(deps, args);
   if (name === "undo_last_action") return await undoLastAction(deps, args);
@@ -7393,7 +7640,7 @@ registerHandlers(["click_element", "click_at", "hover_element", "drag_element", 
   compactSnapshotSummary,
   summarizeCdpError
 }));
-registerHandlers(["annotate", "inspect_element", "scroll_page", "get_element_source", "undo_last_action"], (name, args, ctx) => handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
+registerHandlers(["annotate", "inspect_element", "read_table", "scroll_page", "get_element_source", "undo_last_action"], (name, args, ctx) => handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
 registerHandlers(["take_screenshot"], (name, args, ctx) => takeScreenshot({
   ctx,
   args,
@@ -7585,6 +7832,7 @@ var INTENT_DEFS = Object.freeze({
       "click_element",
       "annotate",
       "inspect_element",
+      "read_table",
       "take_screenshot",
       "scroll_page",
       "annotate",
@@ -8194,6 +8442,18 @@ function tokenBudgetExceeded(totalTokens, budget) {
   if (!Number.isFinite(used) || used <= 0) return false;
   return used >= cap;
 }
+function deadlineDecision(input = {}) {
+  const now2 = Number(input.now);
+  const deadlineAt = Number(input.deadlineAt);
+  const wrapUpAt = Number(input.wrapUpAt);
+  if (Number.isFinite(deadlineAt) && deadlineAt > 0 && Number.isFinite(now2) && now2 >= deadlineAt) {
+    return "stop";
+  }
+  if (Number.isFinite(wrapUpAt) && wrapUpAt > 0 && Number.isFinite(now2) && now2 >= wrapUpAt && input.wrapUpSent !== true) {
+    return "wrap-up";
+  }
+  return "continue";
+}
 
 // lib/application/agent/stream-step.ts
 function buildPartialStep(contentAcc, toolAcc) {
@@ -8729,6 +8989,15 @@ function mcpFailureHint(name, ctx) {
 async function executeAnyTool(name, args, ctx) {
   const validation = validateToolCall(name, args || {});
   if (!validation.ok) return { ok: false, result: validation.error };
+  if (ctx && typeof ctx.agentBudgetGuard === "function") {
+    const verdict = ctx.agentBudgetGuard(name);
+    if (verdict && verdict.allowed === false) {
+      return {
+        ok: false,
+        result: String(verdict.reason || "") + "\n" + String(verdict.hint || "")
+      };
+    }
+  }
   if (typeof name === "string" && name.indexOf("mcp__") === 0) {
     const index = ctx && ctx.mcpIndex;
     const meta = index && typeof index.get === "function" ? index.get(name) : null;
@@ -8804,8 +9073,8 @@ function storageArea() {
 }
 var indexCache2 = null;
 var bodyCache = /* @__PURE__ */ new Map();
-function pruneIndex3(index, now = Date.now()) {
-  const entries = Object.entries(index || {}).filter(([, meta]) => meta && now - Number(meta.updatedAt || 0) < SESSION_TTL_MS).sort((a, b) => Number(b[1] && b[1].updatedAt || 0) - Number(a[1] && a[1].updatedAt || 0)).slice(0, MAX_SESSIONS);
+function pruneIndex3(index, now2 = Date.now()) {
+  const entries = Object.entries(index || {}).filter(([, meta]) => meta && now2 - Number(meta.updatedAt || 0) < SESSION_TTL_MS).sort((a, b) => Number(b[1] && b[1].updatedAt || 0) - Number(a[1] && a[1].updatedAt || 0)).slice(0, MAX_SESSIONS);
   return Object.fromEntries(entries);
 }
 async function writeIndex(index) {
@@ -9192,6 +9461,7 @@ async function prepareAgentRun(options) {
     payload,
     persisted
   });
+  ctx.agentBudgetGuard = settings && typeof settings.agentBudgetGuard === "function" ? settings.agentBudgetGuard : void 0;
   trace({
     phase: "start",
     intent,
@@ -9347,6 +9617,7 @@ var AgentRunState = class {
   toolCallCount;
   totalTokens;
   verificationCount;
+  finalFormatRetryUsed;
   lastDeniedSignature;
   deterministicFails;
   lastProgressIter;
@@ -9390,6 +9661,7 @@ var AgentRunState = class {
     this.toolCallCount = prepared.toolCallCount;
     this.totalTokens = prepared.totalTokens;
     this.verificationCount = prepared.verificationCount;
+    this.finalFormatRetryUsed = false;
     this.lastDeniedSignature = prepared.lastDeniedSignature;
     this.deterministicFails = prepared.deterministicFails;
     this.lastProgressIter = prepared.lastProgressIter;
@@ -9954,6 +10226,15 @@ var AgentRunFinalizer = class {
     emitTabsClosePending(state2.ctx, pendingTabs, state2.emit);
     state2.emit({ type: "end" });
   }
+  /** Stop at an external wall-clock deadline without starting another model call. */
+  async timeBudgetExceeded() {
+    const state2 = this.state;
+    await this.persist({ status: RUN_STATUS.TIMEOUT, reason: "timeBudget" }).catch(() => {
+    });
+    const pendingTabs = await closeAuxTabs(state2.ctx).catch(() => []);
+    emitTabsClosePending(state2.ctx, pendingTabs, state2.emit);
+    state2.emit({ type: "end" });
+  }
   async cancelled(reason, phase) {
     const state2 = this.state;
     await this.persist({ status: RUN_STATUS.CANCELLED, phase, reason }).catch(() => {
@@ -10078,6 +10359,72 @@ function buildDeterministicReflection(result) {
   return parts.join("\n");
 }
 
+// lib/application/agent/final-json.ts
+function isContractObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value;
+  const type = typeof record.task_type === "string" ? record.task_type.trim() : typeof record.action === "string" ? record.action.trim() : "";
+  return Boolean(type && typeof record.status === "string" && record.status.trim());
+}
+function matchBrace(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+function findContractJson(text) {
+  const source = String(text ?? "");
+  const fences = [...source.matchAll(/```(?:json)?\s*\n?([\s\S]*?)```/gi)];
+  for (let index = fences.length - 1; index >= 0; index -= 1) {
+    try {
+      const value = JSON.parse(fences[index][1].trim());
+      if (isContractObject(value)) return value;
+    } catch {
+    }
+  }
+  for (let end = source.lastIndexOf("}"); end >= 0; end = source.lastIndexOf("}", end - 1)) {
+    let start = source.lastIndexOf("{", end);
+    while (start >= 0) {
+      if (matchBrace(source, start) === end) {
+        try {
+          const value = JSON.parse(source.slice(start, end + 1));
+          if (isContractObject(value)) return value;
+          break;
+        } catch {
+          break;
+        }
+      }
+      start = source.lastIndexOf("{", start - 1);
+    }
+  }
+  return null;
+}
+function hasFinalJsonBlock(text) {
+  return Boolean(findContractJson(text));
+}
+var FINAL_JSON_RETRY_PROMPT = "\u4F60\u521A\u624D\u7684\u6700\u7EC8\u7B54\u590D\u91CC\u7F3A\u5C11\u4EFB\u52A1\u8981\u6C42\u7684 ```json \u7EC8\u6001\u5757\u3002**\u4E0D\u8981\u91CD\u65B0\u6267\u884C\u4EFB\u52A1\uFF0C\u4E5F\u4E0D\u8981\u65B0\u589E\u4EFB\u4F55\u4E8B\u5B9E\u6216\u7ED3\u8BBA**\uFF1B\u53EA\u628A\u4E0A\u9762\u7684\u7ED3\u8BBA\u6309\u4EFB\u52A1\u7ED9\u5B9A\u7684\u5B57\u6BB5\u4E0E\u53D6\u503C\u89C4\u5219\uFF0C\u539F\u6837\u6574\u7406\u6210\u4E00\u4E2A ```json \u4EE3\u7801\u5757\u653E\u5728\u7B54\u590D\u6700\u540E\u3002\u4FDD\u6301\u7ED3\u8BBA\u91CC\u539F\u6709\u7684\u7C92\u5EA6\uFF1A\u540D\u5B57/\u6570\u5B57/\u53E5\u5B50\u7B49\u7B80\u5355\u503C\u4E0D\u8981\u5305\u88C5\u6210\u5BF9\u8C61\uFF08\u9664\u975E\u4EFB\u52A1\u660E\u786E\u8981\u6C42\u5BF9\u8C61\uFF09\uFF1B\u4E0D\u8981\u65B0\u589E\u7ED3\u8BBA\u4E2D\u6CA1\u6709\u7684\u5B57\u6BB5\u3002\u6CE8\u610F\uFF1A\u5FC5\u987B\u662F**\u53EF\u89E3\u6790\u7684 JSON**\uFF0C\u4E14\u5FC5\u987B\u5305\u542B task_type \u4E0E status\uFF08\u7F3A\u5C11\u4EFB\u4E00\u5B57\u6BB5\u90FD\u4E0D\u7B97\u7EC8\u6001\uFF09\u3002\u5982\u679C\u4F60\u5DF2\u7ECF\u6709\u4E00\u7EC4\u6570\u636E\u5B57\u6BB5\uFF0C\u8BF7\u628A\u5B83\u4EEC\u653E\u8FDB retrieved_data\uFF0C\u5E76\u5728\u5916\u5C42\u8865\u4E0A task_type \u4E0E status\uFF1B\u4E0D\u8981\u53EA\u8F93\u51FA\u4E00\u4E2A\u6570\u636E\u5BF9\u8C61\uFF08\u4F8B\u5982\u53EA\u6709 names/min/max\uFF09\u3002";
+function shouldRetryFinalJson(input = {}) {
+  if (input.settings?.requireFinalJsonBlock !== true || input.alreadyRetried) return false;
+  if (hasFinalJsonBlock(input.content)) return false;
+  if (input.summary !== void 0 && hasFinalJsonBlock(input.summary)) return false;
+  return true;
+}
+
 // lib/application/agent/agent-completion.ts
 function changesState2(metadata) {
   if (!metadata) return true;
@@ -10093,6 +10440,31 @@ var CompletionCoordinator = class {
   state;
   constructor(state2) {
     this.state = state2;
+  }
+  finalJsonReflection(content, summary2) {
+    const state2 = this.state;
+    if (!shouldRetryFinalJson({
+      settings: state2.settings,
+      content,
+      summary: summary2,
+      alreadyRetried: state2.finalFormatRetryUsed
+    })) {
+      return null;
+    }
+    state2.finalFormatRetryUsed = true;
+    state2.emit({
+      type: "format-retry",
+      reason: "missing-final-json",
+      ...summary2 !== void 0 ? { via: "complete_task" } : {}
+    });
+    state2.trace({
+      phase: "format-retry",
+      reason: "missing-final-json",
+      ...summary2 !== void 0 ? { via: "complete_task" } : {},
+      toolCalls: state2.toolCallCount,
+      totalTokens: state2.totalTokens
+    });
+    return FINAL_JSON_RETRY_PROMPT;
   }
   async reviewCompleteTask(result, signal, iter) {
     const state2 = this.state;
@@ -10200,6 +10572,11 @@ var CompletionCoordinator = class {
         state2.trace({ phase: "verify", ok: true, reason: verdict.reason });
       }
     }
+    const retry = this.finalJsonReflection(
+      this.latestAssistantContent(),
+      String(result?.result || "\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002")
+    );
+    if (retry) return { kind: "reflect", reflection: retry };
     return {
       kind: "complete",
       summary: String(result?.result || "\u4EFB\u52A1\u5DF2\u5B8C\u6210\u3002"),
@@ -10209,6 +10586,8 @@ var CompletionCoordinator = class {
   reviewFinalAnswer(content) {
     const state2 = this.state;
     const claim = String(content || "");
+    const formatRetry = this.finalJsonReflection(claim);
+    if (formatRetry) return formatRetry;
     if (!claim.trim() || !shouldVerifyCompletion(
       resolveVerifyIntent(state2.intent, state2.promotedToResearch),
       state2.toolCallCount,
@@ -10249,6 +10628,15 @@ var CompletionCoordinator = class {
       codes: precheck.reasons.map((reason) => reason.code)
     });
     return buildDeterministicReflection(precheck);
+  }
+  latestAssistantContent() {
+    for (let index = this.state.messages.length - 1; index >= 0; index -= 1) {
+      const message = this.state.messages[index];
+      if (message && message.role === "assistant") {
+        return String(message.content || "");
+      }
+    }
+    return "";
   }
 };
 
@@ -10871,7 +11259,48 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
     nextIteration: resumeIteration
   }).catch(() => {
   });
+  let deadlineWrapUpSent = false;
   for (let iter = resumeIteration; ; iter++) {
+    const deadline = deadlineDecision({
+      now: Date.now(),
+      deadlineAt: settings && settings.deadlineAt,
+      wrapUpAt: settings && settings.wrapUpAt,
+      wrapUpSent: deadlineWrapUpSent
+    });
+    if (deadline === "stop") {
+      state2.emitState(RUN_STATUS.TIMEOUT, { reason: "timeBudget" });
+      state2.trace({
+        phase: "timeout",
+        reason: "timeBudget",
+        toolCalls: state2.toolCallCount,
+        totalTokens: state2.totalTokens
+      });
+      state2.emit({
+        type: "budget-exceeded",
+        reason: "timeBudget",
+        message: "\u672C\u4EFB\u52A1\u7684\u5B9E\u9645\u8017\u65F6\u5DF2\u5230\u5916\u90E8\u8BC4\u6D4B\u7ED9\u7684\u5899\u949F\u4E0A\u9650\uFF0C\u5DF2\u505C\u6B62\uFF1B\u5DF2\u5B8C\u6210\u7684\u5DE5\u5177\u7ED3\u679C\u4ECD\u4F1A\u4FDD\u7559\u3002"
+      });
+      await finalizer.timeBudgetExceeded();
+      return;
+    }
+    if (deadline === "wrap-up") {
+      deadlineWrapUpSent = true;
+      state2.trace({
+        phase: "budget-warning",
+        reason: "timeBudget",
+        toolCalls: state2.toolCallCount,
+        totalTokens: state2.totalTokens
+      });
+      state2.emit({
+        type: "budget-warning",
+        reason: "timeBudget",
+        message: "\u65F6\u95F4\u9884\u7B97\u5FEB\u5230\u4E86\uFF1A\u7ACB\u5373\u6536\u5C3E\uFF0C\u4E0D\u518D\u5F00\u59CB\u65B0\u7684\u6D41\u7A0B\u6216\u65B0\u7684\u641C\u7D22\u3002"
+      });
+      state2.messages.push({
+        role: "user",
+        content: "\u65F6\u95F4\u9884\u7B97\u5FEB\u5230\u4E86\u3002**\u4E0D\u8981\u5F00\u59CB\u65B0\u7684\u6D41\u7A0B\u6216\u65B0\u7684\u641C\u7D22**\uFF1B\u57FA\u4E8E\u5DF2\u6709\u8BC1\u636E\u7ACB\u5373\u6536\u5C3E\uFF1A\u6709\u628A\u63E1\u5C31\u6309\u7EC8\u6001\u5951\u7EA6\u8F93\u51FA\u6700\u7EC8 JSON\uFF1B\u786E\u5B9E\u67E5\u4E0D\u5230\u5C31\u8FD4\u56DE NOT_FOUND_ERROR\uFF1B\u6CA1\u5B8C\u6210\u5C31\u8FD4\u56DE UNKNOWN_ERROR\u3002\u4E0D\u8981\u518D\u53CD\u590D\u6838\u9A8C\u6216\u91CD\u8BFB\u9875\u9762\u3002"
+      });
+    }
     if (tokenBudgetExceeded(state2.totalTokens, state2.budget)) {
       state2.emitState(RUN_STATUS.TIMEOUT, { reason: "maxTotalTokens" });
       state2.trace({
@@ -11417,7 +11846,7 @@ function handleAiStreamConnection(port, deps) {
   const {
     runRegistry: runRegistry2,
     runHub: runHub2,
-    agentRunner: agentRunner2,
+    agentRunner: agentRunner3,
     runLifecycle: runLifecycle2,
     runStats: runStats2,
     registerRunCleanup: registerRunCleanup2,
@@ -11647,7 +12076,7 @@ function handleAiStreamConnection(port, deps) {
           });
         }
         try {
-          await agentRunner2.run({
+          await agentRunner3.run({
             port: channel,
             payload,
             settings,
@@ -12007,7 +12436,7 @@ function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
 function buildHandoffRecord(input = {}) {
   const id = normalizeHandoffId(input.id);
   if (!id) throw new Error("\u4EA4\u63A5\u5305\u9700\u8981\u5408\u6CD5\u7684\u4F1A\u8BDD\u6807\u8BC6");
-  const now = Number(input.now) || Date.now();
+  const now2 = Number(input.now) || Date.now();
   const messages = trimMessages(input.messages);
   const consoleErrors = trimConsole(input.consoleEntries);
   const picked = trimPicked(input.pickedElements);
@@ -12017,8 +12446,8 @@ function buildHandoffRecord(input = {}) {
   return {
     id,
     version: 1,
-    createdAt: Number(input.createdAt) || now,
-    updatedAt: now,
+    createdAt: Number(input.createdAt) || now2,
+    updatedAt: now2,
     pageUrl: clampText(input.pageUrl, 1e3),
     pageTitle: clampText(input.pageTitle, 300),
     selection: clampText(input.selection, 1e3),
@@ -12041,9 +12470,9 @@ function buildHandoffRecord(input = {}) {
     note: clampText(input.note, 500)
   };
 }
-function updateHandoffIndex(index, id, now, keep = 30) {
+function updateHandoffIndex(index, id, now2, keep = 30) {
   const list = Array.isArray(index) ? index : [];
-  const at = Number(now) || Date.now();
+  const at = Number(now2) || Date.now();
   const rest = list.filter((e) => e && e.id && e.id !== id);
   const merged = [{ id, at }].concat(rest).sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
   const next = merged.slice(0, keep);
@@ -12187,22 +12616,40 @@ var BRIDGE_METHODS = Object.freeze([
   // 写入通道：外部客户端也能操作页面（否则"调试"只能看不能碰）。
   // 允许的工具与拒绝语义见 lib/shared/bridge-write-policy.js —— 桥接层是独立入口，
   // 不经过 agent 循环的审批，因此必须有自己的许可清单。
-  "page_action"
+  "page_action",
+  // 导航通道：打开一个页面。一次完整流程的第一步是"到达页面"——
+  // 没有它，外部客户端只能等用户手动把页面打开并保持为活动标签页。
+  // 只放行 http(s)，且单次调用只允许新开一个（见 relay.js 的 openTabViaBridge）。
+  "open_tab",
+  // agent 任务通道：把**一整条任务**交给扩展内置 agent，而不是逐步驱动。
+  // 必须异步（桥接 60s / 客户端 90s，而真实流程是分钟级）：
+  //   agent_task        启动，立刻返回 jobId
+  //   agent_task_status 按游标读增量进度
+  //   agent_task_cancel 发取消信号
+  // 授权形态是「开工前声明 allowRisk」+「执行前逐个判定」——
+  // 桥接场景没有面板，没人能回答 agent 循环的审批（见 lib/shared/bridge-agent-policy.js）。
+  "agent_task",
+  "agent_task_status",
+  "agent_task_cancel"
 ]);
 
 // lib/shared/bridge-write-policy.ts
-var BRIDGE_WRITE_TOOLS = Object.freeze([
+var BRIDGE_PAGE_TOOLS = Object.freeze([
   "click_element",
   "type_text",
   "press_key",
   "wait_for_element",
-  "get_page_snapshot",
-  "get_ax_snapshot",
-  "list_frames",
   "scroll_page",
   "select_option",
   "check_box"
 ]);
+var BRIDGE_INSPECT_TOOLS = Object.freeze([
+  "get_page_snapshot",
+  "list_frames",
+  "get_ax_snapshot"
+]);
+var BRIDGE_NAV_TOOLS = Object.freeze(["open_tab"]);
+var BRIDGE_WRITE_TOOLS = Object.freeze([...BRIDGE_PAGE_TOOLS, ...BRIDGE_NAV_TOOLS]);
 var BRIDGE_DENIED_TOOLS = Object.freeze({
   run_javascript: "\u4EFB\u610F\u4EE3\u7801\u6267\u884C\u53EA\u80FD\u7531\u4F60\u5728\u6D4F\u89C8\u5668\u9762\u677F\u91CC\u5F53\u6B21\u6279\u51C6\uFF0C\u4E0D\u5F00\u653E\u7ED9\u5916\u90E8\u5BA2\u6237\u7AEF\u3002",
   run_userscript: "\u7528\u6237\u811A\u672C\u6267\u884C\u9700\u8981\u9762\u677F\u5185\u9010\u6B21\u6279\u51C6\u3002",
@@ -12210,13 +12657,47 @@ var BRIDGE_DENIED_TOOLS = Object.freeze({
   upload_file: "\u4E0A\u4F20\u672C\u5730\u6587\u4EF6\u4E0D\u53EF\u7531\u5916\u90E8\u5BA2\u6237\u7AEF\u89E6\u53D1\uFF08\u4F1A\u628A\u672C\u673A\u6587\u4EF6\u4EA4\u7ED9\u7F51\u7AD9\uFF09\u3002",
   fetch_webpage: "\u7F51\u7EDC\u6293\u53D6\u4E0D\u5C5E\u9875\u9762\u8C03\u8BD5\uFF0C\u4E14\u4F1A\u4EE5\u4F60\u7684\u767B\u5F55\u6001\u8BBF\u95EE\u4EFB\u610F\u5730\u5740\u3002",
   web_search: "\u7F51\u7EDC\u68C0\u7D22\u4E0D\u5C5E\u9875\u9762\u8C03\u8BD5\u3002",
-  open_tab: "\u8BF7\u5148\u7531\u7528\u6237\u5728\u6D4F\u89C8\u5668\u91CC\u6253\u5F00\u76EE\u6807\u9875\u9762\uFF0C\u518D\u7528 get_page_snapshot \u8BFB\u53D6\u3002",
-  switch_tab: "\u6807\u7B7E\u9875\u5207\u6362\u4F1A\u5F71\u54CD\u7528\u6237\u5F53\u524D\u89C6\u56FE\uFF0C\u4E0D\u5F00\u653E\u3002",
+  switch_tab: "\u6807\u7B7E\u9875\u5207\u6362\u4F1A\u5F71\u54CD\u7528\u6237\u5F53\u524D\u89C6\u56FE\uFF1B\u9700\u8981\u76EE\u6807\u9875\u9762\u65F6\u8BF7\u7528 open_tab\uFF08\u53EF\u590D\u7528\u5DF2\u5F00\u9875\u9762\uFF09\u3002",
   remove_entry: "\u672C\u5730\u6570\u636E\u7684\u5220\u9664\u4E0D\u5F00\u653E\u7ED9\u5916\u90E8\u5BA2\u6237\u7AEF\u3002",
   add_entry: "\u672C\u5730\u6570\u636E\u7684\u5199\u5165\u4E0D\u5F00\u653E\u7ED9\u5916\u90E8\u5BA2\u6237\u7AEF\u3002"
 });
 function isBridgeWriteTool(name) {
   return BRIDGE_WRITE_TOOLS.includes(String(name || ""));
+}
+function isBridgeNavTool(name) {
+  return BRIDGE_NAV_TOOLS.includes(String(name || ""));
+}
+function isBridgeInspectTool(name) {
+  return BRIDGE_INSPECT_TOOLS.includes(String(name || ""));
+}
+function checkPageTarget(_name, args) {
+  const hasTarget = args.ref || args.selector || args.text || args.role || args.name || args.testid || Number.isFinite(Number(args.x)) || Number.isFinite(Number(args.y));
+  if (!hasTarget) {
+    return {
+      ok: false,
+      code: "NO_TARGET",
+      error: "\u7F3A\u5C11\u5B9A\u4F4D\u53C2\u6570\u3002\u8BF7\u5148\u7528 get_page_snapshot \u53D6 ref\uFF0C\u6216\u63D0\u4F9B selector / text / role+name / testid / \u5750\u6807\u3002"
+    };
+  }
+  return { ok: true };
+}
+function checkNavArgs(name, args) {
+  const url = String(args.url || "").trim();
+  if (!url) {
+    return {
+      ok: false,
+      code: "NO_URL",
+      error: name + " \u9700\u8981 url\uFF08\u8981\u6253\u5F00\u7684\u7EDD\u5BF9 http(s) \u5730\u5740\uFF09\u3002"
+    };
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return {
+      ok: false,
+      code: "BAD_URL",
+      error: name + " \u4EC5\u652F\u6301 http/https \u5730\u5740\uFF0C\u6536\u5230\uFF1A" + url + "\u3002\u4E0D\u80FD\u6253\u5F00 chrome://\u3001file://\u3001javascript: \u7B49\u5730\u5740\uFF08\u4F1A\u8D8A\u8FC7\u6D4F\u89C8\u5668\u5B89\u5168\u8FB9\u754C\uFF09\u3002"
+    };
+  }
+  return { ok: true };
 }
 function validateBridgeWrite(name, args) {
   const tool = String(name || "").trim();
@@ -12228,43 +12709,302 @@ function validateBridgeWrite(name, args) {
       error: "\u5DE5\u5177\u300C" + tool + "\u300D\u4E0D\u7ECF\u672C\u673A\u6865\u63A5\u5F00\u653E\uFF1A" + BRIDGE_DENIED_TOOLS[tool]
     };
   }
-  if (!isBridgeWriteTool(tool)) {
+  if (!isBridgeWriteTool(tool) && !isBridgeInspectTool(tool)) {
     return {
       ok: false,
       code: "TOOL_NOT_ALLOWED",
-      error: "\u5DE5\u5177\u300C" + tool + "\u300D\u4E0D\u5728\u6865\u63A5\u5199\u5165\u767D\u540D\u5355\u5185\u3002\u53EF\u7528\u5199\u5165\u5DE5\u5177\uFF1A" + BRIDGE_WRITE_TOOLS.join("\u3001") + "\u3002\u82E5\u786E\u9700\u8BE5\u80FD\u529B\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u9762\u677F\u91CC\u76F4\u63A5\u8BA9\u52A9\u624B\u6267\u884C\uFF08\u9762\u677F\u4F1A\u9010\u6B21\u5F81\u6C42\u4F60\u7684\u540C\u610F\uFF09\u3002"
+      error: "\u5DE5\u5177\u300C" + tool + "\u300D\u4E0D\u5728\u6865\u63A5\u767D\u540D\u5355\u5185\u3002\u53EF\u7528\u52A8\u4F5C\uFF1A" + [...BRIDGE_PAGE_TOOLS, ...BRIDGE_INSPECT_TOOLS, ...BRIDGE_NAV_TOOLS].join("\u3001") + "\u3002\u82E5\u786E\u9700\u8BE5\u80FD\u529B\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u9762\u677F\u91CC\u76F4\u63A5\u8BA9\u52A9\u624B\u6267\u884C\uFF08\u9762\u677F\u4F1A\u9010\u6B21\u5F81\u6C42\u4F60\u7684\u540C\u610F\uFF09\u3002"
     };
   }
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     return { ok: false, code: "BAD_ARGS", error: "\u5DE5\u5177\u53C2\u6570\u5FC5\u987B\u662F JSON \u5BF9\u8C61\u3002" };
   }
+  if (isBridgeInspectTool(tool)) return { ok: true, name: tool };
   const target = args;
-  const hasTarget = target.ref || target.selector || target.text || target.role || target.name || target.testid || Number.isFinite(Number(target.x)) || Number.isFinite(Number(target.y));
-  if (!hasTarget) {
-    return {
-      ok: false,
-      code: "NO_TARGET",
-      error: "\u7F3A\u5C11\u5B9A\u4F4D\u53C2\u6570\u3002\u8BF7\u5148\u7528 get_page_snapshot \u53D6 ref\uFF0C\u6216\u63D0\u4F9B selector / text / role+name / testid / \u5750\u6807\u3002"
-    };
-  }
+  const shape = isBridgeNavTool(tool) ? checkNavArgs(tool, target) : checkPageTarget(tool, target);
+  if (!shape.ok) return shape;
   return { ok: true, name: tool };
 }
+
+// lib/shared/bridge-agent-policy.ts
+var AGENT_BUDGET_RISKS = Object.freeze(["page", "browser", "network", "write", "destructive", "external"]);
+var AGENT_NEVER_RISK = "high";
+var RISK_TO_CATEGORY = Object.freeze({
+  page: "commands",
+  browser: "browser",
+  network: "browser",
+  write: "edit",
+  destructive: "edit",
+  external: "mcp"
+});
+function normalizeAllowRisk(raw) {
+  const list = raw === void 0 || raw === null ? [] : raw;
+  if (!Array.isArray(list)) {
+    return { ok: false, error: "allowRisk \u5FC5\u987B\u662F\u6570\u7EC4\uFF08\u5141\u8BB8\u7684\u98CE\u9669\u7C7B\u522B\u6E05\u5355\uFF09\uFF0C\u6536\u5230\uFF1A" + typeof list };
+  }
+  const set = /* @__PURE__ */ new Set(["read"]);
+  for (const item of list) {
+    const v = String(item === void 0 || item === null ? "" : item).trim().toLowerCase();
+    if (!v) continue;
+    if (v === "read") continue;
+    if (v === AGENT_NEVER_RISK) {
+      return {
+        ok: false,
+        error: 'allowRisk \u4E0D\u63A5\u53D7 "' + AGENT_NEVER_RISK + '"\uFF1A\u4EFB\u610F\u4EE3\u7801\u6267\u884C / \u7B2C\u4E09\u65B9\u7528\u6237\u811A\u672C\uFF08run_javascript\u3001run_userscript\u3001install_userscript\uFF09**\u4EFB\u4F55\u58F0\u660E\u90FD\u6362\u4E0D\u5230**\uFF0C\u53EA\u80FD\u5728\u6D4F\u89C8\u5668\u9762\u677F\u91CC\u7531\u7528\u6237\u5F53\u6B21\u6279\u51C6\u3002'
+      };
+    }
+    if (!AGENT_BUDGET_RISKS.includes(v)) {
+      return {
+        ok: false,
+        error: 'allowRisk \u91CC\u6709\u672A\u77E5\u7684\u98CE\u9669\u7C7B\u522B "' + v + '"\u3002\u53EF\u7528\u7C7B\u522B\uFF1A' + AGENT_BUDGET_RISKS.join("\u3001") + "\uFF08read \u4E0D\u9700\u8981\u58F0\u660E\uFF0C\u6C38\u8FDC\u5141\u8BB8\uFF09\u3002"
+      };
+    }
+    set.add(v);
+  }
+  return { ok: true, set };
+}
+function checkAgentToolBudget(toolName, allowSet, deps = {}) {
+  const name = String(toolName || "");
+  const getMetadata = deps.getMetadata || (() => ({}));
+  const meta = getMetadata(name) || {};
+  const risk = String(meta.risk || "");
+  const set = allowSet instanceof Set ? allowSet : new Set(Array.isArray(allowSet) ? allowSet : []);
+  if (!risk || risk === "unknown") {
+    return {
+      allowed: false,
+      risk: risk || "unknown",
+      reason: "\u5DE5\u5177\u300C" + name + "\u300D\u6CA1\u6709\u53EF\u7528\u7684\u98CE\u9669\u7B49\u7EA7\uFF0C\u65E0\u6CD5\u5224\u65AD\u662F\u5426\u5728\u4F60\u7684 allowRisk \u5185\u3002",
+      hint: "\u8FD9\u901A\u5E38\u662F\u5DE5\u5177\u672A\u767B\u8BB0\u5143\u6570\u636E\u3002\u8BF7\u6539\u7528\u9762\u677F\u6267\u884C\uFF0C\u6216\u6362\u4E00\u4E2A\u5DF2\u767B\u8BB0\u7684\u5DE5\u5177\u3002"
+    };
+  }
+  if (risk === AGENT_NEVER_RISK || meta.alwaysRequireApproval === true) {
+    return {
+      allowed: false,
+      risk,
+      reason: "\u5DE5\u5177\u300C" + name + "\u300D\u5C5E\u9AD8\u98CE\u9669\uFF08" + (risk === AGENT_NEVER_RISK ? "\u4EFB\u610F\u4EE3\u7801\u6267\u884C / \u7B2C\u4E09\u65B9\u811A\u672C" : "\u88AB\u6807\u8BB0\u4E3A\u9010\u6B21\u5BA1\u6279") + "\uFF09\uFF0C**\u4E0D\u80FD**\u7ECF agent_task \u6267\u884C\u3002",
+      hint: "\u8FD9\u7C7B\u64CD\u4F5C\u53EA\u80FD\u5728\u6D4F\u89C8\u5668\u9762\u677F\u91CC\u7531\u7528\u6237\u5F53\u6B21\u6279\u51C6\uFF0C\u8BF7\u8BA9\u7528\u6237\u76F4\u63A5\u5728\u9762\u677F\u91CC\u6267\u884C\u8FD9\u4E00\u6B65\u3002"
+    };
+  }
+  if (risk === "read") return { allowed: true, risk, readOnly: true };
+  const category = RISK_TO_CATEGORY[risk];
+  if (!category) {
+    return {
+      allowed: false,
+      risk,
+      reason: "\u5DE5\u5177\u300C" + name + '\u300D\u7684\u98CE\u9669\u7B49\u7EA7 "' + risk + '" \u6CA1\u6709\u5BF9\u5E94\u7684\u5BA1\u6279\u7C7B\u522B\uFF0C\u65E0\u6CD5\u5224\u5B9A\u3002',
+      hint: "\u8BF7\u6539\u7528\u9762\u677F\u6267\u884C\uFF0C\u6216\u8865\u4E0A\u8BE5\u98CE\u9669\u7B49\u7EA7\u7684\u7C7B\u522B\u6620\u5C04\u3002"
+    };
+  }
+  if (set.has(risk)) return { allowed: true, risk, readOnly: false };
+  return {
+    allowed: false,
+    risk,
+    reason: "\u5DE5\u5177\u300C" + name + '\u300D\u5C5E\u98CE\u9669\u7C7B\u522B "' + risk + '"\uFF08\u5BA1\u6279\u7C7B\u522B ' + category + "\uFF09\uFF0C\u4F46\u4E0D\u5728\u672C\u6B21 allowRisk \u58F0\u660E\u5185\u3002\u5DF2\u58F0\u660E\uFF1A" + [...set].sort().join("\u3001") + "\u3002",
+    hint: '\u82E5\u8FD9\u6B21\u4EFB\u52A1\u786E\u5B9E\u9700\u8981\u5B83\uFF0C\u8BF7\u91CD\u65B0\u8C03\u7528 agent_task \u5E76\u5728 allowRisk \u91CC\u52A0\u4E0A "' + risk + '"\uFF08\u5F53\u524D\u5DF2\u5141\u8BB8\u7684\u7C7B\u522B\u4F1A\u968F\u672C\u6B21\u4EFB\u52A1\u7ED3\u675F\u800C\u5931\u6548\uFF0C\u4E0D\u4F1A\u7D2F\u79EF\u5230\u4E0B\u4E00\u6B21\uFF09\u3002'
+  };
+}
+function preApprovedToolNames(allowSet, toolNames, deps = {}) {
+  const set = allowSet instanceof Set ? allowSet : new Set(Array.isArray(allowSet) ? allowSet : []);
+  const getMetadata = deps.getMetadata || (() => ({}));
+  const out = [];
+  for (const raw of Array.isArray(toolNames) ? toolNames : []) {
+    const name = String(raw || "");
+    if (!name) continue;
+    const meta = getMetadata(name) || {};
+    const risk = String(meta.risk || "");
+    if (risk === "read" || !risk || risk === "unknown") continue;
+    if (risk === AGENT_NEVER_RISK || meta.alwaysRequireApproval === true) continue;
+    if (meta.requiresApproval !== true) continue;
+    if (!set.has(risk)) continue;
+    out.push(name);
+  }
+  return out.sort();
+}
+
+// lib/bridge/agent-job.ts
+var JOB_STATE = Object.freeze({
+  RUNNING: "running",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
+  STALLED: "stalled"
+});
+var JOB_STALL_MS = 9e4;
+var JOB_EVENT_LIMIT = 400;
+var JOB_KEEP = 20;
+function finalAnswerFrom(events) {
+  const list = Array.isArray(events) ? events : [];
+  let last = -1;
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (list[index] && list[index].type === "chunk") {
+      last = index;
+      break;
+    }
+  }
+  if (last < 0) return "";
+  const parts = [];
+  for (let index = last; index >= 0; index -= 1) {
+    const event = list[index];
+    if (!event || event.type !== "chunk") break;
+    const text = typeof event.text === "string" ? event.text : "";
+    if (text) parts.unshift(text);
+  }
+  return parts.join("").trim();
+}
+function now() {
+  return Date.now();
+}
+var AgentJobStore = class {
+  eventLimit;
+  keep;
+  stallMs;
+  now;
+  jobs = /* @__PURE__ */ new Map();
+  seq = 0;
+  constructor(options = {}) {
+    this.eventLimit = Number(options.eventLimit) > 0 ? Number(options.eventLimit) : JOB_EVENT_LIMIT;
+    this.keep = Number(options.keep) > 0 ? Number(options.keep) : JOB_KEEP;
+    this.stallMs = Number(options.stallMs) > 0 ? Number(options.stallMs) : JOB_STALL_MS;
+    this.now = typeof options.now === "function" ? options.now : now;
+  }
+  create(meta = {}) {
+    const running = this.running();
+    if (running) {
+      return {
+        ok: false,
+        error: "\u5DF2\u6709 agent \u4EFB\u52A1\u5728\u8FD0\u884C\u4E2D\uFF08jobId=" + running.id + "\uFF0C\u5F00\u59CB\u4E8E " + new Date(running.startedAt).toISOString() + "\uFF09\u3002\u6D4F\u89C8\u5668\u91CC\u540C\u65F6\u53EA\u80FD\u8DD1\u4E00\u4E2A agent \u4EFB\u52A1\uFF1A\u4E24\u4E2A\u540C\u65F6\u52A8\u624B\u4F1A\u4E92\u76F8\u8E29\u6807\u7B7E\u9875\u3002",
+        runningJobId: running.id
+      };
+    }
+    const id = "job-" + this.now().toString(36) + "-" + (++this.seq).toString(36);
+    const job = {
+      id,
+      state: JOB_STATE.RUNNING,
+      instruction: String(meta.instruction || "").slice(0, 2e3),
+      allowRisk: Array.isArray(meta.allowRisk) ? meta.allowRisk.map(String) : [],
+      tabId: Number.isInteger(Number(meta.tabId)) ? Number(meta.tabId) : null,
+      startedAt: this.now(),
+      updatedAt: this.now(),
+      nextSeq: 1,
+      events: [],
+      omitted: 0,
+      result: "",
+      error: ""
+    };
+    this.jobs.set(id, job);
+    this.prune();
+    return { ok: true, job };
+  }
+  running() {
+    for (const job of this.jobs.values()) {
+      if (job.state === JOB_STATE.RUNNING) return job;
+    }
+    return null;
+  }
+  get(id) {
+    return this.jobs.get(String(id || "")) || null;
+  }
+  append(id, event) {
+    const job = this.get(id);
+    if (!job) return null;
+    const entry = Object.assign({}, event, {
+      seq: job.nextSeq++,
+      at: this.now()
+    });
+    job.events.push(entry);
+    job.updatedAt = this.now();
+    while (job.events.length > this.eventLimit) {
+      job.events.shift();
+      job.omitted += 1;
+    }
+    return entry;
+  }
+  finish(id, state2, extra = {}) {
+    const job = this.get(id);
+    if (!job) return null;
+    job.state = state2;
+    job.updatedAt = this.now();
+    job.finishedAt = this.now();
+    if (extra.result) job.result = String(extra.result);
+    if (state2 === JOB_STATE.COMPLETED && !job.result) {
+      job.result = finalAnswerFrom(job.events);
+      job.resultFromEvents = Boolean(job.result);
+    }
+    if (extra.error !== void 0) job.error = String(extra.error || "");
+    return job;
+  }
+  read(id, sinceSeq = 0) {
+    const job = this.get(id);
+    if (!job) return null;
+    const since = Number(sinceSeq);
+    const from = Number.isFinite(since) && since > 0 ? since : 0;
+    const events = job.events.filter((event) => event.seq > from);
+    return {
+      jobId: job.id,
+      state: job.state,
+      running: job.state === JOB_STATE.RUNNING,
+      instruction: job.instruction,
+      tabId: job.tabId,
+      startedAt: job.startedAt,
+      updatedAt: job.updatedAt,
+      events,
+      seq: events.length ? events[events.length - 1].seq : from,
+      omitted: job.omitted,
+      result: job.result,
+      error: job.error
+    };
+  }
+  requestCancel(id) {
+    const job = this.get(id);
+    if (!job) return null;
+    job.cancelRequested = true;
+    job.updatedAt = this.now();
+    return job;
+  }
+  reapStale(nowMs) {
+    const at = Number.isFinite(Number(nowMs)) ? Number(nowMs) : this.now();
+    const stale = [];
+    for (const job of this.jobs.values()) {
+      if (job.state !== JOB_STATE.RUNNING) continue;
+      const idleMs = at - job.updatedAt;
+      if (idleMs < this.stallMs) continue;
+      job.state = JOB_STATE.STALLED;
+      job.updatedAt = at;
+      job.finishedAt = at;
+      job.error = "\u4EFB\u52A1\u5DF2 " + Math.round(idleMs / 1e3) + "s \u6CA1\u6709\u4EFB\u4F55\u8FDB\u5C55\uFF0C\u5224\u5B9A\u4E3A\u5361\u4F4F\u3002\u5E38\u89C1\u539F\u56E0\uFF1A\u5361\u5728\u4E00\u4E2A\u6CA1\u4EBA\u80FD\u56DE\u7B54\u7684\u5BA1\u6279\u4E0A\uFF08\u6865\u63A5\u573A\u666F\u6CA1\u6709\u9762\u677F\uFF09\uFF0C\u6216\u9875\u9762/\u7F51\u7EDC\u957F\u65F6\u95F4\u65E0\u54CD\u5E94\u3002\u8BF7\u7528 agent_task_cancel \u6536\u5C3E\u540E\u91CD\u8BD5\uFF1B\u82E5\u53CD\u590D\u5361\u5728\u540C\u4E00\u5904\uFF0C\u628A\u8BE5\u6B65\u9AA4\u6539\u7528\u539F\u5B50\u5DE5\u5177\uFF08page_action\uFF09\u9010\u6B65\u9A71\u52A8\u3002";
+      job.stalledAfterMs = idleMs;
+      stale.push(job);
+    }
+    return stale;
+  }
+  prune() {
+    if (this.jobs.size <= this.keep) return;
+    const ordered = [...this.jobs.values()].sort((a, b) => a.startedAt - b.startedAt);
+    for (const job of ordered) {
+      if (this.jobs.size <= this.keep) break;
+      if (job.state === JOB_STATE.RUNNING) continue;
+      this.jobs.delete(job.id);
+    }
+  }
+};
 
 // lib/bridge/relay.ts
 var RELAY_HOST = "127.0.0.1:7801";
 var RELAY_HTTP = "http://" + RELAY_HOST;
+function errorMessage(error) {
+  if (error instanceof Error) return error.message;
+  return String(error ?? "");
+}
 function relayWsUrl() {
   return "ws://" + RELAY_HOST + "/?token=" + encodeURIComponent(relayToken);
 }
 var DEFAULT_BRIDGE_TOKEN = "recallflow-local-bridge-v1";
 var relayToken = "";
-var tokenLoaded = false;
 var socket = null;
 var reconnectTimer = null;
 var heartbeatTimer = null;
 var httpLoopRunning = false;
 async function loadRelayToken() {
-  if (tokenLoaded) return relayToken;
   try {
     const settings = await getAISettings();
     relayToken = String(settings && settings.bridgeToken || "").trim();
@@ -12272,7 +13012,6 @@ async function loadRelayToken() {
     relayToken = "";
   }
   if (!relayToken) relayToken = DEFAULT_BRIDGE_TOKEN;
-  tokenLoaded = true;
   return relayToken;
 }
 function authHeaders() {
@@ -12360,6 +13099,7 @@ async function httpLoop() {
   httpLoopRunning = true;
   while (httpLoopRunning) {
     try {
+      await loadRelayToken();
       const res = await fetch(RELAY_HTTP + "/poll", { cache: "no-store", headers: authHeaders() });
       const data = await res.json();
       const requests = data && data.requests || [];
@@ -12396,14 +13136,226 @@ async function dispatch(method, params) {
   if (method === "handoff_get") return await getHandoff(params && params.id);
   if (method === "handoff_list") return await listHandoffs(params && params.limit);
   if (method === "screenshot_capture") return await screenshotCapture(params);
+  if (method === "open_tab") return await openTabViaBridge(params);
+  if (method === "agent_task") return await agentTaskStart(params);
+  if (method === "agent_task_status") return await agentTaskStatus(params);
+  if (method === "agent_task_cancel") return await agentTaskCancel(params);
   if (method === "page_action") return await pageAction(params);
   throw new Error("unknown method: " + method);
 }
+var agentJobs = new AgentJobStore();
+var cancelControllers = /* @__PURE__ */ new Map();
+var agentRunner = runAgentStream;
+function agentJobPort(jobId) {
+  return {
+    postMessage(msg) {
+      agentJobs.append(jobId, msg);
+    },
+    onMessage: {
+      addListener() {
+      },
+      removeListener() {
+      }
+    },
+    // 桥接没有面板可弹，审批一律不批准（即"不许执行"）。
+    // 正常情况下走不到这里：已声明类别的工具已被预放行，未声明的在执行前就被 guard 拒了。
+    requestApproval() {
+      return Promise.resolve("reject");
+    }
+  };
+}
+function agentJobConflict() {
+  const running = agentJobs.running();
+  if (!running) return null;
+  return {
+    ok: false,
+    code: "AGENT_TASK_RUNNING",
+    error: "\u5DF2\u6709\u4E00\u4E2A agent \u4EFB\u52A1\u5728\u64CD\u4F5C\u6D4F\u89C8\u5668\uFF08jobId=" + running.id + '\uFF09\uFF0C\u56E0\u6B64\u9875\u9762\u52A8\u4F5C\u88AB\u6682\u65F6\u62D2\u7EDD\u3002\u4E24\u4E2A\u6267\u884C\u8005\u540C\u65F6\u52A8\u624B\u4F1A\u4E92\u76F8\u8E29\u6807\u7B7E\u9875\uFF08\u8868\u73B0\u4E3A"\u4E24\u8FB9\u90FD\u70B9\u4E86\u4E00\u4E0B"\uFF09\u3002',
+    hint: "\u7528 agent_task_status \u67E5\u770B\u5B83\u7684\u8FDB\u5EA6\uFF1B\u9700\u8981\u4E2D\u6B62\u5C31\u5148 agent_task_cancel\u3002"
+  };
+}
+async function agentTaskStart(params) {
+  const p = params || {};
+  const instruction = String(p.instruction || "").trim();
+  if (!instruction) {
+    return { ok: false, error: "agent_task \u9700\u8981 instruction\uFF08\u8981\u8BA9\u6269\u5C55\u5185 agent \u5B8C\u6210\u7684\u4EFB\u52A1\uFF09\u3002" };
+  }
+  const norm = normalizeAllowRisk(p.allowRisk);
+  if (!norm.ok) return { ok: false, error: norm.error, code: "BAD_ALLOW_RISK" };
+  const created = agentJobs.create({ instruction, allowRisk: [...norm.set], tabId: p.tabId });
+  if (!created.ok) {
+    return { ok: false, error: created.error, code: "AGENT_TASK_BUSY", runningJobId: created.runningJobId };
+  }
+  const job = created.job;
+  const controller = new AbortController();
+  cancelControllers.set(job.id, controller);
+  const port = agentJobPort(job.id);
+  const guard = (name) => checkAgentToolBudget(name, norm.set, { getMetadata: getToolMetadata });
+  const approved = preApprovedToolNames(norm.set, TOOL_REGISTRY.map((t) => t.name), {
+    getMetadata: getToolMetadata
+  });
+  (async () => {
+    try {
+      const settings = await getAISettings();
+      if (!settings.apiKey) {
+        agentJobs.finish(job.id, JOB_STATE.FAILED, {
+          error: "\u5C1A\u672A\u914D\u7F6E API Key\uFF08\u6269\u5C55\u8BBE\u7F6E\u9875\u586B\u5199\u540E\u91CD\u8BD5\uFF09\u3002\u6269\u5C55\u5185 agent \u9700\u8981\u5B83\u624D\u80FD\u89C4\u5212\u4E0E\u6267\u884C\u3002"
+        });
+        return;
+      }
+      const book = await getBook().catch((e) => {
+        try {
+          console.warn("[relay] \u8BFB\u53D6\u77E5\u8BC6\u5E93\u5931\u8D25\uFF0C\u672C\u6B21\u4EFB\u52A1\u4EE5\u7A7A\u77E5\u8BC6\u5E93\u542F\u52A8\uFF1A" + errorMessage(e));
+        } catch (_) {
+        }
+        return {};
+      });
+      const tab = p.tabId ? await chrome.tabs.get(Number(p.tabId)).catch(() => null) : await activeTab();
+      const settingsWithGuard = Object.assign({}, settings, { agentBudgetGuard: guard });
+      const payload = {
+        action: "agent",
+        question: instruction,
+        runId: job.id,
+        // 预放行清单：让 agent 循环跳过"等面板点同意"那一步（见上方 授权形态 说明）。
+        sessionApprovedTools: approved
+      };
+      await agentRunner(
+        port,
+        payload,
+        settingsWithGuard,
+        book,
+        controller.signal,
+        tab && tab.id ? tab.id : null,
+        void 0
+      );
+      const cur = agentJobs.get(job.id);
+      if (cur && cur.state === JOB_STATE.RUNNING) {
+        agentJobs.finish(job.id, JOB_STATE.COMPLETED, { result: String(cur.result || "") });
+      }
+    } catch (e) {
+      const cur = agentJobs.get(job.id);
+      const cancelled = cur && (cur.state === JOB_STATE.CANCELLED || cur.cancelRequested);
+      agentJobs.finish(job.id, cancelled ? JOB_STATE.CANCELLED : JOB_STATE.FAILED, {
+        error: cancelled ? "\u4EFB\u52A1\u5DF2\u6309\u8BF7\u6C42\u53D6\u6D88\u3002" : "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + errorMessage(e)
+      });
+    } finally {
+      cancelControllers.delete(job.id);
+    }
+  })();
+  return {
+    ok: true,
+    jobId: job.id,
+    state: job.state,
+    approvedTools: approved,
+    allowRisk: [...norm.set],
+    note: "\u4EFB\u52A1\u5DF2\u5728\u540E\u53F0\u542F\u52A8\u3002\u7528 agent_task_status(jobId, sinceSeq) \u6309\u6E38\u6807\u8BFB\u8FDB\u5EA6\uFF1B\u4EFB\u52A1\u671F\u95F4 page_action \u4F1A\u88AB\u62D2\u7EDD\uFF08\u907F\u514D\u4E24\u4E2A\u6267\u884C\u8005\u62A2\u540C\u4E00\u4E2A\u6807\u7B7E\u9875\uFF09\u3002"
+  };
+}
+async function agentTaskStatus(params) {
+  const p = params || {};
+  agentJobs.reapStale();
+  const jobId = String(p.jobId || "").trim();
+  if (!jobId) {
+    const running = agentJobs.running();
+    return {
+      ok: true,
+      runningJobId: running ? running.id : "",
+      jobs: [...agentJobs.jobs.values()].map((j) => ({
+        jobId: j.id,
+        state: j.state,
+        instruction: j.instruction.slice(0, 80),
+        startedAt: j.startedAt
+      }))
+    };
+  }
+  const r = agentJobs.read(jobId, Number(p.sinceSeq) || 0);
+  if (!r) return { ok: false, error: "\u672A\u627E\u5230\u8BE5 job\uFF1A" + jobId, jobId };
+  return Object.assign({ ok: true }, r);
+}
+async function agentTaskCancel(params) {
+  const p = params || {};
+  const jobId = String(p.jobId || "").trim();
+  const job = jobId ? agentJobs.get(jobId) : agentJobs.running();
+  if (!job) return { ok: false, error: "\u6CA1\u6709\u53EF\u53D6\u6D88\u7684 agent \u4EFB\u52A1" };
+  agentJobs.requestCancel(job.id);
+  try {
+    cancelControllers.get(job.id)?.abort();
+  } catch (e) {
+  }
+  return {
+    ok: true,
+    jobId: job.id,
+    state: agentJobs.get(job.id)?.state || JOB_STATE.CANCELLED,
+    note: "\u5DF2\u53D1\u51FA\u53D6\u6D88\u4FE1\u53F7\u3002\u7528 agent_task_status \u786E\u8BA4\u6700\u7EC8\u72B6\u6001\uFF08\u53D6\u6D88\u662F\u5F02\u6B65\u7684\uFF0C\u4E0D\u4F1A\u7ACB\u523B\u53D8 cancelled\uFF09\u3002"
+  };
+}
+async function openTabViaBridge(params) {
+  const p = params || {};
+  const conflict = agentJobConflict();
+  if (conflict) return conflict;
+  const verdict = validateBridgeWrite("open_tab", p);
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      error: verdict.error,
+      code: verdict.code
+    };
+  }
+  try {
+    const res = await executeTool(
+      "open_tab",
+      { url: p.url, newTab: p.newTab === true },
+      {
+        // 与 pageAction 同源的活动标签页上下文：让 openTab 的"隔离模式/绑定会话"照常工作。
+        tabId: null,
+        pageUrl: "",
+        pageTitle: "",
+        openedTabCount: 0,
+        maxOpenedTabs: 1
+      }
+    );
+    if (!res || res.ok === false) {
+      return {
+        ok: false,
+        error: res && res.result || "\u6253\u5F00\u6807\u7B7E\u9875\u5931\u8D25",
+        blocked: Boolean(res && res.blocked)
+      };
+    }
+    return {
+      ok: true,
+      tabId: res.targetTabId,
+      reused: Boolean(res.reused),
+      pageUrl: res.targetTab && res.targetTab.url || p.url,
+      pageTitle: res.targetTab && res.targetTab.title || "",
+      ready: Boolean(res.targetTab && res.targetTab.ready),
+      result: res.result || ""
+    };
+  } catch (e) {
+    return { ok: false, error: "\u6253\u5F00\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + errorMessage(e) };
+  }
+}
+async function resolveActionTab(explicitTabId) {
+  const id = Number(explicitTabId);
+  if (Number.isInteger(id) && id > 0) {
+    const t = await chrome.tabs.get(id).catch(() => null);
+    if (t && t.id) return t;
+    throw new Error("\u6307\u5B9A\u7684\u6807\u7B7E\u9875\u4E0D\u5B58\u5728\u6216\u5DF2\u5173\u95ED\uFF1AtabId=" + id + "\u3002\u8BF7\u91CD\u65B0 open_tab \u83B7\u53D6\u65B0\u7684 tabId\u3002");
+  }
+  return await activeTab();
+}
 async function pageAction(params) {
   const p = params || {};
+  const conflict = agentJobConflict();
+  if (conflict) return conflict;
   const verdict = validateBridgeWrite(p.tool, p.args || {});
-  if (!verdict.ok) return { ok: false, error: verdict.error, code: verdict.code };
-  const tab = await activeTab();
+  if (!verdict.ok) {
+    return {
+      ok: false,
+      error: verdict.error,
+      code: verdict.code
+    };
+  }
+  const tab = await resolveActionTab(p.tabId);
   if (!tab || !tab.id) return { ok: false, error: "\u672A\u627E\u5230\u6D3B\u52A8\u6807\u7B7E\u9875\uFF08\u8BF7\u5148\u8BA9\u7528\u6237\u5207\u5230\u8981\u8C03\u8BD5\u7684\u9875\u9762\uFF09", code: "NO_ACTIVE_TAB" };
   const ctx = { tabId: tab.id, pageUrl: tab.url || "", pageTitle: tab.title || "" };
   const res = await executeTool(verdict.name, p.args || {}, ctx);
@@ -12775,13 +13727,13 @@ var PanelSessionStore = class {
     if (!session || session.id !== id) return null;
     return session;
   }
-  async _readLock(id, now) {
+  async _readLock(id, now2) {
     if (!id) return null;
     const key = panelSessionLockKey(id);
     const data = await this.storage.get(key);
     const lock = data && data[key];
     if (!lock || !lock.runId) return null;
-    if (Number(lock.at) + this.lockTtlMs <= now) return null;
+    if (Number(lock.at) + this.lockTtlMs <= now2) return null;
     return lock;
   }
   async _writeIndex(index) {
@@ -12790,7 +13742,7 @@ var PanelSessionStore = class {
   async _writeActive(id, seq, updatedAt) {
     await this.storage.set({ [PSESS_ACTIVE_KEY]: { id, seq, updatedAt } });
   }
-  async _lockedIds(index, now) {
+  async _lockedIds(index, now2) {
     const ids = Object.keys(index.sessions);
     if (!ids.length) return /* @__PURE__ */ new Set();
     const keys = ids.map(panelSessionLockKey);
@@ -12798,12 +13750,12 @@ var PanelSessionStore = class {
     const locked = /* @__PURE__ */ new Set();
     for (const id of ids) {
       const lock = data && data[panelSessionLockKey(id)];
-      if (lock && lock.runId && Number(lock.at) + this.lockTtlMs > now) locked.add(id);
+      if (lock && lock.runId && Number(lock.at) + this.lockTtlMs > now2) locked.add(id);
     }
     return locked;
   }
-  async _summaries(index, now) {
-    const locked = await this._lockedIds(index, now);
+  async _summaries(index, now2) {
+    const locked = await this._lockedIds(index, now2);
     return Object.values(index.sessions).map((s) => Object.assign(summarize(s), { locked: locked.has(s.id) })).sort(sortSummaries);
   }
   async _state(index, active) {
@@ -12928,13 +13880,13 @@ var PanelSessionStore = class {
       if (!Object.keys(index.sessions).length) {
         const legacy = (Array.isArray(opts.legacyEntries) ? opts.legacyEntries : []).filter((e) => e && e.key && LEGACY_CONV_RE.test(String(e.key)) && Array.isArray(e.conversation)).sort((a, b) => (Number(a.updatedAt) || 0) - (Number(b.updatedAt) || 0));
         for (const entry of legacy) {
-          const now = Number(entry.updatedAt) || this.now();
+          const now2 = Number(entry.updatedAt) || this.now();
           index.seq += 1;
           const session = this._newSession({
             title: deriveSessionTitle(entry.conversation),
             messages: entry.conversation,
-            createdAt: now,
-            updatedAt: now,
+            createdAt: now2,
+            updatedAt: now2,
             origin: "",
             handoffId: "",
             seq: index.seq,
@@ -12943,7 +13895,7 @@ var PanelSessionStore = class {
           index.sessions[session.id] = summarize(session);
           await this.storage.set({ [panelSessionKey(session.id)]: session });
           migratedKeys.push(String(entry.key));
-          active = { id: session.id, seq: session.seq, updatedAt: now };
+          active = { id: session.id, seq: session.seq, updatedAt: now2 };
         }
         if (!Object.keys(index.sessions).length) {
           const empty = await this._createInIndex(index, {});
@@ -13036,7 +13988,7 @@ var PanelSessionStore = class {
           };
         }
       }
-      const now = this.now();
+      const now2 = this.now();
       const seq = index.seq + 1;
       const stats = estimateConversationStats(data.messages);
       const titleAuto = current.titleAuto !== false;
@@ -13044,7 +13996,7 @@ var PanelSessionStore = class {
       const explicitTitle = typeof data.title === "string" ? data.title.trim() : "";
       const next = Object.assign({}, current, {
         messages: data.messages,
-        updatedAt: now,
+        updatedAt: now2,
         seq,
         title: explicitTitle || (titleAuto ? derived : current.title || PSESS_DEFAULT_TITLE),
         titleAuto: explicitTitle ? false : titleAuto,
@@ -13091,15 +14043,15 @@ var PanelSessionStore = class {
       const index = await this._readIndex();
       const session = await this._readSession(wanted);
       if (!session || !index.sessions[wanted]) return { ok: false, error: "\u4F1A\u8BDD\u4E0D\u5B58\u5728" };
-      const now = this.now();
+      const now2 = this.now();
       const seq = index.seq + 1;
-      const next = Object.assign({}, session, { title: nextTitle, titleAuto: false, updatedAt: now, seq });
+      const next = Object.assign({}, session, { title: nextTitle, titleAuto: false, updatedAt: now2, seq });
       index.seq = seq;
       index.sessions[wanted] = summarize(next);
       await this.storage.set({ [panelSessionKey(wanted)]: next });
       await this._writeIndex(index);
       const active = await this._readActive();
-      if (active.id === wanted) await this._writeActive(wanted, seq, now);
+      if (active.id === wanted) await this._writeActive(wanted, seq, now2);
       return {
         ok: true,
         session: next,
@@ -13148,8 +14100,8 @@ var PanelSessionStore = class {
       if (!id || !runId) return { ok: false, error: "\u7F3A\u5C11\u4F1A\u8BDD\u6216\u8FD0\u884C\u6807\u8BC6" };
       const index = await this._readIndex();
       if (!index.sessions[id]) return { ok: false, missing: true, error: "\u4F1A\u8BDD\u4E0D\u5B58\u5728" };
-      const now = this.now();
-      let current = await this._readLock(id, now);
+      const now2 = this.now();
+      let current = await this._readLock(id, now2);
       const sameOwner = current && (current.runId === runId || tabId != null && current.tabId != null && Number(current.tabId) === tabId);
       if (current && !sameOwner && current.tabId != null) {
         let ownerAlive = true;
@@ -13166,11 +14118,11 @@ var PanelSessionStore = class {
       const lock = {
         runId,
         tabId,
-        at: now,
+        at: now2,
         previous: current && !sameOwner ? { runId: current.runId, tabId: current.tabId } : null
       };
       await this.storage.set({ [panelSessionLockKey(id)]: lock });
-      return { ok: true, lock, sessions: await this._summaries(index, now) };
+      return { ok: true, lock, sessions: await this._summaries(index, now2) };
     });
   }
   unlock(input) {
@@ -13208,7 +14160,7 @@ var PanelSessionStore = class {
     });
   }
   async _createInIndex(index, input) {
-    const now = this.now();
+    const now2 = this.now();
     index.seq += 1;
     const messages = Array.isArray(input.messages) ? input.messages : [];
     let id = String(this.idFactory());
@@ -13216,14 +14168,14 @@ var PanelSessionStore = class {
       id = String(this.idFactory());
     }
     if (!id || Object.prototype.hasOwnProperty.call(index.sessions, id)) {
-      id = "S-" + now.toString(36) + "-" + index.seq.toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+      id = "S-" + now2.toString(36) + "-" + index.seq.toString(36) + "-" + Math.random().toString(36).slice(2, 7);
     }
     const session = this._newSession({
       id,
       title: String(input.title || "").trim() || deriveSessionTitle(messages),
       messages,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: now2,
+      updatedAt: now2,
       origin: input.origin,
       handoffId: input.handoffId,
       seq: index.seq,
@@ -13997,7 +14949,7 @@ function createChromeStorageAdapter(area3, api = typeof chrome !== "undefined" ?
 }
 
 // entries/background.ts
-var agentRunner = createAgentRunner(runAgentStream);
+var agentRunner2 = createAgentRunner(runAgentStream);
 var persistentPanelStorage = createIndexedDbKeyValueStore({
   dbName: "recallflow-history",
   storeName: "panel-kv",
@@ -14495,7 +15447,7 @@ function requestRunStop(params, requesterTabId) {
 var aiStreamDependencies = {
   runRegistry,
   runHub,
-  agentRunner,
+  agentRunner: agentRunner2,
   runLifecycle,
   runStats,
   registerRunCleanup,

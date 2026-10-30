@@ -1,0 +1,65 @@
+[
+  {
+    "task_id": 0,
+    "intent_template_id": 0,
+    "sites": ["shopping"],
+    "start_urls": ["__SHOPPING__"],
+    "intent": "What is the price of the cheapest laptop with at least 16GB RAM on the site? Report the price as a number.",
+    "eval": [
+      {
+        "evaluator": "AgentResponseEvaluator",
+        "ordered": false,
+        "expected": {
+          "task_type": "retrieve",
+          "status": "SUCCESS",
+          "retrieved_data": [899.99]
+        }
+      }
+    ],
+    "revision": 1
+  },
+  {
+    "task_id": 1,
+    "intent_template_id": 0,
+    "sites": ["gitlab"],
+    "start_urls": ["__GITLAB__"],
+    "intent": "Create a new issue titled 'Fix login bug' in the repository 'my-project'.",
+    "eval": [
+      {
+        "evaluator": "AgentResponseEvaluator",
+        "ordered": false,
+        "expected": {
+          "task_type": "mutate",
+          "status": "SUCCESS",
+          "retrieved_data": null
+        }
+      },
+      {
+        "evaluator": "NetworkEventEvaluator",
+        "url_pattern": "/api/v4/projects/.*/issues",
+        "method": "POST",
+        "status_code": 201
+      }
+    ],
+    "revision": 1
+  },
+  {
+    "task_id": 2,
+    "intent_template_id": 0,
+    "sites": ["reddit"],
+    "start_urls": ["__REDDIT__"],
+    "intent": "Navigate to the profile page of the user 'marvelsgrantman136'.",
+    "eval": [
+      {
+        "evaluator": "AgentResponseEvaluator",
+        "ordered": false,
+        "expected": {
+          "task_type": "navigate",
+          "status": "SUCCESS",
+          "retrieved_data": null
+        }
+      }
+    ],
+    "revision": 1
+  }
+]

@@ -60,9 +60,11 @@ const OUT_FILE = path.join(ROOT, 'content.js');
  */
 // 2026-10-30: panel layout moved from per-origin localStorage to the injected
 // chrome.storage.local adapter so position/size are shared across the browser.
-// Cross-tab live sync adds a storage-change subscription. Measured 472KB
-// (483033 bytes); keep ~4KB of headroom. No new dependency.
-export const SIZE_BUDGET_BYTES = 476 * 1024;
+// Cross-tab live sync adds a storage-change subscription. The merged
+// read_table implementation also adds automatic main-table selection and
+// pagination parsing to the content bundle. Measured 479KB; keep ~5KB of
+// headroom. No new dependency.
+export const SIZE_BUDGET_BYTES = 484 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

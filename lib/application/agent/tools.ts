@@ -973,7 +973,7 @@ registerHandlers(['click_element', 'click_at', 'hover_element', 'drag_element', 
 // —— 页面命令（内容脚本）族
 // 注意：同属一族 ≠ 可以合并成一个工具。面向模型的边界由 C-4 判据决定
 //（执行路径 + 权限类别），见 ./page-command-tools.js 头注释。
-registerHandlers(['annotate', 'inspect_element', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
+registerHandlers(['annotate', 'inspect_element', 'read_table', 'scroll_page', 'get_element_source', 'undo_last_action'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
   handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
 
 // —— 截图（单工具族）

@@ -31,7 +31,7 @@
 | `macro-save-replay` | 存成宏 | `/macro` ✓ | 6 | `macro-save-replay` | ✓ | 3 | 3 | page |
 | `multi-candidate-convergence` | 比价 | `/pick` ✓ | 4 | `multi-candidate-convergence` | ✓ | 7 | 2 | page |
 | `new-tab-takeover` | 新标签页 | `/portal` ✓ | 3 | `new-tab-takeover` | ✓ | 2 | 3 | page |
-| `operate-in-cross-origin-iframe` | 跨域 | `/framed` ✓ | 5 | `operate-in-cross-origin-iframe` | ✓ | 4 | 2 | page |
+| `operate-in-cross-origin-iframe` | 跨域 | `/framed` ✓ | 5 | `query-report-table` | ✓ | 4 | 2 | page |
 | `paginate-async` | 翻页 | `/paged` ✓ | 4 | `paginate-async` | ✓ | 3 | 2 | page |
 | `paywall-preview-limit` | 没会员 | `/paywall` ✓ | 4 | `paywall-boundary` | ✓ | 4 | 2 | page |
 | `pierce-shadow-dom` | 自定义组件 | `/shadow` ✓ | 4 | `pierce-shadow-dom` | ✓ | 3 | 3 | page |

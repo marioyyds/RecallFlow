@@ -8,9 +8,9 @@
 
 | 指标 | 值 |
 | --- | --- |
-| 技能总数 | **45** |
+| 技能总数 | **46** |
 | 有剧本归属（真浏览器验收覆盖） | **36** |
-| **孤儿技能**（无验收覆盖） | **9** |
+| **孤儿技能**（无验收覆盖） | **10** |
 | 能力剧本总数 | **36** |
 
 ## 运行时到底怎么"选技能"（2026-10 复核，与清单无关）
@@ -89,13 +89,13 @@
 
 | 工具 | 声明它的技能数 |
 | --- | --- |
-| `complete_task` | 42 |
-| `get_page_snapshot` | 40 |
-| `inspect_element` | 38 |
-| `click_element` | 31 |
-| `type_text` | 11 |
+| `complete_task` | 43 |
+| `get_page_snapshot` | 41 |
+| `inspect_element` | 39 |
+| `click_element` | 32 |
+| `type_text` | 12 |
 | `wait_for_element` | 11 |
-| `select_option` | 8 |
+| `select_option` | 9 |
 | `read_current_page` | 6 |
 | `annotate` | 5 |
 | `add_entry` | 4 |
@@ -112,13 +112,13 @@
 
 | 工具 | 技能数 |
 | --- | --- |
-| `complete_task` | 42 |
-| `get_page_snapshot` | 40 |
-| `inspect_element` | 38 |
-| `click_element` | 31 |
-| `type_text` | 11 |
+| `complete_task` | 43 |
+| `get_page_snapshot` | 41 |
+| `inspect_element` | 39 |
+| `click_element` | 32 |
+| `type_text` | 12 |
 | `wait_for_element` | 11 |
-| `select_option` | 8 |
+| `select_option` | 9 |
 | `read_current_page` | 6 |
 | `annotate` | 5 |
 | `add_entry` | 4 |
@@ -143,6 +143,7 @@
 | `macro` | 1 |
 | `open_tab` | 1 |
 | `press_key` | 1 |
+| `read_table` | 1 |
 | `remove_entry` | 1 |
 | `run_userscript` | 1 |
 | `search_userscripts` | 1 |
@@ -179,6 +180,7 @@
 | `find-skill-skillhub` | Find Skill · SkillHub | ai-agent | 依赖第三方技能市场站点（外部服务），不适合做本地夹具；技能本身只是接口说明。 |
 | `highlight-key-points` | 划重点 / 高亮关键信息 | reading | 能力由 annotate 系列工具承担，已有工具级单测；页面侧只是"高亮生效"的视觉结果，自动断言价值低。 |
 | `humanizer` | Humanizer（去 AI 味） | content-creation | 纯文案改写：输入与产出都在回复文本里，不涉及页面操作，没有可断言的页面状态 —— 造一个夹具页也只能验"模型改得对不对"，那是主观判断，不是 E2E 判据。 |
+| `query-report-table` | 报表/网格查询（先读表，再筛选/计数/求和） | browser | 报表/网格查询是「read_table + 页面过滤」的组合能力；当前没有独立夹具页（WebArena admin 网格已用于真模型验证），页面侧不变量（列/分页）由 tests/table-query.test.mjs 与 read_table 工具测试覆盖。 |
 | `remove-ads` | 去广告 / 屏蔽推广 | browser | 判据需要"隐藏得对不对"的人工确认（隐藏广告时不能连带藏掉正文）；已有的 mainContent 提醒是一条弱保障，但造不出可信的"广告与正文同构"夹具来自动断言。**最小可行验收**（未做，留给接手者）：夹具页放一个 `#ad-slot` 广告块 + 与它同容器的正文段落，判据 = 广告块不可见 **且** 正文可见。 |
 | `summarize` | Summarize（总结） | reading | 纯文案处理（对已有内容做摘要），不涉及页面操作，没有可断言的页面状态。 |
 | `userscript-task` | 用户脚本任务（下载/展开/签到/抢购） | browser | 覆盖多种任务形态（下载 / 展开 / 签到 / 抢购），尚未拆出最小可断言的一种；而且它依赖 GreasyFork 这类**外部站点**提供的脚本，夹具页给不出可信的等价物。拆出后应当补剧本并从本表移除。 |

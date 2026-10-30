@@ -27,6 +27,9 @@ import { VISION_ENABLED, VISION_UNAVAILABLE_SKILL_COPY, VISION_ENABLED_SKILL_COP
  * 不是"没人会用它"。
  */
 export const ORPHAN_SKILL_REASONS: Record<string, string> = Object.freeze({
+  'query-report-table':
+    '报表/网格查询是「read_table + 页面过滤」的组合能力；当前没有独立夹具页（WebArena admin 网格已用于真模型验证），' +
+    '页面侧不变量（列/分页）由 tests/table-query.test.mjs 与 read_table 工具测试覆盖。',
   'agent-browser':
     '通用底座类技能（讲 agent-browser 的用法与边界），没有单一页面形态可造夹具；其纪律由各剧本间接覆盖。',
   'clip-to-knowledge':
@@ -622,6 +625,45 @@ export const SKILL_REGISTRY = Object.freeze([
       keywords: ['表格|表|数据表|列表数据', '提取|整理|导出|转成'],
       tools: ['get_page_snapshot', 'inspect_element', 'complete_task'],
       playbook: 'extract-merged-table',
+    },
+  },
+  {
+    name: 'query-report-table',
+    displayName: '报表/网格查询（先读表，再筛选/计数/求和）',
+    description:
+      '在网页报表、后台网格或数据表里回答问题（top-N、多少个、多少钱、某日期范围）。' +
+      '先读表，再按列筛选/排序/计数/求和；不要从页面快照里手抄单元格，也不要手工累加明细行。',
+    version: '1.0.0',
+    category: 'browser',
+    tags: ['报表', '表格', '网格', '筛选', '计数', '求和', 'top-N'],
+    skill_type: 'prompt-template',
+    content:
+      '# 报表/网格查询\n\n' +
+      '## 步骤\n' +
+      '1. 先用 `read_table` 读当前页面的主表（默认自动选"可见且行数最多"的那张）。\n' +
+      '   如果选错（布局表/筛选表），用返回的 `tableCount`/`tableIndex` 或 `selector` 指定。\n' +
+      '2. **先设置页面过滤再读**：Period / From-To / Status / 关键词 / 每页条数。\n' +
+      '   很多报表默认只显示当前页或默认周期，直接读会少数据。\n' +
+      '3. 用工具参数做结构化查询，而不是手算：\n' +
+      '   - 计数：`count:true`（或 `where` 后看 `query.count`）；\n' +
+      '   - 求和：`sum:"Grand Total"`；\n' +
+      '   - top-N：`sort:{column:"Quantity", dir:"desc"}`，然后只取前 N；\n' +
+      '   - 状态/日期：`where:[{column:"Status",op:"eq",value:"Complete"}]`。\n' +
+      '4. **以页面自带的 total 为准**：返回的 `pagination.total` 是页面报告的总条数；\n' +
+      '   它比"本页行数"可信。`pagination.hasNext` 为 true 时不要用第一页冒充全量。\n' +
+      '5. top-N 只输出 N 个；出现并列时用报表自带排名/排序取前 N，不要扩展到 N+1。\n' +
+      '6. 问数量/金额时只输出数字或 schema 指定的聚合对象，不要输出匹配到的记录列表。\n' +
+      '7. 问 `product type` 时优先用能给出具体业务分类的列；\n' +
+      '   `Simple Product / Configurable Product` 是 Magento 系统类型，通常不是业务类型。\n' +
+      '8. 收尾前核对：表头列数、分页 total、过滤条件与答案口径（数量/金额、日期边界）。\n\n' +
+      '## 不要做的事\n' +
+      '- 不要从 `get_page_snapshot` 的正文里逐行抄表格（会漏列/错位/漏页）；\n' +
+      '- 不要手工累加明细行（configurable/child 行容易重复）；\n' +
+      '- 不要在只读了第一页时就回答"共有 N 条"。',
+    x: {
+      intents: ['browser_task'],
+      keywords: ['报表|best.?selling|top.?\\d+|销量|订单|评论网格|表格|grid|count|total|筛选|日期范围'],
+      tools: ['read_table', 'get_page_snapshot', 'inspect_element', 'click_element', 'select_option', 'type_text', 'complete_task'],
     },
   },
   {

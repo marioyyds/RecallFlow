@@ -44,16 +44,19 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ENTRIES = [
   // Background 增加 RunLifecycleService（停止、abort 宽限、标签页统一清理）。
   // Popup 增加 ChromeTabsAdapter；两者均为小型自包含状态/Port 适配，无新依赖。
-  // 850 KB：agent 拆分为 run state、tool pipeline、completion coordinator 与
+  // 892 KB：agent 拆分为 run state、tool pipeline、completion coordinator 与
   // finalizer 后，保留了清晰的对象边界与可读产物；新增约 12 KB 自包含代码，
-  // 未引入新依赖。预算是防误引入依赖的棘轮，不是要求压扁职责边界。
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 850 * 1024 },
+  // 合并 bridge agent job、WebArena 预算判定与安全守卫后实测 887 KB。未引入
+  // 新依赖；预算是防误引入依赖的棘轮，不是要求压扁职责边界。
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 892 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 518 * 1024 },
+  // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 536 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 514 * 1024 },
+  // 532 KB：新增 query-report-table 技能并同步工具清单，实测 525 KB。
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 532 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

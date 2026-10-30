@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { collectAgentTools, executeAnyTool } from '../lib/application/agent/mcp.ts';
+import { resolveAgentBudgetGuard } from '../lib/application/agent/agent.ts';
 
 test('collectAgentTools: 返回 {tools, mcpIndex} 结构', async () => {
   const r = await collectAgentTools({}, { includeMcp: false });
@@ -80,4 +81,92 @@ test('executeAnyTool: MCP 调用失败返回错误文本而不抛出', async () 
 test('executeAnyTool: 内置工具仍走 executeTool（参数校验生效）', async () => {
   const r = await executeAnyTool('完全不存在的工具', {}, {});
   assert.ok(String(r.result).includes('未知工具'), r.result);
+});
+
+// ---------------- 风险预算守卫（桥接驱动 agent 的执行前判定） ----------------
+//
+// 这是 agent_task 的安全承重墙：桥接场景没有面板可弹审批，
+// 因此授权是"开工前声明 allowRisk + 执行前逐个判定"。
+// 判定挂在 executeAnyTool 这一处汇合点（串行与并行两条路径都经过它），
+// 所以只要这里真的拦得住，就不需要动 agent 循环的审批逻辑。
+// 下面这几条证明的是"**真的没执行**"，而不只是"返回了错误文本"。
+
+test('executeAnyTool: agentBudgetGuard 拒绝时不得执行工具，且把原因与提示一并返回', async () => {
+  let executed = false;
+  const ctx = {
+    agentBudgetGuard: () => ({
+      allowed: false,
+      reason: '工具「click_element」不在本次 allowRisk 声明内。',
+      hint: '需要它就在 allowRisk 里加上 "page"。',
+    }),
+    // 放一个会记录"是否被执行"的替身：真的走到执行就能看出来。
+    mcpIndex: new Map([['mcp__srv__t', { serverId: 'srv', origName: 't', client: { async callTool() { executed = true; return 'x'; } } }]]),
+  };
+  const r = await executeAnyTool('mcp__srv__t', {}, ctx);
+  assert.equal(executed, false, '被拒时必须**不执行**，而不是先执行再报错');
+  assert.equal(r.ok, false);
+  assert.match(String(r.result), /allowRisk/, '应把拒绝原因带回给模型');
+  assert.match(String(r.result), /page/, '应带上可操作提示（缺哪个类别）');
+});
+
+test('executeAnyTool: agentBudgetGuard 放行时照常执行（守卫不能把正常调用挡死）', async () => {
+  let executed = false;
+  const ctx = {
+    agentBudgetGuard: () => ({ allowed: true, risk: 'external' }),
+    mcpIndex: new Map([['mcp__srv__t', { serverId: 'srv', origName: 't', client: { async callTool() { executed = true; return '远端结果'; } } }]]),
+  };
+  const r = await executeAnyTool('mcp__srv__t', {}, ctx);
+  assert.equal(executed, true, '放行后必须真的执行');
+  assert.equal(r.result, '远端结果');
+});
+
+test('executeAnyTool: 没有守卫时行为完全不变（面板路径不受影响）', async () => {
+  let executed = false;
+  const ctx = {
+    mcpIndex: new Map([['mcp__srv__t', { serverId: 'srv', origName: 't', client: { async callTool() { executed = true; return 'ok'; } } }]]),
+  };
+  const r = await executeAnyTool('mcp__srv__t', {}, ctx);
+  assert.equal(executed, true, '不带守卫时不应被拦');
+  assert.equal(r.result, 'ok');
+});
+
+test('executeAnyTool: schema 校验失败时报参数错误，而不是报未授权', async () => {
+  // 参数本身错的时候，更该报的是"参数不对"——否则调用方会去改 allowRisk，而问题在参数。
+  // 用 type_text（required: ["value"]）触发真正的 schema 失败：
+  // 注意 click_element 之类**没有** required，空参数能过 schema 校验
+  //（定位参数是桥接策略那一层的判据，不是 schema 的）。
+  let guardCalled = false;
+  const ctx = {
+    agentBudgetGuard: () => { guardCalled = true; return { allowed: false, reason: '不应走到这里', hint: '' }; },
+  };
+  const r = await executeAnyTool('type_text', {}, ctx);
+  assert.equal(guardCalled, false, '参数校验失败时不应进入授权判定');
+  assert.equal(r.ok, false);
+  assert.match(String(r.result), /缺少必填参数/, '应报缺少参数，而不是未授权');
+});
+
+test('executeAnyTool: 守卫抛异常不得让整轮崩掉（只读守卫失败应可归因）', async () => {
+  const ctx = {
+    agentBudgetGuard: () => { throw new Error('守卫内部错误'); },
+  };
+  // 抛出来是可接受的（调用方能看到栈），但必须是可归因的异常，而不是静默放行。
+  await assert.rejects(() => executeAnyTool('click_element', { ref: 'rf-1' }, ctx), /守卫内部错误/);
+});
+
+// ---------------- 守卫的**接线**必须有牙齿 ----------------
+//
+// 这一组的存在理由是一次真实的自查发现：守卫最初被写成 ctx.agentBudgetGuard，
+// 但 runAgentStream **自己造 ctx**，调用方根本没有参数能塞进去 ——
+// 于是判定永不生效、也不会报错，只会静默放行。
+// 对一条安全边界来说，"没生效"比"报错"危险得多，所以把它钉成门禁。
+//
+// 这里用行为断言（直接调用取守卫的纯函数）；relay → settings 的那段接线由
+// tests/relay-dispatch.test.mjs 的注入 runner 行为测试覆盖。
+
+test('接线：从 settings 取 guard，且只认函数', () => {
+  const guard = () => ({ allowed: true });
+  assert.equal(resolveAgentBudgetGuard({ agentBudgetGuard: guard }), guard);
+  assert.equal(resolveAgentBudgetGuard({}), undefined, '没有 guard 时必须是 undefined（面板路径不拦）');
+  assert.equal(resolveAgentBudgetGuard(null), undefined);
+  assert.equal(resolveAgentBudgetGuard({ agentBudgetGuard: 'not-a-fn' }), undefined, '非函数不得被当成守卫');
 });

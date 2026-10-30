@@ -47,6 +47,7 @@ export class AgentRunState {
   toolCallCount: number;
   totalTokens: number;
   verificationCount: number;
+  finalFormatRetryUsed: boolean;
   lastDeniedSignature: string;
   deterministicFails: number;
   lastProgressIter: number;
@@ -93,6 +94,7 @@ export class AgentRunState {
     this.toolCallCount = prepared.toolCallCount;
     this.totalTokens = prepared.totalTokens;
     this.verificationCount = prepared.verificationCount;
+    this.finalFormatRetryUsed = false;
     this.lastDeniedSignature = prepared.lastDeniedSignature;
     this.deterministicFails = prepared.deterministicFails;
     this.lastProgressIter = prepared.lastProgressIter;

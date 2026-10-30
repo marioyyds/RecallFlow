@@ -218,7 +218,10 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       （不改状态 **且** 不需要审批），registry.test.mjs 明确守住了它；
   //                       而联网抓取必须保留审批。于是把两件事拆成两个字段，readOnly 语义不变。
   //                       工具数与审批行为均未变化；`mutatesState` 已纳入本指纹的覆盖范围。
-  const EXPECTED = 'b24e444910f87bfc';
+  //   cb9c895ea5bae48f — **有意改动**：新增 `read_table`（报表/网格结构化查询，read/readOnly/parallelSafe）。
+  //                       480 条 WebArena 实测显示 admin 报表/top-N/count/日期过滤需要"自动选主表 +
+  //                       where/sort/count/sum + 分页摘要"，因此单独成一个只读工具；其余工具契约未变。
+  const EXPECTED = 'cb9c895ea5bae48f';
   assert.equal(
     fp,
     EXPECTED,

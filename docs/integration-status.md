@@ -21,11 +21,22 @@
 | MCP server（stdio + Streamable HTTP） | `integrations/opencode/recallflow-mcp/index.js`（约 1020 行） | 有独立依赖与 lockfile；有集成测试 |
 | 扩展侧桥接（HTTP 长轮询 + WebSocket） | `lib/bridge/relay.ts`；由 `background.js` 的 `startMcpRelay()` 启动 | 已实现 |
 | 桥接方法清单（跨端唯一来源） | `lib/shared/bridge-methods.js` | 由 `tests/bridge-contract.test.mjs` 与 relay 的 dispatch 双向核对 |
-| 写入许可（桥接层自己的白名单） | `lib/shared/bridge-write-policy.js` | 桥接是独立入口、不经 agent 审批，因此单独设闸 |
+| 写入许可（桥接层自己的白名单） | `lib/shared/bridge-write-policy.js` | 桥接是独立入口、不经 agent 审批，因此单独设闸；按**参数形状**分两组（页面动作要定位参数、导航要 URL） |
 | 会话隔离 | `sessionBuckets` + `AsyncLocalStorage`（`index.js`） | `recallflow-mcp/test/session-isolation.test.mjs` |
+| 目标标签页（按会话分桶） | `targetTabBySession`（`index.js`）+ `page_action.tabId` | 没有它，两个客户端会互相覆盖对方正在操作的页面 |
 | 鉴权 | `RECALLFLOW_BRIDGE_TOKEN`（默认 `recallflow-local-bridge-v1`，可覆盖） | `scripts/verify-bridge-ws-handshake.mjs` |
 
-工具面共 **13 个**：12 个只读 + `page_action`（受白名单约束的写通道）。
+工具面共 **14 个**：12 个只读 + 2 个写通道（`page_action` 页面动作、`open_tab` 导航）。
+`open_tab` 是「驱动一次完整流程」的第一步（到达目标页面），只放行 http(s)、单次只开一个标签页；
+`switch_tab`、`upload_file`、`run_javascript`、用户脚本仍被有意拒绝。
+
+> **两个必须记住的落差（都已实测）**：
+> 1. **改扩展侧代码要重载扩展**。只重启 7801 的服务进程不够 —— 服务端会立刻暴露新方法
+>    （如 `open_tab` 出现在工具清单里），但扩展仍是旧代码，调用会返回
+>    `unknown method: open_tab`。这类失败看起来像"服务端没实现"，实际是"扩展没更新"。
+> 2. **MCP 客户端的工具清单是启动时取的**。新增工具后，客户端要等新会话（重连/重启）
+>    才能在模型侧看到，光重启服务端不够。
+
 
 ### 仅有文档、**没有代码**：DSH 插件形态
 

@@ -45,6 +45,7 @@ function formatScreenshotSummary(meta, visionEnabled) {
 
 // lib/application/agent/skill-defs.ts
 var ORPHAN_SKILL_REASONS = Object.freeze({
+  "query-report-table": "\u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\u662F\u300Cread_table + \u9875\u9762\u8FC7\u6EE4\u300D\u7684\u7EC4\u5408\u80FD\u529B\uFF1B\u5F53\u524D\u6CA1\u6709\u72EC\u7ACB\u5939\u5177\u9875\uFF08WebArena admin \u7F51\u683C\u5DF2\u7528\u4E8E\u771F\u6A21\u578B\u9A8C\u8BC1\uFF09\uFF0C\u9875\u9762\u4FA7\u4E0D\u53D8\u91CF\uFF08\u5217/\u5206\u9875\uFF09\u7531 tests/table-query.test.mjs \u4E0E read_table \u5DE5\u5177\u6D4B\u8BD5\u8986\u76D6\u3002",
   "agent-browser": "\u901A\u7528\u5E95\u5EA7\u7C7B\u6280\u80FD\uFF08\u8BB2 agent-browser \u7684\u7528\u6CD5\u4E0E\u8FB9\u754C\uFF09\uFF0C\u6CA1\u6709\u5355\u4E00\u9875\u9762\u5F62\u6001\u53EF\u9020\u5939\u5177\uFF1B\u5176\u7EAA\u5F8B\u7531\u5404\u5267\u672C\u95F4\u63A5\u8986\u76D6\u3002",
   "clip-to-knowledge": '\u8986\u76D6\u7684\u52A8\u4F5C\uFF08`add_entry` / `knowledge_read`\uFF09\u672C\u8EAB\u5DF2\u6709\u5267\u672C\u8EAB\u6F14 \u2014\u2014\u300C\u77E5\u8BC6\u5E93\u5F80\u8FD4\u300D\u4E0E\u300C\u77E5\u8BC6\u5E93\u68C0\u7D22\u56DE\u9000\u300D\u4E24\u6761\u5267\u672C\u9A8C\u7684\u5C31\u662F\u8FD9\u4E24\u4E2A\u5DE5\u5177\uFF0C\u771F\u6A21\u578B\u5B9E\u6D4B\u786E\u8BA4\u672C\u6280\u80FD\u4F1A\u5728\u8FD9\u4E24\u6761\u91CC\u88AB\u52A0\u8F7D\u3002\u672C\u6280\u80FD\u81EA\u5DF1\u6CA1\u6709\u5267\u672C\uFF0C\u662F\u56E0\u4E3A\u5B83\u53EA\u662F\u540C\u4E00\u6279\u52A8\u4F5C\u7684**\u53E6\u4E00\u79CD\u8BF4\u6CD5**\uFF08"\u526A\u85CF"\uFF09\uFF0C\u9875\u9762\u4FA7\u6CA1\u6709\u72EC\u7ACB\u4E0D\u53D8\u91CF\uFF1B\u5355\u72EC\u518D\u7ACB\u4E00\u6761\u53EA\u4F1A\u628A\u540C\u4E00\u4EF6\u4E8B\u9A8C\u4E24\u904D\u3002\u82E5\u5C06\u6765\u8981\u7ACB\uFF0C\u7F3A\u7684\u662F"\u7528\u6237\u8BF4\u526A\u85CF\u3001\u6A21\u578B\u662F\u5426\u771F\u53BB\u5199\u5E93"\u8FD9\u4E00\u7C7B\u5224\u636E\u3002',
   "dialog-handling": "**\u573A\u666F\u672A\u6536\u655B**\uFF1A/dialog \u5939\u5177\u9875\u5DF2\u5C31\u7EEA\uFF0C\u4F46 Playwright \u7684\u5BF9\u8BDD\u6846\u7BA1\u7406\u4E0E\u5916\u90E8 attach \u7684 debugger \u51B2\u7A81\uFF08\u9875\u9762\u4F1A\u76F4\u63A5\u6B7B\u6389\uFF09\uFF0C\u9700\u8981\u6362\u4E00\u5957\u9A71\u52A8\u65B9\u5F0F\u3002\u73B0\u72B6\u4E0E\u5DF2\u6392\u9664\u7684\u539F\u56E0\u89C1 docs/next-steps-handoff.md\u3002",
@@ -299,6 +300,21 @@ var SKILL_REGISTRY = Object.freeze([
       keywords: ["\u8868\u683C|\u8868|\u6570\u636E\u8868|\u5217\u8868\u6570\u636E", "\u63D0\u53D6|\u6574\u7406|\u5BFC\u51FA|\u8F6C\u6210"],
       tools: ["get_page_snapshot", "inspect_element", "complete_task"],
       playbook: "extract-merged-table"
+    }
+  },
+  {
+    name: "query-report-table",
+    displayName: "\u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\uFF08\u5148\u8BFB\u8868\uFF0C\u518D\u7B5B\u9009/\u8BA1\u6570/\u6C42\u548C\uFF09",
+    description: "\u5728\u7F51\u9875\u62A5\u8868\u3001\u540E\u53F0\u7F51\u683C\u6216\u6570\u636E\u8868\u91CC\u56DE\u7B54\u95EE\u9898\uFF08top-N\u3001\u591A\u5C11\u4E2A\u3001\u591A\u5C11\u94B1\u3001\u67D0\u65E5\u671F\u8303\u56F4\uFF09\u3002\u5148\u8BFB\u8868\uFF0C\u518D\u6309\u5217\u7B5B\u9009/\u6392\u5E8F/\u8BA1\u6570/\u6C42\u548C\uFF1B\u4E0D\u8981\u4ECE\u9875\u9762\u5FEB\u7167\u91CC\u624B\u6284\u5355\u5143\u683C\uFF0C\u4E5F\u4E0D\u8981\u624B\u5DE5\u7D2F\u52A0\u660E\u7EC6\u884C\u3002",
+    version: "1.0.0",
+    category: "browser",
+    tags: ["\u62A5\u8868", "\u8868\u683C", "\u7F51\u683C", "\u7B5B\u9009", "\u8BA1\u6570", "\u6C42\u548C", "top-N"],
+    skill_type: "prompt-template",
+    content: '# \u62A5\u8868/\u7F51\u683C\u67E5\u8BE2\n\n## \u6B65\u9AA4\n1. \u5148\u7528 `read_table` \u8BFB\u5F53\u524D\u9875\u9762\u7684\u4E3B\u8868\uFF08\u9ED8\u8BA4\u81EA\u52A8\u9009"\u53EF\u89C1\u4E14\u884C\u6570\u6700\u591A"\u7684\u90A3\u5F20\uFF09\u3002\n   \u5982\u679C\u9009\u9519\uFF08\u5E03\u5C40\u8868/\u7B5B\u9009\u8868\uFF09\uFF0C\u7528\u8FD4\u56DE\u7684 `tableCount`/`tableIndex` \u6216 `selector` \u6307\u5B9A\u3002\n2. **\u5148\u8BBE\u7F6E\u9875\u9762\u8FC7\u6EE4\u518D\u8BFB**\uFF1APeriod / From-To / Status / \u5173\u952E\u8BCD / \u6BCF\u9875\u6761\u6570\u3002\n   \u5F88\u591A\u62A5\u8868\u9ED8\u8BA4\u53EA\u663E\u793A\u5F53\u524D\u9875\u6216\u9ED8\u8BA4\u5468\u671F\uFF0C\u76F4\u63A5\u8BFB\u4F1A\u5C11\u6570\u636E\u3002\n3. \u7528\u5DE5\u5177\u53C2\u6570\u505A\u7ED3\u6784\u5316\u67E5\u8BE2\uFF0C\u800C\u4E0D\u662F\u624B\u7B97\uFF1A\n   - \u8BA1\u6570\uFF1A`count:true`\uFF08\u6216 `where` \u540E\u770B `query.count`\uFF09\uFF1B\n   - \u6C42\u548C\uFF1A`sum:"Grand Total"`\uFF1B\n   - top-N\uFF1A`sort:{column:"Quantity", dir:"desc"}`\uFF0C\u7136\u540E\u53EA\u53D6\u524D N\uFF1B\n   - \u72B6\u6001/\u65E5\u671F\uFF1A`where:[{column:"Status",op:"eq",value:"Complete"}]`\u3002\n4. **\u4EE5\u9875\u9762\u81EA\u5E26\u7684 total \u4E3A\u51C6**\uFF1A\u8FD4\u56DE\u7684 `pagination.total` \u662F\u9875\u9762\u62A5\u544A\u7684\u603B\u6761\u6570\uFF1B\n   \u5B83\u6BD4"\u672C\u9875\u884C\u6570"\u53EF\u4FE1\u3002`pagination.hasNext` \u4E3A true \u65F6\u4E0D\u8981\u7528\u7B2C\u4E00\u9875\u5192\u5145\u5168\u91CF\u3002\n5. top-N \u53EA\u8F93\u51FA N \u4E2A\uFF1B\u51FA\u73B0\u5E76\u5217\u65F6\u7528\u62A5\u8868\u81EA\u5E26\u6392\u540D/\u6392\u5E8F\u53D6\u524D N\uFF0C\u4E0D\u8981\u6269\u5C55\u5230 N+1\u3002\n6. \u95EE\u6570\u91CF/\u91D1\u989D\u65F6\u53EA\u8F93\u51FA\u6570\u5B57\u6216 schema \u6307\u5B9A\u7684\u805A\u5408\u5BF9\u8C61\uFF0C\u4E0D\u8981\u8F93\u51FA\u5339\u914D\u5230\u7684\u8BB0\u5F55\u5217\u8868\u3002\n7. \u95EE `product type` \u65F6\u4F18\u5148\u7528\u80FD\u7ED9\u51FA\u5177\u4F53\u4E1A\u52A1\u5206\u7C7B\u7684\u5217\uFF1B\n   `Simple Product / Configurable Product` \u662F Magento \u7CFB\u7EDF\u7C7B\u578B\uFF0C\u901A\u5E38\u4E0D\u662F\u4E1A\u52A1\u7C7B\u578B\u3002\n8. \u6536\u5C3E\u524D\u6838\u5BF9\uFF1A\u8868\u5934\u5217\u6570\u3001\u5206\u9875 total\u3001\u8FC7\u6EE4\u6761\u4EF6\u4E0E\u7B54\u6848\u53E3\u5F84\uFF08\u6570\u91CF/\u91D1\u989D\u3001\u65E5\u671F\u8FB9\u754C\uFF09\u3002\n\n## \u4E0D\u8981\u505A\u7684\u4E8B\n- \u4E0D\u8981\u4ECE `get_page_snapshot` \u7684\u6B63\u6587\u91CC\u9010\u884C\u6284\u8868\u683C\uFF08\u4F1A\u6F0F\u5217/\u9519\u4F4D/\u6F0F\u9875\uFF09\uFF1B\n- \u4E0D\u8981\u624B\u5DE5\u7D2F\u52A0\u660E\u7EC6\u884C\uFF08configurable/child \u884C\u5BB9\u6613\u91CD\u590D\uFF09\uFF1B\n- \u4E0D\u8981\u5728\u53EA\u8BFB\u4E86\u7B2C\u4E00\u9875\u65F6\u5C31\u56DE\u7B54"\u5171\u6709 N \u6761"\u3002',
+    x: {
+      intents: ["browser_task"],
+      keywords: ["\u62A5\u8868|best.?selling|top.?\\d+|\u9500\u91CF|\u8BA2\u5355|\u8BC4\u8BBA\u7F51\u683C|\u8868\u683C|grid|count|total|\u7B5B\u9009|\u65E5\u671F\u8303\u56F4"],
+      tools: ["read_table", "get_page_snapshot", "inspect_element", "click_element", "select_option", "type_text", "complete_task"]
     }
   },
   {
@@ -3052,6 +3068,49 @@ var TOOL_SCHEMAS = [
   {
     type: "function",
     function: {
+      name: "read_table",
+      description: '\u8BFB\u53D6\u5F53\u524D\u9875\u9762\u7684\u4E3B\u6570\u636E\u8868\u683C/\u7F51\u683C\uFF08\u53EA\u8BFB\uFF09\u3002\u9ED8\u8BA4\u81EA\u52A8\u9009"\u6700\u50CF\u4E3B\u8868"\u7684\u90A3\u5F20\uFF08\u53EF\u89C1\u4F18\u5148\u3001\u884C\u6570\u6700\u591A\uFF09\uFF1B\u591A\u8868\u65F6\u7528 selector/index\u3002\u8FD4\u56DE headers/rows/pagination\uFF0C\u5E76\u53EF\u76F4\u63A5 where \u7B5B\u9009\u3001sort \u6392\u5E8F\u3001count \u8BA1\u6570\u3001sum \u6C42\u548C\u3002\u62A5\u8868/\u8BA2\u5355/\u8BC4\u8BBA\u7F51\u683C\u4F18\u5148\u7528\u5B83\uFF0C\u4E0D\u8981\u4ECE\u5FEB\u7167\u91CC\u9010\u884C\u624B\u6284\u6216\u624B\u7B97\u3002\u5206\u9875\u53EA\u8BFB\u5F53\u524D\u9875\uFF1Apagination \u4F1A\u7ED9\u51FA\u603B\u6761\u6570\u4E0E\u662F\u5426\u8FD8\u6709\u4E0B\u4E00\u9875\u3002',
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "\u53EF\u9009\uFF1ACSS \u9009\u62E9\u5668\u5B9A\u4F4D\u8868\u683C\u6216\u5176\u5BB9\u5668" },
+          index: { type: "integer", description: "\u53EF\u9009\uFF1A\u9875\u9762\u4E0A\u7B2C N \u4E2A\u8868\u683C\uFF1B\u4E0D\u4F20\u4E14\u65E0 selector \u65F6\u81EA\u52A8\u9009\u4E3B\u8868" },
+          maxRows: { type: "integer", description: "\u6700\u591A\u63D0\u53D6\u591A\u5C11\u884C\uFF0C\u9ED8\u8BA4 200" },
+          maxCols: { type: "integer", description: "\u6700\u591A\u63D0\u53D6\u591A\u5C11\u5217\uFF0C\u9ED8\u8BA4\u4E0D\u9650" },
+          fillMerged: { type: "boolean", description: "\u5408\u5E76\u5355\u5143\u683C\u7684\u5EF6\u7EED\u683C\u662F\u5426\u91CD\u590D\u586B\u5165\u540C\u4E00\u6587\u672C\uFF08\u9ED8\u8BA4 true\uFF09" },
+          where: {
+            type: "array",
+            description: '\u6309\u5217\u7B5B\u9009\uFF0C\u53EF\u591A\u6B21\u3002\u4F8B\u5982 [{"column":"Status","op":"eq","value":"Complete"}]',
+            items: {
+              type: "object",
+              properties: {
+                column: { type: "string", description: "\u8868\u5934\u540D\uFF08\u7CBE\u786E\u6216\u5305\u542B\u5339\u914D\uFF09" },
+                op: { type: "string", enum: ["eq", "neq", "contains", "gt", "gte", "lt", "lte"] },
+                value: { description: "\u6BD4\u8F83\u503C\uFF1B\u6570\u5B57\u4F1A\u81EA\u52A8\u53BB\u6389\u8D27\u5E01\u7B26\u53F7/\u5343\u5206\u4F4D" }
+              },
+              required: ["column", "op", "value"]
+            }
+          },
+          sort: {
+            type: "object",
+            description: "\u6309\u5217\u6392\u5E8F\uFF1Btop-N \u524D\u5148\u6309\u6307\u6807\u5217 desc \u6392\u5E8F",
+            properties: {
+              column: { type: "string", description: "\u8868\u5934\u540D" },
+              dir: { type: "string", enum: ["asc", "desc"], description: "\u9ED8\u8BA4 asc" }
+            },
+            required: ["column"]
+          },
+          count: { type: "boolean", description: "\u53EA\u8FD4\u56DE\u5339\u914D\u884C\u6570\uFF08\u4E0D\u8FD4\u56DE rows\uFF09" },
+          sum: { type: "string", description: "\u5BF9\u6307\u5B9A\u5217\u6C42\u548C\uFF08\u81EA\u52A8\u53BB\u6389\u8D27\u5E01\u7B26\u53F7/\u5343\u5206\u4F4D\uFF09" },
+          includeRows: { type: "boolean", description: "\u9ED8\u8BA4 true\uFF1Bfalse \u65F6\u53EA\u8FD4\u56DE\u8BA1\u6570/\u6C42\u548C\u6458\u8981" }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "take_screenshot",
       description: "\u7ED9\u5F53\u524D\u9875\u9762\u622A\u56FE\uFF08\u53EA\u8BFB\uFF0C\u9700 CDP\uFF09\u3002" + // 视觉能力开关（单一来源 `VISION_ENABLED`）：**整句**二选一 ——
       // 关闭时那段与**引入开关之前逐字节相同**（纯重构 ⇒ 不需要测量 ✓）；
@@ -3405,6 +3464,9 @@ var TOOL_METADATA = {
   // ⚠ 本档**没有**并入 get_attribute 与 get_element_source：它们走各自不同的执行路径
   //（独立消息 / 源码映射链路），且后者被 MCP 的「页面元素 → 源码文件」闭环直接使用。
   inspect_element: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
+  // 读取表格/网格并做筛选/计数/求和：只读，不需要审批。与 inspect_element 同走内容脚本，
+  // 但多一层"自动选主表 + 结构化查询"，因此单独成一个工具（面向模型的边界按执行路径+权限分组）。
+  read_table: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
   // 截图刻意不标记：它重、会向 UI 推图，且同批截图没有实际收益
   take_screenshot: { risk: "read", readOnly: true, route: "background" },
   scroll_page: { risk: "page", requiresApproval: true, route: "content" },
@@ -5599,6 +5661,137 @@ async function handleCodeAccessTool(name, args, deps) {
   return null;
 }
 
+// lib/shared/table.ts
+function formatTableText(table, options = {}) {
+  const maxRows = Math.max(1, Number(options.maxRows) || 40);
+  const maxCellChars = Math.max(4, Number(options.maxCellChars) || 60);
+  const headers = table && Array.isArray(table.headers) ? table.headers : [];
+  const rows = table && Array.isArray(table.rows) ? table.rows : [];
+  const cell = (v) => {
+    const s = String(v === void 0 || v === null ? "" : v).replace(/\s+/g, " ").trim();
+    return s.length > maxCellChars ? sliceSafe(s, 0, maxCellChars) + "\u2026" : s;
+  };
+  const lines = [];
+  if (headers.length) {
+    lines.push("| " + headers.map(cell).join(" | ") + " |");
+    lines.push("|" + headers.map(() => "---").join("|") + "|");
+  }
+  for (const row of rows.slice(0, maxRows)) {
+    lines.push("| " + (Array.isArray(row) ? row : []).map(cell).join(" | ") + " |");
+  }
+  if (rows.length > maxRows) {
+    lines.push("\u2026\uFF08\u5171 " + rows.length + " \u884C\uFF0C\u4EC5\u663E\u793A\u524D " + maxRows + " \u884C\uFF09");
+  }
+  return lines.join("\n");
+}
+
+// lib/shared/table-query.ts
+function toTableNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  let s = String(value === void 0 || value === null ? "" : value).trim();
+  if (!s) return null;
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) {
+    negative = true;
+    s = s.slice(1, -1);
+  }
+  s = s.replace(/[,\s]/g, "").replace(/[$€£¥￥]/g, "");
+  let percent = false;
+  if (/%$/.test(s)) {
+    percent = true;
+    s = s.slice(0, -1);
+  }
+  if (!/^-?\d+(?:\.\d+)?$/.test(s)) return null;
+  let n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  if (percent) n = n / 100;
+  return negative ? -n : n;
+}
+function findTableColumn(headers, name) {
+  const list = Array.isArray(headers) ? headers : [];
+  const want = String(name === void 0 || name === null ? "" : name).trim().toLowerCase();
+  if (!want) return -1;
+  for (let i = 0; i < list.length; i++) {
+    if (String(list[i] || "").trim().toLowerCase() === want) return i;
+  }
+  for (let i = 0; i < list.length; i++) {
+    const h = String(list[i] || "").trim().toLowerCase();
+    if (h && (h.includes(want) || want.includes(h))) return i;
+  }
+  return -1;
+}
+function cellMatches(cell, op, value) {
+  const c = String(cell === void 0 || cell === null ? "" : cell).trim();
+  const v = String(value === void 0 || value === null ? "" : value).trim();
+  const cn = toTableNumber(c);
+  const vn = toTableNumber(v);
+  const bothNumeric = cn !== null && vn !== null;
+  switch (String(op || "eq")) {
+    case "eq":
+      return bothNumeric ? cn === vn : c.toLowerCase() === v.toLowerCase();
+    case "neq":
+      return bothNumeric ? cn !== vn : c.toLowerCase() !== v.toLowerCase();
+    case "contains":
+      return c.toLowerCase().includes(v.toLowerCase());
+    case "gt":
+      return bothNumeric && cn > vn;
+    case "gte":
+      return bothNumeric && cn >= vn;
+    case "lt":
+      return bothNumeric && cn < vn;
+    case "lte":
+      return bothNumeric && cn <= vn;
+    default:
+      return false;
+  }
+}
+function queryTableData(table, options = {}) {
+  const headers = Array.isArray(table?.headers) ? table.headers.map((value) => String(value ?? "")) : [];
+  const source = Array.isArray(table?.rows) ? table.rows.slice() : [];
+  const errors = [];
+  let rows = source;
+  const where = Array.isArray(options.where) ? options.where : [];
+  for (const f of where) {
+    if (!f || typeof f !== "object") continue;
+    const idx = findTableColumn(headers, f.column);
+    if (idx < 0) {
+      errors.push("\u627E\u4E0D\u5230\u5217\u300C" + f.column + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+      continue;
+    }
+    rows = rows.filter((row) => cellMatches(Array.isArray(row) ? row[idx] : "", f.op, f.value));
+  }
+  if (options.sort && options.sort.column) {
+    const idx = findTableColumn(headers, options.sort.column);
+    if (idx < 0) {
+      errors.push("\u6392\u5E8F\u627E\u4E0D\u5230\u5217\u300C" + options.sort.column + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+    } else {
+      const dir = String(options.sort.dir || "asc").toLowerCase() === "desc" ? -1 : 1;
+      rows = rows.slice().sort((a, b) => {
+        const av = Array.isArray(a) ? a[idx] : "";
+        const bv = Array.isArray(b) ? b[idx] : "";
+        const an = toTableNumber(av);
+        const bn = toTableNumber(bv);
+        if (an !== null && bn !== null) return (an - bn) * dir;
+        return String(av || "").localeCompare(String(bv || "")) * dir;
+      });
+    }
+  }
+  let sum = null;
+  const sumColumn = String(options.sum || "");
+  if (sumColumn) {
+    const idx = findTableColumn(headers, sumColumn);
+    if (idx < 0) {
+      errors.push("\u6C42\u548C\u627E\u4E0D\u5230\u5217\u300C" + sumColumn + "\u300D\uFF1B\u53EF\u7528\u5217\uFF1A" + headers.join(" / "));
+    } else {
+      sum = rows.reduce((acc, row) => {
+        const n = toTableNumber(Array.isArray(row) ? row[idx] : "");
+        return n === null ? acc : acc + n;
+      }, 0);
+    }
+  }
+  return { ok: errors.length === 0, errors, headers, rows, count: rows.length, totalRows: source.length, sum, sumColumn };
+}
+
 // lib/application/agent/page-command-tools.ts
 var ANNOTATE_OPS = Object.freeze({
   highlight: "highlight",
@@ -5647,6 +5840,59 @@ async function inspectElement(deps, args) {
   delete rest.op;
   return await deps.executePageTool(deps.ctx.tabId, cmd, rest, deps.ctx);
 }
+async function readTable(deps, args) {
+  const p = args || {};
+  const params = {
+    selector: p.selector,
+    index: p.index !== void 0 ? p.index : p.selector ? void 0 : "auto",
+    maxRows: p.maxRows,
+    maxCols: p.maxCols,
+    fillMerged: p.fillMerged
+  };
+  const res = await deps.executePageTool(deps.ctx.tabId, "extract_table", params, deps.ctx);
+  if (!res || res.ok === false) return res;
+  const q = queryTableData(
+    { headers: res.headers, rows: res.rows },
+    {
+      where: Array.isArray(p.where) ? p.where : void 0,
+      sort: p.sort && typeof p.sort === "object" ? p.sort : void 0,
+      sum: p.sum
+    }
+  );
+  if (!q.ok) {
+    return deps.toolError("BAD_ARGS", q.errors.join("\uFF1B"));
+  }
+  const includeRows = p.includeRows !== false && p.count !== true;
+  const rows = includeRows ? q.rows : [];
+  const markdown = includeRows ? formatTableText({ headers: q.headers, rows }, { maxRows: 40 }) : "";
+  const pagination = res.pagination || {};
+  const bits = [
+    "\u8868\u683C\u300C" + (res.selector || "") + "\u300D\uFF1A\u672C\u9875 " + res.rowCount + " \u884C" + (res.widths ? " \xD7 " + res.widths + " \u5217" : "")
+  ];
+  if (q.totalRows !== res.rowCount) bits.push("\u7B5B\u9009\u524D " + q.totalRows + " \u884C");
+  bits.push("\u5339\u914D " + q.count + " \u884C");
+  if (p.sum) bits.push("\u300C" + q.sumColumn + "\u300D\u5408\u8BA1 " + q.sum);
+  if (pagination.total !== null && pagination.total !== void 0) bits.push("\u9875\u9762\u62A5\u544A\u5171 " + pagination.total + " \u6761");
+  if (pagination.currentPage !== null && pagination.totalPages !== null) {
+    bits.push("\u7B2C " + pagination.currentPage + "/" + pagination.totalPages + " \u9875");
+  }
+  if (pagination.hasNext) bits.push("\u8FD8\u6709\u66F4\u591A\u9875");
+  bits.push("\u8868\u5934\uFF1A" + (q.headers.length ? q.headers.join(" / ") : "\u65E0"));
+  return Object.assign({}, res, {
+    ok: true,
+    query: {
+      count: q.count,
+      totalRows: q.totalRows,
+      sum: q.sum,
+      sumColumn: q.sumColumn,
+      where: p.where || [],
+      sort: p.sort || null
+    },
+    rows,
+    markdown,
+    result: bits.join("\uFF1B") + (markdown ? "\n" + markdown : "")
+  });
+}
 async function scrollPage(deps, args) {
   const params = args || {};
   const hasTarget = Boolean(params.ref || params.selector || params.text);
@@ -5673,6 +5919,7 @@ async function undoLastAction(deps, args) {
 async function handlePageCommandTool(name, args, deps) {
   if (name === "annotate") return await annotate(deps, args);
   if (name === "inspect_element") return await inspectElement(deps, args);
+  if (name === "read_table") return await readTable(deps, args);
   if (name === "scroll_page") return await scrollPage(deps, args);
   if (name === "get_element_source") return await getElementSource(deps, args);
   if (name === "undo_last_action") return await undoLastAction(deps, args);
@@ -6201,7 +6448,7 @@ registerHandlers(["click_element", "click_at", "hover_element", "drag_element", 
   compactSnapshotSummary,
   summarizeCdpError
 }));
-registerHandlers(["annotate", "inspect_element", "scroll_page", "get_element_source", "undo_last_action"], (name, args, ctx) => handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
+registerHandlers(["annotate", "inspect_element", "read_table", "scroll_page", "get_element_source", "undo_last_action"], (name, args, ctx) => handlePageCommandTool(name, args, { ctx, toolError, executePageTool, executeContentAction, sendTabMessage }));
 registerHandlers(["take_screenshot"], (name, args, ctx) => takeScreenshot({
   ctx,
   args,

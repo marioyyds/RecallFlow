@@ -8,7 +8,7 @@ import {
   resolveElementRef,
 } from '../page-text.ts';
 import { normalizeCitationText, isElementCollectExcluded } from '../citation.ts';
-import { expandTableGrid, formatTableText } from '../../../shared/table.ts';
+import { expandTableGrid, formatTableText, parseGridPagination } from '../../../shared/table.ts';
 import { sliceSafe } from '../../../shared/surrogates.ts';
 import {
   DEFAULT_STYLE_PROPS,
@@ -547,6 +547,8 @@ function cmdExtractTable(params: any) {
   const p = params || {};
   let table = null;
   let total = 0;
+  let chosenIndex = -1;
+  const wantAuto = p.auto === true || p.index === 'auto';
   try {
     const all = findElementsFor({ selector: 'table' });
     total = all.length;
@@ -563,9 +565,31 @@ function cmdExtractTable(params: any) {
           break;
         }
       }
+    } else if (wantAuto) {
+      // 报表页常有布局表/筛选表排在前面；自动选可见、行数最多的主数据表。
+      let bestScore = -1;
+      for (let i = 0; i < all.length; i++) {
+        const el: any = all[i];
+        if (!el || el.tagName !== 'TABLE') continue;
+        let rowCount = 0;
+        try {
+          rowCount = Array.from<any>(el.querySelectorAll('tr')).filter((tr: any) => tr.closest('table') === el).length;
+        } catch (e: any) {
+          rowCount = 0;
+        }
+        const headerCount = (el.querySelectorAll && el.querySelectorAll('th').length) || 0;
+        const visible = el.offsetParent !== null || (el.getClientRects && el.getClientRects().length > 0);
+        const score = (visible ? 100000 : 0) + rowCount * 100 + headerCount * 10;
+        if (score > bestScore) {
+          bestScore = score;
+          table = el;
+          chosenIndex = i;
+        }
+      }
     } else {
       const idx = Math.max(0, Number(p.index) || 0);
       table = all[idx] || null;
+      chosenIndex = idx;
     }
   } catch (e: any) {
     return { ok: false, error: '查找表格失败：' + ((e && e.message) || String(e)) };
@@ -597,24 +621,43 @@ function cmdExtractTable(params: any) {
   );
 
   const grid = expandTableGrid(raw, { maxRows: p.maxRows, maxCols: p.maxCols, fillMerged: p.fillMerged !== false });
+  // 分页信息只从表格所在的网格/分页容器里读，避免把页面别处的数字误当总条数。
+  let pagination: ReturnType<typeof parseGridPagination> = {
+    total: null,
+    currentPage: null,
+    totalPages: null,
+    pageSize: null,
+    hasNext: null,
+    raw: '',
+  };
+  try {
+    const scrollRoot = table.closest('.admin__data-grid-wrap, [data-role="grid"], .data-grid, .grid, .pager, .pagination');
+    const scope: any = scrollRoot || table.parentElement || document.body;
+    const scopeText = (scope.innerText || scope.textContent || '').slice(0, 8000);
+    pagination = parseGridPagination(scopeText);
+  } catch (e: any) {}
   // markdown 只算一次，同时作为结构化字段与 result 正文的来源（避免两处各拼一遍、日后漂移）。
   const markdown = formatTableText(grid, { maxRows: 40 });
   return {
     ok: true,
     selector: elementSelector(table),
-    tableIndex: p.selector ? undefined : Math.max(0, Number(p.index) || 0),
+    tableIndex: p.selector ? undefined : chosenIndex,
     tableCount: total,
     headers: grid.headers,
     rows: grid.rows,
     widths: grid.widths,
     rowCount: grid.rows.length,
     mergedCells: grid.mergedCells,
+    pagination,
     markdown,
     result:
-      '表格「' + elementSelector(table) + '」：' + grid.rows.length + ' 行 × ' + grid.widths + ' 列' +
+      '表格「' + elementSelector(table) + '」：本页 ' + grid.rows.length + ' 行 × ' + grid.widths + ' 列' +
       (grid.mergedCells ? '（含 ' + grid.mergedCells + ' 个合并单元格，已展开对齐）' : '') +
       (grid.headers.length ? '，表头：' + grid.headers.join(' / ') : '，无表头') +
-      (total > 1 ? '。页面上共 ' + total + ' 个表格。' : '') +
+      (pagination.total !== null ? '；页面报告共 ' + pagination.total + ' 条' : '') +
+      (pagination.currentPage !== null && pagination.totalPages !== null ? '（第 ' + pagination.currentPage + '/' + pagination.totalPages + ' 页）' : '') +
+      (pagination.hasNext ? '，还有更多页' : '') +
+      (total > 1 ? '。页面上共 ' + total + ' 个表格，可用 index/selector 指定。' : '') +
       // ⚠ 表格**数据本身**必须并进 result。
       // 原先只把它放在 markdown / rows 字段里，而页面命令走到模型的那条路
       // （executePageTool）只取 result 字符串 —— 于是模型只收到

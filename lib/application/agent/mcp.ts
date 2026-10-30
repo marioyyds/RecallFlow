@@ -370,6 +370,18 @@ function mcpFailureHint(name: string, ctx: any) {
 export async function executeAnyTool(name: string, args: Record<string, unknown>, ctx: any) {
   const validation = validateToolCall(name, args || {});
   if (!validation.ok) return { ok: false, result: validation.error };
+  // Bridge tasks have no panel from which to request approval. The caller
+  // declares allowRisk up front and this single dispatch point enforces it
+  // for both serial and parallel tool execution.
+  if (ctx && typeof ctx.agentBudgetGuard === 'function') {
+    const verdict = ctx.agentBudgetGuard(name);
+    if (verdict && verdict.allowed === false) {
+      return {
+        ok: false,
+        result: String(verdict.reason || '') + '\n' + String(verdict.hint || ''),
+      };
+    }
+  }
   if (typeof name === 'string' && name.indexOf('mcp__') === 0) {
     const index = ctx && ctx.mcpIndex;
     const meta = index && typeof index.get === 'function' ? index.get(name) : null;

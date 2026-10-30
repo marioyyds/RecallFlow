@@ -1316,6 +1316,36 @@
     }
     return lines.join("\n");
   }
+  function parseGridPagination(text) {
+    const raw = String(text || "").replace(/\s+/g, " ").trim();
+    const out = { total: null, currentPage: null, totalPages: null, pageSize: null, hasNext: null, raw: raw.slice(0, 300) };
+    let m = /items?\s+(\d+)\s*(?:to|[-–])\s*(\d+)\s+of\s+([\d,]+)/i.exec(raw);
+    if (m) {
+      const from = Number(m[1]);
+      const to = Number(m[2]);
+      out.total = Number(String(m[3]).replace(/,/g, ""));
+      const pageSize = Math.max(1, to - from + 1);
+      out.pageSize = pageSize;
+      out.currentPage = Math.max(1, Math.floor((from - 1) / pageSize) + 1);
+      out.hasNext = to < (out.total || 0);
+    } else {
+      m = /([\d,]+)\s+(?:records?|items?|results?)\s+found/i.exec(raw);
+      if (m) out.total = Number(String(m[1]).replace(/,/g, ""));
+    }
+    m = /page\s+(\d+)\s+of\s+(\d+)/i.exec(raw) || /(\d+)\s+of\s+(\d+)\s+pages?/i.exec(raw);
+    if (m) {
+      out.currentPage = Number(m[1]);
+      out.totalPages = Number(m[2]);
+      out.hasNext = out.currentPage < out.totalPages;
+    }
+    if (out.total !== null && out.totalPages === null && out.pageSize) {
+      out.totalPages = Math.max(1, Math.ceil(out.total / out.pageSize));
+    }
+    if (out.hasNext === null && out.total !== null && out.currentPage !== null && out.pageSize) {
+      out.hasNext = out.currentPage * out.pageSize < out.total;
+    }
+    return out;
+  }
 
   // lib/application/page/commands/locator.ts
   function queryAllInFrames(root, selector, into = []) {
@@ -1982,6 +2012,8 @@
     const p = params || {};
     let table = null;
     let total = 0;
+    let chosenIndex = -1;
+    const wantAuto = p.auto === true || p.index === "auto";
     try {
       const all = findElementsFor({ selector: "table" });
       total = all.length;
@@ -1998,9 +2030,30 @@
             break;
           }
         }
+      } else if (wantAuto) {
+        let bestScore = -1;
+        for (let i = 0; i < all.length; i++) {
+          const el = all[i];
+          if (!el || el.tagName !== "TABLE") continue;
+          let rowCount = 0;
+          try {
+            rowCount = Array.from(el.querySelectorAll("tr")).filter((tr) => tr.closest("table") === el).length;
+          } catch (e) {
+            rowCount = 0;
+          }
+          const headerCount = el.querySelectorAll && el.querySelectorAll("th").length || 0;
+          const visible = el.offsetParent !== null || el.getClientRects && el.getClientRects().length > 0;
+          const score = (visible ? 1e5 : 0) + rowCount * 100 + headerCount * 10;
+          if (score > bestScore) {
+            bestScore = score;
+            table = el;
+            chosenIndex = i;
+          }
+        }
       } else {
         const idx = Math.max(0, Number(p.index) || 0);
         table = all[idx] || null;
+        chosenIndex = idx;
       }
     } catch (e) {
       return { ok: false, error: "\u67E5\u627E\u8868\u683C\u5931\u8D25\uFF1A" + (e && e.message || String(e)) };
@@ -2027,19 +2080,35 @@
       }))
     );
     const grid = expandTableGrid(raw, { maxRows: p.maxRows, maxCols: p.maxCols, fillMerged: p.fillMerged !== false });
+    let pagination = {
+      total: null,
+      currentPage: null,
+      totalPages: null,
+      pageSize: null,
+      hasNext: null,
+      raw: ""
+    };
+    try {
+      const scrollRoot = table.closest('.admin__data-grid-wrap, [data-role="grid"], .data-grid, .grid, .pager, .pagination');
+      const scope = scrollRoot || table.parentElement || document.body;
+      const scopeText = (scope.innerText || scope.textContent || "").slice(0, 8e3);
+      pagination = parseGridPagination(scopeText);
+    } catch (e) {
+    }
     const markdown = formatTableText(grid, { maxRows: 40 });
     return {
       ok: true,
       selector: elementSelector(table),
-      tableIndex: p.selector ? void 0 : Math.max(0, Number(p.index) || 0),
+      tableIndex: p.selector ? void 0 : chosenIndex,
       tableCount: total,
       headers: grid.headers,
       rows: grid.rows,
       widths: grid.widths,
       rowCount: grid.rows.length,
       mergedCells: grid.mergedCells,
+      pagination,
       markdown,
-      result: "\u8868\u683C\u300C" + elementSelector(table) + "\u300D\uFF1A" + grid.rows.length + " \u884C \xD7 " + grid.widths + " \u5217" + (grid.mergedCells ? "\uFF08\u542B " + grid.mergedCells + " \u4E2A\u5408\u5E76\u5355\u5143\u683C\uFF0C\u5DF2\u5C55\u5F00\u5BF9\u9F50\uFF09" : "") + (grid.headers.length ? "\uFF0C\u8868\u5934\uFF1A" + grid.headers.join(" / ") : "\uFF0C\u65E0\u8868\u5934") + (total > 1 ? "\u3002\u9875\u9762\u4E0A\u5171 " + total + " \u4E2A\u8868\u683C\u3002" : "") + // ⚠ 表格**数据本身**必须并进 result。
+      result: "\u8868\u683C\u300C" + elementSelector(table) + "\u300D\uFF1A\u672C\u9875 " + grid.rows.length + " \u884C \xD7 " + grid.widths + " \u5217" + (grid.mergedCells ? "\uFF08\u542B " + grid.mergedCells + " \u4E2A\u5408\u5E76\u5355\u5143\u683C\uFF0C\u5DF2\u5C55\u5F00\u5BF9\u9F50\uFF09" : "") + (grid.headers.length ? "\uFF0C\u8868\u5934\uFF1A" + grid.headers.join(" / ") : "\uFF0C\u65E0\u8868\u5934") + (pagination.total !== null ? "\uFF1B\u9875\u9762\u62A5\u544A\u5171 " + pagination.total + " \u6761" : "") + (pagination.currentPage !== null && pagination.totalPages !== null ? "\uFF08\u7B2C " + pagination.currentPage + "/" + pagination.totalPages + " \u9875\uFF09" : "") + (pagination.hasNext ? "\uFF0C\u8FD8\u6709\u66F4\u591A\u9875" : "") + (total > 1 ? "\u3002\u9875\u9762\u4E0A\u5171 " + total + " \u4E2A\u8868\u683C\uFF0C\u53EF\u7528 index/selector \u6307\u5B9A\u3002" : "") + // ⚠ 表格**数据本身**必须并进 result。
       // 原先只把它放在 markdown / rows 字段里，而页面命令走到模型的那条路
       // （executePageTool）只取 result 字符串 —— 于是模型只收到
       // 「4 行 × 4 列（含 4 个合并单元格，已展开对齐）」这一句摘要，

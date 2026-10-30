@@ -89,6 +89,15 @@ export class AgentRunFinalizer {
     state.emit({ type: 'end' });
   }
 
+  /** Stop at an external wall-clock deadline without starting another model call. */
+  async timeBudgetExceeded(): Promise<void> {
+    const state = this.state;
+    await this.persist({ status: RUN_STATUS.TIMEOUT, reason: 'timeBudget' }).catch(() => {});
+    const pendingTabs = await closeAuxTabs(state.ctx).catch(() => []);
+    emitTabsClosePending(state.ctx, pendingTabs, state.emit);
+    state.emit({ type: 'end' });
+  }
+
   async cancelled(reason: string, phase: string): Promise<void> {
     const state = this.state;
     await this.persist({ status: RUN_STATUS.CANCELLED, phase, reason }).catch(() => {});

@@ -15,6 +15,10 @@ import {
   verifyEvidenceSignature,
 } from './verification-policy.ts';
 import { runCompletionVerification } from './agent-finalization.ts';
+import {
+  FINAL_JSON_RETRY_PROMPT,
+  shouldRetryFinalJson,
+} from './final-json.ts';
 import type { AgentRunState } from './agent-run-state.ts';
 
 export type CompleteTaskDecision =
@@ -40,6 +44,34 @@ export class CompletionCoordinator {
 
   constructor(state: AgentRunState) {
     this.state = state;
+  }
+
+  private finalJsonReflection(content: unknown, summary?: unknown): string | null {
+    const state = this.state;
+    if (
+      !shouldRetryFinalJson({
+        settings: state.settings,
+        content,
+        summary,
+        alreadyRetried: state.finalFormatRetryUsed,
+      })
+    ) {
+      return null;
+    }
+    state.finalFormatRetryUsed = true;
+    state.emit({
+      type: 'format-retry',
+      reason: 'missing-final-json',
+      ...(summary !== undefined ? { via: 'complete_task' } : {}),
+    });
+    state.trace({
+      phase: 'format-retry',
+      reason: 'missing-final-json',
+      ...(summary !== undefined ? { via: 'complete_task' } : {}),
+      toolCalls: state.toolCallCount,
+      totalTokens: state.totalTokens,
+    });
+    return FINAL_JSON_RETRY_PROMPT;
   }
 
   async reviewCompleteTask(result: any, signal: AbortSignal, iter: number): Promise<CompleteTaskDecision> {
@@ -157,6 +189,12 @@ export class CompletionCoordinator {
       }
     }
 
+    const retry = this.finalJsonReflection(
+      this.latestAssistantContent(),
+      String(result?.result || '任务已完成。')
+    );
+    if (retry) return { kind: 'reflect', reflection: retry };
+
     return {
       kind: 'complete',
       summary: String(result?.result || '任务已完成。'),
@@ -167,6 +205,8 @@ export class CompletionCoordinator {
   reviewFinalAnswer(content: string): string | null {
     const state = this.state;
     const claim = String(content || '');
+    const formatRetry = this.finalJsonReflection(claim);
+    if (formatRetry) return formatRetry;
     if (
       !claim.trim() ||
       !shouldVerifyCompletion(
@@ -213,5 +253,15 @@ export class CompletionCoordinator {
       codes: precheck.reasons.map((reason: any) => reason.code),
     });
     return buildDeterministicReflection(precheck);
+  }
+
+  private latestAssistantContent(): string {
+    for (let index = this.state.messages.length - 1; index >= 0; index -= 1) {
+      const message = this.state.messages[index];
+      if (message && message.role === 'assistant') {
+        return String(message.content || '');
+      }
+    }
+    return '';
   }
 }

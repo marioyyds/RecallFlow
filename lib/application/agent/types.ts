@@ -414,6 +414,8 @@ export interface RunCtx {
   pendingCloseWindowId?: number | null;
   lastAuthChallenge?: AuthChallenge | null;
   citations?: CitationLike[];
+  /** Bridge-only pre-execution risk gate; absent for panel runs. */
+  agentBudgetGuard?: (name: string) => unknown;
 }
 
 /** 一次鉴权挑战（`lastAuthChallenge`）。 */

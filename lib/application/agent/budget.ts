@@ -41,3 +41,42 @@ export function tokenBudgetExceeded(totalTokens: any, budget: any) {
   if (!Number.isFinite(used) || used <= 0) return false;
   return used >= cap;
 }
+
+/**
+ * Wall-clock budget decision for externally bounded runs.
+ *
+ * `stop` is a hard deadline, `wrap-up` is a one-shot soft warning, and
+ * `continue` leaves the normal panel path unchanged when no deadline is set.
+ */
+export function deadlineDecision(
+  input: {
+    now?: unknown;
+    deadlineAt?: unknown;
+    wrapUpAt?: unknown;
+    wrapUpSent?: boolean;
+  } = {}
+): 'stop' | 'wrap-up' | 'continue' {
+  const now = Number(input.now);
+  const deadlineAt = Number(input.deadlineAt);
+  const wrapUpAt = Number(input.wrapUpAt);
+  if (Number.isFinite(deadlineAt) && deadlineAt > 0 && Number.isFinite(now) && now >= deadlineAt) {
+    return 'stop';
+  }
+  if (
+    Number.isFinite(wrapUpAt) &&
+    wrapUpAt > 0 &&
+    Number.isFinite(now) &&
+    now >= wrapUpAt &&
+    input.wrapUpSent !== true
+  ) {
+    return 'wrap-up';
+  }
+  return 'continue';
+}
+
+/** Resolve the bridge authorization guard from the settings snapshot. */
+export function resolveAgentBudgetGuard(settings: unknown): ((name: string) => unknown) | undefined {
+  if (!settings || typeof settings !== 'object') return undefined;
+  const guard = (settings as { agentBudgetGuard?: unknown }).agentBudgetGuard;
+  return typeof guard === 'function' ? (guard as (name: string) => unknown) : undefined;
+}

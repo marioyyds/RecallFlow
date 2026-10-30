@@ -72,6 +72,9 @@ export const TOOL_METADATA: Record<string, ToolMetadataEntry> = {
   // ⚠ 本档**没有**并入 get_attribute 与 get_element_source：它们走各自不同的执行路径
   //（独立消息 / 源码映射链路），且后者被 MCP 的「页面元素 → 源码文件」闭环直接使用。
   inspect_element: { risk: 'read', readOnly: true, parallelSafe: true, route: 'content' },
+  // 读取表格/网格并做筛选/计数/求和：只读，不需要审批。与 inspect_element 同走内容脚本，
+  // 但多一层"自动选主表 + 结构化查询"，因此单独成一个工具（面向模型的边界按执行路径+权限分组）。
+  read_table: { risk: 'read', readOnly: true, parallelSafe: true, route: 'content' },
   // 截图刻意不标记：它重、会向 UI 推图，且同批截图没有实际收益
   take_screenshot: { risk: 'read', readOnly: true, route: 'background' },
   scroll_page: { risk: 'page', requiresApproval: true, route: 'content' },

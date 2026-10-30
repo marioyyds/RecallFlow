@@ -75,3 +75,53 @@ test('截图链路两端对齐（relay 实现 + MCP 工具 + 归档函数都存�
   const store = fs.readFileSync(path.join(ROOT, 'integrations/opencode/recallflow-mcp/evidence-store.js'), 'utf8');
   assert.ok(/export function archiveImage\(/.test(store), 'evidence-store 应提供 archiveImage');
 });
+
+/**
+ * 抽出 dispatch 的 `方法名 -> 处理函数名` 映射。
+ * 形如：`if (method === 'page_action') return await pageAction(params);`
+ */
+function relayDispatchHandlers(src) {
+  const out = new Map();
+  const re = /if \(method === '([a-z_]+)'\) return await ([A-Za-z0-9_]+)\(/g;
+  let m;
+  while ((m = re.exec(src))) out.set(m[1], m[2]);
+  return out;
+}
+
+/** 某个标识符在本文件里是否有定义（本地函数声明，或从别处 import 进来）。 */
+function identifierDefined(src, name) {
+  if (new RegExp('function ' + name + '\\s*\\(').test(src)) return true; // 本地函数声明
+  if (new RegExp('(const|let|var)\\s+' + name + '\\s*=').test(src)) return true; // 本地变量
+  // import { a, b } from '...' —— 逐个列出导入名
+  const importRe = /import\s+(?:([A-Za-z0-9_]+)\s*,\s*)?\{([^}]*)\}\s*from/g;
+  let m;
+  while ((m = importRe.exec(src))) {
+    const names = m[2]
+      .split(',')
+      .map((x) => x.split(/\s+as\s+/).pop().trim())
+      .filter(Boolean);
+    if (names.includes(name)) return true;
+  }
+  if (new RegExp('import \\* as ' + name + '\\b').test(src)) return true;
+  return false;
+}
+
+test('relay 的每个 dispatch 分支都指向一个真实存在的处理函数', () => {
+  // 为什么需要这条：relay.js **只在扩展里运行，没有任何测试 import 它**
+  //（它引用了 chrome / WebSocket 等浏览器全局）。于是"分支指向一个不存在的函数"
+  // 这种错误不会在单测里变红，只会在**重载扩展之后**才炸 ——
+  // 而那时的现象是一个 unknown/undefined 报错，很容易被误判成"服务端没实现"。
+  const handlers = relayDispatchHandlers(relaySource);
+  assert.ok(handlers.size > 0, '未能从 relay 解析出 dispatch 分支（解析器需更新？）');
+  const missing = [];
+  for (const [method, fn] of handlers) {
+    if (!identifierDefined(relaySource, fn)) missing.push(method + ' -> ' + fn + '()');
+  }
+  assert.deepEqual(missing, [], 'dispatch 指向了不存在的处理函数（重载扩展后才会炸）：' + missing.join('、'));
+});
+
+test('relay 的 dispatch 分支覆盖清单里的每个方法（不只方向对，还要指得对）', () => {
+  const handlers = relayDispatchHandlers(relaySource);
+  const notDispatched = BRIDGE_METHODS.filter((m) => !handlers.has(m));
+  assert.deepEqual(notDispatched, [], '清单里这些方法没有 dispatch 分支：' + notDispatched.join('、'));
+});
