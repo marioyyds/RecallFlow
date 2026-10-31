@@ -3025,6 +3025,14 @@ function createPanelWithLayout(
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'false');
   panel.setAttribute('aria-label', 'RecallFlow 浏览器助手');
+  // Shadow DOM 的键盘事件默认是 composed 的：在输入框里敲空格，事件会继续冒泡到
+  // 页面，触发视频站点的「空格播放/暂停」等全局快捷键。面板自己的输入目标必须先
+  // 消费冒泡阶段；只阻断向页面传播，不 preventDefault，所以打字、按钮空格激活和
+  // 面板内键盘交互都不受影响。文档捕获阶段仍先由面板的 Esc / 全局快捷键处理。
+  const keepKeyboardInPanel = (e: KeyboardEvent) => e.stopPropagation();
+  for (const type of ['keydown', 'keypress', 'keyup'] as const) {
+    panel.addEventListener(type, keepKeyboardInPanel);
+  }
   // 尺寸：恢复上次的宽高（夹在视口内）。停靠面板被自动高度撑大后，重开会把它当成
   // 用户尺寸（`_manualSize`）—— 这是既有语义，本次不改，但它意味着重开后
   // `fitPanelHeight()` 不再重算高度，所以下面摆放位置时用的是**恢复后的尺寸**。

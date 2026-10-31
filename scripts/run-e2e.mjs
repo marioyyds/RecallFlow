@@ -102,6 +102,8 @@ function runE2E() {
     // 不依赖 LLM，用默认夹具即可。
     { name: '存档零痕迹', spec: 'save-clean.spec.mjs', hold: '', visionShot: '' },
     { name: '设置提示', spec: 'settings-ui.spec.mjs', hold: '', visionShot: '' },
+    // 面板叠在视频页上时，输入框里的空格不能冒泡成页面的播放/暂停快捷键。
+    { name: '面板键盘隔离', spec: 'panel-keyboard-isolation.spec.mjs', hold: '', visionShot: '' },
     { name: '登录拦截提示', spec: 'auth-challenge.spec.mjs', hold: '', visionShot: '' },
     // 面板布局存在扩展级存储：跨 origin 也必须恢复同一位置与尺寸。
     { name: '全局面板布局', spec: 'panel-layout.spec.mjs', hold: '', visionShot: '' },

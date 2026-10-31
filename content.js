@@ -9460,6 +9460,10 @@
     panel.setAttribute("role", "dialog");
     panel.setAttribute("aria-modal", "false");
     panel.setAttribute("aria-label", "RecallFlow \u6D4F\u89C8\u5668\u52A9\u624B");
+    const keepKeyboardInPanel = (e) => e.stopPropagation();
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      panel.addEventListener(type, keepKeyboardInPanel);
+    }
     const savedSize = clampPanelSize(layout, panelViewport());
     if (savedSize) {
       panel.style.width = savedSize.width + "px";
