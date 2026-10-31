@@ -70,7 +70,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // 2026-10-31: session export now downloads a UTF-8 Markdown Blob instead of
 // writing to the clipboard. Filename sanitization and lifecycle cleanup add
 // ~1.1KB (measured 500401 bytes). Raise by 2KB. No new dependency.
-export const SIZE_BUDGET_BYTES = 490 * 1024;
+// 2026-10-31: contenteditable readback now derives logical block text instead
+// of trusting innerText's rendered margins. Measured 502657 bytes (491KB);
+// raise by 2KB. No new dependency.
+export const SIZE_BUDGET_BYTES = 492 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

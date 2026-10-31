@@ -4634,6 +4634,67 @@ async function takeScreenshot(deps) {
 }
 
 // lib/shared/editable-text.ts
+function readContentEditableText(root) {
+  if (!root) return "";
+  const BLOCK_TAGS = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DIV|DL|DT|DD|FIGURE|FOOTER|FORM|H[1-6]|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TBODY|TD|TFOOT|TH|THEAD|TR|UL)$/;
+  const tokens = [];
+  const isBlock = (node) => {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = String(node.tagName || node.nodeName || "").toUpperCase();
+    if (BLOCK_TAGS.test(tag)) return true;
+    try {
+      return /^(block|list-item|table|table-row|flex|grid|flow-root)$/.test(
+        String(getComputedStyle(node).display || "")
+      );
+    } catch (e) {
+      return false;
+    }
+  };
+  const onlyBreaks = (node) => {
+    for (const child of Array.from(node.childNodes || [])) {
+      if (child.nodeType === 3) {
+        if (String(child.nodeValue || "").trim()) return false;
+        continue;
+      }
+      if (child.nodeType === 1 && String(child.tagName || child.nodeName).toUpperCase() === "BR") continue;
+      return false;
+    }
+    return true;
+  };
+  const walk = (node) => {
+    for (const child of Array.from(node.childNodes || [])) {
+      if (child.nodeType === 3) {
+        const text2 = String(child.nodeValue || "");
+        if (text2) tokens.push(text2);
+        continue;
+      }
+      if (child.nodeType !== 1) continue;
+      const tag = String(child.tagName || child.nodeName || "").toUpperCase();
+      if (tag === "BR") {
+        tokens.push("\n");
+        continue;
+      }
+      const block = isBlock(child);
+      if (block) tokens.push(null);
+      if (block && onlyBreaks(child)) continue;
+      walk(child);
+    }
+  };
+  walk(root);
+  let text = "";
+  let boundaries = 0;
+  for (const token of tokens) {
+    if (token === null) {
+      if (text) boundaries += 1;
+      continue;
+    }
+    if (!token) continue;
+    if (boundaries && text && !text.endsWith("\n")) text += "\n".repeat(boundaries);
+    boundaries = 0;
+    text += token;
+  }
+  return text.replace(/\n+$/g, "");
+}
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
 }
@@ -4662,7 +4723,7 @@ function editableTextSummary(expected, actual) {
 // lib/application/agent/page-input-tools.ts
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
-  const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + '); if (!el) return null; if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || ""); return typeof el.value === "string" ? el.value : null; })()';
+  const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + "); if (!el) return null; if (el.isContentEditable) { " + readContentEditableText.toString() + ' return readContentEditableText(el); } return typeof el.value === "string" ? el.value : null; })()';
   try {
     return isSubframe ? await deps.cdp.evaluateInFrame(tabId, frameId, expr) : await deps.cdp.evaluate(tabId, expr);
   } catch (e) {

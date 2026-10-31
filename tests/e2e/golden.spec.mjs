@@ -2874,16 +2874,26 @@ test('golden: 多行富文本写入必须保留换行、无重复', async () => 
 
   await expect
     .poll(() => page.locator('#rt-editor').innerText(), { timeout: 30_000 })
-    .toMatch(/第一行\s*\n\s*第二行\s*\n\s*第三行/);
+    .toMatch(/第一行\s*\n\s*\n\s*第二行\s*\n\s*第三行/);
 
   const text = await page.locator('#rt-editor').innerText();
+  const blocks = await page
+    .locator('#rt-editor')
+    .evaluate((el) => Array.from(el.children).map((child) => String(child.textContent || '').trim()));
   const syntheticIgnored = await page.evaluate(() => window.__rt.syntheticIgnored);
   expect(syntheticIgnored, '不应触发“无 inputType 的合成输入”陷阱').toBe(0);
+  expect(blocks, '空行只能生成一个空段落，不能因块级排版重复计数').toEqual([
+    '第一行',
+    '',
+    '第二行',
+    '第三行',
+  ]);
   expect(text.split('第一行').length - 1, '第一行不应重复').toBe(1);
   expect(text.split('第二行').length - 1, '第二行不应重复').toBe(1);
   expect(text.split('第三行').length - 1, '第三行不应重复').toBe(1);
 
-  await expect.poll(() => toolResultsText(), { timeout: 20_000 }).toContain('实际值');
+  await expect.poll(() => toolResultsText(), { timeout: 20_000 }).toContain('已清空并输入 12 个字符');
+  expect(toolResultsText(), '逻辑回读一致后不应误报 partial').not.toContain('CDP 输入未达到预期');
   await page.close();
 });
 

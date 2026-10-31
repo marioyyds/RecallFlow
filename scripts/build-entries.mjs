@@ -51,15 +51,19 @@ export const ENTRIES = [
   // 2026-10-31: download observation (Page/Browser events, session persistence,
   // task-start setup) and progressive snapshot wiring measured 901KB; raise to
   // 902KB explicitly. No new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 902 * 1024 },
+  // 2026-10-31: contenteditable logical readback adds ~1.9KB; measured
+  // 924986 bytes (904KB). Raise explicitly. No new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 904 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 536 * 1024 },
+  // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 538 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
   // 532 KB：新增 query-report-table 技能并同步工具清单，实测 525 KB。
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 532 * 1024 },
+  // 2026-10-31: shared logical readback measured 545104 bytes (533KB); 534KB.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 534 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

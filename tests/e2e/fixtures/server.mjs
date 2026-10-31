@@ -3635,7 +3635,7 @@ const llm = http.createServer((req, res) => {
       if (done === 1) {
         toolStep(res, 'type_text', {
           selector: '#rt-editor',
-          value: '第一行\n第二行\n第三行',
+          value: '第一行\n\n第二行\n第三行',
           clearFirst: true,
         });
         return;

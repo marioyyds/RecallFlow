@@ -12,7 +12,7 @@
 //      **升级条件是"合成失败"，不是"没有观测到效果"** —— 后者会对真实页面重复输入。
 //   2. `hadEffect` / `verification` 由 `observedChange` + `buildActionVerification`
 //      按**观测**算出，不写死 true（此处曾是 7 处硬编码谎报之一）。
-import { editableTextSummary } from '../../shared/editable-text.ts';
+import { editableTextSummary, readContentEditableText } from '../../shared/editable-text.ts';
 import type { Caught } from './errors.ts';
 import type { PageInputDeps } from './tool-deps.ts';
 
@@ -27,7 +27,9 @@ async function readEditableValue(
   const sel = JSON.stringify(String(selector || ''));
   const expr =
     '(() => { /* rf-read-editable */ const el = document.querySelector(' + sel + '); if (!el) return null;' +
-    ' if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || "");' +
+    ' if (el.isContentEditable) { ' +
+    readContentEditableText.toString() +
+    ' return readContentEditableText(el); }' +
     ' return typeof el.value === "string" ? el.value : null; })()';
   try {
     return isSubframe

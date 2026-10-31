@@ -1,7 +1,7 @@
 // User-observable interactions with the current page.
 import { elementSelector } from '../page-text.ts';
 import { waitForSettle } from '../settle.ts';
-import { editableTextSummary } from '../../../shared/editable-text.ts';
+import { editableTextSummary, readContentEditableText } from '../../../shared/editable-text.ts';
 import {
   describeLookupMiss,
   describeTargetState,
@@ -211,9 +211,9 @@ function dispatchRealisticClick(el: any) {
 
 function editableValue(el: any) {
   if (!el) return null;
-  // contenteditable 的 textContent 会把段落边界压成连续文本；innerText 保留换行。
-  // 输入校验必须基于用户实际看到/编辑器实际读到的文本。
-  if (el.isContentEditable) return String(el.innerText !== undefined ? el.innerText : el.textContent || '');
+  // contenteditable 的 textContent 会压平段落；innerText 又会把段落的 CSS 间距
+  // 重复算成空行。逻辑读法按 DOM 块边界还原，避免把正常段落误判成换行翻倍。
+  if (el.isContentEditable) return readContentEditableText(el);
   if (typeof el.value === 'string') return el.value;
   return null;
 }

@@ -158,6 +158,23 @@ test('type_text：富文本多行输入逐行插入，并以 Enter 建立段边�
   assert.equal(r.matchesIntent, true);
 });
 
+test('type_text：CDP 富文本回读使用逻辑 DOM 文本，不按 innerText 的排版空行验收', async () => {
+  const deps = mkDeps({
+    contentResult: { ok: false, matchesIntent: false, partial: true },
+    resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
+    readValues: ['', 'A\n\nB'],
+  });
+  const r = await typeText(deps, { value: 'A\n\nB', clearFirst: true });
+  const readExpr = deps.calls.find(
+    (c) => c.op === 'cdp.evaluate' && String(c.expr).includes('rf-read-editable')
+  );
+  assert.ok(readExpr, '应执行富文本回读');
+  assert.match(String(readExpr.expr), /function readContentEditableText/);
+  assert.doesNotMatch(String(readExpr.expr), /el\.innerText/);
+  assert.equal(r.ok, true);
+  assert.equal(r.matchesIntent, true);
+});
+
 test('type_text：CDP 输入后回读不一致必须失败（不许假报成功）', async () => {
   const deps = mkDeps({
     contentResult: { ok: false },
