@@ -48,9 +48,10 @@ export const ENTRIES = [
   // finalizer 后，保留了清晰的对象边界与可读产物；新增约 12 KB 自包含代码，
   // 合并 bridge agent job、WebArena 预算判定与安全守卫后实测 887 KB。未引入
   // 新依赖；预算是防误引入依赖的棘轮，不是要求压扁职责边界。
-  // 2026-10-31: progressive snapshot schema / prompt wiring measured 893KB;
-  // +1KB explicit, no new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 893 * 1024 },
+  // 2026-10-31: download observation (Page/Browser events, session persistence,
+  // task-start setup) and progressive snapshot wiring measured 901KB; raise to
+  // 902KB explicitly. No new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 902 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 536 * 1024 },

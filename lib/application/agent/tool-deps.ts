@@ -8,7 +8,11 @@
 // 借用已导出函数的签名一律用 `typeof fn`，避免把签名抄第二份（抄写漂移是 L-42 的同类风险）。
 import * as cdp from '../../backend/cdp.ts';
 import { getTrace, listTraces } from './trace.ts';
-import { handleDialog, getDownloads } from './target-manager.ts';
+import {
+  handleDialog,
+  getDownloads,
+  isDownloadObservationActive,
+} from './target-manager.ts';
 import { readBounded, decodeBuffer, extractHtmlTitle, searchWeb, isAbortLikeError, describeFetchError } from './net-parse.ts';
 import { listScripts as listUserscripts, searchScripts, installFromUrl, runUserscriptOnTab } from '../../userscript/manager.ts';
 import { getUserscriptSettings } from '../../userscript/settings.ts';
@@ -248,6 +252,7 @@ export interface DiagnosticsDeps {
   sendTabMessage: SendTabMessage;
   tabId: number;
   getDownloads: typeof getDownloads;
+  isDownloadObservationActive: typeof isDownloadObservationActive;
 }
 
 export type { RunCtx, PageSnapshotLike, ToolResult, ActionVerification };

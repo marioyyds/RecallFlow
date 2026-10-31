@@ -2044,7 +2044,8 @@ test('golden: 付费墙 —— 「能打开」不等于「能看」，要找到�
 // 难点：点一下之后**页面什么都不变**（没有 DOM 变化、没有状态文案）——
 // 于是"点了链接"与"文件真的下载了"分家 ✗ 与付费墙同源（能点 ≠ 生效）。
 // 唯一可信来源是**浏览器自己报的下载事件**（CDP `Page.downloadWillBegin`
-// → `read_diagnostics({kind:"downloads"})`），它同样要求**点击之前已 attach CDP**。
+// → `read_diagnostics({kind:"downloads"})`）。普通内容脚本点击不会 attach CDP，
+// 所以 Agent 必须在下载任务开始时自动开启观测；本用例刻意不先调用 get_ax_snapshot。
 //
 // 判据两层：
 //   · 浏览器级结果（本场景没有"页面状态"可断言）：Playwright 的 download 事件确实发生、

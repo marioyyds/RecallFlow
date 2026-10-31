@@ -24,6 +24,11 @@ import {
 import { sanitizeToolPairing } from './history-policy.ts';
 import { buildInitialMessagesPure } from './initial-messages.ts';
 import { formatElementLocator } from '../../shared/format/picked.ts';
+import {
+  clearDownloads,
+  ensureDownloadObservation,
+  shouldObserveDownloads,
+} from './target-manager.ts';
 
 function buildInitialMessages(
   instruction: string,
@@ -281,6 +286,23 @@ export async function prepareAgentRun(options: {
     pageUrl: ctx.pageUrl,
     budget: { maxTotalTokens: budget.maxTotalTokens, toolTimeoutMs: budget.toolTimeoutMs },
   });
+  const downloadTask = shouldObserveDownloads(detected.sourceText || instruction);
+  if (!canResume && downloadTask && ctx.tabId) {
+    const observation =
+      settings && settings.cdpEnabled !== false
+        ? await ensureDownloadObservation(ctx.tabId).catch((error) => ({
+            ok: false,
+            result: String(error && error.message || error),
+          }))
+        : { ok: false, result: 'CDP 已关闭，无法捕获浏览器下载事件。' };
+    // “本任务已捕获”从新任务开始计；不要用上一个任务的下载记录冒充本次结果。
+    clearDownloads(ctx.tabId);
+    trace({
+      phase: 'download-observer',
+      ok: Boolean(observation.ok),
+      result: String(observation.result || ''),
+    });
+  }
   const disabledTools = new Set<string>(
     canResume && Array.isArray(persisted.disabledTools) ? persisted.disabledTools : []
   );

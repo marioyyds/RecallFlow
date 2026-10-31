@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 
 import { readDiagnostics, DIAGNOSTIC_KINDS, readConsole, readNetwork, listDownloads } from '../lib/application/agent/diagnostics.ts';
 
-function mkDeps({ console: c = [], network: n = [], downloads: d = [] } = {}) {
+function mkDeps({ console: c = [], network: n = [], downloads: d = [], observationActive = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -20,6 +20,7 @@ function mkDeps({ console: c = [], network: n = [], downloads: d = [] } = {}) {
       throw new Error('未预期的消息类型 ' + msg.type);
     },
     getDownloads: () => d,
+    isDownloadObservationActive: () => observationActive,
   };
 }
 
@@ -58,11 +59,20 @@ test('kind=network 走 network 通道（不得串到 console）', async () => {
 });
 
 test('kind=downloads 走后台下载记录（不请求内容脚本）', async () => {
-  const deps = mkDeps({ downloads: [{ suggestedFilename: 'a.zip', url: 'https://a.test/a.zip' }] });
+  const deps = mkDeps({
+    downloads: [{
+      suggestedFilename: 'a.zip',
+      url: 'https://a.test/a.zip',
+      state: 'completed',
+      receivedBytes: 100,
+      totalBytes: 100,
+    }],
+  });
   const r = await readDiagnostics(deps, { kind: 'downloads' });
   assert.equal(r.ok, true);
   assert.deepEqual(deps.calls, [], 'downloads 不该向内容脚本发消息');
   assert.match(r.result, /a\.zip/);
+  assert.match(r.result, /completed/);
 });
 
 test('无标签页时 console / network 返回"无法定位"，而不是抛', async () => {
@@ -106,5 +116,6 @@ test('limit 被夹在 1..200，越界不得放行', async () => {
 test('空结果给出可读提示，而不是空字符串', async () => {
   assert.match((await readDiagnostics(mkDeps(), { kind: 'console' })).result, /暂无 console 记录/);
   assert.match((await readDiagnostics(mkDeps(), { kind: 'network' })).result, /暂无网络请求记录/);
-  assert.match(listDownloads(() => [], 7).result, /暂未捕获到下载/);
+  assert.match(listDownloads(() => [], 7, () => false).result, /点击前开启 CDP 观测/);
+  assert.match(listDownloads(() => [], 7, () => true).result, /下载观测已开启/);
 });

@@ -4176,15 +4176,15 @@ const llm = http.createServer((req, res) => {
     // 再读快照看到"未处理对话框"的提示，然后处理它 —— 这正是真实使用路径。
     // 剧本：下载文件（playbook id = 'download-verify'）。
     //
-    // ⚠ 第一步用 **CDP 支撑的**读取：下载事件（Page.downloadWillBegin）只有
-    // 在"点击之前就已 attach"时才会到达扩展 —— 与对话框是同一个坑。
+    // ⚠ 刻意**不**先调用 get_ax_snapshot：下载任务必须在 Agent 启动时自动开启
+    // CDP 观测，否则普通 click_element（内容脚本合成点击成功）不会 attach，
+    // Page/Browser 下载事件也就永远到不了扩展。
     if (userText.includes(PLAYBOOKS['download-verify'].trigger)) {
       const done = toolResults.length;
-      if (done === 0) { toolStep(res, 'get_ax_snapshot', { limit: 30 }); return; }
-      if (done === 1) { toolStep(res, 'click_element', { role: 'link', name: '导出报表 CSV' }); return; }
+      if (done === 0) { toolStep(res, 'click_element', { role: 'link', name: '导出报表 CSV' }); return; }
       // 页面不会变，唯一的凭据来自浏览器自己的下载事件
-      if (done === 2) { toolStep(res, 'read_diagnostics', { kind: 'downloads' }); return; }
-      if (done === 3) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
+      if (done === 1) { toolStep(res, 'read_diagnostics', { kind: 'downloads' }); return; }
+      if (done === 2) { toolStep(res, 'inspect_element', { op: 'text', selector: '#status' }); return; }
       finalText(res, '已从浏览器下载事件确认报表已导出，文件名是 report.csv（页面上不会有任何变化，这正是要说明的地方）。', 90);
       return;
     }

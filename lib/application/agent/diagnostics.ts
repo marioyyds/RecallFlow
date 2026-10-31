@@ -56,12 +56,37 @@ export async function readNetwork(sendTabMessage: SendTabMessage, tabId: number,
 }
 
 /** 列出本任务已捕获的下载（原 list_downloads 的实现）。 */
-export function listDownloads(getDownloads: DiagnosticsDeps['getDownloads'], tabId: number) {
+export function listDownloads(
+  getDownloads: DiagnosticsDeps['getDownloads'],
+  tabId: number,
+  isObservationActive?: DiagnosticsDeps['isDownloadObservationActive']
+) {
   const list = getDownloads(tabId);
-  if (!list.length) return { ok: true, result: '本任务暂未捕获到下载。' };
+  if (!list.length) {
+    const active = Boolean(isObservationActive && isObservationActive(tabId));
+    return {
+      ok: true,
+      result:
+        '本任务暂未捕获到下载。' +
+        (active
+          ? '下载观测已开启；若浏览器确实发生下载，请等待事件写入后再读一次。'
+          : '下载事件必须在点击前开启 CDP 观测；读取诊断本身不会追溯此前的下载。'),
+    };
+  }
   return {
     ok: true,
-    result: '捕获到的下载：\n' + list.map((d, i) => '[' + (i + 1) + '] ' + (d.suggestedFilename || '') + ' ← ' + d.url).join('\n'),
+    result:
+      '捕获到的下载：\n' +
+      list
+        .map((d, i) => {
+          const state = String(d.state || 'inProgress');
+          const size =
+            Number(d.totalBytes) > 0
+              ? '（' + Number(d.receivedBytes || 0) + '/' + Number(d.totalBytes) + ' bytes，' + state + '）'
+              : '（' + state + '）';
+          return '[' + (i + 1) + '] ' + (d.suggestedFilename || '') + size + ' ← ' + d.url;
+        })
+        .join('\n'),
   };
 }
 
@@ -81,6 +106,12 @@ export async function readDiagnostics(deps: DiagnosticsDeps, args: Record<string
   }
   if (kind === 'console') return await readConsole(deps.sendTabMessage, deps.tabId, args);
   if (kind === 'network') return await readNetwork(deps.sendTabMessage, deps.tabId, args);
-  if (kind === 'downloads') return listDownloads(deps.getDownloads, deps.tabId);
+  if (kind === 'downloads') {
+    return listDownloads(
+      deps.getDownloads,
+      deps.tabId,
+      deps.isDownloadObservationActive
+    );
+  }
   return { ok: false, result: '未知的 kind「' + kind + '」，取值：' + DIAGNOSTIC_KINDS.join(' / ') + '。' };
 }

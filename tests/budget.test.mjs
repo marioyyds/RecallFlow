@@ -53,6 +53,15 @@ test('生产装配不按意图筛选工具，也不在运行中修改 tools', ()
   );
 });
 
+test('下载任务在 tab 重新绑定和点击前都确保当前 tab 已开启观测', () => {
+  const pipeline = readSource('lib/application/agent/tool-call-pipeline.ts');
+  assert.match(pipeline, /DOWNLOAD_TRIGGER_TOOLS/);
+  assert.match(pipeline, /trigger: 'before-click'/);
+  assert.match(pipeline, /trigger: 'tab-bound'/);
+  const calls = pipeline.match(/ensureDownloadObservation\(state\.ctx\.tabId\)/g) || [];
+  assert.ok(calls.length >= 2, '点击前与 tab 绑定后各需要一次幂等 ensure');
+});
+
 test('设置页不再暴露已失效的「工具调用上限 / 推理轮数上限」输入框', () => {
   const html = readSource('options.html');
   assert.ok(!/id="budget-tools"/.test(html), '输入框还在，但值已经没人读了 —— 那是"静默无效"的设置');

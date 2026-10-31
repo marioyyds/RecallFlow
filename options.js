@@ -1687,7 +1687,7 @@ var SKILL_REGISTRY = Object.freeze([
     category: "browser-automation",
     tags: ["\u4E0B\u8F7D", "\u5BFC\u51FA", "\u6D4F\u89C8\u5668\u4E8B\u4EF6"],
     skill_type: "prompt-template",
-    content: '# \u4E0B\u8F7D\uFF1A**\u9875\u9762\u4E0A\u4EC0\u4E48\u90FD\u4E0D\u4F1A\u53D8**\n\n## \u6700\u5BB9\u6613\u9519\u7684\u4E00\u6B65\n\u70B9\u4E00\u4E0B\u5BFC\u51FA\u94FE\u63A5\uFF0C\u7136\u540E\u770B\u9875\u9762 \u2014\u2014 **\u4EC0\u4E48\u90FD\u6CA1\u6709\u53D8**\u3002\u4E8E\u662F\u5F88\u5BB9\u6613\u628A"\u70B9\u4E86\u94FE\u63A5"\u5F53\u6210"\u5BFC\u51FA\u4E86" \u2717\n\u4E0B\u8F7D\u662F**\u6D4F\u89C8\u5668\u7EA7**\u884C\u4E3A\uFF1A\u4E0D\u4EA7\u751F DOM \u53D8\u5316\u3001\u6CA1\u6709\u9875\u9762\u72B6\u6001\u6587\u6848\uFF0C\u9875\u9762\u81EA\u5DF1\u4E5F\u4E0D\u77E5\u9053\u3002\n\n## \u6B63\u786E\u7684\u51ED\u636E\n`read_diagnostics({ kind: "downloads" })` \u2014\u2014 \u5B83\u8BFB\u7684\u662F**\u6D4F\u89C8\u5668\u62A5\u7684\u4E0B\u8F7D\u4E8B\u4EF6**\uFF0C\n\u91CC\u9762\u6709\u771F\u5B9E\u7684 URL \u4E0E**\u6587\u4EF6\u540D**\uFF08\u7531\u54CD\u5E94\u5934 `Content-Disposition` \u51B3\u5B9A\uFF0C\n\u5E38\u5E38\u548C\u94FE\u63A5\u6587\u5B57\u6216 URL \u672B\u6BB5\u90FD\u4E0D\u4E00\u6837\uFF09\u3002\u8981\u56DE\u7B54"\u6587\u4EF6\u53EB\u4EC0\u4E48"\uFF0C\u53EA\u80FD\u770B\u8FD9\u91CC\u3002\n\n## \u6B65\u9AA4\n1. \u627E\u5230\u5BFC\u51FA\u5165\u53E3\uFF08\u94FE\u63A5/\u6309\u94AE\uFF09\uFF1B\n2. \u70B9\u5B83 \u2014\u2014 **\u4E0D\u8981**\u671F\u5F85\u9875\u9762\u53D8\u5316\uFF0C\u4E5F\u522B\u56E0\u4E3A"\u6CA1\u53CD\u5E94"\u5C31\u91CD\u590D\u70B9\uFF08\u53EF\u80FD\u89E6\u53D1\u591A\u6B21\u4E0B\u8F7D\uFF09\uFF1B\n3. `read_diagnostics({kind:"downloads"})` \u8BFB\u6D4F\u89C8\u5668\u4E8B\u4EF6\uFF0C\u62A5\u51FA\u6587\u4EF6\u540D\uFF1B\n4. \u82E5\u4E8B\u4EF6\u5217\u8868\u4E3A\u7A7A\uFF1A\u53EF\u80FD\u662F**\u70B9\u51FB\u4E4B\u524D\u6CA1\u6709 attach CDP**\uFF08\u4E0B\u8F7D\u4E8B\u4EF6\u9760 CDP \u4E0A\u62A5\uFF09\u2014\u2014\n   \u8FD9\u65F6\u5982\u5B9E\u8BF4\u660E"\u6CA1\u80FD\u786E\u8BA4\u4E0B\u8F7D\u662F\u5426\u53D1\u751F"\uFF0C\u800C\u4E0D\u662F\u731C\u3002\n\n## \u4E09\u6761\u7EAA\u5F8B\n- **\u522B\u7528\u9875\u9762\u72B6\u6001\u8BC1\u660E\u4E0B\u8F7D**\uFF1A\u5B83\u4E0D\u4F1A\u53D8\u3002\n- **\u522B\u91CD\u590D\u70B9**\uFF1A\u4E00\u6B21\u70B9\u51FB\u53EF\u80FD\u5DF2\u7ECF\u4EA7\u751F\u4E00\u6B21\u4E0B\u8F7D\uFF0C\u91CD\u590D\u70B9\u4F1A\u53D8\u6210\u591A\u4EFD\u3002\n- **\u6587\u4EF6\u540D\u4EE5\u6D4F\u89C8\u5668\u4E8B\u4EF6\u4E3A\u51C6**\uFF1A\u94FE\u63A5\u6587\u5B57\u4E0E\u771F\u5B9E\u6587\u4EF6\u540D\u7ECF\u5E38\u4E0D\u4E00\u81F4\u3002',
+    content: '# \u4E0B\u8F7D\uFF1A**\u9875\u9762\u4E0A\u4EC0\u4E48\u90FD\u4E0D\u4F1A\u53D8**\n\n## \u6700\u5BB9\u6613\u9519\u7684\u4E00\u6B65\n\u70B9\u4E00\u4E0B\u5BFC\u51FA\u94FE\u63A5\uFF0C\u7136\u540E\u770B\u9875\u9762 \u2014\u2014 **\u4EC0\u4E48\u90FD\u6CA1\u6709\u53D8**\u3002\u4E8E\u662F\u5F88\u5BB9\u6613\u628A"\u70B9\u4E86\u94FE\u63A5"\u5F53\u6210"\u5BFC\u51FA\u4E86" \u2717\n\u4E0B\u8F7D\u662F**\u6D4F\u89C8\u5668\u7EA7**\u884C\u4E3A\uFF1A\u4E0D\u4EA7\u751F DOM \u53D8\u5316\u3001\u6CA1\u6709\u9875\u9762\u72B6\u6001\u6587\u6848\uFF0C\u9875\u9762\u81EA\u5DF1\u4E5F\u4E0D\u77E5\u9053\u3002\n\n## \u6B63\u786E\u7684\u51ED\u636E\n`read_diagnostics({ kind: "downloads" })` \u2014\u2014 \u5B83\u8BFB\u7684\u662F**\u6D4F\u89C8\u5668\u62A5\u7684\u4E0B\u8F7D\u4E8B\u4EF6**\uFF0C\n\u91CC\u9762\u6709\u771F\u5B9E\u7684 URL \u4E0E**\u6587\u4EF6\u540D**\uFF08\u7531\u54CD\u5E94\u5934 `Content-Disposition` \u51B3\u5B9A\uFF0C\n\u5E38\u5E38\u548C\u94FE\u63A5\u6587\u5B57\u6216 URL \u672B\u6BB5\u90FD\u4E0D\u4E00\u6837\uFF09\u3002\u8981\u56DE\u7B54"\u6587\u4EF6\u53EB\u4EC0\u4E48"\uFF0C\u53EA\u80FD\u770B\u8FD9\u91CC\u3002\n\n## \u6B65\u9AA4\n1. \u627E\u5230\u5BFC\u51FA\u5165\u53E3\uFF08\u94FE\u63A5/\u6309\u94AE\uFF09\uFF1B\n2. \u70B9\u5B83 \u2014\u2014 **\u4E0D\u8981**\u671F\u5F85\u9875\u9762\u53D8\u5316\uFF0C\u4E5F\u522B\u56E0\u4E3A"\u6CA1\u53CD\u5E94"\u5C31\u91CD\u590D\u70B9\uFF08\u53EF\u80FD\u89E6\u53D1\u591A\u6B21\u4E0B\u8F7D\uFF09\uFF1B\n3. `read_diagnostics({kind:"downloads"})` \u8BFB\u6D4F\u89C8\u5668\u4E8B\u4EF6\uFF0C\u62A5\u51FA\u6587\u4EF6\u540D\uFF1B\n4. \u4E0B\u8F7D\u4EFB\u52A1\u542F\u52A8\u65F6\u7CFB\u7EDF\u4F1A\u81EA\u52A8 attach CDP \u5E76\u5F00\u542F\u4E0B\u8F7D\u4E8B\u4EF6\uFF1B\u82E5\u5217\u8868\u4ECD\u4E3A\u7A7A\uFF0C\n   \u5148\u7B49\u5F85\u7247\u523B\u518D\u8BFB\u4E00\u6B21\u3002**\u4E8B\u4EF6\u53EA\u80FD\u524D\u65B9\u6355\u83B7\u3001\u4E0D\u80FD\u56DE\u6EAF**\uFF0C\u6240\u4EE5\u4E0D\u8981\u7B49\u5230\u4E0B\u8F7D\u540E\u624D\u53BB\u5F00\u542F\u3002\n\n## \u4E09\u6761\u7EAA\u5F8B\n- **\u522B\u7528\u9875\u9762\u72B6\u6001\u8BC1\u660E\u4E0B\u8F7D**\uFF1A\u5B83\u4E0D\u4F1A\u53D8\u3002\n- **\u522B\u91CD\u590D\u70B9**\uFF1A\u4E00\u6B21\u70B9\u51FB\u53EF\u80FD\u5DF2\u7ECF\u4EA7\u751F\u4E00\u6B21\u4E0B\u8F7D\uFF0C\u91CD\u590D\u70B9\u4F1A\u53D8\u6210\u591A\u4EFD\u3002\n- **\u6587\u4EF6\u540D\u4EE5\u6D4F\u89C8\u5668\u4E8B\u4EF6\u4E3A\u51C6**\uFF1A\u94FE\u63A5\u6587\u5B57\u4E0E\u771F\u5B9E\u6587\u4EF6\u540D\u7ECF\u5E38\u4E0D\u4E00\u81F4\u3002',
     x: {
       intents: ["browser_task"],
       tools: ["get_ax_snapshot", "click_element", "read_diagnostics", "inspect_element", "complete_task"],
@@ -2498,6 +2498,7 @@ async function recallTrace(url, opts = {}) {
 
 // lib/application/agent/target-manager.ts
 var state = /* @__PURE__ */ new Map();
+var observedDownloadTabs = /* @__PURE__ */ new Set();
 function bucket(tabId) {
   const id = Number(tabId);
   let rec = state.get(id);
@@ -2506,6 +2507,9 @@ function bucket(tabId) {
     state.set(id, rec);
   }
   return rec;
+}
+function isDownloadObservationActive(tabId) {
+  return observedDownloadTabs.has(Number(tabId) || 0);
 }
 function getPendingDialogs(tabId) {
   return bucket(tabId).dialogs;
@@ -3938,12 +3942,22 @@ async function readNetwork(sendTabMessage2, tabId, args) {
     return { ok: false, result: "\u8BFB\u53D6\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF1A" + e.message };
   }
 }
-function listDownloads(getDownloads2, tabId) {
+function listDownloads(getDownloads2, tabId, isObservationActive) {
   const list = getDownloads2(tabId);
-  if (!list.length) return { ok: true, result: "\u672C\u4EFB\u52A1\u6682\u672A\u6355\u83B7\u5230\u4E0B\u8F7D\u3002" };
+  if (!list.length) {
+    const active = Boolean(isObservationActive && isObservationActive(tabId));
+    return {
+      ok: true,
+      result: "\u672C\u4EFB\u52A1\u6682\u672A\u6355\u83B7\u5230\u4E0B\u8F7D\u3002" + (active ? "\u4E0B\u8F7D\u89C2\u6D4B\u5DF2\u5F00\u542F\uFF1B\u82E5\u6D4F\u89C8\u5668\u786E\u5B9E\u53D1\u751F\u4E0B\u8F7D\uFF0C\u8BF7\u7B49\u5F85\u4E8B\u4EF6\u5199\u5165\u540E\u518D\u8BFB\u4E00\u6B21\u3002" : "\u4E0B\u8F7D\u4E8B\u4EF6\u5FC5\u987B\u5728\u70B9\u51FB\u524D\u5F00\u542F CDP \u89C2\u6D4B\uFF1B\u8BFB\u53D6\u8BCA\u65AD\u672C\u8EAB\u4E0D\u4F1A\u8FFD\u6EAF\u6B64\u524D\u7684\u4E0B\u8F7D\u3002")
+    };
+  }
   return {
     ok: true,
-    result: "\u6355\u83B7\u5230\u7684\u4E0B\u8F7D\uFF1A\n" + list.map((d, i) => "[" + (i + 1) + "] " + (d.suggestedFilename || "") + " \u2190 " + d.url).join("\n")
+    result: "\u6355\u83B7\u5230\u7684\u4E0B\u8F7D\uFF1A\n" + list.map((d, i) => {
+      const state2 = String(d.state || "inProgress");
+      const size = Number(d.totalBytes) > 0 ? "\uFF08" + Number(d.receivedBytes || 0) + "/" + Number(d.totalBytes) + " bytes\uFF0C" + state2 + "\uFF09" : "\uFF08" + state2 + "\uFF09";
+      return "[" + (i + 1) + "] " + (d.suggestedFilename || "") + size + " \u2190 " + d.url;
+    }).join("\n")
   };
 }
 var DIAGNOSTIC_KINDS = ["console", "network", "downloads"];
@@ -3954,7 +3968,13 @@ async function readDiagnostics(deps, args) {
   }
   if (kind === "console") return await readConsole(deps.sendTabMessage, deps.tabId, args);
   if (kind === "network") return await readNetwork(deps.sendTabMessage, deps.tabId, args);
-  if (kind === "downloads") return listDownloads(deps.getDownloads, deps.tabId);
+  if (kind === "downloads") {
+    return listDownloads(
+      deps.getDownloads,
+      deps.tabId,
+      deps.isDownloadObservationActive
+    );
+  }
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
@@ -6509,7 +6529,12 @@ registerHandlers(["read_current_page", "get_page_snapshot", "list_frames"], (nam
   splitIntoChunks,
   citationTitleFor
 }));
-registerHandlers(["read_diagnostics"], (name, args, ctx) => readDiagnostics({ sendTabMessage, tabId: ctx.tabId, getDownloads }, args));
+registerHandlers(["read_diagnostics"], (name, args, ctx) => readDiagnostics({
+  sendTabMessage,
+  tabId: ctx.tabId,
+  getDownloads,
+  isDownloadObservationActive
+}, args));
 registerHandlers(["type_text", "press_key", "select_option", "check_box", "wait_for_element", "get_attribute"], (name, args, ctx) => handlePageInputTool(name, args, {
   ctx,
   cdp: cdp_exports,

@@ -17,7 +17,12 @@ import * as cdp from '../../backend/cdp.ts';
 import { sliceSafe } from '../../shared/surrogates.ts';
 import { rememberElement } from './site-memory.ts';
 import { saveMacro, listMacros, getMacro, bumpMacroHits, rememberTrace, recallTrace } from './macro-store.ts';
-import { handleDialog, getPendingDialogs, getDownloads } from './target-manager.ts';
+import {
+  handleDialog,
+  getPendingDialogs,
+  getDownloads,
+  isDownloadObservationActive,
+} from './target-manager.ts';
 import { getTrace, listTraces } from './trace.ts';
 import { TOOL_SCHEMAS } from './tool-schemas.ts';
 import { TOOL_METADATA } from './tool-metadata.ts';
@@ -905,7 +910,12 @@ registerHandlers(['read_current_page', 'get_page_snapshot', 'list_frames'], (nam
 
 // —— 诊断（C-4 第 3 档合并：read_console / read_network / list_downloads → read_diagnostics）
 registerHandlers(['read_diagnostics'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>
-  readDiagnostics({ sendTabMessage, tabId: ctx.tabId, getDownloads }, args));
+  readDiagnostics({
+    sendTabMessage,
+    tabId: ctx.tabId,
+    getDownloads,
+    isDownloadObservationActive,
+  }, args));
 
 // —— 页面输入命令族
 registerHandlers(['type_text', 'press_key', 'select_option', 'check_box', 'wait_for_element', 'get_attribute'], (name: string, args: Record<string, unknown>, ctx: RunCtx) =>

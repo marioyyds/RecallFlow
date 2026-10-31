@@ -35,6 +35,10 @@ import {
 } from './tool-execution.ts';
 import { CompletionCoordinator } from './agent-completion.ts';
 import type { AgentRunState } from './agent-run-state.ts';
+import {
+  ensureDownloadObservation,
+  shouldObserveDownloads,
+} from './target-manager.ts';
 
 const RESEARCH_TRIGGER_TOOLS = new Set([
   'fetch_webpage',
@@ -46,6 +50,7 @@ const RESEARCH_TRIGGER_TOOLS = new Set([
   'read_current_page',
   'click_element',
 ]);
+const DOWNLOAD_TRIGGER_TOOLS = new Set(['click_element', 'click_at', 'press_key']);
 
 export type ToolBatchOutcome =
   | { kind: 'continue'; toolMs: number }
@@ -85,6 +90,30 @@ export class ToolCallPipeline {
   ): Promise<ToolBatchOutcome> {
     const state = this.state;
     const pendingReflections: string[] = [];
+    const downloadTask = shouldObserveDownloads(
+      state.detected.sourceText || state.instruction
+    );
+    if (
+      downloadTask &&
+      step.toolCalls.some((toolCall: any) => DOWNLOAD_TRIGGER_TOOLS.has(toolCall.name))
+    ) {
+      const observation = await ensureDownloadObservation(state.ctx.tabId).catch(
+        (error) => ({ ok: false, result: String(error?.message || error) })
+      );
+      state.trace({
+        phase: 'download-observer',
+        trigger: 'before-click',
+        tabId: state.ctx.tabId,
+        ok: Boolean(observation.ok),
+        result: String(observation.result || ''),
+      });
+      if (!observation.ok) {
+        pendingReflections.push(
+          '下载观测未能在点击前开启：' + observation.result +
+            ' 可以继续完成用户请求，但不要声称已验证下载成功。'
+        );
+      }
+    }
     let pendingResearchPromotion: (() => void) | null = null;
     let turnToolMs = 0;
     const callIds = step.toolCalls.map(
@@ -327,7 +356,7 @@ export class ToolCallPipeline {
       }
 
       this.applyCitations(result);
-      this.applyTabTarget(result);
+      await this.applyTabTarget(result);
       const rawResult = typeof result.result === 'string' ? result.result : '';
       if (rawResult.length > CONTEXT_TUNING.spillResultChars) {
         const resultId = 'res-' + sequence;
@@ -572,7 +601,7 @@ export class ToolCallPipeline {
     }
   }
 
-  private applyTabTarget(result: any): void {
+  private async applyTabTarget(result: any): Promise<void> {
     if (!Number.isInteger(Number(result.targetTabId))) return;
     const state = this.state;
     state.ctx.tabId = Number(result.targetTabId);
@@ -586,6 +615,18 @@ export class ToolCallPipeline {
         tabId: state.ctx.tabId,
         title: state.ctx.pageTitle,
         url: state.ctx.pageUrl,
+      });
+    }
+    if (shouldObserveDownloads(state.detected.sourceText || state.instruction)) {
+      const observation = await ensureDownloadObservation(state.ctx.tabId).catch(
+        (error) => ({ ok: false, result: String(error?.message || error) })
+      );
+      state.trace({
+        phase: 'download-observer',
+        trigger: 'tab-bound',
+        tabId: state.ctx.tabId,
+        ok: Boolean(observation.ok),
+        result: String(observation.result || ''),
       });
     }
   }
