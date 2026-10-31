@@ -21,6 +21,7 @@ import {
 import { createFrameScheduler } from './render-scheduler.ts';
 import { createLruCache } from '../../shared/lru.ts';
 import { createExportGuard, HOST_ID } from './save-clean.ts';
+import { downloadMarkdownFile, markdownDownloadFilename } from './download-file.ts';
 import { PanelThemeController } from '../panel/theme-controller.ts';
 import { PanelProgressController, stateLabel } from '../panel/progress-controller.ts';
 import { PanelScreenshotView } from '../panel/screenshot-view.ts';
@@ -2373,8 +2374,8 @@ function renderSessionMenu() {
     rename.setAttribute('data-session-id', session.id);
     const exportBtn = document.createElement('button');
     exportBtn.type = 'button';
-    exportBtn.title = '导出该会话为 Markdown';
-    exportBtn.setAttribute('aria-label', '导出会话');
+    exportBtn.title = '下载该会话为 Markdown 文件';
+    exportBtn.setAttribute('aria-label', '下载会话');
     exportBtn.textContent = '⤓';
     exportBtn.setAttribute('data-session-action', 'export');
     exportBtn.setAttribute('data-session-id', session.id);
@@ -2799,17 +2800,18 @@ async function exportPanelSession(id: any, btn: any) {
     showCitationHint('该会话暂无可导出的内容。');
     return;
   }
+  const filename = markdownDownloadFilename(res.session.title || document.title || 'RecallFlow 会话');
   try {
-    await navigator.clipboard.writeText(text);
+    downloadMarkdownFile(text, filename);
     if (btn) {
       const old = btn.textContent;
       btn.textContent = '✓';
       setTimeout(() => (btn.textContent = old), 1200);
     } else {
-      showCitationHint('已复制会话记录（' + text.length + ' 字）。');
+      showCitationHint('已下载会话记录：' + filename);
     }
   } catch (e: any) {
-    showCitationHint('复制失败，请检查剪贴板权限。');
+    showCitationHint('下载失败，请检查浏览器的下载权限。');
   }
 }
 

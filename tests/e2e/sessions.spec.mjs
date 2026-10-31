@@ -1,5 +1,6 @@
 // 全浏览器会话：新建、切换历史、跨标签页同步、运行锁冲突。
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import {
   launchExtension,
   closeExtension,
@@ -72,6 +73,30 @@ test('会话：新建后保留旧历史，切回能恢复完整对话', async ()
   await oldItem.locator('.session-main').click();
   await expect(page.locator(PANEL + ' .user-turn', { hasText: '点击提交按钮' })).toHaveCount(1);
   await expect(page.locator(PANEL + ' .p-body')).toContainText('点击提交按钮');
+  await page.close();
+});
+
+test('最近会话：导出按钮下载 Markdown 文件', async () => {
+  await configureSettings(context);
+  const page = await openFixturePage(context);
+  await startNewSession(page);
+  await send(page, '导出下载测试');
+  await waitRunSaved('导出下载测试');
+
+  await page.locator(PANEL + ' .session-btn').click();
+  const item = page.locator(PANEL + ' .session-item', { hasText: '导出下载测试' });
+  await expect(item).toBeVisible();
+
+  const downloadPromise = page.waitForEvent('download');
+  await item.locator('[data-session-action="export"]').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('导出下载测试.md');
+
+  const path = await download.path();
+  expect(path).toBeTruthy();
+  const markdown = await readFile(path, 'utf8');
+  expect(markdown).toMatch(/^# RecallFlow 对话记录/);
+  expect(markdown).toContain('导出下载测试');
   await page.close();
 });
 

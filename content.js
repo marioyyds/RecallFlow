@@ -4670,6 +4670,30 @@
     return { suspend, restore, isSuspended, install, uninstall };
   }
 
+  // lib/ui/page/download-file.ts
+  var WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+  function markdownDownloadFilename(title) {
+    let name = String(title || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim().replace(/[. ]+$/g, "");
+    name = Array.from(name).slice(0, 80).join("").replace(/[. ]+$/g, "");
+    if (!name) name = "RecallFlow \u4F1A\u8BDD";
+    if (WINDOWS_RESERVED_NAME.test(name)) name = "_" + name;
+    return name + ".md";
+  }
+  function downloadMarkdownFile(text, filename) {
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    (document.body || document.documentElement).appendChild(anchor);
+    anchor.click();
+    setTimeout(() => {
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }, 1e3);
+  }
+
   // lib/ui/panel/theme-controller.ts
   var THEME_KEY = "recallflow-panel-theme";
   var PanelThemeController = class {
@@ -8852,8 +8876,8 @@
       rename.setAttribute("data-session-id", session.id);
       const exportBtn = document.createElement("button");
       exportBtn.type = "button";
-      exportBtn.title = "\u5BFC\u51FA\u8BE5\u4F1A\u8BDD\u4E3A Markdown";
-      exportBtn.setAttribute("aria-label", "\u5BFC\u51FA\u4F1A\u8BDD");
+      exportBtn.title = "\u4E0B\u8F7D\u8BE5\u4F1A\u8BDD\u4E3A Markdown \u6587\u4EF6";
+      exportBtn.setAttribute("aria-label", "\u4E0B\u8F7D\u4F1A\u8BDD");
       exportBtn.textContent = "\u2913";
       exportBtn.setAttribute("data-session-action", "export");
       exportBtn.setAttribute("data-session-id", session.id);
@@ -9263,17 +9287,18 @@
       showCitationHint("\u8BE5\u4F1A\u8BDD\u6682\u65E0\u53EF\u5BFC\u51FA\u7684\u5185\u5BB9\u3002");
       return;
     }
+    const filename = markdownDownloadFilename(res.session.title || document.title || "RecallFlow \u4F1A\u8BDD");
     try {
-      await navigator.clipboard.writeText(text);
+      downloadMarkdownFile(text, filename);
       if (btn) {
         const old = btn.textContent;
         btn.textContent = "\u2713";
         setTimeout(() => btn.textContent = old, 1200);
       } else {
-        showCitationHint("\u5DF2\u590D\u5236\u4F1A\u8BDD\u8BB0\u5F55\uFF08" + text.length + " \u5B57\uFF09\u3002");
+        showCitationHint("\u5DF2\u4E0B\u8F7D\u4F1A\u8BDD\u8BB0\u5F55\uFF1A" + filename);
       }
     } catch (e) {
-      showCitationHint("\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u526A\u8D34\u677F\u6743\u9650\u3002");
+      showCitationHint("\u4E0B\u8F7D\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u6D4F\u89C8\u5668\u7684\u4E0B\u8F7D\u6743\u9650\u3002");
     }
   }
   async function acquirePanelSessionLock(runId, takeover) {
