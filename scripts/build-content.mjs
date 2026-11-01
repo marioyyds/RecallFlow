@@ -80,7 +80,9 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // execution, run snapshots and persisted conversation parts, with matching
 // panel badges and history restoration. Measured 510377 bytes (498KB); raise
 // by 7KB. No new dependency or duplicated module.
-export const SIZE_BUDGET_BYTES = 500 * 1024;
+// JEV decision/handoff details and lane tags are now retained in exported
+// transcripts. Measured 512051 bytes (500KB); raise by 2KB. No dependency.
+export const SIZE_BUDGET_BYTES = 502 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

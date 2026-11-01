@@ -12,6 +12,10 @@ import {
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import {
+  writeJevDiagnostic,
+  type JevDiagnosticRecord,
+} from './jev-diagnostics.ts';
+import {
   JEV_MAX_ATTEMPTS_PER_RUN,
   JEV_MAX_CONSECUTIVE_ACTIONS,
 } from './jev-loop-state.ts';
@@ -32,17 +36,20 @@ export class JevFastController {
   private readonly pipeline: ToolCallPipeline;
   private readonly signal: AbortSignal;
   private readonly callSystemOne: typeof callJevSystemOne;
+  private readonly writeDiagnostic: typeof writeJevDiagnostic;
 
   constructor(
     state: AgentRunState,
     pipeline: ToolCallPipeline,
     signal: AbortSignal,
-    callSystemOne: typeof callJevSystemOne = callJevSystemOne
+    callSystemOne: typeof callJevSystemOne = callJevSystemOne,
+    writeDiagnostic: typeof writeJevDiagnostic = writeJevDiagnostic
   ) {
     this.state = state;
     this.pipeline = pipeline;
     this.signal = signal;
     this.callSystemOne = callSystemOne;
+    this.writeDiagnostic = writeDiagnostic;
   }
 
   private canAttempt(): boolean {
@@ -107,6 +114,12 @@ export class JevFastController {
       snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames,
     });
+    this.recordDiagnostic({
+      state: 'deciding',
+      mode: settings.shadowMode ? 'shadow' : 'live',
+      outcome: 'awaiting-decision',
+      phase,
+    });
     const startedAt = Date.now();
     let response: JevSystemOneResponse;
     try {
@@ -146,6 +159,15 @@ export class JevFastController {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs),
+    });
+    this.recordDiagnostic({
+      state: settings.shadowMode ? 'shadow' : decision.kind === 'act' ? 'act' : 'handoff',
+      mode: settings.shadowMode ? 'shadow' : 'live',
+      outcome: decision.kind,
+      reason: decision.kind === 'escalate' ? decision.reason : undefined,
+      phase,
+      tool: decision.kind === 'act' ? decision.toolName : undefined,
+      latencyMs,
     });
 
     if (settings.shadowMode) {
@@ -216,6 +238,15 @@ export class JevFastController {
       ? this.state.jevLoop.consecutiveFailures + 1
       : 0;
     this.state.jevLoop.lastOutcome = toolFailed ? 'tool-failed' : 'act';
+    this.recordDiagnostic({
+      state: 'act',
+      mode: 'live',
+      outcome: toolFailed ? 'tool-failed' : 'act',
+      phase,
+      tool: decision.toolName,
+      latencyMs,
+      failed: toolFailed,
+    });
     if (this.state.jevLoop.consecutiveFailures >= 2) {
       this.appendHandoff(iter, 'tool-failure-limit', decision);
       await persist({ phase: 'jev_decision' }).catch(() => {});
@@ -250,6 +281,18 @@ export class JevFastController {
       detail,
       message: '↪ 慢思考接管：' + reason + (detail ? '（' + detail + '）' : ''),
     });
+    this.recordDiagnostic({
+      state: 'handoff',
+      mode: this.state.settings.jev?.shadowMode ? 'shadow' : 'live',
+      outcome: 'handoff',
+      reason,
+      phase: deriveJevPhase(
+        this.state.ctx.pageUrl,
+        this.state.ctx.pageTitle,
+        this.state.ctx.lastSnapshot
+      ),
+      tool: decision?.kind === 'act' ? decision.toolName : undefined,
+    });
     const signals = decision && decision.kind === 'act' ? decision.signals : decision?.signals;
     const lines = [
       '【JEV 移交给慢思考】',
@@ -272,6 +315,15 @@ export class JevFastController {
       '请基于真实工具结果继续规划；不要假设 JEV 未执行的动作已经发生。',
     ].filter(Boolean);
     this.state.messages.push({ role: 'system', content: lines.join('\n') });
+  }
+
+  private recordDiagnostic(
+    entry: Omit<JevDiagnosticRecord, 'updatedAt' | 'attempts'>
+  ): void {
+    Promise.resolve(this.writeDiagnostic({
+      ...entry,
+      attempts: this.state.jevLoop.attempts,
+    })).catch(() => {});
   }
 
   traceShadowComparison(decision: JevFastDecision, step: Record<string, any>): void {

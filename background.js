@@ -12031,6 +12031,13 @@ var BASE_ACTIONS = [
     minConfidence: JEV_MIN_ACTION_CONFIDENCE
   },
   {
+    key: "diagnostics",
+    toolName: "read_diagnostics",
+    args: {},
+    description: "\u9875\u9762\u65E0\u54CD\u5E94\u3001\u5185\u5BB9\u811A\u672C\u5931\u6548\u3001\u52A8\u4F5C\u770B\u4F3C\u6267\u884C\u4F46\u6CA1\u6709\u51FA\u73B0\u9884\u671F\u7ED3\u679C\u65F6\uFF0C\u8BFB\u53D6\u63A7\u5236\u53F0\u4E0E\u7F51\u7EDC\u8BCA\u65AD",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
+  },
+  {
     key: "scroll_down",
     toolName: "scroll_page",
     args: { y: 600 },
@@ -12264,17 +12271,44 @@ function formatJevDecisionSummary(shadow, decision, latencyMs) {
   return prefix + "\uFF1A" + action + detail + "\uFF08" + Math.round(latencyMs) + "ms\uFF09";
 }
 
+// lib/application/agent/jev-diagnostics.ts
+var JEV_DIAGNOSTICS_KEY = "jevDiagnostics.v1";
+function defaultStorage() {
+  const local = globalThis?.chrome?.storage?.local;
+  if (!local || typeof local.get !== "function" || typeof local.set !== "function") return null;
+  return {
+    get: (key) => local.get(key),
+    set: (items) => local.set(items)
+  };
+}
+async function writeJevDiagnostic(record2, storage2 = defaultStorage()) {
+  if (!storage2) return false;
+  try {
+    await storage2.set({
+      [JEV_DIAGNOSTICS_KEY]: {
+        ...record2,
+        updatedAt: Date.now()
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // lib/application/agent/jev-controller.ts
 var JevFastController = class {
   state;
   pipeline;
   signal;
   callSystemOne;
-  constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne) {
+  writeDiagnostic;
+  constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic) {
     this.state = state2;
     this.pipeline = pipeline;
     this.signal = signal;
     this.callSystemOne = callSystemOne;
+    this.writeDiagnostic = writeDiagnostic;
   }
   canAttempt() {
     const settings = this.state.settings.jev;
@@ -12328,6 +12362,12 @@ var JevFastController = class {
       snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames
     });
+    this.recordDiagnostic({
+      state: "deciding",
+      mode: settings.shadowMode ? "shadow" : "live",
+      outcome: "awaiting-decision",
+      phase
+    });
     const startedAt = Date.now();
     let response;
     try {
@@ -12368,6 +12408,15 @@ var JevFastController = class {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs)
+    });
+    this.recordDiagnostic({
+      state: settings.shadowMode ? "shadow" : decision.kind === "act" ? "act" : "handoff",
+      mode: settings.shadowMode ? "shadow" : "live",
+      outcome: decision.kind,
+      reason: decision.kind === "escalate" ? decision.reason : void 0,
+      phase,
+      tool: decision.kind === "act" ? decision.toolName : void 0,
+      latencyMs
     });
     if (settings.shadowMode) {
       this.state.jevLoop.consecutiveFastActions = 0;
@@ -12433,6 +12482,15 @@ var JevFastController = class {
     this.state.jevLoop.lastActionSignature = signature;
     this.state.jevLoop.consecutiveFailures = toolFailed ? this.state.jevLoop.consecutiveFailures + 1 : 0;
     this.state.jevLoop.lastOutcome = toolFailed ? "tool-failed" : "act";
+    this.recordDiagnostic({
+      state: "act",
+      mode: "live",
+      outcome: toolFailed ? "tool-failed" : "act",
+      phase,
+      tool: decision.toolName,
+      latencyMs,
+      failed: toolFailed
+    });
     if (this.state.jevLoop.consecutiveFailures >= 2) {
       this.appendHandoff(iter, "tool-failure-limit", decision);
       await persist({ phase: "jev_decision" }).catch(() => {
@@ -12461,6 +12519,18 @@ var JevFastController = class {
       detail,
       message: "\u21AA \u6162\u601D\u8003\u63A5\u7BA1\uFF1A" + reason + (detail ? "\uFF08" + detail + "\uFF09" : "")
     });
+    this.recordDiagnostic({
+      state: "handoff",
+      mode: this.state.settings.jev?.shadowMode ? "shadow" : "live",
+      outcome: "handoff",
+      reason,
+      phase: deriveJevPhase(
+        this.state.ctx.pageUrl,
+        this.state.ctx.pageTitle,
+        this.state.ctx.lastSnapshot
+      ),
+      tool: decision?.kind === "act" ? decision.toolName : void 0
+    });
     const signals = decision && decision.kind === "act" ? decision.signals : decision?.signals;
     const lines = [
       "\u3010JEV \u79FB\u4EA4\u7ED9\u6162\u601D\u8003\u3011",
@@ -12477,6 +12547,13 @@ var JevFastController = class {
       "\u8BF7\u57FA\u4E8E\u771F\u5B9E\u5DE5\u5177\u7ED3\u679C\u7EE7\u7EED\u89C4\u5212\uFF1B\u4E0D\u8981\u5047\u8BBE JEV \u672A\u6267\u884C\u7684\u52A8\u4F5C\u5DF2\u7ECF\u53D1\u751F\u3002"
     ].filter(Boolean);
     this.state.messages.push({ role: "system", content: lines.join("\n") });
+  }
+  recordDiagnostic(entry) {
+    Promise.resolve(this.writeDiagnostic({
+      ...entry,
+      attempts: this.state.jevLoop.attempts
+    })).catch(() => {
+    });
   }
   traceShadowComparison(decision, step) {
     const comparison = compareJevShadowAction(
@@ -15637,7 +15714,16 @@ function applyRunEvent(state2, event) {
         type: "notice",
         text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
         color: "#7c3aed",
-        lane: "fast"
+        lane: "fast",
+        jev: {
+          type: "decision",
+          mode: String(event.mode || "live"),
+          phaseName: String(event.phaseName || ""),
+          decision: event.decision,
+          latencyMs: Number(event.latencyMs) || 0,
+          inputTokens: Number(event.inputTokens) || 0,
+          outputTokens: Number(event.outputTokens) || 0
+        }
       });
       break;
     case "jev-handoff":
@@ -15648,7 +15734,12 @@ function applyRunEvent(state2, event) {
         type: "notice",
         text: String(event.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003"),
         color: "#2563a6",
-        lane: "slow"
+        lane: "slow",
+        jev: {
+          type: "handoff",
+          reason: String(event.reason || ""),
+          detail: String(event.detail || "")
+        }
       });
       break;
     case "stop-requested":

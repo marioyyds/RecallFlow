@@ -7127,11 +7127,34 @@ async function listJevModels(settings, options = {}) {
   return parseJevModelList(raw);
 }
 
+// lib/application/agent/jev-diagnostics.ts
+var JEV_DIAGNOSTICS_KEY = "jevDiagnostics.v1";
+function defaultStorage() {
+  const local = globalThis?.chrome?.storage?.local;
+  if (!local || typeof local.get !== "function" || typeof local.set !== "function") return null;
+  return {
+    get: (key) => local.get(key),
+    set: (items) => local.set(items)
+  };
+}
+async function readJevDiagnostic(storage2 = defaultStorage()) {
+  if (!storage2) return null;
+  try {
+    const data = await storage2.get(JEV_DIAGNOSTICS_KEY);
+    const value = data?.[JEV_DIAGNOSTICS_KEY];
+    if (!value || typeof value !== "object") return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 // entries/options.ts
 var $ = (id) => document.getElementById(id);
 var $q = (root, selector) => root.querySelector(selector);
 var settingsDirty = false;
 var settingsLoading = true;
+var jevLastDiagnostic = null;
 async function load() {
   const s = await getAISettings();
   $("api-key").value = s.apiKey;
@@ -7145,6 +7168,8 @@ async function load() {
   $("jev-timeout").value = String(s.jev.requestTimeoutMs);
   $("jev-retries").value = String(s.jev.maxRetries);
   $("jev-schema-version").value = s.jev.schemaVersion;
+  jevLastDiagnostic = await readJevDiagnostic();
+  renderJevRuntimeStatus();
   $("rag-enabled").checked = !!s.ragEnabled;
   $("target-lang").value = s.targetLang;
   $("page-context").checked = s.pageContext !== false;
@@ -7174,6 +7199,46 @@ async function load() {
   settingsLoading = false;
   setDirty(false);
   initSettingsNav();
+}
+function renderJevRuntimeStatus() {
+  const el = $("jev-runtime-status");
+  if (!el) return;
+  const enabled = $("jev-enabled").checked;
+  const shadow = $("jev-shadow-mode").checked;
+  if (!enabled) {
+    el.className = "connection-status error";
+    el.textContent = "JEV \u672A\u542F\u7528\uFF1A\u5FEB\u601D\u8003\u4E0D\u4F1A\u53D1\u8D77\u4EFB\u4F55\u8BF7\u6C42\u3002";
+    return;
+  }
+  let current = shadow ? "\u5F53\u524D\u4E3A\u5F71\u5B50\u6A21\u5F0F\uFF1AJEV \u53EA\u7ED9\u51FA\u5EFA\u8BAE\uFF0C\u4E0D\u4F1A\u6267\u884C\u5DE5\u5177\u3002\u5173\u95ED\u5F71\u5B50\u6A21\u5F0F\u540E\u624D\u4F1A\u8FDB\u5165\u5B9E\u9645\u5FEB\u8DEF\u5F84\u3002" : "\u5F53\u524D\u4E3A\u5B9E\u9645\u6267\u884C\u6A21\u5F0F\u3002";
+  let className = shadow ? "connection-status warn" : "connection-status ok";
+  if (!jevLastDiagnostic) {
+    el.className = className;
+    el.textContent = current + " \u5C1A\u672A\u6536\u5230 JEV \u8FD0\u884C\u8BB0\u5F55\u3002";
+    return;
+  }
+  const d = jevLastDiagnostic;
+  const when = d.updatedAt ? new Date(d.updatedAt).toLocaleString("zh-CN", { hour12: false }) : "";
+  const attempts = Number.isFinite(Number(d.attempts)) ? "\u7B2C " + d.attempts + " \u6B21\u5C1D\u8BD5" : "\u6700\u8FD1\u4E00\u6B21";
+  let latest = "";
+  if (d.state === "act") {
+    latest = "\u6267\u884C\u4E86 " + (d.tool || d.outcome || "\u5FEB\u52A8\u4F5C") + (d.failed ? "\uFF0C\u4F46\u5DE5\u5177\u5931\u8D25" : "");
+    className = "connection-status " + (d.failed ? "error" : "ok");
+  } else if (d.state === "handoff") {
+    latest = "\u5DF2\u79FB\u4EA4\u6162\u601D\u8003" + (d.reason ? "\uFF1A" + d.reason : "");
+    className = "connection-status warn";
+  } else if (d.state === "error") {
+    latest = "\u8FD0\u884C\u5931\u8D25" + (d.reason ? "\uFF1A" + d.reason : "");
+    className = "connection-status error";
+  } else if (d.state === "deciding") {
+    latest = "\u6B63\u5728\u7B49\u5F85\u7ED3\u6784\u5316\u51B3\u7B56";
+    className = "connection-status";
+  } else {
+    latest = "\u5F71\u5B50\u5EFA\u8BAE\uFF1A" + (d.tool || d.reason || d.outcome || "\u65E0\u52A8\u4F5C");
+    className = "connection-status warn";
+  }
+  el.className = className;
+  el.textContent = current + " \u6700\u8FD1\u8FD0\u884C" + (when ? "\uFF08" + when + "\uFF09" : "\uFF1A") + attempts + " \xB7 " + latest + "\u3002";
 }
 async function renderUserscriptSummary() {
   const meta = $("us-summary-meta");
@@ -7358,6 +7423,9 @@ $("toggle-jev-key").addEventListener("click", () => {
   $("toggle-jev-key").textContent = el.type === "password" ? "\u{1F441}" : "\u{1F648}";
   $("toggle-jev-key").setAttribute("aria-label", el.type === "password" ? "\u663E\u793A JEV API Key" : "\u9690\u85CF JEV API Key");
   $("toggle-jev-key").setAttribute("aria-pressed", el.type === "text" ? "true" : "false");
+});
+["jev-enabled", "jev-shadow-mode"].forEach((id) => {
+  $(id).addEventListener("change", renderJevRuntimeStatus);
 });
 $("test-jev").addEventListener("click", async () => {
   const status = $("jev-status");

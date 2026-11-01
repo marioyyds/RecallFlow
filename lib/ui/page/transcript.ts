@@ -589,7 +589,7 @@ function toolLine(p: TranscriptPart, result: TranscriptPart | undefined, maxResu
   const mark = !result ? '…' : result.status === 'completed' ? '✓' : result.status === 'failed' ? '✗' : '—';
   const args = previewArgsJson(p.args);
   const detail = clipInline(result ? result.result : '', maxResultLen);
-  return '- `' + p.name + '` ' + args + ' → ' + mark + (detail ? ' ' + detail : '');
+  return '- `' + p.name + '` ' + args + ' → ' + mark + (detail ? ' ' + detail : '') + laneSuffix(p.lane);
 }
 
 function screenshotLine(p: TranscriptPart): string {
@@ -597,7 +597,19 @@ function screenshotLine(p: TranscriptPart): string {
   if (p.label) bits.push(String(p.label));
   if (p.width && p.height) bits.push(p.width + '×' + p.height);
   if (p.bytes) bits.push(Math.round(Number(p.bytes) / 1024) + 'KB');
-  return '- （截图' + (bits.length ? '：' + bits.join(' · ') : '') + '）';
+  return '- （截图' + (bits.length ? '：' + bits.join(' · ') : '') + '）' + laneSuffix(p.lane);
+}
+
+function laneSuffix(lane: unknown): string {
+  if (lane === 'fast') return ' · ⚡ 快思考';
+  if (lane === 'slow') return ' · 🧠 慢思考';
+  return '';
+}
+
+function lanePrefix(lane: unknown): string {
+  if (lane === 'fast') return '**[⚡ 快思考]** ';
+  if (lane === 'slow') return '**[🧠 慢思考]** ';
+  return '';
 }
 
 /**
@@ -713,9 +725,14 @@ export function buildTranscript(input: TranscriptInput = {}): string {
         // （见 fullyInline：被截断时不能去重，否则那段文字就哪儿都没有了）。
         if (lastToolText && fullyInline(lastToolText) && norm(t) === lastToolText) continue;
         // 模型常自己在末尾写一份「参考来源」，导出器还会按 citations 追加一份 —— 去掉模型那份
-        out.push(stripTrailingSources(t));
+        out.push(lanePrefix(p.lane) + stripTrailingSources(t));
         out.push('');
         lastText = t;
+        continue;
+      }
+      if (p.type === 'notice' && p.text) {
+        const text = String(p.text).trim();
+        if (text) pending.push('- ' + lanePrefix(p.lane) + text);
         continue;
       }
       if (p.type === 'tool-call') {

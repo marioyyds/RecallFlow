@@ -111,6 +111,15 @@ body {
   color: var(--danger);
 }
 
+.connection-status.warn {
+  color: #b45309;
+}
+
+#jev-runtime-status {
+  margin: -10px 0 16px;
+  line-height: 1.55;
+}
+
 .card h2 {
   font-size: 14px;
   font-weight: 600;

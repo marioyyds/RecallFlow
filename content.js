@@ -4401,14 +4401,24 @@
     const mark = !result ? "\u2026" : result.status === "completed" ? "\u2713" : result.status === "failed" ? "\u2717" : "\u2014";
     const args = previewArgsJson(p.args);
     const detail = clipInline(result ? result.result : "", maxResultLen);
-    return "- `" + p.name + "` " + args + " \u2192 " + mark + (detail ? " " + detail : "");
+    return "- `" + p.name + "` " + args + " \u2192 " + mark + (detail ? " " + detail : "") + laneSuffix(p.lane);
   }
   function screenshotLine(p) {
     const bits = [];
     if (p.label) bits.push(String(p.label));
     if (p.width && p.height) bits.push(p.width + "\xD7" + p.height);
     if (p.bytes) bits.push(Math.round(Number(p.bytes) / 1024) + "KB");
-    return "- \uFF08\u622A\u56FE" + (bits.length ? "\uFF1A" + bits.join(" \xB7 ") : "") + "\uFF09";
+    return "- \uFF08\u622A\u56FE" + (bits.length ? "\uFF1A" + bits.join(" \xB7 ") : "") + "\uFF09" + laneSuffix(p.lane);
+  }
+  function laneSuffix(lane) {
+    if (lane === "fast") return " \xB7 \u26A1 \u5FEB\u601D\u8003";
+    if (lane === "slow") return " \xB7 \u{1F9E0} \u6162\u601D\u8003";
+    return "";
+  }
+  function lanePrefix(lane) {
+    if (lane === "fast") return "**[\u26A1 \u5FEB\u601D\u8003]** ";
+    if (lane === "slow") return "**[\u{1F9E0} \u6162\u601D\u8003]** ";
+    return "";
   }
   function buildTranscript(input = {}) {
     const { title, url, exportedAt, handoffId: handoffId2, conversation, maxResultLen = 500 } = input;
@@ -4476,9 +4486,14 @@
           if (!t) continue;
           flushTools();
           if (lastToolText && fullyInline(lastToolText) && norm(t) === lastToolText) continue;
-          out.push(stripTrailingSources(t));
+          out.push(lanePrefix(p.lane) + stripTrailingSources(t));
           out.push("");
           lastText2 = t;
+          continue;
+        }
+        if (p.type === "notice" && p.text) {
+          const text = String(p.text).trim();
+          if (text) pending.push("- " + lanePrefix(p.lane) + text);
           continue;
         }
         if (p.type === "tool-call") {
@@ -6669,7 +6684,16 @@
           type: "notice",
           text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
           color: "#7c3aed",
-          lane: "fast"
+          lane: "fast",
+          jev: {
+            type: "decision",
+            mode: String(event.mode || "live"),
+            phaseName: String(event.phaseName || ""),
+            decision: event.decision,
+            latencyMs: Number(event.latencyMs) || 0,
+            inputTokens: Number(event.inputTokens) || 0,
+            outputTokens: Number(event.outputTokens) || 0
+          }
         });
         break;
       case "jev-handoff":
@@ -6680,7 +6704,12 @@
           type: "notice",
           text: String(event.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003"),
           color: "#2563a6",
-          lane: "slow"
+          lane: "slow",
+          jev: {
+            type: "handoff",
+            reason: String(event.reason || ""),
+            detail: String(event.detail || "")
+          }
         });
         break;
       case "stop-requested":
@@ -10333,7 +10362,7 @@
       streamView.pendingContentEl = null;
       if (streamView.flowEl) streamView.flowEl.appendChild(step);
     }
-    function appendNoticePart(text, color, className, lane) {
+    function appendNoticePart(text, color, className, lane, jev) {
       const value = String(text || "").trim();
       if (!value) return;
       const step = document.createElement("div");
@@ -10347,7 +10376,7 @@
         step.textContent = value;
       }
       appendStep(step);
-      streamState.appendPart({ type: "notice", text: value, color: color || "", ...safeLane ? { lane: safeLane } : {} });
+      streamState.appendPart({ type: "notice", text: value, color: color || "", ...safeLane ? { lane: safeLane } : {}, ...jev ? { jev } : {} });
     }
     function commitPendingVerifyPass() {
       streamState.commitVerifyPass();
@@ -10745,12 +10774,24 @@
           progressController.render();
         } else if (resp.type === "jev-decision") {
           const message = resp.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56";
-          appendNoticePart(message, "#7c3aed", "lane-notice", "fast");
+          appendNoticePart(message, "#7c3aed", "lane-notice", "fast", {
+            type: "decision",
+            mode: resp.mode || "live",
+            phaseName: resp.phaseName || "",
+            decision: resp.decision,
+            latencyMs: Number(resp.latencyMs) || 0,
+            inputTokens: Number(resp.inputTokens) || 0,
+            outputTokens: Number(resp.outputTokens) || 0
+          });
           streamState.setLane("fast");
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "jev-handoff") {
-          appendNoticePart(resp.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003", "#2563a6", "lane-notice", "slow");
+          appendNoticePart(resp.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003", "#2563a6", "lane-notice", "slow", {
+            type: "handoff",
+            reason: resp.reason || "",
+            detail: resp.detail || ""
+          });
           streamState.setLane("slow");
           fitPanelHeight();
           pinToBottom();

@@ -64,7 +64,9 @@ export const ENTRIES = [
   // 2026-11-01: fast/slow lane metadata now flows through chat stream events,
   // tool execution, JEV decisions/handoffs and run snapshots. Measured 962406
   // bytes; raise by 2KB. No dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 940 * 1024 },
+  // JEV runtime diagnostics and the read-only diagnostics action add ~3KB;
+  // measured 965325 bytes. Raise explicitly. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 944 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -72,7 +74,8 @@ export const ENTRIES = [
   // measured 552273 bytes (540KB). No new dependency. Raise explicitly.
   // The model-list connection test reuses the typed JEV client; measured
   // 561271 bytes after shared JEV protocol updates. No dependency was added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 549 * 1024 },
+  // JEV runtime status rendering measured 564478 bytes; raise explicitly.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 553 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },

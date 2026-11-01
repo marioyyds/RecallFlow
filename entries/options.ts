@@ -14,6 +14,10 @@ import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 // 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
 import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/application/agent/mcp.ts';
 import { listJevModels } from '../lib/application/agent/jev-client.ts';
+import {
+  readJevDiagnostic,
+  type JevDiagnosticRecord,
+} from '../lib/application/agent/jev-diagnostics.ts';
 
 /** MCP 服务器配置 / 最近连接结果：字段由 mcp.js 与设置页共同约定。 */
 type Dyn = Record<string, any>;
@@ -26,6 +30,7 @@ const $q = (root: Element | Document, selector: string): any => root.querySelect
 
 let settingsDirty = false;
 let settingsLoading = true;
+let jevLastDiagnostic: JevDiagnosticRecord | null = null;
 
 async function load() {
   const s = await getAISettings();
@@ -40,6 +45,8 @@ async function load() {
   $('jev-timeout').value = String(s.jev.requestTimeoutMs);
   $('jev-retries').value = String(s.jev.maxRetries);
   $('jev-schema-version').value = s.jev.schemaVersion;
+  jevLastDiagnostic = await readJevDiagnostic();
+  renderJevRuntimeStatus();
   $('rag-enabled').checked = !!s.ragEnabled;
   $('target-lang').value = s.targetLang;
   $('page-context').checked = s.pageContext !== false;
@@ -71,6 +78,51 @@ async function load() {
   settingsLoading = false;
   setDirty(false);
   initSettingsNav();
+}
+
+function renderJevRuntimeStatus() {
+  const el = $('jev-runtime-status');
+  if (!el) return;
+  const enabled = $('jev-enabled').checked;
+  const shadow = $('jev-shadow-mode').checked;
+  if (!enabled) {
+    el.className = 'connection-status error';
+    el.textContent = 'JEV 未启用：快思考不会发起任何请求。';
+    return;
+  }
+  let current =
+    shadow
+      ? '当前为影子模式：JEV 只给出建议，不会执行工具。关闭影子模式后才会进入实际快路径。'
+      : '当前为实际执行模式。';
+  let className = shadow ? 'connection-status warn' : 'connection-status ok';
+  if (!jevLastDiagnostic) {
+    el.className = className;
+    el.textContent = current + ' 尚未收到 JEV 运行记录。';
+    return;
+  }
+  const d = jevLastDiagnostic;
+  const when = d.updatedAt ? new Date(d.updatedAt).toLocaleString('zh-CN', { hour12: false }) : '';
+  const attempts = Number.isFinite(Number(d.attempts)) ? '第 ' + d.attempts + ' 次尝试' : '最近一次';
+  let latest = '';
+  if (d.state === 'act') {
+    latest = '执行了 ' + (d.tool || d.outcome || '快动作') + (d.failed ? '，但工具失败' : '');
+    className = 'connection-status ' + (d.failed ? 'error' : 'ok');
+  } else if (d.state === 'handoff') {
+    latest = '已移交慢思考' + (d.reason ? '：' + d.reason : '');
+    className = 'connection-status warn';
+  } else if (d.state === 'error') {
+    latest = '运行失败' + (d.reason ? '：' + d.reason : '');
+    className = 'connection-status error';
+  } else if (d.state === 'deciding') {
+    latest = '正在等待结构化决策';
+    className = 'connection-status';
+  } else {
+    latest = '影子建议：' + (d.tool || d.reason || d.outcome || '无动作');
+    className = 'connection-status warn';
+  }
+  el.className = className;
+  el.textContent =
+    current + ' 最近运行' + (when ? '（' + when + '）' : '：') + attempts + ' · ' + latest + '。';
 }
 
 async function renderUserscriptSummary() {
@@ -286,6 +338,10 @@ $('toggle-jev-key').addEventListener('click', () => {
   $('toggle-jev-key').textContent = el.type === 'password' ? '👁' : '🙈';
   $('toggle-jev-key').setAttribute('aria-label', el.type === 'password' ? '显示 JEV API Key' : '隐藏 JEV API Key');
   $('toggle-jev-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
+});
+
+['jev-enabled', 'jev-shadow-mode'].forEach((id) => {
+  $(id).addEventListener('change', renderJevRuntimeStatus);
 });
 
 $('test-jev').addEventListener('click', async () => {

@@ -211,6 +211,15 @@ export function applyRunEvent(state: RunState, event: any): RunState {
         text: String(event.message || '⚡ 快思考完成一次决策'),
         color: '#7c3aed',
         lane: 'fast',
+        jev: {
+          type: 'decision',
+          mode: String(event.mode || 'live'),
+          phaseName: String(event.phaseName || ''),
+          decision: event.decision,
+          latencyMs: Number(event.latencyMs) || 0,
+          inputTokens: Number(event.inputTokens) || 0,
+          outputTokens: Number(event.outputTokens) || 0,
+        },
       });
       break;
     case 'jev-handoff':
@@ -222,6 +231,11 @@ export function applyRunEvent(state: RunState, event: any): RunState {
         text: String(event.message || '↪ 已移交慢思考'),
         color: '#2563a6',
         lane: 'slow',
+        jev: {
+          type: 'handoff',
+          reason: String(event.reason || ''),
+          detail: String(event.detail || ''),
+        },
       });
       break;
     case 'stop-requested':

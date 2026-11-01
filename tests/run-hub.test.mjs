@@ -77,6 +77,10 @@ test('run state: 快思考决策、工具步骤、慢思考接管和正文分别
     ['fast', 'fast', 'fast', 'slow', 'slow', 'slow', 'slow'],
     '写入会话历史再读回后，每个步骤仍应保留自己的通道'
   );
+  assert.equal(persisted.parts[0].jev.type, 'decision');
+  assert.equal(persisted.parts[0].jev.decision.toolName, 'read_table');
+  assert.equal(persisted.parts[3].jev.type, 'handoff');
+  assert.equal(persisted.parts[3].jev.reason, 'low-expected-progress');
 });
 
 test('run state: 审批等待、计划、用量和状态事件都能反映到快照', () => {

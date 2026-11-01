@@ -3893,7 +3893,7 @@ function createPanelWithLayout(
   // 过程提示（意图、校验、限流等）原先只写 DOM，不进入 conversation.parts：
   // 发起页面板重开或跟随页切换到正式落盘消息时，这些步骤会凭空消失。
   // 这里统一“显示 + 入库”，确保即时与最终态一致。
-  function appendNoticePart(text: any, color?: any, className?: any, lane?: any) {
+  function appendNoticePart(text: any, color?: any, className?: any, lane?: any, jev?: any) {
     const value = String(text || '').trim();
     if (!value) return;
     const step = document.createElement('div');
@@ -3907,7 +3907,7 @@ function createPanelWithLayout(
       step.textContent = value;
     }
     appendStep(step);
-    streamState.appendPart({ type: 'notice', text: value, color: color || '', ...(safeLane ? { lane: safeLane } : {}) });
+    streamState.appendPart({ type: 'notice', text: value, color: color || '', ...(safeLane ? { lane: safeLane } : {}), ...(jev ? { jev } : {}) });
   }
 
   function commitPendingVerifyPass() {
@@ -4368,12 +4368,24 @@ function createPanelWithLayout(
         progressController.render();
       } else if (resp.type === 'jev-decision') {
         const message = resp.message || '⚡ 快思考完成一次决策';
-        appendNoticePart(message, '#7c3aed', 'lane-notice', 'fast');
+        appendNoticePart(message, '#7c3aed', 'lane-notice', 'fast', {
+          type: 'decision',
+          mode: resp.mode || 'live',
+          phaseName: resp.phaseName || '',
+          decision: resp.decision,
+          latencyMs: Number(resp.latencyMs) || 0,
+          inputTokens: Number(resp.inputTokens) || 0,
+          outputTokens: Number(resp.outputTokens) || 0,
+        });
         streamState.setLane('fast');
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'jev-handoff') {
-        appendNoticePart(resp.message || '↪ 已移交慢思考', '#2563a6', 'lane-notice', 'slow');
+        appendNoticePart(resp.message || '↪ 已移交慢思考', '#2563a6', 'lane-notice', 'slow', {
+          type: 'handoff',
+          reason: resp.reason || '',
+          detail: resp.detail || '',
+        });
         streamState.setLane('slow');
         fitPanelHeight();
         pinToBottom();

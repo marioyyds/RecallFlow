@@ -216,6 +216,50 @@ test('不再输出「全部叙述 + 工具执行汇总」的分组结构', () =>
   assert.ok(!text.includes('### 工具执行'), '分组小节会把时序抹平，应已移除：\n' + text);
 });
 
+test('导出保留快慢通道、JEV 决策和移交节点', () => {
+  const text = wrap([
+    {
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          type: 'notice',
+          lane: 'fast',
+          text: '⚡ 快思考：读取当前页面',
+          jev: { type: 'decision', mode: 'live', phaseName: 'editor' },
+        },
+        {
+          type: 'tool-call',
+          callId: 'f1',
+          name: 'read_current_page',
+          args: {},
+          lane: 'fast',
+        },
+        {
+          type: 'tool-result',
+          callId: 'f1',
+          name: 'read_current_page',
+          status: 'completed',
+          result: '编辑器正文',
+          lane: 'fast',
+        },
+        {
+          type: 'notice',
+          lane: 'slow',
+          text: '↪ 慢思考接管：low-expected-progress',
+          jev: { type: 'handoff', reason: 'low-expected-progress' },
+        },
+        { type: 'narration', lane: 'slow', text: '慢思考重新规划。' },
+      ],
+    },
+  ]);
+
+  assert.ok(pos(text, '⚡ 快思考：读取当前页面') < pos(text, '`read_current_page`'));
+  assert.match(text, /`read_current_page` \{\} → ✓ 编辑器正文 · ⚡ 快思考/);
+  assert.match(text, /↪ 慢思考接管：low-expected-progress/);
+  assert.match(text, /\*\*\[🧠 慢思考\]\*\* 慢思考重新规划。/);
+});
+
 // markdown 的 lazy continuation：列表项后面紧跟一行普通文本（中间没有空行）时，
 // 那一行会被并进上一条列表项，整段叙述被渲染进项目符号里。实测踩到过。
 test('工具行块与后续叙述之间必须留空行（否则叙述会被并进列表项）', () => {

@@ -18,6 +18,7 @@ export type JevToolName =
   | 'read_table'
   | 'get_page_snapshot'
   | 'get_ax_snapshot'
+  | 'read_diagnostics'
   | 'scroll_page'
   | 'click_element';
 
@@ -109,6 +110,13 @@ const BASE_ACTIONS: JevActionDefinition[] = [
     toolName: 'get_ax_snapshot',
     args: { limit: 40 },
     description: 'DOM 定位失败、自定义组件或需要 role/name/坐标时读取可访问性树',
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE,
+  },
+  {
+    key: 'diagnostics',
+    toolName: 'read_diagnostics',
+    args: {},
+    description: '页面无响应、内容脚本失效、动作看似执行但没有出现预期结果时，读取控制台与网络诊断',
     minConfidence: JEV_MIN_ACTION_CONFIDENCE,
   },
   {

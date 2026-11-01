@@ -58,6 +58,7 @@ test('快思考暴露观察、滚动和升级动作，不直接生成内容', ()
   assert.equal(question.type, 'choice');
   assert.deepEqual(Object.keys(question.criteria).sort(), [
     'accessibility',
+    'diagnostics',
     'escalate',
     'read_page',
     'read_table',
@@ -69,6 +70,7 @@ test('快思考暴露观察、滚动和升级动作，不直接生成内容', ()
   assert.equal(request.questions[JEV_PAGE_READY_QUESTION].type, 'noul');
   assert.equal('messages' in request, false);
   assert.equal(actions.read_table.toolName, 'read_table');
+  assert.equal(actions.diagnostics.toolName, 'read_diagnostics');
 });
 
 test('高置信度只读建议转换为类型明确、参数受控的工具调用', () => {
@@ -236,6 +238,7 @@ function makeState(shadowMode) {
 test('控制器在非影子模式只执行受控只读动作，并复用现有工具流水线', async () => {
   const state = makeState(false);
   const emitted = [];
+  const diagnostics = [];
   state.emit = (event) => emitted.push(event);
   let processed = null;
   const pipeline = {
@@ -248,9 +251,11 @@ test('控制器在非影子模式只执行受控只读动作，并复用现有�
     state,
     pipeline,
     new AbortController().signal,
-    async () => response('read_table', 0.95)
+    async () => response('read_table', 0.95),
+    async (entry) => diagnostics.push(entry)
   );
   const outcome = await controller.runAvailable(0, async () => {});
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(outcome.kind, 'act');
   assert.equal(state.messages.length, 1);
   assert.equal(processed.toolCalls[0].name, 'read_table');
@@ -260,22 +265,29 @@ test('控制器在非影子模式只执行受控只读动作，并复用现有�
   assert.equal(emitted[0]?.type, 'jev-decision');
   assert.match(emitted[0]?.message || '', /^⚡ 快思考：/);
   assert.match(emitted[0]?.message || '', /handoff \d+%/);
+  assert.equal(diagnostics.at(-1)?.state, 'act');
+  assert.equal(diagnostics.at(-1)?.tool, 'read_table');
   assert.equal(state.totalTokens, 12);
 });
 
 test('控制器在影子模式不执行工具', async () => {
   const state = makeState(true);
+  const diagnostics = [];
   let called = false;
   const controller = new JevFastController(
     state,
     { process: async () => { called = true; return { kind: 'continue', toolMs: 0 }; } },
     new AbortController().signal,
-    async () => response('read_table', 0.95)
+    async () => response('read_table', 0.95),
+    async (entry) => diagnostics.push(entry)
   );
   const outcome = await controller.runAvailable(0, async () => {});
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(outcome.kind, 'shadow');
   assert.equal(called, false);
   assert.equal(state.messages.length, 0);
+  assert.equal(diagnostics.at(-1)?.state, 'shadow');
+  assert.equal(diagnostics.at(-1)?.tool, 'read_table');
 });
 
 test('页面状态变化后允许新的快思考片段，单片段最多连续三步', async () => {
