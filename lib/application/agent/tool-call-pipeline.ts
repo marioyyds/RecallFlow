@@ -96,6 +96,7 @@ export class ToolCallPipeline {
     persist: (extra: Record<string, any>) => Promise<unknown>
   ): Promise<ToolBatchOutcome> {
     const state = this.state;
+    const lane = step && step.lane === 'fast' ? 'fast' : 'slow';
     const pendingReflections: string[] = [];
     const downloadTask = shouldObserveDownloads(
       state.detected.sourceText || state.instruction
@@ -142,6 +143,7 @@ export class ToolCallPipeline {
       emit: state.emit,
       emitState: state.emitState,
       trace: state.trace,
+      lane,
     });
 
     for (let toolIndex = 0; toolIndex < step.toolCalls.length; toolIndex += 1) {
@@ -186,6 +188,7 @@ export class ToolCallPipeline {
           name: toolCall.name,
           status: 'failed',
           result: result.result,
+          lane,
         });
       }
 
@@ -197,6 +200,7 @@ export class ToolCallPipeline {
           name: toolCall.name,
           status: 'failed',
           result: blocked,
+          lane,
         });
         state.messages.push({
           role: 'tool',
@@ -215,6 +219,7 @@ export class ToolCallPipeline {
           name: toolCall.name,
           status: 'failed',
           result: blocked,
+          lane,
         });
         state.messages.push({
           role: 'tool',
@@ -250,7 +255,8 @@ export class ToolCallPipeline {
           this.signal,
           state.runId,
           allowSession,
-          state.emit
+          state.emit,
+          lane
         );
         if (decision === 'session' && allowSession) {
           state.sessionApprovedTools.add(toolCall.name);
@@ -270,6 +276,7 @@ export class ToolCallPipeline {
             name: toolCall.name,
             status: 'rejected',
             result: result.result,
+            lane,
           });
           state.emitState(RUN_STATUS.OBSERVING, {
             callId,
@@ -299,6 +306,7 @@ export class ToolCallPipeline {
             args: toolCall.args,
             requiresApproval: false,
             risk: metadata.risk,
+            lane,
           });
           const startedAt = Date.now();
           authBeforeUrl = state.ctx.pageUrl;
@@ -338,6 +346,7 @@ export class ToolCallPipeline {
           name: toolCall.name,
           status: result.ok === false ? 'failed' : 'completed',
           result: result.result,
+          lane,
           ...(result.authChallenge
             ? {
                 needsLogin: true,

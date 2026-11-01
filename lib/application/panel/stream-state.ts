@@ -3,6 +3,7 @@ export interface PanelStreamSnapshot {
   content?: unknown;
   narration?: unknown;
   parts?: unknown;
+  lane?: unknown;
 }
 
 export interface PanelStreamState {
@@ -14,10 +15,12 @@ export interface PanelStreamState {
   readonly verifyPass: any | null;
   readonly budgetStopped: boolean;
   readonly responseText: string;
+  readonly lane: string;
   reset(): void;
   beginNew(): void;
   restore(snapshot: PanelStreamSnapshot | null | undefined): void;
-  appendChunk(text: unknown): void;
+  appendChunk(text: unknown, lane?: unknown): void;
+  setLane(lane: unknown): void;
   appendPart(part: any): void;
   flushNarration(): string | null;
   setVerifyPass(part: any): void;
@@ -40,6 +43,7 @@ export class PanelStreamAccumulator implements PanelStreamState {
   private partsValue: any[] = [];
   private verifyPassValue: any | null = null;
   private budgetStoppedValue = false;
+  private laneValue = 'slow';
 
   get content(): string {
     return this.contentValue;
@@ -73,6 +77,10 @@ export class PanelStreamAccumulator implements PanelStreamState {
     return this.narrationValue || this.previousNarrationValue || this.contentValue;
   }
 
+  get lane(): string {
+    return this.laneValue;
+  }
+
   reset(): void {
     this.contentValue = '';
     this.narrationValue = '';
@@ -81,6 +89,7 @@ export class PanelStreamAccumulator implements PanelStreamState {
     this.partsValue = [];
     this.verifyPassValue = null;
     this.budgetStoppedValue = false;
+    this.laneValue = 'slow';
   }
 
   beginNew(): void {
@@ -98,14 +107,20 @@ export class PanelStreamAccumulator implements PanelStreamState {
     this.startedValue = true;
     this.verifyPassValue = null;
     this.budgetStoppedValue = false;
+    this.laneValue = source.lane === 'fast' ? 'fast' : 'slow';
   }
 
-  appendChunk(text: unknown): void {
+  appendChunk(text: unknown, lane?: unknown): void {
     const piece = String(text || '');
     if (!piece) return;
+    this.setLane(lane);
     this.contentValue += piece;
     this.narrationValue += piece;
     this.startedValue = true;
+  }
+
+  setLane(lane: unknown): void {
+    if (lane === 'fast' || lane === 'slow') this.laneValue = lane;
   }
 
   appendPart(part: any): void {
@@ -118,7 +133,7 @@ export class PanelStreamAccumulator implements PanelStreamState {
     const text = this.narrationValue;
     if (!text) return null;
     this.previousNarrationValue = text;
-    this.partsValue.push({ type: 'narration', text });
+    this.partsValue.push({ type: 'narration', text, lane: this.laneValue });
     this.narrationValue = '';
     return text;
   }

@@ -465,6 +465,37 @@ export const PANEL_CSS = `
     .panel.dark .agent-step { background: rgba(110,168,254,.12); color: #9aa6b3; }
     .agent-tool { font-weight: 600; color: #4a90d9; }
     .panel.dark .agent-tool { color: #7db4e8; }
+    .agent-lane {
+      display: inline-flex; align-items: center; margin-right: 5px; padding: 1px 5px;
+      border-radius: 999px; font-size: 9.5px; font-weight: 700; vertical-align: 1px;
+    }
+    .agent-lane.lane-fast { color: #7c3aed; background: rgba(124,58,237,.10); border: 1px solid rgba(124,58,237,.28); }
+    .agent-lane.lane-slow { color: #2563a6; background: rgba(74,144,217,.10); border: 1px solid rgba(74,144,217,.28); }
+    .panel.dark .agent-lane.lane-fast { color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30); }
+    .panel.dark .agent-lane.lane-slow { color: #9bc7f5; background: rgba(74,144,217,.18); border-color: rgba(155,199,245,.28); }
+    .agent-step.lane-fast { background: rgba(124,58,237,.07); border-left-color: #7c3aed; }
+    .agent-step.lane-slow { background: rgba(74,144,217,.08); border-left-color: #4a90d9; }
+    .panel.dark .agent-step.lane-fast { background: rgba(124,58,237,.14); }
+    .panel.dark .agent-step.lane-slow { background: rgba(74,144,217,.12); }
+    .agent-content.lane-fast::before,
+    .agent-content.lane-slow::before {
+      display: inline-flex; align-items: center; margin-right: 5px; padding: 1px 5px;
+      border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1.5;
+    }
+    .agent-content.lane-fast::before {
+      content: '⚡ 快思考'; color: #7c3aed; background: rgba(124,58,237,.10);
+      border: 1px solid rgba(124,58,237,.28);
+    }
+    .agent-content.lane-slow::before {
+      content: '🧠 慢思考'; color: #2563a6; background: rgba(74,144,217,.10);
+      border: 1px solid rgba(74,144,217,.28);
+    }
+    .panel.dark .agent-content.lane-fast::before {
+      color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30);
+    }
+    .panel.dark .agent-content.lane-slow::before {
+      color: #9bc7f5; background: rgba(74,144,217,.18); border-color: rgba(155,199,245,.28);
+    }
     .agent-tool-arg { color: inherit; opacity: .85; }
     /* 工具步骤可展开：args 与 result 本就存在 parts 里却从不渲染，
        用户只能开 DevTools 才能知道「它到底读到了什么」。 */

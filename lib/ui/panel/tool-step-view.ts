@@ -6,13 +6,22 @@ export function clipDetail(text: any, max: any): string {
   return value.length > max ? value.slice(0, max) + '\n…（共 ' + value.length + ' 字符，已截断）' : value;
 }
 
-export function toolStepHtml(lead: any, name: any, hint: any, detailLabel: any, detail: any): string {
+export function laneBadgeHtml(lane: unknown): string {
+  const value = String(lane || '');
+  if (value === 'fast') return '<span class="agent-lane lane-fast">⚡ 快思考</span>';
+  if (value === 'slow') return '<span class="agent-lane lane-slow">🧠 慢思考</span>';
+  return '';
+}
+
+export function toolStepHtml(lead: any, name: any, hint: any, detailLabel: any, detail: any, lane?: unknown): string {
+  const stepClass = 'agent-step' + (lane === 'fast' || lane === 'slow' ? ' lane-' + lane : '');
   const head =
+    laneBadgeHtml(lane) +
     '<span class="agent-tool">' + esc(lead) + esc(name) + '</span>' +
     (hint ? '<span class="agent-tool-arg">：' + esc(hint) + '</span>' : '');
-  if (!detail) return '<div class="agent-step">' + head + '</div>';
+  if (!detail) return '<div class="' + stepClass + '">' + head + '</div>';
   return (
-    '<details class="agent-step"><summary>' + head + '</summary>' +
+    '<details class="' + stepClass + '"><summary>' + head + '</summary>' +
     '<div class="agent-step-detail">' +
     (detailLabel ? '<div class="agent-step-label">' + esc(detailLabel) + '</div>' : '') +
     '<pre class="agent-step-pre">' + esc(detail) + '</pre>' +
@@ -20,9 +29,9 @@ export function toolStepHtml(lead: any, name: any, hint: any, detailLabel: any, 
   );
 }
 
-export function toolStepElement(lead: any, name: any, hint: any, detailLabel: any, detail: any): Element | null {
+export function toolStepElement(lead: any, name: any, hint: any, detailLabel: any, detail: any, lane?: unknown): Element | null {
   const wrap = document.createElement('div');
-  wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
+  wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail, lane);
   return wrap.firstElementChild;
 }
 

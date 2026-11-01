@@ -235,6 +235,8 @@ function makeState(shadowMode) {
 
 test('控制器在非影子模式只执行受控只读动作，并复用现有工具流水线', async () => {
   const state = makeState(false);
+  const emitted = [];
+  state.emit = (event) => emitted.push(event);
   let processed = null;
   const pipeline = {
     process: async (step) => {
@@ -253,6 +255,11 @@ test('控制器在非影子模式只执行受控只读动作，并复用现有�
   assert.equal(state.messages.length, 1);
   assert.equal(processed.toolCalls[0].name, 'read_table');
   assert.deepEqual(processed.toolCalls[0].args, {});
+  assert.equal(processed.lane, 'fast');
+  assert.equal(processed.assistantMessage.lane, 'fast');
+  assert.equal(emitted[0]?.type, 'jev-decision');
+  assert.match(emitted[0]?.message || '', /^⚡ 快思考：/);
+  assert.match(emitted[0]?.message || '', /handoff \d+%/);
   assert.equal(state.totalTokens, 12);
 });
 
@@ -339,6 +346,8 @@ test('快路径失败后允许一次不同动作恢复，恢复成功会清零�
 
 test('连续两次工具失败后停止快路径并写入 handoff', async () => {
   const state = makeState(false);
+  const emitted = [];
+  state.emit = (event) => emitted.push(event);
   let calls = 0;
   const pipeline = {
     process: async () => {
@@ -356,4 +365,6 @@ test('连续两次工具失败后停止快路径并写入 handoff', async () => 
   await controller.runAvailable(0, async () => {});
   assert.equal(state.jevLoop.consecutiveFailures, 2);
   assert.match(String(state.messages.at(-1)?.content || ''), /tool-failure-limit/);
+  assert.ok(emitted.some((event) => event.type === 'jev-handoff' && event.reason === 'tool-failure-limit'));
+  assert.match(emitted.find((event) => event.type === 'jev-handoff')?.message || '', /^↪ 慢思考接管：/);
 });

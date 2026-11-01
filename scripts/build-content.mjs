@@ -76,7 +76,11 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // 2026-11-01: shared AI settings now include the remote JEV connection
 // defaults consumed by the panel content bundle. Measured 504360 bytes
 // (493KB); raise by 1KB. No new dependency or duplicated module.
-export const SIZE_BUDGET_BYTES = 493 * 1024;
+// 2026-11-01: fast/slow thinking lanes now flow through model events, tool
+// execution, run snapshots and persisted conversation parts, with matching
+// panel badges and history restoration. Measured 510377 bytes (498KB); raise
+// by 7KB. No new dependency or duplicated module.
+export const SIZE_BUDGET_BYTES = 500 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

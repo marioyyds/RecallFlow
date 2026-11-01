@@ -9012,11 +9012,11 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
       }
       if (delta.reasoning_content) {
         reasoningAcc += delta.reasoning_content;
-        (emit || ((event) => port.postMessage(event)))({ type: "reasoning", text: delta.reasoning_content });
+        (emit || ((event) => port.postMessage(event)))({ type: "reasoning", lane: "slow", text: delta.reasoning_content });
       }
       if (delta.content) {
         contentAcc += delta.content;
-        (emit || ((event) => port.postMessage(event)))({ type: "chunk", text: delta.content });
+        (emit || ((event) => port.postMessage(event)))({ type: "chunk", lane: "slow", text: delta.content });
       }
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
@@ -9047,7 +9047,7 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
     decodeMs: firstTokenAt ? streamEndAt - firstTokenAt : 0,
     totalMs: streamEndAt - requestStartAt
   };
-  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc };
+  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc, lane: "slow" };
 }
 
 // lib/application/agent/agent-events.ts
@@ -10356,7 +10356,8 @@ async function runParallelBatch(toolCalls, o) {
         name: tc.name,
         args: tc.args,
         requiresApproval: false,
-        risk: getToolMetadata(tc.name).risk
+        risk: getToolMetadata(tc.name).risk,
+        lane: o.lane === "fast" ? "fast" : "slow"
       });
     }
     o.emitState(RUN_STATUS.EXECUTING);
@@ -10391,7 +10392,7 @@ async function runParallelBatch(toolCalls, o) {
   }
   return precomputed;
 }
-function waitForToolApproval(port, callId, name, args, signal, runId, allowSession, emit) {
+function waitForToolApproval(port, callId, name, args, signal, runId, allowSession, emit, lane) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (approved) => {
@@ -10412,7 +10413,7 @@ function waitForToolApproval(port, callId, name, args, signal, runId, allowSessi
     port.onMessage.addListener(onMessage);
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const event = { type: "tool-call", runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false };
+      const event = { type: "tool-call", runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false, lane: lane === "fast" ? "fast" : "slow" };
       if (typeof emit === "function") emit(event);
       else port.postMessage(event);
     } catch (e) {
@@ -10585,7 +10586,7 @@ var AgentRunFinalizer = class {
   }
   async completeTask(toolName, summary2, assistantAlreadySpoke) {
     const state2 = this.state;
-    if (!assistantAlreadySpoke) state2.emit({ type: "chunk", text: summary2 });
+    if (!assistantAlreadySpoke) state2.emit({ type: "chunk", lane: "slow", text: summary2 });
     const pendingTabs = await closeAuxTabs(state2.ctx).catch(() => []);
     emitTabsClosePending(state2.ctx, pendingTabs, state2.emit);
     state2.emitState(RUN_STATUS.COMPLETED, { tool: toolName });
@@ -11200,6 +11201,7 @@ var ToolCallPipeline = class {
   }
   async process(step, iter, persist) {
     const state2 = this.state;
+    const lane = step && step.lane === "fast" ? "fast" : "slow";
     const pendingReflections = [];
     const downloadTask = shouldObserveDownloads(
       state2.detected.sourceText || state2.instruction
@@ -11239,7 +11241,8 @@ var ToolCallPipeline = class {
       signal: this.signal,
       emit: state2.emit,
       emitState: state2.emitState,
-      trace: state2.trace
+      trace: state2.trace,
+      lane
     });
     for (let toolIndex = 0; toolIndex < step.toolCalls.length; toolIndex += 1) {
       const toolCall = step.toolCalls[toolIndex];
@@ -11275,7 +11278,8 @@ var ToolCallPipeline = class {
           callId,
           name: toolCall.name,
           status: "failed",
-          result: result.result
+          result: result.result,
+          lane
         });
       }
       if (!result && state2.disabledTools.has(toolCall.name)) {
@@ -11285,7 +11289,8 @@ var ToolCallPipeline = class {
           callId,
           name: toolCall.name,
           status: "failed",
-          result: blocked
+          result: blocked,
+          lane
         });
         state2.messages.push({
           role: "tool",
@@ -11302,7 +11307,8 @@ var ToolCallPipeline = class {
           callId,
           name: toolCall.name,
           status: "failed",
-          result: blocked
+          result: blocked,
+          lane
         });
         state2.messages.push({
           role: "tool",
@@ -11330,7 +11336,8 @@ var ToolCallPipeline = class {
           this.signal,
           state2.runId,
           allowSession,
-          state2.emit
+          state2.emit,
+          lane
         );
         if (decision === "session" && allowSession) {
           state2.sessionApprovedTools.add(toolCall.name);
@@ -11346,7 +11353,8 @@ var ToolCallPipeline = class {
             callId,
             name: toolCall.name,
             status: "rejected",
-            result: result.result
+            result: result.result,
+            lane
           });
           state2.emitState(RUN_STATUS.OBSERVING, {
             callId,
@@ -11374,7 +11382,8 @@ var ToolCallPipeline = class {
             name: toolCall.name,
             args: toolCall.args,
             requiresApproval: false,
-            risk: metadata.risk
+            risk: metadata.risk,
+            lane
           });
           const startedAt = Date.now();
           authBeforeUrl = state2.ctx.pageUrl;
@@ -11413,6 +11422,7 @@ var ToolCallPipeline = class {
           name: toolCall.name,
           status: result.ok === false ? "failed" : "completed",
           result: result.result,
+          lane,
           ...result.authChallenge ? {
             needsLogin: true,
             loginUrl: result.authChallenge.loginUrl || "",
@@ -12246,6 +12256,13 @@ function compareJevShadowAction(suggestion, slowToolNames, finalText = "") {
     finalAnswerOnly: names.length === 0 && Boolean(String(finalText || "").trim())
   };
 }
+function formatJevDecisionSummary(shadow, decision, latencyMs) {
+  const prefix = shadow ? "\u26A1 \u5FEB\u601D\u8003\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u601D\u8003";
+  const action = decision.kind === "act" ? decision.description : "\u79FB\u4EA4\u6162\u601D\u8003\uFF1A" + decision.reason;
+  const signals = decision.signals;
+  const detail = signals ? "\uFF1Bhandoff " + Math.round(signals.handoff * 100) + "% / \u8FDB\u5C55 " + Math.round(signals.expectedProgress * 100) + "% / \u9875\u9762 " + Math.round(signals.pageReady * 100) + "%" : "";
+  return prefix + "\uFF1A" + action + detail + "\uFF08" + Math.round(latencyMs) + "ms\uFF09";
+}
 
 // lib/application/agent/jev-controller.ts
 var JevFastController = class {
@@ -12342,6 +12359,16 @@ var JevFastController = class {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens
     });
+    this.state.emit({
+      type: "jev-decision",
+      mode: settings.shadowMode ? "shadow" : "live",
+      phaseName: phase,
+      decision,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs)
+    });
     if (settings.shadowMode) {
       this.state.jevLoop.consecutiveFastActions = 0;
       await persist({ phase: "jev_decision" }).catch(() => {
@@ -12379,6 +12406,7 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
+      lane: "fast",
       content: "JEV \u5FEB\u601D\u8003\uFF1A" + decision.description,
       tool_calls: [{
         id: callId,
@@ -12393,7 +12421,8 @@ var JevFastController = class {
     const failuresBefore = this.state.failedToolNames.length;
     const toolOutcome = await this.pipeline.process({
       assistantMessage,
-      toolCalls: [toolCall]
+      toolCalls: [toolCall],
+      lane: "fast"
     }, iter, persist);
     if (toolOutcome.kind === "cancelled") {
       return { kind: "cancelled", reason: toolOutcome.reason };
@@ -12425,6 +12454,12 @@ var JevFastController = class {
       reason,
       decision,
       detail
+    });
+    this.state.emit({
+      type: "jev-handoff",
+      reason,
+      detail,
+      message: "\u21AA \u6162\u601D\u8003\u63A5\u7BA1\uFF1A" + reason + (detail ? "\uFF08" + detail + "\uFF09" : "")
     });
     const signals = decision && decision.kind === "act" ? decision.signals : decision?.signals;
     const lines = [
@@ -12679,6 +12714,7 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
       await finalizer.failed(step.error);
       return;
     }
+    step.lane = "slow";
     state2.messages.push(step.assistantMessage);
     if (pendingJevShadow) {
       jevFast.traceShadowComparison(pendingJevShadow, step);
@@ -15473,7 +15509,10 @@ function createRunState(input) {
     updatedAt: Number(data.updatedAt) || Date.now(),
     content: "",
     narration: "",
+    narrationLane: "slow",
     reasoning: "",
+    reasoningLane: "slow",
+    lane: "slow",
     parts: [],
     plan: [],
     citations: Array.isArray(data.citations) ? data.citations.slice() : [],
@@ -15489,12 +15528,12 @@ function createRunState(input) {
 }
 function endReasoning(state2) {
   if (!state2.reasoning) return;
-  state2.parts.push({ type: "thinking", text: state2.reasoning });
+  state2.parts.push({ type: "thinking", text: state2.reasoning, lane: state2.reasoningLane });
   state2.reasoning = "";
 }
 function flushNarration(state2) {
   if (!state2.narration) return;
-  state2.parts.push({ type: "narration", text: state2.narration });
+  state2.parts.push({ type: "narration", text: state2.narration, lane: state2.narrationLane });
   state2.narration = "";
 }
 function pushNotice(state2, text2, color) {
@@ -15514,10 +15553,14 @@ function applyRunEvent(state2, event) {
       state2.citations = Array.isArray(event.citations) ? event.citations.slice() : [];
       break;
     case "reasoning":
+      state2.lane = event.lane === "fast" ? "fast" : "slow";
+      state2.reasoningLane = state2.lane;
       if (event.text) state2.reasoning += String(event.text);
       break;
     case "chunk":
       endReasoning(state2);
+      state2.lane = event.lane === "fast" ? "fast" : "slow";
+      state2.narrationLane = state2.lane;
       if (event.text) {
         const text2 = String(event.text);
         state2.content += text2;
@@ -15527,12 +15570,14 @@ function applyRunEvent(state2, event) {
     case "tool-call":
       endReasoning(state2);
       flushNarration(state2);
+      state2.lane = event.lane === "fast" ? "fast" : "slow";
       state2.parts.push({
         type: "tool-call",
         callId: String(event.callId || ""),
         name: String(event.name || ""),
         args: event.args && typeof event.args === "object" ? event.args : {},
-        risk: String(event.risk || "unknown")
+        risk: String(event.risk || "unknown"),
+        lane: state2.lane
       });
       if (event.requiresApproval) {
         state2.approval = {
@@ -15540,6 +15585,7 @@ function applyRunEvent(state2, event) {
           name: String(event.name || ""),
           args: event.args && typeof event.args === "object" ? event.args : {},
           risk: String(event.risk || "unknown"),
+          lane: state2.lane,
           allowSession: event.allowSession !== false
         };
       }
@@ -15547,12 +15593,14 @@ function applyRunEvent(state2, event) {
     case "tool-result":
       endReasoning(state2);
       flushNarration(state2);
+      state2.lane = event.lane === "fast" ? "fast" : "slow";
       state2.parts.push({
         type: "tool-result",
         callId: String(event.callId || ""),
         name: String(event.name || ""),
         status: String(event.status || ""),
         result: String(event.result || ""),
+        lane: state2.lane,
         // 登录 / 权限提示必须跟着 tool-result 走：跟随页、刷新接管与历史回放
         // 都从同一个 parts 数组重建，不再各猜一份页面状态。
         ...event.needsLogin === true && event.authChallenge ? { needsLogin: true, authChallenge: event.authChallenge } : event.needsLogin === true ? {
@@ -15577,7 +15625,30 @@ function applyRunEvent(state2, event) {
         label: String(event.label || ""),
         width: Number(event.width) || 0,
         height: Number(event.height) || 0,
-        bytes: Number(event.bytes) || 0
+        bytes: Number(event.bytes) || 0,
+        lane: "slow"
+      });
+      break;
+    case "jev-decision":
+      endReasoning(state2);
+      flushNarration(state2);
+      state2.lane = "fast";
+      state2.parts.push({
+        type: "notice",
+        text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
+        color: "#7c3aed",
+        lane: "fast"
+      });
+      break;
+    case "jev-handoff":
+      endReasoning(state2);
+      flushNarration(state2);
+      state2.lane = "slow";
+      state2.parts.push({
+        type: "notice",
+        text: String(event.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003"),
+        color: "#2563a6",
+        lane: "slow"
       });
       break;
     case "stop-requested":

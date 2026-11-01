@@ -6155,6 +6155,37 @@
     .panel.dark .agent-step { background: rgba(110,168,254,.12); color: #9aa6b3; }
     .agent-tool { font-weight: 600; color: #4a90d9; }
     .panel.dark .agent-tool { color: #7db4e8; }
+    .agent-lane {
+      display: inline-flex; align-items: center; margin-right: 5px; padding: 1px 5px;
+      border-radius: 999px; font-size: 9.5px; font-weight: 700; vertical-align: 1px;
+    }
+    .agent-lane.lane-fast { color: #7c3aed; background: rgba(124,58,237,.10); border: 1px solid rgba(124,58,237,.28); }
+    .agent-lane.lane-slow { color: #2563a6; background: rgba(74,144,217,.10); border: 1px solid rgba(74,144,217,.28); }
+    .panel.dark .agent-lane.lane-fast { color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30); }
+    .panel.dark .agent-lane.lane-slow { color: #9bc7f5; background: rgba(74,144,217,.18); border-color: rgba(155,199,245,.28); }
+    .agent-step.lane-fast { background: rgba(124,58,237,.07); border-left-color: #7c3aed; }
+    .agent-step.lane-slow { background: rgba(74,144,217,.08); border-left-color: #4a90d9; }
+    .panel.dark .agent-step.lane-fast { background: rgba(124,58,237,.14); }
+    .panel.dark .agent-step.lane-slow { background: rgba(74,144,217,.12); }
+    .agent-content.lane-fast::before,
+    .agent-content.lane-slow::before {
+      display: inline-flex; align-items: center; margin-right: 5px; padding: 1px 5px;
+      border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1.5;
+    }
+    .agent-content.lane-fast::before {
+      content: '\u26A1 \u5FEB\u601D\u8003'; color: #7c3aed; background: rgba(124,58,237,.10);
+      border: 1px solid rgba(124,58,237,.28);
+    }
+    .agent-content.lane-slow::before {
+      content: '\u{1F9E0} \u6162\u601D\u8003'; color: #2563a6; background: rgba(74,144,217,.10);
+      border: 1px solid rgba(74,144,217,.28);
+    }
+    .panel.dark .agent-content.lane-fast::before {
+      color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30);
+    }
+    .panel.dark .agent-content.lane-slow::before {
+      color: #9bc7f5; background: rgba(74,144,217,.18); border-color: rgba(155,199,245,.28);
+    }
     .agent-tool-arg { color: inherit; opacity: .85; }
     /* \u5DE5\u5177\u6B65\u9AA4\u53EF\u5C55\u5F00\uFF1Aargs \u4E0E result \u672C\u5C31\u5B58\u5728 parts \u91CC\u5374\u4ECE\u4E0D\u6E32\u67D3\uFF0C
        \u7528\u6237\u53EA\u80FD\u5F00 DevTools \u624D\u80FD\u77E5\u9053\u300C\u5B83\u5230\u5E95\u8BFB\u5230\u4E86\u4EC0\u4E48\u300D\u3002 */
@@ -6529,12 +6560,12 @@
   // lib/application/agent/run-hub.ts
   function endReasoning(state) {
     if (!state.reasoning) return;
-    state.parts.push({ type: "thinking", text: state.reasoning });
+    state.parts.push({ type: "thinking", text: state.reasoning, lane: state.reasoningLane });
     state.reasoning = "";
   }
   function flushNarration(state) {
     if (!state.narration) return;
-    state.parts.push({ type: "narration", text: state.narration });
+    state.parts.push({ type: "narration", text: state.narration, lane: state.narrationLane });
     state.narration = "";
   }
   function pushNotice(state, text, color) {
@@ -6554,10 +6585,14 @@
         state.citations = Array.isArray(event.citations) ? event.citations.slice() : [];
         break;
       case "reasoning":
+        state.lane = event.lane === "fast" ? "fast" : "slow";
+        state.reasoningLane = state.lane;
         if (event.text) state.reasoning += String(event.text);
         break;
       case "chunk":
         endReasoning(state);
+        state.lane = event.lane === "fast" ? "fast" : "slow";
+        state.narrationLane = state.lane;
         if (event.text) {
           const text = String(event.text);
           state.content += text;
@@ -6567,12 +6602,14 @@
       case "tool-call":
         endReasoning(state);
         flushNarration(state);
+        state.lane = event.lane === "fast" ? "fast" : "slow";
         state.parts.push({
           type: "tool-call",
           callId: String(event.callId || ""),
           name: String(event.name || ""),
           args: event.args && typeof event.args === "object" ? event.args : {},
-          risk: String(event.risk || "unknown")
+          risk: String(event.risk || "unknown"),
+          lane: state.lane
         });
         if (event.requiresApproval) {
           state.approval = {
@@ -6580,6 +6617,7 @@
             name: String(event.name || ""),
             args: event.args && typeof event.args === "object" ? event.args : {},
             risk: String(event.risk || "unknown"),
+            lane: state.lane,
             allowSession: event.allowSession !== false
           };
         }
@@ -6587,12 +6625,14 @@
       case "tool-result":
         endReasoning(state);
         flushNarration(state);
+        state.lane = event.lane === "fast" ? "fast" : "slow";
         state.parts.push({
           type: "tool-result",
           callId: String(event.callId || ""),
           name: String(event.name || ""),
           status: String(event.status || ""),
           result: String(event.result || ""),
+          lane: state.lane,
           // 登录 / 权限提示必须跟着 tool-result 走：跟随页、刷新接管与历史回放
           // 都从同一个 parts 数组重建，不再各猜一份页面状态。
           ...event.needsLogin === true && event.authChallenge ? { needsLogin: true, authChallenge: event.authChallenge } : event.needsLogin === true ? {
@@ -6617,7 +6657,30 @@
           label: String(event.label || ""),
           width: Number(event.width) || 0,
           height: Number(event.height) || 0,
-          bytes: Number(event.bytes) || 0
+          bytes: Number(event.bytes) || 0,
+          lane: "slow"
+        });
+        break;
+      case "jev-decision":
+        endReasoning(state);
+        flushNarration(state);
+        state.lane = "fast";
+        state.parts.push({
+          type: "notice",
+          text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
+          color: "#7c3aed",
+          lane: "fast"
+        });
+        break;
+      case "jev-handoff":
+        endReasoning(state);
+        flushNarration(state);
+        state.lane = "slow";
+        state.parts.push({
+          type: "notice",
+          text: String(event.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003"),
+          color: "#2563a6",
+          lane: "slow"
         });
         break;
       case "stop-requested":
@@ -6707,8 +6770,8 @@
   function runStateToAssistantMessage(state) {
     if (!state) return null;
     let parts = (state.parts || []).map((p) => Object.assign({}, p));
-    if (state.reasoning) parts.push({ type: "thinking", text: state.reasoning, live: true });
-    if (state.narration) parts.push({ type: "narration", text: state.narration, live: true });
+    if (state.reasoning) parts.push({ type: "thinking", text: state.reasoning, live: true, lane: state.reasoningLane });
+    if (state.narration) parts.push({ type: "narration", text: state.narration, live: true, lane: state.narrationLane });
     if (state.error) parts.push({ type: "notice", text: state.error, color: "#e74c3c" });
     if (state.approval) {
       parts.push({
@@ -7201,6 +7264,7 @@
     partsValue = [];
     verifyPassValue = null;
     budgetStoppedValue = false;
+    laneValue = "slow";
     get content() {
       return this.contentValue;
     }
@@ -7225,6 +7289,9 @@
     get responseText() {
       return this.narrationValue || this.previousNarrationValue || this.contentValue;
     }
+    get lane() {
+      return this.laneValue;
+    }
     reset() {
       this.contentValue = "";
       this.narrationValue = "";
@@ -7233,6 +7300,7 @@
       this.partsValue = [];
       this.verifyPassValue = null;
       this.budgetStoppedValue = false;
+      this.laneValue = "slow";
     }
     beginNew() {
       this.reset();
@@ -7246,13 +7314,18 @@
       this.startedValue = true;
       this.verifyPassValue = null;
       this.budgetStoppedValue = false;
+      this.laneValue = source.lane === "fast" ? "fast" : "slow";
     }
-    appendChunk(text) {
+    appendChunk(text, lane) {
       const piece = String(text || "");
       if (!piece) return;
+      this.setLane(lane);
       this.contentValue += piece;
       this.narrationValue += piece;
       this.startedValue = true;
+    }
+    setLane(lane) {
+      if (lane === "fast" || lane === "slow") this.laneValue = lane;
     }
     appendPart(part) {
       if (!part) return;
@@ -7263,7 +7336,7 @@
       const text = this.narrationValue;
       if (!text) return null;
       this.previousNarrationValue = text;
-      this.partsValue.push({ type: "narration", text });
+      this.partsValue.push({ type: "narration", text, lane: this.laneValue });
       this.narrationValue = "";
       return text;
     }
@@ -7341,14 +7414,21 @@
     if (!value) return "";
     return value.length > max ? value.slice(0, max) + "\n\u2026\uFF08\u5171 " + value.length + " \u5B57\u7B26\uFF0C\u5DF2\u622A\u65AD\uFF09" : value;
   }
-  function toolStepHtml(lead, name, hint, detailLabel, detail) {
-    const head = '<span class="agent-tool">' + esc(lead) + esc(name) + "</span>" + (hint ? '<span class="agent-tool-arg">\uFF1A' + esc(hint) + "</span>" : "");
-    if (!detail) return '<div class="agent-step">' + head + "</div>";
-    return '<details class="agent-step"><summary>' + head + '</summary><div class="agent-step-detail">' + (detailLabel ? '<div class="agent-step-label">' + esc(detailLabel) + "</div>" : "") + '<pre class="agent-step-pre">' + esc(detail) + "</pre></div></details>";
+  function laneBadgeHtml(lane) {
+    const value = String(lane || "");
+    if (value === "fast") return '<span class="agent-lane lane-fast">\u26A1 \u5FEB\u601D\u8003</span>';
+    if (value === "slow") return '<span class="agent-lane lane-slow">\u{1F9E0} \u6162\u601D\u8003</span>';
+    return "";
   }
-  function toolStepElement(lead, name, hint, detailLabel, detail) {
+  function toolStepHtml(lead, name, hint, detailLabel, detail, lane) {
+    const stepClass = "agent-step" + (lane === "fast" || lane === "slow" ? " lane-" + lane : "");
+    const head = laneBadgeHtml(lane) + '<span class="agent-tool">' + esc(lead) + esc(name) + "</span>" + (hint ? '<span class="agent-tool-arg">\uFF1A' + esc(hint) + "</span>" : "");
+    if (!detail) return '<div class="' + stepClass + '">' + head + "</div>";
+    return '<details class="' + stepClass + '"><summary>' + head + '</summary><div class="agent-step-detail">' + (detailLabel ? '<div class="agent-step-label">' + esc(detailLabel) + "</div>" : "") + '<pre class="agent-step-pre">' + esc(detail) + "</pre></div></details>";
+  }
+  function toolStepElement(lead, name, hint, detailLabel, detail, lane) {
     const wrap = document.createElement("div");
-    wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail);
+    wrap.innerHTML = toolStepHtml(lead, name, hint, detailLabel, detail, lane);
     return wrap.firstElementChild;
   }
   function safeAuthLink(value) {
@@ -8129,12 +8209,12 @@
   function thinkBlockHtml(text, opts) {
     const o = opts || {};
     const body = String(text == null ? "" : text);
-    return '<div class="think-block" data-state="' + (o.done === true ? "done" : "running") + '" data-open="' + (o.open === true ? "true" : "false") + '"><button type="button" class="think-head"><span class="think-dots"><span></span><span></span><span></span></span><span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span><span class="think-caret" aria-hidden="true">\u25BE</span></button><div class="think-body">' + escHtml(body) + "</div></div>";
+    return '<div class="think-block" data-state="' + (o.done === true ? "done" : "running") + '" data-open="' + (o.open === true ? "true" : "false") + '"><button type="button" class="think-head"><span class="think-dots"><span></span><span></span><span></span></span>' + laneBadgeHtml(o.lane) + '<span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span><span class="think-caret" aria-hidden="true">\u25BE</span></button><div class="think-body">' + escHtml(body) + "</div></div>";
   }
   function mountThinkSegment(seg, open) {
     if (!streamView.flowEl) return null;
     const frag = document.createRange().createContextualFragment(
-      thinkBlockHtml(seg.text, { open, done: seg.done, truncated: seg.truncated })
+      thinkBlockHtml(seg.text, { open, done: seg.done, truncated: seg.truncated, lane: seg.lane })
     );
     const block = frag.firstElementChild;
     if (!block) return null;
@@ -8148,15 +8228,15 @@
     streamView.flowEl = flow;
     for (const p of streamState.parts) {
       if (p.type === "thinking" && p.text) {
-        mountThinkSegment({ text: p.text, done: true, block: null, body: null });
+        mountThinkSegment({ text: p.text, done: true, block: null, body: null, lane: p.lane });
       } else if (p.type === "narration" && p.text) {
         const d = document.createElement("div");
-        d.className = "agent-content";
+        d.className = "agent-content" + (p.lane ? " lane-" + escAttr(p.lane) : "");
         d.innerHTML = renderAnswer(p.text, streamView.currentCitations, false);
         flow.appendChild(d);
       } else if (p.type === "tool-call") {
         flow.appendChild(
-          toolStepElement("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3))
+          toolStepElement("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3), p.lane)
         );
       } else if (p.type === "tool-result") {
         flow.appendChild(
@@ -8165,7 +8245,8 @@
             p.name,
             "",
             p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
-            clipDetail(p.result, 4e3)
+            clipDetail(p.result, 4e3),
+            p.lane
           )
         );
         const authEl = authChallengeElement(p.authChallenge);
@@ -8183,7 +8264,7 @@
     aiMsg.appendChild(flow);
     renderCommittedParts(flow);
     const contentEl = document.createElement("div");
-    contentEl.className = "agent-content";
+    contentEl.className = "agent-content lane-" + streamState.lane;
     if (streamState.narration) {
       contentEl.innerHTML = renderAnswer(streamState.narration, streamView.currentCitations, false);
     } else {
@@ -8291,10 +8372,10 @@
     return html;
   }
   var streamingCursors = /* @__PURE__ */ new WeakMap();
-  function makeContentEl(flow) {
+  function makeContentEl(flow, lane) {
     if (!flow) return null;
     const el = document.createElement("div");
-    el.className = "agent-content";
+    el.className = "agent-content" + (lane === "fast" || lane === "slow" ? " lane-" + lane : "");
     flow.appendChild(el);
     return el;
   }
@@ -8432,7 +8513,7 @@
   }
   function partHtml(p, citations) {
     if (p.type === "tool-call") {
-      return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3));
+      return toolStepHtml("\u{1F527} ", p.name, argHint(p.args), "\u53C2\u6570", clipDetail(JSON.stringify(p.args || {}, null, 2), 2e3), p.lane);
     }
     if (p.type === "tool-result") {
       const html = toolStepHtml(
@@ -8440,19 +8521,20 @@
         p.name,
         "",
         p.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
-        clipDetail(p.result, 4e3)
+        clipDetail(p.result, 4e3),
+        p.lane
       );
       return html + authChallengeHtml(p.authChallenge);
     }
     if (p.type === "screenshot") return screenshotView.html(p);
     if (p.type === "thinking" && p.text) {
-      return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
+      return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true, lane: p.lane });
     }
     if ((p.type === "narration" || p.type === "text") && p.text) {
-      return '<div class="agent-content">' + cachedAnswerHtml(p.text, citations) + "</div>";
+      return '<div class="agent-content' + (p.lane ? " lane-" + escAttr(p.lane) : "") + '">' + cachedAnswerHtml(p.text, citations) + "</div>";
     }
     if (p.type === "notice" && p.text) {
-      return '<div class="agent-step" style="color:' + escAttr(p.color || "#6b7280") + '">' + escHtml(p.text) + "</div>";
+      return '<div class="agent-step' + (p.lane ? " lane-" + escAttr(p.lane) : "") + '" style="color:' + escAttr(p.color || "#6b7280") + '">' + laneBadgeHtml(p.lane) + escHtml(p.text) + "</div>";
     }
     return "";
   }
@@ -8611,7 +8693,7 @@
     if (liveThinking && liveThinking.text) {
       if (!dom.liveThink) {
         const wrap = document.createElement("div");
-        wrap.innerHTML = thinkBlockHtml(liveThinking.text, { done: false });
+        wrap.innerHTML = thinkBlockHtml(liveThinking.text, { done: false, lane: liveThinking.lane });
         const el = wrap.firstElementChild;
         if (el) {
           dom.liveEl.appendChild(el);
@@ -10191,14 +10273,21 @@
       }
       streamView.typingEl = null;
     }
-    function ensureTextEl() {
-      return makeContentEl(streamView.flowEl);
+    function ensureTextEl(lane) {
+      return makeContentEl(streamView.flowEl, lane);
     }
     function pushReasoning(text) {
       const piece = String(text || "");
       if (!piece) return;
       if (!streamView.thinkSeg || streamView.thinkSeg.done) {
-        streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: "", done: false, block: null, body: null };
+        streamView.thinkSeg = {
+          id: ++streamView.thinkSegSeq,
+          text: "",
+          done: false,
+          block: null,
+          body: null,
+          lane: streamState.lane
+        };
         streamView.thinkExpandedManual = null;
         mountThinkSegment(streamView.thinkSeg);
       }
@@ -10224,7 +10313,7 @@
         refreshThinkHead(seg);
         pinToBottom();
       });
-      streamState.appendPart({ type: "thinking", text: seg.text });
+      streamState.appendPart({ type: "thinking", text: seg.text, lane: seg.lane });
       streamView.thinkSeg = null;
     }
     function resetReasoning() {
@@ -10244,15 +10333,21 @@
       streamView.pendingContentEl = null;
       if (streamView.flowEl) streamView.flowEl.appendChild(step);
     }
-    function appendNoticePart(text, color, className) {
+    function appendNoticePart(text, color, className, lane) {
       const value = String(text || "").trim();
       if (!value) return;
       const step = document.createElement("div");
-      step.className = "agent-step" + (className ? " " + className : "");
+      const safeLane = lane === "fast" || lane === "slow" ? lane : "";
+      step.className = "agent-step" + (className ? " " + className : "") + (safeLane ? " lane-" + safeLane : "");
       if (color) step.style.color = color;
-      step.textContent = value;
+      if (safeLane) {
+        step.innerHTML = laneBadgeHtml(safeLane);
+        step.appendChild(document.createTextNode(value));
+      } else {
+        step.textContent = value;
+      }
       appendStep(step);
-      streamState.appendPart({ type: "notice", text: value, color: color || "" });
+      streamState.appendPart({ type: "notice", text: value, color: color || "", ...safeLane ? { lane: safeLane } : {} });
     }
     function commitPendingVerifyPass() {
       streamState.commitVerifyPass();
@@ -10505,9 +10600,17 @@
         renderCommittedParts(streamView.flowEl);
         resetReasoning();
         if (snapshot.reasoning) {
-          streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
+          streamView.thinkSeg = {
+            id: ++streamView.thinkSegSeq,
+            text: String(snapshot.reasoning),
+            done: false,
+            block: null,
+            body: null,
+            lane: streamState.lane
+          };
           mountThinkSegment(streamView.thinkSeg);
         }
+        contentEl.className = "agent-content lane-" + streamState.lane;
         contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, streamView.currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
         streamView.flowEl.appendChild(contentEl);
         if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
@@ -10580,9 +10683,17 @@
         } else if (resp.type === "citations") {
           streamView.currentCitations = resp.citations || null;
         } else if (resp.type === "tool-call") {
-          streamState.appendPart({ type: "tool-call", callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || "unknown" });
+          const lane = resp.lane === "fast" ? "fast" : "slow";
+          streamState.appendPart({
+            type: "tool-call",
+            callId: resp.callId,
+            name: resp.name,
+            args: resp.args || {},
+            risk: resp.risk || "unknown",
+            lane
+          });
           appendStep(
-            toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3))
+            toolStepElement("\u{1F527} ", resp.name, argHint(resp.args), "\u53C2\u6570", clipDetail(JSON.stringify(resp.args || {}, null, 2), 2e3), lane)
           );
           if (resp.requiresApproval) {
             renderApprovalPrompt2(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
@@ -10590,12 +10701,14 @@
           fitPanelHeight();
           pinToBottom();
         } else if (resp.type === "tool-result") {
+          const lane = resp.lane === "fast" ? "fast" : "slow";
           const resultPart = {
             type: "tool-result",
             callId: resp.callId,
             name: resp.name,
             status: resp.status,
-            result: resp.result || ""
+            result: resp.result || "",
+            lane
           };
           if (resp.needsLogin === true) {
             resultPart.needsLogin = true;
@@ -10613,7 +10726,8 @@
               resp.name,
               "",
               resp.status === "failed" ? "\u9519\u8BEF\u4FE1\u606F" : "\u8FD4\u56DE\u7ED3\u679C",
-              clipDetail(resp.result, 4e3)
+              clipDetail(resp.result, 4e3),
+              lane
             )
           );
           const authEl = authChallengeElement(resultPart.authChallenge);
@@ -10629,6 +10743,17 @@
           const max = Number(resp.maxSteps);
           if (Number.isFinite(max) && max > 0) progressController.max = max;
           progressController.render();
+        } else if (resp.type === "jev-decision") {
+          const message = resp.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56";
+          appendNoticePart(message, "#7c3aed", "lane-notice", "fast");
+          streamState.setLane("fast");
+          fitPanelHeight();
+          pinToBottom();
+        } else if (resp.type === "jev-handoff") {
+          appendNoticePart(resp.message || "\u21AA \u5DF2\u79FB\u4EA4\u6162\u601D\u8003", "#2563a6", "lane-notice", "slow");
+          streamState.setLane("slow");
+          fitPanelHeight();
+          pinToBottom();
         } else if (resp.type === "screenshot") {
           if (resp.id && resp.dataUrl) screenshotView.cache.set(resp.id, resp.dataUrl);
           streamState.appendPart({ type: "screenshot", id: resp.id, label: resp.label, width: resp.width, height: resp.height, bytes: resp.bytes });
@@ -10707,13 +10832,14 @@
           }
         } else if (resp.type === "reasoning") {
           removeTypingEl();
+          streamState.setLane(resp.lane);
           pushReasoning(resp.text);
         } else if (resp.type === "chunk") {
           removeTypingEl();
+          streamState.appendChunk(resp.text, resp.lane);
           finishReasoning();
-          streamState.appendChunk(resp.text);
           if (!streamView.pendingContentEl) {
-            streamView.pendingContentEl = ensureTextEl();
+            streamView.pendingContentEl = ensureTextEl(streamState.lane);
             if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = "";
           }
           streamRender.schedule("answer", () => {
@@ -10736,7 +10862,7 @@
           streamRender.flush();
           lastResponse = collapseImmediateRepeatedText(streamState.responseText);
           if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
-            streamState.appendPart({ type: "text", text: lastResponse });
+            streamState.appendPart({ type: "text", text: lastResponse, lane: streamState.lane });
           }
           const textParts = streamState.parts.filter((p) => (p.type === "narration" || p.type === "text") && p.text);
           const renumbered = renumberCitationsAcross(

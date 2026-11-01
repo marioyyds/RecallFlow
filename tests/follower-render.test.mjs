@@ -32,7 +32,7 @@ test('handleRunDelta 不在帧外重建 followedMessages', () => {
 test('当前 narration 标记为 live，避免被当作已定稿而命中缓存', () => {
   assert.match(
     hub,
-    /state\.narration\) parts\.push\(\{ type: 'narration', text: state\.narration, live: true \}\)/,
-    '当前正文必须标记 live'
+    /state\.narration\) parts\.push\(\{ type: 'narration', text: state\.narration, live: true, lane: state\.narrationLane \}\)/,
+    '当前正文必须标记 live，并携带所在快慢通道'
   );
 });

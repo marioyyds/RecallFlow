@@ -115,6 +115,7 @@ import {
   authChallengeHtml,
   authChallengeElement,
   clipDetail,
+  laneBadgeHtml,
   toolStepHtml,
   toolStepElement,
 } from '../panel/tool-step-view.ts';
@@ -1235,7 +1236,7 @@ function refreshThinkHead(seg: any) {
  * 现在两条路都从这里出；谁再写第二份标记，`tests/thinking-record.test.mjs` 会红。
  *
  * @param {string} text 思维链原文
- * @param {{open?: boolean, done?: boolean, truncated?: boolean}} [opts]
+ * @param {{open?: boolean, done?: boolean, truncated?: boolean, lane?: string}} [opts]
  *        `open` 不传 = 折叠（默认折叠与是否定稿无关）。
  */
 function thinkBlockHtml(text: any, opts: any) {
@@ -1245,6 +1246,7 @@ function thinkBlockHtml(text: any, opts: any) {
     '<div class="think-block" data-state="' + (o.done === true ? 'done' : 'running') + '" data-open="' + (o.open === true ? 'true' : 'false') + '">' +
       '<button type="button" class="think-head">' +
         '<span class="think-dots"><span></span><span></span><span></span></span>' +
+        laneBadgeHtml(o.lane) +
         '<span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span>' +
         '<span class="think-caret" aria-hidden="true">▾</span>' +
       '</button>' +
@@ -1279,7 +1281,7 @@ function mountThinkSegment(seg: any, open?: any) {
   //（真实近失：按钮建好、事件也接好，就是忘了 append ⇒ 永远不出现）。
   // 这里确实只需要"把一段标记变成节点"，不需要一个装它的壳。
   const frag = document.createRange().createContextualFragment(
-    thinkBlockHtml(seg.text, { open: open, done: seg.done, truncated: seg.truncated })
+    thinkBlockHtml(seg.text, { open: open, done: seg.done, truncated: seg.truncated, lane: seg.lane })
   );
   const block = frag.firstElementChild;
   if (!block) return null;
@@ -1300,15 +1302,15 @@ function renderCommittedParts(flow: any) {
     if (p.type === 'thinking' && p.text) {
       // 思考记录也是 flow 的一环，必须按原位置还原 ——
       // 否则重开面板后所有思考都会挤到最前面，与它前后步骤的对应关系就没了。
-      mountThinkSegment({ text: p.text, done: true, block: null, body: null });
+      mountThinkSegment({ text: p.text, done: true, block: null, body: null, lane: p.lane });
     } else if (p.type === 'narration' && p.text) {
       const d = document.createElement('div');
-      d.className = 'agent-content';
+      d.className = 'agent-content' + (p.lane ? ' lane-' + escAttr(p.lane) : '');
       d.innerHTML = renderAnswer(p.text, streamView.currentCitations, false);
       flow.appendChild(d);
     } else if (p.type === 'tool-call') {
       flow.appendChild(
-        toolStepElement('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000))
+        toolStepElement('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000), p.lane)
       );
     } else if (p.type === 'tool-result') {
       flow.appendChild(
@@ -1317,7 +1319,8 @@ function renderCommittedParts(flow: any) {
           p.name,
           '',
           p.status === 'failed' ? '错误信息' : '返回结果',
-          clipDetail(p.result, 4000)
+          clipDetail(p.result, 4000),
+          p.lane
         )
       );
       const authEl = authChallengeElement(p.authChallenge);
@@ -1337,7 +1340,7 @@ function restoreStreamingUI() {
   // 已固化的叙述段与工具步骤先渲染回 flow（顺序错误曾导致重开面板时思考块全部丢失）。
   renderCommittedParts(flow);
   const contentEl = document.createElement('div');
-  contentEl.className = 'agent-content';
+  contentEl.className = 'agent-content lane-' + streamState.lane;
   if (streamState.narration) {
     contentEl.innerHTML = renderAnswer(streamState.narration, streamView.currentCitations, false);
   } else {
@@ -1497,10 +1500,10 @@ function cachedAnswerHtml(text: any, citations: any) {
 const streamingCursors = new WeakMap();
 
 /** 在对话流里新建一个正文块。`ensureTextEl` 与错误渲染共用（原先两份一样的代码）。 */
-function makeContentEl(flow: any) {
+function makeContentEl(flow: any, lane?: any) {
   if (!flow) return null;
   const el = document.createElement('div');
-  el.className = 'agent-content';
+  el.className = 'agent-content' + (lane === 'fast' || lane === 'slow' ? ' lane-' + lane : '');
   flow.appendChild(el);
   return el;
 }
@@ -1709,7 +1712,7 @@ function showStreamingAnswer(host: any, text: any, citations: any) {
 /** 单个 part 的 HTML（整轮重绘与增量 part 节点共用）。 */
 function partHtml(p: any, citations: any) {
   if (p.type === 'tool-call') {
-    return toolStepHtml('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000));
+    return toolStepHtml('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000), p.lane);
   }
   if (p.type === 'tool-result') {
     const html = toolStepHtml(
@@ -1717,21 +1720,25 @@ function partHtml(p: any, citations: any) {
       p.name,
       '',
       p.status === 'failed' ? '错误信息' : '返回结果',
-      clipDetail(p.result, 4000)
+      clipDetail(p.result, 4000),
+      p.lane
     );
     return html + authChallengeHtml(p.authChallenge);
   }
   if (p.type === 'screenshot') return screenshotView.html(p);
   if (p.type === 'thinking' && p.text) {
     // 思考记录必须能在重开面板后重建；历史段按定稿态，live 段保持 run 动画。
-    return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true });
+    return thinkBlockHtml(p.text, { done: p.live !== true, truncated: p.textTruncated === true, lane: p.lane });
   }
   if ((p.type === 'narration' || p.type === 'text') && p.text) {
     // 游标由 streamingCursors 单独维护；整段 HTML 里不再放会随重绘重建的游标。
-    return '<div class="agent-content">' + cachedAnswerHtml(p.text, citations) + '</div>';
+    return '<div class="agent-content' + (p.lane ? ' lane-' + escAttr(p.lane) : '') + '">' +
+      cachedAnswerHtml(p.text, citations) + '</div>';
   }
   if (p.type === 'notice' && p.text) {
-    return '<div class="agent-step" style="color:' + escAttr(p.color || '#6b7280') + '">' + escHtml(p.text) + '</div>';
+    return '<div class="agent-step' + (p.lane ? ' lane-' + escAttr(p.lane) : '') +
+      '" style="color:' + escAttr(p.color || '#6b7280') + '">' +
+      laneBadgeHtml(p.lane) + escHtml(p.text) + '</div>';
   }
   return '';
 }
@@ -1939,7 +1946,7 @@ function renderFollowedLive() {
   if (liveThinking && liveThinking.text) {
     if (!dom.liveThink) {
       const wrap = document.createElement('div');
-      wrap.innerHTML = thinkBlockHtml(liveThinking.text, { done: false });
+      wrap.innerHTML = thinkBlockHtml(liveThinking.text, { done: false, lane: liveThinking.lane });
       const el = wrap.firstElementChild;
       if (el) {
         dom.liveEl.appendChild(el);
@@ -3779,8 +3786,8 @@ function createPanelWithLayout(
   }
 
   // 当前叙述段落对应的文本元素：每段一个 div，工具步骤插在段落之间。
-  function ensureTextEl() {
-    return makeContentEl(streamView.flowEl);
+  function ensureTextEl(lane?: any) {
+    return makeContentEl(streamView.flowEl, lane);
   }
 
   // ---- 思考记录 ----
@@ -3795,7 +3802,14 @@ function createPanelWithLayout(
     if (!piece) return;
     // 没有「进行中的段」就开一段新的 —— 定稿过的段已经置 null，因此新段必然另起一块。
     if (!streamView.thinkSeg || streamView.thinkSeg.done) {
-      streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: '', done: false, block: null, body: null };
+      streamView.thinkSeg = {
+        id: ++streamView.thinkSegSeq,
+        text: '',
+        done: false,
+        block: null,
+        body: null,
+        lane: streamState.lane,
+      };
       streamView.thinkExpandedManual = null; // 新一段：用户还没表过态
       mountThinkSegment(streamView.thinkSeg);
     }
@@ -3847,7 +3861,7 @@ function createPanelWithLayout(
     // 记进 flow 记录：位置由 push 顺序天然决定，面板重建时据此还原到原来的位置。
     // 注意 transcript.js 只认 narration / text / tool-* / screenshot，
     // 因此思考记录**不会**进入导出给外部 AI 的交接文本（它是展示层，不是证据）。
-    streamState.appendPart({ type: 'thinking', text: seg.text });
+    streamState.appendPart({ type: 'thinking', text: seg.text, lane: seg.lane });
     // 关键：断掉「进行中的段」指针，下一段思考就会另起一块 —— 这是"穿插"的实现要点。
     streamView.thinkSeg = null;
   }
@@ -3879,15 +3893,21 @@ function createPanelWithLayout(
   // 过程提示（意图、校验、限流等）原先只写 DOM，不进入 conversation.parts：
   // 发起页面板重开或跟随页切换到正式落盘消息时，这些步骤会凭空消失。
   // 这里统一“显示 + 入库”，确保即时与最终态一致。
-  function appendNoticePart(text: any, color?: any, className?: any) {
+  function appendNoticePart(text: any, color?: any, className?: any, lane?: any) {
     const value = String(text || '').trim();
     if (!value) return;
     const step = document.createElement('div');
-    step.className = 'agent-step' + (className ? ' ' + className : '');
+    const safeLane = lane === 'fast' || lane === 'slow' ? lane : '';
+    step.className = 'agent-step' + (className ? ' ' + className : '') + (safeLane ? ' lane-' + safeLane : '');
     if (color) step.style.color = color;
-    step.textContent = value;
+    if (safeLane) {
+      step.innerHTML = laneBadgeHtml(safeLane);
+      step.appendChild(document.createTextNode(value));
+    } else {
+      step.textContent = value;
+    }
     appendStep(step);
-    streamState.appendPart({ type: 'notice', text: value, color: color || '' });
+    streamState.appendPart({ type: 'notice', text: value, color: color || '', ...(safeLane ? { lane: safeLane } : {}) });
   }
 
   function commitPendingVerifyPass() {
@@ -4191,9 +4211,17 @@ function createPanelWithLayout(
       renderCommittedParts(streamView.flowEl);
       resetReasoning();
       if (snapshot.reasoning) {
-        streamView.thinkSeg = { id: ++streamView.thinkSegSeq, text: String(snapshot.reasoning), done: false, block: null, body: null };
+        streamView.thinkSeg = {
+          id: ++streamView.thinkSegSeq,
+          text: String(snapshot.reasoning),
+          done: false,
+          block: null,
+          body: null,
+          lane: streamState.lane,
+        };
         mountThinkSegment(streamView.thinkSeg);
       }
+      contentEl.className = 'agent-content lane-' + streamState.lane;
       contentEl.innerHTML = streamState.narration
         ? renderAnswer(streamState.narration, streamView.currentCitations, false)
         : '<span class="typing"><span></span><span></span><span></span></span>';
@@ -4273,9 +4301,17 @@ function createPanelWithLayout(
       } else if (resp.type === 'citations') {
         streamView.currentCitations = resp.citations || null;
       } else if (resp.type === 'tool-call') {
-        streamState.appendPart({ type: 'tool-call', callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || 'unknown' });
+        const lane = resp.lane === 'fast' ? 'fast' : 'slow';
+        streamState.appendPart({
+          type: 'tool-call',
+          callId: resp.callId,
+          name: resp.name,
+          args: resp.args || {},
+          risk: resp.risk || 'unknown',
+          lane,
+        });
         appendStep(
-          toolStepElement('🔧 ', resp.name, argHint(resp.args), '参数', clipDetail(JSON.stringify(resp.args || {}, null, 2), 2000))
+          toolStepElement('🔧 ', resp.name, argHint(resp.args), '参数', clipDetail(JSON.stringify(resp.args || {}, null, 2), 2000), lane)
         );
         if (resp.requiresApproval) {
           renderApprovalPrompt(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
@@ -4283,12 +4319,14 @@ function createPanelWithLayout(
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'tool-result') {
+        const lane = resp.lane === 'fast' ? 'fast' : 'slow';
         const resultPart: any = {
           type: 'tool-result',
           callId: resp.callId,
           name: resp.name,
           status: resp.status,
           result: resp.result || '',
+          lane,
         };
         if (resp.needsLogin === true) {
           resultPart.needsLogin = true;
@@ -4309,7 +4347,8 @@ function createPanelWithLayout(
             resp.name,
             '',
             resp.status === 'failed' ? '错误信息' : '返回结果',
-            clipDetail(resp.result, 4000)
+            clipDetail(resp.result, 4000),
+            lane
           )
         );
         const authEl = authChallengeElement(resultPart.authChallenge);
@@ -4327,6 +4366,17 @@ function createPanelWithLayout(
         const max = Number(resp.maxSteps);
         if (Number.isFinite(max) && max > 0) progressController.max = max;
         progressController.render();
+      } else if (resp.type === 'jev-decision') {
+        const message = resp.message || '⚡ 快思考完成一次决策';
+        appendNoticePart(message, '#7c3aed', 'lane-notice', 'fast');
+        streamState.setLane('fast');
+        fitPanelHeight();
+        pinToBottom();
+      } else if (resp.type === 'jev-handoff') {
+        appendNoticePart(resp.message || '↪ 已移交慢思考', '#2563a6', 'lane-notice', 'slow');
+        streamState.setLane('slow');
+        fitPanelHeight();
+        pinToBottom();
       } else if (resp.type === 'screenshot') {
         // 图片给用户看：渲染成缩略图，点击放大。base64 只留在内存缓存里，
         // 不写进 pendingParts（否则会话持久化会背着几百 KB 的图到处走）；
@@ -4417,15 +4467,16 @@ function createPanelWithLayout(
         // 思维链增量（只有推理模型会发）。它到达时把「正在输入」占位换掉 ——
         // 此时用户已经能看到实时思考内容，比三个点更有信息量。
         removeTypingEl();
+        streamState.setLane(resp.lane);
         pushReasoning(resp.text);
       } else if (resp.type === 'chunk') {
         removeTypingEl();
+        streamState.appendChunk(resp.text, resp.lane);
         // 正文开始 → 思考记录定稿（它**本来就是折叠的**；用户手动展开过则保持展开，
         // 「定稿」不改变用户的选择）。
         finishReasoning();
-        streamState.appendChunk(resp.text);
         if (!streamView.pendingContentEl) {
-          streamView.pendingContentEl = ensureTextEl();
+          streamView.pendingContentEl = ensureTextEl(streamState.lane);
           if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = '';
         }
         // 只累积，不立刻重绘：本条 chunk 与同帧内的其它 chunk 会被合并成一次渲染。
@@ -4460,7 +4511,7 @@ function createPanelWithLayout(
         // 去重必须在引文重编号**之前**。重编号会改变 `[n]`，若拿重编号后的 finalText
         // 去和 parts 里的原始文本比较，同一段答案会被误判成新内容并再追加一份。
         if (lastResponse && !alreadyCommittedAsText(streamState.parts, lastResponse)) {
-          streamState.appendPart({ type: 'text', text: lastResponse });
+          streamState.appendPart({ type: 'text', text: lastResponse, lane: streamState.lane });
         }
         // 最终回复统一重编号引用：正文从 [1] 开始，参考来源只保留被引用的文章。
         //

@@ -61,7 +61,10 @@ export const ENTRIES = [
   // Stateful multi-episode JEV scheduling and dynamic candidate generation add
   // another ~8.2KB. Multi-question handoff gating and structured handoff
   // messages add a further ~5.6KB; measured 959584 bytes. No dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 938 * 1024 },
+  // 2026-11-01: fast/slow lane metadata now flows through chat stream events,
+  // tool execution, JEV decisions/handoffs and run snapshots. Measured 962406
+  // bytes; raise by 2KB. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 940 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

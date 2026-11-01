@@ -20,7 +20,7 @@ test('叙述段定稿后进入 parts，最终正文仍可独立读取', () => {
   state.appendChunk('最终答案');
 
   assert.equal(state.narration, '最终答案');
-  assert.deepEqual(state.parts, [{ type: 'narration', text: '先说一句' }]);
+  assert.deepEqual(state.parts, [{ type: 'narration', text: '先说一句', lane: 'slow' }]);
   assert.equal(state.responseText, '最终答案');
   assert.equal(state.hasPartial(), true);
 });
@@ -65,4 +65,18 @@ test('reset 清空所有运行态并保留对象身份', () => {
   assert.deepEqual(state.parts, []);
   assert.equal(state.verifyPass, null);
   assert.equal(state.budgetStopped, false);
+});
+
+test('叙述段携带当前快慢通道标记，恢复时保留 lane', () => {
+  const state = createPanelStreamState();
+  state.setLane('fast');
+  state.appendChunk('观察页面');
+  state.flushNarration();
+  assert.equal(state.parts[0].lane, 'fast');
+
+  state.restore({ content: '', narration: '', lane: 'slow', parts: [] });
+  assert.equal(state.lane, 'slow');
+  state.appendChunk('继续');
+  state.flushNarration();
+  assert.equal(state.parts[0].lane, 'slow');
 });

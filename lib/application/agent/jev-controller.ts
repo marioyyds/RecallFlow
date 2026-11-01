@@ -5,6 +5,7 @@ import {
   buildJevFastRequest,
   compareJevShadowAction,
   deriveJevPhase,
+  formatJevDecisionSummary,
   interpretJevFastDecision,
   type JevFastDecision,
 } from './jev-action-space.ts';
@@ -136,6 +137,16 @@ export class JevFastController {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
+    this.state.emit({
+      type: 'jev-decision',
+      mode: settings.shadowMode ? 'shadow' : 'live',
+      phaseName: phase,
+      decision,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs),
+    });
 
     if (settings.shadowMode) {
       this.state.jevLoop.consecutiveFastActions = 0;
@@ -176,6 +187,7 @@ export class JevFastController {
     };
     const assistantMessage = {
       role: 'assistant',
+      lane: 'fast',
       content: 'JEV 快思考：' + decision.description,
       tool_calls: [{
         id: callId,
@@ -191,6 +203,7 @@ export class JevFastController {
     const toolOutcome = await this.pipeline.process({
       assistantMessage,
       toolCalls: [toolCall],
+      lane: 'fast',
     }, iter, persist);
     if (toolOutcome.kind === 'cancelled') {
       return { kind: 'cancelled', reason: toolOutcome.reason };
@@ -230,6 +243,12 @@ export class JevFastController {
       reason,
       decision,
       detail,
+    });
+    this.state.emit({
+      type: 'jev-handoff',
+      reason,
+      detail,
+      message: '↪ 慢思考接管：' + reason + (detail ? '（' + detail + '）' : ''),
     });
     const signals = decision && decision.kind === 'act' ? decision.signals : decision?.signals;
     const lines = [

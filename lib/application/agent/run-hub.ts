@@ -30,7 +30,10 @@ export interface RunState {
   updatedAt: number;
   content: string;
   narration: string;
+  narrationLane: string;
   reasoning: string;
+  reasoningLane: string;
+  lane: string;
   parts: RunPart[];
   plan: any[];
   citations: any[];
@@ -64,7 +67,10 @@ export function createRunState(input: any): RunState {
     updatedAt: Number(data.updatedAt) || Date.now(),
     content: '',
     narration: '',
+    narrationLane: 'slow',
     reasoning: '',
+    reasoningLane: 'slow',
+    lane: 'slow',
     parts: [],
     plan: [],
     citations: Array.isArray(data.citations) ? data.citations.slice() : [],
@@ -81,13 +87,13 @@ export function createRunState(input: any): RunState {
 
 function endReasoning(state: RunState): void {
   if (!state.reasoning) return;
-  state.parts.push({ type: 'thinking', text: state.reasoning });
+  state.parts.push({ type: 'thinking', text: state.reasoning, lane: state.reasoningLane });
   state.reasoning = '';
 }
 
 function flushNarration(state: RunState): void {
   if (!state.narration) return;
-  state.parts.push({ type: 'narration', text: state.narration });
+  state.parts.push({ type: 'narration', text: state.narration, lane: state.narrationLane });
   state.narration = '';
 }
 
@@ -116,10 +122,14 @@ export function applyRunEvent(state: RunState, event: any): RunState {
       state.citations = Array.isArray(event.citations) ? event.citations.slice() : [];
       break;
     case 'reasoning':
+      state.lane = event.lane === 'fast' ? 'fast' : 'slow';
+      state.reasoningLane = state.lane;
       if (event.text) state.reasoning += String(event.text);
       break;
     case 'chunk':
       endReasoning(state);
+      state.lane = event.lane === 'fast' ? 'fast' : 'slow';
+      state.narrationLane = state.lane;
       if (event.text) {
         const text = String(event.text);
         state.content += text;
@@ -129,12 +139,14 @@ export function applyRunEvent(state: RunState, event: any): RunState {
     case 'tool-call':
       endReasoning(state);
       flushNarration(state);
+      state.lane = event.lane === 'fast' ? 'fast' : 'slow';
       state.parts.push({
         type: 'tool-call',
         callId: String(event.callId || ''),
         name: String(event.name || ''),
         args: event.args && typeof event.args === 'object' ? event.args : {},
         risk: String(event.risk || 'unknown'),
+        lane: state.lane,
       });
       if (event.requiresApproval) {
         state.approval = {
@@ -142,6 +154,7 @@ export function applyRunEvent(state: RunState, event: any): RunState {
           name: String(event.name || ''),
           args: event.args && typeof event.args === 'object' ? event.args : {},
           risk: String(event.risk || 'unknown'),
+          lane: state.lane,
           allowSession: event.allowSession !== false,
         };
       }
@@ -149,12 +162,14 @@ export function applyRunEvent(state: RunState, event: any): RunState {
     case 'tool-result':
       endReasoning(state);
       flushNarration(state);
+      state.lane = event.lane === 'fast' ? 'fast' : 'slow';
       state.parts.push({
         type: 'tool-result',
         callId: String(event.callId || ''),
         name: String(event.name || ''),
         status: String(event.status || ''),
         result: String(event.result || ''),
+        lane: state.lane,
         // 登录 / 权限提示必须跟着 tool-result 走：跟随页、刷新接管与历史回放
         // 都从同一个 parts 数组重建，不再各猜一份页面状态。
         ...(event.needsLogin === true && event.authChallenge
@@ -184,6 +199,29 @@ export function applyRunEvent(state: RunState, event: any): RunState {
         width: Number(event.width) || 0,
         height: Number(event.height) || 0,
         bytes: Number(event.bytes) || 0,
+        lane: 'slow',
+      });
+      break;
+    case 'jev-decision':
+      endReasoning(state);
+      flushNarration(state);
+      state.lane = 'fast';
+      state.parts.push({
+        type: 'notice',
+        text: String(event.message || '⚡ 快思考完成一次决策'),
+        color: '#7c3aed',
+        lane: 'fast',
+      });
+      break;
+    case 'jev-handoff':
+      endReasoning(state);
+      flushNarration(state);
+      state.lane = 'slow';
+      state.parts.push({
+        type: 'notice',
+        text: String(event.message || '↪ 已移交慢思考'),
+        color: '#2563a6',
+        lane: 'slow',
       });
       break;
     case 'stop-requested':
@@ -277,8 +315,8 @@ export function applyRunEvent(state: RunState, event: any): RunState {
 export function runStateToAssistantMessage(state: RunState) {
   if (!state) return null;
   let parts = (state.parts || []).map((p) => Object.assign({}, p));
-  if (state.reasoning) parts.push({ type: 'thinking', text: state.reasoning, live: true });
-  if (state.narration) parts.push({ type: 'narration', text: state.narration, live: true });
+  if (state.reasoning) parts.push({ type: 'thinking', text: state.reasoning, live: true, lane: state.reasoningLane });
+  if (state.narration) parts.push({ type: 'narration', text: state.narration, live: true, lane: state.narrationLane });
   if (state.error) parts.push({ type: 'notice', text: state.error, color: '#e74c3c' });
   if (state.approval) {
     parts.push({

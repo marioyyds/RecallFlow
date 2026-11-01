@@ -298,6 +298,7 @@ export async function runAgentLoop(
       return;
     }
 
+    step.lane = 'slow';
     state.messages.push(step.assistantMessage);
     if (pendingJevShadow) {
       jevFast.traceShadowComparison(pendingJevShadow, step);

@@ -314,11 +314,11 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       // 若混进 chunk，面板就再也分不出哪段是思考、哪段是回答。
       if (delta.reasoning_content) {
         reasoningAcc += delta.reasoning_content;
-        (emit || ((event: any) => port.postMessage(event)))({ type: 'reasoning', text: delta.reasoning_content });
+        (emit || ((event: any) => port.postMessage(event)))({ type: 'reasoning', lane: 'slow', text: delta.reasoning_content });
       }
       if (delta.content) {
         contentAcc += delta.content;
-        (emit || ((event: any) => port.postMessage(event)))({ type: 'chunk', text: delta.content });
+        (emit || ((event: any) => port.postMessage(event)))({ type: 'chunk', lane: 'slow', text: delta.content });
       }
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
@@ -353,6 +353,6 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
     decodeMs: firstTokenAt ? streamEndAt - firstTokenAt : 0,
     totalMs: streamEndAt - requestStartAt,
   };
-  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc };
+  return { assistantMessage, toolCalls, usage, timing, reasoning: reasoningAcc, lane: 'slow' };
 }
 

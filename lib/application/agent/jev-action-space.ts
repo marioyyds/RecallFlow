@@ -374,3 +374,21 @@ export function compareJevShadowAction(
     finalAnswerOnly: names.length === 0 && Boolean(String(finalText || '').trim()),
   };
 }
+
+export function formatJevDecisionSummary(
+  shadow: boolean,
+  decision: JevFastDecision,
+  latencyMs: number
+): string {
+  const prefix = shadow ? '⚡ 快思考（影子）' : '⚡ 快思考';
+  const action = decision.kind === 'act'
+    ? decision.description
+    : '移交慢思考：' + decision.reason;
+  const signals = decision.signals;
+  const detail = signals
+    ? '；handoff ' + Math.round(signals.handoff * 100) + '%' +
+      ' / 进展 ' + Math.round(signals.expectedProgress * 100) + '%' +
+      ' / 页面 ' + Math.round(signals.pageReady * 100) + '%'
+    : '';
+  return prefix + '：' + action + detail + '（' + Math.round(latencyMs) + 'ms）';
+}

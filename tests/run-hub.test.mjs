@@ -24,7 +24,7 @@ test('run state: 思考先于正文，正文开始会定稿思考段', () => {
   applyRunEvent(s, { type: 'reasoning', text: '再决定动作。' });
   applyRunEvent(s, { type: 'chunk', text: '我开始了。' });
   assert.equal(s.reasoning, '');
-  assert.deepEqual(s.parts[0], { type: 'thinking', text: '先看页面，再决定动作。' });
+  assert.deepEqual(s.parts[0], { type: 'thinking', text: '先看页面，再决定动作。', lane: 'slow' });
   assert.equal(s.narration, '我开始了。');
   assert.equal(s.content, '我开始了。');
 });
@@ -40,6 +40,43 @@ test('run state: 工具步骤前的叙述会被固化，工具结果随后进入
   );
   assert.equal(s.parts[0].text, '先搜索。');
   assert.equal(s.narration, '');
+});
+
+test('run state: 快思考决策、工具步骤、慢思考接管和正文分别保留通道标记', () => {
+  const s = state();
+  applyRunEvent(s, {
+    type: 'jev-decision',
+    message: '⚡ 快思考：读取表格',
+    decision: { kind: 'act', toolName: 'read_table' },
+  });
+  applyRunEvent(s, { type: 'tool-call', callId: 'f1', name: 'read_table', args: {}, lane: 'fast' });
+  applyRunEvent(s, { type: 'tool-result', callId: 'f1', name: 'read_table', status: 'completed', result: '表', lane: 'fast' });
+  applyRunEvent(s, { type: 'jev-handoff', reason: 'low-expected-progress', message: '↪ 慢思考接管' });
+  applyRunEvent(s, { type: 'chunk', text: '我读取后再规划。', lane: 'slow' });
+  applyRunEvent(s, { type: 'tool-call', callId: 's1', name: 'inspect_element', args: {}, lane: 'slow' });
+  applyRunEvent(s, { type: 'tool-result', callId: 's1', name: 'inspect_element', status: 'completed', result: '元素', lane: 'slow' });
+  applyRunEvent(s, { type: 'end' });
+
+  const message = runStateToAssistantMessage(s);
+  assert.deepEqual(
+    message.parts.map((part) => [part.type, part.lane]),
+    [
+      ['notice', 'fast'],
+      ['tool-call', 'fast'],
+      ['tool-result', 'fast'],
+      ['notice', 'slow'],
+      ['narration', 'slow'],
+      ['tool-call', 'slow'],
+      ['tool-result', 'slow'],
+    ]
+  );
+
+  const persisted = JSON.parse(JSON.stringify(message));
+  assert.deepEqual(
+    persisted.parts.map((part) => part.lane),
+    ['fast', 'fast', 'fast', 'slow', 'slow', 'slow', 'slow'],
+    '写入会话历史再读回后，每个步骤仍应保留自己的通道'
+  );
 });
 
 test('run state: 审批等待、计划、用量和状态事件都能反映到快照', () => {

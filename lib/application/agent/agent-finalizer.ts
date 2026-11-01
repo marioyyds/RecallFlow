@@ -41,7 +41,7 @@ export class AgentRunFinalizer {
 
   async completeTask(toolName: string, summary: string, assistantAlreadySpoke: boolean): Promise<void> {
     const state = this.state;
-    if (!assistantAlreadySpoke) state.emit({ type: 'chunk', text: summary });
+    if (!assistantAlreadySpoke) state.emit({ type: 'chunk', lane: 'slow', text: summary });
     const pendingTabs = await closeAuxTabs(state.ctx).catch(() => []);
     emitTabsClosePending(state.ctx, pendingTabs, state.emit);
     state.emitState(RUN_STATUS.COMPLETED, { tool: toolName });

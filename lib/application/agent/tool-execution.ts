@@ -126,6 +126,7 @@ export async function runParallelBatch(toolCalls: any, o: any) {
         args: tc.args,
         requiresApproval: false,
         risk: getToolMetadata(tc.name).risk,
+        lane: o.lane === 'fast' ? 'fast' : 'slow',
       });
     }
     o.emitState(RUN_STATUS.EXECUTING);
@@ -166,7 +167,7 @@ export async function runParallelBatch(toolCalls: any, o: any) {
 }
 
 
-function waitForToolApproval(port: any, callId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, runId: string, allowSession: any, emit: any) {
+function waitForToolApproval(port: any, callId: string, name: string, args: Record<string, unknown>, signal: AbortSignal, runId: string, allowSession: any, emit: any, lane?: string) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (approved: any) => {
@@ -187,7 +188,7 @@ function waitForToolApproval(port: any, callId: string, name: string, args: Reco
     port.onMessage.addListener(onMessage);
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     try {
-      const event = { type: 'tool-call', runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false };
+      const event = { type: 'tool-call', runId, callId, name, args, requiresApproval: true, risk: getToolMetadata(name).risk, allowSession: allowSession !== false, lane: lane === 'fast' ? 'fast' : 'slow' };
       if (typeof emit === 'function') emit(event);
       else port.postMessage(event);
     } catch (e) {
