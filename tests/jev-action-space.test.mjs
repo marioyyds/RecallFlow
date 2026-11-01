@@ -281,6 +281,11 @@ test('候选数和各动作置信度使用设置覆盖值', () => {
   );
   assert.equal(typeBundle.operations.TYPE_TEXT.minConfidence, 0.63);
   assert.equal(typeBundle.targets.TYPE_TEXT['2'].minConfidence, 0.63);
+  assert.equal(
+    typeBundle.targets.TYPE_TEXT['2'].args.clearFirst,
+    true,
+    'JEV 生成完整字段值，因此必须替换而不是追加'
+  );
 });
 
 test('TYPE_TEXT 排除已填写标题，并用可编辑能力样本识别正文编辑器', () => {
@@ -329,6 +334,41 @@ test('TYPE_TEXT 排除已填写标题，并用可编辑能力样本识别正文�
   const body = targets.find((target) => target.ref === 'rf-body');
   assert.ok(body);
   assert.equal(body.label, '正文编辑区');
+});
+
+test('慢思考已成功写入的目标不再进入下一轮快思考 TYPE_TEXT', () => {
+  const titleSelector = 'input.article-bar__title:nth-of-type(1)';
+  const snapshot = pageSnapshot({
+    elements: [
+      {
+        ref: 'rf-title-new',
+        tag: 'input',
+        role: 'textbox',
+        type: 'text',
+        label: '文章标题',
+        selector: titleSelector,
+        valuePresent: false,
+        inViewport: true,
+      },
+      {
+        ref: 'rf-body',
+        tag: 'textarea',
+        role: 'textbox',
+        label: '正文',
+        inViewport: true,
+      },
+    ],
+  });
+  const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'editor',
+    instruction: '标题已经写好，继续填写正文',
+    snapshot,
+    completedTypeTargets: [titleSelector],
+  });
+  const targets = Object.values(bundle.targets.TYPE_TEXT || {});
+  assert.equal(targets.some((target) => target.selector === titleSelector), false);
+  assert.equal(targets.some((target) => target.ref === 'rf-body'), true);
 });
 
 test('WAIT 使用独立低风险阈值，不再与读取共用 0.72', () => {
@@ -611,6 +651,7 @@ test('TYPE_TEXT 由文本助手生成值，JEV 只负责 operation 和 target', 
   assert.ok(typeCall, '应执行 JEV 选中的 TYPE_TEXT；实际工具：' + calls.map((call) => call.name).join(','));
   assert.equal(typeCall.args.ref, 'rf-2');
   assert.equal(typeCall.args.value, '图像编辑论文合集');
+  assert.equal(typeCall.args.clearFirst, true);
 });
 
 test('同一 blocked 路由冷却，页面变化后允许重新尝试', async () => {

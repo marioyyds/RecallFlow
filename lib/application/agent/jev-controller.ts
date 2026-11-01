@@ -164,6 +164,11 @@ export class JevFastController {
       pageText: this.state.ctx.lastReadFullText || this.state.ctx.lastEvidence || this.state.ctx.page,
       snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames,
+      completedTypeTargets: (this.state.ctx.completedTypeTargets || [])
+        .filter((entry: any) => entry && entry.url === this.state.ctx.pageUrl)
+        .flatMap((entry: any) => [entry.ref, entry.selector])
+        .map((value: unknown) => String(value || ''))
+        .filter(Boolean),
     });
     this.recordDiagnostic({
       state: 'deciding',

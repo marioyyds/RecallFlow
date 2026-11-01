@@ -11481,6 +11481,24 @@ function evaluateXhsPublicationGate(toolName, args, ctx) {
   return { kind: "none" };
 }
 
+// lib/application/agent/jev-write-ledger.ts
+function recordCompletedTypeTarget(ctx, toolName, args, result, pageUrl, now2 = Date.now()) {
+  if (toolName !== "type_text" || result?.ok === false || result?.matchesIntent === false) {
+    return;
+  }
+  const entry = {
+    url: String(pageUrl || ""),
+    ref: String(args?.ref || ""),
+    selector: String(result?.selector || args?.selector || ""),
+    valueLength: String(args?.value || "").length,
+    at: now2
+  };
+  const previous = Array.isArray(ctx?.completedTypeTargets) ? ctx.completedTypeTargets : [];
+  ctx.completedTypeTargets = previous.filter(
+    (item) => !(item && item.url === entry.url && (entry.ref && item.ref === entry.ref || entry.selector && item.selector === entry.selector))
+  ).concat(entry).slice(-100);
+}
+
 // lib/application/agent/tool-call-pipeline.ts
 var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage",
@@ -11798,6 +11816,13 @@ var ToolCallPipeline = class {
       this.emitScreenshot(result);
       if (result.pageSnapshot) state2.ctx.lastSnapshot = result.pageSnapshot;
       else if (result.snapshot) state2.ctx.lastSnapshot = result.snapshot;
+      recordCompletedTypeTarget(
+        state2.ctx,
+        toolCall.name,
+        toolCall.args || {},
+        result,
+        state2.ctx.pageUrl
+      );
       state2.ctx.lastEvidence = evidenceAfter(
         state2.ctx.lastEvidence,
         toolCall,
@@ -12436,7 +12461,7 @@ function targetDescription(element) {
     element.selectedLabel ? "\u5F53\u524D\u9009\u9879\u300C" + clip(element.selectedLabel, 80) + "\u300D" : ""
   ].filter(Boolean).join("\uFF0C");
 }
-function buildElementSpace(snapshot, maxCandidates, minClickConfidence, minActionConfidence) {
+function buildElementSpace(snapshot, maxCandidates, minClickConfidence, minActionConfidence, completedTypeTargets) {
   const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
   const table = [];
   const clickTargets = {};
@@ -12448,7 +12473,14 @@ function buildElementSpace(snapshot, maxCandidates, minClickConfidence, minActio
   for (const element of elements) {
     if (table.length >= maxCandidates) break;
     const canClick = isClickable(element);
-    const canType = isTypeTarget(element, editableSelectors);
+    const targetIdentifiers = [
+      String(element.ref || ""),
+      String(element.selector || "")
+    ].filter(Boolean);
+    const alreadyWritten = targetIdentifiers.some(
+      (identifier) => completedTypeTargets.has(identifier)
+    );
+    const canType = !alreadyWritten && isTypeTarget(element, editableSelectors);
     if (!canClick && !canType) continue;
     const target = elementTarget(element);
     const identity = target + "|" + element.role + "|" + elementLabel(element);
@@ -12487,6 +12519,9 @@ function buildElementSpace(snapshot, maxCandidates, minClickConfidence, minActio
     if (canType) {
       typeTargets[key] = {
         ...definition,
+        // JEV 的文本助手生成的是完整字段值，不是增量片段。TypeSafe 选择目标后
+        // 必须替换当前值；默认追加会让“标题已经是 45 字”变成 90 字。
+        args: { ...definition.args, clearFirst: true },
         minConfidence: minActionConfidence
       };
     }
@@ -12513,7 +12548,10 @@ function buildJevFastRequest(settings, context) {
     context.snapshot,
     maxCandidates,
     minClickConfidence,
-    minActionConfidence
+    minActionConfidence,
+    new Set(
+      (context.completedTypeTargets || []).map((target) => String(target || "")).filter(Boolean)
+    )
   );
   const targetOperations = [];
   if (Object.keys(elementSpace.clickTargets).length) targetOperations.push("CLICK");
@@ -12992,7 +13030,8 @@ var JevFastController = class {
       pageTitle: this.state.ctx.pageTitle,
       pageText: this.state.ctx.lastReadFullText || this.state.ctx.lastEvidence || this.state.ctx.page,
       snapshot: this.state.ctx.lastSnapshot,
-      recentTools: this.state.ranToolNames
+      recentTools: this.state.ranToolNames,
+      completedTypeTargets: (this.state.ctx.completedTypeTargets || []).filter((entry) => entry && entry.url === this.state.ctx.pageUrl).flatMap((entry) => [entry.ref, entry.selector]).map((value) => String(value || "")).filter(Boolean)
     });
     this.recordDiagnostic({
       state: "deciding",

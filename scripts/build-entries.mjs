@@ -77,7 +77,9 @@ export const ENTRIES = [
   // explicitly to 971KB; no dependency added.
   // Route-aware repeat protection and transactional CDP text insertion measured
   // 997361 bytes. Raise explicitly to 975KB; no dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 975 * 1024 },
+  // Cross-lane completed-field ledger and replace-only JEV typing measured
+  // 999197 bytes. Raise explicitly to 977KB; no dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 977 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

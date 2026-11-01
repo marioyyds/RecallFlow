@@ -125,6 +125,8 @@ export interface JevFastContext {
   pageText?: string;
   snapshot?: PageSnapshotLike | null;
   recentTools?: string[];
+  /** 当前 URL 上已由快/慢路径成功写过的输入目标，快路径不得再次追加。 */
+  completedTypeTargets?: string[];
 }
 
 const NEXT_ACTION_RULES = `Advance the user's entire goal from the CURRENT page using one operation.
@@ -250,6 +252,7 @@ function buildElementSpace(
   maxCandidates: number,
   minClickConfidence: number,
   minActionConfidence: number,
+  completedTypeTargets: Set<string>,
 ): {
   elements: Array<Record<string, unknown>>;
   clickTargets: Record<string, JevTargetDefinition>;
@@ -268,7 +271,15 @@ function buildElementSpace(
   for (const element of elements) {
     if (table.length >= maxCandidates) break;
     const canClick = isClickable(element);
-    const canType = isTypeTarget(element, editableSelectors);
+    const targetIdentifiers = [
+      String(element.ref || ''),
+      String(element.selector || ''),
+    ].filter(Boolean);
+    const alreadyWritten = targetIdentifiers.some((identifier) =>
+      completedTypeTargets.has(identifier)
+    );
+    const canType =
+      !alreadyWritten && isTypeTarget(element, editableSelectors);
     if (!canClick && !canType) continue;
     const target = elementTarget(element);
     const identity = target + '|' + element.role + '|' + elementLabel(element);
@@ -311,6 +322,9 @@ function buildElementSpace(
     if (canType) {
       typeTargets[key] = {
         ...definition,
+        // JEV 的文本助手生成的是完整字段值，不是增量片段。TypeSafe 选择目标后
+        // 必须替换当前值；默认追加会让“标题已经是 45 字”变成 90 字。
+        args: { ...definition.args, clearFirst: true },
         minConfidence: minActionConfidence,
       };
     }
@@ -369,6 +383,11 @@ export function buildJevFastRequest(
     maxCandidates,
     minClickConfidence,
     minActionConfidence,
+    new Set(
+      (context.completedTypeTargets || [])
+        .map((target) => String(target || ''))
+        .filter(Boolean)
+    ),
   );
   const targetOperations: JevOperation[] = [];
   if (Object.keys(elementSpace.clickTargets).length) targetOperations.push('CLICK');

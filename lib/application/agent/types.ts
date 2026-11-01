@@ -11,6 +11,7 @@
 import type { KnowledgeBook, CitationMeta } from '../../domain/knowledge/model.ts';
 import type { JevSettings } from '../../shared/settings.ts';
 import type { PublicationEvidenceState } from './publication-policy.ts';
+import type { CompletedTypeTarget } from './jev-write-ledger.ts';
 
 /** Agent 预算（`settings.agentBudget` 与 `createBudget` 的产物）。 */
 export interface AgentBudget {
@@ -438,6 +439,7 @@ export interface RunCtx {
   lastEvidence: string;
   lastReadFullText: string;
   publicationEvidence?: PublicationEvidenceState;
+  completedTypeTargets?: CompletedTypeTarget[];
   mcpIndex: Map<string, McpToolIndexEntry>;
   mcpStatus: McpServerStatus[];
   visionBudget?: Record<string, number>;
