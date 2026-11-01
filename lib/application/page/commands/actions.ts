@@ -35,13 +35,26 @@ function stateSuffix(el: any) {
   return '；点击后状态：' + state;
 }
 
+export function staleClickTargetFailure(el: any) {
+  if (!el || el.isConnected !== false) return null;
+  return {
+    ok: false,
+    code: 'STALE_TARGET',
+    error: '目标元素已从页面移除，ref/selector 可能已过期；请重新观察页面后重试。',
+  };
+}
+
 async function cmdClick(params: any) {
   const els = findElementsFor(params);
   if (!els.length) return { ok: false, error: targetMissError(params) };
   const el = els[0];
+  const staleBeforeWait = staleClickTargetFailure(el);
+  if (staleBeforeWait) return staleBeforeWait;
   const tag = (el.tagName || '').toLowerCase();
   const beforeHref = location.href;
   const ready = await ensureActionable(el);
+  const staleAfterWait = staleClickTargetFailure(el);
+  if (staleAfterWait) return staleAfterWait;
   if (!ready) {
     // 自愈：被遮挡或 pointer-events 受限时，退化为程序化 click（绕过遮挡），
     // 仍失败则如实上报，交由后台用 CDP 可信事件兜底。

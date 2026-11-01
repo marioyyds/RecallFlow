@@ -2862,7 +2862,7 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "update_plan",
-      description: "\u7EF4\u62A4\u5F53\u524D\u4EFB\u52A1\u7684\u6267\u884C\u8BA1\u5212\uFF08\u5B50\u76EE\u6807\u6E05\u5355\uFF09\u3002\u591A\u6B65\u4EFB\u52A1\u5F00\u59CB\u65F6\u5148\u5217\u51FA\u8BA1\u5212\uFF0C\u4E4B\u540E\u6BCF\u5B8C\u6210\u4E00\u6B65\u5C31\u66F4\u65B0\u72B6\u6001\u3002\u65E2\u8BA9\u7528\u6237\u770B\u5230\u8FDB\u5EA6\uFF0C\u4E5F\u5E2E\u52A9\u4F60\u81EA\u5DF1\u4E0D\u8DD1\u4E22\u76EE\u6807\u3002\u6BCF\u6B21\u4F20\u5165\u5B8C\u6574\u5217\u8868\uFF08\u6574\u4F53\u66FF\u6362\uFF0C\u4E0D\u662F\u589E\u91CF\uFF09\u3002",
+      description: "\u7EF4\u62A4\u6267\u884C\u8BA1\u5212\u3002\u5F53\u524D\u6B65\u9AA4\u53EF\u58F0\u660E\u5FEB\u8DEF\u52A8\u4F5C\u3001\u5B8C\u6210\u6761\u4EF6\u548C\u79DF\u7EA6\uFF1B\u6BCF\u6B21\u6574\u4F53\u66FF\u6362\u3002",
       parameters: {
         type: "object",
         properties: {
@@ -2872,8 +2872,37 @@ var TOOL_SCHEMAS = [
             items: {
               type: "object",
               properties: {
-                text: { type: "string", description: "\u6309\u6587\u672C\u7247\u6BB5\u5B9A\u4F4D" },
-                status: { type: "string", enum: ["pending", "in_progress", "done"], description: "\u72B6\u6001\uFF0C\u9ED8\u8BA4 pending" }
+                id: { type: "string", description: "\u7A33\u5B9A\u6B65\u9AA4 id" },
+                text: { type: "string", description: "\u5B50\u76EE\u6807" },
+                status: { type: "string", enum: ["pending", "in_progress", "done"], description: "\u72B6\u6001\uFF0C\u9ED8\u8BA4 pending" },
+                successPredicate: {
+                  type: "string",
+                  description: "\u53EF\u89C2\u5BDF\u7684\u5B8C\u6210\u6761\u4EF6"
+                },
+                allowedOperations: {
+                  type: "array",
+                  description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5168\u52A8\u4F5C\uFF0C[]=\u65E0\u5FEB\u52A8\u4F5C",
+                  items: {
+                    type: "string",
+                    enum: [
+                      "CLICK",
+                      "TYPE_TEXT",
+                      "READ_PAGE",
+                      "READ_TABLE",
+                      "ACCESSIBILITY",
+                      "DIAGNOSTICS",
+                      "SCROLL_UP",
+                      "SCROLL_DOWN",
+                      "WAIT"
+                    ]
+                  }
+                },
+                leaseActions: {
+                  type: "integer",
+                  minimum: 1,
+                  maximum: 50,
+                  description: "\u672C\u6B65\u9AA4\u6700\u591A\u5FEB\u52A8\u4F5C\u6570\uFF1B\u7701\u7565=\u5168\u5C40\u4E0A\u9650"
+                }
               },
               required: ["text"]
             }
@@ -3964,7 +3993,15 @@ function compactSnapshotSummary(snapshot) {
     return e.ref + (label ? "\uFF1A" + sliceSafe(String(label), 0, 24) : "");
   }).join("\uFF1B") : "";
   const text2 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
-  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
+  const runtime = snapshot.runtime && typeof snapshot.runtime === "object" ? snapshot.runtime : null;
+  const media = runtime && Array.isArray(runtime.media) ? runtime.media.slice(0, 3).map((item) => {
+    const state2 = item.paused === false ? "playing" : item.paused === true ? "paused" : "unknown";
+    const progress = item.currentTime == null ? "?" : String(item.currentTime);
+    const duration = item.duration == null ? "?" : String(item.duration);
+    return item.kind + " " + state2 + " " + progress + "/" + duration + "s" + (item.readyState == null ? "" : " ready=" + item.readyState) + (item.networkState == null ? "" : " net=" + item.networkState);
+  }).join("\uFF1B") : "";
+  const runtimeText = runtime ? [media ? "\u5A92\u4F53\u72B6\u6001\uFF1A" + media : "", runtime.ariaBusy ? "\u9875\u9762\u4ECD\u5728 aria-busy" : ""].filter(Boolean).join("\uFF1B") : "";
+  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", runtimeText ? "\u8FD0\u884C\u6001\uFF1A" + runtimeText : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
 }
 
 // lib/application/agent/diagnostics.ts
@@ -4458,15 +4495,80 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
+// lib/application/agent/plan-contract.ts
+var PLAN_FAST_OPERATIONS = Object.freeze([
+  "CLICK",
+  "TYPE_TEXT",
+  "READ_PAGE",
+  "READ_TABLE",
+  "ACCESSIBILITY",
+  "DIAGNOSTICS",
+  "SCROLL_UP",
+  "SCROLL_DOWN",
+  "WAIT"
+]);
+var PLAN_MAX_LEASE_ACTIONS = 50;
+var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
+function cleanText(value, maxChars) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+function cleanStepId(value, index) {
+  const candidate = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
+}
+function normalizePlanOperations(value) {
+  if (!Array.isArray(value)) return void 0;
+  const operations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of value) {
+    const operation = String(raw || "").trim().toUpperCase();
+    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
+    seen.add(operation);
+    operations.push(operation);
+  }
+  return operations;
+}
+function normalizePlanLease(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return void 0;
+  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
+}
+function normalizePlanStep(value, index) {
+  const step = {
+    id: cleanStepId(value.id, index),
+    text: cleanText(value.text, 120),
+    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
+  };
+  const successPredicate = cleanText(value.successPredicate, 240);
+  if (successPredicate) step.successPredicate = successPredicate;
+  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
+    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
+  }
+  const leaseActions = normalizePlanLease(value.leaseActions);
+  if (leaseActions != null) step.leaseActions = leaseActions;
+  return step;
+}
+function describePlanStep(step) {
+  const parts = [step.text];
+  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
+  if (step.allowedOperations) {
+    parts.push(
+      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+    );
+  }
+  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
+  return parts.join("\uFF1B");
+}
+
 // lib/application/agent/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
-  const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
-    text: sliceSafe(String(it.text).trim(), 0, 120),
-    status: ["pending", "in_progress", "done"].includes(it.status) ? it.status : "pending"
-  }));
+  const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it, index) => normalizePlanStep(it, index));
   ctx.plan = plan;
-  const text2 = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+  ctx.planVersion = Math.max(0, Number(ctx.planVersion) || 0) + 1;
+  const text2 = plan.map(
+    (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
+  ).join("\n");
   return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
 }
 function expandResult(ctx, args) {

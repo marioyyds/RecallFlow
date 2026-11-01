@@ -79,7 +79,14 @@ export const ENTRIES = [
   // 997361 bytes. Raise explicitly to 975KB; no dependency added.
   // Cross-lane completed-field ledger and replace-only JEV typing measured
   // 999197 bytes. Raise explicitly to 977KB; no dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 977 * 1024 },
+  // PlanCard schema and subgoal leases measured 1008155 bytes. Raise explicitly
+  // to 985KB; this is a small in-repo contract module, not a new dependency.
+  // WAIT progress guards, low-confidence read fallback, runtime media snapshots
+  // and verification-state semantics measured 1011702 bytes. Raise to 988KB;
+  // these changes reuse existing modules and add no dependency.
+  // Navigation-aware abort hold and stale-target handling measured 1014642
+  // bytes. Raise explicitly to 991KB; no dependency was added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 991 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -92,7 +99,10 @@ export const ENTRIES = [
   // measured 566551 bytes. Raise explicitly to 554KB; no dependency added.
   // WAIT confidence and no-progress retry controls measured 568347 bytes.
   // Raise explicitly to 556KB; no dependency added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 556 * 1024 },
+  // Shared PlanCard schema increased the bundle to 571994 bytes. It is re-exported
+  // through the shared tool surface; no dependency was added. Raise to 559KB.
+  // Shared runtime and verification changes measured 572929 bytes; raise to 560KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 560 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -102,7 +112,10 @@ export const ENTRIES = [
   // 546877 bytes. Raise to 535KB with explicit headroom.
   // The expanded JEV settings shape is shared with skill pages; measured
   // 548043 bytes. Raise explicitly to 536KB; no dependency added.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 536 * 1024 },
+  // The same shared PlanCard contract measured 551339 bytes; raise explicitly
+  // to 539KB. No new dependency was introduced.
+  // Shared runtime/verification code measured 552274 bytes; raise to 540KB.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 540 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

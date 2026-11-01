@@ -14,6 +14,11 @@ export interface JevLoopState {
   lastActionSignature: string;
   lastActionRouteKey: string;
   sameActionStreak: number;
+  waitStreak: number;
+  planVersion: number;
+  planKey: string;
+  planActions: number;
+  readFallbackKey: string;
   lastOutcome: string;
 }
 
@@ -39,6 +44,14 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
     lastActionSignature: String(source.lastActionSignature || '').slice(0, 500),
     lastActionRouteKey: String(source.lastActionRouteKey || '').slice(0, 1000),
     sameActionStreak: Math.min(nonNegativeInteger(source.sameActionStreak), 10),
+    waitStreak: Math.min(nonNegativeInteger(source.waitStreak), 10),
+    planVersion: nonNegativeInteger(source.planVersion),
+    planKey: String(source.planKey || '').slice(0, 160),
+    planActions: Math.min(
+      nonNegativeInteger(source.planActions),
+      JEV_HARD_MAX_CONSECUTIVE_ACTIONS
+    ),
+    readFallbackKey: String(source.readFallbackKey || '').slice(0, 1000),
     lastOutcome: String(source.lastOutcome || '').slice(0, 80),
   };
 }

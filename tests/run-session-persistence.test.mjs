@@ -22,6 +22,7 @@ test('RunSessionPersistence：落盘 schema、容量上限与 extra 覆盖', asy
         tabId: 9,
         trace: Array.from({ length: 50 }, (_, i) => i),
         plan: Array.from({ length: 25 }, (_, i) => i),
+        planVersion: 9,
         resultIds: Array.from({ length: 90 }, (_, i) => i),
       },
       sessionApprovedTools: new Set(['click_element']),
@@ -56,6 +57,7 @@ test('RunSessionPersistence：落盘 schema、容量上限与 extra 覆盖', asy
   assert.equal(written.runCitations.length, 60);
   assert.equal(written.trace.length, 40);
   assert.equal(written.plan.length, 20);
+  assert.equal(written.planVersion, 9);
   assert.equal(written.resultIds.length, 80);
   assert.equal(written.ranToolNames.length, 60);
   assert.deepEqual(written.sessionApprovedTools, ['click_element']);

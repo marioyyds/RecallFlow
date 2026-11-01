@@ -85,7 +85,13 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // 2026-11-01: per-message runtime metadata, persisted session elapsed time and
 // duplicate lane-badge suppression measured 516116 bytes. Raise explicitly to
 // 505KB; no dependency added.
-export const SIZE_BUDGET_BYTES = 505 * 1024;
+// Runtime media snapshots and "unverified" completion rendering measured
+// 517485 bytes. Raise explicitly to 506KB; no dependency was added.
+// The non-passive panel wheel guard adds one small in-repo module and measured
+// 518394 bytes. Raise explicitly to 507KB; no dependency was added.
+// Navigation resume now deduplicates interrupted assistant tails and measured
+// 520245 bytes. Raise explicitly to 509KB; no dependency was added.
+export const SIZE_BUDGET_BYTES = 509 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

@@ -13,6 +13,7 @@ import {
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
+import { activePlanStep, planStepKey } from './plan-contract.ts';
 import {
   writeJevDiagnostic,
   type JevDiagnosticRecord,
@@ -71,11 +72,44 @@ export class JevFastController {
     this.textHelper = textHelper;
   }
 
+  private syncPlanContract(): ReturnType<typeof activePlanStep> {
+    const step = activePlanStep(this.state.ctx.plan);
+    const version = Math.max(0, Math.floor(Number(this.state.ctx.planVersion) || 0));
+    const key = planStepKey(step, version);
+    const loop = this.state.jevLoop;
+    if (loop.planKey !== key || loop.planVersion !== version) {
+      loop.planKey = key;
+      loop.planVersion = version;
+      loop.planActions = 0;
+      // A slow replan is a new execution attempt even when the same page stayed blocked.
+      this.lastBlockedRoute = '';
+      this.state.trace({
+        phase: 'jev-plan',
+        planVersion: version,
+        stepId: String(step?.id || ''),
+        leaseActions: Number(step?.leaseActions) || null,
+        allowedOperations: Array.isArray(step?.allowedOperations)
+          ? step.allowedOperations.slice()
+          : null,
+      });
+    }
+    return step;
+  }
+
+  private planLeaseRemaining(): number | null {
+    const step = this.syncPlanContract();
+    const lease = Number(step?.leaseActions);
+    if (!Number.isFinite(lease) || lease < 1) return null;
+    return Math.max(0, Math.floor(lease) - this.state.jevLoop.planActions);
+  }
+
   private canAttempt(): boolean {
     const settings = this.state.settings.jev;
     if (!settings || settings.enabled !== true) return false;
     if (this.state.intent === INTENTS.CHAT) return false;
     if (!settings.apiKey || !settings.model || !settings.baseUrl) return false;
+    const leaseRemaining = this.planLeaseRemaining();
+    if (leaseRemaining === 0) return false;
     const loop = this.state.jevLoop;
     const maxAttempts = Number(settings.maxAttemptsPerRun) > 0
       ? Math.floor(Number(settings.maxAttemptsPerRun))
@@ -123,9 +157,13 @@ export class JevFastController {
     const decisions: JevFastDecision[] = [];
     const toolOutcomes: ToolBatchOutcome[] = [];
     let latencyMs = 0;
-    const maxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0
+    const configuredMaxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0
       ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions))
       : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    const leaseRemaining = this.planLeaseRemaining();
+    const maxActions = leaseRemaining === null
+      ? configuredMaxActions
+      : Math.min(configuredMaxActions, leaseRemaining);
     for (let step = 0; step < maxActions; step += 1) {
       if (!this.canAttempt()) break;
       const result = await this.runOnce(iter, persist);
@@ -164,6 +202,9 @@ export class JevFastController {
       pageText: this.state.ctx.lastReadFullText || this.state.ctx.lastEvidence || this.state.ctx.page,
       snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames,
+      plan: this.state.ctx.plan,
+      planVersion: this.state.ctx.planVersion,
+      leaseRemaining: this.planLeaseRemaining(),
       completedTypeTargets: (this.state.ctx.completedTypeTargets || [])
         .filter((entry: any) => entry && entry.url === this.state.ctx.pageUrl)
         .flatMap((entry: any) => [entry.ref, entry.selector])
@@ -190,7 +231,37 @@ export class JevFastController {
       return { kind: 'skipped', reason: 'request-failed', latencyMs: Date.now() - startedAt };
     }
     const latencyMs = Date.now() - startedAt;
-    const decision = interpretJevFastDecision(response, bundle);
+    let decision = interpretJevFastDecision(response, bundle);
+    let readFallback = false;
+    const readOperation = bundle.operations.READ_PAGE;
+    const fallbackKey =
+      Math.max(0, Math.floor(Number(this.state.ctx.planVersion) || 0)) +
+      '|' +
+      String(this.state.ctx.pageUrl || '');
+    if (
+      decision.kind === 'blocked' &&
+      decision.reason === 'low-confidence' &&
+      decision.operation === 'READ_PAGE' &&
+      readOperation?.toolName === 'read_current_page' &&
+      this.state.jevLoop.readFallbackKey !== fallbackKey
+    ) {
+      // A failed read classification is safe to resolve by reading. Do not spend
+      // a full slow-model turn on an operation that cannot mutate the page.
+      decision = {
+        kind: 'act',
+        operation: 'READ_PAGE',
+        actionKey: 'READ_PAGE',
+        toolName: readOperation.toolName,
+        args: { ...(readOperation.args || {}) },
+        description: 'READ_PAGE 置信度不足，使用只读确定性回退',
+        confidence: decision.confidence || 0,
+        operationConfidence: decision.confidence || 0,
+        targetConfidence: null,
+        probabilities: decision.probabilities || {},
+      };
+      this.state.jevLoop.readFallbackKey = fallbackKey;
+      readFallback = true;
+    }
     this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
     this.state.jevLoop.lastOutcome = decision.kind;
     this.state.trace({
@@ -200,6 +271,7 @@ export class JevFastController {
       phaseName: phase,
       model: response.model,
       decision,
+      readFallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -209,6 +281,7 @@ export class JevFastController {
       mode: settings.shadowMode ? 'shadow' : 'live',
       phaseName: phase,
       decision,
+      readFallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -224,7 +297,13 @@ export class JevFastController {
             : 'handoff',
       mode: settings.shadowMode ? 'shadow' : 'live',
       outcome: decision.kind === 'act' ? decision.operation : decision.kind,
-      reason: decision.kind === 'blocked' ? decision.reason : decision.kind === 'done' ? 'done-claim' : undefined,
+      reason: readFallback
+        ? 'low-confidence-read-fallback'
+        : decision.kind === 'blocked'
+          ? decision.reason
+          : decision.kind === 'done'
+            ? 'done-claim'
+            : undefined,
       phase,
       tool: decision.kind === 'act' ? decision.toolName : undefined,
       latencyMs,
@@ -242,6 +321,7 @@ export class JevFastController {
     if (decision.kind === 'blocked') {
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.jevLoop.sameActionStreak = 0;
+      this.state.jevLoop.waitStreak = 0;
       this.state.jevLoop.lastActionRouteKey = '';
       this.appendBlocked(iter, decision.reason, decision.description);
       await persist({ phase: 'jev_decision' }).catch(() => {});
@@ -282,6 +362,9 @@ export class JevFastController {
     const sameActionStreak = previousActionIsComparable
       ? loop.sameActionStreak
       : 0;
+    const repeatedCount = action.operation === 'WAIT'
+      ? loop.waitStreak
+      : sameActionStreak;
     const configuredRepeatLimit = Number(
       this.state.settings.jev.maxRepeatedActionsWithoutProgress
     );
@@ -289,16 +372,19 @@ export class JevFastController {
       Number.isFinite(configuredRepeatLimit) && configuredRepeatLimit >= 1
         ? Math.min(10, Math.floor(configuredRepeatLimit))
         : JEV_SETTINGS_DEFAULTS.maxRepeatedActionsWithoutProgress;
-    if (sameActionStreak >= repeatLimit) {
+    if (repeatedCount >= repeatLimit) {
       loop.consecutiveFastActions = 0;
       loop.sameActionStreak = 0;
-      loop.lastOutcome = 'repeated-action';
+      loop.waitStreak = 0;
+      loop.lastOutcome = action.operation === 'WAIT' ? 'wait-limit' : 'repeated-action';
       this.appendBlocked(
         iter,
-        'repeated-action',
-        '同一动作在当前页面状态下已连续尝试 ' +
-          sameActionStreak +
-          ' 次且无页面进展'
+        loop.lastOutcome,
+        action.operation === 'WAIT'
+          ? '连续等待 ' + repeatedCount + ' 次仍未确认目标状态'
+          : '同一动作在当前页面状态下已连续尝试 ' +
+              sameActionStreak +
+              ' 次且无页面进展'
       );
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'repeated-action', latencyMs };
@@ -338,9 +424,11 @@ export class JevFastController {
     const failed = this.state.failedToolNames.length > failuresBefore;
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
     this.state.jevLoop.sameActionStreak =
       previousActionIsComparable ? sameActionStreak + 1 : 1;
+    this.state.jevLoop.waitStreak = 0;
     this.state.jevLoop.lastActionRouteKey = routeKey;
     this.state.jevLoop.consecutiveFailures = failed
       ? this.state.jevLoop.consecutiveFailures + 1
@@ -394,9 +482,13 @@ export class JevFastController {
     const postActionRouteKey = this.currentRouteKey();
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
     this.state.jevLoop.sameActionStreak =
       postActionRouteKey === beforeRouteKey ? sameActionStreak : 0;
+    this.state.jevLoop.waitStreak = signature.startsWith('WAIT:')
+      ? this.state.jevLoop.waitStreak + 1
+      : 0;
     this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
     this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastOutcome = 'act';
@@ -498,6 +590,7 @@ export class JevFastController {
     this.state.jevLoop.lastActionSignature = '';
     this.state.jevLoop.lastActionRouteKey = '';
     this.state.jevLoop.sameActionStreak = 0;
+    this.state.jevLoop.waitStreak = 0;
     this.state.jevLoop.lastOutcome = 'slow-handoff';
   }
 

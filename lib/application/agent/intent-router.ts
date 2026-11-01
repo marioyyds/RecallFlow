@@ -255,6 +255,10 @@ const KEYWORD_RULES = [
 
 const PRIORITY = [INTENTS.BROWSER, INTENTS.KNOWLEDGE, INTENTS.RESEARCH, INTENTS.CHAT];
 const CONTINUATION_RE = /^(继续|接着|下一步|好的|可以|继续吧|然后呢|再来|再试一次|就这样|是的)[，。！？!?,\s]*$/u;
+// Explicit imperative mutations are browser work even when the sentence has no
+// object keyword in the scoring table (e.g. "创建一个 test 分支").
+const IMPERATIVE_BROWSER_MUTATION_RE =
+  /^(?:请|麻烦|帮我|给我|替我)?\s*(?:(?:创建|新建|建立|添加|删除|移除|修改|更新|重命名|提交|保存|发布|发送|上传|下载|注册|登录|打开|关闭|勾选|选择|填写|点击|滚动)|(?:把|将).{1,40}(?:创建|新建|删除|移除|修改|更新|重命名|提交|保存|发布|发送|上传|下载|设置|改))/u;
 
 function scoreIntent(text: string) {
   const scores = { [INTENTS.BROWSER]: 0, [INTENTS.KNOWLEDGE]: 0, [INTENTS.RESEARCH]: 0, [INTENTS.CHAT]: 0 };
@@ -304,6 +308,18 @@ export function detectIntent(instruction = '', history = [], opts: Record<string
     if (lastUser) sourceText = lastUser.content as string;
   }
   const scores = scoreIntent(sourceText);
+  if (IMPERATIVE_BROWSER_MUTATION_RE.test(String(sourceText || '').trim())) {
+    return {
+      intent: INTENTS.BROWSER,
+      label: INTENT_DEFS[INTENTS.BROWSER].label,
+      confidence: 'high',
+      includeMcp: INTENT_DEFS[INTENTS.BROWSER].includeMcp,
+      keyword: extractKeyword(sourceText),
+      sourceText,
+      viaContinuation,
+      reason: '指令以明确页面操作动词开头，按浏览器操作处理',
+    };
+  }
   // 按得分降序；得分相同时保持 PRIORITY 顺序（稳定排序），保证“看看我的收藏”归为知识库。
   const intent = PRIORITY.slice().sort((a, b) => scores[b] - scores[a])[0];
   const maxScore = scores[intent];
@@ -503,7 +519,7 @@ export function buildStableSystemPrompt(toolNames: any[] = [], skills: any[] = [
     '6. 若合成点击/输入无效（返回“不可操作”或页面无变化），可改用 CDP 工具：先用 get_ax_snapshot 取交互节点的视口坐标，再用 click_at / hover_element 按坐标操作；canvas/虚拟列表等无 DOM 场景同样如此。',
     '7. 操作跨域 iframe（如嵌入的编辑器、登录框、支付表单）：先用 list_frames 找到 frameId，用 get_page_snapshot({frameId}) 读取该框架；想一次看全可用 get_page_snapshot({includeFrames:true})，此时子框架元素 ref 形如 f3:rf-2，原样传回 click_element/type_text 即可自动路由到对应框架。',
     '8. 流程复用与撤销：用户说「记住这个流程 / 以后都这么做」时，完成一次后调用 macro({op:"save", name:"…"}) 保存；用户要求执行某个已保存流程时，优先 macro({op:"run", name:"…"}) 一键回放（系统提示里会列出本站点已有的宏；name 必须照抄，不要用描述）。用户说「撤销 / 撤回上一步」时调用 undo_last_action。用户说「信任这个网站 / 以后别再问我」时调用 trust_site。',
-    '9. 定位元素优先级：ref（当前快照）→ role+name（如 {role:"button",name:"登录"}，最稳）→ testid → text → selector。get_page_snapshot 默认只给页面区域轮廓与代表性元素：看到 nextCursor / omittedByLimit 时不要以为页面只有这些内容；已知目标、找 custom element 或深入 Shadow DOM 时用 inspect_element({op:"query"})，需要继续浏览则把 nextCursor 原样回传。query 支持 selector / text / role+name / testid / region，并用 cursor 翻页；它直接返回可复用 ref。**不要为普通 DOM 查询调用 run_javascript**。复杂页面也可用 get_ax_snapshot 拿 role/name。多步任务用 update_plan 维护进度；大工具结果被截断时用 expand_result 分段读取。',
+    '9. 定位元素优先级：ref（当前快照）→ role+name（如 {role:"button",name:"登录"}，最稳）→ testid → text → selector。get_page_snapshot 默认只给页面区域轮廓与代表性元素：看到 nextCursor / omittedByLimit 时不要以为页面只有这些内容；已知目标、找 custom element 或深入 Shadow DOM 时用 inspect_element({op:"query"})，需要继续浏览则把 nextCursor 原样回传。query 支持 selector / text / role+name / testid / region，并用 cursor 翻页；它直接返回可复用 ref。**不要为普通 DOM 查询调用 run_javascript**。复杂页面也可用 get_ax_snapshot 拿 role/name。媒体页优先看快照 runtime.media；它比“正在缓冲/00:00”等可能滞后的可见文案可靠。多步任务用 update_plan 维护进度；希望 JEV 执行某个子目标时，为当前 in_progress 步骤填写 successPredicate、allowedOperations 和 leaseActions，租约耗尽或子目标变化时再次 update_plan。大工具结果被截断时用 expand_result 分段读取。',
     '10. 声称完成（complete_task）前会有一次独立校验；若收到「自我校验未通过」的反思，说明目标可能尚未达成，请据实核对页面状态并换一种做法继续，绝不谎报完成。',
     '11. 叙述与动作交替：每次调用工具前，先用**一句话（不超过 40 字）**说明你正要做什么、为什么，例如「先扫描页面上的广告位」。规则 2 禁止的是「声称结果已经达成」，与「说明意图」并不冲突——两者都要做到。**不要在多次工具调用之间完全不输出文字**，否则用户跟不上进度、也无法判断你在做什么。',
     '12. 一轮可以发出**多个**工具调用：当若干操作互不依赖时（例如同时读取两个区块、同时给两处元素设样式、同时取快照与页面文本），请在**同一轮**里一并发出，不要一次一个地串行调用——串行会成倍拉长耗时。只有后一步需要前一步结果时才分轮。隐藏多个元素请优先用 annotate({op:"style", selectors:[…]}) 一次完成。',

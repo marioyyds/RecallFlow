@@ -36,6 +36,7 @@ Domain ─→ no Chrome, DOM, storage, or framework code
 - `application/agent/runner.ts`：Agent 运行用例的稳定入口。
 - `application/agent/run-context.ts`：新任务与恢复任务的上下文构造。
 - `application/agent/budget.ts`、`history-policy.ts`、`intent-policy.ts`：成本预算、可恢复历史与意图提升策略。
+- `application/agent/plan-contract.ts`：PlanCard 规范化、当前子目标选择和快路动作租约规则。
 - `application/agent/verification-policy.ts`：存活看门狗、任务类型、证据与完成校验判定。
 - `application/agent/stream-step.ts`：模型流式请求、重试、中止与 SSE 解析。
 - `application/agent/tool-execution.ts`：工具超时、实时审批与安全的并行批次执行。

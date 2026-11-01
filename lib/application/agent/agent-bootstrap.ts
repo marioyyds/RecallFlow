@@ -30,6 +30,7 @@ import {
   shouldObserveDownloads,
 } from './target-manager.ts';
 import { restoreJevLoopState } from './jev-loop-state.ts';
+import { describePlanStep } from './plan-contract.ts';
 
 function buildInitialMessages(
   instruction: string,
@@ -391,7 +392,13 @@ export async function prepareAgentRun(options: {
   const injectPlanMessage = () => {
     if (!ctx.plan || !ctx.plan.length) return;
     const text = ctx.plan
-      .map((p: any, i: any) => (p.status === 'done' ? '✓' : p.status === 'in_progress' ? '▶' : '○') + ' ' + (i + 1) + '. ' + p.text)
+      .map((p: any, i: any) =>
+        (p.status === 'done' ? '✓' : p.status === 'in_progress' ? '▶' : '○') +
+        ' ' +
+        (i + 1) +
+        '. ' +
+        describePlanStep(p)
+      )
       .join('\n');
     messages.splice(1, 0, {
       role: 'system',

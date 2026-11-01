@@ -4010,7 +4010,7 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "update_plan",
-      description: "\u7EF4\u62A4\u5F53\u524D\u4EFB\u52A1\u7684\u6267\u884C\u8BA1\u5212\uFF08\u5B50\u76EE\u6807\u6E05\u5355\uFF09\u3002\u591A\u6B65\u4EFB\u52A1\u5F00\u59CB\u65F6\u5148\u5217\u51FA\u8BA1\u5212\uFF0C\u4E4B\u540E\u6BCF\u5B8C\u6210\u4E00\u6B65\u5C31\u66F4\u65B0\u72B6\u6001\u3002\u65E2\u8BA9\u7528\u6237\u770B\u5230\u8FDB\u5EA6\uFF0C\u4E5F\u5E2E\u52A9\u4F60\u81EA\u5DF1\u4E0D\u8DD1\u4E22\u76EE\u6807\u3002\u6BCF\u6B21\u4F20\u5165\u5B8C\u6574\u5217\u8868\uFF08\u6574\u4F53\u66FF\u6362\uFF0C\u4E0D\u662F\u589E\u91CF\uFF09\u3002",
+      description: "\u7EF4\u62A4\u6267\u884C\u8BA1\u5212\u3002\u5F53\u524D\u6B65\u9AA4\u53EF\u58F0\u660E\u5FEB\u8DEF\u52A8\u4F5C\u3001\u5B8C\u6210\u6761\u4EF6\u548C\u79DF\u7EA6\uFF1B\u6BCF\u6B21\u6574\u4F53\u66FF\u6362\u3002",
       parameters: {
         type: "object",
         properties: {
@@ -4020,8 +4020,37 @@ var TOOL_SCHEMAS = [
             items: {
               type: "object",
               properties: {
-                text: { type: "string", description: "\u6309\u6587\u672C\u7247\u6BB5\u5B9A\u4F4D" },
-                status: { type: "string", enum: ["pending", "in_progress", "done"], description: "\u72B6\u6001\uFF0C\u9ED8\u8BA4 pending" }
+                id: { type: "string", description: "\u7A33\u5B9A\u6B65\u9AA4 id" },
+                text: { type: "string", description: "\u5B50\u76EE\u6807" },
+                status: { type: "string", enum: ["pending", "in_progress", "done"], description: "\u72B6\u6001\uFF0C\u9ED8\u8BA4 pending" },
+                successPredicate: {
+                  type: "string",
+                  description: "\u53EF\u89C2\u5BDF\u7684\u5B8C\u6210\u6761\u4EF6"
+                },
+                allowedOperations: {
+                  type: "array",
+                  description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5168\u52A8\u4F5C\uFF0C[]=\u65E0\u5FEB\u52A8\u4F5C",
+                  items: {
+                    type: "string",
+                    enum: [
+                      "CLICK",
+                      "TYPE_TEXT",
+                      "READ_PAGE",
+                      "READ_TABLE",
+                      "ACCESSIBILITY",
+                      "DIAGNOSTICS",
+                      "SCROLL_UP",
+                      "SCROLL_DOWN",
+                      "WAIT"
+                    ]
+                  }
+                },
+                leaseActions: {
+                  type: "integer",
+                  minimum: 1,
+                  maximum: 50,
+                  description: "\u672C\u6B65\u9AA4\u6700\u591A\u5FEB\u52A8\u4F5C\u6570\uFF1B\u7701\u7565=\u5168\u5C40\u4E0A\u9650"
+                }
               },
               required: ["text"]
             }
@@ -5122,7 +5151,15 @@ function compactSnapshotSummary(snapshot) {
     return e.ref + (label ? "\uFF1A" + sliceSafe(String(label), 0, 24) : "");
   }).join("\uFF1B") : "";
   const text2 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
-  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
+  const runtime = snapshot.runtime && typeof snapshot.runtime === "object" ? snapshot.runtime : null;
+  const media = runtime && Array.isArray(runtime.media) ? runtime.media.slice(0, 3).map((item) => {
+    const state2 = item.paused === false ? "playing" : item.paused === true ? "paused" : "unknown";
+    const progress = item.currentTime == null ? "?" : String(item.currentTime);
+    const duration = item.duration == null ? "?" : String(item.duration);
+    return item.kind + " " + state2 + " " + progress + "/" + duration + "s" + (item.readyState == null ? "" : " ready=" + item.readyState) + (item.networkState == null ? "" : " net=" + item.networkState);
+  }).join("\uFF1B") : "";
+  const runtimeText = runtime ? [media ? "\u5A92\u4F53\u72B6\u6001\uFF1A" + media : "", runtime.ariaBusy ? "\u9875\u9762\u4ECD\u5728 aria-busy" : ""].filter(Boolean).join("\uFF1B") : "";
+  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", runtimeText ? "\u8FD0\u884C\u6001\uFF1A" + runtimeText : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
 }
 
 // lib/application/agent/diagnostics.ts
@@ -5616,15 +5653,92 @@ function formatRunMetrics(m) {
   return lines.join("\n");
 }
 
+// lib/application/agent/plan-contract.ts
+var PLAN_FAST_OPERATIONS = Object.freeze([
+  "CLICK",
+  "TYPE_TEXT",
+  "READ_PAGE",
+  "READ_TABLE",
+  "ACCESSIBILITY",
+  "DIAGNOSTICS",
+  "SCROLL_UP",
+  "SCROLL_DOWN",
+  "WAIT"
+]);
+var PLAN_MAX_LEASE_ACTIONS = 50;
+var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
+function cleanText(value, maxChars) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+function cleanStepId(value, index) {
+  const candidate = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
+}
+function normalizePlanOperations(value) {
+  if (!Array.isArray(value)) return void 0;
+  const operations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of value) {
+    const operation = String(raw || "").trim().toUpperCase();
+    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
+    seen.add(operation);
+    operations.push(operation);
+  }
+  return operations;
+}
+function normalizePlanLease(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return void 0;
+  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
+}
+function normalizePlanStep(value, index) {
+  const step = {
+    id: cleanStepId(value.id, index),
+    text: cleanText(value.text, 120),
+    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
+  };
+  const successPredicate = cleanText(value.successPredicate, 240);
+  if (successPredicate) step.successPredicate = successPredicate;
+  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
+    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
+  }
+  const leaseActions = normalizePlanLease(value.leaseActions);
+  if (leaseActions != null) step.leaseActions = leaseActions;
+  return step;
+}
+function activePlanStep(plan) {
+  if (!Array.isArray(plan)) return null;
+  const steps = plan.filter(
+    (step) => Boolean(step && typeof step === "object" && typeof step.text === "string")
+  );
+  return steps.find((step) => step.status === "in_progress") || steps.find((step) => step.status === "pending") || null;
+}
+function planStepKey(step, planVersion) {
+  if (!step) return "";
+  const id = String(step.id || step.text);
+  return String(Math.max(0, Math.floor(Number(planVersion) || 0))) + ":" + id;
+}
+function describePlanStep(step) {
+  const parts = [step.text];
+  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
+  if (step.allowedOperations) {
+    parts.push(
+      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+    );
+  }
+  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
+  return parts.join("\uFF1B");
+}
+
 // lib/application/agent/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
-  const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it) => ({
-    text: sliceSafe(String(it.text).trim(), 0, 120),
-    status: ["pending", "in_progress", "done"].includes(it.status) ? it.status : "pending"
-  }));
+  const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it, index) => normalizePlanStep(it, index));
   ctx.plan = plan;
-  const text2 = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+  ctx.planVersion = Math.max(0, Number(ctx.planVersion) || 0) + 1;
+  const text2 = plan.map(
+    (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
+  ).join("\n");
   return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
 }
 function expandResult(ctx, args) {
@@ -8426,6 +8540,7 @@ var KEYWORD_RULES = [
 ];
 var PRIORITY = [INTENTS.BROWSER, INTENTS.KNOWLEDGE, INTENTS.RESEARCH, INTENTS.CHAT];
 var CONTINUATION_RE = /^(继续|接着|下一步|好的|可以|继续吧|然后呢|再来|再试一次|就这样|是的)[，。！？!?,\s]*$/u;
+var IMPERATIVE_BROWSER_MUTATION_RE = /^(?:请|麻烦|帮我|给我|替我)?\s*(?:(?:创建|新建|建立|添加|删除|移除|修改|更新|重命名|提交|保存|发布|发送|上传|下载|注册|登录|打开|关闭|勾选|选择|填写|点击|滚动)|(?:把|将).{1,40}(?:创建|新建|删除|移除|修改|更新|重命名|提交|保存|发布|发送|上传|下载|设置|改))/u;
 function scoreIntent(text2) {
   const scores = { [INTENTS.BROWSER]: 0, [INTENTS.KNOWLEDGE]: 0, [INTENTS.RESEARCH]: 0, [INTENTS.CHAT]: 0 };
   for (const rule of KEYWORD_RULES) {
@@ -8448,6 +8563,18 @@ function detectIntent(instruction = "", history = [], opts = {}) {
     if (lastUser) sourceText = lastUser.content;
   }
   const scores = scoreIntent(sourceText);
+  if (IMPERATIVE_BROWSER_MUTATION_RE.test(String(sourceText || "").trim())) {
+    return {
+      intent: INTENTS.BROWSER,
+      label: INTENT_DEFS[INTENTS.BROWSER].label,
+      confidence: "high",
+      includeMcp: INTENT_DEFS[INTENTS.BROWSER].includeMcp,
+      keyword: extractKeyword(sourceText),
+      sourceText,
+      viaContinuation,
+      reason: "\u6307\u4EE4\u4EE5\u660E\u786E\u9875\u9762\u64CD\u4F5C\u52A8\u8BCD\u5F00\u5934\uFF0C\u6309\u6D4F\u89C8\u5668\u64CD\u4F5C\u5904\u7406"
+    };
+  }
   const intent = PRIORITY.slice().sort((a, b) => scores[b] - scores[a])[0];
   const maxScore = scores[intent];
   const secondScore = Math.max(...PRIORITY.filter((name) => name !== intent).map((name) => scores[name]));
@@ -8593,7 +8720,7 @@ function buildStableSystemPrompt(toolNames = [], skills = []) {
     "6. \u82E5\u5408\u6210\u70B9\u51FB/\u8F93\u5165\u65E0\u6548\uFF08\u8FD4\u56DE\u201C\u4E0D\u53EF\u64CD\u4F5C\u201D\u6216\u9875\u9762\u65E0\u53D8\u5316\uFF09\uFF0C\u53EF\u6539\u7528 CDP \u5DE5\u5177\uFF1A\u5148\u7528 get_ax_snapshot \u53D6\u4EA4\u4E92\u8282\u70B9\u7684\u89C6\u53E3\u5750\u6807\uFF0C\u518D\u7528 click_at / hover_element \u6309\u5750\u6807\u64CD\u4F5C\uFF1Bcanvas/\u865A\u62DF\u5217\u8868\u7B49\u65E0 DOM \u573A\u666F\u540C\u6837\u5982\u6B64\u3002",
     "7. \u64CD\u4F5C\u8DE8\u57DF iframe\uFF08\u5982\u5D4C\u5165\u7684\u7F16\u8F91\u5668\u3001\u767B\u5F55\u6846\u3001\u652F\u4ED8\u8868\u5355\uFF09\uFF1A\u5148\u7528 list_frames \u627E\u5230 frameId\uFF0C\u7528 get_page_snapshot({frameId}) \u8BFB\u53D6\u8BE5\u6846\u67B6\uFF1B\u60F3\u4E00\u6B21\u770B\u5168\u53EF\u7528 get_page_snapshot({includeFrames:true})\uFF0C\u6B64\u65F6\u5B50\u6846\u67B6\u5143\u7D20 ref \u5F62\u5982 f3:rf-2\uFF0C\u539F\u6837\u4F20\u56DE click_element/type_text \u5373\u53EF\u81EA\u52A8\u8DEF\u7531\u5230\u5BF9\u5E94\u6846\u67B6\u3002",
     '8. \u6D41\u7A0B\u590D\u7528\u4E0E\u64A4\u9500\uFF1A\u7528\u6237\u8BF4\u300C\u8BB0\u4F4F\u8FD9\u4E2A\u6D41\u7A0B / \u4EE5\u540E\u90FD\u8FD9\u4E48\u505A\u300D\u65F6\uFF0C\u5B8C\u6210\u4E00\u6B21\u540E\u8C03\u7528 macro({op:"save", name:"\u2026"}) \u4FDD\u5B58\uFF1B\u7528\u6237\u8981\u6C42\u6267\u884C\u67D0\u4E2A\u5DF2\u4FDD\u5B58\u6D41\u7A0B\u65F6\uFF0C\u4F18\u5148 macro({op:"run", name:"\u2026"}) \u4E00\u952E\u56DE\u653E\uFF08\u7CFB\u7EDF\u63D0\u793A\u91CC\u4F1A\u5217\u51FA\u672C\u7AD9\u70B9\u5DF2\u6709\u7684\u5B8F\uFF1Bname \u5FC5\u987B\u7167\u6284\uFF0C\u4E0D\u8981\u7528\u63CF\u8FF0\uFF09\u3002\u7528\u6237\u8BF4\u300C\u64A4\u9500 / \u64A4\u56DE\u4E0A\u4E00\u6B65\u300D\u65F6\u8C03\u7528 undo_last_action\u3002\u7528\u6237\u8BF4\u300C\u4FE1\u4EFB\u8FD9\u4E2A\u7F51\u7AD9 / \u4EE5\u540E\u522B\u518D\u95EE\u6211\u300D\u65F6\u8C03\u7528 trust_site\u3002',
-    '9. \u5B9A\u4F4D\u5143\u7D20\u4F18\u5148\u7EA7\uFF1Aref\uFF08\u5F53\u524D\u5FEB\u7167\uFF09\u2192 role+name\uFF08\u5982 {role:"button",name:"\u767B\u5F55"}\uFF0C\u6700\u7A33\uFF09\u2192 testid \u2192 text \u2192 selector\u3002get_page_snapshot \u9ED8\u8BA4\u53EA\u7ED9\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u5143\u7D20\uFF1A\u770B\u5230 nextCursor / omittedByLimit \u65F6\u4E0D\u8981\u4EE5\u4E3A\u9875\u9762\u53EA\u6709\u8FD9\u4E9B\u5185\u5BB9\uFF1B\u5DF2\u77E5\u76EE\u6807\u3001\u627E custom element \u6216\u6DF1\u5165 Shadow DOM \u65F6\u7528 inspect_element({op:"query"})\uFF0C\u9700\u8981\u7EE7\u7EED\u6D4F\u89C8\u5219\u628A nextCursor \u539F\u6837\u56DE\u4F20\u3002query \u652F\u6301 selector / text / role+name / testid / region\uFF0C\u5E76\u7528 cursor \u7FFB\u9875\uFF1B\u5B83\u76F4\u63A5\u8FD4\u56DE\u53EF\u590D\u7528 ref\u3002**\u4E0D\u8981\u4E3A\u666E\u901A DOM \u67E5\u8BE2\u8C03\u7528 run_javascript**\u3002\u590D\u6742\u9875\u9762\u4E5F\u53EF\u7528 get_ax_snapshot \u62FF role/name\u3002\u591A\u6B65\u4EFB\u52A1\u7528 update_plan \u7EF4\u62A4\u8FDB\u5EA6\uFF1B\u5927\u5DE5\u5177\u7ED3\u679C\u88AB\u622A\u65AD\u65F6\u7528 expand_result \u5206\u6BB5\u8BFB\u53D6\u3002',
+    '9. \u5B9A\u4F4D\u5143\u7D20\u4F18\u5148\u7EA7\uFF1Aref\uFF08\u5F53\u524D\u5FEB\u7167\uFF09\u2192 role+name\uFF08\u5982 {role:"button",name:"\u767B\u5F55"}\uFF0C\u6700\u7A33\uFF09\u2192 testid \u2192 text \u2192 selector\u3002get_page_snapshot \u9ED8\u8BA4\u53EA\u7ED9\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u5143\u7D20\uFF1A\u770B\u5230 nextCursor / omittedByLimit \u65F6\u4E0D\u8981\u4EE5\u4E3A\u9875\u9762\u53EA\u6709\u8FD9\u4E9B\u5185\u5BB9\uFF1B\u5DF2\u77E5\u76EE\u6807\u3001\u627E custom element \u6216\u6DF1\u5165 Shadow DOM \u65F6\u7528 inspect_element({op:"query"})\uFF0C\u9700\u8981\u7EE7\u7EED\u6D4F\u89C8\u5219\u628A nextCursor \u539F\u6837\u56DE\u4F20\u3002query \u652F\u6301 selector / text / role+name / testid / region\uFF0C\u5E76\u7528 cursor \u7FFB\u9875\uFF1B\u5B83\u76F4\u63A5\u8FD4\u56DE\u53EF\u590D\u7528 ref\u3002**\u4E0D\u8981\u4E3A\u666E\u901A DOM \u67E5\u8BE2\u8C03\u7528 run_javascript**\u3002\u590D\u6742\u9875\u9762\u4E5F\u53EF\u7528 get_ax_snapshot \u62FF role/name\u3002\u5A92\u4F53\u9875\u4F18\u5148\u770B\u5FEB\u7167 runtime.media\uFF1B\u5B83\u6BD4\u201C\u6B63\u5728\u7F13\u51B2/00:00\u201D\u7B49\u53EF\u80FD\u6EDE\u540E\u7684\u53EF\u89C1\u6587\u6848\u53EF\u9760\u3002\u591A\u6B65\u4EFB\u52A1\u7528 update_plan \u7EF4\u62A4\u8FDB\u5EA6\uFF1B\u5E0C\u671B JEV \u6267\u884C\u67D0\u4E2A\u5B50\u76EE\u6807\u65F6\uFF0C\u4E3A\u5F53\u524D in_progress \u6B65\u9AA4\u586B\u5199 successPredicate\u3001allowedOperations \u548C leaseActions\uFF0C\u79DF\u7EA6\u8017\u5C3D\u6216\u5B50\u76EE\u6807\u53D8\u5316\u65F6\u518D\u6B21 update_plan\u3002\u5927\u5DE5\u5177\u7ED3\u679C\u88AB\u622A\u65AD\u65F6\u7528 expand_result \u5206\u6BB5\u8BFB\u53D6\u3002',
     "10. \u58F0\u79F0\u5B8C\u6210\uFF08complete_task\uFF09\u524D\u4F1A\u6709\u4E00\u6B21\u72EC\u7ACB\u6821\u9A8C\uFF1B\u82E5\u6536\u5230\u300C\u81EA\u6211\u6821\u9A8C\u672A\u901A\u8FC7\u300D\u7684\u53CD\u601D\uFF0C\u8BF4\u660E\u76EE\u6807\u53EF\u80FD\u5C1A\u672A\u8FBE\u6210\uFF0C\u8BF7\u636E\u5B9E\u6838\u5BF9\u9875\u9762\u72B6\u6001\u5E76\u6362\u4E00\u79CD\u505A\u6CD5\u7EE7\u7EED\uFF0C\u7EDD\u4E0D\u8C0E\u62A5\u5B8C\u6210\u3002",
     "11. \u53D9\u8FF0\u4E0E\u52A8\u4F5C\u4EA4\u66FF\uFF1A\u6BCF\u6B21\u8C03\u7528\u5DE5\u5177\u524D\uFF0C\u5148\u7528**\u4E00\u53E5\u8BDD\uFF08\u4E0D\u8D85\u8FC7 40 \u5B57\uFF09**\u8BF4\u660E\u4F60\u6B63\u8981\u505A\u4EC0\u4E48\u3001\u4E3A\u4EC0\u4E48\uFF0C\u4F8B\u5982\u300C\u5148\u626B\u63CF\u9875\u9762\u4E0A\u7684\u5E7F\u544A\u4F4D\u300D\u3002\u89C4\u5219 2 \u7981\u6B62\u7684\u662F\u300C\u58F0\u79F0\u7ED3\u679C\u5DF2\u7ECF\u8FBE\u6210\u300D\uFF0C\u4E0E\u300C\u8BF4\u660E\u610F\u56FE\u300D\u5E76\u4E0D\u51B2\u7A81\u2014\u2014\u4E24\u8005\u90FD\u8981\u505A\u5230\u3002**\u4E0D\u8981\u5728\u591A\u6B21\u5DE5\u5177\u8C03\u7528\u4E4B\u95F4\u5B8C\u5168\u4E0D\u8F93\u51FA\u6587\u5B57**\uFF0C\u5426\u5219\u7528\u6237\u8DDF\u4E0D\u4E0A\u8FDB\u5EA6\u3001\u4E5F\u65E0\u6CD5\u5224\u65AD\u4F60\u5728\u505A\u4EC0\u4E48\u3002",
     '12. \u4E00\u8F6E\u53EF\u4EE5\u53D1\u51FA**\u591A\u4E2A**\u5DE5\u5177\u8C03\u7528\uFF1A\u5F53\u82E5\u5E72\u64CD\u4F5C\u4E92\u4E0D\u4F9D\u8D56\u65F6\uFF08\u4F8B\u5982\u540C\u65F6\u8BFB\u53D6\u4E24\u4E2A\u533A\u5757\u3001\u540C\u65F6\u7ED9\u4E24\u5904\u5143\u7D20\u8BBE\u6837\u5F0F\u3001\u540C\u65F6\u53D6\u5FEB\u7167\u4E0E\u9875\u9762\u6587\u672C\uFF09\uFF0C\u8BF7\u5728**\u540C\u4E00\u8F6E**\u91CC\u4E00\u5E76\u53D1\u51FA\uFF0C\u4E0D\u8981\u4E00\u6B21\u4E00\u4E2A\u5730\u4E32\u884C\u8C03\u7528\u2014\u2014\u4E32\u884C\u4F1A\u6210\u500D\u62C9\u957F\u8017\u65F6\u3002\u53EA\u6709\u540E\u4E00\u6B65\u9700\u8981\u524D\u4E00\u6B65\u7ED3\u679C\u65F6\u624D\u5206\u8F6E\u3002\u9690\u85CF\u591A\u4E2A\u5143\u7D20\u8BF7\u4F18\u5148\u7528 annotate({op:"style", selectors:[\u2026]}) \u4E00\u6B21\u5B8C\u6210\u3002',
@@ -9530,6 +9657,7 @@ function createAgentRunContext(input) {
     agentWindowId: resumed ? finiteInteger(persisted.agentWindowId) : null,
     trace: resumed ? arrayCopy(persisted.trace) : [],
     plan: resumed ? arrayCopy(persisted.plan) : [],
+    planVersion: resumed ? Math.max(0, Math.floor(Number(persisted.planVersion) || 0)) : 0,
     resultStore: /* @__PURE__ */ new Map(),
     resultIds: new Set(resumed ? arrayCopy(persisted.resultIds) : []),
     lastSnapshot: null,
@@ -9825,6 +9953,14 @@ function restoreJevLoopState(value) {
     lastActionSignature: String(source.lastActionSignature || "").slice(0, 500),
     lastActionRouteKey: String(source.lastActionRouteKey || "").slice(0, 1e3),
     sameActionStreak: Math.min(nonNegativeInteger(source.sameActionStreak), 10),
+    waitStreak: Math.min(nonNegativeInteger(source.waitStreak), 10),
+    planVersion: nonNegativeInteger(source.planVersion),
+    planKey: String(source.planKey || "").slice(0, 160),
+    planActions: Math.min(
+      nonNegativeInteger(source.planActions),
+      JEV_HARD_MAX_CONSECUTIVE_ACTIONS
+    ),
+    readFallbackKey: String(source.readFallbackKey || "").slice(0, 1e3),
     lastOutcome: String(source.lastOutcome || "").slice(0, 80)
   };
 }
@@ -10047,7 +10183,9 @@ async function prepareAgentRun(options) {
   }
   const injectPlanMessage = () => {
     if (!ctx.plan || !ctx.plan.length) return;
-    const text2 = ctx.plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+    const text2 = ctx.plan.map(
+      (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
+    ).join("\n");
     messages.splice(1, 0, {
       role: "system",
       content: "\u3010\u5F53\u524D\u8BA1\u5212\u3011\n" + text2 + "\n\uFF08\u6BCF\u5B8C\u6210\u4E00\u6B65\u7528 update_plan \u66F4\u65B0\u72B6\u6001\u3002\uFF09"
@@ -10672,6 +10810,7 @@ var RunSessionPersistence = class {
       disabledTools: Array.from(state2.disabledTools || []),
       trace: tail(ctx.trace, 40),
       plan: head(ctx.plan, 20),
+      planVersion: Math.max(0, Math.floor(Number(ctx.planVersion) || 0)),
       totalTokens: state2.totalTokens,
       verificationCount: state2.verificationCount,
       lastDeniedSignature: state2.lastDeniedSignature,
@@ -11075,14 +11214,22 @@ var CompletionCoordinator = class {
       }
       verdict = outcome.kind === "verdict" ? outcome.verdict : null;
       if (!verdict) {
+        state2.ctx.verificationState = "unverified";
         state2.emit({
           type: "verify",
           ok: null,
           inconclusive: true,
-          reason: "\u6821\u9A8C\u5668\u672A\u80FD\u7ED9\u51FA\u7ED3\u8BBA\uFF08\u8D85\u65F6\u6216\u8C03\u7528\u5931\u8D25\uFF09\uFF0C\u5DF2\u6309\u901A\u8FC7\u653E\u884C\u3002"
+          verificationState: "unverified",
+          reason: "\u72EC\u7ACB\u6821\u9A8C\u4E0D\u53EF\u7528\uFF08\u8D85\u65F6\u6216\u8C03\u7528\u5931\u8D25\uFF09\uFF1B\u4EC5\u4F9D\u636E\u5F53\u524D\u786E\u5B9A\u6027\u8BC1\u636E\u4EA4\u4ED8\uFF0C\u672A\u6807\u8BB0\u4E3A\u5DF2\u9A8C\u8BC1\u3002"
         });
-        state2.trace({ phase: "verify", ok: null, reason: "verifier-unavailable" });
+        state2.trace({
+          phase: "verify",
+          ok: null,
+          verificationState: "unverified",
+          reason: "verifier-unavailable"
+        });
       } else if (verdict.ok === false) {
+        state2.ctx.verificationState = "rejected";
         state2.verificationCount += 1;
         state2.lastDeniedSignature = signature;
         state2.emit({
@@ -11100,6 +11247,7 @@ var CompletionCoordinator = class {
         });
         return { kind: "reflect", reflection: buildVerificationReflection(verdict) };
       } else {
+        state2.ctx.verificationState = "verified";
         state2.emit({ type: "verify", ok: true, reason: verdict.reason });
         state2.trace({ phase: "verify", ok: true, reason: verdict.reason });
       }
@@ -12381,6 +12529,7 @@ Do not repeat satisfied steps. Choose CLICK only for a visible element that dire
 Choose TYPE_TEXT only for an empty or incorrect editable field. A typed query may still need a matching result selected.
 Do not toggle a checkbox, switch, or radio already in the requested state.
 If a required control is absent or disabled, choose WAIT, ACCESSIBILITY, or READ_PAGE when offered.
+When runtime.media is present, use its paused/currentTime/readyState as the authoritative playback state; stale loading text alone does not justify repeated WAIT.
 DONE requires visible evidence that all requirements are satisfied. A matching result alone does not prove every requirement.
 BLOCKED means no offered operation can make safe progress. High-risk publishing, sending, deleting, and payment controls are not offered.`;
 var TARGET_RULES = `Choose the best observed target if the next operation is the one named in this question.
@@ -12544,6 +12693,10 @@ function addChoice(operations, operation, description, options = {}) {
   };
 }
 function buildJevFastRequest(settings, context) {
+  const planStep = activePlanStep(context.plan);
+  const hasOperationContract = Boolean(planStep) && Object.prototype.hasOwnProperty.call(planStep, "allowedOperations");
+  const allowedPlanOperations = hasOperationContract ? new Set(normalizePlanOperations(planStep?.allowedOperations) || []) : null;
+  const allows = (operation) => allowedPlanOperations === null || allowedPlanOperations.has(operation);
   const maxCandidates = Number.isFinite(Number(settings.maxElementCandidates)) ? Math.max(5, Math.min(100, Math.floor(Number(settings.maxElementCandidates)))) : JEV_MAX_ELEMENT_ACTIONS;
   const minReadConfidence = Number.isFinite(Number(settings.minReadConfidence)) ? Math.max(0, Math.min(1, Number(settings.minReadConfidence))) : JEV_MIN_READ_CONFIDENCE;
   const minActionConfidence = Number.isFinite(Number(settings.minActionConfidence)) ? Math.max(0, Math.min(1, Number(settings.minActionConfidence))) : JEV_MIN_ACTION_CONFIDENCE;
@@ -12560,8 +12713,12 @@ function buildJevFastRequest(settings, context) {
     )
   );
   const targetOperations = [];
-  if (Object.keys(elementSpace.clickTargets).length) targetOperations.push("CLICK");
-  if (Object.keys(elementSpace.typeTargets).length) targetOperations.push("TYPE_TEXT");
+  if (allows("CLICK") && Object.keys(elementSpace.clickTargets).length) {
+    targetOperations.push("CLICK");
+  }
+  if (allows("TYPE_TEXT") && Object.keys(elementSpace.typeTargets).length) {
+    targetOperations.push("TYPE_TEXT");
+  }
   const targets = {
     ...targetOperations.includes("CLICK") ? { CLICK: elementSpace.clickTargets } : {},
     ...targetOperations.includes("TYPE_TEXT") ? { TYPE_TEXT: elementSpace.typeTargets } : {}
@@ -12583,46 +12740,54 @@ function buildJevFastRequest(settings, context) {
       minBranchConfidence: minTargetOperationConfidence
     });
   }
-  addChoice(operations, "READ_PAGE", "Read the current visible page text when the supplied text is incomplete.", {
-    toolName: "read_current_page",
-    minConfidence: minReadConfidence
-  });
-  if (/(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ""))) {
+  if (allows("READ_PAGE")) {
+    addChoice(operations, "READ_PAGE", "Read the current visible page text when the supplied text is incomplete.", {
+      toolName: "read_current_page",
+      minConfidence: minReadConfidence
+    });
+  }
+  if (allows("READ_TABLE") && /(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ""))) {
     addChoice(operations, "READ_TABLE", "Read a structured table or grid needed for the current goal.", {
       toolName: "read_table",
       minConfidence: minReadConfidence
     });
   }
-  addChoice(operations, "ACCESSIBILITY", "Read the accessibility tree for custom controls or role/name targets.", {
-    toolName: "get_ax_snapshot",
-    args: { limit: 80 },
-    minConfidence: minReadConfidence
-  });
-  addChoice(operations, "DIAGNOSTICS", "Read browser diagnostics when the page or content script appears broken.", {
-    toolName: "read_diagnostics",
-    minConfidence: minReadConfidence
-  });
+  if (allows("ACCESSIBILITY")) {
+    addChoice(operations, "ACCESSIBILITY", "Read the accessibility tree for custom controls or role/name targets.", {
+      toolName: "get_ax_snapshot",
+      args: { limit: 80 },
+      minConfidence: minReadConfidence
+    });
+  }
+  if (allows("DIAGNOSTICS")) {
+    addChoice(operations, "DIAGNOSTICS", "Read browser diagnostics when the page or content script appears broken.", {
+      toolName: "read_diagnostics",
+      minConfidence: minReadConfidence
+    });
+  }
   const scroll = context.snapshot?.scroll;
-  if (Number(scroll?.y || 0) > 0) {
+  if (allows("SCROLL_UP") && Number(scroll?.y || 0) > 0) {
     addChoice(operations, "SCROLL_UP", "Scroll upward to reveal controls or content above the viewport.", {
       toolName: "scroll_page",
       args: { y: -600 },
       minConfidence: minReadConfidence
     });
   }
-  if (scroll && Number(scroll.height || 0) > Number(scroll.y || 0) + Number(scroll.viewport || 0)) {
+  if (allows("SCROLL_DOWN") && scroll && Number(scroll.height || 0) > Number(scroll.y || 0) + Number(scroll.viewport || 0)) {
     addChoice(operations, "SCROLL_DOWN", "Scroll downward to reveal controls or content below the viewport.", {
       toolName: "scroll_page",
       args: { y: 600 },
       minConfidence: minReadConfidence
     });
   }
-  addChoice(
-    operations,
-    "WAIT",
-    "Wait briefly and observe again when the needed control or result is still loading.",
-    { minConfidence: minWaitConfidence }
-  );
+  if (allows("WAIT")) {
+    addChoice(
+      operations,
+      "WAIT",
+      "Wait briefly and observe again when the needed control or result is still loading.",
+      { minConfidence: minWaitConfidence }
+    );
+  }
   addChoice(
     operations,
     "DONE",
@@ -12637,12 +12802,19 @@ function buildJevFastRequest(settings, context) {
   );
   const criteria = {};
   for (const operation of Object.values(operations)) criteria[operation.operation] = operation.description;
+  const planRule = planStep ? [
+    "Current plan step: " + clip(planStep.text, 240),
+    planStep.successPredicate ? "Completion predicate: " + clip(planStep.successPredicate, 400) : "",
+    allowedPlanOperations ? "Only offered plan operations are authorized; DONE and BLOCKED remain available." : "This plan step does not restrict the operation set.",
+    Number.isFinite(Number(context.leaseRemaining)) ? "Remaining fast-action lease: " + Math.max(0, Math.floor(Number(context.leaseRemaining))) : ""
+  ].filter(Boolean).join("\n") : "";
+  const operationRules = planRule ? [NEXT_ACTION_RULES, planRule] : [NEXT_ACTION_RULES];
   const questions = {
     [JEV_OPERATION_QUESTION]: {
       type: "choice",
       instructions: {
         goal: clip(context.instruction, 4e3),
-        rules: NEXT_ACTION_RULES
+        rules: operationRules
       },
       criteria
     }
@@ -12653,7 +12825,7 @@ function buildJevFastRequest(settings, context) {
       instructions: {
         goal: clip(context.instruction, 4e3),
         operation: "CLICK",
-        rules: [NEXT_ACTION_RULES, TARGET_RULES]
+        rules: [NEXT_ACTION_RULES, planRule, TARGET_RULES].filter(Boolean)
       },
       criteria: Object.fromEntries(
         Object.entries(targets.CLICK).map(([key, target]) => [key, target.description])
@@ -12666,7 +12838,7 @@ function buildJevFastRequest(settings, context) {
       instructions: {
         goal: clip(context.instruction, 4e3),
         operation: "TYPE_TEXT",
-        rules: [NEXT_ACTION_RULES, TARGET_RULES]
+        rules: [NEXT_ACTION_RULES, planRule, TARGET_RULES].filter(Boolean)
       },
       criteria: Object.fromEntries(
         Object.entries(targets.TYPE_TEXT).map(([key, target]) => [key, target.description])
@@ -12682,7 +12854,15 @@ function buildJevFastRequest(settings, context) {
       task: {
         intent: context.intent,
         goal: clip(context.instruction, 4e3),
-        selectedText: clip(context.selectedText, 4e3)
+        selectedText: clip(context.selectedText, 4e3),
+        plan: planStep ? {
+          version: Math.max(0, Math.floor(Number(context.planVersion) || 0)),
+          stepId: String(planStep.id || ""),
+          subgoal: clip(planStep.text, 240),
+          successPredicate: clip(planStep.successPredicate, 400),
+          allowedOperations: allowedPlanOperations ? Array.from(allowedPlanOperations) : null,
+          leaseRemaining: Number.isFinite(Number(context.leaseRemaining)) ? Math.max(0, Math.floor(Number(context.leaseRemaining))) : null
+        } : null
       },
       page: {
         url: clip(context.pageUrl, 2e3),
@@ -12691,7 +12871,8 @@ function buildJevFastRequest(settings, context) {
       },
       observation: context.snapshot ? {
         fingerprint: clip(context.snapshot.fingerprint, 200),
-        capabilities: context.snapshot.capabilities || {}
+        capabilities: context.snapshot.capabilities || {},
+        runtime: context.snapshot.runtime || null
       } : null,
       elements,
       recentActions: (context.recentTools || []).slice(-10)
@@ -12737,7 +12918,9 @@ function interpretJevFastDecision(response, bundle) {
     return {
       kind: "blocked",
       reason: "low-confidence",
+      operation: operation.operation,
       confidence: operationAnswer.confidence,
+      probabilities: { ...operationAnswer.probabilities },
       description: operation.operation + " \u7F6E\u4FE1\u5EA6\u4E0D\u8DB3"
     };
   }
@@ -12815,7 +12998,9 @@ function interpretJevFastDecision(response, bundle) {
     return {
       kind: "blocked",
       reason: "low-confidence",
+      operation: operation.operation,
       confidence: Math.min(operationConfidence, targetConfidence || 0),
+      probabilities: { ...operationAnswer.probabilities },
       description: operation.operation + " \u76EE\u6807\u5206\u652F\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF08" + Math.round(operationConfidence * 100) + "% < " + Math.round(operation.minBranchConfidence * 100) + "%\uFF09"
     };
   }
@@ -12824,7 +13009,9 @@ function interpretJevFastDecision(response, bundle) {
     return {
       kind: "blocked",
       reason: "low-confidence",
+      operation: operation.operation,
       confidence,
+      probabilities: { ...operationAnswer.probabilities },
       description: operation.operation + " \u7F6E\u4FE1\u5EA6\u4E0D\u8DB3"
     };
   }
@@ -12876,7 +13063,8 @@ function formatJevDecisionSummary(shadow, decision, latencyMs) {
   if (decision.kind === "blocked") {
     return prefix + "\uFF1A\u53D7\u963B\uFF0C\u4EA4\u7ED9\u6162\u601D\u8003\uFF1A" + decision.description + "\uFF08" + Math.round(latencyMs) + "ms\uFF09";
   }
-  return prefix + "\uFF1A" + decision.operation + (decision.target ? " \u2192 " + decision.target.label : "") + "\uFF08" + Math.round(decision.confidence * 100) + "%\uFF0C" + Math.round(latencyMs) + "ms\uFF09";
+  const fallback = /确定性回退/.test(decision.description) ? "\uFF08\u53EA\u8BFB\u56DE\u9000\uFF09" : "";
+  return prefix + "\uFF1A" + decision.operation + (decision.target ? " \u2192 " + decision.target.label : "") + fallback + "\uFF08" + Math.round(decision.confidence * 100) + "%\uFF0C" + Math.round(latencyMs) + "ms\uFF09";
 }
 
 // lib/application/agent/jev-diagnostics.ts
@@ -12975,11 +13163,39 @@ var JevFastController = class {
     this.writeDiagnostic = writeDiagnostic;
     this.textHelper = textHelper;
   }
+  syncPlanContract() {
+    const step = activePlanStep(this.state.ctx.plan);
+    const version = Math.max(0, Math.floor(Number(this.state.ctx.planVersion) || 0));
+    const key = planStepKey(step, version);
+    const loop = this.state.jevLoop;
+    if (loop.planKey !== key || loop.planVersion !== version) {
+      loop.planKey = key;
+      loop.planVersion = version;
+      loop.planActions = 0;
+      this.lastBlockedRoute = "";
+      this.state.trace({
+        phase: "jev-plan",
+        planVersion: version,
+        stepId: String(step?.id || ""),
+        leaseActions: Number(step?.leaseActions) || null,
+        allowedOperations: Array.isArray(step?.allowedOperations) ? step.allowedOperations.slice() : null
+      });
+    }
+    return step;
+  }
+  planLeaseRemaining() {
+    const step = this.syncPlanContract();
+    const lease = Number(step?.leaseActions);
+    if (!Number.isFinite(lease) || lease < 1) return null;
+    return Math.max(0, Math.floor(lease) - this.state.jevLoop.planActions);
+  }
   canAttempt() {
     const settings = this.state.settings.jev;
     if (!settings || settings.enabled !== true) return false;
     if (this.state.intent === INTENTS.CHAT) return false;
     if (!settings.apiKey || !settings.model || !settings.baseUrl) return false;
+    const leaseRemaining = this.planLeaseRemaining();
+    if (leaseRemaining === 0) return false;
     const loop = this.state.jevLoop;
     const maxAttempts = Number(settings.maxAttemptsPerRun) > 0 ? Math.floor(Number(settings.maxAttemptsPerRun)) : JEV_SETTINGS_DEFAULTS.maxAttemptsPerRun;
     const maxActions = Number(settings.maxConsecutiveActions) > 0 ? Math.floor(Number(settings.maxConsecutiveActions)) : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
@@ -13014,7 +13230,9 @@ var JevFastController = class {
     const decisions = [];
     const toolOutcomes = [];
     let latencyMs = 0;
-    const maxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0 ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions)) : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    const configuredMaxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0 ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions)) : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    const leaseRemaining = this.planLeaseRemaining();
+    const maxActions = leaseRemaining === null ? configuredMaxActions : Math.min(configuredMaxActions, leaseRemaining);
     for (let step = 0; step < maxActions; step += 1) {
       if (!this.canAttempt()) break;
       const result = await this.runOnce(iter, persist);
@@ -13047,6 +13265,9 @@ var JevFastController = class {
       pageText: this.state.ctx.lastReadFullText || this.state.ctx.lastEvidence || this.state.ctx.page,
       snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames,
+      plan: this.state.ctx.plan,
+      planVersion: this.state.ctx.planVersion,
+      leaseRemaining: this.planLeaseRemaining(),
       completedTypeTargets: (this.state.ctx.completedTypeTargets || []).filter((entry) => entry && entry.url === this.state.ctx.pageUrl).flatMap((entry) => [entry.ref, entry.selector]).map((value) => String(value || "")).filter(Boolean)
     });
     this.recordDiagnostic({
@@ -13070,7 +13291,26 @@ var JevFastController = class {
       return { kind: "skipped", reason: "request-failed", latencyMs: Date.now() - startedAt };
     }
     const latencyMs = Date.now() - startedAt;
-    const decision = interpretJevFastDecision(response, bundle);
+    let decision = interpretJevFastDecision(response, bundle);
+    let readFallback = false;
+    const readOperation = bundle.operations.READ_PAGE;
+    const fallbackKey = Math.max(0, Math.floor(Number(this.state.ctx.planVersion) || 0)) + "|" + String(this.state.ctx.pageUrl || "");
+    if (decision.kind === "blocked" && decision.reason === "low-confidence" && decision.operation === "READ_PAGE" && readOperation?.toolName === "read_current_page" && this.state.jevLoop.readFallbackKey !== fallbackKey) {
+      decision = {
+        kind: "act",
+        operation: "READ_PAGE",
+        actionKey: "READ_PAGE",
+        toolName: readOperation.toolName,
+        args: { ...readOperation.args || {} },
+        description: "READ_PAGE \u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF0C\u4F7F\u7528\u53EA\u8BFB\u786E\u5B9A\u6027\u56DE\u9000",
+        confidence: decision.confidence || 0,
+        operationConfidence: decision.confidence || 0,
+        targetConfidence: null,
+        probabilities: decision.probabilities || {}
+      };
+      this.state.jevLoop.readFallbackKey = fallbackKey;
+      readFallback = true;
+    }
     this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
     this.state.jevLoop.lastOutcome = decision.kind;
     this.state.trace({
@@ -13080,6 +13320,7 @@ var JevFastController = class {
       phaseName: phase,
       model: response.model,
       decision,
+      readFallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens
@@ -13089,6 +13330,7 @@ var JevFastController = class {
       mode: settings.shadowMode ? "shadow" : "live",
       phaseName: phase,
       decision,
+      readFallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -13098,7 +13340,7 @@ var JevFastController = class {
       state: settings.shadowMode ? "shadow" : decision.kind === "act" ? "act" : decision.kind === "done" ? "handoff" : "handoff",
       mode: settings.shadowMode ? "shadow" : "live",
       outcome: decision.kind === "act" ? decision.operation : decision.kind,
-      reason: decision.kind === "blocked" ? decision.reason : decision.kind === "done" ? "done-claim" : void 0,
+      reason: readFallback ? "low-confidence-read-fallback" : decision.kind === "blocked" ? decision.reason : decision.kind === "done" ? "done-claim" : void 0,
       phase,
       tool: decision.kind === "act" ? decision.toolName : void 0,
       latencyMs
@@ -13116,6 +13358,7 @@ var JevFastController = class {
     if (decision.kind === "blocked") {
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.jevLoop.sameActionStreak = 0;
+      this.state.jevLoop.waitStreak = 0;
       this.state.jevLoop.lastActionRouteKey = "";
       this.appendBlocked(iter, decision.reason, decision.description);
       await persist({ phase: "jev_decision" }).catch(() => {
@@ -13152,18 +13395,20 @@ var JevFastController = class {
     const loop = this.state.jevLoop;
     const previousActionIsComparable = loop.lastActionRouteKey === routeKey && signature === loop.lastActionSignature;
     const sameActionStreak = previousActionIsComparable ? loop.sameActionStreak : 0;
+    const repeatedCount = action.operation === "WAIT" ? loop.waitStreak : sameActionStreak;
     const configuredRepeatLimit = Number(
       this.state.settings.jev.maxRepeatedActionsWithoutProgress
     );
     const repeatLimit = Number.isFinite(configuredRepeatLimit) && configuredRepeatLimit >= 1 ? Math.min(10, Math.floor(configuredRepeatLimit)) : JEV_SETTINGS_DEFAULTS.maxRepeatedActionsWithoutProgress;
-    if (sameActionStreak >= repeatLimit) {
+    if (repeatedCount >= repeatLimit) {
       loop.consecutiveFastActions = 0;
       loop.sameActionStreak = 0;
-      loop.lastOutcome = "repeated-action";
+      loop.waitStreak = 0;
+      loop.lastOutcome = action.operation === "WAIT" ? "wait-limit" : "repeated-action";
       this.appendBlocked(
         iter,
-        "repeated-action",
-        "\u540C\u4E00\u52A8\u4F5C\u5728\u5F53\u524D\u9875\u9762\u72B6\u6001\u4E0B\u5DF2\u8FDE\u7EED\u5C1D\u8BD5 " + sameActionStreak + " \u6B21\u4E14\u65E0\u9875\u9762\u8FDB\u5C55"
+        loop.lastOutcome,
+        action.operation === "WAIT" ? "\u8FDE\u7EED\u7B49\u5F85 " + repeatedCount + " \u6B21\u4ECD\u672A\u786E\u8BA4\u76EE\u6807\u72B6\u6001" : "\u540C\u4E00\u52A8\u4F5C\u5728\u5F53\u524D\u9875\u9762\u72B6\u6001\u4E0B\u5DF2\u8FDE\u7EED\u5C1D\u8BD5 " + sameActionStreak + " \u6B21\u4E14\u65E0\u9875\u9762\u8FDB\u5C55"
       );
       await persist({ phase: "jev_decision" }).catch(() => {
       });
@@ -13199,8 +13444,10 @@ var JevFastController = class {
     const failed = this.state.failedToolNames.length > failuresBefore;
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
     this.state.jevLoop.sameActionStreak = previousActionIsComparable ? sameActionStreak + 1 : 1;
+    this.state.jevLoop.waitStreak = 0;
     this.state.jevLoop.lastActionRouteKey = routeKey;
     this.state.jevLoop.consecutiveFailures = failed ? this.state.jevLoop.consecutiveFailures + 1 : 0;
     this.state.jevLoop.lastOutcome = failed ? "tool-failed" : "act";
@@ -13242,8 +13489,10 @@ var JevFastController = class {
     const postActionRouteKey = this.currentRouteKey();
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
     this.state.jevLoop.sameActionStreak = postActionRouteKey === beforeRouteKey ? sameActionStreak : 0;
+    this.state.jevLoop.waitStreak = signature.startsWith("WAIT:") ? this.state.jevLoop.waitStreak + 1 : 0;
     this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
     this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastOutcome = "act";
@@ -13327,6 +13576,7 @@ var JevFastController = class {
     this.state.jevLoop.lastActionSignature = "";
     this.state.jevLoop.lastActionRouteKey = "";
     this.state.jevLoop.sameActionStreak = 0;
+    this.state.jevLoop.waitStreak = 0;
     this.state.jevLoop.lastOutcome = "slow-handoff";
   }
   appendBlocked(iter, reason, detail = "") {
@@ -16611,7 +16861,7 @@ function applyRunEvent(state2, event) {
           color: "#16a34a"
         };
       } else if (event.inconclusive) {
-        pushStepNotice(state2, "\u2026 \u672A\u80FD\u5B8C\u6210\u6821\u9A8C\uFF1A" + (event.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528") + "\uFF08\u5DF2\u653E\u884C\uFF09", "#6b7280");
+        pushStepNotice(state2, "\u2026 \u672A\u72EC\u7ACB\u9A8C\u8BC1\uFF1A" + (event.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528"), "#6b7280");
       } else {
         pushStepNotice(
           state2,
@@ -16857,22 +17107,50 @@ var RunLifecycleService = class {
   hub;
   ports;
   graceMs;
-  constructor(registry, hub, ports, graceMs = 8e3) {
+  navigationHoldMs;
+  navigationPollMs;
+  navigationHoldStarted = /* @__PURE__ */ new Map();
+  constructor(registry, hub, ports, graceMs = 8e3, navigationHoldMs = 3e4, navigationPollMs = 1e3) {
     this.registry = registry;
     this.hub = hub;
     this.ports = ports;
     this.graceMs = graceMs;
+    this.navigationHoldMs = Math.max(graceMs, navigationHoldMs);
+    this.navigationPollMs = Math.max(100, navigationPollMs);
   }
   clearAbortTimer(runId) {
-    this.registry.clearAbortTimer(runId);
+    const id = String(runId || "");
+    this.navigationHoldStarted.delete(id);
+    this.registry.clearAbortTimer(id);
   }
   scheduleAbortIfNoReattach(runId, tabId) {
     const id = String(runId || "");
-    this.registry.scheduleAbort(id, this.graceMs, () => {
+    if (!this.navigationHoldStarted.has(id)) {
+      this.navigationHoldStarted.set(id, Date.now());
+    }
+    const attemptAbort = () => {
       const record2 = this.registry.runFor(tabId);
-      if (!record2 || String(record2.runId || "") !== id) return;
+      if (!record2 || String(record2.runId || "") !== id) {
+        this.navigationHoldStarted.delete(id);
+        return;
+      }
       const channel = this.registry.channelFor(id);
-      if (channel && channel.isAttached()) return;
+      if (channel && channel.isAttached()) {
+        this.navigationHoldStarted.delete(id);
+        return;
+      }
+      const navigating = tabId != null && typeof this.ports.isTabNavigating === "function" && this.ports.isTabNavigating(Number(tabId));
+      const startedAt = this.navigationHoldStarted.get(id) || Date.now();
+      const remainingHold = this.navigationHoldMs - (Date.now() - startedAt);
+      if (navigating && remainingHold > 0) {
+        this.registry.scheduleAbort(
+          id,
+          Math.min(this.navigationPollMs, remainingHold),
+          attemptAbort
+        );
+        return;
+      }
+      this.navigationHoldStarted.delete(id);
       const controller = record2.controller;
       if (controller && !controller.__rfFinished) {
         this.stats.aborts += 1;
@@ -16881,7 +17159,8 @@ var RunLifecycleService = class {
         } catch (error) {
         }
       }
-    });
+    };
+    this.registry.scheduleAbort(id, this.graceMs, attemptAbort);
   }
   requestStop(params, requesterTabId) {
     const wantedRunId = String(params.runId || "");
@@ -17635,9 +17914,25 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 var runRegistry = createTabRunRegistry();
 var REATTACH_GRACE_MS = 8e3;
+var NAVIGATION_SETTLE_GRACE_MS = 3e3;
+var navigatingTabs = /* @__PURE__ */ new Map();
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    navigatingTabs.set(tabId, Number.MAX_SAFE_INTEGER);
+  } else if (changeInfo.status === "complete") {
+    navigatingTabs.set(tabId, Date.now() + NAVIGATION_SETTLE_GRACE_MS);
+  }
+});
 var runLifecycle = new RunLifecycleService(runRegistry, runHub, {
   sendToTab(tabId, message) {
     chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  isTabNavigating(tabId) {
+    const id = Number(tabId);
+    const until = navigatingTabs.get(id) || 0;
+    if (until > Date.now()) return true;
+    navigatingTabs.delete(id);
+    return false;
   }
 }, REATTACH_GRACE_MS);
 var runStats = runLifecycle.stats;

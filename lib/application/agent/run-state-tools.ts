@@ -12,8 +12,9 @@
 // expand_result 的 offset 由**模型**给（它按自己估的字符位置切），所以这条路径上
 // "切点落在代理对中间"完全可能发生 —— 而它读出来的又是页面原文（数学/表情最密集）。
 // 一律走 rangeSafe，并把**实际取到的区间**如实写进回执（回退后就不要再报请求区间了）。
-import { rangeSafe, sliceSafe } from '../../shared/surrogates.ts';
+import { rangeSafe } from '../../shared/surrogates.ts';
 import { summarizeRunTrace, formatRunMetrics } from './run-metrics.ts';
+import { describePlanStep, normalizePlanStep } from './plan-contract.ts';
 import type { RunCtx } from './types.ts';
 import type { RunStateDeps } from './tool-deps.ts';
 
@@ -23,13 +24,17 @@ export function updatePlan(ctx: RunCtx, args: Record<string, unknown>) {
   const plan = raw
     .filter((it: Record<string, unknown>) => it && typeof it.text === 'string' && it.text.trim())
     .slice(0, 20)
-    .map((it: Record<string, unknown>) => ({
-      text: sliceSafe(String(it.text).trim(), 0, 120),
-      status: ['pending', 'in_progress', 'done'].includes(it.status as string) ? (it.status as string) : 'pending',
-    }));
+    .map((it: Record<string, unknown>, index: number) => normalizePlanStep(it, index));
   ctx.plan = plan;
+  ctx.planVersion = Math.max(0, Number(ctx.planVersion) || 0) + 1;
   const text = plan
-    .map((p, i) => (p.status === 'done' ? '✓' : p.status === 'in_progress' ? '▶' : '○') + ' ' + (i + 1) + '. ' + p.text)
+    .map((p, i) =>
+      (p.status === 'done' ? '✓' : p.status === 'in_progress' ? '▶' : '○') +
+      ' ' +
+      (i + 1) +
+      '. ' +
+      describePlanStep(p)
+    )
     .join('\n');
   return { result: '计划已更新（' + plan.length + ' 步）：\n' + (text || '（空计划）') };
 }

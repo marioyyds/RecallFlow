@@ -601,9 +601,27 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // controller / 最近 run / 输出通道 / reattach 宽限定时器必须一起维护。
 const runRegistry = createTabRunRegistry();
 const REATTACH_GRACE_MS = 8000;
+const NAVIGATION_SETTLE_GRACE_MS = 3000;
+const navigatingTabs = new Map<number, number>();
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    navigatingTabs.set(tabId, Number.MAX_SAFE_INTEGER);
+  } else if (changeInfo.status === 'complete') {
+    // Give the new content script time to query-run and attach even after the
+    // document reports complete.
+    navigatingTabs.set(tabId, Date.now() + NAVIGATION_SETTLE_GRACE_MS);
+  }
+});
 const runLifecycle = new RunLifecycleService(runRegistry, runHub, {
   sendToTab(tabId, message) {
     chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, () => void chrome.runtime.lastError);
+  },
+  isTabNavigating(tabId) {
+    const id = Number(tabId);
+    const until = navigatingTabs.get(id) || 0;
+    if (until > Date.now()) return true;
+    navigatingTabs.delete(id);
+    return false;
   },
 }, REATTACH_GRACE_MS);
 const runStats = runLifecycle.stats;

@@ -291,9 +291,8 @@ export function applyRunEvent(state: RunState, event: any): RunState {
           color: '#16a34a',
         };
       } else if (event.inconclusive) {
-        // 校验器自己没给出结论（超时/报错），任务按通过放行。
-        // 不能沿用下面的"校验未通过"——那是一句自相矛盾的话（否了却放行）。
-        pushStepNotice(state, '… 未能完成校验：' + (event.reason || '校验器不可用') + '（已放行）', '#6b7280');
+        // 校验器不可用不等于校验通过：单独标记为"未独立验证"。
+        pushStepNotice(state, '… 未独立验证：' + (event.reason || '校验器不可用'), '#6b7280');
       } else {
         pushStepNotice(
           state,

@@ -5,7 +5,9 @@ import {
   type JevSystemOneRequest,
   type JevSystemOneResponse,
 } from './jev-contract.ts';
+import { activePlanStep, normalizePlanOperations } from './plan-contract.ts';
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
+import type { PlanStep } from './types.ts';
 
 export const JEV_OPERATION_QUESTION = 'operation';
 export const JEV_CLICK_TARGET_QUESTION = 'click_target';
@@ -113,7 +115,9 @@ export type JevFastDecision =
         | 'missing-target'
         | 'unknown-target'
         | 'invalid-answer';
+      operation?: JevOperation;
       confidence?: number;
+      probabilities?: Record<string, number>;
       description: string;
     };
 
@@ -129,6 +133,10 @@ export interface JevFastContext {
   recentTools?: string[];
   /** 当前 URL 上已由快/慢路径成功写过的输入目标，快路径不得再次追加。 */
   completedTypeTargets?: string[];
+  /** 慢模型维护的计划；当前 in_progress 步骤可收紧快路动作空间。 */
+  plan?: PlanStep[];
+  planVersion?: number;
+  leaseRemaining?: number | null;
 }
 
 const NEXT_ACTION_RULES = `Advance the user's entire goal from the CURRENT page using one operation.
@@ -137,6 +145,7 @@ Do not repeat satisfied steps. Choose CLICK only for a visible element that dire
 Choose TYPE_TEXT only for an empty or incorrect editable field. A typed query may still need a matching result selected.
 Do not toggle a checkbox, switch, or radio already in the requested state.
 If a required control is absent or disabled, choose WAIT, ACCESSIBILITY, or READ_PAGE when offered.
+When runtime.media is present, use its paused/currentTime/readyState as the authoritative playback state; stale loading text alone does not justify repeated WAIT.
 DONE requires visible evidence that all requirements are satisfied. A matching result alone does not prove every requirement.
 BLOCKED means no offered operation can make safe progress. High-risk publishing, sending, deleting, and payment controls are not offered.`;
 
@@ -372,6 +381,15 @@ export function buildJevFastRequest(
   settings: JevPolicySettings,
   context: JevFastContext
 ): JevFastRequestBundle {
+  const planStep = activePlanStep(context.plan);
+  const hasOperationContract =
+    Boolean(planStep) &&
+    Object.prototype.hasOwnProperty.call(planStep, 'allowedOperations');
+  const allowedPlanOperations = hasOperationContract
+    ? new Set<string>(normalizePlanOperations(planStep?.allowedOperations) || [])
+    : null;
+  const allows = (operation: JevOperation): boolean =>
+    allowedPlanOperations === null || allowedPlanOperations.has(operation);
   const maxCandidates = Number.isFinite(Number(settings.maxElementCandidates))
     ? Math.max(5, Math.min(100, Math.floor(Number(settings.maxElementCandidates))))
     : JEV_MAX_ELEMENT_ACTIONS;
@@ -403,8 +421,12 @@ export function buildJevFastRequest(
     ),
   );
   const targetOperations: JevOperation[] = [];
-  if (Object.keys(elementSpace.clickTargets).length) targetOperations.push('CLICK');
-  if (Object.keys(elementSpace.typeTargets).length) targetOperations.push('TYPE_TEXT');
+  if (allows('CLICK') && Object.keys(elementSpace.clickTargets).length) {
+    targetOperations.push('CLICK');
+  }
+  if (allows('TYPE_TEXT') && Object.keys(elementSpace.typeTargets).length) {
+    targetOperations.push('TYPE_TEXT');
+  }
   const targets: JevFastRequestBundle['targets'] = {
     ...(targetOperations.includes('CLICK') ? { CLICK: elementSpace.clickTargets } : {}),
     ...(targetOperations.includes('TYPE_TEXT') ? { TYPE_TEXT: elementSpace.typeTargets } : {}),
@@ -427,27 +449,36 @@ export function buildJevFastRequest(
       minBranchConfidence: minTargetOperationConfidence,
     });
   }
-  addChoice(operations, 'READ_PAGE', 'Read the current visible page text when the supplied text is incomplete.', {
-    toolName: 'read_current_page',
-    minConfidence: minReadConfidence,
-  });
-  if (/(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ''))) {
+  if (allows('READ_PAGE')) {
+    addChoice(operations, 'READ_PAGE', 'Read the current visible page text when the supplied text is incomplete.', {
+      toolName: 'read_current_page',
+      minConfidence: minReadConfidence,
+    });
+  }
+  if (
+    allows('READ_TABLE') &&
+    /(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ''))
+  ) {
     addChoice(operations, 'READ_TABLE', 'Read a structured table or grid needed for the current goal.', {
       toolName: 'read_table',
       minConfidence: minReadConfidence,
     });
   }
-  addChoice(operations, 'ACCESSIBILITY', 'Read the accessibility tree for custom controls or role/name targets.', {
-    toolName: 'get_ax_snapshot',
-    args: { limit: 80 },
-    minConfidence: minReadConfidence,
-  });
-  addChoice(operations, 'DIAGNOSTICS', 'Read browser diagnostics when the page or content script appears broken.', {
-    toolName: 'read_diagnostics',
-    minConfidence: minReadConfidence,
-  });
+  if (allows('ACCESSIBILITY')) {
+    addChoice(operations, 'ACCESSIBILITY', 'Read the accessibility tree for custom controls or role/name targets.', {
+      toolName: 'get_ax_snapshot',
+      args: { limit: 80 },
+      minConfidence: minReadConfidence,
+    });
+  }
+  if (allows('DIAGNOSTICS')) {
+    addChoice(operations, 'DIAGNOSTICS', 'Read browser diagnostics when the page or content script appears broken.', {
+      toolName: 'read_diagnostics',
+      minConfidence: minReadConfidence,
+    });
+  }
   const scroll = context.snapshot?.scroll;
-  if (Number(scroll?.y || 0) > 0) {
+  if (allows('SCROLL_UP') && Number(scroll?.y || 0) > 0) {
     addChoice(operations, 'SCROLL_UP', 'Scroll upward to reveal controls or content above the viewport.', {
       toolName: 'scroll_page',
       args: { y: -600 },
@@ -455,6 +486,7 @@ export function buildJevFastRequest(
     });
   }
   if (
+    allows('SCROLL_DOWN') &&
     scroll &&
     Number(scroll.height || 0) > Number(scroll.y || 0) + Number((scroll as any).viewport || 0)
   ) {
@@ -464,12 +496,14 @@ export function buildJevFastRequest(
       minConfidence: minReadConfidence,
     });
   }
-  addChoice(
-    operations,
-    'WAIT',
-    'Wait briefly and observe again when the needed control or result is still loading.',
-    { minConfidence: minWaitConfidence }
-  );
+  if (allows('WAIT')) {
+    addChoice(
+      operations,
+      'WAIT',
+      'Wait briefly and observe again when the needed control or result is still loading.',
+      { minConfidence: minWaitConfidence }
+    );
+  }
   addChoice(
     operations,
     'DONE',
@@ -485,13 +519,28 @@ export function buildJevFastRequest(
 
   const criteria: Record<string, string> = {};
   for (const operation of Object.values(operations)) criteria[operation.operation] = operation.description;
+  const planRule = planStep
+    ? [
+        'Current plan step: ' + clip(planStep.text, 240),
+        planStep.successPredicate
+          ? 'Completion predicate: ' + clip(planStep.successPredicate, 400)
+          : '',
+        allowedPlanOperations
+          ? 'Only offered plan operations are authorized; DONE and BLOCKED remain available.'
+          : 'This plan step does not restrict the operation set.',
+        Number.isFinite(Number(context.leaseRemaining))
+          ? 'Remaining fast-action lease: ' + Math.max(0, Math.floor(Number(context.leaseRemaining)))
+          : '',
+      ].filter(Boolean).join('\n')
+    : '';
+  const operationRules = planRule ? [NEXT_ACTION_RULES, planRule] : [NEXT_ACTION_RULES];
 
   const questions: JevSystemOneRequest['questions'] = {
     [JEV_OPERATION_QUESTION]: {
       type: 'choice',
       instructions: {
         goal: clip(context.instruction, 4000),
-        rules: NEXT_ACTION_RULES,
+        rules: operationRules,
       },
       criteria,
     },
@@ -502,7 +551,7 @@ export function buildJevFastRequest(
       instructions: {
         goal: clip(context.instruction, 4000),
         operation: 'CLICK',
-        rules: [NEXT_ACTION_RULES, TARGET_RULES],
+        rules: [NEXT_ACTION_RULES, planRule, TARGET_RULES].filter(Boolean),
       },
       criteria: Object.fromEntries(
         Object.entries(targets.CLICK).map(([key, target]) => [key, target.description])
@@ -515,7 +564,7 @@ export function buildJevFastRequest(
       instructions: {
         goal: clip(context.instruction, 4000),
         operation: 'TYPE_TEXT',
-        rules: [NEXT_ACTION_RULES, TARGET_RULES],
+        rules: [NEXT_ACTION_RULES, planRule, TARGET_RULES].filter(Boolean),
       },
       criteria: Object.fromEntries(
         Object.entries(targets.TYPE_TEXT).map(([key, target]) => [key, target.description])
@@ -533,6 +582,20 @@ export function buildJevFastRequest(
         intent: context.intent,
         goal: clip(context.instruction, 4000),
         selectedText: clip(context.selectedText, 4000),
+        plan: planStep
+          ? {
+              version: Math.max(0, Math.floor(Number(context.planVersion) || 0)),
+              stepId: String(planStep.id || ''),
+              subgoal: clip(planStep.text, 240),
+              successPredicate: clip(planStep.successPredicate, 400),
+              allowedOperations: allowedPlanOperations
+                ? Array.from(allowedPlanOperations)
+                : null,
+              leaseRemaining: Number.isFinite(Number(context.leaseRemaining))
+                ? Math.max(0, Math.floor(Number(context.leaseRemaining)))
+                : null,
+            }
+          : null,
       },
       page: {
         url: clip(context.pageUrl, 2000),
@@ -542,6 +605,7 @@ export function buildJevFastRequest(
       observation: context.snapshot ? {
         fingerprint: clip(context.snapshot.fingerprint, 200),
         capabilities: context.snapshot.capabilities || {},
+        runtime: context.snapshot.runtime || null,
       } : null,
       elements,
       recentActions: (context.recentTools || []).slice(-10),
@@ -606,7 +670,9 @@ export function interpretJevFastDecision(
     return {
       kind: 'blocked',
       reason: 'low-confidence',
+      operation: operation.operation,
       confidence: operationAnswer.confidence,
+      probabilities: { ...operationAnswer.probabilities },
       description: operation.operation + ' 置信度不足',
     };
   }
@@ -689,7 +755,9 @@ export function interpretJevFastDecision(
     return {
       kind: 'blocked',
       reason: 'low-confidence',
+      operation: operation.operation,
       confidence: Math.min(operationConfidence, targetConfidence || 0),
+      probabilities: { ...operationAnswer.probabilities },
       description:
         operation.operation +
         ' 目标分支置信度不足（' +
@@ -714,7 +782,9 @@ export function interpretJevFastDecision(
     return {
       kind: 'blocked',
       reason: 'low-confidence',
+      operation: operation.operation,
       confidence,
+      probabilities: { ...operationAnswer.probabilities },
       description: operation.operation + ' 置信度不足',
     };
   }
@@ -778,9 +848,11 @@ export function formatJevDecisionSummary(
   if (decision.kind === 'blocked') {
     return prefix + '：受阻，交给慢思考：' + decision.description + '（' + Math.round(latencyMs) + 'ms）';
   }
+  const fallback = /确定性回退/.test(decision.description) ? '（只读回退）' : '';
   return (
     prefix + '：' + decision.operation +
     (decision.target ? ' → ' + decision.target.label : '') +
+    fallback +
     '（' + Math.round(decision.confidence * 100) + '%，' + Math.round(latencyMs) + 'ms）'
   );
 }

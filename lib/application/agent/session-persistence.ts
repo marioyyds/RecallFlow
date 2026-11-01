@@ -66,6 +66,7 @@ export class RunSessionPersistence {
       disabledTools: Array.from(state.disabledTools || []),
       trace: tail(ctx.trace, 40),
       plan: head(ctx.plan, 20),
+      planVersion: Math.max(0, Math.floor(Number(ctx.planVersion) || 0)),
       totalTokens: state.totalTokens,
       verificationCount: state.verificationCount,
       lastDeniedSignature: state.lastDeniedSignature,

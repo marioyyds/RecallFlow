@@ -52,7 +52,7 @@ export const VERIFIER_TIMEOUT_MS = 25000;
 
 // 校验只需要一小段结构化结论：限输出长度 + 要求 JSON。
 // 不设上限时模型可能自由长篇输出，把预算耗在生成上；不要求 JSON 时一旦输出成散文，
-// 解析失败就 fail-open —— 护栏静默失效，而用户只看到"已按通过放行"。
+// 解析失败就 fail-open —— 任务可收尾，但调用方必须标成“未独立验证”。
 const VERIFIER_MAX_TOKENS = 400;
 
 // 返回 { ok, confidence, reason, missing, suggestion } 或 null（校验失败时调用方按“通过”处理，避免阻塞）。
@@ -68,7 +68,7 @@ export async function verifyCompletion(settings: any, { instruction, claim, evid
       (String(evidence || '').slice(0, 8000) || '（无）'),
   ].join('\n\n');
   // 用户已经中断就别再花一次校验请求（15 秒 + 一次计费），也不要伪装成「校验器故障」——
-  // 那条分支会往下走 "已按通过放行"，进而把一次「我按了停止」变成「任务已完成」。
+  // 那条分支会进入 fail-open 收尾，进而把一次「我按了停止」变成「任务已完成」。
   if (signal && signal.aborted) throw makeAbortError();
   try {
     const content = await callDeepSeek(

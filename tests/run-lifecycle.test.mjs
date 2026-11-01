@@ -19,6 +19,20 @@ function createHarness() {
   return { registry, service, pushed, sent };
 }
 
+function navigationHarness() {
+  const registry = createTabRunRegistry();
+  const nav = { value: true };
+  const service = new RunLifecycleService(registry, {
+    findBySession: () => null,
+    snapshot: (runId) => ({ runId, sessionId: 's1', status: 'running' }),
+    push: () => {},
+  }, {
+    sendToTab: () => {},
+    isTabNavigating: () => nav.value,
+  }, 5, 45, 5);
+  return { registry, service, nav };
+}
+
 test('stop 标记不可续跑、广播中间态并中止 controller', () => {
   const { registry, service, pushed, sent } = createHarness();
   const controller = new AbortController();
@@ -49,4 +63,19 @@ test('cleanupTab 清除 channel、controller、run 和宽限定时器', () => {
   assert.equal(registry.runFor(4), null);
   assert.equal(registry.controllerFor(4), null);
   assert.equal(registry.channelFor('r4'), null);
+});
+
+test('标签页仍在导航时延后 abort，加载结束后仍无人接管才中止', async () => {
+  const { registry, service, nav } = navigationHarness();
+  const controller = new AbortController();
+  registry.setController(8, controller);
+  registry.setRun(8, { runId: 'r-nav', controller, resumable: true });
+  service.scheduleAbortIfNoReattach('r-nav', 8);
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(controller.signal.aborted, false, '导航中固定宽限不能直接中止');
+
+  nav.value = false;
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  assert.equal(controller.signal.aborted, true, '导航结束且仍无 port 时应正常中止');
 });

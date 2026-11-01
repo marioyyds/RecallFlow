@@ -427,6 +427,41 @@ test('DONE 和 BLOCKED 是显式 operation，不是额外 noul', () => {
   assert.equal(blocked.reason, 'model-blocked');
 });
 
+test('PlanCard 将 JEV operation head 投影到当前子目标允许的动作', () => {
+  const bundle = buildJevFastRequest(
+    { model: 'jev-latest' },
+    {
+      intent: 'browser_task',
+      phase: 'editor',
+      instruction: '先读取页面，暂不点击或填写',
+      pageText: '上传图文 表格 标题 正文',
+      snapshot: pageSnapshot(),
+      plan: [{
+        id: 'read-only',
+        text: '读取当前页面',
+        status: 'in_progress',
+        successPredicate: '获得页面正文',
+        allowedOperations: ['READ_PAGE'],
+        leaseActions: 2,
+      }],
+      planVersion: 7,
+      leaseRemaining: 2,
+    }
+  );
+  assert.deepEqual(
+    Object.keys(bundle.operations).sort(),
+    ['BLOCKED', 'DONE', 'READ_PAGE'].sort(),
+    'DONE/BLOCKED 始终保留为安全出口，其它动作由 PlanCard 收紧'
+  );
+  assert.equal(bundle.targets.CLICK, undefined);
+  assert.equal(bundle.targets.TYPE_TEXT, undefined);
+  const state = bundle.request.state;
+  assert.equal(state.task.plan.version, 7);
+  assert.equal(state.task.plan.stepId, 'read-only');
+  assert.deepEqual(state.task.plan.allowedOperations, ['READ_PAGE']);
+  assert.equal(state.task.plan.leaseRemaining, 2);
+});
+
 test('移交摘要显示 operation、目标与置信度', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
@@ -664,6 +699,122 @@ test('TYPE_TEXT 由文本助手生成值，JEV 只负责 operation 和 target', 
   assert.equal(typeCall.args.ref, 'rf-2');
   assert.equal(typeCall.args.value, '图像编辑论文合集');
   assert.equal(typeCall.args.clearFirst, true);
+});
+
+test('子目标动作租约限制连续快动作，计划版本更新后重新开租约', async () => {
+  const state = makeState(false);
+  state.settings.jev.maxConsecutiveActions = 5;
+  state.ctx.plan = [{
+    id: 'read-page',
+    text: '读取当前页面',
+    status: 'in_progress',
+    allowedOperations: ['READ_PAGE'],
+    leaseActions: 1,
+  }];
+  state.ctx.planVersion = 1;
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'READ_PAGE');
+    }
+  );
+
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.kind, 'act');
+  assert.equal(first.decisions.length, 1);
+  assert.equal(calls.filter((name) => name === 'read_current_page').length, 1);
+  assert.equal(state.jevLoop.planActions, 1);
+
+  const exhausted = await controller.runAvailable(1, async () => {});
+  assert.equal(exhausted.kind, 'skipped');
+  assert.equal(exhausted.reason, 'not-due');
+
+  state.ctx.plan = [{
+    id: 'read-next-page',
+    text: '读取更新后的页面',
+    status: 'in_progress',
+    allowedOperations: ['READ_PAGE'],
+    leaseActions: 1,
+  }];
+  state.ctx.planVersion = 2;
+  const renewed = await controller.runAvailable(2, async () => {});
+  assert.equal(renewed.kind, 'act');
+  assert.equal(renewed.decisions.length, 1);
+  assert.equal(calls.filter((name) => name === 'read_current_page').length, 2);
+});
+
+test('连续 WAIT 不受动态 DOM 指纹影响，达到阈值后立即移交慢思考', async () => {
+  const state = makeState(false);
+  state.settings.jev.maxRepeatedActionsWithoutProgress = 2;
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'WAIT', 0.7);
+    }
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions.length, 2, 'WAIT 连续两次后不再继续等待');
+  assert.equal(calls.filter((name) => name === 'get_page_snapshot').length, 3);
+  assert.equal(state.jevLoop.waitStreak, 0);
+  assert.match(
+    state.messages.at(-1)?.content || '',
+    /wait-limit[\s\S]*连续等待 2 次/,
+    '移交消息必须说明连续等待次数'
+  );
+});
+
+test('READ_PAGE 低置信时使用确定性只读回退，不立即占用慢模型轮次', async () => {
+  const state = makeState(false);
+  const calls = [];
+  const decisions = [];
+  state.emit = (event) => {
+    if (event.type === 'jev-decision') decisions.push(event);
+  };
+  let turn = 0;
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      turn += 1;
+      const bundle = bundleFromRequest(request);
+      return turn === 1
+        ? responseFor(bundle, 'READ_PAGE', 0.4)
+        : responseFor(bundle, 'BLOCKED', 0.95);
+    }
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions[0].operation, 'READ_PAGE');
+  assert.equal(calls.includes('read_current_page'), true);
+  assert.equal(decisions[0].readFallback, true);
+  assert.match(decisions[0].message, /只读回退/);
+  assert.match(outcome.decisions[0].description, /确定性回退/);
+});
+
+test('同一计划版本和 URL 的低置信 READ_PAGE 只回退一次', async () => {
+  const state = makeState(false);
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'READ_PAGE', 0.4);
+    }
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.kind, 'act');
+  assert.equal(first.decisions.length, 1);
+  assert.equal(calls.filter((name) => name === 'read_current_page').length, 1);
+  assert.match(state.messages.at(-1)?.content || '', /low-confidence/);
 });
 
 test('同一 blocked 路由冷却，页面变化后允许重新尝试', async () => {

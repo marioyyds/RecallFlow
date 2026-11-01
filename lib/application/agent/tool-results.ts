@@ -57,7 +57,23 @@ export function compactSnapshotSummary(snapshot: PageSnapshotLike | null | undef
         .join('；')
     : '';
   const text = sliceSafe(String(snapshot.text || '').replace(/\s+/g, ' ').trim(), 0, 300);
-  return ['页面标题：' + title, '页面URL：' + url, elements ? '关键元素：' + elements : '', text ? '正文摘要（按 textContent 抽取，含已隐藏节点文字，不能用于判断可见性）：' + text : '']
+  const runtime = snapshot.runtime && typeof snapshot.runtime === 'object'
+    ? snapshot.runtime
+    : null;
+  const media = runtime && Array.isArray(runtime.media)
+    ? runtime.media.slice(0, 3).map((item) => {
+        const state = item.paused === false ? 'playing' : item.paused === true ? 'paused' : 'unknown';
+        const progress = item.currentTime == null ? '?' : String(item.currentTime);
+        const duration = item.duration == null ? '?' : String(item.duration);
+        return item.kind + ' ' + state + ' ' + progress + '/' + duration + 's' +
+          (item.readyState == null ? '' : ' ready=' + item.readyState) +
+          (item.networkState == null ? '' : ' net=' + item.networkState);
+      }).join('；')
+    : '';
+  const runtimeText = runtime
+    ? [media ? '媒体状态：' + media : '', runtime.ariaBusy ? '页面仍在 aria-busy' : ''].filter(Boolean).join('；')
+    : '';
+  return ['页面标题：' + title, '页面URL：' + url, elements ? '关键元素：' + elements : '', runtimeText ? '运行态：' + runtimeText : '', text ? '正文摘要（按 textContent 抽取，含已隐藏节点文字，不能用于判断可见性）：' + text : '']
     .filter(Boolean)
     .join('\n');
 }

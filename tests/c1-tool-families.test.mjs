@@ -56,6 +56,41 @@ test('update_plan：非数组输入不抛', () => {
   }
 });
 
+test('update_plan：规范化 PlanCard 操作、租约并递增计划版本', () => {
+  const ctx = { planVersion: 4 };
+  updatePlan(ctx, {
+    items: [
+      {
+        id: 'fill-title',
+        text: '填写标题',
+        status: 'in_progress',
+        successPredicate: '标题输入框非空',
+        allowedOperations: ['CLICK', 'click', 'READ_PAGE', 'not-real'],
+        leaseActions: 999,
+      },
+      {
+        id: 'no-fast-actions',
+        text: '等待人工确认',
+        status: 'pending',
+        allowedOperations: [],
+        leaseActions: 0,
+      },
+      {
+        text: '损坏的契约',
+        status: 'pending',
+        allowedOperations: 'READ_PAGE',
+      },
+    ],
+  });
+  assert.equal(ctx.planVersion, 5);
+  assert.deepEqual(ctx.plan[0].allowedOperations, ['CLICK', 'READ_PAGE']);
+  assert.equal(ctx.plan[0].leaseActions, 50);
+  assert.equal(ctx.plan[0].successPredicate, '标题输入框非空');
+  assert.deepEqual(ctx.plan[1].allowedOperations, [], '显式空数组表示没有可执行快动作');
+  assert.equal(ctx.plan[1].leaseActions, undefined);
+  assert.deepEqual(ctx.plan[2].allowedOperations, [], '损坏的显式契约必须 fail-closed');
+});
+
 test('expand_result：分段读取并标注区间与总长', () => {
   const text = 'abcdefghij';
   const ctx = { resultStore: { get: (id) => (id === 'res-1' ? text : null) } };

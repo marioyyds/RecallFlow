@@ -52,6 +52,7 @@ test('恢复任务沿用落盘的页面、标签页、计划和轨迹，并复�
     agentWindowId: 44,
     trace: [{ phase: 'start' }],
     plan: [{ text: 'finish', status: 'in_progress' }],
+    planVersion: 3,
     resultIds: ['r1'],
   };
   const ctx = createAgentRunContext({
@@ -72,6 +73,7 @@ test('恢复任务沿用落盘的页面、标签页、计划和轨迹，并复�
   assert.deepEqual(ctx.openedTabs, [7, 8]);
   assert.deepEqual(ctx.trace, [{ phase: 'start' }]);
   assert.deepEqual(ctx.plan, [{ text: 'finish', status: 'in_progress' }]);
+  assert.equal(ctx.planVersion, 3);
   assert.deepEqual([...ctx.resultIds], ['r1']);
 
   ctx.openedTabs.push(9);

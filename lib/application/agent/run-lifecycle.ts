@@ -8,6 +8,7 @@ export interface RunHubLike {
 
 export interface RunLifecyclePorts {
   sendToTab(tabId: number, message: Record<string, unknown>): void;
+  isTabNavigating?: (tabId: number) => boolean;
 }
 
 export interface RunLifecycleStats {
@@ -44,30 +45,63 @@ export class RunLifecycleService {
   private readonly hub: RunHubLike;
   private readonly ports: RunLifecyclePorts;
   private readonly graceMs: number;
+  private readonly navigationHoldMs: number;
+  private readonly navigationPollMs: number;
+  private readonly navigationHoldStarted = new Map<string, number>();
 
   constructor(
     registry: TabRunRegistry,
     hub: RunHubLike,
     ports: RunLifecyclePorts,
-    graceMs = 8000
+    graceMs = 8000,
+    navigationHoldMs = 30000,
+    navigationPollMs = 1000
   ) {
     this.registry = registry;
     this.hub = hub;
     this.ports = ports;
     this.graceMs = graceMs;
+    this.navigationHoldMs = Math.max(graceMs, navigationHoldMs);
+    this.navigationPollMs = Math.max(100, navigationPollMs);
   }
 
   clearAbortTimer(runId: unknown): void {
-    this.registry.clearAbortTimer(runId);
+    const id = String(runId || '');
+    this.navigationHoldStarted.delete(id);
+    this.registry.clearAbortTimer(id);
   }
 
   scheduleAbortIfNoReattach(runId: unknown, tabId: number | null | undefined): void {
     const id = String(runId || '');
-    this.registry.scheduleAbort(id, this.graceMs, () => {
+    if (!this.navigationHoldStarted.has(id)) {
+      this.navigationHoldStarted.set(id, Date.now());
+    }
+    const attemptAbort = () => {
       const record = this.registry.runFor(tabId);
-      if (!record || String(record.runId || '') !== id) return;
+      if (!record || String(record.runId || '') !== id) {
+        this.navigationHoldStarted.delete(id);
+        return;
+      }
       const channel = this.registry.channelFor(id);
-      if (channel && channel.isAttached()) return;
+      if (channel && channel.isAttached()) {
+        this.navigationHoldStarted.delete(id);
+        return;
+      }
+      const navigating =
+        tabId != null &&
+        typeof this.ports.isTabNavigating === 'function' &&
+        this.ports.isTabNavigating(Number(tabId));
+      const startedAt = this.navigationHoldStarted.get(id) || Date.now();
+      const remainingHold = this.navigationHoldMs - (Date.now() - startedAt);
+      if (navigating && remainingHold > 0) {
+        this.registry.scheduleAbort(
+          id,
+          Math.min(this.navigationPollMs, remainingHold),
+          attemptAbort
+        );
+        return;
+      }
+      this.navigationHoldStarted.delete(id);
       const controller = record.controller;
       if (controller && !controller.__rfFinished) {
         this.stats.aborts += 1;
@@ -75,7 +109,8 @@ export class RunLifecycleService {
           controller.abort();
         } catch (error) {}
       }
-    });
+    };
+    this.registry.scheduleAbort(id, this.graceMs, attemptAbort);
   }
 
   requestStop(params: Record<string, any>, requesterTabId: number | null | undefined): RunStopResult {

@@ -19,6 +19,8 @@ import {
   buildInterruptedTurn,
 } from './transcript.ts';
 import { createFrameScheduler } from './render-scheduler.ts';
+import { bindPanelWheelGuard, bindPanelWheelScroller } from './wheel-scroll.ts';
+import { hasInstructionUserTurn, pruneResumableAssistantTail } from './resume-conversation.ts';
 import { createLruCache } from '../../shared/lru.ts';
 import { createExportGuard, HOST_ID } from './save-clean.ts';
 import { downloadMarkdownFile, markdownDownloadFilename } from './download-file.ts';
@@ -1845,9 +1847,7 @@ function rebuildFollowedMessages() {
   followedRun.followedMessages = [];
   if (!followedRun.followedRunState) return;
   const instruction = String(followedRun.followedRunState.instruction || '').trim();
-  const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-  const alreadyHasUser =
-    last && last.role === 'user' && String(last.content || '').trim() === instruction;
+  const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
   if (instruction && !alreadyHasUser) {
     followedRun.followedMessages.push({ role: 'user', content: instruction, live: true });
   }
@@ -1883,8 +1883,7 @@ function ensureFollowedDom() {
     return followedRun.followedDom;
   }
   const instruction = String(followedRun.followedRunState.instruction || '').trim();
-  const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-  const alreadyHasUser = last && last.role === 'user' && String(last.content || '').trim() === instruction;
+  const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
   if (!panelSessionState.conversation.length) panelBody.innerHTML = '';
   panelBody.querySelectorAll('.follow-live-user,.follow-live-ai').forEach((el: any) => el.remove());
   let userEl = null;
@@ -3192,6 +3191,8 @@ function createPanelWithLayout(
   progressController.el.appendChild(progressController.timeEl);
   panel.appendChild(progressController.el);
 
+  bindPanelWheelGuard(panel);
+
   panelBody = document.createElement('div');
   resetPanelFitCache();
   panelBody.className = 'p-body';
@@ -3230,9 +3231,9 @@ function createPanelWithLayout(
   });
   // 显式记录用户滚动意图：滚轮、触摸、拖动滚动条、键盘翻页。
   // 这些事件优先于「布局变化产生的 scroll 事件」的屏蔽窗口。
-  pbEl.addEventListener('wheel', (e: any) => {
-    markUserScrollIntent(Number(e.deltaY) < 0);
-  }, { passive: true });
+  // A passive listener could not stop Ctrl-wheel / trackpad pinch from zooming
+  // the whole page. This binding guards the host page and records scroll intent.
+  bindPanelWheelScroller(pbEl, markUserScrollIntent);
   let touchStartY: any = null;
   pbEl.addEventListener('touchstart', (e: any) => {
     const t = e.touches && e.touches[0];
@@ -4186,6 +4187,14 @@ function createPanelWithLayout(
     // 整页刷新后的自动续跑会传 skipUserTurn：对话历史里已经有这条用户消息
     //（persist 后恢复的），不要再重复 push、也不要重复渲染。
     const skipUserTurn = Boolean(runOptions.skipUserTurn);
+    if (skipUserTurn && runOptions.resumeSnapshot) {
+      const pruned = pruneResumableAssistantTail(panelSessionState.conversation, instruction);
+      if (pruned.changed) {
+        panelSessionState.conversation = pruned.messages;
+        saveConversation();
+        if (panelBody) renderConversation();
+      }
+    }
     if (!skipUserTurn) {
       panelSessionState.conversation.push(
         Object.assign(
@@ -4474,9 +4483,8 @@ function createPanelWithLayout(
         if (resp.ok) {
           text = '✓ 完成前校验通过' + (resp.reason ? '：' + resp.reason : '');
         } else if (resp.inconclusive) {
-          // 校验器没给出结论（超时/报错），任务按通过放行。
-          // 不能渲染成"校验未通过"—— 那是在同一句里既否决又放行。
-          text = '… 未能完成校验：' + (resp.reason || '校验器不可用');
+          // 校验器不可用不等于校验通过；保留"未独立验证"的独立语义。
+          text = '… 未独立验证：' + (resp.reason || '校验器不可用');
         } else if (resp.deterministic) {
           // 确定性规则命中：与 LLM 校验区分开，用户才好判断这条结论的来路。
           text = '⚠ 完成前检查未通过（确定性规则，未消耗模型调用）：' + (resp.reason || '声称与实际动作不符');
@@ -5008,8 +5016,10 @@ function maybeResumeRunAfterReload() {
             openPanel(0, 0, true, true); // 先让 openPanel 把 run 挂到 runAgent
           });
           // 对话历史若已恢复出这条用户消息，就跳过重复 push（见 run 的 skipUserTurn）。
-          const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-          const alreadyHas = last && last.role === 'user' && String(last.content || '').trim() === String(resp.instruction).trim();
+          const alreadyHas = hasInstructionUserTurn(
+            panelSessionState.conversation,
+            resp.instruction
+          );
           if (runSession.hasRunner) {
             runSession.invokeRunner(String(resp.instruction), {
               // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。

@@ -19,6 +19,11 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     lastActionSignature: '',
     lastActionRouteKey: '',
     sameActionStreak: 0,
+    waitStreak: 0,
+    planVersion: 0,
+    planKey: '',
+    planActions: 0,
+    readFallbackKey: '',
     lastOutcome: '',
   });
   const restored = restoreJevLoopState({
@@ -30,6 +35,7 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     lastActionSignature: 123,
     lastActionRouteKey: 456,
     sameActionStreak: 99,
+    waitStreak: 99,
   });
   assert.equal(restored.attempts, JEV_HARD_MAX_ATTEMPTS_PER_RUN);
   assert.equal(restored.consecutiveFastActions, JEV_HARD_MAX_CONSECUTIVE_ACTIONS);
@@ -38,6 +44,7 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
   assert.equal(restored.lastActionSignature, '123');
   assert.equal(restored.lastActionRouteKey, '456');
   assert.equal(restored.sameActionStreak, 10);
+  assert.equal(restored.waitStreak, 10);
 });
 
 test('会话持久化包含 JEV 快循环预算，恢复不会重新计数', async () => {

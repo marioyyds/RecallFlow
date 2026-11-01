@@ -882,6 +882,35 @@
       return "";
     }
   }
+  function finiteRuntimeNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.round(numeric * 100) / 100 : null;
+  }
+  function createPageRuntimeState() {
+    const media = [];
+    const nodes = Array.from(document.querySelectorAll("video,audio")).slice(0, 3);
+    for (const node of nodes) {
+      const el = node;
+      media.push({
+        kind: node.tagName.toLowerCase() === "audio" ? "audio" : "video",
+        selector: shortSelector(node),
+        paused: typeof el.paused === "boolean" ? el.paused : null,
+        ended: typeof el.ended === "boolean" ? el.ended : null,
+        muted: typeof el.muted === "boolean" ? el.muted : null,
+        currentTime: finiteRuntimeNumber(el.currentTime),
+        duration: finiteRuntimeNumber(el.duration),
+        readyState: finiteRuntimeNumber(el.readyState),
+        networkState: finiteRuntimeNumber(el.networkState),
+        error: finiteRuntimeNumber(el.error?.code)
+      });
+    }
+    let ariaBusy = false;
+    try {
+      ariaBusy = Boolean(document.querySelector('[aria-busy="true"]'));
+    } catch {
+    }
+    return media.length || ariaBusy ? { ariaBusy, media } : void 0;
+  }
   function editorKind(el) {
     let cls = String(el.getAttribute("class") || "");
     try {
@@ -1235,6 +1264,7 @@
       const query = normalizeSnapshotText(options.query, 200);
       const capabilities = createPageCapabilities();
       const nodes = collectInteractiveInFrames(document, [], capabilities);
+      const runtime = createPageRuntimeState();
       const capabilitySummary = {};
       for (const [kind, bucket] of Object.entries(capabilities)) {
         if (bucket.count > 0) {
@@ -1244,7 +1274,7 @@
           };
         }
       }
-      const capabilityChars = Object.keys(capabilitySummary).length ? JSON.stringify(capabilitySummary).length : 0;
+      const capabilityChars = JSON.stringify(capabilitySummary).length + (runtime ? JSON.stringify(runtime).length : 0);
       const outline2 = buildPageOutline(nodes);
       const outlineChars = outline2 ? JSON.stringify(outline2).length : 0;
       const ranked = rankSnapshotNodes(nodes, query);
@@ -1290,6 +1320,7 @@
         nextCursor,
         mainContent: findMainContent(),
         capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : void 0,
+        runtime,
         counts: {
           interactive: nodes.length,
           shown: elements.length,
@@ -2757,13 +2788,25 @@
     if (!el.isConnected) return "\uFF08\u8BE5\u5143\u7D20\u5DF2\u4E0D\u5728\u9875\u9762\u4E0A\uFF09";
     return "\uFF1B\u70B9\u51FB\u540E\u72B6\u6001\uFF1A" + state;
   }
+  function staleClickTargetFailure(el) {
+    if (!el || el.isConnected !== false) return null;
+    return {
+      ok: false,
+      code: "STALE_TARGET",
+      error: "\u76EE\u6807\u5143\u7D20\u5DF2\u4ECE\u9875\u9762\u79FB\u9664\uFF0Cref/selector \u53EF\u80FD\u5DF2\u8FC7\u671F\uFF1B\u8BF7\u91CD\u65B0\u89C2\u5BDF\u9875\u9762\u540E\u91CD\u8BD5\u3002"
+    };
+  }
   async function cmdClick(params) {
     const els = findElementsFor(params);
     if (!els.length) return { ok: false, error: targetMissError(params) };
     const el = els[0];
+    const staleBeforeWait = staleClickTargetFailure(el);
+    if (staleBeforeWait) return staleBeforeWait;
     const tag = (el.tagName || "").toLowerCase();
     const beforeHref = location.href;
     const ready = await ensureActionable(el);
+    const staleAfterWait = staleClickTargetFailure(el);
+    if (staleAfterWait) return staleAfterWait;
     if (!ready) {
       if (el.disabled || el.getAttribute("aria-disabled") === "true") {
         return { ok: false, error: "\u76EE\u6807\u5143\u7D20\u4E0D\u53EF\u64CD\u4F5C\uFF08\u5DF2\u7981\u7528\uFF09\uFF1A" + tag + " " + describeTargetState(el) };
@@ -4637,6 +4680,70 @@
     };
   }
 
+  // lib/ui/page/wheel-scroll.ts
+  function panelWheelDecision(event) {
+    const blockPageZoom = Boolean(event.ctrlKey || event.metaKey);
+    return {
+      blockPageZoom,
+      allowNativeScroll: !blockPageZoom,
+      scrollUp: Number(event.deltaY) < 0
+    };
+  }
+  function applyPanelWheel(event) {
+    const decision = panelWheelDecision(event);
+    if (typeof event.stopPropagation === "function") event.stopPropagation();
+    if (decision.blockPageZoom && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+    return decision;
+  }
+  function bindPanelWheelGuard(target) {
+    target.addEventListener("wheel", applyPanelWheel, { passive: false });
+  }
+  function bindPanelWheelScroller(target, markUserScrollIntent2) {
+    target.addEventListener("wheel", (event) => {
+      const decision = applyPanelWheel(event);
+      markUserScrollIntent2(decision.scrollUp);
+    }, { passive: false });
+  }
+
+  // lib/ui/page/resume-conversation.ts
+  function normalizedInstruction(instruction) {
+    return String(instruction || "").trim();
+  }
+  function latestInstructionUserIndex(messages, instruction) {
+    const list = Array.isArray(messages) ? messages : [];
+    const wanted = normalizedInstruction(instruction);
+    if (!wanted) return -1;
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const message = list[index];
+      if (message && message.role === "user" && normalizedInstruction(message.content) === wanted) {
+        return index;
+      }
+    }
+    return -1;
+  }
+  function hasInstructionUserTurn(messages, instruction) {
+    return latestInstructionUserIndex(messages, instruction) >= 0;
+  }
+  function pruneResumableAssistantTail(messages, instruction) {
+    const list = Array.isArray(messages) ? messages.slice() : [];
+    const userIndex = latestInstructionUserIndex(list, instruction);
+    if (userIndex < 0) {
+      return { alreadyHasUser: false, changed: false, messages: list };
+    }
+    const next = list.filter((message, index) => {
+      if (index <= userIndex) return true;
+      if (!message || message.role !== "assistant") return true;
+      return !(message.live === true || message.interrupted === true);
+    });
+    return {
+      alreadyHasUser: true,
+      changed: next.length !== list.length,
+      messages: next
+    };
+  }
+
   // lib/shared/lru.ts
   function createLruCache(max) {
     const limit = Math.max(1, Math.floor(Number(max) || 1));
@@ -5908,7 +6015,7 @@
     .panel.dark .p-text-clear:hover { color: #ff8a80; background: rgba(255,138,128,.1); }
     /* margin-right \u662F --rf-edge\uFF1A\u628A\u6EDA\u52A8\u6761\u63A8\u5230\u53F3\u4FA7 resize \u624B\u67C4\u7684\u5DE6\u8FB9\u3002
        \u5C11\u4E86\u8FD9\u4E00\u53E5\uFF0C\u624B\u67C4\uFF08\u7EDD\u5BF9\u5B9A\u4F4D + z-index:5\uFF09\u4F1A\u538B\u4F4F\u6EDA\u52A8\u6761\uFF0C\u6EDA\u52A8\u6761\u5C31\u70B9\u4E0D\u52A8\u3001\u62D6\u4E0D\u52A8\u3002 */
-    .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
+    .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
     .p-body:focus { outline: none; }
     .p-body::-webkit-scrollbar { width: 8px; }
     .p-body::-webkit-scrollbar-thumb { background: #d5d9e0; border-radius: 999px; }
@@ -6814,7 +6921,7 @@
             color: "#16a34a"
           };
         } else if (event.inconclusive) {
-          pushStepNotice(state, "\u2026 \u672A\u80FD\u5B8C\u6210\u6821\u9A8C\uFF1A" + (event.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528") + "\uFF08\u5DF2\u653E\u884C\uFF09", "#6b7280");
+          pushStepNotice(state, "\u2026 \u672A\u72EC\u7ACB\u9A8C\u8BC1\uFF1A" + (event.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528"), "#6b7280");
         } else {
           pushStepNotice(
             state,
@@ -8679,8 +8786,7 @@
     followedRun.followedMessages = [];
     if (!followedRun.followedRunState) return;
     const instruction = String(followedRun.followedRunState.instruction || "").trim();
-    const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
+    const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
     if (instruction && !alreadyHasUser) {
       followedRun.followedMessages.push({ role: "user", content: instruction, live: true });
     }
@@ -8712,8 +8818,7 @@
       return followedRun.followedDom;
     }
     const instruction = String(followedRun.followedRunState.instruction || "").trim();
-    const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-    const alreadyHasUser = last && last.role === "user" && String(last.content || "").trim() === instruction;
+    const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
     if (!panelSessionState.conversation.length) panelBody.innerHTML = "";
     panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
     let userEl = null;
@@ -9852,6 +9957,7 @@
     progressController.el.appendChild(progressController.messageEl);
     progressController.el.appendChild(progressController.timeEl);
     panel.appendChild(progressController.el);
+    bindPanelWheelGuard(panel);
     panelBody = document.createElement("div");
     resetPanelFitCache();
     panelBody.className = "p-body";
@@ -9870,9 +9976,7 @@
       if (userDriven) userScrollIntentUntil = now + USER_SCROLL_INTENT_MS;
       followedRun.observerAutoScroll = pbEl.scrollHeight - pbEl.scrollTop - pbEl.clientHeight < 40;
     });
-    pbEl.addEventListener("wheel", (e) => {
-      markUserScrollIntent(Number(e.deltaY) < 0);
-    }, { passive: true });
+    bindPanelWheelScroller(pbEl, markUserScrollIntent);
     let touchStartY = null;
     pbEl.addEventListener("touchstart", (e) => {
       const t = e.touches && e.touches[0];
@@ -10663,6 +10767,14 @@
       const pickedForMessage = summarizePickedForMessage(streamView.pickedElements);
       const selectedForMessage = activeSelection;
       const skipUserTurn = Boolean(runOptions.skipUserTurn);
+      if (skipUserTurn && runOptions.resumeSnapshot) {
+        const pruned = pruneResumableAssistantTail(panelSessionState.conversation, instruction);
+        if (pruned.changed) {
+          panelSessionState.conversation = pruned.messages;
+          saveConversation();
+          if (panelBody) renderConversation();
+        }
+      }
       if (!skipUserTurn) {
         panelSessionState.conversation.push(
           Object.assign(
@@ -10919,7 +11031,7 @@
           if (resp.ok) {
             text = "\u2713 \u5B8C\u6210\u524D\u6821\u9A8C\u901A\u8FC7" + (resp.reason ? "\uFF1A" + resp.reason : "");
           } else if (resp.inconclusive) {
-            text = "\u2026 \u672A\u80FD\u5B8C\u6210\u6821\u9A8C\uFF1A" + (resp.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528");
+            text = "\u2026 \u672A\u72EC\u7ACB\u9A8C\u8BC1\uFF1A" + (resp.reason || "\u6821\u9A8C\u5668\u4E0D\u53EF\u7528");
           } else if (resp.deterministic) {
             text = "\u26A0 \u5B8C\u6210\u524D\u68C0\u67E5\u672A\u901A\u8FC7\uFF08\u786E\u5B9A\u6027\u89C4\u5219\uFF0C\u672A\u6D88\u8017\u6A21\u578B\u8C03\u7528\uFF09\uFF1A" + (resp.reason || "\u58F0\u79F0\u4E0E\u5B9E\u9645\u52A8\u4F5C\u4E0D\u7B26");
           } else if (resp.repeated) {
@@ -11348,8 +11460,10 @@
             await panelVisibility.withSuppressed(async () => {
               openPanel(0, 0, true, true);
             });
-            const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
-            const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
+            const alreadyHas = hasInstructionUserTurn(
+              panelSessionState.conversation,
+              resp.instruction
+            );
             if (runSession.hasRunner) {
               runSession.invokeRunner(String(resp.instruction), {
                 // live=true：run 还在跑，直接 reattach；否则才是 abort 后的续跑。

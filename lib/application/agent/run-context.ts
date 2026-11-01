@@ -53,6 +53,7 @@ export function createAgentRunContext(input: AgentRunContextInput): RunCtx {
     agentWindowId: resumed ? finiteInteger(persisted.agentWindowId) : null,
     trace: resumed ? arrayCopy<TraceStep>(persisted.trace) : [],
     plan: resumed ? arrayCopy<PlanStep>(persisted.plan) : [],
+    planVersion: resumed ? Math.max(0, Math.floor(Number(persisted.planVersion) || 0)) : 0,
     resultStore: new Map<string, string>(),
     resultIds: new Set<string>(resumed ? arrayCopy<string>(persisted.resultIds) : []),
     lastSnapshot: null,

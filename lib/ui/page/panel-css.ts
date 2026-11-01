@@ -158,7 +158,7 @@ export const PANEL_CSS = `
     .panel.dark .p-text-clear:hover { color: #ff8a80; background: rgba(255,138,128,.1); }
     /* margin-right 是 --rf-edge：把滚动条推到右侧 resize 手柄的左边。
        少了这一句，手柄（绝对定位 + z-index:5）会压住滚动条，滚动条就点不动、拖不动。 */
-    .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
+    .p-body { padding: 10px 12px; margin-right: var(--rf-edge); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; flex: 1 1 auto; font-size: 13px; line-height: 1.7; color: #333; word-break: break-word; min-height: 0; scrollbar-width: thin; scrollbar-color: #d5d9e0 transparent; }
     .p-body:focus { outline: none; }
     .p-body::-webkit-scrollbar { width: 8px; }
     .p-body::-webkit-scrollbar-thumb { background: #d5d9e0; border-radius: 999px; }

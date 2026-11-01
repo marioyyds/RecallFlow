@@ -227,7 +227,10 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   cdcc9ab387ecea49 — **有意改动**：`read_table` 标记为 `alwaysAvailable`。
   //                       表格读取是知识库、研究、普通对话也会用到的页面观察能力，
   //                       不能只在 browser_task 的执行权限中可用；工具数量与风险等级不变。
-  const EXPECTED = 'cdcc9ab387ecea49';
+  //   f30c1047079b8523 — **有意改动**：`update_plan` 增加 PlanCard 契约。
+  //                       步骤可选择声明 successPredicate / allowedOperations / leaseActions，
+  //                       JEV 据此收紧动作空间并限制连续执行；工具数、权限与风险等级不变。
+  const EXPECTED = 'f30c1047079b8523';
   assert.equal(
     fp,
     EXPECTED,

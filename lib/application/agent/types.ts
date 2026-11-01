@@ -70,10 +70,14 @@ export interface AgentSettings {
   ts?: number;
 }
 
-/** 计划条（`update_plan` 维护）。 */
+/** 计划条（`update_plan` 维护，也是 JEV 快执行器的子目标租约）。 */
 export interface PlanStep {
+  id?: string;
   text: string;
   status: string;
+  successPredicate?: string;
+  allowedOperations?: string[];
+  leaseActions?: number;
 }
 
 /** 可重放的一步（本任务轨迹 / 宏步骤）。 */
@@ -134,6 +138,7 @@ export interface PageSnapshotLike {
   nextCursor?: number | null;
   scroll?: { x: number; y: number; height?: number; viewport?: number } | null;
   capabilities?: Record<string, CapabilityBucketLike>;
+  runtime?: PageRuntimeState | null;
   mainContent?: { selector?: string; textLength?: number; tag?: string; note?: string } | null;
   counts?: {
     interactive?: number;
@@ -147,6 +152,25 @@ export interface PageSnapshotLike {
   frameRead?: { read: number[]; failed: number[]; total: number };
   frameId?: number;
   [key: string]: unknown;
+}
+
+/** Structured state for live media elements; visible loading text may be stale. */
+export interface RuntimeMediaState {
+  kind: 'video' | 'audio';
+  selector?: string;
+  paused: boolean | null;
+  ended: boolean | null;
+  muted: boolean | null;
+  currentTime: number | null;
+  duration: number | null;
+  readyState: number | null;
+  networkState: number | null;
+  error: number | null;
+}
+
+export interface PageRuntimeState {
+  ariaBusy: boolean;
+  media: RuntimeMediaState[];
 }
 
 /** 一类页面能力的计数与少量样本。 */
@@ -433,6 +457,7 @@ export interface RunCtx {
   agentWindowId: number | null;
   trace: TraceStep[];
   plan: PlanStep[];
+  planVersion: number;
   resultStore: Map<string, string>;
   resultIds: Set<string>;
   lastSnapshot: PageSnapshotLike | null;
@@ -440,6 +465,7 @@ export interface RunCtx {
   lastReadFullText: string;
   publicationEvidence?: PublicationEvidenceState;
   completedTypeTargets?: CompletedTypeTarget[];
+  verificationState?: 'verified' | 'unverified' | 'rejected' | 'not-run';
   mcpIndex: Map<string, McpToolIndexEntry>;
   mcpStatus: McpServerStatus[];
   visionBudget?: Record<string, number>;

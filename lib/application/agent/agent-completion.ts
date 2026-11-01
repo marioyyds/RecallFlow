@@ -159,14 +159,22 @@ export class CompletionCoordinator {
 
       verdict = outcome.kind === 'verdict' ? outcome.verdict : null;
       if (!verdict) {
+        state.ctx.verificationState = 'unverified';
         state.emit({
           type: 'verify',
           ok: null,
           inconclusive: true,
-          reason: '校验器未能给出结论（超时或调用失败），已按通过放行。',
+          verificationState: 'unverified',
+          reason: '独立校验不可用（超时或调用失败）；仅依据当前确定性证据交付，未标记为已验证。',
         });
-        state.trace({ phase: 'verify', ok: null, reason: 'verifier-unavailable' });
+        state.trace({
+          phase: 'verify',
+          ok: null,
+          verificationState: 'unverified',
+          reason: 'verifier-unavailable',
+        });
       } else if (verdict.ok === false) {
+        state.ctx.verificationState = 'rejected';
         state.verificationCount += 1;
         state.lastDeniedSignature = signature;
         state.emit({
@@ -184,6 +192,7 @@ export class CompletionCoordinator {
         });
         return { kind: 'reflect', reflection: buildVerificationReflection(verdict) };
       } else {
+        state.ctx.verificationState = 'verified';
         state.emit({ type: 'verify', ok: true, reason: verdict.reason });
         state.trace({ phase: 'verify', ok: true, reason: verdict.reason });
       }

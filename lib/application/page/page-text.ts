@@ -136,6 +136,7 @@ export interface PageSnapshot {
   mainContent?: MainContentHint | null;
   /** 只含命中的类别，空则整个字段不给 */
   capabilities?: Record<string, { count: number; samples: unknown[] }>;
+  runtime?: PageRuntimeState;
   counts?: {
     interactive: number;
     shown: number;
@@ -149,6 +150,24 @@ export interface PageSnapshot {
   /** 由 hashSnapshot 事后补上（构造时先不给，避免多出一个空串字段） */
   fingerprint?: string;
   error?: string;
+}
+
+export interface RuntimeMediaState {
+  kind: 'video' | 'audio';
+  selector?: string;
+  paused: boolean | null;
+  ended: boolean | null;
+  muted: boolean | null;
+  currentTime: number | null;
+  duration: number | null;
+  readyState: number | null;
+  networkState: number | null;
+  error: number | null;
+}
+
+export interface PageRuntimeState {
+  ariaBusy: boolean;
+  media: RuntimeMediaState[];
 }
 
 // 不需要走入文本的标签。
@@ -583,6 +602,40 @@ function shortSelector(el: Element): string {
   } catch (e) {
     return '';
   }
+}
+
+function finiteRuntimeNumber(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric * 100) / 100 : null;
+}
+
+/**
+ * Capture structured live-media state because rendered text such as
+ * "buffering" can remain visible after playback has already started.
+ */
+function createPageRuntimeState(): PageRuntimeState | undefined {
+  const media: RuntimeMediaState[] = [];
+  const nodes = Array.from(document.querySelectorAll('video,audio')).slice(0, 3);
+  for (const node of nodes) {
+    const el = node as HTMLMediaElement;
+    media.push({
+      kind: node.tagName.toLowerCase() === 'audio' ? 'audio' : 'video',
+      selector: shortSelector(node),
+      paused: typeof el.paused === 'boolean' ? el.paused : null,
+      ended: typeof el.ended === 'boolean' ? el.ended : null,
+      muted: typeof el.muted === 'boolean' ? el.muted : null,
+      currentTime: finiteRuntimeNumber(el.currentTime),
+      duration: finiteRuntimeNumber(el.duration),
+      readyState: finiteRuntimeNumber(el.readyState),
+      networkState: finiteRuntimeNumber(el.networkState),
+      error: finiteRuntimeNumber(el.error?.code),
+    });
+  }
+  let ariaBusy = false;
+  try {
+    ariaBusy = Boolean(document.querySelector('[aria-busy="true"]'));
+  } catch {}
+  return media.length || ariaBusy ? { ariaBusy, media } : undefined;
 }
 
 // 富文本编辑器识别：类名比 contenteditable 更能说明"该怎么输入"。
@@ -1022,6 +1075,7 @@ export function extractPageSnapshot(
     const query = normalizeSnapshotText(options.query, 200);
     const capabilities = createPageCapabilities();
     const nodes = collectInteractiveInFrames(document, [], capabilities);
+    const runtime = createPageRuntimeState();
     // 只挂**确实存在**的类别：绝大多数页面这几项都是空的，全量输出等于每份快照
     // 白花几百个字符，还会稀释真正要看的内容。
     const capabilitySummary: Record<string, { count: number; samples: unknown[] }> = {};
@@ -1033,7 +1087,7 @@ export function extractPageSnapshot(
         };
       }
     }
-    const capabilityChars = Object.keys(capabilitySummary).length ? JSON.stringify(capabilitySummary).length : 0;
+    const capabilityChars = JSON.stringify(capabilitySummary).length + (runtime ? JSON.stringify(runtime).length : 0);
     const outline = buildPageOutline(nodes);
     const outlineChars = outline ? JSON.stringify(outline).length : 0;
     // query 优先于视口距离；cursor 在排序结果上稳定翻页。
@@ -1085,6 +1139,7 @@ export function extractPageSnapshot(
       nextCursor,
       mainContent: findMainContent(),
       capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : undefined,
+      runtime,
       counts: {
         interactive: nodes.length,
         shown: elements.length,

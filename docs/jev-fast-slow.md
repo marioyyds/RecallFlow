@@ -30,6 +30,10 @@ RecallFlow 使用 TypeSafe 的远程 JEV 作为浏览器内循环控制器，而
 - `operation`：当前可执行的 CLICK、TYPE_TEXT、读取、滚动、WAIT、DONE 或 BLOCKED；
 - `click_target`：仅在 CLICK 可用时提供，候选只能来自当前可见、未禁用的安全点击元素；
 - `type_text_target`：仅在 TYPE_TEXT 可用时提供，候选只能来自可编辑字段。
+- `plan`：当前 `in_progress` 子目标、完成条件、允许操作和剩余动作租约。
+- `observation.runtime`：结构化媒体状态（`paused`、`currentTime`、`readyState` 等）与 `aria-busy`，用于避免被“正在缓冲”等可能滞后的可见文案误导。
+
+`update_plan` 的每个步骤可声明 `allowedOperations` 与 `leaseActions`。一旦声明，JEV 的可执行集合会与当前子目标取交集；`DONE` 与 `BLOCKED` 始终保留作为安全出口。省略 `allowedOperations` 时保持旧的全动作空间；显式空数组表示该步骤不允许任何快动作。
 
 所有 target head speculative 地并行评分；执行器只读取 selected operation 对应的 target head。高风险发布、发送、删除、支付等语义不会进入 CLICK 候选。
 
@@ -46,17 +50,22 @@ RecallFlow 使用 TypeSafe 的远程 JEV 作为浏览器内循环控制器，而
 每个 cycle 的顺序是：
 
 ```text
+read current PlanCard
+  -> project allowed operations
 get_page_snapshot
   -> JEV /v1/systemone
   -> validate operation + matching target
   -> execute exactly one operation
+  -> consume one action from the subgoal lease
   -> get_page_snapshot
   -> repeat
 ```
 
 `TYPE_TEXT` 的字段值由聊天模型生成并校验为唯一 `text` 字段；校验失败时不会输入。JEV 生成的是完整字段值，因此执行参数固定带 `clearFirst:true`，不会在旧标题后追加第二遍。已经有值的输入框、以及本任务中快路径或慢路径已经成功写过的目标，都不会再进入 JEV 的 `TYPE_TEXT` target head。`WAIT` 只等待并重新观察，不执行页面写入。
 
-单次快路径片段默认最多连续执行 12 个动作，每个 run 默认最多 36 次 JEV 尝试；连续动作数、尝试数、候选元素数、读取/输入/点击/等待阈值、目标动作分支下限和“同一动作无进展”连续执行上限都可在设置页调整。恢复态仍受 200 次尝试、50 个连续动作的持久化硬上限保护。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化后才允许重新尝试。
+单次快路径片段默认最多连续执行 12 个动作，每个 run 默认最多 36 次 JEV 尝试；如果当前 PlanCard 声明了更小的 `leaseActions`，以租约先耗尽为准。慢思考更新计划或推进到新步骤后，计划版本变化，快路会获得新的子目标租约。连续动作数、尝试数、候选元素数、读取/输入/点击/等待阈值、目标动作分支下限和“同一动作无进展”连续执行上限仍可在设置页调整。恢复态仍受 200 次尝试、50 个连续动作的持久化硬上限保护。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化或慢思考写入新计划版本后才允许重新尝试。
+
+`WAIT` 另有一条不受页面指纹影响的连续等待计数。动态广告、计时器或加载组件造成的 DOM 指纹变化不能把连续等待刷成“有进展”；达到 `maxRepeatedActionsWithoutProgress` 后直接交给慢思考。
 
 `CLICK` / `TYPE_TEXT` 同时产生 operation 与目标 head。operation 是多分类判断；target 是条件判断，即使 operation 分支错误也可能给出 100%。因此目标动作须同时满足：匹配 target 达到该操作门槛，且 operation 达到独立的分支下限。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。真实校准结果见 [JEV 阈值校准记录](./jev-threshold-calibration.md)。
 
@@ -70,6 +79,7 @@ get_page_snapshot
 
 - `BLOCKED`；
 - 无 target head 时 operation 置信度不足，或有 target head 时匹配 target 置信度不足；
+- 连续 `WAIT` 达到无进展阈值；
 - 不支持的操作、目标或页面结构；
 - TYPE_TEXT 文本助手失败；
 - 动作后无法重新观察；

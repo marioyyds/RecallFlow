@@ -6,6 +6,19 @@ test('detects browser intent', () => {
   assert.equal(detectIntent('打开百度搜索今天的热搜').intent, INTENTS.BROWSER);
 });
 
+test('明确写操作动词开头直接进入浏览器任务', () => {
+  for (const instruction of [
+    '创建一个test分支',
+    '帮我新建一个页面',
+    '删除这条记录',
+    '把标题改掉',
+  ]) {
+    const d = detectIntent(instruction);
+    assert.equal(d.intent, INTENTS.BROWSER, instruction);
+    assert.equal(d.confidence, 'high', instruction);
+  }
+});
+
 test('detects knowledge intent', () => {
   assert.equal(detectIntent('我的收藏里有没有 nginx 的笔记').intent, INTENTS.KNOWLEDGE);
 });

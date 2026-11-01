@@ -181,7 +181,7 @@ export const TOOL_SCHEMAS = [
     function: {
       name: 'update_plan',
       description:
-        '维护当前任务的执行计划（子目标清单）。多步任务开始时先列出计划，之后每完成一步就更新状态。既让用户看到进度，也帮助你自己不跑丢目标。每次传入完整列表（整体替换，不是增量）。',
+        '维护执行计划。当前步骤可声明快路动作、完成条件和租约；每次整体替换。',
       parameters: {
         type: 'object',
         properties: {
@@ -191,8 +191,37 @@ export const TOOL_SCHEMAS = [
             items: {
               type: 'object',
               properties: {
-                text: { type: 'string', description: '按文本片段定位' },
+                id: { type: 'string', description: '稳定步骤 id' },
+                text: { type: 'string', description: '子目标' },
                 status: { type: 'string', enum: ['pending', 'in_progress', 'done'], description: '状态，默认 pending' },
+                successPredicate: {
+                  type: 'string',
+                  description: '可观察的完成条件',
+                },
+                allowedOperations: {
+                  type: 'array',
+                  description: '允许的快路操作；省略=全动作，[]=无快动作',
+                  items: {
+                    type: 'string',
+                    enum: [
+                      'CLICK',
+                      'TYPE_TEXT',
+                      'READ_PAGE',
+                      'READ_TABLE',
+                      'ACCESSIBILITY',
+                      'DIAGNOSTICS',
+                      'SCROLL_UP',
+                      'SCROLL_DOWN',
+                      'WAIT',
+                    ],
+                  },
+                },
+                leaseActions: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: 50,
+                  description: '本步骤最多快动作数；省略=全局上限',
+                },
               },
               required: ['text'],
             },

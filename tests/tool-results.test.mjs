@@ -84,6 +84,29 @@ test('compactSnapshotSummary：关键元素最多 8 个，且带 ref 与标签',
   assert.ok(!line.includes('rf-8'), '第 9 个起应被截掉，避免刷屏');
 });
 
+test('compactSnapshotSummary：优先暴露媒体运行态，避免被缓冲文案误导', () => {
+  const out = compactSnapshotSummary({
+    title: '视频',
+    url: 'https://video.test/watch',
+    text: '正在缓冲… 00:00 / 25:36',
+    runtime: {
+      ariaBusy: false,
+      media: [{
+        kind: 'video',
+        paused: false,
+        ended: false,
+        muted: false,
+        currentTime: 8.34,
+        duration: 1536,
+        readyState: 4,
+        networkState: 2,
+        error: null,
+      }],
+    },
+  });
+  assert.match(out, /运行态：媒体状态：video playing 8\.34\/1536s ready=4 net=2/);
+});
+
 test('compactSnapshotSummary：元素无 label 时回落到 placeholder，都没有则只留 ref', () => {
   const out = compactSnapshotSummary({
     title: 't', url: 'u',
