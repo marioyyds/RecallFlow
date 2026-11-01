@@ -13,6 +13,10 @@ const ENTRIES = [
   { ts: 6, phase: 'tool', name: 'expand_result', ok: true, ms: 5 },
   { ts: 7, phase: 'cache', iter: 1, hit: 900, miss: 100 },
   { ts: 8, phase: 'collapse', iter: 2, collapsed: 1 },
+  { ts: 9, phase: 'jev', iter: 0, mode: 'shadow', decision: { kind: 'act' }, latencyMs: 120, inputTokens: 90, outputTokens: 10 },
+  { ts: 10, phase: 'jev-shadow-compare', agreed: true },
+  { ts: 11, phase: 'jev', iter: 1, mode: 'live', decision: { kind: 'act' }, latencyMs: 80, inputTokens: 40, outputTokens: 5 },
+  { ts: 12, phase: 'jev', iter: 2, mode: 'live', decision: { kind: 'escalate' }, latencyMs: 60, inputTokens: 20, outputTokens: 3 },
   { ts: 9, phase: 'complete', reason: 'final-answer', totalTokens: 1200 },
 ];
 
@@ -30,6 +34,16 @@ test('summarizeRunTrace：轮次/工具/缓存/耗时都能聚合出来', () => 
   assert.equal(m.totalTokens, 1200);
   assert.equal(m.collapsed, 1);
   assert.equal(m.errors, 0);
+  assert.equal(m.jevCalls, 3);
+  assert.equal(m.jevShadowCalls, 1);
+  assert.equal(m.jevLiveCalls, 2);
+  assert.equal(m.jevActions, 2);
+  assert.equal(m.jevEscalations, 1);
+  assert.equal(m.jevLatencyMs, 260);
+  assert.equal(m.jevInputTokens, 150);
+  assert.equal(m.jevOutputTokens, 18);
+  assert.equal(m.jevShadowCompared, 1);
+  assert.equal(m.jevShadowAgreed, 1);
 });
 
 test('summarizeRunTrace：空/坏输入安全', () => {
@@ -45,4 +59,6 @@ test('formatRunMetrics：能读出关键口径（命中率/工具分布/耗时�
   assert.match(text, /前缀缓存命中率 90%/);
   assert.match(text, /click_element×1/);
   assert.match(text, /1\.1s/);
+  assert.match(text, /JEV 调用 3（影子 1 \/ 执行 2）/);
+  assert.match(text, /影子一致 1\/1/);
 });

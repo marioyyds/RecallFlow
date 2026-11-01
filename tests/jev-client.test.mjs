@@ -96,6 +96,24 @@ test('System One 对 5xx 做有限重试', async () => {
   assert.equal(result.answers.should_escalate.noul, 0.2);
 });
 
+test('451 区域限制给出独立错误码且不重试', async () => {
+  let calls = 0;
+  await assert.rejects(
+    () => callJevSystemOne(settings, {
+      model: 'jev-latest',
+      state: 'state',
+      questions: { ok: { type: 'noul' } },
+    }, {
+      fetchImpl: async () => {
+        calls += 1;
+        return response({ title: 'Typesafe is not available in your region.' }, 451);
+      },
+    }),
+    (error) => error instanceof JevClientError && error.code === 'REGION_BLOCKED'
+  );
+  assert.equal(calls, 1);
+});
+
 test('模型列表探测解析 TypeSafe 返回结构', async () => {
   const result = await listJevModels(settings, {
     fetchImpl: async () => response({

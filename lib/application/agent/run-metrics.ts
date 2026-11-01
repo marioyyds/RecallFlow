@@ -17,6 +17,10 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
   const tools = list.filter((e) => e && e.phase === 'tool');
   const turns = list.filter((e) => e && e.phase === 'turn-timing');
   const cache = list.filter((e) => e && e.phase === 'cache');
+  const jev = list.filter((e) => e && e.phase === 'jev');
+  const jevShadow = jev.filter((e) => e.mode === 'shadow');
+  const jevLive = jev.filter((e) => e.mode === 'live');
+  const jevCompares = list.filter((e) => e && e.phase === 'jev-shadow-compare');
   const complete = (list.find((e) => e && e.phase === 'complete') || {}) as TraceRecordEntry;
 
   const byTool: Record<string, number> = {};
@@ -41,6 +45,16 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
     timeouts: list.filter((e) => e && e.phase === 'timeout').length,
     collapsed: list.filter((e) => e && e.phase === 'collapse').length,
     repaired: list.filter((e) => e && e.phase === 'conversation-repair').length,
+    jevCalls: jev.length,
+    jevShadowCalls: jevShadow.length,
+    jevLiveCalls: jevLive.length,
+    jevActions: jev.filter((e) => (e.decision as any)?.kind === 'act').length,
+    jevEscalations: jev.filter((e) => (e.decision as any)?.kind === 'escalate').length,
+    jevLatencyMs: Math.round(jev.reduce((n, e) => n + num(e.latencyMs), 0)),
+    jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
+    jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
+    jevShadowCompared: jevCompares.length,
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
   };
 }
 
@@ -58,5 +72,18 @@ export function formatRunMetrics(m: RunMetricsSummary): string {
     .sort((a, b) => b[1] - a[1])
     .map(([k, n]) => k + '×' + n);
   if (by.length) lines.push('按工具：' + by.join('、'));
+  if (m.jevCalls) {
+    lines.push(
+      'JEV 调用 ' + m.jevCalls +
+      '（影子 ' + m.jevShadowCalls + ' / 执行 ' + m.jevLiveCalls + '）' +
+      ' / 动作建议 ' + m.jevActions +
+      ' / 升级 ' + m.jevEscalations +
+      ' / 延迟 ' + sec(m.jevLatencyMs) +
+      ' / token ' + (m.jevInputTokens + m.jevOutputTokens)
+    );
+    if (m.jevShadowCompared) {
+      lines.push('JEV 影子一致 ' + m.jevShadowAgreed + '/' + m.jevShadowCompared);
+    }
+  }
   return lines.join('\n');
 }

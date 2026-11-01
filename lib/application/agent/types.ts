@@ -297,6 +297,16 @@ export interface RunMetricsSummary {
   timeouts: number;
   collapsed: number;
   repaired: number;
+  jevCalls: number;
+  jevShadowCalls: number;
+  jevLiveCalls: number;
+  jevActions: number;
+  jevEscalations: number;
+  jevLatencyMs: number;
+  jevInputTokens: number;
+  jevOutputTokens: number;
+  jevShadowCompared: number;
+  jevShadowAgreed: number;
 }
 
 /** 工具元数据（`tool-metadata.ts` 的条目）。 */

@@ -101,6 +101,10 @@
         <span class="field-label">模型标识</span>
         <input id="jev-model" type="text" placeholder="jev-latest" autocomplete="off">
       </label>
+      <div class="connection-check">
+        <button id="test-jev" class="btn btn-secondary" type="button">测试连接</button>
+        <span id="jev-status" class="connection-status" role="status" aria-live="polite">尚未测试</span>
+      </div>
       <div class="budget-row">
         <label class="field">
           <span class="field-label">请求超时（毫秒）</span>

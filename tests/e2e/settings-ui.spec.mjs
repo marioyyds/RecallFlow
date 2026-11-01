@@ -86,6 +86,19 @@ test('远程 JEV 配置可保存并在重新打开设置页后恢复', async () 
   await page.locator('#jev-timeout').fill('8000');
   await page.locator('#jev-retries').fill('2');
   await page.locator('#jev-schema-version').fill('jev.recallflow.v2');
+  await page.route('https://example.com/v1/models', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        models: [
+          { name: 'jev-action-v1', description: 'test', release_date: '2026-11-01' },
+        ],
+      }),
+    });
+  });
+  await page.locator('#test-jev').click();
+  await expect(page.locator('#jev-status')).toContainText('连接成功，模型可用');
   await page.locator('#save-btn').click();
   await expect(page.locator('#status')).toContainText('已保存');
 

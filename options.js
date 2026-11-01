@@ -209,8 +209,8 @@ async function saveScript(script) {
 // lib/shared/surrogates.ts
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
-function alignRange(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function alignRange(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const len = s.length;
   const clamp = (v, fallback) => {
     if (v === void 0 || v === null) return fallback;
@@ -225,13 +225,13 @@ function alignRange(text, start, end) {
   if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
   return { start: a, end: b };
 }
-function sliceSafe(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function sliceSafe(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const { start: a, end: b } = alignRange(s, start, end);
   return s.slice(a, b);
 }
-function rangeSafe(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function rangeSafe(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const { start: a, end: b } = alignRange(s, start, end);
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
@@ -263,8 +263,8 @@ function formatCurrentPageResult(input) {
     return head + "\u8FD9\u662F\u300C\u6587\u6848\u53EF\u89C1\u6027\u6838\u67E5\u300D\u7684\u7ED3\u679C\uFF0C**\u4E0D\u542B\u9875\u9762\u6B63\u6587**\u3002\u5982\u9700\u6B63\u6587\uFF0C\u8BF7\u518D\u6B21\u8C03\u7528 read_current_page \u4E14\u4E0D\u8981\u4F20 checkTexts\u3002\n\n" + vis;
   }
   const chunks = Array.isArray(o.chunks) ? o.chunks : [];
-  const text = String(o.text || "");
-  let out = head + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text);
+  const text2 = String(o.text || "");
+  let out = head + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text2);
   if (vis) out += "\n\n" + vis;
   if (o.visibleOnly === true) {
     out += "\n\n\uFF08\u672C\u6B21\u4EC5\u8FD4\u56DE\u6309\u53EF\u89C1\u6027\u8FC7\u6EE4\u540E\u7684\u6587\u672C\uFF1B\u5982\u9700\u5305\u542B\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u53BB\u6389 visibleOnly\u3002\uFF09";
@@ -410,9 +410,9 @@ function cleanTitle(title) {
   ).trim();
   return t;
 }
-function markdownExcerpt(text, maxChars = 160) {
+function markdownExcerpt(text2, maxChars = 160) {
   const limit = Math.max(20, Number(maxChars) || 160);
-  let s = String(text || "");
+  let s = String(text2 || "");
   s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
   s = s.replace(/`([^`]+)`/g, "$1");
   s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
@@ -809,10 +809,10 @@ function parseUserscriptMetadata(code) {
   return Object.assign(meta, { valid: Boolean(meta.name) });
 }
 function hashId(...parts) {
-  const text = parts.join("|");
+  const text2 = parts.join("|");
   let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash << 5) + hash + text.charCodeAt(i) >>> 0;
+  for (let i = 0; i < text2.length; i += 1) {
+    hash = (hash << 5) + hash + text2.charCodeAt(i) >>> 0;
   }
   return hash.toString(36);
 }
@@ -874,10 +874,10 @@ async function searchGreasyFork(q) {
   const keyword = String(q || "").trim();
   if (!keyword) return [];
   const url = SEARCH_ENDPOINT + "?q=" + encodeURIComponent(keyword);
-  const text = await fetchText(url);
+  const text2 = await fetchText(url);
   let list = [];
   try {
-    list = JSON.parse(text);
+    list = JSON.parse(text2);
   } catch (e) {
     throw new Error("GreasyFork \u8FD4\u56DE\u7684\u4E0D\u662F\u6709\u6548 JSON");
   }
@@ -1832,8 +1832,8 @@ function parseScalar(raw) {
   if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
   return s;
 }
-function parseSkillMd(text) {
-  const str = String(text || "");
+function parseSkillMd(text2) {
+  const str = String(text2 || "");
   const m = str.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/);
   if (!m) {
     return { data: {}, body: str.trim() };
@@ -1858,8 +1858,8 @@ function parseSkillMd(text) {
   }
   return { data, body };
 }
-function mdToSkill(text) {
-  const { data, body } = parseSkillMd(text);
+function mdToSkill(text2) {
+  const { data, body } = parseSkillMd(text2);
   const x = {
     intents: Array.isArray(data["x-recallflow-intents"]) ? data["x-recallflow-intents"] : [],
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
@@ -2170,8 +2170,8 @@ async function drag(tabId, x1, y1, x2, y2) {
   await command(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x2), y: Math.round(y2), button: "left", buttons: 0, clickCount: 1 });
   return { ok: true };
 }
-async function insertText(tabId, text) {
-  await command(tabId, "Input.insertText", { text: String(text == null ? "" : text) });
+async function insertText(tabId, text2) {
+  await command(tabId, "Input.insertText", { text: String(text2 == null ? "" : text2) });
   return { ok: true };
 }
 async function pressKey(tabId, key, modifiers) {
@@ -3849,10 +3849,10 @@ async function searchWeb(query, maxResults = 6) {
 
 // lib/application/agent/page-action-verify.ts
 function buildActionVerification(observed, reason) {
-  const text = String(reason || "");
-  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
-  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text };
-  return { executed: true, verified: false, changed: false, reason: text };
+  const text2 = String(reason || "");
+  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text2 };
+  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text2 };
+  return { executed: true, verified: false, changed: false, reason: text2 };
 }
 function observedChange(before, after) {
   if (!after || typeof after.fingerprint !== "string") return "unobservable";
@@ -3933,8 +3933,8 @@ function compactSnapshotSummary(snapshot) {
     const label = e.label || e.placeholder || "";
     return e.ref + (label ? "\uFF1A" + sliceSafe(String(label), 0, 24) : "");
   }).join("\uFF1B") : "";
-  const text = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
-  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
+  const text2 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
+  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
 }
 
 // lib/application/agent/diagnostics.ts
@@ -3947,8 +3947,8 @@ async function readConsole(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0 console \u8BB0\u5F55\u3002" };
-    const text = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
-    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text };
+    const text2 = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
+    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6 console \u5931\u8D25\uFF1A" + e.message };
   }
@@ -3965,12 +3965,12 @@ async function readNetwork(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0\u7F51\u7EDC\u8BF7\u6C42\u8BB0\u5F55\u3002" };
-    const text = entries.map((e) => {
+    const text2 = entries.map((e) => {
       const head = (e.method || "GET") + " " + (e.error ? "ERR" : e.status || "") + " " + e.url + (e.ms != null ? " (" + e.ms + "ms)" : "") + (e.error ? " \u2014 " + e.error : "");
       const init = e.initiator ? e.initiator.split("\n").slice(0, 2).join(" ") : "";
       return head + (init ? "\n  \u53D1\u8D77\u4E8E: " + init : "");
     }).join("\n");
-    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text };
+    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF1A" + e.message };
   }
@@ -4059,8 +4059,8 @@ async function macroSave(deps, args) {
 async function macroList(deps) {
   const macros = await deps.listMacros(deps.pageUrl);
   if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
-  const text = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
-  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text };
+  const text2 = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
+  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text2 };
 }
 async function macroRun(deps, args) {
   const name = String(args && args.name || "").trim();
@@ -4145,10 +4145,10 @@ function knowledgeSearch(deps, args) {
   const relevant = deps.buildRagContext(deps.book, args.query || "", limit);
   if (!relevant.length) return { result: "\u672A\u68C0\u7D22\u5230\u76F8\u5173\u77E5\u8BC6\u5E93\u6761\u76EE\u3002" };
   const citations = deps.buildCitations(relevant, false);
-  const text = relevant.map(
+  const text2 = relevant.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.note ? "\uFF5C\u5185\u5BB9\uFF1A" + it.note : ""}${it.url ? "\uFF5C\u94FE\u63A5\uFF1A" + it.url : ""}`
   ).join("\n");
-  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text, citations };
+  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text2, citations };
 }
 function knowledgeList(deps, args) {
   let items = Object.values(deps.book);
@@ -4156,12 +4156,12 @@ function knowledgeList(deps, args) {
   items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const limit = Number(args.limit) || 20;
   const shown = items.slice(0, limit);
-  const text = shown.map(
+  const text2 = shown.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.tags && it.tags.length ? "\uFF5C\u6807\u7B7E\uFF1A" + it.tags.join("\u3001") : ""}`
   ).join("\n");
   return {
     result: `\u77E5\u8BC6\u5E93\u5171 ${items.length} \u6761\uFF0C\u4EE5\u4E0B\u5217\u51FA ${shown.length} \u6761\uFF1A
-` + (text || "\uFF08\u7A7A\uFF09"),
+` + (text2 || "\uFF08\u7A7A\uFF09"),
     citations: deps.buildCitations(shown, true)
   };
 }
@@ -4204,8 +4204,8 @@ async function listTabs(deps) {
       url: t.url || "",
       active: Boolean(t.active)
     }));
-    const text = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
-    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text || "\uFF08\u65E0\uFF09") };
+    const text2 = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
+    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text2 || "\uFF08\u65E0\uFF09") };
   } catch (e) {
     return { ok: false, result: "\u5217\u51FA\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + e.message };
   }
@@ -4364,6 +4364,10 @@ function summarizeRunTrace(entries) {
   const tools = list.filter((e) => e && e.phase === "tool");
   const turns = list.filter((e) => e && e.phase === "turn-timing");
   const cache = list.filter((e) => e && e.phase === "cache");
+  const jev = list.filter((e) => e && e.phase === "jev");
+  const jevShadow = jev.filter((e) => e.mode === "shadow");
+  const jevLive = jev.filter((e) => e.mode === "live");
+  const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -4384,7 +4388,17 @@ function summarizeRunTrace(entries) {
     errors: list.filter((e) => e && e.phase === "error").length,
     timeouts: list.filter((e) => e && e.phase === "timeout").length,
     collapsed: list.filter((e) => e && e.phase === "collapse").length,
-    repaired: list.filter((e) => e && e.phase === "conversation-repair").length
+    repaired: list.filter((e) => e && e.phase === "conversation-repair").length,
+    jevCalls: jev.length,
+    jevShadowCalls: jevShadow.length,
+    jevLiveCalls: jevLive.length,
+    jevActions: jev.filter((e) => e.decision?.kind === "act").length,
+    jevEscalations: jev.filter((e) => e.decision?.kind === "escalate").length,
+    jevLatencyMs: Math.round(jev.reduce((n, e) => n + num(e.latencyMs), 0)),
+    jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
+    jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
+    jevShadowCompared: jevCompares.length,
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length
   };
 }
 function formatRunMetrics(m) {
@@ -4398,6 +4412,14 @@ function formatRunMetrics(m) {
   ];
   const by = Object.entries(m.byTool || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => k + "\xD7" + n);
   if (by.length) lines.push("\u6309\u5DE5\u5177\uFF1A" + by.join("\u3001"));
+  if (m.jevCalls) {
+    lines.push(
+      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
+    );
+    if (m.jevShadowCompared) {
+      lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -4409,14 +4431,14 @@ function updatePlan(ctx, args) {
     status: ["pending", "in_progress", "done"].includes(it.status) ? it.status : "pending"
   }));
   ctx.plan = plan;
-  const text = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
+  const text2 = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();
   const store = ctx && ctx.resultStore;
-  const text = store && typeof store.get === "function" ? store.get(id) : null;
-  if (!text) {
+  const text2 = store && typeof store.get === "function" ? store.get(id) : null;
+  if (!text2) {
     const known = ctx && ctx.resultIds && typeof ctx.resultIds.has === "function" && ctx.resultIds.has(id);
     return {
       ok: false,
@@ -4425,7 +4447,7 @@ function expandResult(ctx, args) {
   }
   const offset = Math.max(0, Number(args.offset) || 0);
   const limit = Math.min(4e3, Math.max(200, Number(args.limit) || 2e3));
-  const piece = rangeSafe(text, offset, offset + limit);
+  const piece = rangeSafe(text2, offset, offset + limit);
   return {
     ok: true,
     result: "\u7ED3\u679C " + id + " [" + piece.start + "," + piece.end + ") / \u5171 " + piece.length + " \u5B57\u7B26\uFF1A\n" + piece.text
@@ -4541,7 +4563,7 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       const cur = await area2.get([SHOT_KEY, SHOT_INDEX_KEY]);
       const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
       const index = isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {};
-      const record = Object.assign({}, shot, {
+      const record2 = Object.assign({}, shot, {
         id,
         sessionId: String(sessionId || shot && shot.sessionId || ""),
         createdAt: Number(shot && shot.createdAt) || Date.now(),
@@ -4549,16 +4571,16 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       });
       index[id] = {
         id,
-        sessionId: record.sessionId,
-        createdAt: record.createdAt,
-        bytes: record.bytes
+        sessionId: record2.sessionId,
+        createdAt: record2.createdAt,
+        bytes: record2.bytes
       };
       pruneIndex2(index);
-      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record]).slice(-MAX_SHOTS);
+      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record2]).slice(-MAX_SHOTS);
       await area2.set({
         [SHOT_KEY]: nextArchive,
         [SHOT_INDEX_KEY]: index,
-        [shotStorageKey(id)]: record
+        [shotStorageKey(id)]: record2
       });
       const stale = Object.keys(cur && cur[SHOT_INDEX_KEY] || {}).filter((oldId) => !index[oldId]).map(shotStorageKey);
       if (stale.length && typeof area2.remove === "function") {
@@ -4697,8 +4719,8 @@ function readContentEditableText(root) {
   const walk = (node) => {
     for (const child of Array.from(node.childNodes || [])) {
       if (child.nodeType === 3) {
-        const text2 = String(child.nodeValue || "");
-        if (text2) tokens.push(text2);
+        const text3 = String(child.nodeValue || "");
+        if (text3) tokens.push(text3);
         continue;
       }
       if (child.nodeType !== 1) continue;
@@ -4714,19 +4736,19 @@ function readContentEditableText(root) {
     }
   };
   walk(root);
-  let text = "";
+  let text2 = "";
   let boundaries = 0;
   for (const token of tokens) {
     if (token === null) {
-      if (text) boundaries += 1;
+      if (text2) boundaries += 1;
       continue;
     }
     if (!token) continue;
-    if (boundaries && text && !text.endsWith("\n")) text += "\n".repeat(boundaries);
+    if (boundaries && text2 && !text2.endsWith("\n")) text2 += "\n".repeat(boundaries);
     boundaries = 0;
-    text += token;
+    text2 += token;
   }
-  return text.replace(/\n+$/g, "");
+  return text2.replace(/\n+$/g, "");
 }
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
@@ -4781,20 +4803,20 @@ async function typeText(deps, args) {
     const focusExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return false; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } } else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(el.value.length, el.value.length); return true; })()';
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
-    const text = String(args.value == null ? "" : args.value);
+    const text2 = String(args.value == null ? "" : args.value);
     const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
-    const expected = args.clearFirst === true ? text : String(beforeValue == null ? "" : beforeValue) + text;
+    const expected = args.clearFirst === true ? text2 : String(beforeValue == null ? "" : beforeValue) + text2;
     if (args.clearFirst === true) await deps.cdp.pressKey(deps.ctx.tabId, "a", ["CTRL"]);
     let strategy = "cdp-insertText";
-    if (target.contentEditable && text.includes("\n")) {
+    if (target.contentEditable && text2.includes("\n")) {
       strategy = "cdp-line-by-line";
-      const lines = text.split("\n");
+      const lines = text2.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (i > 0) await deps.cdp.pressKey(deps.ctx.tabId, "Enter");
         if (lines[i] || i === 0) await deps.cdp.insertText(deps.ctx.tabId, lines[i]);
       }
     } else {
-      await deps.cdp.insertText(deps.ctx.tabId, text);
+      await deps.cdp.insertText(deps.ctx.tabId, text2);
     }
     const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
     const summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
@@ -4817,7 +4839,7 @@ async function typeText(deps, args) {
         deps.observedChange(before, after),
         verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text2.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;
@@ -5107,7 +5129,7 @@ async function fetchWebpage(deps, args) {
       return { ok: false, result: "\u8BE5\u9875\u9762\u6B63\u6587\u4E3A\u7A7A\uFF08" + u + "\uFF09\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BFB\u53D6\u6E32\u67D3\u540E\u5185\u5BB9\uFF0C\u6216\u6362\u7528\u5176\u5B83\u6765\u6E90\u3002" };
     }
     const likelySpa = trimmedText.length < 150 && /<script[\s>]/i.test(raw);
-    const text = fullText.slice(0, 8e3);
+    const text2 = fullText.slice(0, 8e3);
     const finalUrl = resp.url || u;
     const auth = detectAuthChallenge({
       beforeUrl: u,
@@ -5132,8 +5154,8 @@ async function fetchWebpage(deps, args) {
     }
     const usable = !likelySpa && trimmedText.length >= 200;
     return {
-      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
-      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text.slice(0, 180) }] } : {}
+      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text2 + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
+      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text2.slice(0, 180) }] } : {}
     };
   } catch (e) {
     if (!deps.isAbortLikeError(e)) ctx.failedUrls.push(norm);
@@ -5407,22 +5429,22 @@ async function readCurrentPage(deps, args) {
       }
     });
     const pr = pageResponse || {};
-    const text = pr.text ? pr.text : "";
+    const text2 = pr.text ? pr.text : "";
     const visReport = deps.formatVisibilityReport(pr.visibility);
     const checkTexts = Array.isArray(args.checkTexts) ? args.checkTexts : [];
     if (checkTexts.filter((t) => String(t == null ? "" : t).trim()).length && visReport) {
       return {
         ok: true,
-        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
+        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text2.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
       };
     }
-    if (!text) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
-    const chunks = deps.splitIntoChunks(text, 1200, 8);
+    if (!text2) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
+    const chunks = deps.splitIntoChunks(text2, 1200, 8);
     const result = deps.formatCurrentPageResult({
       title: pr.title,
       url: pr.url || ctx.pageUrl,
-      text,
-      textLength: text.length,
+      text: text2,
+      textLength: text2.length,
       chunks,
       visReport,
       visibleOnly: args.visibleOnly === true
@@ -5555,11 +5577,11 @@ async function listFrames(deps) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   const frames = await listFramesRaw(deps, tabId);
   if (!frames.length) return { ok: false, result: "\u672A\u83B7\u53D6\u5230\u9875\u9762\u6846\u67B6\u4FE1\u606F\uFF08\u53EF\u80FD\u65E0\u5185\u5BB9\u811A\u672C\u6743\u9650\uFF09\u3002" };
-  const text = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
+  const text2 = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
   return {
     ok: true,
     frames,
-    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
+    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text2 + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
   };
 }
 async function handlePageReadTool(name, args, deps) {
@@ -5572,13 +5594,13 @@ async function handlePageReadTool(name, args, deps) {
 // lib/application/agent/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
-  const text = scripts.length ? scripts.map(
+  const text2 = scripts.length ? scripts.map(
     (s, i) => `[${i + 1}] ${s.name} v${s.version}${s.enabled ? "" : "\uFF08\u5DF2\u505C\u7528\uFF09"}
 id\uFF1A${s.id}
 \u5339\u914D\uFF1A${(s.matches || []).join("\u3001")}
 \u63CF\u8FF0\uFF1A${s.description || "\u65E0"}`
   ).join("\n\n") : "\u5C1A\u672A\u5B89\u88C5\u4EFB\u4F55\u7528\u6237\u811A\u672C\u3002";
-  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text };
+  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text2 };
 }
 async function searchUserscripts(deps, args) {
   const list = await deps.searchScripts(args.query);
@@ -6746,8 +6768,8 @@ function decodeNumericEntity(code) {
     return "\uFFFD";
   }
 }
-function splitIntoChunks(text, size, max) {
-  const s = String(text || "").trim();
+function splitIntoChunks(text2, size, max) {
+  const s = String(text2 || "").trim();
   if (!s) return [];
   const paras = s.split(/\n+/).map((p) => p.trim()).filter(Boolean);
   if (!paras.length) return [sliceSafe(s, 0, size)];
@@ -6893,8 +6915,8 @@ var McpClient = class {
     return r.content.map((c) => c.type === "text" ? c.text : JSON.stringify(c)).join("\n");
   }
 };
-function parseSseResult(text) {
-  const lines = String(text).split("\n");
+function parseSseResult(text2) {
+  const lines = String(text2).split("\n");
   let last = null;
   for (const line of lines) {
     const t = line.trim();
@@ -6929,6 +6951,178 @@ async function probeMcpServer(server) {
       ts: Date.now()
     });
   }
+}
+
+// lib/application/agent/jev-contract.ts
+var JevProtocolError = class extends Error {
+  path;
+  constructor(message, path = "") {
+    super(message);
+    this.name = "JevProtocolError";
+    this.path = path;
+  }
+};
+function record(value, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u5BF9\u8C61", path);
+  }
+  return value;
+}
+function text(value, path) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32", path);
+  }
+  return value;
+}
+function parseJevModelList(value) {
+  const source = record(value, "response");
+  if (!Array.isArray(source.models)) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u6570\u7EC4", "response.models");
+  }
+  return {
+    models: source.models.map((item, index) => {
+      const model = record(item, "response.models." + index);
+      return {
+        name: text(model.name, "response.models." + index + ".name"),
+        description: String(model.description || ""),
+        release_date: String(model.release_date || "")
+      };
+    })
+  };
+}
+
+// lib/application/agent/jev-client.ts
+var JevClientError = class extends Error {
+  code;
+  status;
+  constructor(code, message, status) {
+    super(message);
+    this.name = "JevClientError";
+    this.code = code;
+    this.status = status;
+  }
+};
+function jevBaseUrl(settings) {
+  const raw = String(settings.baseUrl || "").trim();
+  if (!raw) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API \u5730\u5740");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new JevClientError("CONFIG", "TypeSafe API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+  }
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {
+    throw new JevClientError("CONFIG", "TypeSafe API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF08\u672C\u673A\u5F00\u53D1\u9664\u5916\uFF09");
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+function jevModelsUrl(settings) {
+  return jevBaseUrl(settings) + "/v1/models";
+}
+function apiKey(settings) {
+  const value = String(settings.apiKey || "").trim();
+  if (!value) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API Key");
+  return value;
+}
+function retryableStatus(status) {
+  return status === 429 || status >= 500;
+}
+function makeAbortError() {
+  const error = new Error("\u4EFB\u52A1\u5DF2\u53D6\u6D88");
+  error.name = "AbortError";
+  return error;
+}
+async function readErrorDetail(resp) {
+  let raw = "";
+  try {
+    raw = await resp.text();
+  } catch {
+  }
+  const value = raw.trim();
+  if (!value) return "";
+  try {
+    const parsed = JSON.parse(value);
+    const detail = parsed.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") return JSON.stringify(detail);
+    if (typeof parsed.error === "object" && parsed.error && "message" in parsed.error) {
+      return String(parsed.error.message || "");
+    }
+  } catch {
+  }
+  return value.slice(0, 1e3);
+}
+async function requestJson(settings, url, init, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const external = options.signal;
+  const retries = Math.max(0, Math.min(3, Math.floor(Number(settings.maxRetries) || 0)));
+  for (let attempt = 0; ; attempt += 1) {
+    if (external && external.aborted) throw makeAbortError();
+    const controller = new AbortController();
+    let timedOut = false;
+    const onAbort = () => controller.abort();
+    if (external) external.addEventListener("abort", onAbort, { once: true });
+    const timeoutMs = Math.max(1e3, Math.min(12e4, Number(settings.requestTimeoutMs) || 15e3));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    let resp;
+    try {
+      resp = await fetchImpl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (external && external.aborted) throw makeAbortError();
+      if (timedOut) {
+        throw new JevClientError("TIMEOUT", "TypeSafe \u8BF7\u6C42\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09");
+      }
+      if (attempt < retries) {
+        await sleep(500 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new JevClientError("NETWORK", "TypeSafe \u8FDE\u63A5\u5931\u8D25\uFF1A" + errorMessage(error));
+    } finally {
+      clearTimeout(timer);
+      if (external) external.removeEventListener("abort", onAbort);
+    }
+    if (resp.ok) {
+      try {
+        return await resp.json();
+      } catch {
+        throw new JevClientError("PROTOCOL", "TypeSafe \u8FD4\u56DE\u4E86\u65E0\u6548 JSON", resp.status);
+      }
+    }
+    const detail = await readErrorDetail(resp);
+    if (attempt < retries && retryableStatus(resp.status)) {
+      await sleep(500 * Math.pow(2, attempt));
+      continue;
+    }
+    if (resp.status === 451) {
+      throw new JevClientError(
+        "REGION_BLOCKED",
+        "TypeSafe \u5F53\u524D\u7F51\u7EDC\u533A\u57DF\u4E0D\u53EF\u7528\uFF08HTTP 451\uFF09" + (detail ? "\uFF1A" + detail : "") + "\u3002\u8BF7\u5207\u6362\u53EF\u7528\u7684\u7F51\u7EDC\u51FA\u53E3\u540E\u91CD\u8BD5\u3002",
+        resp.status
+      );
+    }
+    throw new JevClientError(
+      "HTTP",
+      "TypeSafe \u8BF7\u6C42\u5931\u8D25 (" + resp.status + ")" + (detail ? "\uFF1A" + detail : ""),
+      resp.status
+    );
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+async function listJevModels(settings, options = {}) {
+  const raw = await requestJson(settings, jevModelsUrl(settings), {
+    method: "GET",
+    headers: { Authorization: "Bearer " + apiKey(settings) }
+  }, options);
+  return parseJevModelList(raw);
 }
 
 // entries/options.ts
@@ -7163,6 +7357,39 @@ $("toggle-jev-key").addEventListener("click", () => {
   $("toggle-jev-key").setAttribute("aria-label", el.type === "password" ? "\u663E\u793A JEV API Key" : "\u9690\u85CF JEV API Key");
   $("toggle-jev-key").setAttribute("aria-pressed", el.type === "text" ? "true" : "false");
 });
+$("test-jev").addEventListener("click", async () => {
+  const status = $("jev-status");
+  status.className = "connection-status";
+  const settings = mergeJevSettings({
+    baseUrl: $("jev-base-url").value,
+    apiKey: $("jev-api-key").value,
+    model: $("jev-model").value,
+    requestTimeoutMs: $("jev-timeout").value,
+    maxRetries: $("jev-retries").value,
+    schemaVersion: $("jev-schema-version").value
+  });
+  if (!settings.apiKey) {
+    status.textContent = "\u8BF7\u5148\u586B\u5199 JEV API Key";
+    status.classList.add("error");
+    $("jev-api-key").focus();
+    return;
+  }
+  status.textContent = "\u6B63\u5728\u6D4B\u8BD5\u2026";
+  try {
+    const result = await listJevModels(settings);
+    const found = result.models.some((item) => item.name === settings.model);
+    if (found) {
+      status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0C\u6A21\u578B\u53EF\u7528";
+      status.classList.add("ok");
+    } else {
+      status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u6A21\u578B\u4E0D\u5728\u53EF\u7528\u5217\u8868\u4E2D\uFF1A" + result.models.map((item) => item.name).join("\u3001");
+      status.classList.add("error");
+    }
+  } catch (error) {
+    status.textContent = "\u8FDE\u63A5\u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error));
+    status.classList.add("error");
+  }
+});
 function collectMcp() {
   const rows = document.querySelectorAll("#mcp-list .mcp-row");
   const out = [];
@@ -7200,10 +7427,10 @@ $("approval-preset").addEventListener("change", (e) => {
 document.querySelectorAll(".approval-list input").forEach((el) => el.addEventListener("change", syncApprovalPreset));
 $("test-connection").addEventListener("click", async () => {
   const status = $("connection-status");
-  const apiKey = $("api-key").value.trim();
+  const apiKey2 = $("api-key").value.trim();
   const baseUrl = $("base-url").value.trim().replace(/\/+$/, "") || AI_SETTINGS_DEFAULTS.baseUrl;
   status.className = "connection-status";
-  if (!apiKey) {
+  if (!apiKey2) {
     status.textContent = "\u8BF7\u5148\u586B\u5199 API Key";
     status.classList.add("error");
     $("api-key").focus();
@@ -7214,7 +7441,7 @@ $("test-connection").addEventListener("click", async () => {
   const timer = setTimeout(() => controller.abort(), 8e3);
   try {
     const res = await fetch(baseUrl + "/models", {
-      headers: { Authorization: "Bearer " + apiKey },
+      headers: { Authorization: "Bearer " + apiKey2 },
       signal: controller.signal
     });
     if (!res.ok) throw new Error("HTTP " + res.status);

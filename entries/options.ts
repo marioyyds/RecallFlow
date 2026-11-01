@@ -13,6 +13,7 @@ import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 // 复用后台那一套握手（initialize → notifications/initialized → tools/list），
 // 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
 import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/application/agent/mcp.ts';
+import { listJevModels } from '../lib/application/agent/jev-client.ts';
 
 /** MCP 服务器配置 / 最近连接结果：字段由 mcp.js 与设置页共同约定。 */
 type Dyn = Record<string, any>;
@@ -285,6 +286,42 @@ $('toggle-jev-key').addEventListener('click', () => {
   $('toggle-jev-key').textContent = el.type === 'password' ? '👁' : '🙈';
   $('toggle-jev-key').setAttribute('aria-label', el.type === 'password' ? '显示 JEV API Key' : '隐藏 JEV API Key');
   $('toggle-jev-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
+});
+
+$('test-jev').addEventListener('click', async () => {
+  const status = $('jev-status');
+  status.className = 'connection-status';
+  const settings = mergeJevSettings({
+    baseUrl: $('jev-base-url').value,
+    apiKey: $('jev-api-key').value,
+    model: $('jev-model').value,
+    requestTimeoutMs: $('jev-timeout').value,
+    maxRetries: $('jev-retries').value,
+    schemaVersion: $('jev-schema-version').value,
+  });
+  if (!settings.apiKey) {
+    status.textContent = '请先填写 JEV API Key';
+    status.classList.add('error');
+    $('jev-api-key').focus();
+    return;
+  }
+  status.textContent = '正在测试…';
+  try {
+    const result = await listJevModels(settings);
+    const found = result.models.some((item) => item.name === settings.model);
+    if (found) {
+      status.textContent = '连接成功，模型可用';
+      status.classList.add('ok');
+    } else {
+      status.textContent =
+        '连接成功，但当前模型不在可用列表中：' +
+        result.models.map((item) => item.name).join('、');
+      status.classList.add('error');
+    }
+  } catch (error) {
+    status.textContent = '连接失败：' + (error instanceof Error ? error.message : String(error));
+    status.classList.add('error');
+  }
 });
 
 function collectMcp() {

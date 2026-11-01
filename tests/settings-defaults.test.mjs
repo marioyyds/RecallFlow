@@ -32,6 +32,8 @@ test('设置页提供独立的远程 JEV 配置', () => {
     'jev-timeout',
     'jev-retries',
     'jev-schema-version',
+    'test-jev',
+    'jev-status',
   ]) {
     assert.match(OPTIONS_HTML, new RegExp('id="' + id + '"'));
   }

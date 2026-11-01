@@ -4276,6 +4276,10 @@ function summarizeRunTrace(entries) {
   const tools = list.filter((e) => e && e.phase === "tool");
   const turns = list.filter((e) => e && e.phase === "turn-timing");
   const cache = list.filter((e) => e && e.phase === "cache");
+  const jev = list.filter((e) => e && e.phase === "jev");
+  const jevShadow = jev.filter((e) => e.mode === "shadow");
+  const jevLive = jev.filter((e) => e.mode === "live");
+  const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -4296,7 +4300,17 @@ function summarizeRunTrace(entries) {
     errors: list.filter((e) => e && e.phase === "error").length,
     timeouts: list.filter((e) => e && e.phase === "timeout").length,
     collapsed: list.filter((e) => e && e.phase === "collapse").length,
-    repaired: list.filter((e) => e && e.phase === "conversation-repair").length
+    repaired: list.filter((e) => e && e.phase === "conversation-repair").length,
+    jevCalls: jev.length,
+    jevShadowCalls: jevShadow.length,
+    jevLiveCalls: jevLive.length,
+    jevActions: jev.filter((e) => e.decision?.kind === "act").length,
+    jevEscalations: jev.filter((e) => e.decision?.kind === "escalate").length,
+    jevLatencyMs: Math.round(jev.reduce((n, e) => n + num(e.latencyMs), 0)),
+    jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
+    jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
+    jevShadowCompared: jevCompares.length,
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length
   };
 }
 function formatRunMetrics(m) {
@@ -4310,6 +4324,14 @@ function formatRunMetrics(m) {
   ];
   const by = Object.entries(m.byTool || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => k + "\xD7" + n);
   if (by.length) lines.push("\u6309\u5DE5\u5177\uFF1A" + by.join("\u3001"));
+  if (m.jevCalls) {
+    lines.push(
+      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
+    );
+    if (m.jevShadowCompared) {
+      lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
+    }
+  }
   return lines.join("\n");
 }
 

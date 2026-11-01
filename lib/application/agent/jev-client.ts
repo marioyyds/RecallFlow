@@ -136,6 +136,15 @@ async function requestJson(
       await sleep(500 * Math.pow(2, attempt));
       continue;
     }
+    if (resp.status === 451) {
+      throw new JevClientError(
+        'REGION_BLOCKED',
+        'TypeSafe 当前网络区域不可用（HTTP 451）' +
+          (detail ? '：' + detail : '') +
+          '。请切换可用的网络出口后重试。',
+        resp.status
+      );
+    }
     throw new JevClientError(
       'HTTP',
       'TypeSafe 请求失败 (' + resp.status + ')' + (detail ? '：' + detail : ''),

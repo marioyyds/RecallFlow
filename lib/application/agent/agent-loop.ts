@@ -25,6 +25,8 @@ import { AgentRunState } from './agent-run-state.ts';
 import { AgentRunFinalizer } from './agent-finalizer.ts';
 import { CompletionCoordinator } from './agent-completion.ts';
 import { ToolCallPipeline } from './tool-call-pipeline.ts';
+import { JevFastController } from './jev-controller.ts';
+import type { JevFastDecision } from './jev-action-space.ts';
 
 const CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
 
@@ -53,6 +55,7 @@ export async function runAgentLoop(
   const state = new AgentRunState(prepared, payload, settings);
   const finalizer = new AgentRunFinalizer(state, port, settings, signal);
   const toolPipeline = new ToolCallPipeline(state, port, signal);
+  const jevFast = new JevFastController(state, toolPipeline, signal);
   const completion = new CompletionCoordinator(state);
   const resumeIteration = state.resumeIteration;
   const persist = (extra: Record<string, any> = {}) =>
@@ -65,6 +68,8 @@ export async function runAgentLoop(
   }).catch(() => {});
 
   let deadlineWrapUpSent = false;
+  let jevAttempted = false;
+  let pendingJevShadow: JevFastDecision | null = null;
   for (let iter = resumeIteration; ; iter++) {
     const deadline = deadlineDecision({
       now: Date.now(),
@@ -172,6 +177,18 @@ export async function runAgentLoop(
       phase: 'model',
       nextIteration: iter,
     }).catch(() => {});
+
+    if (!jevAttempted) {
+      jevAttempted = true;
+      const jevOutcome = await jevFast.runOnce(iter, persist);
+      if (jevOutcome.kind === 'cancelled') {
+        await finalizer.cancelled(jevOutcome.reason, 'interrupted');
+        return;
+      }
+      if (jevOutcome.kind === 'shadow') {
+        pendingJevShadow = jevOutcome.decision;
+      }
+    }
 
     const historyTokens = estimateMessagesTokens(state.messages);
     let collapsedNow = 0;
@@ -286,6 +303,10 @@ export async function runAgentLoop(
     }
 
     state.messages.push(step.assistantMessage);
+    if (pendingJevShadow) {
+      jevFast.traceShadowComparison(pendingJevShadow, step);
+      pendingJevShadow = null;
+    }
     recordUsage(state, step, iter);
     state.emit({ type: 'usage', totalTokens: state.totalTokens });
 

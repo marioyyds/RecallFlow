@@ -43,8 +43,8 @@ function typeInfo(id) {
 var REPLACEMENT = "\uFFFD";
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
-function loneSurrogateIndexes(text) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function loneSurrogateIndexes(text2) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const out = [];
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
@@ -61,18 +61,18 @@ function loneSurrogateIndexes(text) {
   }
   return out;
 }
-function sanitizeLoneSurrogates(text, replacement = REPLACEMENT) {
-  if (typeof text !== "string" || !text) return text;
-  const idx = loneSurrogateIndexes(text);
-  if (!idx.length) return text;
+function sanitizeLoneSurrogates(text2, replacement = REPLACEMENT) {
+  if (typeof text2 !== "string" || !text2) return text2;
+  const idx = loneSurrogateIndexes(text2);
+  if (!idx.length) return text2;
   const rep = String(replacement);
   let out = "";
   let prev = 0;
   for (const i of idx) {
-    out += text.slice(prev, i) + rep;
+    out += text2.slice(prev, i) + rep;
     prev = i + 1;
   }
-  return out + text.slice(prev);
+  return out + text2.slice(prev);
 }
 var MAX_WALK_DEPTH = 6;
 function walkStrings(node, apply, depth = 0) {
@@ -97,20 +97,20 @@ function walkStrings(node, apply, depth = 0) {
 }
 function sanitizeMessages(messages) {
   const list = Array.isArray(messages) ? messages : [];
-  let count = 0;
+  let count2 = 0;
   const apply = (s) => {
     const fixed = sanitizeLoneSurrogates(s);
-    if (fixed !== s) count += loneSurrogateIndexes(s).length;
+    if (fixed !== s) count2 += loneSurrogateIndexes(s).length;
     return fixed;
   };
   for (const m of list) {
     if (!m || typeof m !== "object" || !m.role) continue;
     walkStrings(m, apply);
   }
-  return { count, messages: list };
+  return { count: count2, messages: list };
 }
-function alignRange(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function alignRange(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const len = s.length;
   const clamp = (v, fallback) => {
     if (v === void 0 || v === null) return fallback;
@@ -125,13 +125,13 @@ function alignRange(text, start, end) {
   if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
   return { start: a, end: b };
 }
-function sliceSafe(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function sliceSafe(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const { start: a, end: b } = alignRange(s, start, end);
   return s.slice(a, b);
 }
-function rangeSafe(text, start, end) {
-  const s = String(text === void 0 || text === null ? "" : text);
+function rangeSafe(text2, start, end) {
+  const s = String(text2 === void 0 || text2 === null ? "" : text2);
   const { start: a, end: b } = alignRange(s, start, end);
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
@@ -148,9 +148,9 @@ function cleanTitle(title) {
   ).trim();
   return t;
 }
-function markdownExcerpt(text, maxChars = 160) {
+function markdownExcerpt(text2, maxChars = 160) {
   const limit = Math.max(20, Number(maxChars) || 160);
-  let s = String(text || "");
+  let s = String(text2 || "");
   s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
   s = s.replace(/`([^`]+)`/g, "$1");
   s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
@@ -263,8 +263,8 @@ function formatCurrentPageResult(input) {
     return head2 + "\u8FD9\u662F\u300C\u6587\u6848\u53EF\u89C1\u6027\u6838\u67E5\u300D\u7684\u7ED3\u679C\uFF0C**\u4E0D\u542B\u9875\u9762\u6B63\u6587**\u3002\u5982\u9700\u6B63\u6587\uFF0C\u8BF7\u518D\u6B21\u8C03\u7528 read_current_page \u4E14\u4E0D\u8981\u4F20 checkTexts\u3002\n\n" + vis;
   }
   const chunks = Array.isArray(o.chunks) ? o.chunks : [];
-  const text = String(o.text || "");
-  let out = head2 + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text);
+  const text2 = String(o.text || "");
+  let out = head2 + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text2);
   if (vis) out += "\n\n" + vis;
   if (o.visibleOnly === true) {
     out += "\n\n\uFF08\u672C\u6B21\u4EC5\u8FD4\u56DE\u6309\u53EF\u89C1\u6027\u8FC7\u6EE4\u540E\u7684\u6587\u672C\uFF1B\u5982\u9700\u5305\u542B\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u53BB\u6389 visibleOnly\u3002\uFF09";
@@ -753,36 +753,36 @@ function buildCitations(relevantItems, isOverview) {
   }));
 }
 function buildAiMessages(action, payload, settings, book, normalizeHistory2) {
-  const text = String(payload.text || "");
+  const text2 = String(payload.text || "");
   if (action === "translate") {
     const t = payload.targetLang || settings.targetLang || "\u4E2D\u6587";
     return [
       { role: "system", content: "\u4F60\u662F\u4E00\u540D\u4E13\u4E1A\u7FFB\u8BD1\u3002\u53EA\u8F93\u51FA\u8BD1\u6587\uFF0C\u4E0D\u8981\u4EFB\u4F55\u89E3\u91CA\u6216\u989D\u5916\u5185\u5BB9\u3002" },
-      { role: "user", content: "\u8BF7\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u6210" + t + "\uFF1A\n\n" + text }
+      { role: "user", content: "\u8BF7\u5C06\u4EE5\u4E0B\u5185\u5BB9\u7FFB\u8BD1\u6210" + t + "\uFF1A\n\n" + text2 }
     ];
   }
   if (action === "explain") {
     return [
       { role: "system", content: "\u4F60\u662F\u4E00\u540D\u8010\u5FC3\u7684\u8BB2\u89E3\u8005\uFF0C\u7528\u901A\u4FD7\u6613\u61C2\u7684\u4E2D\u6587\u89E3\u91CA\u6982\u5FF5\uFF0C\u53EF\u7528 Markdown \u6392\u7248\u3002" },
-      { role: "user", content: "\u8BF7\u89E3\u91CA\u4EE5\u4E0B\u5185\u5BB9\uFF1A\n\n" + text }
+      { role: "user", content: "\u8BF7\u89E3\u91CA\u4EE5\u4E0B\u5185\u5BB9\uFF1A\n\n" + text2 }
     ];
   }
   if (action === "summarize") {
     return [
       { role: "system", content: "\u4F60\u662F\u603B\u7ED3\u52A9\u624B\uFF0C\u8F93\u51FA\u7B80\u6D01\u7684\u4E2D\u6587\u8981\u70B9\u603B\u7ED3\uFF0C\u7528 Markdown \u5217\u8868\u6392\u7248\u3002" },
-      { role: "user", content: "\u8BF7\u603B\u7ED3\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n" + text }
+      { role: "user", content: "\u8BF7\u603B\u7ED3\u4EE5\u4E0B\u5185\u5BB9\u7684\u8981\u70B9\uFF1A\n\n" + text2 }
     ];
   }
   if (action === "ask") {
-    const question = payload.question || text || "";
+    const question = payload.question || text2 || "";
     let ctx = "";
     let citations = null;
     if (settings.ragEnabled) {
-      if (isKbOverviewQuery(question || text)) {
+      if (isKbOverviewQuery(question || text2)) {
         ctx = buildKbOverview(book, 30);
         citations = buildCitations(Object.values(book).slice(0, 30), true);
       } else {
-        const relevant = buildRagContext(book, question || text, 5);
+        const relevant = buildRagContext(book, question || text2, 5);
         if (relevant.length) {
           citations = buildCitations(relevant, false);
           ctx = "\u4EE5\u4E0B\u662F\u4ECE\u7528\u6237\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u4E2D\u68C0\u7D22\u5230\u7684\u76F8\u5173\u6761\u76EE\uFF0C\u8BF7\u4F18\u5148\u53C2\u8003\u5B83\u4EEC\u56DE\u7B54\uFF1A\n" + relevant.map((it, i) => {
@@ -801,7 +801,7 @@ function buildAiMessages(action, payload, settings, book, normalizeHistory2) {
       },
       {
         role: "user",
-        content: "\u95EE\u9898\uFF1A" + question + (text ? "\n\n\u9009\u4E2D\u7684\u6587\u672C\uFF1A\n" + text : "") + (ctx ? "\n\n\u77E5\u8BC6\u5E93\u4E0A\u4E0B\u6587\uFF1A\n" + ctx : "")
+        content: "\u95EE\u9898\uFF1A" + question + (text2 ? "\n\n\u9009\u4E2D\u7684\u6587\u672C\uFF1A\n" + text2 : "") + (ctx ? "\n\n\u77E5\u8BC6\u5E93\u4E0A\u4E0B\u6587\uFF1A\n" + ctx : "")
       }
     ];
     messages._citations = citations;
@@ -814,20 +814,20 @@ function buildAiMessages(action, payload, settings, book, normalizeHistory2) {
     let ctx = "";
     let citations = null;
     if (settings.ragEnabled) {
-      if (isKbOverviewQuery(instruction || text)) {
+      if (isKbOverviewQuery(instruction || text2)) {
         ctx = buildKbOverview(book, 30);
         citations = buildCitations(Object.values(book).slice(0, 30), true);
       } else {
-        const relevant = buildRagContext(book, instruction || text, 5);
+        const relevant = buildRagContext(book, instruction || text2, 5);
         if (relevant.length) {
           citations = buildCitations(relevant, false);
           ctx = "\u4EE5\u4E0B\u662F\u4ECE\u7528\u6237\u4E2A\u4EBA\u77E5\u8BC6\u5E93\u4E2D\u68C0\u7D22\u5230\u7684\u76F8\u5173\u6761\u76EE\uFF0C\u53EF\u53C2\u8003\uFF08\u5F15\u7528\u65F6\u8BF7\u4F7F\u7528 [n] \u683C\u5F0F\u6807\u6CE8\u6765\u6E90\u7F16\u53F7\uFF09\uFF1A\n" + relevant.map((it, i) => `[${i + 1}] \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${typeInfo(it.type).name}${it.note ? "\uFF5C\u5185\u5BB9\uFF1A" + it.note : ""}`).join("\n");
         }
       }
     }
-    const hasText = !!text;
+    const hasText = !!text2;
     const userParts = [];
-    if (hasText) userParts.push("\u9009\u4E2D\u7684\u6587\u672C\uFF1A\n" + text);
+    if (hasText) userParts.push("\u9009\u4E2D\u7684\u6587\u672C\uFF1A\n" + text2);
     if (page) userParts.push("\u5F53\u524D\u9875\u9762\u7684\u5B8C\u6574\u5185\u5BB9\uFF08\u4F5C\u4E3A\u80CC\u666F\u4E0A\u4E0B\u6587\uFF0C\u56DE\u7B54\u65F6\u8BF7\u7ED3\u5408\u6574\u9875\u5185\u5BB9\uFF0C\u800C\u4E0D\u53EA\u9650\u4E8E\u9009\u4E2D\u6587\u672C\uFF09\uFF1A\n" + page);
     if (ctx) userParts.push("\u77E5\u8BC6\u5E93\u4E0A\u4E0B\u6587\uFF08\u4F9B\u53C2\u8003\uFF0C\u53EF\u9009\u7528\uFF09\uFF1A\n" + ctx);
     if (instruction) userParts.push("\u7528\u6237\u6307\u4EE4\uFF1A\n" + instruction);
@@ -958,8 +958,8 @@ async function callDeepSeek(settings, messages, signal) {
 
 // lib/application/agent/context.ts
 var CJK_RE2 = /[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g;
-function estimateTokens(text) {
-  const s = String(text || "");
+function estimateTokens(text2) {
+  const s = String(text2 || "");
   if (!s) return 0;
   const cjk = (s.match(CJK_RE2) || []).length;
   const rest = s.length - cjk;
@@ -1005,12 +1005,12 @@ function flattenHistoryContent(content, visionEnabled) {
     }
     texts.push("[" + (type || "\u672A\u77E5\u90E8\u4EF6") + "]");
   }
-  let text = texts.join("\n");
+  let text2 = texts.join("\n");
   if (images > 0) {
     const enabled = typeof visionEnabled === "boolean" ? visionEnabled : VISION_ENABLED;
-    text += (text ? "\n" : "") + (enabled ? "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5386\u53F2\u56DE\u653E**\u4E0D\u4F1A\u91CD\u4F20**\u8FD9\u4E9B\u56FE\u7247\uFF0C\u6B64\u5904\u53EA\u4FDD\u7559\u6587\u5B57\u5360\u4F4D \u2014\u2014 \u53EA\u6709**\u672C\u6B21\u65B0\u589E**\u7684\u622A\u56FE\u624D\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\u3002\uFF09" : "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5F53\u524D**\u672A\u628A\u56FE\u7247\u4F20\u7ED9\u6A21\u578B**\uFF0C\u4EC5\u4FDD\u7559\u6B64\u6587\u5B57\u8BF4\u660E\u3002\uFF09");
+    text2 += (text2 ? "\n" : "") + (enabled ? "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5386\u53F2\u56DE\u653E**\u4E0D\u4F1A\u91CD\u4F20**\u8FD9\u4E9B\u56FE\u7247\uFF0C\u6B64\u5904\u53EA\u4FDD\u7559\u6587\u5B57\u5360\u4F4D \u2014\u2014 \u53EA\u6709**\u672C\u6B21\u65B0\u589E**\u7684\u622A\u56FE\u624D\u4F1A\u968F\u8BF7\u6C42\u9001\u8FDB\u4F60\u7684\u4E0A\u4E0B\u6587\u3002\uFF09" : "\uFF08\u8BE5\u6D88\u606F\u542B " + images + " \u5F20\u56FE\u7247\uFF1B\u5F53\u524D**\u672A\u628A\u56FE\u7247\u4F20\u7ED9\u6A21\u578B**\uFF0C\u4EC5\u4FDD\u7559\u6B64\u6587\u5B57\u8BF4\u660E\u3002\uFF09");
   }
-  return text;
+  return text2;
 }
 var HISTORY_MAX_CHARS = 3e3;
 var HISTORY_SUMMARY_MAX_CHARS = 400;
@@ -1021,8 +1021,8 @@ var HISTORY_TRUNC_RE = /\n⟨…本条历史已截断：[\s\S]*⟩$/;
 function formatTailKeptTruncationNotice(totalChars, limitChars) {
   return "\u27E8\u2026\u672C\u6761\u6D88\u606F\u8FC7\u957F\uFF0C\u53EA\u4FDD\u7559\u672B\u5C3E\uFF1A\u539F\u6587\u5171 " + totalChars + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4ECE\u7B2C " + (totalChars - limitChars + 1) + " \u4E2A\u5B57\u7B26\u8D77\uFF1B**\u88AB\u622A\u6389\u7684\u524D\u534A\u6BB5\u53D6\u4E0D\u56DE\u539F\u6587**\uFF08\u843D\u76D8\u5FEB\u7167\u4E0D\u4FDD\u5B58\u5B83\uFF09\u27E9\n";
 }
-function stripHistoryTruncationNotice(text) {
-  return String(text === void 0 || text === null ? "" : text).replace(HISTORY_TRUNC_RE, "");
+function stripHistoryTruncationNotice(text2) {
+  return String(text2 === void 0 || text2 === null ? "" : text2).replace(HISTORY_TRUNC_RE, "");
 }
 function isDuplicateInstruction(lastContent, instruction) {
   const instr = String(instruction === void 0 || instruction === null ? "" : instruction).trim();
@@ -1043,18 +1043,18 @@ function normalizeHistory(history, options = {}) {
   for (let i = src.length - 1; i >= 0; i--) {
     const h = src[i];
     if (!h || h.role !== "user" && h.role !== "assistant") continue;
-    const text = flattenHistoryContent(h.content, options.visionEnabled);
-    if (!text.trim()) continue;
+    const text2 = flattenHistoryContent(h.content, options.visionEnabled);
+    if (!text2.trim()) continue;
     if (picked.length >= maxMessages) {
       dropped = true;
       break;
     }
-    const t = estimateTokens(text);
+    const t = estimateTokens(text2);
     if (picked.length && tokens + t > maxTokens) {
       dropped = true;
       break;
     }
-    picked.push(Object.assign({}, h, { content: text }));
+    picked.push(Object.assign({}, h, { content: text2 }));
     tokens += t;
   }
   picked.reverse();
@@ -1076,11 +1076,11 @@ var COLLAPSE_MARK = "\u3010\u5DF2\u6298\u53E0\u3011";
 var ID_NOTICE_RE = /\n…（结果共[^）]*id=(res-[A-Za-z0-9_-]+)[^）]*）\s*$/;
 var ID_ONLY_RE = /id=(res-[A-Za-z0-9_-]+)/;
 function buildCollapsed(content, headLen = 300, tailLen = 150) {
-  const text = String(content);
-  const noticeMatch = text.match(ID_NOTICE_RE);
-  const resultId = noticeMatch ? noticeMatch[1] : (text.match(ID_ONLY_RE) || [])[1] || "";
-  const body = noticeMatch ? text.slice(0, noticeMatch.index) : text;
-  if (body.length <= headLen + tailLen + 40) return text;
+  const text2 = String(content);
+  const noticeMatch = text2.match(ID_NOTICE_RE);
+  const resultId = noticeMatch ? noticeMatch[1] : (text2.match(ID_ONLY_RE) || [])[1] || "";
+  const body = noticeMatch ? text2.slice(0, noticeMatch.index) : text2;
+  if (body.length <= headLen + tailLen + 40) return text2;
   const head2 = sliceSafe(body, 0, headLen);
   const tail2 = sliceSafe(body, -tailLen);
   const notice = "\n" + COLLAPSE_MARK + "\u5171 " + body.length + " \u5B57\u7B26\uFF0C\u6B64\u5904\u4FDD\u7559\u5F00\u5934\u4E0E\u7ED3\u5C3E" + (resultId ? "\uFF1B**\u5168\u6587\u672A\u4E22\u5931**\uFF0Cid=" + resultId + '\uFF0C\u53EF\u7528 expand_result(id="' + resultId + '") \u5206\u6BB5\u53D6\u56DE' : (
@@ -1262,19 +1262,19 @@ var FAIL_THRESHOLDS = Object.freeze([2, 3, 5]);
 var NO_PROGRESS_THRESHOLDS = Object.freeze([3, 5, 8]);
 var ARGS_PREVIEW_CHARS = 500;
 var DEFAULT_EXCLUDED_TOOLS = Object.freeze(["update_plan"]);
-function crosses(count, thresholds) {
-  return thresholds.indexOf(count) !== -1;
+function crosses(count2, thresholds) {
+  return thresholds.indexOf(count2) !== -1;
 }
 function clipArgs(args) {
-  let text;
+  let text2;
   try {
-    text = JSON.stringify(args || {});
+    text2 = JSON.stringify(args || {});
   } catch (e) {
-    text = String(args);
+    text2 = String(args);
   }
-  text = String(text);
-  if (text.length <= ARGS_PREVIEW_CHARS) return text;
-  return text.slice(0, ARGS_PREVIEW_CHARS) + "\u2026 (+" + (text.length - ARGS_PREVIEW_CHARS) + " more chars)";
+  text2 = String(text2);
+  if (text2.length <= ARGS_PREVIEW_CHARS) return text2;
+  return text2.slice(0, ARGS_PREVIEW_CHARS) + "\u2026 (+" + (text2.length - ARGS_PREVIEW_CHARS) + " more chars)";
 }
 function createToolGuard(budget = {}) {
   const repeatThresholds = Array.isArray(budget.repeatThresholds) && budget.repeatThresholds.length ? budget.repeatThresholds.map((n) => Math.max(2, Number(n) || 0)).filter(Boolean).sort((a, b) => a - b) : REPEAT_THRESHOLDS.slice();
@@ -1380,11 +1380,11 @@ function fingerprintMessage(m) {
 }
 function headOf(m) {
   if (!m || typeof m !== "object") return "";
-  let text = typeof m.content === "string" ? m.content : m.content === void 0 ? "" : JSON.stringify(m.content);
-  if (!text && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-    text = "tool_calls:" + m.tool_calls.map((tc) => tc && tc.function && tc.function.name || "?").join(",");
+  let text2 = typeof m.content === "string" ? m.content : m.content === void 0 ? "" : JSON.stringify(m.content);
+  if (!text2 && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+    text2 = "tool_calls:" + m.tool_calls.map((tc) => tc && tc.function && tc.function.name || "?").join(",");
   }
-  return String(text || "").replace(/\s+/g, " ").slice(0, 48);
+  return String(text2 || "").replace(/\s+/g, " ").slice(0, 48);
 }
 function snapshotMessages(messages) {
   return (Array.isArray(messages) ? messages : []).map((m) => ({
@@ -1567,10 +1567,10 @@ function parseUserscriptMetadata(code) {
   return Object.assign(meta, { valid: Boolean(meta.name) });
 }
 function hashId(...parts) {
-  const text = parts.join("|");
+  const text2 = parts.join("|");
   let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash << 5) + hash + text.charCodeAt(i) >>> 0;
+  for (let i = 0; i < text2.length; i += 1) {
+    hash = (hash << 5) + hash + text2.charCodeAt(i) >>> 0;
   }
   return hash.toString(36);
 }
@@ -1673,10 +1673,10 @@ async function searchGreasyFork(q) {
   const keyword = String(q || "").trim();
   if (!keyword) return [];
   const url = SEARCH_ENDPOINT + "?q=" + encodeURIComponent(keyword);
-  const text = await fetchText(url);
+  const text2 = await fetchText(url);
   let list = [];
   try {
-    list = JSON.parse(text);
+    list = JSON.parse(text2);
   } catch (e) {
     throw new Error("GreasyFork \u8FD4\u56DE\u7684\u4E0D\u662F\u6709\u6548 JSON");
   }
@@ -2734,8 +2734,8 @@ function parseScalar(raw) {
   if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
   return s;
 }
-function parseSkillMd(text) {
-  const str = String(text || "");
+function parseSkillMd(text2) {
+  const str = String(text2 || "");
   const m = str.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/);
   if (!m) {
     return { data: {}, body: str.trim() };
@@ -2760,8 +2760,8 @@ function parseSkillMd(text) {
   }
   return { data, body };
 }
-function mdToSkill(text) {
-  const { data, body } = parseSkillMd(text);
+function mdToSkill(text2) {
+  const { data, body } = parseSkillMd(text2);
   const x = {
     intents: Array.isArray(data["x-recallflow-intents"]) ? data["x-recallflow-intents"] : [],
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
@@ -3072,8 +3072,8 @@ async function drag(tabId, x1, y1, x2, y2) {
   await command(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x2), y: Math.round(y2), button: "left", buttons: 0, clickCount: 1 });
   return { ok: true };
 }
-async function insertText(tabId, text) {
-  await command(tabId, "Input.insertText", { text: String(text == null ? "" : text) });
+async function insertText(tabId, text2) {
+  await command(tabId, "Input.insertText", { text: String(text2 == null ? "" : text2) });
   return { ok: true };
 }
 async function pressKey(tabId, key, modifiers) {
@@ -4997,10 +4997,10 @@ async function searchWeb(query, maxResults = 6) {
 
 // lib/application/agent/page-action-verify.ts
 function buildActionVerification(observed, reason) {
-  const text = String(reason || "");
-  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text };
-  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text };
-  return { executed: true, verified: false, changed: false, reason: text };
+  const text2 = String(reason || "");
+  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text2 };
+  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text2 };
+  return { executed: true, verified: false, changed: false, reason: text2 };
 }
 function observedChange(before, after) {
   if (!after || typeof after.fingerprint !== "string") return "unobservable";
@@ -5091,8 +5091,8 @@ function compactSnapshotSummary(snapshot) {
     const label = e.label || e.placeholder || "";
     return e.ref + (label ? "\uFF1A" + sliceSafe(String(label), 0, 24) : "");
   }).join("\uFF1B") : "";
-  const text = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
-  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text : ""].filter(Boolean).join("\n");
+  const text2 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
+  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
 }
 
 // lib/application/agent/diagnostics.ts
@@ -5105,8 +5105,8 @@ async function readConsole(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0 console \u8BB0\u5F55\u3002" };
-    const text = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
-    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text };
+    const text2 = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
+    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6 console \u5931\u8D25\uFF1A" + e.message };
   }
@@ -5123,12 +5123,12 @@ async function readNetwork(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0\u7F51\u7EDC\u8BF7\u6C42\u8BB0\u5F55\u3002" };
-    const text = entries.map((e) => {
+    const text2 = entries.map((e) => {
       const head2 = (e.method || "GET") + " " + (e.error ? "ERR" : e.status || "") + " " + e.url + (e.ms != null ? " (" + e.ms + "ms)" : "") + (e.error ? " \u2014 " + e.error : "");
       const init = e.initiator ? e.initiator.split("\n").slice(0, 2).join(" ") : "";
       return head2 + (init ? "\n  \u53D1\u8D77\u4E8E: " + init : "");
     }).join("\n");
-    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text };
+    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF1A" + e.message };
   }
@@ -5217,8 +5217,8 @@ async function macroSave(deps, args) {
 async function macroList(deps) {
   const macros = await deps.listMacros(deps.pageUrl);
   if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
-  const text = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
-  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text };
+  const text2 = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
+  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text2 };
 }
 async function macroRun(deps, args) {
   const name = String(args && args.name || "").trim();
@@ -5303,10 +5303,10 @@ function knowledgeSearch(deps, args) {
   const relevant = deps.buildRagContext(deps.book, args.query || "", limit);
   if (!relevant.length) return { result: "\u672A\u68C0\u7D22\u5230\u76F8\u5173\u77E5\u8BC6\u5E93\u6761\u76EE\u3002" };
   const citations = deps.buildCitations(relevant, false);
-  const text = relevant.map(
+  const text2 = relevant.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.note ? "\uFF5C\u5185\u5BB9\uFF1A" + it.note : ""}${it.url ? "\uFF5C\u94FE\u63A5\uFF1A" + it.url : ""}`
   ).join("\n");
-  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text, citations };
+  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text2, citations };
 }
 function knowledgeList(deps, args) {
   let items = Object.values(deps.book);
@@ -5314,12 +5314,12 @@ function knowledgeList(deps, args) {
   items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const limit = Number(args.limit) || 20;
   const shown = items.slice(0, limit);
-  const text = shown.map(
+  const text2 = shown.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.tags && it.tags.length ? "\uFF5C\u6807\u7B7E\uFF1A" + it.tags.join("\u3001") : ""}`
   ).join("\n");
   return {
     result: `\u77E5\u8BC6\u5E93\u5171 ${items.length} \u6761\uFF0C\u4EE5\u4E0B\u5217\u51FA ${shown.length} \u6761\uFF1A
-` + (text || "\uFF08\u7A7A\uFF09"),
+` + (text2 || "\uFF08\u7A7A\uFF09"),
     citations: deps.buildCitations(shown, true)
   };
 }
@@ -5362,8 +5362,8 @@ async function listTabs(deps) {
       url: t.url || "",
       active: Boolean(t.active)
     }));
-    const text = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
-    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text || "\uFF08\u65E0\uFF09") };
+    const text2 = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
+    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text2 || "\uFF08\u65E0\uFF09") };
   } catch (e) {
     return { ok: false, result: "\u5217\u51FA\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + e.message };
   }
@@ -5522,6 +5522,10 @@ function summarizeRunTrace(entries) {
   const tools = list.filter((e) => e && e.phase === "tool");
   const turns = list.filter((e) => e && e.phase === "turn-timing");
   const cache = list.filter((e) => e && e.phase === "cache");
+  const jev = list.filter((e) => e && e.phase === "jev");
+  const jevShadow = jev.filter((e) => e.mode === "shadow");
+  const jevLive = jev.filter((e) => e.mode === "live");
+  const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -5542,7 +5546,17 @@ function summarizeRunTrace(entries) {
     errors: list.filter((e) => e && e.phase === "error").length,
     timeouts: list.filter((e) => e && e.phase === "timeout").length,
     collapsed: list.filter((e) => e && e.phase === "collapse").length,
-    repaired: list.filter((e) => e && e.phase === "conversation-repair").length
+    repaired: list.filter((e) => e && e.phase === "conversation-repair").length,
+    jevCalls: jev.length,
+    jevShadowCalls: jevShadow.length,
+    jevLiveCalls: jevLive.length,
+    jevActions: jev.filter((e) => e.decision?.kind === "act").length,
+    jevEscalations: jev.filter((e) => e.decision?.kind === "escalate").length,
+    jevLatencyMs: Math.round(jev.reduce((n, e) => n + num(e.latencyMs), 0)),
+    jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
+    jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
+    jevShadowCompared: jevCompares.length,
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length
   };
 }
 function formatRunMetrics(m) {
@@ -5556,6 +5570,14 @@ function formatRunMetrics(m) {
   ];
   const by = Object.entries(m.byTool || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => k + "\xD7" + n);
   if (by.length) lines.push("\u6309\u5DE5\u5177\uFF1A" + by.join("\u3001"));
+  if (m.jevCalls) {
+    lines.push(
+      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
+    );
+    if (m.jevShadowCompared) {
+      lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -5567,14 +5589,14 @@ function updatePlan(ctx, args) {
     status: ["pending", "in_progress", "done"].includes(it.status) ? it.status : "pending"
   }));
   ctx.plan = plan;
-  const text = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
+  const text2 = plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();
   const store = ctx && ctx.resultStore;
-  const text = store && typeof store.get === "function" ? store.get(id) : null;
-  if (!text) {
+  const text2 = store && typeof store.get === "function" ? store.get(id) : null;
+  if (!text2) {
     const known = ctx && ctx.resultIds && typeof ctx.resultIds.has === "function" && ctx.resultIds.has(id);
     return {
       ok: false,
@@ -5583,7 +5605,7 @@ function expandResult(ctx, args) {
   }
   const offset = Math.max(0, Number(args.offset) || 0);
   const limit = Math.min(4e3, Math.max(200, Number(args.limit) || 2e3));
-  const piece = rangeSafe(text, offset, offset + limit);
+  const piece = rangeSafe(text2, offset, offset + limit);
   return {
     ok: true,
     result: "\u7ED3\u679C " + id + " [" + piece.start + "," + piece.end + ") / \u5171 " + piece.length + " \u5B57\u7B26\uFF1A\n" + piece.text
@@ -5699,7 +5721,7 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       const cur = await area3.get([SHOT_KEY, SHOT_INDEX_KEY]);
       const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
       const index = isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {};
-      const record = Object.assign({}, shot, {
+      const record2 = Object.assign({}, shot, {
         id,
         sessionId: String(sessionId || shot && shot.sessionId || ""),
         createdAt: Number(shot && shot.createdAt) || Date.now(),
@@ -5707,16 +5729,16 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       });
       index[id] = {
         id,
-        sessionId: record.sessionId,
-        createdAt: record.createdAt,
-        bytes: record.bytes
+        sessionId: record2.sessionId,
+        createdAt: record2.createdAt,
+        bytes: record2.bytes
       };
       pruneIndex2(index);
-      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record]).slice(-MAX_SHOTS);
+      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record2]).slice(-MAX_SHOTS);
       await area3.set({
         [SHOT_KEY]: nextArchive,
         [SHOT_INDEX_KEY]: index,
-        [shotStorageKey(id)]: record
+        [shotStorageKey(id)]: record2
       });
       const stale = Object.keys(cur && cur[SHOT_INDEX_KEY] || {}).filter((oldId) => !index[oldId]).map(shotStorageKey);
       if (stale.length && typeof area3.remove === "function") {
@@ -5875,8 +5897,8 @@ function readContentEditableText(root) {
   const walk = (node) => {
     for (const child of Array.from(node.childNodes || [])) {
       if (child.nodeType === 3) {
-        const text2 = String(child.nodeValue || "");
-        if (text2) tokens.push(text2);
+        const text3 = String(child.nodeValue || "");
+        if (text3) tokens.push(text3);
         continue;
       }
       if (child.nodeType !== 1) continue;
@@ -5892,19 +5914,19 @@ function readContentEditableText(root) {
     }
   };
   walk(root);
-  let text = "";
+  let text2 = "";
   let boundaries = 0;
   for (const token of tokens) {
     if (token === null) {
-      if (text) boundaries += 1;
+      if (text2) boundaries += 1;
       continue;
     }
     if (!token) continue;
-    if (boundaries && text && !text.endsWith("\n")) text += "\n".repeat(boundaries);
+    if (boundaries && text2 && !text2.endsWith("\n")) text2 += "\n".repeat(boundaries);
     boundaries = 0;
-    text += token;
+    text2 += token;
   }
-  return text.replace(/\n+$/g, "");
+  return text2.replace(/\n+$/g, "");
 }
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
@@ -5959,20 +5981,20 @@ async function typeText(deps, args) {
     const focusExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return false; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } } else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(el.value.length, el.value.length); return true; })()';
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
-    const text = String(args.value == null ? "" : args.value);
+    const text2 = String(args.value == null ? "" : args.value);
     const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
-    const expected = args.clearFirst === true ? text : String(beforeValue == null ? "" : beforeValue) + text;
+    const expected = args.clearFirst === true ? text2 : String(beforeValue == null ? "" : beforeValue) + text2;
     if (args.clearFirst === true) await deps.cdp.pressKey(deps.ctx.tabId, "a", ["CTRL"]);
     let strategy = "cdp-insertText";
-    if (target.contentEditable && text.includes("\n")) {
+    if (target.contentEditable && text2.includes("\n")) {
       strategy = "cdp-line-by-line";
-      const lines = text.split("\n");
+      const lines = text2.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (i > 0) await deps.cdp.pressKey(deps.ctx.tabId, "Enter");
         if (lines[i] || i === 0) await deps.cdp.insertText(deps.ctx.tabId, lines[i]);
       }
     } else {
-      await deps.cdp.insertText(deps.ctx.tabId, text);
+      await deps.cdp.insertText(deps.ctx.tabId, text2);
     }
     const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
     const summary2 = editableTextSummary(expected, actualValue == null ? "" : actualValue);
@@ -5995,7 +6017,7 @@ async function typeText(deps, args) {
         deps.observedChange(before, after),
         verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary2.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary2.actualLength + " \u5B57\u7B26") + (summary2.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary2.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text2.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary2.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary2.actualLength + " \u5B57\u7B26") + (summary2.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary2.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;
@@ -6285,7 +6307,7 @@ async function fetchWebpage(deps, args) {
       return { ok: false, result: "\u8BE5\u9875\u9762\u6B63\u6587\u4E3A\u7A7A\uFF08" + u + "\uFF09\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BFB\u53D6\u6E32\u67D3\u540E\u5185\u5BB9\uFF0C\u6216\u6362\u7528\u5176\u5B83\u6765\u6E90\u3002" };
     }
     const likelySpa = trimmedText.length < 150 && /<script[\s>]/i.test(raw);
-    const text = fullText.slice(0, 8e3);
+    const text2 = fullText.slice(0, 8e3);
     const finalUrl = resp.url || u;
     const auth = detectAuthChallenge({
       beforeUrl: u,
@@ -6310,8 +6332,8 @@ async function fetchWebpage(deps, args) {
     }
     const usable = !likelySpa && trimmedText.length >= 200;
     return {
-      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
-      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text.slice(0, 180) }] } : {}
+      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text2 + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
+      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text2.slice(0, 180) }] } : {}
     };
   } catch (e) {
     if (!deps.isAbortLikeError(e)) ctx.failedUrls.push(norm);
@@ -6504,18 +6526,18 @@ function mergeFrameCapabilities(top, perFrame) {
   const out = {};
   for (const kind of ["customElements", "shadowHosts", "editables", "scrollContainers"]) {
     const topBucket = top && top[kind];
-    let count = topBucket ? Number(topBucket.count) || 0 : 0;
+    let count2 = topBucket ? Number(topBucket.count) || 0 : 0;
     const topSamples = topBucket && Array.isArray(topBucket.samples) ? topBucket.samples.slice(0, 2) : [];
     const childSamples = [];
     for (const frame of Array.isArray(perFrame) ? perFrame : []) {
       const bucket2 = frame && frame.capabilities && frame.capabilities[kind];
       if (!bucket2) continue;
-      count += Number(bucket2.count) || 0;
+      count2 += Number(bucket2.count) || 0;
       if (!Array.isArray(bucket2.samples) || !bucket2.samples.length) continue;
       childSamples.push(Object.assign({}, bucket2.samples[0], { frameId: frame.frameId }));
     }
     const samples = topSamples.length ? topSamples.concat(childSamples).slice(0, CAPABILITY_SAMPLE_LIMIT) : childSamples.slice(0, CAPABILITY_SAMPLE_LIMIT);
-    if (count > 0) out[kind] = { count, samples };
+    if (count2 > 0) out[kind] = { count: count2, samples };
   }
   return Object.keys(out).length ? out : void 0;
 }
@@ -6585,22 +6607,22 @@ async function readCurrentPage(deps, args) {
       }
     });
     const pr = pageResponse || {};
-    const text = pr.text ? pr.text : "";
+    const text2 = pr.text ? pr.text : "";
     const visReport = deps.formatVisibilityReport(pr.visibility);
     const checkTexts = Array.isArray(args.checkTexts) ? args.checkTexts : [];
     if (checkTexts.filter((t) => String(t == null ? "" : t).trim()).length && visReport) {
       return {
         ok: true,
-        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
+        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text2.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
       };
     }
-    if (!text) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
-    const chunks = deps.splitIntoChunks(text, 1200, 8);
+    if (!text2) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
+    const chunks = deps.splitIntoChunks(text2, 1200, 8);
     const result = deps.formatCurrentPageResult({
       title: pr.title,
       url: pr.url || ctx.pageUrl,
-      text,
-      textLength: text.length,
+      text: text2,
+      textLength: text2.length,
       chunks,
       visReport,
       visibleOnly: args.visibleOnly === true
@@ -6733,11 +6755,11 @@ async function listFrames(deps) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   const frames = await listFramesRaw(deps, tabId);
   if (!frames.length) return { ok: false, result: "\u672A\u83B7\u53D6\u5230\u9875\u9762\u6846\u67B6\u4FE1\u606F\uFF08\u53EF\u80FD\u65E0\u5185\u5BB9\u811A\u672C\u6743\u9650\uFF09\u3002" };
-  const text = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
+  const text2 = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
   return {
     ok: true,
     frames,
-    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
+    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text2 + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
   };
 }
 async function handlePageReadTool(name, args, deps) {
@@ -6750,13 +6772,13 @@ async function handlePageReadTool(name, args, deps) {
 // lib/application/agent/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
-  const text = scripts.length ? scripts.map(
+  const text2 = scripts.length ? scripts.map(
     (s, i) => `[${i + 1}] ${s.name} v${s.version}${s.enabled ? "" : "\uFF08\u5DF2\u505C\u7528\uFF09"}
 id\uFF1A${s.id}
 \u5339\u914D\uFF1A${(s.matches || []).join("\u3001")}
 \u63CF\u8FF0\uFF1A${s.description || "\u65E0"}`
   ).join("\n\n") : "\u5C1A\u672A\u5B89\u88C5\u4EFB\u4F55\u7528\u6237\u811A\u672C\u3002";
-  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text };
+  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text2 };
 }
 async function searchUserscripts(deps, args) {
   const list = await deps.searchScripts(args.query);
@@ -7489,8 +7511,8 @@ async function collectElementSource(tabId, params) {
     const s = res.source || {};
     const loc = String(s.file || "") + (s.line ? ":" + s.line + (s.column ? ":" + s.column : "") : "");
     const extra = s.framework ? "\uFF08" + s.framework + (s.component ? " \xB7 " + s.component : "") + "\uFF09" : "";
-    const text = "\u5143\u7D20\u6E90\u7801\u4F4D\u7F6E\uFF1A" + loc + extra + (res.selector ? "\n\u9009\u62E9\u5668\uFF1A" + res.selector : "");
-    return { found: true, source: s, selector: res.selector || "", text };
+    const text2 = "\u5143\u7D20\u6E90\u7801\u4F4D\u7F6E\uFF1A" + loc + extra + (res.selector ? "\n\u9009\u62E9\u5668\uFF1A" + res.selector : "");
+    return { found: true, source: s, selector: res.selector || "", text: text2 };
   } catch (e) {
     return { found: false, reason: e.message };
   }
@@ -8056,8 +8078,8 @@ function decodeNumericEntity(code) {
     return "\uFFFD";
   }
 }
-function splitIntoChunks(text, size, max) {
-  const s = String(text || "").trim();
+function splitIntoChunks(text2, size, max) {
+  const s = String(text2 || "").trim();
   if (!s) return [];
   const paras = s.split(/\n+/).map((p) => p.trim()).filter(Boolean);
   if (!paras.length) return [sliceSafe(s, 0, size)];
@@ -8365,11 +8387,11 @@ var KEYWORD_RULES = [
 ];
 var PRIORITY = [INTENTS.BROWSER, INTENTS.KNOWLEDGE, INTENTS.RESEARCH, INTENTS.CHAT];
 var CONTINUATION_RE = /^(继续|接着|下一步|好的|可以|继续吧|然后呢|再来|再试一次|就这样|是的)[，。！？!?,\s]*$/u;
-function scoreIntent(text) {
+function scoreIntent(text2) {
   const scores = { [INTENTS.BROWSER]: 0, [INTENTS.KNOWLEDGE]: 0, [INTENTS.RESEARCH]: 0, [INTENTS.CHAT]: 0 };
   for (const rule of KEYWORD_RULES) {
     for (const pattern of rule.patterns) {
-      if (pattern.test(text)) scores[rule.intent] += rule.weight;
+      if (pattern.test(text2)) scores[rule.intent] += rule.weight;
     }
   }
   return scores;
@@ -8378,12 +8400,12 @@ function extractKeyword(instruction = "") {
   return String(instruction || "").trim().replace(/^(请|帮我|麻烦你|你好[，,、\s]*)/, "").replace(/^(把|将)/, "").replace(/^(我想看|我要看|我想|我要|我想请|麻烦|帮我)\s*/, "").replace(/^(打开|搜索|搜|查|查找|看看|看一下|去看|看|进入|访问|跳转|浏览|播放|观看|翻译|解释|总结|保存|收藏)\s*(一下|一遍|下)?\s*/u, "").replace(/^(成|为)/, "").replace(/^(一下|一遍)\s*/, "").replace(/(打开|搜索|搜一下|搜|查找|查一下|播放|观看|帮我|我想看|我要看)/g, " ").replace(/\s+/g, " ").replace(/[，。！？!?,.、\s]+$/g, "").trim().slice(0, 60);
 }
 function detectIntent(instruction = "", history = [], opts = {}) {
-  const text = String(instruction || "").trim();
-  let sourceText = text;
+  const text2 = String(instruction || "").trim();
+  let sourceText = text2;
   let viaContinuation = false;
-  if (CONTINUATION_RE.test(text) || opts.forceContinuation === true) {
+  if (CONTINUATION_RE.test(text2) || opts.forceContinuation === true) {
     viaContinuation = true;
-    const lastUser = (Array.isArray(history) ? history : []).filter((h) => h && h.role === "user" && typeof h.content === "string" && h.content.trim() !== text).pop();
+    const lastUser = (Array.isArray(history) ? history : []).filter((h) => h && h.role === "user" && typeof h.content === "string" && h.content.trim() !== text2).pop();
     if (lastUser) sourceText = lastUser.content;
   }
   const scores = scoreIntent(sourceText);
@@ -8564,14 +8586,14 @@ var TOKEN_PATTERNS = [
   // 中文片段（模型引用原文时用得上）
 ];
 function extractClaimTokens(claim) {
-  const text = String(claim === void 0 || claim === null ? "" : claim);
-  if (!text) return [];
+  const text2 = String(claim === void 0 || claim === null ? "" : claim);
+  if (!text2) return [];
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const re of TOKEN_PATTERNS) {
     re.lastIndex = 0;
     let m;
-    while ((m = re.exec(text)) !== null) {
+    while ((m = re.exec(text2)) !== null) {
       const tok = m[0];
       if (tok.length < MIN_TOKEN_LEN) continue;
       const key = tok.toLowerCase();
@@ -8602,22 +8624,22 @@ function selectEvidence(input = {}) {
   const claim = String(input.claim === void 0 || input.claim === null ? "" : input.claim);
   const budget = Math.max(400, Number(input.budget) || EVIDENCE_BUDGET);
   if (!fullText) {
-    const text = fallback.slice(0, budget);
+    const text2 = fallback.slice(0, budget);
     return {
-      text,
-      coverage: text ? "\uFF08\u8BC1\u636E\u4E3A\u5DE5\u5177\u7ED3\u679C\u7684**\u5F00\u5934\u7247\u6BB5**\uFF0C\u672A\u505A\u76F8\u5173\u6027\u62BD\u53D6\uFF1B\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728\uFF09" : "",
+      text: text2,
+      coverage: text2 ? "\uFF08\u8BC1\u636E\u4E3A\u5DE5\u5177\u7ED3\u679C\u7684**\u5F00\u5934\u7247\u6BB5**\uFF0C\u672A\u505A\u76F8\u5173\u6027\u62BD\u53D6\uFF1B\u672A\u5217\u51FA\u7684\u90E8\u5206\u4E0D\u4EE3\u8868\u4E0D\u5B58\u5728\uFF09" : "",
       hitTokens: [],
       missedTokens: []
     };
   }
   const tokens = extractClaimTokens(claim).filter((t) => {
-    let count = 0;
+    let count2 = 0;
     let at = fullText.indexOf(t);
-    while (at !== -1 && count <= MAX_TOKEN_FREQUENCY) {
-      count += 1;
+    while (at !== -1 && count2 <= MAX_TOKEN_FREQUENCY) {
+      count2 += 1;
       at = fullText.indexOf(t, at + t.length);
     }
-    return count <= MAX_TOKEN_FREQUENCY;
+    return count2 <= MAX_TOKEN_FREQUENCY;
   });
   const hitTokens = [];
   const missedTokens = [];
@@ -8645,10 +8667,10 @@ function selectEvidence(input = {}) {
   const midRanges = merged.slice(1, hasTail ? merged.length - 1 : 1);
   const picked = [];
   let used = 0;
-  const push = (start, text, truncated) => {
-    if (!text) return;
-    picked.push({ start, text, truncated });
-    used += text.length;
+  const push = (start, text2, truncated) => {
+    if (!text2) return;
+    picked.push({ start, text: text2, truncated });
+    used += text2.length;
   };
   const headText = fullText.slice(headRange.start, headRange.end);
   push(headRange.start, headText.slice(0, budget), headText.length > budget);
@@ -8708,9 +8730,9 @@ function evaluateLiveness(input = {}) {
   return { stalled: false, reason: "", noProgressRounds };
 }
 function evidenceAfter(prev, tc, res, summarizeArgs) {
-  const text = res && typeof res.result === "string" ? res.result : "";
-  if (!text) return prev;
-  if (EVIDENCE_READ_TOOLS.has(tc.name)) return sliceSafe(text, 0, 3e3);
+  const text2 = res && typeof res.result === "string" ? res.result : "";
+  if (!text2) return prev;
+  if (EVIDENCE_READ_TOOLS.has(tc.name)) return sliceSafe(text2, 0, 3e3);
   let metadata = null;
   try {
     metadata = getToolMetadata(tc.name);
@@ -8718,7 +8740,7 @@ function evidenceAfter(prev, tc, res, summarizeArgs) {
     metadata = null;
   }
   if (metadata && metadata.readOnly === true) return prev;
-  return "\u3010\u6700\u8FD1\u4E00\u6B21\u9875\u9762\u52A8\u4F5C\u3011" + tc.name + (res.ok === false ? "\uFF08\u6267\u884C\u5931\u8D25\uFF09" : "\uFF08\u5DF2\u6267\u884C\u6210\u529F\uFF09") + "\n\u53C2\u6570\uFF1A" + summarizeArgs(tc.args) + "\n\u8FD4\u56DE\uFF1A" + text.slice(0, 2e3) + "\n\uFF08\u5907\u6CE8\uFF1A\u82E5\u540C\u65F6\u63D0\u4F9B\u4E86\u9875\u9762\u5FEB\u7167\uFF0C\u90A3\u4EFD\u5FEB\u7167\u662F\u5728\u672C\u52A8\u4F5C\u4E4B\u524D\u91C7\u96C6\u7684\u3002\uFF09";
+  return "\u3010\u6700\u8FD1\u4E00\u6B21\u9875\u9762\u52A8\u4F5C\u3011" + tc.name + (res.ok === false ? "\uFF08\u6267\u884C\u5931\u8D25\uFF09" : "\uFF08\u5DF2\u6267\u884C\u6210\u529F\uFF09") + "\n\u53C2\u6570\uFF1A" + summarizeArgs(tc.args) + "\n\u8FD4\u56DE\uFF1A" + text2.slice(0, 2e3) + "\n\uFF08\u5907\u6CE8\uFF1A\u82E5\u540C\u65F6\u63D0\u4F9B\u4E86\u9875\u9762\u5FEB\u7167\uFF0C\u90A3\u4EFD\u5FEB\u7167\u662F\u5728\u672C\u52A8\u4F5C\u4E4B\u524D\u91C7\u96C6\u7684\u3002\uFF09";
 }
 function resolveVerifyIntent(intent, promotedToResearch) {
   return promotedToResearch ? INTENTS.RESEARCH : intent;
@@ -8849,14 +8871,14 @@ async function readErrorDetail(resp) {
   } catch (e) {
     raw = "";
   }
-  const text = String(raw === void 0 || raw === null ? "" : raw).trim();
-  if (!text) return { detail: "", parsed: false };
+  const text2 = String(raw === void 0 || raw === null ? "" : raw).trim();
+  if (!text2) return { detail: "", parsed: false };
   try {
-    const j = JSON.parse(text);
+    const j = JSON.parse(text2);
     const msg = j && j.error && j.error.message ? j.error.message : JSON.stringify(j);
     return { detail: String(msg), parsed: true };
   } catch (e) {
-    return { detail: text, parsed: false };
+    return { detail: text2, parsed: false };
   }
 }
 function isBodyParseRejection(status, parsed, detail) {
@@ -8893,7 +8915,7 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
     else signal.addEventListener("abort", abortFromOutside);
   }
   const MAX_RETRIES = 2;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
   let resp;
   let requestStartAt = Date.now();
   try {
@@ -8925,7 +8947,7 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
         if (e && e.name === "AbortError") throw e;
         if (attempt < MAX_RETRIES && isRetryableError(e)) {
           console.log("[RecallFlow] LLM fetch retry " + (attempt + 1) + ":", e && e.message);
-          await sleep(500 * Math.pow(2, attempt));
+          await sleep2(500 * Math.pow(2, attempt));
           continue;
         }
         throw e;
@@ -8949,7 +8971,7 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
       err.bodyParseRejected = bodyParseRejected;
       if (attempt < MAX_RETRIES && isRetryableError(err)) {
         console.log("[RecallFlow] LLM retry after status " + resp.status + " (attempt " + (attempt + 1) + ")");
-        await sleep(500 * Math.pow(2, attempt));
+        await sleep2(500 * Math.pow(2, attempt));
         continue;
       }
       cleanup();
@@ -9228,8 +9250,8 @@ var McpClient = class {
     return r.content.map((c) => c.type === "text" ? c.text : JSON.stringify(c)).join("\n");
   }
 };
-function parseSseResult(text) {
-  const lines = String(text).split("\n");
+function parseSseResult(text2) {
+  const lines = String(text2).split("\n");
   let last = null;
   for (const line of lines) {
     const t = line.trim();
@@ -9639,8 +9661,8 @@ function compactSessionMessages(messages) {
 // lib/application/agent/initial-messages.ts
 var UNTRUSTED_BEGIN = "<<<RECALLFLOW_UNTRUSTED_DATA>>>";
 var UNTRUSTED_END = "<<<END_RECALLFLOW_UNTRUSTED_DATA>>>";
-function sanitizeUntrusted(text) {
-  return String(text === void 0 || text === null ? "" : text).split(UNTRUSTED_BEGIN).join("[[RF-DATA]]").split(UNTRUSTED_END).join("[[/RF-DATA]]").replace(/[\u200B-\u200D\uFEFF]/g, "");
+function sanitizeUntrusted(text2) {
+  return String(text2 === void 0 || text2 === null ? "" : text2).split(UNTRUSTED_BEGIN).join("[[RF-DATA]]").split(UNTRUSTED_END).join("[[/RF-DATA]]").replace(/[\u200B-\u200D\uFEFF]/g, "");
 }
 function renderUntrustedBlock(label, body, note) {
   const safe = sanitizeUntrusted(body);
@@ -9903,10 +9925,10 @@ async function prepareAgentRun(options) {
   }
   const injectPlanMessage = () => {
     if (!ctx.plan || !ctx.plan.length) return;
-    const text = ctx.plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
+    const text2 = ctx.plan.map((p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + p.text).join("\n");
     messages.splice(1, 0, {
       role: "system",
-      content: "\u3010\u5F53\u524D\u8BA1\u5212\u3011\n" + text + "\n\uFF08\u6BCF\u5B8C\u6210\u4E00\u6B65\u7528 update_plan \u66F4\u65B0\u72B6\u6001\u3002\uFF09"
+      content: "\u3010\u5F53\u524D\u8BA1\u5212\u3011\n" + text2 + "\n\uFF08\u6BCF\u5B8C\u6210\u4E00\u6B65\u7528 update_plan \u66F4\u65B0\u72B6\u6001\u3002\uFF09"
     });
   };
   injectPlanMessage();
@@ -10741,16 +10763,16 @@ function buildDeterministicReflection(result) {
 // lib/application/agent/final-json.ts
 function isContractObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const record = value;
-  const type = typeof record.task_type === "string" ? record.task_type.trim() : typeof record.action === "string" ? record.action.trim() : "";
-  return Boolean(type && typeof record.status === "string" && record.status.trim());
+  const record2 = value;
+  const type = typeof record2.task_type === "string" ? record2.task_type.trim() : typeof record2.action === "string" ? record2.action.trim() : "";
+  return Boolean(type && typeof record2.status === "string" && record2.status.trim());
 }
-function matchBrace(text, start) {
+function matchBrace(text2, start) {
   let depth = 0;
   let inString = false;
   let escaped = false;
-  for (let index = start; index < text.length; index += 1) {
-    const character = text[index];
+  for (let index = start; index < text2.length; index += 1) {
+    const character = text2[index];
     if (inString) {
       if (escaped) escaped = false;
       else if (character === "\\") escaped = true;
@@ -10766,8 +10788,8 @@ function matchBrace(text, start) {
   }
   return -1;
 }
-function findContractJson(text) {
-  const source = String(text ?? "");
+function findContractJson(text2) {
+  const source = String(text2 ?? "");
   const fences = [...source.matchAll(/```(?:json)?\s*\n?([\s\S]*?)```/gi)];
   for (let index = fences.length - 1; index >= 0; index -= 1) {
     try {
@@ -10793,8 +10815,8 @@ function findContractJson(text) {
   }
   return null;
 }
-function hasFinalJsonBlock(text) {
-  return Boolean(findContractJson(text));
+function hasFinalJsonBlock(text2) {
+  return Boolean(findContractJson(text2));
 }
 var FINAL_JSON_RETRY_PROMPT = "\u4F60\u521A\u624D\u7684\u6700\u7EC8\u7B54\u590D\u91CC\u7F3A\u5C11\u4EFB\u52A1\u8981\u6C42\u7684 ```json \u7EC8\u6001\u5757\u3002**\u4E0D\u8981\u91CD\u65B0\u6267\u884C\u4EFB\u52A1\uFF0C\u4E5F\u4E0D\u8981\u65B0\u589E\u4EFB\u4F55\u4E8B\u5B9E\u6216\u7ED3\u8BBA**\uFF1B\u53EA\u628A\u4E0A\u9762\u7684\u7ED3\u8BBA\u6309\u4EFB\u52A1\u7ED9\u5B9A\u7684\u5B57\u6BB5\u4E0E\u53D6\u503C\u89C4\u5219\uFF0C\u539F\u6837\u6574\u7406\u6210\u4E00\u4E2A ```json \u4EE3\u7801\u5757\u653E\u5728\u7B54\u590D\u6700\u540E\u3002\u4FDD\u6301\u7ED3\u8BBA\u91CC\u539F\u6709\u7684\u7C92\u5EA6\uFF1A\u540D\u5B57/\u6570\u5B57/\u53E5\u5B50\u7B49\u7B80\u5355\u503C\u4E0D\u8981\u5305\u88C5\u6210\u5BF9\u8C61\uFF08\u9664\u975E\u4EFB\u52A1\u660E\u786E\u8981\u6C42\u5BF9\u8C61\uFF09\uFF1B\u4E0D\u8981\u65B0\u589E\u7ED3\u8BBA\u4E2D\u6CA1\u6709\u7684\u5B57\u6BB5\u3002\u6CE8\u610F\uFF1A\u5FC5\u987B\u662F**\u53EF\u89E3\u6790\u7684 JSON**\uFF0C\u4E14\u5FC5\u987B\u5305\u542B task_type \u4E0E status\uFF08\u7F3A\u5C11\u4EFB\u4E00\u5B57\u6BB5\u90FD\u4E0D\u7B97\u7EC8\u6001\uFF09\u3002\u5982\u679C\u4F60\u5DF2\u7ECF\u6709\u4E00\u7EC4\u6570\u636E\u5B57\u6BB5\uFF0C\u8BF7\u628A\u5B83\u4EEC\u653E\u8FDB retrieved_data\uFF0C\u5E76\u5728\u5916\u5C42\u8865\u4E0A task_type \u4E0E status\uFF1B\u4E0D\u8981\u53EA\u8F93\u51FA\u4E00\u4E2A\u6570\u636E\u5BF9\u8C61\uFF08\u4F8B\u5982\u53EA\u6709 names/min/max\uFF09\u3002";
 function shouldRetryFinalJson(input = {}) {
@@ -11133,9 +11155,9 @@ function toolResultProgress(res) {
 }
 function resultProgressByChange(store, name, res) {
   if (!res || res.ok === false) return false;
-  const text = typeof res.result === "string" ? res.result : "";
-  if (!text) return false;
-  const fp = (Number.isInteger(Number(res.targetTabId)) ? Number(res.targetTabId) : "") + "|" + (res.url || "") + "|" + (res.title || "") + "|" + text.length + "|" + text.slice(0, 200) + text.slice(-200);
+  const text2 = typeof res.result === "string" ? res.result : "";
+  if (!text2) return false;
+  const fp = (Number.isInteger(Number(res.targetTabId)) ? Number(res.targetTabId) : "") + "|" + (res.url || "") + "|" + (res.title || "") + "|" + text2.length + "|" + text2.slice(0, 200) + text2.slice(-200);
   const prev = store.get(name);
   store.set(name, fp);
   return prev !== void 0 && prev !== fp;
@@ -11667,6 +11689,486 @@ var ToolCallPipeline = class {
   }
 };
 
+// lib/application/agent/jev-contract.ts
+var JEV_PROTOCOL_VERSION = "jev.recallflow.v1";
+var JevProtocolError = class extends Error {
+  path;
+  constructor(message, path = "") {
+    super(message);
+    this.name = "JevProtocolError";
+    this.path = path;
+  }
+};
+function record(value, path) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u5BF9\u8C61", path);
+  }
+  return value;
+}
+function text(value, path) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32", path);
+  }
+  return value;
+}
+function count(value, path) {
+  if (!Number.isInteger(value) || Number(value) < 0) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570", path);
+  }
+  return Number(value);
+}
+function probability(value, path) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F 0 \u5230 1 \u4E4B\u95F4\u7684\u6570\u5B57", path);
+  }
+  return n;
+}
+function numericMap(value, path) {
+  const source = record(value, path);
+  const result = {};
+  for (const [key, item] of Object.entries(source)) {
+    result[key] = probability(item, path + "." + key);
+  }
+  return result;
+}
+function protocolText(value, path) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value;
+  return record(value, path);
+}
+function parseLegend(value, path) {
+  const source = record(value, path);
+  const result = {};
+  for (const [key, item] of Object.entries(source)) {
+    result[key] = protocolText(item, path + "." + key);
+  }
+  return result;
+}
+function parseJevAnswer(value, path = "answer") {
+  const source = record(value, path);
+  const type = text(source.type, path + ".type");
+  if (type === "noul") {
+    return { type, noul: probability(source.noul, path + ".noul") };
+  }
+  if (type === "choice") {
+    return {
+      type,
+      choice: text(source.choice, path + ".choice"),
+      confidence: probability(source.confidence, path + ".confidence"),
+      probabilities: numericMap(source.probabilities, path + ".probabilities")
+    };
+  }
+  if (type === "score") {
+    const score = Number(source.score);
+    if (!Number.isFinite(score)) {
+      throw new JevProtocolError("\u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57", path + ".score");
+    }
+    return {
+      type,
+      score,
+      confidence: probability(source.confidence, path + ".confidence"),
+      legend: parseLegend(source.legend, path + ".legend"),
+      probabilities: numericMap(source.probabilities, path + ".probabilities")
+    };
+  }
+  if (type === "box") {
+    const box = record(source.box, path + ".box");
+    const confidence = source.confidence === null ? null : probability(source.confidence, path + ".confidence");
+    return {
+      type,
+      box: {
+        top: probability(box.top, path + ".box.top"),
+        bottom: probability(box.bottom, path + ".box.bottom"),
+        left: probability(box.left, path + ".box.left"),
+        right: probability(box.right, path + ".box.right")
+      },
+      confidence
+    };
+  }
+  throw new JevProtocolError("\u672A\u77E5\u7B54\u6848\u7C7B\u578B\uFF1A" + type, path + ".type");
+}
+function expectedAnswerType(question) {
+  return question.type;
+}
+function parseJevSystemOneResponse(value, questions) {
+  const source = record(value, "response");
+  const answerSource = record(source.answers, "response.answers");
+  const answers = {};
+  for (const [name, answerValue] of Object.entries(answerSource)) {
+    const answer = parseJevAnswer(answerValue, "response.answers." + name);
+    const question = questions && questions[name];
+    if (question && answer.type !== expectedAnswerType(question)) {
+      throw new JevProtocolError(
+        "\u7B54\u6848\u7C7B\u578B " + answer.type + " \u4E0E\u95EE\u9898\u7C7B\u578B " + question.type + " \u4E0D\u5339\u914D",
+        "response.answers." + name
+      );
+    }
+    answers[name] = answer;
+  }
+  if (questions) {
+    const missing = Object.keys(questions).filter((name) => !answers[name]);
+    if (missing.length) {
+      throw new JevProtocolError(
+        "\u7F3A\u5C11\u95EE\u9898\u7B54\u6848\uFF1A" + missing.join("\u3001"),
+        "response.answers"
+      );
+    }
+  }
+  const usage = record(source.usage, "response.usage");
+  return {
+    model: text(source.model, "response.model"),
+    answers,
+    usage: {
+      input_tokens: count(usage.input_tokens, "response.usage.input_tokens"),
+      output_tokens: count(usage.output_tokens, "response.usage.output_tokens")
+    }
+  };
+}
+
+// lib/application/agent/jev-client.ts
+var JevClientError = class extends Error {
+  code;
+  status;
+  constructor(code, message, status) {
+    super(message);
+    this.name = "JevClientError";
+    this.code = code;
+    this.status = status;
+  }
+};
+function jevBaseUrl(settings) {
+  const raw = String(settings.baseUrl || "").trim();
+  if (!raw) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API \u5730\u5740");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new JevClientError("CONFIG", "TypeSafe API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+  }
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {
+    throw new JevClientError("CONFIG", "TypeSafe API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF08\u672C\u673A\u5F00\u53D1\u9664\u5916\uFF09");
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+function jevSystemOneUrl(settings) {
+  return jevBaseUrl(settings) + "/v1/systemone";
+}
+function apiKey(settings) {
+  const value = String(settings.apiKey || "").trim();
+  if (!value) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API Key");
+  return value;
+}
+function retryableStatus(status) {
+  return status === 429 || status >= 500;
+}
+function makeAbortError2() {
+  const error = new Error("\u4EFB\u52A1\u5DF2\u53D6\u6D88");
+  error.name = "AbortError";
+  return error;
+}
+async function readErrorDetail2(resp) {
+  let raw = "";
+  try {
+    raw = await resp.text();
+  } catch {
+  }
+  const value = raw.trim();
+  if (!value) return "";
+  try {
+    const parsed = JSON.parse(value);
+    const detail = parsed.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") return JSON.stringify(detail);
+    if (typeof parsed.error === "object" && parsed.error && "message" in parsed.error) {
+      return String(parsed.error.message || "");
+    }
+  } catch {
+  }
+  return value.slice(0, 1e3);
+}
+async function requestJson(settings, url, init, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const external = options.signal;
+  const retries = Math.max(0, Math.min(3, Math.floor(Number(settings.maxRetries) || 0)));
+  for (let attempt = 0; ; attempt += 1) {
+    if (external && external.aborted) throw makeAbortError2();
+    const controller = new AbortController();
+    let timedOut = false;
+    const onAbort = () => controller.abort();
+    if (external) external.addEventListener("abort", onAbort, { once: true });
+    const timeoutMs = Math.max(1e3, Math.min(12e4, Number(settings.requestTimeoutMs) || 15e3));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    let resp;
+    try {
+      resp = await fetchImpl(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (external && external.aborted) throw makeAbortError2();
+      if (timedOut) {
+        throw new JevClientError("TIMEOUT", "TypeSafe \u8BF7\u6C42\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09");
+      }
+      if (attempt < retries) {
+        await sleep(500 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new JevClientError("NETWORK", "TypeSafe \u8FDE\u63A5\u5931\u8D25\uFF1A" + errorMessage(error));
+    } finally {
+      clearTimeout(timer);
+      if (external) external.removeEventListener("abort", onAbort);
+    }
+    if (resp.ok) {
+      try {
+        return await resp.json();
+      } catch {
+        throw new JevClientError("PROTOCOL", "TypeSafe \u8FD4\u56DE\u4E86\u65E0\u6548 JSON", resp.status);
+      }
+    }
+    const detail = await readErrorDetail2(resp);
+    if (attempt < retries && retryableStatus(resp.status)) {
+      await sleep(500 * Math.pow(2, attempt));
+      continue;
+    }
+    if (resp.status === 451) {
+      throw new JevClientError(
+        "REGION_BLOCKED",
+        "TypeSafe \u5F53\u524D\u7F51\u7EDC\u533A\u57DF\u4E0D\u53EF\u7528\uFF08HTTP 451\uFF09" + (detail ? "\uFF1A" + detail : "") + "\u3002\u8BF7\u5207\u6362\u53EF\u7528\u7684\u7F51\u7EDC\u51FA\u53E3\u540E\u91CD\u8BD5\u3002",
+        resp.status
+      );
+    }
+    throw new JevClientError(
+      "HTTP",
+      "TypeSafe \u8BF7\u6C42\u5931\u8D25 (" + resp.status + ")" + (detail ? "\uFF1A" + detail : ""),
+      resp.status
+    );
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+async function callJevSystemOne(settings, request, options = {}) {
+  if (!request.model) {
+    throw new JevClientError("CONFIG", "\u8BF7\u6C42\u7F3A\u5C11 TypeSafe \u6A21\u578B\u540D");
+  }
+  const body = sanitizeLoneSurrogates(JSON.stringify(request));
+  const raw = await requestJson(settings, jevSystemOneUrl(settings), {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + apiKey(settings),
+      "Content-Type": "application/json"
+    },
+    body
+  }, options);
+  return parseJevSystemOneResponse(raw, request.questions);
+}
+
+// lib/application/agent/jev-action-space.ts
+var JEV_NEXT_ACTION_QUESTION = "next_action";
+var JEV_MIN_ACTION_CONFIDENCE = 0.72;
+var READ_ACTIONS = {
+  read_current_page: {
+    args: {},
+    description: "\u5F53\u524D\u9875\u9762\u7684\u53EF\u89C1\u6B63\u6587\u4E0D\u5B8C\u6574\u3001\u9700\u8981\u8BFB\u53D6\u5168\u6587\u540E\u518D\u56DE\u7B54\u6216\u7EE7\u7EED\u64CD\u4F5C"
+  },
+  read_table: {
+    args: {},
+    description: "\u4EFB\u52A1\u9700\u8981\u8BFB\u53D6\u9875\u9762\u4E2D\u7684\u7ED3\u6784\u5316\u8868\u683C\u3001\u7F51\u683C\u3001\u7EDF\u8BA1\u884C\u6216\u5206\u9875\u6570\u636E"
+  }
+};
+function clip(value, maxChars) {
+  const text2 = String(value || "");
+  return text2.length > maxChars ? text2.slice(0, maxChars) + "\n\u2026" : text2;
+}
+function buildJevFastRequest(settings, context) {
+  const criteria = {};
+  for (const [name, action] of Object.entries(READ_ACTIONS)) {
+    criteria[name] = action.description;
+  }
+  criteria.escalate = "\u76EE\u6807\u6709\u6B67\u4E49\u3001\u9700\u8981\u591A\u6B65\u89C4\u5212\u3001\u9700\u8981\u4FEE\u6539\u9875\u9762\u6216\u77E5\u8BC6\u5E93\u3001\u9700\u8981\u804A\u5929\u6A21\u578B\u751F\u6210\u6700\u7EC8\u56DE\u7B54\uFF0C\u6216\u5F53\u524D\u4FE1\u606F\u4E0D\u8DB3\u4E14\u8BFB\u53D6\u52A8\u4F5C\u65E0\u6CD5\u5B89\u5168\u89E3\u51B3";
+  return {
+    model: settings.model,
+    state: {
+      protocol: JEV_PROTOCOL_VERSION,
+      task: {
+        intent: context.intent,
+        instruction: clip(context.instruction, 4e3),
+        selectedText: clip(context.selectedText, 4e3)
+      },
+      page: {
+        url: clip(context.pageUrl, 2e3),
+        title: clip(context.pageTitle, 500),
+        visibleText: clip(context.pageText, 12e3)
+      },
+      recentTools: (context.recentTools || []).slice(-8)
+    },
+    questions: {
+      [JEV_NEXT_ACTION_QUESTION]: {
+        type: "choice",
+        instructions: "\u9009\u62E9\u6267\u884C\u4E00\u4E2A\u53EA\u8BFB\u52A8\u4F5C\u662F\u5426\u80FD\u76F4\u63A5\u5E2E\u52A9\u5F53\u524D\u4EFB\u52A1\u3002\u4E0D\u8981\u89C4\u5212\u5199\u64CD\u4F5C\u3001\u70B9\u51FB\u3001\u8F93\u5165\u6216\u6700\u7EC8\u56DE\u7B54\uFF1B\u8FD9\u4E9B\u60C5\u51B5\u9009\u62E9 escalate\u3002",
+        criteria
+      }
+    }
+  };
+}
+function interpretJevFastDecision(response) {
+  const answer = response.answers[JEV_NEXT_ACTION_QUESTION];
+  if (!answer || answer.type !== "choice") {
+    return { kind: "escalate", reason: "invalid-answer" };
+  }
+  if (answer.choice === "escalate") {
+    return {
+      kind: "escalate",
+      reason: "model-escalation",
+      choice: answer.choice,
+      confidence: answer.confidence
+    };
+  }
+  if (!(answer.choice in READ_ACTIONS)) {
+    return {
+      kind: "escalate",
+      reason: "unknown-action",
+      choice: answer.choice,
+      confidence: answer.confidence
+    };
+  }
+  if (answer.confidence < JEV_MIN_ACTION_CONFIDENCE) {
+    return {
+      kind: "escalate",
+      reason: "low-confidence",
+      choice: answer.choice,
+      confidence: answer.confidence
+    };
+  }
+  const toolName = answer.choice;
+  return {
+    kind: "act",
+    toolName,
+    args: { ...READ_ACTIONS[toolName].args },
+    confidence: answer.confidence,
+    probabilities: { ...answer.probabilities }
+  };
+}
+function compareJevShadowAction(suggestion, slowToolNames, finalText = "") {
+  const names = Array.isArray(slowToolNames) ? slowToolNames.filter(Boolean) : [];
+  const suggestedTool = suggestion.kind === "act" ? suggestion.toolName : "escalate";
+  return {
+    suggestedTool,
+    slowTools: names,
+    agreed: suggestion.kind === "act" ? names.includes(suggestion.toolName) : names.length === 0 && Boolean(String(finalText || "").trim()),
+    finalAnswerOnly: names.length === 0 && Boolean(String(finalText || "").trim())
+  };
+}
+
+// lib/application/agent/jev-controller.ts
+var JevFastController = class {
+  state;
+  pipeline;
+  signal;
+  callSystemOne;
+  constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne) {
+    this.state = state2;
+    this.pipeline = pipeline;
+    this.signal = signal;
+    this.callSystemOne = callSystemOne;
+  }
+  async runOnce(iter, persist) {
+    const settings = this.state.settings.jev;
+    if (!settings || settings.enabled !== true) {
+      return { kind: "skipped", reason: "disabled" };
+    }
+    if (this.state.intent === INTENTS.CHAT) {
+      return { kind: "skipped", reason: "chat-uses-slow-lane" };
+    }
+    if (!settings.apiKey || !settings.model || !settings.baseUrl) {
+      return { kind: "skipped", reason: "incomplete-config" };
+    }
+    const request = buildJevFastRequest(settings, {
+      intent: this.state.intent,
+      instruction: this.state.detected.sourceText || this.state.instruction,
+      selectedText: this.state.selectedText,
+      pageUrl: this.state.ctx.pageUrl,
+      pageTitle: this.state.ctx.pageTitle,
+      pageText: this.state.ctx.page,
+      recentTools: this.state.ranToolNames
+    });
+    const startedAt = Date.now();
+    let response;
+    try {
+      response = await this.callSystemOne(settings, request, {
+        signal: this.signal
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.state.trace({ phase: "jev", iter, status: "error", reason });
+      return { kind: "skipped", reason: "request-failed" };
+    }
+    const latencyMs = Date.now() - startedAt;
+    const decision = interpretJevFastDecision(response);
+    this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
+    this.state.trace({
+      phase: "jev",
+      iter,
+      mode: settings.shadowMode ? "shadow" : "live",
+      model: response.model,
+      decision,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens
+    });
+    if (settings.shadowMode) {
+      return { kind: "shadow", decision, latencyMs };
+    }
+    if (decision.kind === "escalate") {
+      return { kind: "skipped", reason: decision.reason };
+    }
+    const callId = "jev-" + iter + "-" + Date.now().toString(36);
+    const toolCall = {
+      id: callId,
+      name: decision.toolName,
+      args: decision.args
+    };
+    const assistantMessage = {
+      role: "assistant",
+      content: "JEV \u5FEB\u601D\u8003\uFF1A\u5148\u8BFB\u53D6" + (decision.toolName === "read_table" ? "\u9875\u9762\u8868\u683C" : "\u9875\u9762\u6B63\u6587") + "\u3002",
+      tool_calls: [{
+        id: callId,
+        type: "function",
+        function: {
+          name: decision.toolName,
+          arguments: JSON.stringify(decision.args)
+        }
+      }]
+    };
+    this.state.messages.push(assistantMessage);
+    const toolOutcome = await this.pipeline.process({
+      assistantMessage,
+      toolCalls: [toolCall]
+    }, iter, persist);
+    if (toolOutcome.kind === "cancelled") {
+      return { kind: "cancelled", reason: toolOutcome.reason };
+    }
+    return { kind: "act", decision, latencyMs, toolOutcome };
+  }
+  traceShadowComparison(decision, step) {
+    const comparison = compareJevShadowAction(
+      decision,
+      Array.isArray(step.toolCalls) ? step.toolCalls.map((call) => String(call.name || "")) : [],
+      String(step.assistantMessage?.content || "")
+    );
+    this.state.trace({
+      phase: "jev-shadow-compare",
+      decision,
+      ...comparison
+    });
+  }
+};
+
 // lib/application/agent/agent-loop.ts
 var CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
 async function runAgentLoop(port, payload, settings, book, signal, tabId, observeEvent) {
@@ -11682,6 +12184,7 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
   const state2 = new AgentRunState(prepared, payload, settings);
   const finalizer = new AgentRunFinalizer(state2, port, settings, signal);
   const toolPipeline = new ToolCallPipeline(state2, port, signal);
+  const jevFast = new JevFastController(state2, toolPipeline, signal);
   const completion = new CompletionCoordinator(state2);
   const resumeIteration = state2.resumeIteration;
   const persist = (extra = {}) => finalizer.persist(extra);
@@ -11692,6 +12195,8 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
   }).catch(() => {
   });
   let deadlineWrapUpSent = false;
+  let jevAttempted = false;
+  let pendingJevShadow = null;
   for (let iter = resumeIteration; ; iter++) {
     const deadline = deadlineDecision({
       now: Date.now(),
@@ -11784,6 +12289,17 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
       nextIteration: iter
     }).catch(() => {
     });
+    if (!jevAttempted) {
+      jevAttempted = true;
+      const jevOutcome = await jevFast.runOnce(iter, persist);
+      if (jevOutcome.kind === "cancelled") {
+        await finalizer.cancelled(jevOutcome.reason, "interrupted");
+        return;
+      }
+      if (jevOutcome.kind === "shadow") {
+        pendingJevShadow = jevOutcome.decision;
+      }
+    }
     const historyTokens = estimateMessagesTokens(state2.messages);
     let collapsedNow = 0;
     if (historyTokens > CONTEXT_COLLAPSE_TOKENS) {
@@ -11880,6 +12396,10 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
       return;
     }
     state2.messages.push(step.assistantMessage);
+    if (pendingJevShadow) {
+      jevFast.traceShadowComparison(pendingJevShadow, step);
+      pendingJevShadow = null;
+    }
     recordUsage(state2, step, iter);
     state2.emit({ type: "usage", totalTokens: state2.totalTokens });
     if (step.toolCalls.length) {
@@ -12826,8 +13346,8 @@ function handoffByteSize(value) {
     return s.length * 2;
   }
 }
-function fitRecordToBudget(record, maxBytes = MAX_RECORD_BYTES) {
-  let out = record && typeof record === "object" ? record : {};
+function fitRecordToBudget(record2, maxBytes = MAX_RECORD_BYTES) {
+  let out = record2 && typeof record2 === "object" ? record2 : {};
   let bytes = handoffByteSize(out);
   if (bytes <= maxBytes) return { record: out, truncated: "", bytes };
   const attempt = (next, label) => {
@@ -12926,15 +13446,15 @@ async function saveHandoff(input, extras = {}) {
   const a = area2();
   if (!a) return { ok: false, error: "\u672C\u5730\u5B58\u50A8\u4E0D\u53EF\u7528" };
   const isRecord2 = !!input && typeof input.id === "string" && input.trailTotal !== void 0;
-  let record;
+  let record2;
   try {
-    record = isRecord2 ? input : buildHandoffRecord(input);
+    record2 = isRecord2 ? input : buildHandoffRecord(input);
   } catch (e) {
     return { ok: false, error: e?.message || String(e) };
   }
-  const fitted = fitRecordToBudget(record);
-  record = fitted.record;
-  const key = KEY_PREFIX + record.id;
+  const fitted = fitRecordToBudget(record2);
+  record2 = fitted.record;
+  const key = KEY_PREFIX + record2.id;
   const rawTrail = Array.isArray(extras.trailItems) ? extras.trailItems : Array.isArray(input.toolTrail) ? input.toolTrail : buildToolTrail(input.messages);
   const prepared = prepareHandoffTrail(rawTrail);
   let prev = null;
@@ -12944,7 +13464,7 @@ async function saveHandoff(input, extras = {}) {
   } catch (e) {
     prev = null;
   }
-  if (prev && prev.createdAt) record.createdAt = prev.createdAt;
+  if (prev && prev.createdAt) record2.createdAt = prev.createdAt;
   let index = [];
   try {
     const data = await a.get(INDEX_KEY2);
@@ -12952,9 +13472,9 @@ async function saveHandoff(input, extras = {}) {
   } catch (e) {
     index = [];
   }
-  const { index: nextIndex, dropped } = updateHandoffIndex(index, record.id, record.updatedAt, MAX_RECORDS);
+  const { index: nextIndex, dropped } = updateHandoffIndex(index, record2.id, record2.updatedAt, MAX_RECORDS);
   try {
-    await a.set({ [key]: record, [TRAIL_KEY_PREFIX + record.id]: prepared.items, [INDEX_KEY2]: nextIndex });
+    await a.set({ [key]: record2, [TRAIL_KEY_PREFIX + record2.id]: prepared.items, [INDEX_KEY2]: nextIndex });
   } catch (e) {
     return { ok: false, error: "\u5199\u5165\u5931\u8D25\uFF1A" + (e?.message || String(e)) };
   }
@@ -12964,7 +13484,7 @@ async function saveHandoff(input, extras = {}) {
     } catch (e) {
     }
   }
-  return { ok: true, id: record.id, updatedAt: record.updatedAt, dropped };
+  return { ok: true, id: record2.id, updatedAt: record2.updatedAt, dropped };
 }
 async function getHandoff(id, opts = {}) {
   const norm = normalizeHandoffId(id);
@@ -13278,8 +13798,8 @@ function finalAnswerFrom(events) {
   for (let index = last; index >= 0; index -= 1) {
     const event = list[index];
     if (!event || event.type !== "chunk") break;
-    const text = typeof event.text === "string" ? event.text : "";
-    if (text) parts.unshift(text);
+    const text2 = typeof event.text === "string" ? event.text : "";
+    if (text2) parts.unshift(text2);
   }
   return parts.join("").trim();
 }
@@ -13423,7 +13943,7 @@ var AgentJobStore = class {
 // lib/bridge/relay.ts
 var RELAY_HOST = "127.0.0.1:7801";
 var RELAY_HTTP = "http://" + RELAY_HOST;
-function errorMessage(error) {
+function errorMessage2(error) {
   if (error instanceof Error) return error.message;
   return String(error ?? "");
 }
@@ -13637,7 +14157,7 @@ async function agentTaskStart(params) {
       }
       const book = await getBook().catch((e) => {
         try {
-          console.warn("[relay] \u8BFB\u53D6\u77E5\u8BC6\u5E93\u5931\u8D25\uFF0C\u672C\u6B21\u4EFB\u52A1\u4EE5\u7A7A\u77E5\u8BC6\u5E93\u542F\u52A8\uFF1A" + errorMessage(e));
+          console.warn("[relay] \u8BFB\u53D6\u77E5\u8BC6\u5E93\u5931\u8D25\uFF0C\u672C\u6B21\u4EFB\u52A1\u4EE5\u7A7A\u77E5\u8BC6\u5E93\u542F\u52A8\uFF1A" + errorMessage2(e));
         } catch (_) {
         }
         return {};
@@ -13668,7 +14188,7 @@ async function agentTaskStart(params) {
       const cur = agentJobs.get(job.id);
       const cancelled = cur && (cur.state === JOB_STATE.CANCELLED || cur.cancelRequested);
       agentJobs.finish(job.id, cancelled ? JOB_STATE.CANCELLED : JOB_STATE.FAILED, {
-        error: cancelled ? "\u4EFB\u52A1\u5DF2\u6309\u8BF7\u6C42\u53D6\u6D88\u3002" : "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + errorMessage(e)
+        error: cancelled ? "\u4EFB\u52A1\u5DF2\u6309\u8BF7\u6C42\u53D6\u6D88\u3002" : "Agent \u8FD0\u884C\u51FA\u9519\uFF1A" + errorMessage2(e)
       });
     } finally {
       cancelControllers.delete(job.id);
@@ -13763,7 +14283,7 @@ async function openTabViaBridge(params) {
       result: res.result || ""
     };
   } catch (e) {
-    return { ok: false, error: "\u6253\u5F00\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + errorMessage(e) };
+    return { ok: false, error: "\u6253\u5F00\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + errorMessage2(e) };
   }
 }
 async function resolveActionTab(explicitTabId) {
@@ -13968,11 +14488,11 @@ async function browserRead(params) {
       waitError = String(e && e.message || e).slice(0, 200);
     }
   }
-  let text = "";
+  let text2 = "";
   try {
     const read = await executeTool("read_current_page", {}, ctx);
-    text = String(read && read.result || "");
-    text = text.replace(/^页面标题：[^\n]*\n页面URL：[^\n]*\n\n/, "");
+    text2 = String(read && read.result || "");
+    text2 = text2.replace(/^页面标题：[^\n]*\n页面URL：[^\n]*\n\n/, "");
   } finally {
     try {
       await closeAgentWindow(ctx);
@@ -13981,12 +14501,12 @@ async function browserRead(params) {
   }
   const finalUrl = opened.targetTab && opened.targetTab.url || url;
   const title = opened.targetTab && opened.targetTab.title || "";
-  const cut = truncateEvidenceText(text, maxChars);
-  text = cut.text;
+  const cut = truncateEvidenceText(text2, maxChars);
+  text2 = cut.text;
   return {
     url: finalUrl,
     title,
-    text,
+    text: text2,
     quotes: [],
     // 等待超时不当作失败，但必须让调用方看见 —— 否则「页面是空壳」会被误当成「页面本来就没内容」。
     waitError: waitError || void 0,
@@ -14035,36 +14555,36 @@ function panelSessionLockKey(id) {
 function deriveSessionTitle(messages, fallback = PSESS_DEFAULT_TITLE) {
   const list = Array.isArray(messages) ? messages : [];
   const first = list.find((m) => m && m.role === "user" && String(m.content || "").trim());
-  const text = String(first && first.content || "").replace(/\s+/g, " ").trim();
-  if (!text) return fallback;
-  return text.length > MAX_TITLE_CHARS ? sliceSafe(text, 0, MAX_TITLE_CHARS - 1) + "\u2026" : text;
+  const text2 = String(first && first.content || "").replace(/\s+/g, " ").trim();
+  if (!text2) return fallback;
+  return text2.length > MAX_TITLE_CHARS ? sliceSafe(text2, 0, MAX_TITLE_CHARS - 1) + "\u2026" : text2;
 }
 function countConversationMessages(messages) {
   return Array.isArray(messages) ? messages.length : 0;
 }
 function estimateConversationStats(messages) {
-  let text = "";
+  let text2 = "";
   try {
-    text = JSON.stringify(Array.isArray(messages) ? messages : []);
+    text2 = JSON.stringify(Array.isArray(messages) ? messages : []);
   } catch (e) {
-    text = "";
+    text2 = "";
   }
-  const cjk = (text.match(/[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
-  const rest = Math.max(0, text.length - cjk);
-  let bytes = text.length * 2;
+  const cjk = (text2.match(/[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
+  const rest = Math.max(0, text2.length - cjk);
+  let bytes = text2.length * 2;
   try {
-    bytes = new TextEncoder().encode(text).length;
+    bytes = new TextEncoder().encode(text2).length;
   } catch (e) {
   }
   return {
-    charCount: text.length,
+    charCount: text2.length,
     byteLength: bytes,
     tokenEstimate: Math.ceil(cjk + rest / 4)
   };
 }
 function normalizeOrigin(value) {
-  const text = String(value || "").trim();
-  return text.slice(0, 2048);
+  const text2 = String(value || "").trim();
+  return text2.slice(0, 2048);
 }
 function summarize(session) {
   return {
@@ -14692,15 +15212,15 @@ function flushNarration(state2) {
   state2.parts.push({ type: "narration", text: state2.narration });
   state2.narration = "";
 }
-function pushNotice(state2, text, color) {
-  const value = String(text || "").trim();
+function pushNotice(state2, text2, color) {
+  const value = String(text2 || "").trim();
   if (!value) return;
   state2.parts.push({ type: "notice", text: value, color: color || "" });
 }
-function pushStepNotice(state2, text, color) {
+function pushStepNotice(state2, text2, color) {
   endReasoning(state2);
   flushNarration(state2);
-  pushNotice(state2, text, color);
+  pushNotice(state2, text2, color);
 }
 function applyRunEvent(state2, event) {
   if (!state2 || !event || typeof event !== "object") return state2;
@@ -14714,9 +15234,9 @@ function applyRunEvent(state2, event) {
     case "chunk":
       endReasoning(state2);
       if (event.text) {
-        const text = String(event.text);
-        state2.content += text;
-        state2.narration += text;
+        const text2 = String(event.text);
+        state2.content += text2;
+        state2.narration += text2;
       }
       break;
     case "tool-call":
@@ -14808,9 +15328,9 @@ function applyRunEvent(state2, event) {
       }
       break;
     case "tabs-close-pending": {
-      const count = Array.isArray(event.tabIds) ? event.tabIds.length : 0;
-      if (count) {
-        pushStepNotice(state2, "\u{1F5C2} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5C06\u5728\u6700\u7EC8\u56DE\u590D\u4FDD\u5B58\u540E\u5173\u95ED " + count + " \u4E2A\u8F85\u52A9\u6807\u7B7E\u9875", "#6b7280");
+      const count2 = Array.isArray(event.tabIds) ? event.tabIds.length : 0;
+      if (count2) {
+        pushStepNotice(state2, "\u{1F5C2} \u4EFB\u52A1\u7ED3\u675F\uFF0C\u5C06\u5728\u6700\u7EC8\u56DE\u590D\u4FDD\u5B58\u540E\u5173\u95ED " + count2 + " \u4E2A\u8F85\u52A9\u6807\u7B7E\u9875", "#6b7280");
       }
       break;
     }
@@ -15021,11 +15541,11 @@ var TabRunRegistryState = class {
     if (tabId == null) return null;
     return this.tabRecords.get(tabId) || null;
   }
-  setRun(tabId, record) {
-    this.tabRecords.set(tabId, record);
+  setRun(tabId, record2) {
+    this.tabRecords.set(tabId, record2);
   }
-  updateRun(tabId, record, patch) {
-    const next = Object.assign({}, record, patch);
+  updateRun(tabId, record2, patch) {
+    const next = Object.assign({}, record2, patch);
     this.tabRecords.set(tabId, next);
     return next;
   }
@@ -15086,11 +15606,11 @@ var RunLifecycleService = class {
   scheduleAbortIfNoReattach(runId, tabId) {
     const id = String(runId || "");
     this.registry.scheduleAbort(id, this.graceMs, () => {
-      const record = this.registry.runFor(tabId);
-      if (!record || String(record.runId || "") !== id) return;
+      const record2 = this.registry.runFor(tabId);
+      if (!record2 || String(record2.runId || "") !== id) return;
       const channel = this.registry.channelFor(id);
       if (channel && channel.isAttached()) return;
-      const controller = record.controller;
+      const controller = record2.controller;
       if (controller && !controller.__rfFinished) {
         this.stats.aborts += 1;
         try {
@@ -15104,11 +15624,11 @@ var RunLifecycleService = class {
     const wantedRunId = String(params.runId || "");
     const wantedSessionId = String(params.sessionId || "");
     let owner = null;
-    for (const [tabId, record] of this.registry.runs) {
-      if (!record) continue;
-      if (wantedRunId && String(record.runId || "") !== wantedRunId) continue;
-      if (!wantedRunId && wantedSessionId && String(record.sessionId || "") !== wantedSessionId) continue;
-      owner = { tabId: Number(tabId), record };
+    for (const [tabId, record2] of this.registry.runs) {
+      if (!record2) continue;
+      if (wantedRunId && String(record2.runId || "") !== wantedRunId) continue;
+      if (!wantedRunId && wantedSessionId && String(record2.sessionId || "") !== wantedSessionId) continue;
+      owner = { tabId: Number(tabId), record: record2 };
       break;
     }
     if (!owner && wantedSessionId) {
@@ -15155,10 +15675,10 @@ var RunLifecycleService = class {
     };
   }
   cleanupTab(tabId) {
-    const record = this.registry.runFor(tabId);
-    if (record?.runId) {
-      this.clearAbortTimer(record.runId);
-      this.registry.deleteChannel(record.runId);
+    const record2 = this.registry.runFor(tabId);
+    if (record2?.runId) {
+      this.clearAbortTimer(record2.runId);
+      this.registry.deleteChannel(record2.runId);
     }
     const controller = this.registry.controllerFor(tabId);
     if (controller && !controller.__rfFinished) {
@@ -15180,8 +15700,8 @@ var RunLifecycleService = class {
   deleteChannel(runId) {
     this.registry.deleteChannel(runId);
   }
-  setRun(tabId, record) {
-    this.registry.setRun(tabId, record);
+  setRun(tabId, record2) {
+    this.registry.setRun(tabId, record2);
   }
 };
 
