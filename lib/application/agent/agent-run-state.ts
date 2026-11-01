@@ -1,5 +1,6 @@
 import type { PreparedAgentRun } from './agent-bootstrap.ts';
 import type { RunPersistenceState } from './session-persistence.ts';
+import type { JevLoopState } from './jev-loop-state.ts';
 
 /**
  * The mutable state owned by one agent run.
@@ -42,6 +43,7 @@ export class AgentRunState {
   readonly ranToolNames: string[];
   readonly failedToolNames: string[];
   readonly succeededToolNames: string[];
+  readonly jevLoop: JevLoopState;
 
   promotedToResearch: boolean;
   toolCallCount: number;
@@ -89,6 +91,7 @@ export class AgentRunState {
     this.ranToolNames = prepared.ranToolNames;
     this.failedToolNames = prepared.failedToolNames;
     this.succeededToolNames = prepared.succeededToolNames;
+    this.jevLoop = prepared.jevLoop;
 
     this.promotedToResearch = prepared.promotedToResearch;
     this.toolCallCount = prepared.toolCallCount;
@@ -126,6 +129,7 @@ export class AgentRunState {
       toolCallCount: this.toolCallCount,
       guard: this.guard.snapshot(),
       promotedToResearch: this.promotedToResearch,
+      jevLoop: this.jevLoop,
       runCitations: this.runCitations,
       ctx: this.ctx,
       sessionApprovedTools: this.sessionApprovedTools,

@@ -58,8 +58,9 @@ export const ENTRIES = [
   // 2026-11-01: typed TypeSafe System One client, runtime response validation,
   // action space, and fast-controller wiring add ~17KB; measured 944085 bytes.
   // Shadower metrics and 451 handling add ~1.6KB; measured 945766 bytes.
-  // No dependency was added. Raise explicitly.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 924 * 1024 },
+  // Stateful multi-episode JEV scheduling and dynamic candidate generation add
+  // another ~8.2KB; measured 954000 bytes. No dependency was added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 933 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

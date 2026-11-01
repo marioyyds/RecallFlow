@@ -68,7 +68,6 @@ export async function runAgentLoop(
   }).catch(() => {});
 
   let deadlineWrapUpSent = false;
-  let jevAttempted = false;
   let pendingJevShadow: JevFastDecision | null = null;
   for (let iter = resumeIteration; ; iter++) {
     const deadline = deadlineDecision({
@@ -178,16 +177,13 @@ export async function runAgentLoop(
       nextIteration: iter,
     }).catch(() => {});
 
-    if (!jevAttempted) {
-      jevAttempted = true;
-      const jevOutcome = await jevFast.runOnce(iter, persist);
-      if (jevOutcome.kind === 'cancelled') {
-        await finalizer.cancelled(jevOutcome.reason, 'interrupted');
-        return;
-      }
-      if (jevOutcome.kind === 'shadow') {
-        pendingJevShadow = jevOutcome.decision;
-      }
+    const jevOutcome = await jevFast.runAvailable(iter, persist);
+    if (jevOutcome.kind === 'cancelled') {
+      await finalizer.cancelled(jevOutcome.reason, 'interrupted');
+      return;
+    }
+    if (jevOutcome.kind === 'shadow') {
+      pendingJevShadow = jevOutcome.decision;
     }
 
     const historyTokens = estimateMessagesTokens(state.messages);
@@ -324,6 +320,7 @@ export async function runAgentLoop(
         );
         return;
       }
+      jevFast.noteSlowTurn();
       state.reportTurnTiming(iter, step, outcome.toolMs);
       continue;
     }

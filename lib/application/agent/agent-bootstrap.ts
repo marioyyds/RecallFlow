@@ -29,6 +29,7 @@ import {
   ensureDownloadObservation,
   shouldObserveDownloads,
 } from './target-manager.ts';
+import { restoreJevLoopState } from './jev-loop-state.ts';
 
 function buildInitialMessages(
   instruction: string,
@@ -99,6 +100,7 @@ export interface PreparedAgentRun {
   loadedSkillNames: string[];
   budget: any;
   promotedToResearch: boolean;
+  jevLoop: ReturnType<typeof restoreJevLoopState>;
   startedAt: number;
   toolCallCount: number;
   totalTokens: number;
@@ -181,6 +183,7 @@ export async function prepareAgentRun(options: {
   const budget = canResume ? persisted.budget : getBudget(payload, settings, intent);
   // CHAT 任务是否已就地提升为 RESEARCH 画像（工具 + 系统提示 + complete_task 收尾）。
   let promotedToResearch = canResume && persisted.promotedToResearch === true;
+  const jevLoop = restoreJevLoopState(canResume ? persisted.jevLoop : null);
   const startedAt = canResume ? Number(persisted.startedAt || Date.now()) : Date.now();
   let toolCallCount = canResume ? Number(persisted.toolCallCount || 0) : 0;
   // 累计 token 用量（有 API usage 时用真实值，否则粗估）。
@@ -409,7 +412,7 @@ export async function prepareAgentRun(options: {
   return {
     runId, persisted, canResume, sessionApprovedTools,
     instruction, selectedText, detected, intent, allSkills, loadedSkillNames,
-    budget, promotedToResearch, startedAt, toolCallCount, totalTokens,
+    budget, promotedToResearch, jevLoop, startedAt, toolCallCount, totalTokens,
     verificationCount, lastDeniedSignature, ranToolNames, failedToolNames,
     succeededToolNames, deterministicFails, lastProgressIter, runCitations,
     guard, stuckAttempts, resultFingerprints, run, ctx, disabledTools, tools,

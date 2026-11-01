@@ -42,6 +42,7 @@ export class RunSessionPersistence {
       toolCallCount: state.toolCallCount,
       guard: state.guard,
       promotedToResearch: state.promotedToResearch,
+      jevLoop: state.jevLoop,
       runCitations: tail(state.runCitations, 60),
       failedUrls: tail(ctx.failedUrls, 80),
       browsingMode: ctx.browsingMode,

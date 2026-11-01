@@ -11,11 +11,13 @@ import {
 } from '../lib/application/agent/initial-messages.ts';
 import {
   INTENTS,
+  PAGE_INTERACTION_TOOL_NAMES,
   buildStableSystemPrompt,
   buildTaskPolicyPrompt,
   isToolAllowedForIntent,
 } from '../lib/application/agent/intent-router.ts';
 import { collectAgentTools } from '../lib/application/agent/mcp.ts';
+import { shouldPromoteToResearchForTool } from '../lib/application/agent/tool-call-pipeline.ts';
 
 const allTools = await collectAgentTools({}, { includeMcp: false });
 const toolNames = allTools.tools.map((tool) => tool.function.name);
@@ -79,5 +81,32 @@ test('意图白名单改为执行期权限：schema 可见不等于当前任务�
     isToolAllowedForIntent(INTENTS.CHAT, 'click_element', ['click_element']),
     true,
     '已加载技能声明的工具可显式放行'
+  );
+});
+
+test('浏览器与研究共享完整页面交互能力，不再漏掉 type_text 等同性质工具', () => {
+  for (const intent of [INTENTS.BROWSER, INTENTS.RESEARCH]) {
+    for (const name of PAGE_INTERACTION_TOOL_NAMES) {
+      assert.equal(
+        isToolAllowedForIntent(intent, name),
+        true,
+        `${intent} 必须允许同类页面交互工具 ${name}`
+      );
+    }
+  }
+  assert.ok(PAGE_INTERACTION_TOOL_NAMES.includes('type_text'));
+  assert.equal(isToolAllowedForIntent(INTENTS.CHAT, 'type_text'), false, '普通对话仍不得直接编辑页面');
+  assert.equal(
+    shouldPromoteToResearchForTool('type_text'),
+    true,
+    'CHAT 误判后调用 type_text 必须能提升画像，而不是先被权限拦截'
+  );
+  for (const name of PAGE_INTERACTION_TOOL_NAMES) {
+    assert.equal(shouldPromoteToResearchForTool(name), true, `${name} 应触发 RESEARCH 画像提升`);
+  }
+  assert.equal(
+    isToolAllowedForIntent(INTENTS.BROWSER, 'fetch_webpage'),
+    true,
+    '浏览器规则允许标签页触顶后回退 fetch_webpage，执行权限必须一致'
   );
 });

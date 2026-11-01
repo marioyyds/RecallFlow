@@ -8151,6 +8151,34 @@ var ALL_TOOL_NAMES = new Set(TOOL_REGISTRY.map((tool) => tool.name));
 var ALWAYS_AVAILABLE_TOOL_NAMES = new Set(
   TOOL_REGISTRY.filter((tool) => tool.alwaysAvailable).map((tool) => tool.name)
 );
+var PAGE_READ_TOOL_NAMES = [
+  "read_current_page",
+  "get_page_snapshot",
+  "read_diagnostics",
+  "get_element_source",
+  "wait_for_element",
+  "get_attribute",
+  "inspect_element",
+  "read_table",
+  "take_screenshot",
+  "get_ax_snapshot",
+  "list_frames"
+];
+var TAB_TOOL_NAMES = ["open_tab", "list_tabs", "switch_tab"];
+var RESEARCH_ACCESS_TOOL_NAMES = ["knowledge_read", "fetch_webpage", "web_search"];
+var BROWSER_AUTOMATION_TOOL_NAMES = ["macro", "trust_site", "handle_dialog", "undo_last_action"];
+var USER_SCRIPT_TOOL_NAMES = [
+  "list_userscripts",
+  "search_userscripts",
+  "install_userscript",
+  "run_userscript"
+];
+var PAGE_INTERACTION_TOOL_NAMES = Object.freeze(
+  TOOL_REGISTRY.filter((tool) => tool.risk === "page" || tool.name === "upload_file").map((tool) => tool.name)
+);
+function toolsFor(...groups) {
+  return [...new Set(groups.flat())].filter((name) => ALL_TOOL_NAMES.has(name));
+}
 var PURE_CHITCHAT_RE = /^(你好|您好|谢谢|感谢|再见|拜拜|在吗|嗨|hi|hello|hey|嗯|好|可以|好的|行)[，。！？!?,\s]*$/i;
 var INTENT_ROUTER_SYSTEM = `\u4F60\u662F RecallFlow \u7684\u610F\u56FE\u8DEF\u7531\u5668\u3002\u6839\u636E\u7528\u6237\u6307\u4EE4\u5224\u65AD\u5B83\u5C5E\u4E8E\u54EA\u4E00\u7C7B\u4EFB\u52A1\uFF0C\u53EA\u8F93\u51FA\u4E00\u4E2A JSON\u3002
 
@@ -8181,51 +8209,21 @@ var INTENT_DEFS = Object.freeze({
   [INTENTS.BROWSER]: {
     label: "\u6D4F\u89C8\u5668\u64CD\u4F5C",
     description: "\u6253\u5F00\u7F51\u9875\u3001\u641C\u7D22\u3001\u6D4F\u89C8\u3001\u64AD\u653E\u3001\u8FDB\u5165\u76EE\u6807\u7AD9\u70B9",
-    allowedTools: [
-      "open_tab",
-      "list_tabs",
-      "switch_tab",
-      "get_page_snapshot",
-      "read_current_page",
-      "read_diagnostics",
-      "get_element_source",
-      "type_text",
-      "press_key",
-      "select_option",
-      "check_box",
-      "wait_for_element",
-      "get_attribute",
-      "click_element",
-      "annotate",
-      "inspect_element",
-      "read_table",
-      "take_screenshot",
-      "scroll_page",
-      "annotate",
-      "run_javascript",
-      "click_at",
-      "hover_element",
-      "drag_element",
-      "upload_file",
-      "get_ax_snapshot",
-      "list_frames",
-      "undo_last_action",
-      "macro",
-      "trust_site",
-      "handle_dialog",
-      "read_diagnostics",
-      "list_userscripts",
-      "search_userscripts",
-      "install_userscript",
-      "run_userscript",
-      "complete_task"
-    ].filter((name) => ALL_TOOL_NAMES.has(name)),
+    allowedTools: toolsFor(
+      TAB_TOOL_NAMES,
+      PAGE_READ_TOOL_NAMES,
+      PAGE_INTERACTION_TOOL_NAMES,
+      ["fetch_webpage", "web_search"],
+      BROWSER_AUTOMATION_TOOL_NAMES,
+      USER_SCRIPT_TOOL_NAMES,
+      ["complete_task"]
+    ),
     // MCP 是用户自己在设置页装的扩展能力，不是「资料研究」这个意图的附属品：
     // 从前只有 RESEARCH 为 true，于是「你有可用的 mcp 吗？」「用 Obsidian 读一下当前笔记」
     // 落在 CHAT / BROWSER，本次运行一个 MCP 工具都没有 —— 模型只能如实回答「我没有 MCP」。
     includeMcp: true,
     rules: [
-      "\u53EA\u80FD\u4F7F\u7528\u6D4F\u89C8\u5668\u7C7B\u5DE5\u5177\uFF0C\u7981\u6B62\u8C03\u7528 knowledge_read\u3001fetch_webpage \u7B49\u68C0\u7D22/\u6293\u53D6\u5DE5\u5177\u3002",
+      "\u53EA\u80FD\u4F7F\u7528\u6D4F\u89C8\u5668\u7C7B\u5DE5\u5177\u4E0E\u8054\u7F51\u8BFB\u53D6\u5DE5\u5177\uFF1B\u7981\u6B62\u8C03\u7528 knowledge_read\uFF0C\u77E5\u8BC6\u5E93\u4E0D\u662F\u672C\u4EFB\u52A1\u7684\u68C0\u7D22\u5165\u53E3\u3002",
       "\u4F18\u5148\u5728\u7528\u6237\u5F53\u524D\u9875\u9762\u5185\u5B8C\u6210\u64CD\u4F5C\uFF1B\u9700\u8981\u641C\u7D22\u65F6\uFF0C\u5148\u786E\u8BA4\u5F53\u524D\u9875\u662F\u5426\u4E3A\u53EF\u7528\u7684\u641C\u7D22\u5F15\u64CE\uFF0C\u80FD\u7528\u5219\u76F4\u63A5 type_text\uFF0C\u4E0D\u8981\u76F2\u76EE\u5F00\u65B0\u9875\u3002",
       "\u9700\u8981\u6253\u5F00\u67D0\u4E2A\u7F51\u5740\u65F6\uFF0Copen_tab \u4F1A\u4F18\u5148\u590D\u7528\u5DF2\u6253\u5F00\u7684\u540C URL \u6807\u7B7E\u9875\uFF1B\u4E0D\u8981\u5BF9\u540C\u4E00\u7F51\u5740\u91CD\u590D open_tab\uFF0C\u4E5F\u4E0D\u8981\u53CD\u590D\u65B0\u5EFA\u6807\u7B7E\u9875\u3002",
       "\u672C\u4EFB\u52A1\u65B0\u5EFA\u6807\u7B7E\u9875\u6709\u6570\u91CF\u4E0A\u9650\uFF0C\u4E00\u65E6 open_tab \u8FD4\u56DE\u201C\u8FBE\u5230\u4E0A\u9650\u201D\u7684\u63D0\u793A\uFF0C\u7ACB\u5373\u505C\u6B62\u65B0\u5EFA\uFF1A\u6539\u7528 switch_tab \u590D\u7528\u5DF2\u6253\u5F00\u7684\u6807\u7B7E\u9875\uFF08\u7528\u8FD4\u56DE\u91CC\u7684 tabId\uFF09\uFF0C\u6216\u6539\u7528 fetch_webpage \u6293\u53D6\u5185\u5BB9\u3002",
@@ -8258,36 +8256,14 @@ var INTENT_DEFS = Object.freeze({
   [INTENTS.RESEARCH]: {
     label: "\u8D44\u6599\u7814\u7A76",
     description: "\u603B\u7ED3\u3001\u89E3\u91CA\u3001\u7FFB\u8BD1\u3001\u5BF9\u6BD4\u3001\u67E5\u8D44\u6599\u7B49\u9700\u8981\u7EFC\u5408\u4FE1\u606F\u7684\u4EFB\u52A1",
-    allowedTools: [
-      "knowledge_read",
-      "read_current_page",
-      "get_page_snapshot",
-      "read_diagnostics",
-      "get_element_source",
-      "list_tabs",
-      "switch_tab",
-      "open_tab",
-      "fetch_webpage",
-      "web_search",
-      "wait_for_element",
-      "get_attribute",
-      "click_element",
-      "inspect_element",
-      "take_screenshot",
-      "scroll_page",
-      "annotate",
-      "run_javascript",
-      "click_at",
-      "hover_element",
-      "get_ax_snapshot",
-      "list_frames",
-      "undo_last_action",
-      "macro",
-      "trust_site",
-      "handle_dialog",
-      "read_diagnostics",
-      "complete_task"
-    ].filter((name) => ALL_TOOL_NAMES.has(name)),
+    allowedTools: toolsFor(
+      PAGE_READ_TOOL_NAMES,
+      PAGE_INTERACTION_TOOL_NAMES,
+      TAB_TOOL_NAMES,
+      RESEARCH_ACCESS_TOOL_NAMES,
+      BROWSER_AUTOMATION_TOOL_NAMES,
+      ["complete_task"]
+    ),
     includeMcp: true,
     rules: [
       "\u5148\u770B\u5F53\u524D\u9875\u9762\u548C\u77E5\u8BC6\u5E93\u662F\u5426\u5DF2\u6709\u7B54\u6848\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u6293\u53D6\u5916\u90E8\u7F51\u9875\uFF1B\u540C\u4E00 URL \u4E0D\u8981\u91CD\u590D fetch_webpage\u3002",
@@ -9708,6 +9684,29 @@ function buildInitialMessagesPure(input = {}) {
   return messages;
 }
 
+// lib/application/agent/jev-loop-state.ts
+var JEV_MAX_ATTEMPTS_PER_RUN = 12;
+var JEV_MAX_CONSECUTIVE_ACTIONS = 3;
+function nonNegativeInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+function restoreJevLoopState(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    attempts: Math.min(nonNegativeInteger(source.attempts), JEV_MAX_ATTEMPTS_PER_RUN),
+    fastActions: nonNegativeInteger(source.fastActions),
+    consecutiveFastActions: Math.min(
+      nonNegativeInteger(source.consecutiveFastActions),
+      JEV_MAX_CONSECUTIVE_ACTIONS
+    ),
+    lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),
+    lastToolCallCount: nonNegativeInteger(source.lastToolCallCount),
+    lastActionSignature: String(source.lastActionSignature || "").slice(0, 500),
+    lastOutcome: String(source.lastOutcome || "").slice(0, 80)
+  };
+}
+
 // lib/application/agent/agent-bootstrap.ts
 function buildInitialMessages(instruction, selectedText, page, pageUrl, history, emit, systemPrompt, taskSystemPrompt, pickedElements) {
   let normalized = normalizeHistory(history, {
@@ -9790,6 +9789,7 @@ async function prepareAgentRun(options) {
   const loadedSkillNames = canResume && Array.isArray(persisted.skills) ? persisted.skills.slice() : [];
   const budget = canResume ? persisted.budget : getBudget(payload, settings, intent);
   let promotedToResearch = canResume && persisted.promotedToResearch === true;
+  const jevLoop = restoreJevLoopState(canResume ? persisted.jevLoop : null);
   const startedAt = canResume ? Number(persisted.startedAt || Date.now()) : Date.now();
   let toolCallCount = canResume ? Number(persisted.toolCallCount || 0) : 0;
   let totalTokens = canResume ? Number(persisted.totalTokens || 0) : 0;
@@ -9947,6 +9947,7 @@ async function prepareAgentRun(options) {
     loadedSkillNames,
     budget,
     promotedToResearch,
+    jevLoop,
     startedAt,
     toolCallCount,
     totalTokens,
@@ -10013,6 +10014,7 @@ var AgentRunState = class {
   ranToolNames;
   failedToolNames;
   succeededToolNames;
+  jevLoop;
   promotedToResearch;
   toolCallCount;
   totalTokens;
@@ -10057,6 +10059,7 @@ var AgentRunState = class {
     this.ranToolNames = prepared.ranToolNames;
     this.failedToolNames = prepared.failedToolNames;
     this.succeededToolNames = prepared.succeededToolNames;
+    this.jevLoop = prepared.jevLoop;
     this.promotedToResearch = prepared.promotedToResearch;
     this.toolCallCount = prepared.toolCallCount;
     this.totalTokens = prepared.totalTokens;
@@ -10089,6 +10092,7 @@ var AgentRunState = class {
       toolCallCount: this.toolCallCount,
       guard: this.guard.snapshot(),
       promotedToResearch: this.promotedToResearch,
+      jevLoop: this.jevLoop,
       runCitations: this.runCitations,
       ctx: this.ctx,
       sessionApprovedTools: this.sessionApprovedTools,
@@ -10518,6 +10522,7 @@ var RunSessionPersistence = class {
       toolCallCount: state2.toolCallCount,
       guard: state2.guard,
       promotedToResearch: state2.promotedToResearch,
+      jevLoop: state2.jevLoop,
       runCitations: tail(state2.runCitations, 60),
       failedUrls: tail(ctx.failedUrls, 80),
       browsingMode: ctx.browsingMode,
@@ -11172,8 +11177,12 @@ var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "search_knowledge_base",
   "get_page_snapshot",
   "read_current_page",
-  "click_element"
+  "click_element",
+  ...PAGE_INTERACTION_TOOL_NAMES
 ]);
+function shouldPromoteToResearchForTool(name) {
+  return RESEARCH_TRIGGER_TOOLS.has(String(name || ""));
+}
 var DOWNLOAD_TRIGGER_TOOLS = /* @__PURE__ */ new Set(["click_element", "click_at", "press_key"]);
 var ToolCallPipeline = class {
   completion;
@@ -11233,7 +11242,7 @@ var ToolCallPipeline = class {
       const toolCall = step.toolCalls[toolIndex];
       const sequence = state2.beginToolCall();
       const metadata = getToolMetadata(toolCall.name);
-      if (RESEARCH_TRIGGER_TOOLS.has(toolCall.name) && state2.intent === INTENTS.CHAT && !state2.promotedToResearch) {
+      if (shouldPromoteToResearchForTool(toolCall.name) && state2.intent === INTENTS.CHAT && !state2.promotedToResearch) {
         state2.promotedToResearch = true;
         pendingResearchPromotion = () => promoteToResearch(
           state2.messages,
@@ -11971,30 +11980,111 @@ async function callJevSystemOne(settings, request, options = {}) {
 // lib/application/agent/jev-action-space.ts
 var JEV_NEXT_ACTION_QUESTION = "next_action";
 var JEV_MIN_ACTION_CONFIDENCE = 0.72;
-var READ_ACTIONS = {
-  read_current_page: {
+var JEV_MIN_CLICK_CONFIDENCE = 0.86;
+var JEV_MAX_ELEMENT_ACTIONS = 10;
+var BASE_ACTIONS = [
+  {
+    key: "read_page",
+    toolName: "read_current_page",
     args: {},
-    description: "\u5F53\u524D\u9875\u9762\u7684\u53EF\u89C1\u6B63\u6587\u4E0D\u5B8C\u6574\u3001\u9700\u8981\u8BFB\u53D6\u5168\u6587\u540E\u518D\u56DE\u7B54\u6216\u7EE7\u7EED\u64CD\u4F5C"
+    description: "\u5F53\u524D\u9875\u9762\u7684\u53EF\u89C1\u6B63\u6587\u4E0D\u5B8C\u6574\u3001\u9700\u8981\u8BFB\u53D6\u5168\u6587\u540E\u518D\u56DE\u7B54\u6216\u7EE7\u7EED\u64CD\u4F5C",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
   },
-  read_table: {
+  {
+    key: "read_table",
+    toolName: "read_table",
     args: {},
-    description: "\u4EFB\u52A1\u9700\u8981\u8BFB\u53D6\u9875\u9762\u4E2D\u7684\u7ED3\u6784\u5316\u8868\u683C\u3001\u7F51\u683C\u3001\u7EDF\u8BA1\u884C\u6216\u5206\u9875\u6570\u636E"
+    description: "\u4EFB\u52A1\u9700\u8981\u8BFB\u53D6\u9875\u9762\u4E2D\u7684\u7ED3\u6784\u5316\u8868\u683C\u3001\u7F51\u683C\u3001\u7EDF\u8BA1\u884C\u6216\u5206\u9875\u6570\u636E",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
+  },
+  {
+    key: "snapshot",
+    toolName: "get_page_snapshot",
+    args: { maxText: 1200 },
+    description: "\u9700\u8981\u6700\u65B0 DOM \u7ED3\u6784\u4E0E\u53EF\u89C1\u4EA4\u4E92\u5143\u7D20\uFF0C\u5C24\u5176\u9002\u5408\u9875\u9762\u521A\u53D8\u5316\u6216\u7F3A\u5C11\u53EF\u7528 ref \u65F6",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
+  },
+  {
+    key: "accessibility",
+    toolName: "get_ax_snapshot",
+    args: { limit: 40 },
+    description: "DOM \u5B9A\u4F4D\u5931\u8D25\u3001\u81EA\u5B9A\u4E49\u7EC4\u4EF6\u6216\u9700\u8981 role/name/\u5750\u6807\u65F6\u8BFB\u53D6\u53EF\u8BBF\u95EE\u6027\u6811",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
+  },
+  {
+    key: "scroll_down",
+    toolName: "scroll_page",
+    args: { y: 600 },
+    description: "\u76EE\u6807\u53EF\u80FD\u5728\u5F53\u524D\u89C6\u53E3\u4E0B\u65B9\uFF0C\u5E76\u4E14\u8BFB\u53D6\u5F53\u524D\u7ED3\u6784\u540E\u4ECD\u7F3A\u5C11\u5185\u5BB9\u65F6\u5411\u4E0B\u6EDA\u52A8",
+    minConfidence: JEV_MIN_ACTION_CONFIDENCE
   }
-};
+];
+var RISKY_CLICK_LABEL = /(删除|移除|清空|退出|注销|取消|支付|购买|提交|发布|发送|关闭|卸载|重置)/i;
+var INTERACTIVE_TAGS = /* @__PURE__ */ new Set(["a", "button", "input", "select", "textarea"]);
+var INTERACTIVE_ROLES2 = /* @__PURE__ */ new Set([
+  "button",
+  "link",
+  "textbox",
+  "checkbox",
+  "radio",
+  "combobox",
+  "tab",
+  "menuitem",
+  "option"
+]);
 function clip(value, maxChars) {
   const text2 = String(value || "");
   return text2.length > maxChars ? text2.slice(0, maxChars) + "\n\u2026" : text2;
 }
-function buildJevFastRequest(settings, context) {
-  const criteria = {};
-  for (const [name, action] of Object.entries(READ_ACTIONS)) {
-    criteria[name] = action.description;
+function deriveJevPhase(pageUrl, pageTitle, snapshot) {
+  const haystack = String(pageUrl || "") + " " + String(pageTitle || "");
+  if (/(publish\/success|success|发布成功|完成发布)/i.test(haystack)) return "verification";
+  if (/(editor|publish|creator|创作|编辑|发布)/i.test(haystack) || Number(snapshot?.capabilities?.editables?.count || 0) > 0) {
+    return "editor";
   }
-  criteria.escalate = "\u76EE\u6807\u6709\u6B67\u4E49\u3001\u9700\u8981\u591A\u6B65\u89C4\u5212\u3001\u9700\u8981\u4FEE\u6539\u9875\u9762\u6216\u77E5\u8BC6\u5E93\u3001\u9700\u8981\u804A\u5929\u6A21\u578B\u751F\u6210\u6700\u7EC8\u56DE\u7B54\uFF0C\u6216\u5F53\u524D\u4FE1\u606F\u4E0D\u8DB3\u4E14\u8BFB\u53D6\u52A8\u4F5C\u65E0\u6CD5\u5B89\u5168\u89E3\u51B3";
-  return {
+  if (/(github|arxiv|docs?|paper|research|论文|文档)/i.test(haystack)) return "research";
+  return "browsing";
+}
+function elementActions(snapshot) {
+  const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
+  const actions = [];
+  for (const element of elements) {
+    if (actions.length >= JEV_MAX_ELEMENT_ACTIONS) break;
+    if (element.disabled === true || element.inViewport === false) continue;
+    const tag = String(element.tag || "").toLowerCase();
+    const role = String(element.role || "").toLowerCase();
+    if (!INTERACTIVE_TAGS.has(tag) && !INTERACTIVE_ROLES2.has(role)) continue;
+    const label = String(
+      element.label || element.name || element.text || element.placeholder || ""
+    ).replace(/\s+/g, " ").trim();
+    const identity = [label, tag, role, element.selector, element.testid].filter(Boolean).join(" ");
+    if (!label || RISKY_CLICK_LABEL.test(identity)) continue;
+    const target = element.ref || element.selector;
+    if (!target) continue;
+    const args = element.ref ? { ref: element.ref } : { selector: element.selector };
+    actions.push({
+      key: "click_" + actions.length,
+      toolName: "click_element",
+      args,
+      description: "\u70B9\u51FB\u5F53\u524D\u53EF\u89C1\u5143\u7D20\u300C" + clip(label, 100) + "\u300D\uFF08" + (role || tag || "interactive") + "\uFF09\uFF1B\u4EC5\u5728\u5B83\u76F4\u63A5\u63A8\u8FDB\u5F53\u524D\u76EE\u6807\u65F6\u9009\u62E9",
+      minConfidence: JEV_MIN_CLICK_CONFIDENCE
+    });
+  }
+  return actions;
+}
+function buildJevFastRequest(settings, context) {
+  const actionList = [...BASE_ACTIONS, ...elementActions(context.snapshot)];
+  const actions = Object.fromEntries(actionList.map((action) => [action.key, action]));
+  const criteria = {};
+  for (const action of actionList) {
+    criteria[action.key] = action.description;
+  }
+  criteria.escalate = "\u76EE\u6807\u6709\u6B67\u4E49\u3001\u9700\u8981\u751F\u6210\u6216\u7F16\u8F91\u5B9E\u8D28\u5185\u5BB9\u3001\u9700\u8981\u9AD8\u98CE\u9669\u5199\u64CD\u4F5C\u3001\u5F53\u524D\u5019\u9009\u90FD\u4E0D\u53EF\u9760\uFF0C\u6216\u9700\u8981\u804A\u5929\u6A21\u578B\u91CD\u65B0\u89C4\u5212";
+  const request = {
     model: settings.model,
     state: {
       protocol: JEV_PROTOCOL_VERSION,
+      phase: context.phase,
       task: {
         intent: context.intent,
         instruction: clip(context.instruction, 4e3),
@@ -12005,18 +12095,29 @@ function buildJevFastRequest(settings, context) {
         title: clip(context.pageTitle, 500),
         visibleText: clip(context.pageText, 12e3)
       },
+      observation: context.snapshot ? {
+        fingerprint: clip(context.snapshot.fingerprint, 200),
+        elements: elementActions(context.snapshot).map((action) => ({
+          key: action.key,
+          tool: action.toolName,
+          args: action.args,
+          label: action.description
+        })),
+        capabilities: context.snapshot.capabilities || {}
+      } : null,
       recentTools: (context.recentTools || []).slice(-8)
     },
     questions: {
       [JEV_NEXT_ACTION_QUESTION]: {
         type: "choice",
-        instructions: "\u9009\u62E9\u6267\u884C\u4E00\u4E2A\u53EA\u8BFB\u52A8\u4F5C\u662F\u5426\u80FD\u76F4\u63A5\u5E2E\u52A9\u5F53\u524D\u4EFB\u52A1\u3002\u4E0D\u8981\u89C4\u5212\u5199\u64CD\u4F5C\u3001\u70B9\u51FB\u3001\u8F93\u5165\u6216\u6700\u7EC8\u56DE\u7B54\uFF1B\u8FD9\u4E9B\u60C5\u51B5\u9009\u62E9 escalate\u3002",
+        instructions: "\u9009\u62E9\u5F53\u524D\u6700\u80FD\u63A8\u52A8\u4EFB\u52A1\u7684\u4E00\u9879\u5C40\u90E8\u52A8\u4F5C\u3002\u4F18\u5148\u89C2\u5BDF\u6216\u5B89\u5168\u70B9\u51FB\uFF1B\u53D1\u5E03\u3001\u53D1\u9001\u3001\u5220\u9664\u3001\u652F\u4ED8\u3001\u5185\u5BB9\u751F\u6210\u548C\u6700\u7EC8\u56DE\u7B54\u5FC5\u987B escalate\u3002",
         criteria
       }
     }
   };
+  return { request, actions };
 }
-function interpretJevFastDecision(response) {
+function interpretJevFastDecision(response, actions) {
   const answer = response.answers[JEV_NEXT_ACTION_QUESTION];
   if (!answer || answer.type !== "choice") {
     return { kind: "escalate", reason: "invalid-answer" };
@@ -12029,7 +12130,8 @@ function interpretJevFastDecision(response) {
       confidence: answer.confidence
     };
   }
-  if (!(answer.choice in READ_ACTIONS)) {
+  const action = actions[answer.choice];
+  if (!action) {
     return {
       kind: "escalate",
       reason: "unknown-action",
@@ -12037,7 +12139,7 @@ function interpretJevFastDecision(response) {
       confidence: answer.confidence
     };
   }
-  if (answer.confidence < JEV_MIN_ACTION_CONFIDENCE) {
+  if (answer.confidence < action.minConfidence) {
     return {
       kind: "escalate",
       reason: "low-confidence",
@@ -12045,11 +12147,12 @@ function interpretJevFastDecision(response) {
       confidence: answer.confidence
     };
   }
-  const toolName = answer.choice;
   return {
     kind: "act",
-    toolName,
-    args: { ...READ_ACTIONS[toolName].args },
+    actionKey: action.key,
+    toolName: action.toolName,
+    args: { ...action.args },
+    description: action.description,
     confidence: answer.confidence,
     probabilities: { ...answer.probabilities }
   };
@@ -12077,44 +12180,81 @@ var JevFastController = class {
     this.signal = signal;
     this.callSystemOne = callSystemOne;
   }
+  canAttempt() {
+    const settings = this.state.settings.jev;
+    if (!settings || settings.enabled !== true) return false;
+    if (this.state.intent === INTENTS.CHAT) return false;
+    if (!settings.apiKey || !settings.model || !settings.baseUrl) return false;
+    const loop = this.state.jevLoop;
+    if (loop.attempts >= JEV_MAX_ATTEMPTS_PER_RUN) return false;
+    if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
+    if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
+    return true;
+  }
+  async runAvailable(iter, persist) {
+    if (!this.canAttempt()) {
+      return { kind: "skipped", reason: "not-due" };
+    }
+    const decisions = [];
+    const toolOutcomes = [];
+    let latencyMs = 0;
+    for (let step = 0; step < JEV_MAX_CONSECUTIVE_ACTIONS; step += 1) {
+      if (!this.canAttempt()) break;
+      const result = await this.runOnce(iter, persist);
+      if (result.kind === "cancelled") return result;
+      latencyMs += "latencyMs" in result ? result.latencyMs : 0;
+      if (result.kind === "shadow") return result;
+      if (result.kind !== "act") break;
+      decisions.push(...result.decisions);
+      toolOutcomes.push(...result.toolOutcomes);
+    }
+    return decisions.length ? { kind: "act", decisions, latencyMs, toolOutcomes } : { kind: "skipped", reason: "no-action" };
+  }
   async runOnce(iter, persist) {
     const settings = this.state.settings.jev;
-    if (!settings || settings.enabled !== true) {
-      return { kind: "skipped", reason: "disabled" };
-    }
-    if (this.state.intent === INTENTS.CHAT) {
-      return { kind: "skipped", reason: "chat-uses-slow-lane" };
-    }
-    if (!settings.apiKey || !settings.model || !settings.baseUrl) {
-      return { kind: "skipped", reason: "incomplete-config" };
-    }
+    this.state.jevLoop.attempts += 1;
+    this.state.jevLoop.lastAttemptAt = Date.now();
+    this.state.jevLoop.lastToolCallCount = this.state.toolCallCount;
+    const phase = deriveJevPhase(
+      this.state.ctx.pageUrl,
+      this.state.ctx.pageTitle,
+      this.state.ctx.lastSnapshot
+    );
     const request = buildJevFastRequest(settings, {
       intent: this.state.intent,
+      phase,
       instruction: this.state.detected.sourceText || this.state.instruction,
       selectedText: this.state.selectedText,
       pageUrl: this.state.ctx.pageUrl,
       pageTitle: this.state.ctx.pageTitle,
-      pageText: this.state.ctx.page,
+      pageText: this.state.ctx.lastReadFullText || this.state.ctx.lastEvidence || this.state.ctx.page,
+      snapshot: this.state.ctx.lastSnapshot,
       recentTools: this.state.ranToolNames
     });
     const startedAt = Date.now();
     let response;
     try {
-      response = await this.callSystemOne(settings, request, {
+      response = await this.callSystemOne(settings, request.request, {
         signal: this.signal
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      this.state.jevLoop.lastOutcome = "error";
+      this.state.jevLoop.consecutiveFastActions = 0;
       this.state.trace({ phase: "jev", iter, status: "error", reason });
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
       return { kind: "skipped", reason: "request-failed" };
     }
     const latencyMs = Date.now() - startedAt;
-    const decision = interpretJevFastDecision(response);
+    const decision = interpretJevFastDecision(response, request.actions);
     this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
+    this.state.jevLoop.lastOutcome = decision.kind;
     this.state.trace({
       phase: "jev",
       iter,
       mode: settings.shadowMode ? "shadow" : "live",
+      phaseName: phase,
       model: response.model,
       decision,
       latencyMs,
@@ -12122,10 +12262,31 @@ var JevFastController = class {
       outputTokens: response.usage.output_tokens
     });
     if (settings.shadowMode) {
+      this.state.jevLoop.consecutiveFastActions = 0;
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
       return { kind: "shadow", decision, latencyMs };
     }
     if (decision.kind === "escalate") {
+      this.state.jevLoop.consecutiveFastActions = 0;
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
       return { kind: "skipped", reason: decision.reason };
+    }
+    const signature = decision.toolName + ":" + JSON.stringify(decision.args);
+    if (this.state.jevLoop.consecutiveFastActions > 0 && signature === this.state.jevLoop.lastActionSignature) {
+      this.state.jevLoop.consecutiveFastActions = 0;
+      this.state.jevLoop.lastOutcome = "repeated-action";
+      this.state.trace({
+        phase: "jev",
+        iter,
+        status: "escalate",
+        reason: "repeated-action",
+        decision
+      });
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "repeated-action" };
     }
     const callId = "jev-" + iter + "-" + Date.now().toString(36);
     const toolCall = {
@@ -12135,7 +12296,7 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
-      content: "JEV \u5FEB\u601D\u8003\uFF1A\u5148\u8BFB\u53D6" + (decision.toolName === "read_table" ? "\u9875\u9762\u8868\u683C" : "\u9875\u9762\u6B63\u6587") + "\u3002",
+      content: "JEV \u5FEB\u601D\u8003\uFF1A" + decision.description,
       tool_calls: [{
         id: callId,
         type: "function",
@@ -12153,7 +12314,16 @@ var JevFastController = class {
     if (toolOutcome.kind === "cancelled") {
       return { kind: "cancelled", reason: toolOutcome.reason };
     }
-    return { kind: "act", decision, latencyMs, toolOutcome };
+    this.state.jevLoop.fastActions += 1;
+    this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.lastActionSignature = signature;
+    this.state.jevLoop.lastOutcome = "act";
+    return { kind: "act", decisions: [decision], latencyMs, toolOutcomes: [toolOutcome] };
+  }
+  noteSlowTurn() {
+    this.state.jevLoop.consecutiveFastActions = 0;
+    this.state.jevLoop.lastActionSignature = "";
+    this.state.jevLoop.lastOutcome = "slow-handoff";
   }
   traceShadowComparison(decision, step) {
     const comparison = compareJevShadowAction(
@@ -12195,7 +12365,6 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
   }).catch(() => {
   });
   let deadlineWrapUpSent = false;
-  let jevAttempted = false;
   let pendingJevShadow = null;
   for (let iter = resumeIteration; ; iter++) {
     const deadline = deadlineDecision({
@@ -12289,16 +12458,13 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
       nextIteration: iter
     }).catch(() => {
     });
-    if (!jevAttempted) {
-      jevAttempted = true;
-      const jevOutcome = await jevFast.runOnce(iter, persist);
-      if (jevOutcome.kind === "cancelled") {
-        await finalizer.cancelled(jevOutcome.reason, "interrupted");
-        return;
-      }
-      if (jevOutcome.kind === "shadow") {
-        pendingJevShadow = jevOutcome.decision;
-      }
+    const jevOutcome = await jevFast.runAvailable(iter, persist);
+    if (jevOutcome.kind === "cancelled") {
+      await finalizer.cancelled(jevOutcome.reason, "interrupted");
+      return;
+    }
+    if (jevOutcome.kind === "shadow") {
+      pendingJevShadow = jevOutcome.decision;
     }
     const historyTokens = estimateMessagesTokens(state2.messages);
     let collapsedNow = 0;
@@ -12416,6 +12582,7 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
         );
         return;
       }
+      jevFast.noteSlowTurn();
       state2.reportTurnTiming(iter, step, outcome.toolMs);
       continue;
     }

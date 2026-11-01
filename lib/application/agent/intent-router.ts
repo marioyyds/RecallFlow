@@ -20,6 +20,46 @@ const ALWAYS_AVAILABLE_TOOL_NAMES = new Set(
   TOOL_REGISTRY.filter((tool) => tool.alwaysAvailable).map((tool) => tool.name)
 );
 
+const PAGE_READ_TOOL_NAMES = [
+  'read_current_page',
+  'get_page_snapshot',
+  'read_diagnostics',
+  'get_element_source',
+  'wait_for_element',
+  'get_attribute',
+  'inspect_element',
+  'read_table',
+  'take_screenshot',
+  'get_ax_snapshot',
+  'list_frames',
+];
+const TAB_TOOL_NAMES = ['open_tab', 'list_tabs', 'switch_tab'];
+const RESEARCH_ACCESS_TOOL_NAMES = ['knowledge_read', 'fetch_webpage', 'web_search'];
+const BROWSER_AUTOMATION_TOOL_NAMES = ['macro', 'trust_site', 'handle_dialog', 'undo_last_action'];
+const USER_SCRIPT_TOOL_NAMES = [
+  'list_userscripts',
+  'search_userscripts',
+  'install_userscript',
+  'run_userscript',
+];
+
+/**
+ * 页面动作能力是“任务目标”之外的执行能力：研究任务经常需要输入搜索词、选下拉项、
+ * 勾复选框或上传材料。不能只放行 click_element 而拒绝 type_text 等同类动作。
+ *
+ * 从注册表风险等级派生，保证以后新增 risk:page 工具时不会再次漏配。
+ * upload_file 虽然归入 destructive 审批档，但仍是页面交互能力，显式加入。
+ */
+export const PAGE_INTERACTION_TOOL_NAMES = Object.freeze(
+  TOOL_REGISTRY
+    .filter((tool) => tool.risk === 'page' || tool.name === 'upload_file')
+    .map((tool) => tool.name)
+);
+
+function toolsFor(...groups: string[][]): string[] {
+  return [...new Set(groups.flat())].filter((name) => ALL_TOOL_NAMES.has(name));
+}
+
 // 明显寒暄：整句只有问候/道谢等，直接按普通对话，不浪费一次 LLM 分类调用。
 const PURE_CHITCHAT_RE = /^(你好|您好|谢谢|感谢|再见|拜拜|在吗|嗨|hi|hello|hey|嗯|好|可以|好的|行)[，。！？!?,\s]*$/i;
 
@@ -59,51 +99,21 @@ const INTENT_DEFS: Record<string, any> = Object.freeze({
   [INTENTS.BROWSER]: {
     label: '浏览器操作',
     description: '打开网页、搜索、浏览、播放、进入目标站点',
-    allowedTools: [
-      'open_tab',
-      'list_tabs',
-      'switch_tab',
-      'get_page_snapshot',
-      'read_current_page',
-      'read_diagnostics',
-      'get_element_source',
-      'type_text',
-      'press_key',
-      'select_option',
-      'check_box',
-      'wait_for_element',
-      'get_attribute',
-      'click_element',
-      'annotate',
-      'inspect_element',
-      'read_table',
-      'take_screenshot',
-      'scroll_page',
-      'annotate',
-      'run_javascript',
-      'click_at',
-      'hover_element',
-      'drag_element',
-      'upload_file',
-      'get_ax_snapshot',
-      'list_frames',
-      'undo_last_action',
-      'macro',
-      'trust_site',
-      'handle_dialog',
-      'read_diagnostics',
-      'list_userscripts',
-      'search_userscripts',
-      'install_userscript',
-      'run_userscript',
-      'complete_task',
-    ].filter((name) => ALL_TOOL_NAMES.has(name)),
+    allowedTools: toolsFor(
+      TAB_TOOL_NAMES,
+      PAGE_READ_TOOL_NAMES,
+      PAGE_INTERACTION_TOOL_NAMES as string[],
+      ['fetch_webpage', 'web_search'],
+      BROWSER_AUTOMATION_TOOL_NAMES,
+      USER_SCRIPT_TOOL_NAMES,
+      ['complete_task']
+    ),
     // MCP 是用户自己在设置页装的扩展能力，不是「资料研究」这个意图的附属品：
     // 从前只有 RESEARCH 为 true，于是「你有可用的 mcp 吗？」「用 Obsidian 读一下当前笔记」
     // 落在 CHAT / BROWSER，本次运行一个 MCP 工具都没有 —— 模型只能如实回答「我没有 MCP」。
     includeMcp: true,
     rules: [
-      '只能使用浏览器类工具，禁止调用 knowledge_read、fetch_webpage 等检索/抓取工具。',
+      '只能使用浏览器类工具与联网读取工具；禁止调用 knowledge_read，知识库不是本任务的检索入口。',
       '优先在用户当前页面内完成操作；需要搜索时，先确认当前页是否为可用的搜索引擎，能用则直接 type_text，不要盲目开新页。',
       '需要打开某个网址时，open_tab 会优先复用已打开的同 URL 标签页；不要对同一网址重复 open_tab，也不要反复新建标签页。',
       '本任务新建标签页有数量上限，一旦 open_tab 返回“达到上限”的提示，立即停止新建：改用 switch_tab 复用已打开的标签页（用返回里的 tabId），或改用 fetch_webpage 抓取内容。',
@@ -136,36 +146,14 @@ const INTENT_DEFS: Record<string, any> = Object.freeze({
   [INTENTS.RESEARCH]: {
     label: '资料研究',
     description: '总结、解释、翻译、对比、查资料等需要综合信息的任务',
-    allowedTools: [
-      'knowledge_read',
-      'read_current_page',
-      'get_page_snapshot',
-      'read_diagnostics',
-      'get_element_source',
-      'list_tabs',
-      'switch_tab',
-      'open_tab',
-      'fetch_webpage',
-      'web_search',
-      'wait_for_element',
-      'get_attribute',
-      'click_element',
-      'inspect_element',
-      'take_screenshot',
-      'scroll_page',
-      'annotate',
-      'run_javascript',
-      'click_at',
-      'hover_element',
-      'get_ax_snapshot',
-      'list_frames',
-      'undo_last_action',
-      'macro',
-      'trust_site',
-      'handle_dialog',
-      'read_diagnostics',
-      'complete_task',
-    ].filter((name) => ALL_TOOL_NAMES.has(name)),
+    allowedTools: toolsFor(
+      PAGE_READ_TOOL_NAMES,
+      PAGE_INTERACTION_TOOL_NAMES as string[],
+      TAB_TOOL_NAMES,
+      RESEARCH_ACCESS_TOOL_NAMES,
+      BROWSER_AUTOMATION_TOOL_NAMES,
+      ['complete_task']
+    ),
     includeMcp: true,
     rules: [
       '先看当前页面和知识库是否已有答案，再决定是否抓取外部网页；同一 URL 不要重复 fetch_webpage。',

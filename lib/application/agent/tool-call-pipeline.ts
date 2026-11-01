@@ -11,6 +11,7 @@ import { RUN_STATUS, TOOL_STATUS } from './agent-state.ts';
 import { CONTEXT_TUNING } from './context-tuning.ts';
 import {
   INTENTS,
+  PAGE_INTERACTION_TOOL_NAMES,
   isToolAllowedForIntent,
   resolveIntent,
 } from './intent-router.ts';
@@ -49,7 +50,13 @@ const RESEARCH_TRIGGER_TOOLS = new Set([
   'get_page_snapshot',
   'read_current_page',
   'click_element',
+  ...PAGE_INTERACTION_TOOL_NAMES,
 ]);
+
+/** CHAT 任务的工具调用是否应就地提升为 RESEARCH 画像。 */
+export function shouldPromoteToResearchForTool(name: string): boolean {
+  return RESEARCH_TRIGGER_TOOLS.has(String(name || ''));
+}
 const DOWNLOAD_TRIGGER_TOOLS = new Set(['click_element', 'click_at', 'press_key']);
 
 export type ToolBatchOutcome =
@@ -143,7 +150,7 @@ export class ToolCallPipeline {
       const metadata = getToolMetadata(toolCall.name);
 
       if (
-        RESEARCH_TRIGGER_TOOLS.has(toolCall.name) &&
+        shouldPromoteToResearchForTool(toolCall.name) &&
         state.intent === INTENTS.CHAT &&
         !state.promotedToResearch
       ) {
