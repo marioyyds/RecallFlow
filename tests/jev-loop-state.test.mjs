@@ -13,6 +13,7 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     attempts: 0,
     fastActions: 0,
     consecutiveFastActions: 0,
+    consecutiveFailures: 0,
     lastAttemptAt: 0,
     lastToolCallCount: 0,
     lastActionSignature: '',

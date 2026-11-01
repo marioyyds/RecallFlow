@@ -5526,6 +5526,7 @@ function summarizeRunTrace(entries) {
   const jevShadow = jev.filter((e) => e.mode === "shadow");
   const jevLive = jev.filter((e) => e.mode === "live");
   const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
+  const jevHandoffs = list.filter((e) => e && e.phase === "jev-handoff");
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -5556,7 +5557,8 @@ function summarizeRunTrace(entries) {
     jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
     jevShadowCompared: jevCompares.length,
-    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
+    jevHandoffs: jevHandoffs.length
   };
 }
 function formatRunMetrics(m) {
@@ -5572,7 +5574,7 @@ function formatRunMetrics(m) {
   if (by.length) lines.push("\u6309\u5DE5\u5177\uFF1A" + by.join("\u3001"));
   if (m.jevCalls) {
     lines.push(
-      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
+      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u79FB\u4EA4 " + m.jevHandoffs + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
     );
     if (m.jevShadowCompared) {
       lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
@@ -9700,6 +9702,7 @@ function restoreJevLoopState(value) {
       nonNegativeInteger(source.consecutiveFastActions),
       JEV_MAX_CONSECUTIVE_ACTIONS
     ),
+    consecutiveFailures: nonNegativeInteger(source.consecutiveFailures),
     lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),
     lastToolCallCount: nonNegativeInteger(source.lastToolCallCount),
     lastActionSignature: String(source.lastActionSignature || "").slice(0, 500),
@@ -11979,9 +11982,15 @@ async function callJevSystemOne(settings, request, options = {}) {
 
 // lib/application/agent/jev-action-space.ts
 var JEV_NEXT_ACTION_QUESTION = "next_action";
+var JEV_HANDOFF_QUESTION = "handoff_now";
+var JEV_EXPECTED_PROGRESS_QUESTION = "expected_progress";
+var JEV_PAGE_READY_QUESTION = "page_ready";
 var JEV_MIN_ACTION_CONFIDENCE = 0.72;
 var JEV_MIN_CLICK_CONFIDENCE = 0.86;
 var JEV_MAX_ELEMENT_ACTIONS = 10;
+var JEV_HANDOFF_THRESHOLD = 0.5;
+var JEV_MIN_EXPECTED_PROGRESS = 0.4;
+var JEV_MIN_PAGE_READY = 0.5;
 var BASE_ACTIONS = [
   {
     key: "read_page",
@@ -12112,22 +12121,80 @@ function buildJevFastRequest(settings, context) {
         type: "choice",
         instructions: "\u9009\u62E9\u5F53\u524D\u6700\u80FD\u63A8\u52A8\u4EFB\u52A1\u7684\u4E00\u9879\u5C40\u90E8\u52A8\u4F5C\u3002\u4F18\u5148\u89C2\u5BDF\u6216\u5B89\u5168\u70B9\u51FB\uFF1B\u53D1\u5E03\u3001\u53D1\u9001\u3001\u5220\u9664\u3001\u652F\u4ED8\u3001\u5185\u5BB9\u751F\u6210\u548C\u6700\u7EC8\u56DE\u7B54\u5FC5\u987B escalate\u3002",
         criteria
+      },
+      [JEV_HANDOFF_QUESTION]: {
+        type: "noul",
+        instructions: "\u5F53\u524D\u662F\u5426\u5E94\u8BE5\u7ACB\u5373\u628A\u63A7\u5236\u6743\u4EA4\u7ED9\u6162\u601D\u8003\uFF1F",
+        criteria: {
+          true: "\u76EE\u6807\u6709\u6B67\u4E49\u3001\u9700\u8981\u751F\u6210\u5B9E\u8D28\u5185\u5BB9\u3001\u9700\u8981\u9AD8\u98CE\u9669\u5199\u64CD\u4F5C\u3001\u9875\u9762\u4E0D\u53EF\u9760\u6216\u5FEB\u8DEF\u5F84\u5DF2\u6709\u5931\u8D25",
+          false: "\u5F53\u524D\u72B6\u6001\u3001\u9875\u9762\u548C\u5019\u9009\u52A8\u4F5C\u90FD\u8DB3\u591F\u660E\u786E\uFF0C\u53EF\u4EE5\u5B89\u5168\u6267\u884C\u5C40\u90E8\u5FEB\u52A8\u4F5C"
+        }
+      },
+      [JEV_EXPECTED_PROGRESS_QUESTION]: {
+        type: "noul",
+        instructions: "\u6240\u9009\u5C40\u90E8\u52A8\u4F5C\u662F\u5426\u4F1A\u4EA7\u751F\u53EF\u89C2\u5BDF\u7684\u65B0\u8FDB\u5C55\uFF1F",
+        criteria: {
+          true: "\u52A8\u4F5C\u9884\u671F\u4F1A\u6539\u53D8\u9875\u9762\u3001\u63D0\u4F9B\u65B0\u8BC1\u636E\u6216\u660E\u663E\u63A8\u8FDB\u5F53\u524D\u9636\u6BB5",
+          false: "\u52A8\u4F5C\u5927\u6982\u7387\u91CD\u590D\u3001\u6CA1\u6709\u6548\u679C\uFF0C\u6216\u65E0\u6CD5\u89E3\u51B3\u5F53\u524D\u4FE1\u606F\u7F3A\u53E3"
+        }
+      },
+      [JEV_PAGE_READY_QUESTION]: {
+        type: "noul",
+        instructions: "\u5F53\u524D\u9875\u9762\u89C2\u5BDF\u662F\u5426\u8DB3\u591F\u7A33\u5B9A\uFF0C\u53EF\u4EE5\u76F4\u63A5\u6267\u884C\u6709\u526F\u4F5C\u7528\u7684\u52A8\u4F5C\uFF1F",
+        criteria: {
+          true: "\u9875\u9762\u5DF2\u52A0\u8F7D\uFF0C\u76EE\u6807\u5143\u7D20\u4E0E\u53EF\u4EA4\u4E92\u72B6\u6001\u53EF\u9760",
+          false: "\u9875\u9762\u4ECD\u5728\u52A0\u8F7D\u3001\u76EE\u6807\u4E0D\u5B8C\u6574\uFF0C\u6216\u9700\u8981\u5148\u91CD\u65B0\u89C2\u5BDF"
+        }
       }
     }
   };
   return { request, actions };
 }
+function noulAnswer(response, name) {
+  const answer = response.answers[name];
+  return answer && answer.type === "noul" ? answer.noul : null;
+}
 function interpretJevFastDecision(response, actions) {
+  const handoff = noulAnswer(response, JEV_HANDOFF_QUESTION);
+  const expectedProgress = noulAnswer(response, JEV_EXPECTED_PROGRESS_QUESTION);
+  const pageReady = noulAnswer(response, JEV_PAGE_READY_QUESTION);
+  if (handoff === null || expectedProgress === null || pageReady === null) {
+    return { kind: "escalate", reason: "invalid-answer" };
+  }
+  const signals = {
+    handoff,
+    expectedProgress,
+    pageReady
+  };
   const answer = response.answers[JEV_NEXT_ACTION_QUESTION];
   if (!answer || answer.type !== "choice") {
-    return { kind: "escalate", reason: "invalid-answer" };
+    return { kind: "escalate", reason: "invalid-answer", signals };
+  }
+  if (handoff >= JEV_HANDOFF_THRESHOLD) {
+    return {
+      kind: "escalate",
+      reason: "handoff-requested",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
+    };
+  }
+  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
+    return {
+      kind: "escalate",
+      reason: "low-expected-progress",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
+    };
   }
   if (answer.choice === "escalate") {
     return {
       kind: "escalate",
       reason: "model-escalation",
       choice: answer.choice,
-      confidence: answer.confidence
+      confidence: answer.confidence,
+      signals
     };
   }
   const action = actions[answer.choice];
@@ -12136,7 +12203,8 @@ function interpretJevFastDecision(response, actions) {
       kind: "escalate",
       reason: "unknown-action",
       choice: answer.choice,
-      confidence: answer.confidence
+      confidence: answer.confidence,
+      signals
     };
   }
   if (answer.confidence < action.minConfidence) {
@@ -12144,7 +12212,17 @@ function interpretJevFastDecision(response, actions) {
       kind: "escalate",
       reason: "low-confidence",
       choice: answer.choice,
-      confidence: answer.confidence
+      confidence: answer.confidence,
+      signals
+    };
+  }
+  if (pageReady < JEV_MIN_PAGE_READY && (action.toolName === "click_element" || action.toolName === "scroll_page")) {
+    return {
+      kind: "escalate",
+      reason: "page-not-ready",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
     };
   }
   return {
@@ -12154,7 +12232,8 @@ function interpretJevFastDecision(response, actions) {
     args: { ...action.args },
     description: action.description,
     confidence: answer.confidence,
-    probabilities: { ...answer.probabilities }
+    probabilities: { ...answer.probabilities },
+    signals
   };
 }
 function compareJevShadowAction(suggestion, slowToolNames, finalText = "") {
@@ -12188,6 +12267,7 @@ var JevFastController = class {
     const loop = this.state.jevLoop;
     if (loop.attempts >= JEV_MAX_ATTEMPTS_PER_RUN) return false;
     if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
+    if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
     return true;
   }
@@ -12242,6 +12322,7 @@ var JevFastController = class {
       this.state.jevLoop.lastOutcome = "error";
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.trace({ phase: "jev", iter, status: "error", reason });
+      this.appendHandoff(iter, "request-failed", null, reason);
       await persist({ phase: "jev_decision" }).catch(() => {
       });
       return { kind: "skipped", reason: "request-failed" };
@@ -12269,6 +12350,7 @@ var JevFastController = class {
     }
     if (decision.kind === "escalate") {
       this.state.jevLoop.consecutiveFastActions = 0;
+      this.appendHandoff(iter, decision.reason, decision);
       await persist({ phase: "jev_decision" }).catch(() => {
       });
       return { kind: "skipped", reason: decision.reason };
@@ -12284,6 +12366,7 @@ var JevFastController = class {
         reason: "repeated-action",
         decision
       });
+      this.appendHandoff(iter, "repeated-action", decision);
       await persist({ phase: "jev_decision" }).catch(() => {
       });
       return { kind: "skipped", reason: "repeated-action" };
@@ -12307,6 +12390,7 @@ var JevFastController = class {
       }]
     };
     this.state.messages.push(assistantMessage);
+    const failuresBefore = this.state.failedToolNames.length;
     const toolOutcome = await this.pipeline.process({
       assistantMessage,
       toolCalls: [toolCall]
@@ -12314,16 +12398,50 @@ var JevFastController = class {
     if (toolOutcome.kind === "cancelled") {
       return { kind: "cancelled", reason: toolOutcome.reason };
     }
+    const toolFailed = this.state.failedToolNames.length > failuresBefore;
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
-    this.state.jevLoop.lastOutcome = "act";
+    this.state.jevLoop.consecutiveFailures = toolFailed ? this.state.jevLoop.consecutiveFailures + 1 : 0;
+    this.state.jevLoop.lastOutcome = toolFailed ? "tool-failed" : "act";
+    if (this.state.jevLoop.consecutiveFailures >= 2) {
+      this.appendHandoff(iter, "tool-failure-limit", decision);
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "tool-failure-limit" };
+    }
     return { kind: "act", decisions: [decision], latencyMs, toolOutcomes: [toolOutcome] };
   }
   noteSlowTurn() {
     this.state.jevLoop.consecutiveFastActions = 0;
+    this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastActionSignature = "";
     this.state.jevLoop.lastOutcome = "slow-handoff";
+  }
+  appendHandoff(iter, reason, decision, detail = "") {
+    this.state.trace({
+      phase: "jev-handoff",
+      iter,
+      reason,
+      decision,
+      detail
+    });
+    const signals = decision && decision.kind === "act" ? decision.signals : decision?.signals;
+    const lines = [
+      "\u3010JEV \u79FB\u4EA4\u7ED9\u6162\u601D\u8003\u3011",
+      "\u539F\u56E0\uFF1A" + reason,
+      detail ? "\u8BE6\u60C5\uFF1A" + detail : "",
+      "\u5F53\u524D\u9636\u6BB5\uFF1A" + deriveJevPhase(
+        this.state.ctx.pageUrl,
+        this.state.ctx.pageTitle,
+        this.state.ctx.lastSnapshot
+      ),
+      "\u6700\u8FD1\u5DE5\u5177\uFF1A" + this.state.ranToolNames.slice(-8).join("\u3001"),
+      "JEV \u4FE1\u53F7\uFF1A" + (signals ? "handoff=" + signals.handoff.toFixed(3) + "\uFF0Cprogress=" + signals.expectedProgress.toFixed(3) + "\uFF0CpageReady=" + signals.pageReady.toFixed(3) : "\u65E0\u6709\u6548\u7ED3\u6784\u5316\u51B3\u7B56"),
+      this.state.ctx.lastEvidence ? "\u6700\u8FD1\u8BC1\u636E\uFF1A" + String(this.state.ctx.lastEvidence).slice(0, 1200) : "",
+      "\u8BF7\u57FA\u4E8E\u771F\u5B9E\u5DE5\u5177\u7ED3\u679C\u7EE7\u7EED\u89C4\u5212\uFF1B\u4E0D\u8981\u5047\u8BBE JEV \u672A\u6267\u884C\u7684\u52A8\u4F5C\u5DF2\u7ECF\u53D1\u751F\u3002"
+    ].filter(Boolean);
+    this.state.messages.push({ role: "system", content: lines.join("\n") });
   }
   traceShadowComparison(decision, step) {
     const comparison = compareJevShadowAction(

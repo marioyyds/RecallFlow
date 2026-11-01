@@ -3,9 +3,15 @@ import { JEV_PROTOCOL_VERSION, type JevSystemOneRequest, type JevSystemOneRespon
 import type { PageSnapshotLike } from './types.ts';
 
 export const JEV_NEXT_ACTION_QUESTION = 'next_action';
+export const JEV_HANDOFF_QUESTION = 'handoff_now';
+export const JEV_EXPECTED_PROGRESS_QUESTION = 'expected_progress';
+export const JEV_PAGE_READY_QUESTION = 'page_ready';
 export const JEV_MIN_ACTION_CONFIDENCE = 0.72;
 export const JEV_MIN_CLICK_CONFIDENCE = 0.86;
 export const JEV_MAX_ELEMENT_ACTIONS = 10;
+export const JEV_HANDOFF_THRESHOLD = 0.5;
+export const JEV_MIN_EXPECTED_PROGRESS = 0.4;
+export const JEV_MIN_PAGE_READY = 0.5;
 
 export type JevToolName =
   | 'read_current_page'
@@ -36,6 +42,11 @@ export interface JevReadAction {
   description: string;
   confidence: number;
   probabilities: Record<string, number>;
+  signals: {
+    handoff: number;
+    expectedProgress: number;
+    pageReady: number;
+  };
 }
 
 export type JevFastDecision =
@@ -44,11 +55,19 @@ export type JevFastDecision =
       kind: 'escalate';
       reason:
         | 'model-escalation'
+        | 'handoff-requested'
+        | 'low-expected-progress'
+        | 'page-not-ready'
         | 'low-confidence'
         | 'unknown-action'
         | 'invalid-answer';
       choice?: string;
       confidence?: number;
+      signals?: {
+        handoff: number;
+        expectedProgress: number;
+        pageReady: number;
+      };
     };
 
 export interface JevFastContext {
@@ -216,18 +235,76 @@ export function buildJevFastRequest(
           '选择当前最能推动任务的一项局部动作。优先观察或安全点击；发布、发送、删除、支付、内容生成和最终回答必须 escalate。',
         criteria,
       },
+      [JEV_HANDOFF_QUESTION]: {
+        type: 'noul',
+        instructions: '当前是否应该立即把控制权交给慢思考？',
+        criteria: {
+          true: '目标有歧义、需要生成实质内容、需要高风险写操作、页面不可靠或快路径已有失败',
+          false: '当前状态、页面和候选动作都足够明确，可以安全执行局部快动作',
+        },
+      },
+      [JEV_EXPECTED_PROGRESS_QUESTION]: {
+        type: 'noul',
+        instructions: '所选局部动作是否会产生可观察的新进展？',
+        criteria: {
+          true: '动作预期会改变页面、提供新证据或明显推进当前阶段',
+          false: '动作大概率重复、没有效果，或无法解决当前信息缺口',
+        },
+      },
+      [JEV_PAGE_READY_QUESTION]: {
+        type: 'noul',
+        instructions: '当前页面观察是否足够稳定，可以直接执行有副作用的动作？',
+        criteria: {
+          true: '页面已加载，目标元素与可交互状态可靠',
+          false: '页面仍在加载、目标不完整，或需要先重新观察',
+        },
+      },
     },
   };
   return { request, actions };
+}
+
+function noulAnswer(response: JevSystemOneResponse, name: string): number | null {
+  const answer = response.answers[name];
+  return answer && answer.type === 'noul' ? answer.noul : null;
 }
 
 export function interpretJevFastDecision(
   response: JevSystemOneResponse,
   actions: Record<string, JevActionDefinition>
 ): JevFastDecision {
+  const handoff = noulAnswer(response, JEV_HANDOFF_QUESTION);
+  const expectedProgress = noulAnswer(response, JEV_EXPECTED_PROGRESS_QUESTION);
+  const pageReady = noulAnswer(response, JEV_PAGE_READY_QUESTION);
+  if (handoff === null || expectedProgress === null || pageReady === null) {
+    return { kind: 'escalate', reason: 'invalid-answer' };
+  }
+  const signals = {
+    handoff,
+    expectedProgress,
+    pageReady,
+  };
   const answer = response.answers[JEV_NEXT_ACTION_QUESTION];
   if (!answer || answer.type !== 'choice') {
-    return { kind: 'escalate', reason: 'invalid-answer' };
+    return { kind: 'escalate', reason: 'invalid-answer', signals };
+  }
+  if (handoff >= JEV_HANDOFF_THRESHOLD) {
+    return {
+      kind: 'escalate',
+      reason: 'handoff-requested',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
+    };
+  }
+  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
+    return {
+      kind: 'escalate',
+      reason: 'low-expected-progress',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
+    };
   }
   if (answer.choice === 'escalate') {
     return {
@@ -235,6 +312,7 @@ export function interpretJevFastDecision(
       reason: 'model-escalation',
       choice: answer.choice,
       confidence: answer.confidence,
+      signals,
     };
   }
   const action = actions[answer.choice];
@@ -244,6 +322,7 @@ export function interpretJevFastDecision(
       reason: 'unknown-action',
       choice: answer.choice,
       confidence: answer.confidence,
+      signals,
     };
   }
   if (answer.confidence < action.minConfidence) {
@@ -252,6 +331,19 @@ export function interpretJevFastDecision(
       reason: 'low-confidence',
       choice: answer.choice,
       confidence: answer.confidence,
+      signals,
+    };
+  }
+  if (
+    pageReady < JEV_MIN_PAGE_READY &&
+    (action.toolName === 'click_element' || action.toolName === 'scroll_page')
+  ) {
+    return {
+      kind: 'escalate',
+      reason: 'page-not-ready',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
     };
   }
   return {
@@ -262,6 +354,7 @@ export function interpretJevFastDecision(
     description: action.description,
     confidence: answer.confidence,
     probabilities: { ...answer.probabilities },
+    signals,
   };
 }
 

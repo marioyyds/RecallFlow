@@ -307,6 +307,7 @@ export interface RunMetricsSummary {
   jevOutputTokens: number;
   jevShadowCompared: number;
   jevShadowAgreed: number;
+  jevHandoffs: number;
 }
 
 /** 工具元数据（`tool-metadata.ts` 的条目）。 */

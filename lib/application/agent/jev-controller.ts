@@ -52,6 +52,7 @@ export class JevFastController {
     const loop = this.state.jevLoop;
     if (loop.attempts >= JEV_MAX_ATTEMPTS_PER_RUN) return false;
     if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
+    if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
     return true;
   }
@@ -116,6 +117,7 @@ export class JevFastController {
       this.state.jevLoop.lastOutcome = 'error';
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.trace({ phase: 'jev', iter, status: 'error', reason });
+      this.appendHandoff(iter, 'request-failed', null, reason);
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'request-failed' };
     }
@@ -142,6 +144,7 @@ export class JevFastController {
     }
     if (decision.kind === 'escalate') {
       this.state.jevLoop.consecutiveFastActions = 0;
+      this.appendHandoff(iter, decision.reason, decision);
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: decision.reason };
     }
@@ -160,6 +163,7 @@ export class JevFastController {
         reason: 'repeated-action',
         decision,
       });
+      this.appendHandoff(iter, 'repeated-action', decision);
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'repeated-action' };
     }
@@ -183,6 +187,7 @@ export class JevFastController {
       }],
     };
     this.state.messages.push(assistantMessage);
+    const failuresBefore = this.state.failedToolNames.length;
     const toolOutcome = await this.pipeline.process({
       assistantMessage,
       toolCalls: [toolCall],
@@ -190,17 +195,64 @@ export class JevFastController {
     if (toolOutcome.kind === 'cancelled') {
       return { kind: 'cancelled', reason: toolOutcome.reason };
     }
+    const toolFailed = this.state.failedToolNames.length > failuresBefore;
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
-    this.state.jevLoop.lastOutcome = 'act';
+    this.state.jevLoop.consecutiveFailures = toolFailed
+      ? this.state.jevLoop.consecutiveFailures + 1
+      : 0;
+    this.state.jevLoop.lastOutcome = toolFailed ? 'tool-failed' : 'act';
+    if (this.state.jevLoop.consecutiveFailures >= 2) {
+      this.appendHandoff(iter, 'tool-failure-limit', decision);
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'tool-failure-limit' };
+    }
     return { kind: 'act', decisions: [decision], latencyMs, toolOutcomes: [toolOutcome] };
   }
 
   noteSlowTurn(): void {
     this.state.jevLoop.consecutiveFastActions = 0;
+    this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastActionSignature = '';
     this.state.jevLoop.lastOutcome = 'slow-handoff';
+  }
+
+  private appendHandoff(
+    iter: number,
+    reason: string,
+    decision: JevFastDecision | null,
+    detail = ''
+  ): void {
+    this.state.trace({
+      phase: 'jev-handoff',
+      iter,
+      reason,
+      decision,
+      detail,
+    });
+    const signals = decision && decision.kind === 'act' ? decision.signals : decision?.signals;
+    const lines = [
+      '【JEV 移交给慢思考】',
+      '原因：' + reason,
+      detail ? '详情：' + detail : '',
+      '当前阶段：' + deriveJevPhase(
+        this.state.ctx.pageUrl,
+        this.state.ctx.pageTitle,
+        this.state.ctx.lastSnapshot
+      ),
+      '最近工具：' + this.state.ranToolNames.slice(-8).join('、'),
+      'JEV 信号：' + (signals
+        ? 'handoff=' + signals.handoff.toFixed(3) +
+          '，progress=' + signals.expectedProgress.toFixed(3) +
+          '，pageReady=' + signals.pageReady.toFixed(3)
+        : '无有效结构化决策'),
+      this.state.ctx.lastEvidence
+        ? '最近证据：' + String(this.state.ctx.lastEvidence).slice(0, 1200)
+        : '',
+      '请基于真实工具结果继续规划；不要假设 JEV 未执行的动作已经发生。',
+    ].filter(Boolean);
+    this.state.messages.push({ role: 'system', content: lines.join('\n') });
   }
 
   traceShadowComparison(decision: JevFastDecision, step: Record<string, any>): void {

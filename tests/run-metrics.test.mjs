@@ -17,6 +17,7 @@ const ENTRIES = [
   { ts: 10, phase: 'jev-shadow-compare', agreed: true },
   { ts: 11, phase: 'jev', iter: 1, mode: 'live', decision: { kind: 'act' }, latencyMs: 80, inputTokens: 40, outputTokens: 5 },
   { ts: 12, phase: 'jev', iter: 2, mode: 'live', decision: { kind: 'escalate' }, latencyMs: 60, inputTokens: 20, outputTokens: 3 },
+  { ts: 13, phase: 'jev-handoff', reason: 'low-expected-progress' },
   { ts: 9, phase: 'complete', reason: 'final-answer', totalTokens: 1200 },
 ];
 
@@ -44,6 +45,7 @@ test('summarizeRunTrace：轮次/工具/缓存/耗时都能聚合出来', () => 
   assert.equal(m.jevOutputTokens, 18);
   assert.equal(m.jevShadowCompared, 1);
   assert.equal(m.jevShadowAgreed, 1);
+  assert.equal(m.jevHandoffs, 1);
 });
 
 test('summarizeRunTrace：空/坏输入安全', () => {
@@ -60,5 +62,6 @@ test('formatRunMetrics：能读出关键口径（命中率/工具分布/耗时�
   assert.match(text, /click_element×1/);
   assert.match(text, /1\.1s/);
   assert.match(text, /JEV 调用 3（影子 1 \/ 执行 2）/);
+  assert.match(text, /移交 1/);
   assert.match(text, /影子一致 1\/1/);
 });

@@ -18,16 +18,27 @@ JEV 不是聊天模型，不生成最终回答。RecallFlow 只接受它返回�
   -> Fast Controller
        -> TypeSafe /v1/systemone
        -> choice: observe | scroll | safe visible click | escalate
-       -> 置信度与白名单校验
+       -> noul: handoff_now | expected_progress | page_ready
+       -> 置信度、动作白名单与移交门控
        -> ToolCallPipeline（权限、审批与超时）
        -> append-only 工具消息
        -> 读新快照后最多再快决策两步
+       -> 请求失败 / 无进展 / 连续失败 → handoff packet
   -> 现有聊天 LLM
        -> 需要时继续规划/调用工具
        -> 基于真实证据生成最终回答
 ```
 
 JEV 按页面状态变化触发快思考片段：每个片段最多连续执行 3 个局部动作，整个 run 最多 12 次 JEV 尝试。后续慢思考动作改变页面后，可以开启新的快思考片段。低置信度、重复动作、高风险点击和实质内容生成会立即交还慢思考。
+
+一次 System One 请求会同时回答四个问题，不需要额外网络调用：
+
+- `next_action`：下一局部动作；
+- `handoff_now`：是否立即移交慢思考；
+- `expected_progress`：动作是否可能产生新进展；
+- `page_ready`：页面是否稳定到可以执行点击或滚动。
+
+任一门控失败、请求异常、重复动作或连续两次工具失败都会终止当前快片段，并追加结构化 handoff 信息供聊天 LLM 接管。
 
 ## 模式
 
@@ -41,7 +52,7 @@ JEV 按页面状态变化触发快思考片段：每个片段最多连续执行 
 - `parseJevSystemOneResponse()` 在执行前校验答案类型、概率范围、问题覆盖和 usage。
 - JEV 只能选择本地生成的动作候选；静态观察动作使用固定参数，点击候选只能引用最新快照中的 ref/selector。
 - 所有动作仍经过意图权限、工具元数据、超时、守卫和结果验证。
-- MCP、点击、输入、写库、脚本和下载动作不进入首版快路径。
+- MCP、输入、写库、脚本、下载和高风险点击不进入快速动作候选；安全点击仍经过统一审批。
 
 ## 前缀缓存
 
@@ -61,6 +72,7 @@ Trace 中记录：
 
 - JEV 调用数、影子/实际执行数；
 - 动作建议数与升级数；
+- handoff 次数与原因；
 - 延迟与 token；
 - 影子一致数/比较数。
 

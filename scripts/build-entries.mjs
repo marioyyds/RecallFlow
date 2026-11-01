@@ -59,16 +59,17 @@ export const ENTRIES = [
   // action space, and fast-controller wiring add ~17KB; measured 944085 bytes.
   // Shadower metrics and 451 handling add ~1.6KB; measured 945766 bytes.
   // Stateful multi-episode JEV scheduling and dynamic candidate generation add
-  // another ~8.2KB; measured 954000 bytes. No dependency was added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 933 * 1024 },
+  // another ~8.2KB. Multi-question handoff gating and structured handoff
+  // messages add a further ~5.6KB; measured 959584 bytes. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 938 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
   // 2026-11-01: independent remote JEV configuration card adds ~2.6KB;
   // measured 552273 bytes (540KB). No new dependency. Raise explicitly.
   // The model-list connection test reuses the typed JEV client; measured
-  // 561123 bytes after the connection UI. No dependency was added. Raise explicitly.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 548 * 1024 },
+  // 561271 bytes after shared JEV protocol updates. No dependency was added.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 549 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },

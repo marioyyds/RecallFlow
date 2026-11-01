@@ -21,6 +21,7 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
   const jevShadow = jev.filter((e) => e.mode === 'shadow');
   const jevLive = jev.filter((e) => e.mode === 'live');
   const jevCompares = list.filter((e) => e && e.phase === 'jev-shadow-compare');
+  const jevHandoffs = list.filter((e) => e && e.phase === 'jev-handoff');
   const complete = (list.find((e) => e && e.phase === 'complete') || {}) as TraceRecordEntry;
 
   const byTool: Record<string, number> = {};
@@ -55,6 +56,7 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
     jevShadowCompared: jevCompares.length,
     jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
+    jevHandoffs: jevHandoffs.length,
   };
 }
 
@@ -78,6 +80,7 @@ export function formatRunMetrics(m: RunMetricsSummary): string {
       '（影子 ' + m.jevShadowCalls + ' / 执行 ' + m.jevLiveCalls + '）' +
       ' / 动作建议 ' + m.jevActions +
       ' / 升级 ' + m.jevEscalations +
+      ' / 移交 ' + m.jevHandoffs +
       ' / 延迟 ' + sec(m.jevLatencyMs) +
       ' / token ' + (m.jevInputTokens + m.jevOutputTokens)
     );

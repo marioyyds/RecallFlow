@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   JEV_MIN_ACTION_CONFIDENCE,
+  JEV_HANDOFF_QUESTION,
+  JEV_EXPECTED_PROGRESS_QUESTION,
   JEV_NEXT_ACTION_QUESTION,
+  JEV_PAGE_READY_QUESTION,
   buildJevFastRequest,
   compareJevShadowAction,
   interpretJevFastDecision,
@@ -11,7 +14,7 @@ import {
 import { JevFastController } from '../lib/application/agent/jev-controller.ts';
 import { restoreJevLoopState } from '../lib/application/agent/jev-loop-state.ts';
 
-function response(choice, confidence, probabilities = {}) {
+function response(choice, confidence, probabilities = {}, signals = {}) {
   return {
     model: 'jev-1.14.0',
     answers: {
@@ -22,6 +25,18 @@ function response(choice, confidence, probabilities = {}) {
         probabilities: Object.keys(probabilities).length
           ? probabilities
           : { [choice]: confidence, escalate: 1 - confidence },
+      },
+      [JEV_HANDOFF_QUESTION]: {
+        type: 'noul',
+        noul: signals.handoff ?? 0.1,
+      },
+      [JEV_EXPECTED_PROGRESS_QUESTION]: {
+        type: 'noul',
+        noul: signals.expectedProgress ?? 0.9,
+      },
+      [JEV_PAGE_READY_QUESTION]: {
+        type: 'noul',
+        noul: signals.pageReady ?? 0.9,
       },
     },
     usage: { input_tokens: 10, output_tokens: 2 },
@@ -49,6 +64,9 @@ test('快思考暴露观察、滚动和升级动作，不直接生成内容', ()
     'scroll_down',
     'snapshot',
   ]);
+  assert.equal(request.questions[JEV_HANDOFF_QUESTION].type, 'noul');
+  assert.equal(request.questions[JEV_EXPECTED_PROGRESS_QUESTION].type, 'noul');
+  assert.equal(request.questions[JEV_PAGE_READY_QUESTION].type, 'noul');
   assert.equal('messages' in request, false);
   assert.equal(actions.read_table.toolName, 'read_table');
 });
@@ -74,7 +92,45 @@ test('高置信度只读建议转换为类型明确、参数受控的工具调�
       read_table: JEV_MIN_ACTION_CONFIDENCE,
       escalate: 1 - JEV_MIN_ACTION_CONFIDENCE,
     },
+    signals: {
+      handoff: 0.1,
+      expectedProgress: 0.9,
+      pageReady: 0.9,
+    },
   });
+});
+
+test('移交、进展和页面稳定度任一门控失败都升级慢思考', () => {
+  const { actions } = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'browsing',
+    instruction: '读取订单表',
+  });
+  assert.equal(
+    interpretJevFastDecision(response('read_table', 0.95, {}, { handoff: 0.6 }), actions).reason,
+    'handoff-requested'
+  );
+  assert.equal(
+    interpretJevFastDecision(response('read_table', 0.95, {}, { expectedProgress: 0.2 }), actions).reason,
+    'low-expected-progress'
+  );
+
+  const dynamic = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'editor',
+    instruction: '点击下一步',
+    snapshot: {
+      fingerprint: 'fp-ready',
+      elements: [{ ref: 'rf-1', tag: 'button', label: '下一步', inViewport: true }],
+    },
+  });
+  assert.equal(
+    interpretJevFastDecision(
+      response('click_0', 0.95, {}, { pageReady: 0.2 }),
+      dynamic.actions
+    ).reason,
+    'page-not-ready'
+  );
 });
 
 test('低置信度、模型升级和未知动作都升级到慢思考', () => {
@@ -167,6 +223,7 @@ function makeState(shadowMode) {
       lastReadFullText: '',
     },
     ranToolNames: [],
+    failedToolNames: [],
     toolCallCount: 0,
     jevLoop: restoreJevLoopState(null),
     messages: [],
@@ -252,4 +309,51 @@ test('页面状态变化后允许新的快思考片段，单片段最多连续�
   state.ctx.lastEvidence = 'slow-tool-evidence';
   controller.noteSlowTurn();
   assert.equal(state.jevLoop.consecutiveFastActions, 0);
+});
+
+test('快路径失败后允许一次不同动作恢复，恢复成功会清零失败连击', async () => {
+  const state = makeState(false);
+  let calls = 0;
+  const pipeline = {
+    process: async () => {
+      state.toolCallCount += 1;
+      if (state.toolCallCount === 1) {
+        state.failedToolNames.push('read_table');
+        return { kind: 'continue', toolMs: 1 };
+      }
+      state.ctx.lastEvidence = 'recovered';
+      return { kind: 'continue', toolMs: 1 };
+    },
+  };
+  const controller = new JevFastController(
+    state,
+    pipeline,
+    new AbortController().signal,
+    async () => response(calls++ === 0 ? 'read_table' : 'read_page', 0.95)
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(state.toolCallCount, 2);
+  assert.equal(state.jevLoop.consecutiveFailures, 0);
+});
+
+test('连续两次工具失败后停止快路径并写入 handoff', async () => {
+  const state = makeState(false);
+  let calls = 0;
+  const pipeline = {
+    process: async () => {
+      state.toolCallCount += 1;
+      state.failedToolNames.push('failure-' + state.toolCallCount);
+      return { kind: 'continue', toolMs: 1 };
+    },
+  };
+  const controller = new JevFastController(
+    state,
+    pipeline,
+    new AbortController().signal,
+    async () => response(calls++ === 0 ? 'read_table' : 'read_page', 0.95)
+  );
+  await controller.runAvailable(0, async () => {});
+  assert.equal(state.jevLoop.consecutiveFailures, 2);
+  assert.match(String(state.messages.at(-1)?.content || ''), /tool-failure-limit/);
 });

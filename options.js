@@ -4368,6 +4368,7 @@ function summarizeRunTrace(entries) {
   const jevShadow = jev.filter((e) => e.mode === "shadow");
   const jevLive = jev.filter((e) => e.mode === "live");
   const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
+  const jevHandoffs = list.filter((e) => e && e.phase === "jev-handoff");
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -4398,7 +4399,8 @@ function summarizeRunTrace(entries) {
     jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
     jevShadowCompared: jevCompares.length,
-    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length
+    jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
+    jevHandoffs: jevHandoffs.length
   };
 }
 function formatRunMetrics(m) {
@@ -4414,7 +4416,7 @@ function formatRunMetrics(m) {
   if (by.length) lines.push("\u6309\u5DE5\u5177\uFF1A" + by.join("\u3001"));
   if (m.jevCalls) {
     lines.push(
-      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
+      "JEV \u8C03\u7528 " + m.jevCalls + "\uFF08\u5F71\u5B50 " + m.jevShadowCalls + " / \u6267\u884C " + m.jevLiveCalls + "\uFF09 / \u52A8\u4F5C\u5EFA\u8BAE " + m.jevActions + " / \u5347\u7EA7 " + m.jevEscalations + " / \u79FB\u4EA4 " + m.jevHandoffs + " / \u5EF6\u8FDF " + sec(m.jevLatencyMs) + " / token " + (m.jevInputTokens + m.jevOutputTokens)
     );
     if (m.jevShadowCompared) {
       lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);

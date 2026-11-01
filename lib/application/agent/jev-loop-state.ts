@@ -5,6 +5,7 @@ export interface JevLoopState {
   attempts: number;
   fastActions: number;
   consecutiveFastActions: number;
+  consecutiveFailures: number;
   lastAttemptAt: number;
   lastToolCallCount: number;
   lastActionSignature: string;
@@ -27,6 +28,7 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
       nonNegativeInteger(source.consecutiveFastActions),
       JEV_MAX_CONSECUTIVE_ACTIONS
     ),
+    consecutiveFailures: nonNegativeInteger(source.consecutiveFailures),
     lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),
     lastToolCallCount: nonNegativeInteger(source.lastToolCallCount),
     lastActionSignature: String(source.lastActionSignature || '').slice(0, 500),
