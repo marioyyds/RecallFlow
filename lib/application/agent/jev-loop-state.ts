@@ -1,5 +1,7 @@
-export const JEV_MAX_ATTEMPTS_PER_RUN = 12;
-export const JEV_MAX_CONSECUTIVE_ACTIONS = 3;
+// The fast executor now owns a browser-action segment, so these bounds are
+// action-safety limits rather than "how often may JEV give advice" limits.
+export const JEV_MAX_ATTEMPTS_PER_RUN = 36;
+export const JEV_MAX_CONSECUTIVE_ACTIONS = 12;
 
 export interface JevLoopState {
   attempts: number;

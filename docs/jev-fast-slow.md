@@ -2,86 +2,94 @@
 
 ## 定位
 
-JEV 使用的是 TypeSafe 的远程 System One 接口：
+RecallFlow 使用 TypeSafe 的远程 JEV 作为浏览器内循环控制器，而不是每一步执行前的“是否移交”分类器。
 
-- `POST /v1/systemone`：对同一份 state 回答命名的 `noul`、`choice`、`score` 或 `box` 问题。
+- `POST /v1/systemone`：一次请求评估当前页面的 operation 和所有 operation-specific target head。
 - `GET /v1/models`：列出当前凭据可用的模型。
-- 默认地址：`https://api.typesafe.ai`
-- 默认模型：`jev-latest`
+- JEV 不生成聊天回复，也不生成字段文本。
+- 研究、规划、正文生成和最终验证由慢思考负责。
 
-JEV 不是聊天模型，不生成最终回答。RecallFlow 只接受它返回的结构化答案，再将其映射到受限的动作空间。
+实现参考 `browser-use/jev-ultrafast` 的 operation + target、speculative fan-out 和确定性页面守卫。
 
-## 快慢链路
+## 快慢分工
 
 ```text
-任务开始
-  -> Fast Controller
-       -> TypeSafe /v1/systemone
-       -> choice: observe | scroll | safe visible click | escalate
-       -> noul: handoff_now | expected_progress | page_ready
-       -> 置信度、动作白名单与移交门控
-       -> ToolCallPipeline（权限、审批与超时）
-       -> append-only 工具消息
-       -> 读新快照后最多再快决策两步
-       -> 请求失败 / 无进展 / 连续失败 → handoff packet
-  -> 现有聊天 LLM
-       -> 需要时继续规划/调用工具
-       -> 基于真实证据生成最终回答
+用户目标
+  -> 慢思考：研究、规划、生成文章/标题/卡片文本
+  -> JEV：观察 -> operation -> matching target -> 执行 -> 重新观察
+  -> JEV DONE：慢思考独立验证
+  -> JEV BLOCKED：慢思考重新规划
 ```
 
-JEV 按页面状态变化触发快思考片段：每个片段最多连续执行 3 个局部动作，整个 run 最多 12 次 JEV 尝试。后续慢思考动作改变页面后，可以开启新的快思考片段。低置信度、重复动作、高风险点击和实质内容生成会立即交还慢思考。
+慢思考不再承担每一个可以直接执行的浏览器动作。JEV 每次只执行一个操作；需要内容输入时，慢模型只作为字段文本助手，为已选中的 TYPE_TEXT target 生成一个 JSON `{text}` 值。
 
-一次 System One 请求会同时回答四个问题，不需要额外网络调用：
+## 决策协议
 
-- `next_action`：下一局部动作；
-- `handoff_now`：是否立即移交慢思考；
-- `expected_progress`：动作是否可能产生新进展；
-- `page_ready`：页面是否稳定到可以执行点击或滚动。
+一次 System One 请求包含：
 
-门控按**当前候选动作**解释，而不是按整个任务的最终形态一票否决：
+- `operation`：当前可执行的 CLICK、TYPE_TEXT、读取、滚动、WAIT、DONE 或 BLOCKED；
+- `click_target`：仅在 CLICK 可用时提供，候选只能来自当前可见、未禁用的安全点击元素；
+- `type_text_target`：仅在 TYPE_TEXT 可用时提供，候选只能来自可编辑字段。
 
-- `next_action=escalate`、低置信度、未知动作或低预期进展仍然立即移交；
-- `handoff_now < 0.5` 时按页面与置信度门控执行；
-- `0.5 <= handoff_now < 0.85` 只对点击/滚动增加风险门控，要求预期进展至少 50%、页面就绪至少 60%；
-- `handoff_now >= 0.85` 无论动作类型都强制移交；
-- 移交后，同一 `phase + URL + snapshot fingerprint` 进入冷却，直到页面阶段或快照指纹变化才重新询问。
+所有 target head speculative 地并行评分；执行器只读取 selected operation 对应的 target head。高风险发布、发送、删除、支付等语义不会进入 CLICK 候选。
 
-请求异常、重复动作或连续两次工具失败也会终止当前快片段，并追加结构化 handoff 信息供聊天 LLM 接管。
+代码级校验包括：
+
+- operation 与 target 必须在本次请求的候选集合中；
+- choice 必须是概率最大的候选项；
+- 概率总和必须为 1（允许 API 浮点误差）；
+- operation 和匹配 target 均需达到动作类型对应的置信度；
+- target 只能映射到已观察的 ref，不接受模型生成的 selector、坐标或 JavaScript。
+
+## 执行循环
+
+每个 cycle 的顺序是：
+
+```text
+get_page_snapshot
+  -> JEV /v1/systemone
+  -> validate operation + matching target
+  -> execute exactly one operation
+  -> get_page_snapshot
+  -> repeat
+```
+
+`TYPE_TEXT` 的字段值由聊天模型生成并校验为唯一 `text` 字段；校验失败时不会输入。JEV 选择 `WAIT` 时只等待并重新观察，不执行页面写入。
+
+单次快路径片段最多连续执行 12 个动作，每个 run 最多 36 次 JEV 尝试。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化后才允许重新尝试。
+
+## 升级到慢思考
+
+以下情况停止快路径：
+
+- `BLOCKED`；
+- operation 或 target 置信度不足；
+- 不支持的操作、目标或页面结构；
+- TYPE_TEXT 文本助手失败；
+- 动作后无法重新观察；
+- 连续两次工具失败；
+- JEV 选择 `DONE`，必须由慢思考独立验证后才能完成任务。
 
 ## 模式
 
 - `enabled=false`：不调用 JEV。
-- `enabled=true` + `shadowMode=true`：调用 JEV 并记录建议，但不执行工具。这是默认推荐模式。
-- `enabled=true` + `shadowMode=false`：高置信度的观察、滚动或安全可见元素点击可以通过现有 `ToolCallPipeline` 执行；发布、发送、删除和支付类候选不会进入快速点击白名单。
+- `enabled=true` + `shadowMode=true`：观察页面并记录 operation/target 建议，但不执行 JEV 动作。
+- `enabled=true` + `shadowMode=false`：执行通过 operation、target、权限、审批、超时与新鲜度检查的安全动作。
 
-## 类型安全边界
+## 安全边界
 
-- TypeScript 定义 TypeSafe 请求、问题和答案的联合类型。
-- `parseJevSystemOneResponse()` 在执行前校验答案类型、概率范围、问题覆盖和 usage。
-- JEV 只能选择本地生成的动作候选；静态观察动作使用固定参数，点击候选只能引用最新快照中的 ref/selector。
-- 所有动作仍经过意图权限、工具元数据、超时、守卫和结果验证。
-- MCP、输入、写库、脚本、下载和高风险点击不进入快速动作候选；安全点击仍经过统一审批。
+- 所有动作仍经过 `ToolCallPipeline` 的意图权限与审批。
+- 发布等高风险按钮不进入快速点击集合。
+- 模型不能输出 selector、坐标、URL、文件路径或 JavaScript。
+- 决策与执行绑定到快照 ref；页面导航或元素替换后旧 ref 必须失效。
+- 上传、新标签页、iframe、Shadow DOM、canvas 与任意键盘组件超出第一阶段快路径，遇到时交给慢思考。
 
-## 前缀缓存
+## 评估指标
 
-- TypeSafe 请求不复用聊天模型消息前缀。
-- JEV 执行的动作以正常 `assistant(tool_calls)` + `tool` 消息追加。
-- 不修改 `messages[0]`，不动态增删聊天工具 schema。
-- 快路径动作完成后，慢思考继续使用同一份稳定工具面，并生成最终回答。
-
-## 影子评估
-
-Trace 中记录：
-
-- `phase=jev`：模式、模型、决策、延迟、输入/输出 token。
-- `phase=jev-shadow-compare`：JEV 建议的下一步，与慢思考首个动作和最终回答比较。
-
-`summarizeRunTrace()` 汇总：
-
-- JEV 调用数、影子/实际执行数；
-- 动作建议数与升级数；
-- handoff 次数与原因；
-- 延迟与 token；
-- 影子一致数/比较数。
-
-上线前应先保持影子模式，按域名与任务类型检查动作准确率、升级召回率、影子一致率和延迟。只有确认只读路径安全后才关闭影子模式。
+- JEV operation/target 准确率；
+- 每次 JEV 请求实际执行动作的比例；
+- 快路径连续完成动作数；
+- BLOCKED 原因分布；
+- 页面 stale 与动作失败率；
+- 慢思考调用次数、工具调用数和总耗时；
+- DONE 声明被独立验证否决的比例。

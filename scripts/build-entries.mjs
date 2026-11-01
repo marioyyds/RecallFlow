@@ -68,7 +68,9 @@ export const ENTRIES = [
   // measured 965325 bytes. Raise explicitly. No dependency added.
   // Action-level handoff gating and same-route cooldown measured 966975 bytes.
   // Raise by 1KB explicitly. No dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 945 * 1024 },
+  // Operation/target JEV executor, per-cycle observation and TYPE_TEXT helper
+  // measured 977997 bytes. Raise explicitly. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 957 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -83,7 +85,9 @@ export const ENTRIES = [
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
   // 532 KB：新增 query-report-table 技能并同步工具清单，实测 525 KB。
   // 2026-10-31: shared logical readback measured 545104 bytes (533KB); 534KB.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 534 * 1024 },
+  // Shared JEV protocol text crossed the old boundary by 61 bytes; measured
+  // 546877 bytes. Raise to 535KB with explicit headroom.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 535 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

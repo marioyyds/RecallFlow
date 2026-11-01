@@ -7,6 +7,7 @@ import {
   deriveJevPhase,
   formatJevDecisionSummary,
   interpretJevFastDecision,
+  type JevFastAction,
   type JevFastDecision,
 } from './jev-action-space.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
@@ -15,6 +16,11 @@ import {
   writeJevDiagnostic,
   type JevDiagnosticRecord,
 } from './jev-diagnostics.ts';
+import {
+  generateJevFieldText,
+  type JevTextFieldContext,
+  type JevTextResult,
+} from './jev-text-helper.ts';
 import {
   JEV_MAX_ATTEMPTS_PER_RUN,
   JEV_MAX_CONSECUTIVE_ACTIONS,
@@ -31,26 +37,40 @@ export type JevFastRunResult =
     }
   | { kind: 'cancelled'; reason: string };
 
+type TextHelper = (
+  settings: AgentRunState['settings'],
+  context: JevTextFieldContext,
+  signal: AbortSignal
+) => Promise<JevTextResult>;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class JevFastController {
   private readonly state: AgentRunState;
   private readonly pipeline: ToolCallPipeline;
   private readonly signal: AbortSignal;
   private readonly callSystemOne: typeof callJevSystemOne;
   private readonly writeDiagnostic: typeof writeJevDiagnostic;
-  private lastHandoffRoute = '';
+  private readonly textHelper: TextHelper;
+  private lastBlockedRoute = '';
+  private toolSequence = 0;
 
   constructor(
     state: AgentRunState,
     pipeline: ToolCallPipeline,
     signal: AbortSignal,
     callSystemOne: typeof callJevSystemOne = callJevSystemOne,
-    writeDiagnostic: typeof writeJevDiagnostic = writeJevDiagnostic
+    writeDiagnostic: typeof writeJevDiagnostic = writeJevDiagnostic,
+    textHelper: TextHelper = generateJevFieldText
   ) {
     this.state = state;
     this.pipeline = pipeline;
     this.signal = signal;
     this.callSystemOne = callSystemOne;
     this.writeDiagnostic = writeDiagnostic;
+    this.textHelper = textHelper;
   }
 
   private canAttempt(): boolean {
@@ -63,7 +83,7 @@ export class JevFastController {
     if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
-    if (this.lastHandoffRoute && this.currentRouteKey() === this.lastHandoffRoute) return false;
+    if (this.lastBlockedRoute && this.currentRouteKey() === this.lastBlockedRoute) return false;
     return true;
   }
 
@@ -84,9 +104,18 @@ export class JevFastController {
     iter: number,
     persist: (extra: Record<string, unknown>) => Promise<unknown>
   ): Promise<JevFastRunResult> {
-    if (!this.canAttempt()) {
-      return { kind: 'skipped', reason: 'not-due' };
+    if (!this.canAttempt()) return { kind: 'skipped', reason: 'not-due' };
+    const failuresBeforeObservation = this.state.failedToolNames.length;
+    const initial = await this.observePage(iter, persist);
+    if (initial.kind === 'cancelled') return initial;
+    if (
+      initial.kind !== 'continue' ||
+      this.state.failedToolNames.length > failuresBeforeObservation
+    ) {
+      this.appendBlocked(iter, 'observation-failed', '无法取得执行前的页面快照');
+      return { kind: 'skipped', reason: 'observation-failed' };
     }
+
     const decisions: JevFastDecision[] = [];
     const toolOutcomes: ToolBatchOutcome[] = [];
     let latencyMs = 0;
@@ -94,7 +123,7 @@ export class JevFastController {
       if (!this.canAttempt()) break;
       const result = await this.runOnce(iter, persist);
       if (result.kind === 'cancelled') return result;
-      latencyMs += 'latencyMs' in result ? result.latencyMs : 0;
+      latencyMs += result.latencyMs || 0;
       if (result.kind === 'shadow') return result;
       if (result.kind !== 'act') break;
       decisions.push(...result.decisions);
@@ -108,7 +137,7 @@ export class JevFastController {
   private async runOnce(
     iter: number,
     persist: (extra: Record<string, unknown>) => Promise<unknown>
-  ): Promise<JevFastRunResult> {
+  ): Promise<JevFastRunResult & { latencyMs?: number }> {
     const settings = this.state.settings.jev;
     this.state.jevLoop.attempts += 1;
     this.state.jevLoop.lastAttemptAt = Date.now();
@@ -118,7 +147,7 @@ export class JevFastController {
       this.state.ctx.pageTitle,
       this.state.ctx.lastSnapshot
     );
-    const request = buildJevFastRequest(settings, {
+    const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
       instruction: this.state.detected.sourceText || this.state.instruction,
@@ -132,26 +161,24 @@ export class JevFastController {
     this.recordDiagnostic({
       state: 'deciding',
       mode: settings.shadowMode ? 'shadow' : 'live',
-      outcome: 'awaiting-decision',
+      outcome: 'awaiting-operation',
       phase,
     });
     const startedAt = Date.now();
     let response: JevSystemOneResponse;
     try {
-      response = await this.callSystemOne(settings, request.request, {
-        signal: this.signal,
-      });
+      response = await this.callSystemOne(settings, bundle.request, { signal: this.signal });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.state.jevLoop.lastOutcome = 'error';
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.trace({ phase: 'jev', iter, status: 'error', reason });
-      this.appendHandoff(iter, 'request-failed', null, reason);
+      this.appendBlocked(iter, 'request-failed', reason);
       await persist({ phase: 'jev_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: 'request-failed' };
+      return { kind: 'skipped', reason: 'request-failed', latencyMs: Date.now() - startedAt };
     }
     const latencyMs = Date.now() - startedAt;
-    const decision = interpretJevFastDecision(response, request.actions);
+    const decision = interpretJevFastDecision(response, bundle);
     this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
     this.state.jevLoop.lastOutcome = decision.kind;
     this.state.trace({
@@ -176,10 +203,16 @@ export class JevFastController {
       message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs),
     });
     this.recordDiagnostic({
-      state: settings.shadowMode ? 'shadow' : decision.kind === 'act' ? 'act' : 'handoff',
+      state: settings.shadowMode
+        ? 'shadow'
+        : decision.kind === 'act'
+          ? 'act'
+          : decision.kind === 'done'
+            ? 'handoff'
+            : 'handoff',
       mode: settings.shadowMode ? 'shadow' : 'live',
-      outcome: decision.kind,
-      reason: decision.kind === 'escalate' ? decision.reason : undefined,
+      outcome: decision.kind === 'act' ? decision.operation : decision.kind,
+      reason: decision.kind === 'blocked' ? decision.reason : decision.kind === 'done' ? 'done-claim' : undefined,
       phase,
       tool: decision.kind === 'act' ? decision.toolName : undefined,
       latencyMs,
@@ -190,84 +223,214 @@ export class JevFastController {
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'shadow', decision, latencyMs };
     }
-    if (decision.kind === 'escalate') {
+    if (decision.kind === 'done') {
+      this.appendBlocked(iter, 'done-claim', 'JEV 判断任务已完成，必须由慢思考独立验证');
+      return { kind: 'skipped', reason: 'done-claim', latencyMs };
+    }
+    if (decision.kind === 'blocked') {
       this.state.jevLoop.consecutiveFastActions = 0;
-      this.appendHandoff(iter, decision.reason, decision);
+      this.appendBlocked(iter, decision.reason, decision.description);
       await persist({ phase: 'jev_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: decision.reason };
+      return { kind: 'skipped', reason: decision.reason, latencyMs };
     }
 
-    const signature = decision.toolName + ':' + JSON.stringify(decision.args);
+    const signature = decision.operation + ':' + JSON.stringify(decision.args);
     if (
       this.state.jevLoop.consecutiveFastActions > 0 &&
       signature === this.state.jevLoop.lastActionSignature
     ) {
       this.state.jevLoop.consecutiveFastActions = 0;
       this.state.jevLoop.lastOutcome = 'repeated-action';
-      this.state.trace({
-        phase: 'jev',
-        iter,
-        status: 'escalate',
-        reason: 'repeated-action',
-        decision,
-      });
-      this.appendHandoff(iter, 'repeated-action', decision);
+      this.appendBlocked(iter, 'repeated-action', 'JEV 连续选择了同一个动作');
       await persist({ phase: 'jev_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: 'repeated-action' };
+      return { kind: 'skipped', reason: 'repeated-action', latencyMs };
     }
 
-    const callId = 'jev-' + iter + '-' + Date.now().toString(36);
+    let action = decision;
+    if (action.operation === 'WAIT') {
+      await sleep(100);
+      const failuresBeforeWaitObservation = this.state.failedToolNames.length;
+      const observed = await this.observePage(iter, persist);
+      if (observed.kind === 'cancelled') return observed;
+      if (
+        observed.kind !== 'continue' ||
+        this.state.failedToolNames.length > failuresBeforeWaitObservation
+      ) {
+        this.appendBlocked(iter, 'observation-failed', '等待后无法重新观察页面');
+        return { kind: 'skipped', reason: 'observation-failed', latencyMs };
+      }
+      this.noteFastAction(signature);
+      return {
+        kind: 'act',
+        decisions: [decision],
+        latencyMs,
+        toolOutcomes: [observed],
+      };
+    }
+
+    if (action.operation === 'TYPE_TEXT') {
+      try {
+        const generated = await this.textHelper(
+          this.state.settings,
+          this.textContext(action),
+          this.signal
+        );
+        action = { ...action, args: { ...action.args, value: generated.text } };
+        this.state.trace({
+          phase: 'jev-text',
+          iter,
+          model: generated.model,
+          latencyMs: generated.latencyMs,
+          chars: generated.text.length,
+          target: action.target?.label || '',
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.appendBlocked(iter, 'text-helper-failed', reason);
+        await persist({ phase: 'jev_decision' }).catch(() => {});
+        return { kind: 'skipped', reason: 'text-helper-failed', latencyMs };
+      }
+    }
+
+    const failuresBefore = this.state.failedToolNames.length;
+    const outcome = await this.processTool(iter, persist, action);
+    if (outcome.kind === 'cancelled') return outcome;
+    if (outcome.kind === 'complete') {
+      return { kind: 'skipped', reason: 'complete-tool', latencyMs };
+    }
+    const failed = this.state.failedToolNames.length > failuresBefore;
+    this.state.jevLoop.fastActions += 1;
+    this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.lastActionSignature = signature;
+    this.state.jevLoop.consecutiveFailures = failed
+      ? this.state.jevLoop.consecutiveFailures + 1
+      : 0;
+    this.state.jevLoop.lastOutcome = failed ? 'tool-failed' : 'act';
+    this.recordDiagnostic({
+      state: 'act',
+      mode: 'live',
+      outcome: failed ? 'tool-failed' : action.operation,
+      phase,
+      tool: action.toolName,
+      latencyMs,
+      failed,
+    });
+
+    const failuresBeforePostObservation = this.state.failedToolNames.length;
+    const observed = await this.observePage(iter, persist);
+    if (observed.kind === 'cancelled') return observed;
+    if (
+      observed.kind !== 'continue' ||
+      this.state.failedToolNames.length > failuresBeforePostObservation
+    ) {
+      this.appendBlocked(iter, 'observation-failed', '动作后无法重新观察页面');
+      return { kind: 'skipped', reason: 'observation-failed', latencyMs };
+    }
+    if (this.state.jevLoop.consecutiveFailures >= 2) {
+      this.appendBlocked(iter, 'tool-failure-limit', '快路径连续两次工具失败');
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'tool-failure-limit', latencyMs };
+    }
+    return {
+      kind: 'act',
+      decisions: [decision],
+      latencyMs,
+      toolOutcomes: [outcome, observed],
+    };
+  }
+
+  private noteFastAction(signature: string): void {
+    this.state.jevLoop.fastActions += 1;
+    this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.lastActionSignature = signature;
+    this.state.jevLoop.consecutiveFailures = 0;
+    this.state.jevLoop.lastOutcome = 'act';
+  }
+
+  private textContext(action: JevFastAction): JevTextFieldContext {
+    return {
+      goal: this.state.detected.sourceText || this.state.instruction,
+      field: {
+        label: action.target?.label || '',
+        role: action.target?.role || '',
+        valuePresent: false,
+      },
+      page: {
+        title: this.state.ctx.pageTitle,
+        text: String(
+          this.state.ctx.lastReadFullText ||
+          this.state.ctx.lastEvidence ||
+          this.state.ctx.page ||
+          ''
+        ).slice(0, 6000),
+      },
+      recentActions: this.state.ranToolNames.slice(-6),
+    };
+  }
+
+  private async processTool(
+    iter: number,
+    persist: (extra: Record<string, unknown>) => Promise<unknown>,
+    action: JevFastAction
+  ): Promise<ToolBatchOutcome> {
+    const callId = 'jev-' + iter + '-' + (++this.toolSequence);
     const toolCall = {
       id: callId,
-      name: decision.toolName,
-      args: decision.args,
+      name: action.toolName,
+      args: action.args,
     };
     const assistantMessage = {
       role: 'assistant',
       lane: 'fast',
-      content: 'JEV 快思考：' + decision.description,
+      content: 'JEV 快思考：' +
+        action.operation +
+        (action.target ? ' → ' + action.target.label : ''),
       tool_calls: [{
         id: callId,
         type: 'function',
         function: {
-          name: decision.toolName,
-          arguments: JSON.stringify(decision.args),
+          name: action.toolName,
+          arguments: JSON.stringify(action.args),
         },
       }],
     };
     this.state.messages.push(assistantMessage);
-    const failuresBefore = this.state.failedToolNames.length;
-    const toolOutcome = await this.pipeline.process({
+    return this.pipeline.process({
       assistantMessage,
       toolCalls: [toolCall],
       lane: 'fast',
     }, iter, persist);
-    if (toolOutcome.kind === 'cancelled') {
-      return { kind: 'cancelled', reason: toolOutcome.reason };
-    }
-    const toolFailed = this.state.failedToolNames.length > failuresBefore;
-    this.state.jevLoop.fastActions += 1;
-    this.state.jevLoop.consecutiveFastActions += 1;
-    this.state.jevLoop.lastActionSignature = signature;
-    this.state.jevLoop.consecutiveFailures = toolFailed
-      ? this.state.jevLoop.consecutiveFailures + 1
-      : 0;
-    this.state.jevLoop.lastOutcome = toolFailed ? 'tool-failed' : 'act';
-    this.recordDiagnostic({
-      state: 'act',
-      mode: 'live',
-      outcome: toolFailed ? 'tool-failed' : 'act',
-      phase,
-      tool: decision.toolName,
-      latencyMs,
-      failed: toolFailed,
-    });
-    if (this.state.jevLoop.consecutiveFailures >= 2) {
-      this.appendHandoff(iter, 'tool-failure-limit', decision);
-      await persist({ phase: 'jev_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: 'tool-failure-limit' };
-    }
-    return { kind: 'act', decisions: [decision], latencyMs, toolOutcomes: [toolOutcome] };
+  }
+
+  private async observePage(
+    iter: number,
+    persist: (extra: Record<string, unknown>) => Promise<unknown>
+  ): Promise<ToolBatchOutcome> {
+    const callId = 'jev-observe-' + iter + '-' + (++this.toolSequence);
+    const toolCall = {
+      id: callId,
+      name: 'get_page_snapshot',
+      args: { maxText: 1200 },
+    };
+    const assistantMessage = {
+      role: 'assistant',
+      lane: 'fast',
+      content: 'JEV 快思考：重新观察页面',
+      tool_calls: [{
+        id: callId,
+        type: 'function',
+        function: {
+          name: 'get_page_snapshot',
+          arguments: JSON.stringify(toolCall.args),
+        },
+      }],
+    };
+    this.state.messages.push(assistantMessage);
+    return this.pipeline.process({
+      assistantMessage,
+      toolCalls: [toolCall],
+      lane: 'fast',
+    }, iter, persist);
   }
 
   noteSlowTurn(): void {
@@ -277,18 +440,16 @@ export class JevFastController {
     this.state.jevLoop.lastOutcome = 'slow-handoff';
   }
 
-  private appendHandoff(
+  private appendBlocked(
     iter: number,
     reason: string,
-    decision: JevFastDecision | null,
     detail = ''
   ): void {
-    this.lastHandoffRoute = this.currentRouteKey();
+    this.lastBlockedRoute = this.currentRouteKey();
     this.state.trace({
       phase: 'jev-handoff',
       iter,
       reason,
-      decision,
       detail,
     });
     this.state.emit({
@@ -307,30 +468,16 @@ export class JevFastController {
         this.state.ctx.pageTitle,
         this.state.ctx.lastSnapshot
       ),
-      tool: decision?.kind === 'act' ? decision.toolName : undefined,
     });
-    const signals = decision && decision.kind === 'act' ? decision.signals : decision?.signals;
-    const lines = [
-      '【JEV 移交给慢思考】',
-      '原因：' + reason,
-      detail ? '详情：' + detail : '',
-      '当前阶段：' + deriveJevPhase(
-        this.state.ctx.pageUrl,
-        this.state.ctx.pageTitle,
-        this.state.ctx.lastSnapshot
-      ),
-      '最近工具：' + this.state.ranToolNames.slice(-8).join('、'),
-      'JEV 信号：' + (signals
-        ? 'handoff=' + signals.handoff.toFixed(3) +
-          '，progress=' + signals.expectedProgress.toFixed(3) +
-          '，pageReady=' + signals.pageReady.toFixed(3)
-        : '无有效结构化决策'),
-      this.state.ctx.lastEvidence
-        ? '最近证据：' + String(this.state.ctx.lastEvidence).slice(0, 1200)
-        : '',
-      '请基于真实工具结果继续规划；不要假设 JEV 未执行的动作已经发生。',
-    ].filter(Boolean);
-    this.state.messages.push({ role: 'system', content: lines.join('\n') });
+    this.state.messages.push({
+      role: 'system',
+      content: [
+        '【JEV 快路径已停止】',
+        '原因：' + reason,
+        detail ? '详情：' + detail : '',
+        '请基于最近一次真实页面快照和工具结果继续规划；不要假设未执行的动作已经发生。',
+      ].filter(Boolean).join('\n'),
+    });
   }
 
   private recordDiagnostic(

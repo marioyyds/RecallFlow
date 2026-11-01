@@ -16,8 +16,8 @@ const ENTRIES = [
   { ts: 9, phase: 'jev', iter: 0, mode: 'shadow', decision: { kind: 'act' }, latencyMs: 120, inputTokens: 90, outputTokens: 10 },
   { ts: 10, phase: 'jev-shadow-compare', agreed: true },
   { ts: 11, phase: 'jev', iter: 1, mode: 'live', decision: { kind: 'act' }, latencyMs: 80, inputTokens: 40, outputTokens: 5 },
-  { ts: 12, phase: 'jev', iter: 2, mode: 'live', decision: { kind: 'escalate' }, latencyMs: 60, inputTokens: 20, outputTokens: 3 },
-  { ts: 13, phase: 'jev-handoff', reason: 'low-expected-progress' },
+  { ts: 12, phase: 'jev', iter: 2, mode: 'live', decision: { kind: 'blocked', reason: 'model-blocked' }, latencyMs: 60, inputTokens: 20, outputTokens: 3 },
+  { ts: 13, phase: 'jev-handoff', reason: 'model-blocked' },
   { ts: 9, phase: 'complete', reason: 'final-answer', totalTokens: 1200 },
 ];
 

@@ -76,12 +76,12 @@
       <span class="hint">JEV 是独立的远程结构化决策模型，不负责聊天或生成最终回答；最终回答仍使用上面的聊天模型。</span>
       <label class="field switch-field">
         <span class="field-label">启用 JEV 快思考</span>
-        <span class="hint">启用后，页面操作任务可优先调用 JEV 选择受限工具动作；高不确定性或高风险操作仍升级到聊天模型。</span>
+        <span class="hint">启用后，JEV 在每次页面观察后选择受限 operation 和对应的 target；研究、规划和文本生成仍交给聊天模型。</span>
         <input id="jev-enabled" type="checkbox" class="switch">
       </label>
       <label class="field switch-field">
         <span class="field-label">影子模式（推荐先启用）</span>
-        <span class="hint">只记录 JEV 的动作建议与置信度，不实际执行；关闭后才会让 JEV 执行受限的只读快路径动作。</span>
+        <span class="hint">只记录 operation、target 和置信度，不实际执行；关闭后才会让 JEV 执行通过安全门控的快路径动作。</span>
         <input id="jev-shadow-mode" type="checkbox" class="switch">
       </label>
       <label class="field">

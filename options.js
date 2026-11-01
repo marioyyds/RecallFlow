@@ -4394,7 +4394,10 @@ function summarizeRunTrace(entries) {
     jevShadowCalls: jevShadow.length,
     jevLiveCalls: jevLive.length,
     jevActions: jev.filter((e) => e.decision?.kind === "act").length,
-    jevEscalations: jev.filter((e) => e.decision?.kind === "escalate").length,
+    jevEscalations: jev.filter((e) => {
+      const kind = e.decision?.kind;
+      return kind === "blocked" || kind === "done";
+    }).length,
     jevLatencyMs: Math.round(jev.reduce((n, e) => n + num(e.latencyMs), 0)),
     jevInputTokens: jev.reduce((n, e) => n + num(e.inputTokens), 0),
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
