@@ -3,6 +3,10 @@ import { isRetryableError } from './llm.ts';
 import { parseToolArgs } from './tools.ts';
 import type { Caught } from './errors.ts';
 import { sanitizeMessages } from '../../shared/surrogates.ts';
+import {
+  modelRequiresReasoningReplay,
+  prepareProviderMessages,
+} from './provider-history.ts';
 
 /**
  * 以流式方式调用一次 Agent 步骤，解析 SSE 中的 content 与 tool_calls。
@@ -25,7 +29,12 @@ import { sanitizeMessages } from '../../shared/surrogates.ts';
  *
  * @returns {{assistantMessage: object}|null} 无内容时返回 null（没什么可保留的）
  */
-export function buildPartialStep(contentAcc: any, toolAcc: any) {
+export function buildPartialStep(
+  contentAcc: any,
+  toolAcc: any,
+  reasoningContent = '',
+  replayReasoning = false
+) {
   const content = String(contentAcc || '');
   const raw = Array.isArray(toolAcc) ? toolAcc : [];
   const toolCalls = [];
@@ -48,6 +57,7 @@ export function buildPartialStep(contentAcc: any, toolAcc: any) {
   if (!content && !toolCalls.length) return null;
   const assistantMessage: Record<string, unknown> = { role: 'assistant', content };
   if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
+  if (replayReasoning) assistantMessage.reasoning_content = String(reasoningContent || '');
   return { assistantMessage };
 }
 
@@ -99,7 +109,6 @@ function isBodyParseRejection(status: any, parsed: any, detail: any) {
 
 export async function streamAgentStep(port: any, settings: any, messages: any, signal: AbortSignal, tools: any, emit: any, toolChoice?: any) {
   const url = settings.baseUrl.replace(/\/+$/, '') + '/chat/completions';
-  const body: any = { model: settings.model, messages, temperature: 0.3, stream: true, stream_options: { include_usage: true } };
   // 出站消毒（**所有模型请求都从这里走**，所以兜底放在这一处最省）。
   //
   // 为什么必须兜：内容里只要有一个孤立代理（切裂的代理对），服务端在**解析请求体**阶段
@@ -118,11 +127,20 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       emit({ type: 'verify', ok: null, reason: '请求体里发现非法字符（孤立代理对），已自动清理后继续（共 ' + cleaned.count + ' 处）。' });
     }
   }
+  const carriesTools = Boolean(tools && tools.length);
+  const providerMessages = prepareProviderMessages(messages, settings, carriesTools);
+  const body: any = {
+    model: settings.model,
+    messages: providerMessages,
+    temperature: 0.3,
+    stream: true,
+    stream_options: { include_usage: true },
+  };
   // 仅在确有可用工具时附带 tools / tool_choice，避免空数组触发 API 400 而中断回答。
   // toolChoice 用来区分「正常推理（auto）」与「收尾成文（none）」：
   // 收尾那次请求必须带着**同一份** tools 才能复用前面所有轮的请求前缀缓存，
   // 靠 tool_choice: 'none' 来禁止它继续调工具（官方：none 表示模型不会调用任何 tool）。
-  if (tools && tools.length) {
+  if (carriesTools) {
     body.tools = tools;
     body.tool_choice = toolChoice || 'auto';
   }
@@ -244,12 +262,8 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
   let buffer = '';
   let contentAcc = '';
   let usage = null;
-  // 思维链累积（只有推理模型会发 delta.reasoning_content，如 deepseek-reasoner）。
-  //
-  // ⚠ **它只用于展示，绝不写回 messages。** 两个理由，任一条都足够：
-  //   ① 前缀缓存：把思维链塞进 assistant 消息会改写请求前缀，历史全部重新 prefill；
-  //   ② 协议：reasoning_content 不是可回传字段，回传会被 API 拒绝或忽略。
-  // 因此这里只累积 + emit 给面板，assistantMessage 里**不带**它。
+  // 思维链累积。面板用它做折叠记录；DeepSeek thinking 模型在携带 tools
+  // 的后续请求中要求把所有历史 assistant 的 reasoning_content 原样回传。
   let reasoningAcc = '';
   const toolAcc: any[] = [];
   // 分阶段计时：一次模型请求可以拆成三段 ——
@@ -276,7 +290,12 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       // 的瞬间，那一步就完全没有可续跑的状态，恢复等于从头再来（实测就是这个后果）。
       if (e && ((e as Caught).name === 'AbortError' || signal?.aborted)) {
         const partialErr: any = new DOMException('任务已取消', 'AbortError');
-        partialErr.partial = buildPartialStep(contentAcc, toolAcc);
+        partialErr.partial = buildPartialStep(
+          contentAcc,
+          toolAcc,
+          reasoningAcc,
+          carriesTools && modelRequiresReasoningReplay(settings)
+        );
         cleanup();
         throw partialErr;
       }
@@ -344,6 +363,9 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       type: 'function',
       function: { name: t.name, arguments: JSON.stringify(t.args) },
     }));
+  }
+  if (carriesTools && modelRequiresReasoningReplay(settings)) {
+    assistantMessage.reasoning_content = reasoningAcc;
   }
   cleanup(); // 流已结束，摘掉中断监听（流式期间刻意保留，以保证「停止」能立即生效）
   const streamEndAt = Date.now();

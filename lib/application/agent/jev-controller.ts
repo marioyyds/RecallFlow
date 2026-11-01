@@ -21,6 +21,7 @@ import {
   type JevTextFieldContext,
   type JevTextResult,
 } from './jev-text-helper.ts';
+import { modelRequiresReasoningReplay } from './provider-history.ts';
 import {
   JEV_MAX_ATTEMPTS_PER_RUN,
   JEV_MAX_CONSECUTIVE_ACTIONS,
@@ -381,7 +382,6 @@ export class JevFastController {
     };
     const assistantMessage = {
       role: 'assistant',
-      lane: 'fast',
       content: 'JEV 快思考：' +
         action.operation +
         (action.target ? ' → ' + action.target.label : ''),
@@ -393,6 +393,9 @@ export class JevFastController {
           arguments: JSON.stringify(action.args),
         },
       }],
+      ...(modelRequiresReasoningReplay(this.state.settings)
+        ? { reasoning_content: '' }
+        : {}),
     };
     this.state.messages.push(assistantMessage);
     return this.pipeline.process({
@@ -414,7 +417,6 @@ export class JevFastController {
     };
     const assistantMessage = {
       role: 'assistant',
-      lane: 'fast',
       content: 'JEV 快思考：重新观察页面',
       tool_calls: [{
         id: callId,
@@ -424,6 +426,9 @@ export class JevFastController {
           arguments: JSON.stringify(toolCall.args),
         },
       }],
+      ...(modelRequiresReasoningReplay(this.state.settings)
+        ? { reasoning_content: '' }
+        : {}),
     };
     this.state.messages.push(assistantMessage);
     return this.pipeline.process({

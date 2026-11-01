@@ -8820,8 +8820,47 @@ function deadlineDecision(input = {}) {
   return "continue";
 }
 
+// lib/application/agent/provider-history.ts
+function modelRequiresReasoningReplay(settings) {
+  const model = String(settings.model || "").trim().toLowerCase();
+  return /^deepseek-(flash|reasoner|v4)(?:$|[-.:])/.test(model) || /(?:^|[-_/])deepseek-(?:flash|reasoner|v4)(?:$|[-.:])/.test(model);
+}
+function prepareProviderMessages(messages, settings, carriesTools) {
+  const list = Array.isArray(messages) ? messages : [];
+  const replayReasoning = carriesTools && modelRequiresReasoningReplay(settings);
+  return list.filter((message) => message && typeof message === "object" && !Array.isArray(message)).map((raw) => {
+    const message = raw;
+    const role = String(message.role || "");
+    if (role === "assistant") {
+      const clean2 = {
+        role: "assistant",
+        content: message.content ?? ""
+      };
+      if (Array.isArray(message.tool_calls)) clean2.tool_calls = message.tool_calls;
+      if (typeof message.name === "string" && message.name) clean2.name = message.name;
+      if (replayReasoning) {
+        clean2.reasoning_content = typeof message.reasoning_content === "string" ? message.reasoning_content : "";
+      }
+      return clean2;
+    }
+    if (role === "tool") {
+      return {
+        role: "tool",
+        tool_call_id: message.tool_call_id,
+        content: message.content ?? ""
+      };
+    }
+    const clean = {
+      role,
+      content: message.content ?? ""
+    };
+    if (typeof message.name === "string" && message.name) clean.name = message.name;
+    return clean;
+  });
+}
+
 // lib/application/agent/stream-step.ts
-function buildPartialStep(contentAcc, toolAcc) {
+function buildPartialStep(contentAcc, toolAcc, reasoningContent = "", replayReasoning = false) {
   const content = String(contentAcc || "");
   const raw = Array.isArray(toolAcc) ? toolAcc : [];
   const toolCalls = [];
@@ -8843,6 +8882,7 @@ function buildPartialStep(contentAcc, toolAcc) {
   if (!content && !toolCalls.length) return null;
   const assistantMessage = { role: "assistant", content };
   if (toolCalls.length) assistantMessage.tool_calls = toolCalls;
+  if (replayReasoning) assistantMessage.reasoning_content = String(reasoningContent || "");
   return { assistantMessage };
 }
 async function readErrorDetail(resp) {
@@ -8870,7 +8910,6 @@ function isBodyParseRejection(status, parsed, detail) {
 }
 async function streamAgentStep(port, settings, messages, signal, tools, emit, toolChoice) {
   const url = settings.baseUrl.replace(/\/+$/, "") + "/chat/completions";
-  const body = { model: settings.model, messages, temperature: 0.3, stream: true, stream_options: { include_usage: true } };
   const cleaned = sanitizeMessages(messages);
   if (cleaned.count) {
     console.log("[RecallFlow] \u51FA\u7AD9\u524D\u6E05\u7406\u975E\u6CD5 Unicode\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF1A" + cleaned.count + " \u5904");
@@ -8878,7 +8917,16 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
       emit({ type: "verify", ok: null, reason: "\u8BF7\u6C42\u4F53\u91CC\u53D1\u73B0\u975E\u6CD5\u5B57\u7B26\uFF08\u5B64\u7ACB\u4EE3\u7406\u5BF9\uFF09\uFF0C\u5DF2\u81EA\u52A8\u6E05\u7406\u540E\u7EE7\u7EED\uFF08\u5171 " + cleaned.count + " \u5904\uFF09\u3002" });
     }
   }
-  if (tools && tools.length) {
+  const carriesTools = Boolean(tools && tools.length);
+  const providerMessages = prepareProviderMessages(messages, settings, carriesTools);
+  const body = {
+    model: settings.model,
+    messages: providerMessages,
+    temperature: 0.3,
+    stream: true,
+    stream_options: { include_usage: true }
+  };
+  if (carriesTools) {
     body.tools = tools;
     body.tool_choice = toolChoice || "auto";
   }
@@ -8983,7 +9031,12 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
     } catch (e) {
       if (e && (e.name === "AbortError" || signal?.aborted)) {
         const partialErr = new DOMException("\u4EFB\u52A1\u5DF2\u53D6\u6D88", "AbortError");
-        partialErr.partial = buildPartialStep(contentAcc, toolAcc);
+        partialErr.partial = buildPartialStep(
+          contentAcc,
+          toolAcc,
+          reasoningAcc,
+          carriesTools && modelRequiresReasoningReplay(settings)
+        );
         cleanup();
         throw partialErr;
       }
@@ -9041,6 +9094,9 @@ async function streamAgentStep(port, settings, messages, signal, tools, emit, to
       type: "function",
       function: { name: t.name, arguments: JSON.stringify(t.args) }
     }));
+  }
+  if (carriesTools && modelRequiresReasoningReplay(settings)) {
+    assistantMessage.reasoning_content = reasoningAcc;
   }
   cleanup();
   const streamEndAt = Date.now();
@@ -12802,7 +12858,6 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
-      lane: "fast",
       content: "JEV \u5FEB\u601D\u8003\uFF1A" + action.operation + (action.target ? " \u2192 " + action.target.label : ""),
       tool_calls: [{
         id: callId,
@@ -12811,7 +12866,8 @@ var JevFastController = class {
           name: action.toolName,
           arguments: JSON.stringify(action.args)
         }
-      }]
+      }],
+      ...modelRequiresReasoningReplay(this.state.settings) ? { reasoning_content: "" } : {}
     };
     this.state.messages.push(assistantMessage);
     return this.pipeline.process({
@@ -12829,7 +12885,6 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
-      lane: "fast",
       content: "JEV \u5FEB\u601D\u8003\uFF1A\u91CD\u65B0\u89C2\u5BDF\u9875\u9762",
       tool_calls: [{
         id: callId,
@@ -12838,7 +12893,8 @@ var JevFastController = class {
           name: "get_page_snapshot",
           arguments: JSON.stringify(toolCall.args)
         }
-      }]
+      }],
+      ...modelRequiresReasoningReplay(this.state.settings) ? { reasoning_content: "" } : {}
     };
     this.state.messages.push(assistantMessage);
     return this.pipeline.process({

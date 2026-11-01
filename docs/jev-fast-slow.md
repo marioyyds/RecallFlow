@@ -84,6 +84,12 @@ get_page_snapshot
 - 决策与执行绑定到快照 ref；页面导航或元素替换后旧 ref 必须失效。
 - 上传、新标签页、iframe、Shadow DOM、canvas 与任意键盘组件超出第一阶段快路径，遇到时交给慢思考。
 
+## 模型协议兼容
+
+内部消息中的 `lane` 只用于 UI 和导出，不发给聊天模型。请求发送前会转换成供应商消息白名单。
+
+DeepSeek thinking 模型在请求携带 `tools` 时，要求历史中每个 `assistant` 消息都回传 `reasoning_content`。真实的模型思维链会原样保留；JEV 合成的工具轮没有聊天模型思维链，因此回传空字符串，避免后续慢思考请求返回 HTTP 400。
+
 ## 评估指标
 
 - JEV operation/target 准确率；

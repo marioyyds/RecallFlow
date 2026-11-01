@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { streamAgentStep } from '../lib/application/agent/agent.ts';
+import { buildPartialStep, streamAgentStep } from '../lib/application/agent/agent.ts';
 
 const SETTINGS = { baseUrl: 'https://api.example.com', model: 'm', apiKey: 'k', requestTimeoutMs: 5000 };
 const ORIGINAL_FETCH = globalThis.fetch;
@@ -285,7 +285,7 @@ test('思维链：reasoning_content 流式转发为独立事件，且**不混进
   assert.equal(events.filter((e) => e.type === 'chunk')[0].text, '结论');
 });
 
-test('思维链：**绝不写回 messages**（写回会改写请求前缀，且该字段不可回传）', async () => {
+test('思维链：没有 tools 时不注入 reasoning_content', async () => {
   const lines = [
     'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '一大段思考' } }] }),
     'data: ' + JSON.stringify({ choices: [{ delta: { content: '答案' } }] }),
@@ -293,10 +293,77 @@ test('思维链：**绝不写回 messages**（写回会改写请求前缀，且�
   ];
   globalThis.fetch = async () => sseResponse(lines);
   const out = await streamAgentStep(null, SETTINGS, [], undefined, [], () => {});
-  // assistantMessage 是要被 push 进历史、下一轮**原样发回**的东西。
   assert.ok(!('reasoning_content' in out.assistantMessage), 'assistantMessage 不得带 reasoning_content');
   assert.ok(!('reasoning' in out.assistantMessage), 'assistantMessage 不得带 reasoning');
   assert.deepEqual(Object.keys(out.assistantMessage).sort(), ['content', 'role'], 'assistant 消息只应有 role 与 content');
+});
+
+test('思维链：DeepSeek thinking + tools 必须把 reasoning_content 写入 assistant 历史', async () => {
+  const settings = {
+    ...SETTINGS,
+    model: 'deepseek-flash',
+    baseUrl: 'https://api.deepseek.com',
+  };
+  const lines = [
+    'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: '先观察页面' } }] }),
+    'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'get_page_snapshot', arguments: '{}' } }] } }] }),
+    'data: [DONE]',
+  ];
+  globalThis.fetch = async () => sseResponse(lines);
+  const out = await streamAgentStep(
+    null,
+    settings,
+    [],
+    undefined,
+    [{ type: 'function', function: { name: 'get_page_snapshot' } }],
+    () => {}
+  );
+  assert.equal(out.assistantMessage.reasoning_content, '先观察页面');
+  assert.deepEqual(out.assistantMessage.tool_calls.map((call) => call.id), ['c1']);
+});
+
+test('中断恢复的 partial assistant 也保留 thinking reasoning', () => {
+  const partial = buildPartialStep(
+    '',
+    [{ index: 0, id: 'c1', name: 'get_page_snapshot', args: '{}' }],
+    '继续思考',
+    true
+  );
+  assert.equal(partial.assistantMessage.reasoning_content, '继续思考');
+  assert.equal(partial.assistantMessage.tool_calls[0].id, 'c1');
+});
+
+test('后续请求会补齐合成工具轮的 reasoning_content，且不发送 UI lane', async () => {
+  const settings = {
+    ...SETTINGS,
+    model: 'deepseek-flash',
+    baseUrl: 'https://api.deepseek.com',
+  };
+  let requestBody = null;
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return sseResponse(contentLines('完成'));
+  };
+  const messages = [
+    { role: 'system', content: 'system' },
+    {
+      role: 'assistant',
+      content: 'JEV 观察',
+      lane: 'fast',
+      tool_calls: [{ id: 'j1', type: 'function', function: { name: 'get_page_snapshot', arguments: '{}' } }],
+    },
+    { role: 'tool', tool_call_id: 'j1', content: '快照' },
+  ];
+  await streamAgentStep(
+    null,
+    settings,
+    messages,
+    undefined,
+    [{ type: 'function', function: { name: 'get_page_snapshot' } }],
+    () => {}
+  );
+  assert.equal(requestBody.messages[1].reasoning_content, '');
+  assert.equal('lane' in requestBody.messages[1], false);
 });
 
 test('思维链：算作「首个增量」——否则整段思考会被错算进 prefill 耗时', async () => {

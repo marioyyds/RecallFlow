@@ -70,7 +70,9 @@ export const ENTRIES = [
   // Raise by 1KB explicitly. No dependency added.
   // Operation/target JEV executor, per-cycle observation and TYPE_TEXT helper
   // measured 977997 bytes. Raise explicitly. No dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 957 * 1024 },
+  // Provider-safe history and DeepSeek reasoning replay measured 980222 bytes.
+  // Raise by 1KB explicitly. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 958 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
