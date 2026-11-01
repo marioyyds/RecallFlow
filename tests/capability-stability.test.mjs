@@ -71,6 +71,9 @@ test('意图白名单改为执行期权限：schema 可见不等于当前任务�
   assert.equal(isToolAllowedForIntent(INTENTS.KNOWLEDGE, 'click_element'), false);
   assert.equal(isToolAllowedForIntent(INTENTS.CHAT, 'run_javascript'), false);
   assert.equal(isToolAllowedForIntent(INTENTS.CHAT, 'update_plan'), true, 'alwaysAvailable 工具跨意图常驻');
+  for (const intent of Object.values(INTENTS)) {
+    assert.equal(isToolAllowedForIntent(intent, 'read_table'), true, `read_table 必须对 ${intent} 可用`);
+  }
   assert.equal(isToolAllowedForIntent(INTENTS.CHAT, 'mcp__server__tool'), true, 'MCP 由审批策略控制');
   assert.equal(
     isToolAllowedForIntent(INTENTS.CHAT, 'click_element', ['click_element']),

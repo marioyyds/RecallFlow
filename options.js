@@ -3563,7 +3563,9 @@ var TOOL_METADATA = {
   inspect_element: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
   // 读取表格/网格并做筛选/计数/求和：只读，不需要审批。与 inspect_element 同走内容脚本，
   // 但多一层"自动选主表 + 结构化查询"，因此单独成一个工具（面向模型的边界按执行路径+权限分组）。
-  read_table: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
+  // 表格读取是各任务共用的页面观察能力：知识库、研究、普通对话也可能需要读取
+  // 用户当前页面的结构化数据，不能只作为 browser_task 的专属工具。
+  read_table: { risk: "read", readOnly: true, parallelSafe: true, alwaysAvailable: true, route: "content" },
   // 截图刻意不标记：它重、会向 UI 推图，且同批截图没有实际收益
   take_screenshot: { risk: "read", readOnly: true, route: "background" },
   scroll_page: { risk: "page", requiresApproval: true, route: "content" },

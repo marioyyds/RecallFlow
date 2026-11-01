@@ -224,7 +224,10 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   197de68d980b3f32 — **有意改动**：get_page_snapshot 增加 query/cursor，inspect_element.query
   //                       增加 region/cursor。首轮快照改为低体积轮廓，未展示元素通过稳定游标
   //                       或精确元素查询增量读取；工具数量、工具名与权限均未变化。
-  const EXPECTED = '197de68d980b3f32';
+  //   cdcc9ab387ecea49 — **有意改动**：`read_table` 标记为 `alwaysAvailable`。
+  //                       表格读取是知识库、研究、普通对话也会用到的页面观察能力，
+  //                       不能只在 browser_task 的执行权限中可用；工具数量与风险等级不变。
+  const EXPECTED = 'cdcc9ab387ecea49';
   assert.equal(
     fp,
     EXPECTED,

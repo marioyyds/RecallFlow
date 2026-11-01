@@ -24,8 +24,9 @@ test('run_javascript 归入页面命令审批', () => {
   assert.ok(!md.alwaysRequireApproval, '不再单独占用逐次审批档');
 });
 
-test('load_skill is always available across intents', () => {
+test('cross-intent tools are always available across intents', () => {
   assert.equal(getToolMetadata('load_skill').alwaysAvailable, true);
+  assert.equal(getToolMetadata('read_table').alwaysAvailable, true);
 });
 
 test('validateToolCall enforces required params', () => {
