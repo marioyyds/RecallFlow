@@ -44,6 +44,12 @@ async function load() {
   $('jev-model').value = s.jev.model;
   $('jev-timeout').value = String(s.jev.requestTimeoutMs);
   $('jev-retries').value = String(s.jev.maxRetries);
+  $('jev-max-attempts').value = String(s.jev.maxAttemptsPerRun);
+  $('jev-max-actions').value = String(s.jev.maxConsecutiveActions);
+  $('jev-max-candidates').value = String(s.jev.maxElementCandidates);
+  $('jev-min-read').value = String(s.jev.minReadConfidence);
+  $('jev-min-action').value = String(s.jev.minActionConfidence);
+  $('jev-min-click').value = String(s.jev.minClickConfidence);
   $('jev-schema-version').value = s.jev.schemaVersion;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
@@ -270,6 +276,12 @@ function collectSettings() {
       model: $('jev-model').value,
       requestTimeoutMs: $('jev-timeout').value,
       maxRetries: $('jev-retries').value,
+      maxAttemptsPerRun: $('jev-max-attempts').value,
+      maxConsecutiveActions: $('jev-max-actions').value,
+      maxElementCandidates: $('jev-max-candidates').value,
+      minReadConfidence: $('jev-min-read').value,
+      minActionConfidence: $('jev-min-action').value,
+      minClickConfidence: $('jev-min-click').value,
       schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
     }),
     ragEnabled: $('rag-enabled').checked,
@@ -353,6 +365,12 @@ $('test-jev').addEventListener('click', async () => {
     model: $('jev-model').value,
     requestTimeoutMs: $('jev-timeout').value,
     maxRetries: $('jev-retries').value,
+    maxAttemptsPerRun: $('jev-max-attempts').value,
+    maxConsecutiveActions: $('jev-max-actions').value,
+    maxElementCandidates: $('jev-max-candidates').value,
+    minReadConfidence: $('jev-min-read').value,
+    minActionConfidence: $('jev-min-action').value,
+    minClickConfidence: $('jev-min-click').value,
     schemaVersion: $('jev-schema-version').value,
   });
   if (!settings.apiKey) {

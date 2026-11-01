@@ -118,6 +118,37 @@
           <input id="jev-retries" type="number" min="0" max="3" step="1" placeholder="1">
         </label>
       </div>
+      <div class="budget-row">
+        <label class="field">
+          <span class="field-label">每个任务最多尝试</span>
+          <input id="jev-max-attempts" type="number" min="1" max="200" step="1" placeholder="36">
+        </label>
+        <label class="field">
+          <span class="field-label">最多连续执行动作</span>
+          <input id="jev-max-actions" type="number" min="1" max="50" step="1" placeholder="12">
+        </label>
+      </div>
+      <label class="field">
+        <span class="field-label">每次最多提供候选元素</span>
+        <input id="jev-max-candidates" type="number" min="5" max="100" step="1" placeholder="40">
+        <span class="hint">只把最相关的有限个元素交给 JEV；增加候选会提高覆盖范围，也会增加请求延迟和成本。</span>
+      </label>
+      <div class="settings-subsection-title">三档置信度阈值</div>
+      <div class="budget-row">
+        <label class="field">
+          <span class="field-label">读取类</span>
+          <input id="jev-min-read" type="number" min="0" max="1" step="0.01" placeholder="0.72">
+        </label>
+        <label class="field">
+          <span class="field-label">输入类</span>
+          <input id="jev-min-action" type="number" min="0" max="1" step="0.01" placeholder="0.8">
+        </label>
+        <label class="field">
+          <span class="field-label">点击类</span>
+          <input id="jev-min-click" type="number" min="0" max="1" step="0.01" placeholder="0.86">
+        </label>
+      </div>
+      <span class="hint">点击类会同时检查 operation 与目标元素；目标元素可定位时不再因多分类 operation 概率略低而单点否决。</span>
       <label class="field">
         <span class="field-label">请求协议版本</span>
         <input id="jev-schema-version" type="text" placeholder="jev.recallflow.v1" autocomplete="off">

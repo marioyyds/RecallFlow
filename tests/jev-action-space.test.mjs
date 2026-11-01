@@ -5,6 +5,7 @@ import {
   JEV_CLICK_TARGET_QUESTION,
   JEV_MIN_ACTION_CONFIDENCE,
   JEV_MIN_CLICK_CONFIDENCE,
+  JEV_MIN_READ_CONFIDENCE,
   JEV_OPERATION_QUESTION,
   JEV_TYPE_TEXT_TARGET_QUESTION,
   buildJevFastRequest,
@@ -197,7 +198,7 @@ test('operation 与所有 target head 能通过 TypeSafe 响应校验', () => {
   assert.equal(decision.target.label, '填写标题');
 });
 
-test('operation 或匹配 target 置信度不足会明确 BLOCKED', () => {
+test('有明确 target 时不因 operation 多分类概率偏低而过早否决', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
@@ -208,9 +209,14 @@ test('operation 或匹配 target 置信度不足会明确 BLOCKED', () => {
   const lowOperation = responseFor(
     bundle,
     'CLICK',
-    JEV_MIN_CLICK_CONFIDENCE - 0.01
+    0.2
   );
-  assert.equal(interpretJevFastDecision(lowOperation, bundle).reason, 'low-confidence');
+  const decision = interpretJevFastDecision(lowOperation, bundle);
+  assert.equal(decision.kind, 'act');
+  assert.equal(decision.operation, 'CLICK');
+  assert.equal(decision.target.label, '上传图文');
+  assert.equal(decision.targetConfidence, 0.95);
+  assert.equal(decision.confidence, 0.95);
 
   const lowTarget = responseFor(bundle, 'CLICK', 0.99);
   lowTarget.answers[JEV_CLICK_TARGET_QUESTION] = choice(
@@ -219,6 +225,59 @@ test('operation 或匹配 target 置信度不足会明确 BLOCKED', () => {
     JEV_MIN_CLICK_CONFIDENCE - 0.01
   );
   assert.equal(interpretJevFastDecision(lowTarget, bundle).reason, 'low-confidence');
+
+  const bothLow = responseFor(bundle, 'CLICK', 0.2);
+  bothLow.answers[JEV_CLICK_TARGET_QUESTION] = choice(
+    Object.keys(bundle.targets.CLICK),
+    Object.keys(bundle.targets.CLICK)[0],
+    0.6
+  );
+  assert.equal(interpretJevFastDecision(bothLow, bundle).reason, 'low-confidence');
+
+  const lowRead = responseFor(bundle, 'READ_PAGE', JEV_MIN_READ_CONFIDENCE - 0.01);
+  assert.equal(interpretJevFastDecision(lowRead, bundle).reason, 'low-confidence');
+});
+
+test('候选数和三档置信度使用设置覆盖值', () => {
+  const elements = Array.from({ length: 12 }, (_, index) => ({
+    ref: 'rf-' + index,
+    tag: 'button',
+    role: 'button',
+    label: '操作 ' + index,
+    inViewport: true,
+  }));
+  const custom = buildJevFastRequest(
+    {
+      model: 'jev-latest',
+      maxElementCandidates: 5,
+      minReadConfidence: 0.61,
+      minActionConfidence: 0.63,
+      minClickConfidence: 0.65,
+    },
+    {
+      intent: 'browser_task',
+      phase: 'editor',
+      instruction: '执行操作',
+      snapshot: pageSnapshot({ elements, text: '操作' }),
+    }
+  );
+  assert.equal(custom.elements.length <= 5, true);
+  assert.equal(custom.operations.CLICK.minConfidence, 0.65);
+  assert.equal(custom.operations.READ_PAGE.minConfidence, 0.61);
+  const typeBundle = buildJevFastRequest(
+    {
+      model: 'jev-latest',
+      minActionConfidence: 0.63,
+    },
+    {
+      intent: 'browser_task',
+      phase: 'editor',
+      instruction: '填写标题',
+      snapshot: pageSnapshot(),
+    }
+  );
+  assert.equal(typeBundle.operations.TYPE_TEXT.minConfidence, 0.63);
+  assert.equal(typeBundle.targets.TYPE_TEXT['2'].minConfidence, 0.63);
 });
 
 test('DONE 和 BLOCKED 是显式 operation，不是额外 noul', () => {
@@ -363,6 +422,32 @@ test('影子模式只观察和决策，不执行 JEV 动作', async () => {
   const outcome = await controller.runAvailable(0, async () => {});
   assert.equal(outcome.kind, 'shadow');
   assert.deepEqual(calls, ['get_page_snapshot']);
+});
+
+test('连续动作上限由设置控制，内部快思考文案不进入聊天历史', async () => {
+  const state = makeState(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'CLICK');
+    }
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions.length, 1);
+  assert.equal(calls.filter((name) => name === 'click_element').length, 1);
+  assert.equal(
+    state.messages.some(
+      (message) =>
+        message.role === 'assistant' &&
+        /JEV 快思考|重新观察页面/.test(String(message.content || ''))
+    ),
+    false
+  );
 });
 
 test('TYPE_TEXT 由文本助手生成值，JEV 只负责 operation 和 target', async () => {

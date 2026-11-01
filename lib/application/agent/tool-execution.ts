@@ -103,6 +103,9 @@ export async function runParallelBatch(toolCalls: any, o: any) {
       // 四条安全边界：任务权限 / 停用 / 参数非法 / 需要审批，任一命中就退回串行路径。
       // 判定条件与下面循环里的完全一致，避免"预执行了但循环会拒绝"的空转。
       if (typeof o.isToolAllowed === 'function' && !o.isToolAllowed(name)) return true;
+      if (typeof o.shouldExecuteSerially === 'function' && o.shouldExecuteSerially(name, args)) {
+        return true;
+      }
       if (o.disabledTools.has(name)) return true;
       if (!validateToolCall(name, args).ok) return true;
       return (

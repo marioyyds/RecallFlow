@@ -89,7 +89,9 @@ test('缺省 loader 在没有 chrome 的环境里也不会抛（单元测试场�
 test('串行路径：审批判断前必须现读，且判断用的是现读结果', () => {
   const at = agentSrc.indexOf('toolNeedsApproval(toolCall.name,');
   assert.ok(at > -1, '应能找到循环里的审批判断');
-  const before = agentSrc.slice(Math.max(0, at - 900), at);
+  const setupAt = agentSrc.lastIndexOf('let approvalSettings = state.settings', at);
+  assert.ok(setupAt > -1, '应能找到本次调用的审批设置起点');
+  const before = agentSrc.slice(setupAt, at);
   assert.match(
     before,
     /approvalSettings = await readLiveApprovalSettings\(state\.settings\)/,
@@ -102,9 +104,11 @@ test('串行路径：审批判断前必须现读，且判断用的是现读结�
 });
 
 test('代码执行审批的会话放行也读现读结果（同一个坑的第三个入口）', () => {
-  const at = agentSrc.indexOf('const allowSession =');
+  const at = agentSrc.indexOf('let allowSession = false');
   assert.ok(at > -1);
-  assert.match(agentSrc.slice(at, at + 220), /resolveCodeExecutionApproval\(approvalSettings\)/);
+  const end = agentSrc.indexOf('if (approvalRequired)', at);
+  assert.ok(end > at);
+  assert.match(agentSrc.slice(at, end), /resolveCodeExecutionApproval\(approvalSettings\)/);
 });
 
 // ---------------- 设置写回：不许拿"打开面板时读到的旧值"当基底 ----------------

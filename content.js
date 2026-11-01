@@ -4048,7 +4048,13 @@
     requestTimeoutMs: 15e3,
     maxRetries: 1,
     schemaVersion: "jev.recallflow.v1",
-    shadowMode: true
+    shadowMode: true,
+    maxAttemptsPerRun: 36,
+    maxConsecutiveActions: 12,
+    maxElementCandidates: 40,
+    minReadConfidence: 0.72,
+    minActionConfidence: 0.8,
+    minClickConfidence: 0.86
   });
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
@@ -4125,6 +4131,14 @@
     };
     const timeout = Number(raw.requestTimeoutMs);
     const retries = Number(raw.maxRetries);
+    const boundedInteger = (key, min, max) => {
+      const value = Number(raw[key]);
+      return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : Number(JEV_SETTINGS_DEFAULTS[key]);
+    };
+    const boundedProbability = (key) => {
+      const value = Number(raw[key]);
+      return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : Number(JEV_SETTINGS_DEFAULTS[key]);
+    };
     return {
       enabled: raw.enabled === true,
       baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
@@ -4133,7 +4147,13 @@
       requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1e3 ? Math.min(Math.floor(timeout), 12e4) : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
       maxRetries: Number.isFinite(retries) && retries >= 0 ? Math.min(Math.floor(retries), 3) : JEV_SETTINGS_DEFAULTS.maxRetries,
       schemaVersion: stringValue("schemaVersion", JEV_SETTINGS_DEFAULTS.schemaVersion),
-      shadowMode: raw.shadowMode !== false
+      shadowMode: raw.shadowMode !== false,
+      maxAttemptsPerRun: boundedInteger("maxAttemptsPerRun", 1, 200),
+      maxConsecutiveActions: boundedInteger("maxConsecutiveActions", 1, 50),
+      maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
+      minReadConfidence: boundedProbability("minReadConfidence"),
+      minActionConfidence: boundedProbability("minActionConfidence"),
+      minClickConfidence: boundedProbability("minClickConfidence")
     };
   }
   async function updateAISettings(patch) {

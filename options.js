@@ -16,7 +16,13 @@ var JEV_SETTINGS_DEFAULTS = Object.freeze({
   requestTimeoutMs: 15e3,
   maxRetries: 1,
   schemaVersion: "jev.recallflow.v1",
-  shadowMode: true
+  shadowMode: true,
+  maxAttemptsPerRun: 36,
+  maxConsecutiveActions: 12,
+  maxElementCandidates: 40,
+  minReadConfidence: 0.72,
+  minActionConfidence: 0.8,
+  minClickConfidence: 0.86
 });
 var AI_SETTINGS_DEFAULTS = {
   apiKey: "",
@@ -90,6 +96,14 @@ function mergeJevSettings(saved) {
   };
   const timeout = Number(raw.requestTimeoutMs);
   const retries = Number(raw.maxRetries);
+  const boundedInteger = (key, min, max) => {
+    const value = Number(raw[key]);
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : Number(JEV_SETTINGS_DEFAULTS[key]);
+  };
+  const boundedProbability = (key) => {
+    const value = Number(raw[key]);
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : Number(JEV_SETTINGS_DEFAULTS[key]);
+  };
   return {
     enabled: raw.enabled === true,
     baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
@@ -98,7 +112,13 @@ function mergeJevSettings(saved) {
     requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1e3 ? Math.min(Math.floor(timeout), 12e4) : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
     maxRetries: Number.isFinite(retries) && retries >= 0 ? Math.min(Math.floor(retries), 3) : JEV_SETTINGS_DEFAULTS.maxRetries,
     schemaVersion: stringValue("schemaVersion", JEV_SETTINGS_DEFAULTS.schemaVersion),
-    shadowMode: raw.shadowMode !== false
+    shadowMode: raw.shadowMode !== false,
+    maxAttemptsPerRun: boundedInteger("maxAttemptsPerRun", 1, 200),
+    maxConsecutiveActions: boundedInteger("maxConsecutiveActions", 1, 50),
+    maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
+    minReadConfidence: boundedProbability("minReadConfidence"),
+    minActionConfidence: boundedProbability("minActionConfidence"),
+    minClickConfidence: boundedProbability("minClickConfidence")
   };
 }
 function resolveCodeExecutionApproval(settings) {
@@ -7170,6 +7190,12 @@ async function load() {
   $("jev-model").value = s.jev.model;
   $("jev-timeout").value = String(s.jev.requestTimeoutMs);
   $("jev-retries").value = String(s.jev.maxRetries);
+  $("jev-max-attempts").value = String(s.jev.maxAttemptsPerRun);
+  $("jev-max-actions").value = String(s.jev.maxConsecutiveActions);
+  $("jev-max-candidates").value = String(s.jev.maxElementCandidates);
+  $("jev-min-read").value = String(s.jev.minReadConfidence);
+  $("jev-min-action").value = String(s.jev.minActionConfidence);
+  $("jev-min-click").value = String(s.jev.minClickConfidence);
   $("jev-schema-version").value = s.jev.schemaVersion;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
@@ -7365,6 +7391,12 @@ function collectSettings() {
       model: $("jev-model").value,
       requestTimeoutMs: $("jev-timeout").value,
       maxRetries: $("jev-retries").value,
+      maxAttemptsPerRun: $("jev-max-attempts").value,
+      maxConsecutiveActions: $("jev-max-actions").value,
+      maxElementCandidates: $("jev-max-candidates").value,
+      minReadConfidence: $("jev-min-read").value,
+      minActionConfidence: $("jev-min-action").value,
+      minClickConfidence: $("jev-min-click").value,
       schemaVersion: $("jev-schema-version").value || JEV_SETTINGS_DEFAULTS.schemaVersion
     }),
     ragEnabled: $("rag-enabled").checked,
@@ -7439,6 +7471,12 @@ $("test-jev").addEventListener("click", async () => {
     model: $("jev-model").value,
     requestTimeoutMs: $("jev-timeout").value,
     maxRetries: $("jev-retries").value,
+    maxAttemptsPerRun: $("jev-max-attempts").value,
+    maxConsecutiveActions: $("jev-max-actions").value,
+    maxElementCandidates: $("jev-max-candidates").value,
+    minReadConfidence: $("jev-min-read").value,
+    minActionConfidence: $("jev-min-action").value,
+    minClickConfidence: $("jev-min-click").value,
     schemaVersion: $("jev-schema-version").value
   });
   if (!settings.apiKey) {

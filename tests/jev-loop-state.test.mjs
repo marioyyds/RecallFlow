@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  JEV_MAX_ATTEMPTS_PER_RUN,
-  JEV_MAX_CONSECUTIVE_ACTIONS,
+  JEV_HARD_MAX_ATTEMPTS_PER_RUN,
+  JEV_HARD_MAX_CONSECUTIVE_ACTIONS,
   restoreJevLoopState,
 } from '../lib/application/agent/jev-loop-state.ts';
 import { RunSessionPersistence } from '../lib/application/agent/session-persistence.ts';
@@ -27,8 +27,8 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     lastToolCallCount: 7,
     lastActionSignature: 123,
   });
-  assert.equal(restored.attempts, JEV_MAX_ATTEMPTS_PER_RUN);
-  assert.equal(restored.consecutiveFastActions, JEV_MAX_CONSECUTIVE_ACTIONS);
+  assert.equal(restored.attempts, JEV_HARD_MAX_ATTEMPTS_PER_RUN);
+  assert.equal(restored.consecutiveFastActions, JEV_HARD_MAX_CONSECUTIVE_ACTIONS);
   assert.equal(restored.fastActions, 0);
   assert.equal(restored.lastAttemptAt, 12);
   assert.equal(restored.lastActionSignature, '123');

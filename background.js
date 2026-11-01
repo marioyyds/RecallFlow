@@ -567,7 +567,13 @@ var JEV_SETTINGS_DEFAULTS = Object.freeze({
   requestTimeoutMs: 15e3,
   maxRetries: 1,
   schemaVersion: "jev.recallflow.v1",
-  shadowMode: true
+  shadowMode: true,
+  maxAttemptsPerRun: 36,
+  maxConsecutiveActions: 12,
+  maxElementCandidates: 40,
+  minReadConfidence: 0.72,
+  minActionConfidence: 0.8,
+  minClickConfidence: 0.86
 });
 var AI_SETTINGS_DEFAULTS = {
   apiKey: "",
@@ -641,6 +647,14 @@ function mergeJevSettings(saved) {
   };
   const timeout = Number(raw.requestTimeoutMs);
   const retries = Number(raw.maxRetries);
+  const boundedInteger = (key, min, max) => {
+    const value = Number(raw[key]);
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.floor(value))) : Number(JEV_SETTINGS_DEFAULTS[key]);
+  };
+  const boundedProbability = (key) => {
+    const value = Number(raw[key]);
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : Number(JEV_SETTINGS_DEFAULTS[key]);
+  };
   return {
     enabled: raw.enabled === true,
     baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
@@ -649,7 +663,13 @@ function mergeJevSettings(saved) {
     requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1e3 ? Math.min(Math.floor(timeout), 12e4) : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
     maxRetries: Number.isFinite(retries) && retries >= 0 ? Math.min(Math.floor(retries), 3) : JEV_SETTINGS_DEFAULTS.maxRetries,
     schemaVersion: stringValue("schemaVersion", JEV_SETTINGS_DEFAULTS.schemaVersion),
-    shadowMode: raw.shadowMode !== false
+    shadowMode: raw.shadowMode !== false,
+    maxAttemptsPerRun: boundedInteger("maxAttemptsPerRun", 1, 200),
+    maxConsecutiveActions: boundedInteger("maxConsecutiveActions", 1, 50),
+    maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
+    minReadConfidence: boundedProbability("minReadConfidence"),
+    minActionConfidence: boundedProbability("minActionConfidence"),
+    minClickConfidence: boundedProbability("minClickConfidence")
   };
 }
 function resolveCodeExecutionApproval(settings) {
@@ -6185,9 +6205,9 @@ function detectAuthChallenge(input) {
   const snapshot = data.snapshot && typeof data.snapshot === "object" ? data.snapshot : null;
   const beforeUrl = asHttpUrl(data.beforeUrl);
   const currentUrl = asHttpUrl(data.afterUrl) || asHttpUrl(snapshot && snapshot.url) || beforeUrl;
-  const resultText = String(data.result || "").slice(0, 12e3);
+  const resultText2 = String(data.result || "").slice(0, 12e3);
   const pageText = snapshotHaystack(snapshot);
-  const haystack = [pageText, resultText].filter(Boolean).join("\n");
+  const haystack = [pageText, resultText2].filter(Boolean).join("\n");
   const ok = data.ok !== false;
   const statusCode = Number(data.statusCode) || 0;
   const toolName = String(data.toolName || "");
@@ -6196,16 +6216,16 @@ function detectAuthChallenge(input) {
   const navigatedToAuth = authPath && (!beforeUrl || !beforeAuthPath && withoutHash(beforeUrl) !== withoutHash(currentUrl));
   const loginCopy = LOGIN_COPY_RE.test(haystack);
   const denyCopy = DENY_COPY_RE.test(haystack);
-  const resultHasAuth = !ok && (LOGIN_COPY_RE.test(resultText) || DENY_COPY_RE.test(resultText));
+  const resultHasAuth = !ok && (LOGIN_COPY_RE.test(resultText2) || DENY_COPY_RE.test(resultText2));
   const statusHasAuth = statusCode === 401 || statusCode === 403;
   const link = findLoginLink(snapshot, currentUrl || beforeUrl);
   const pageTitleLooksLikeLogin = /(登录|登陆|登入|sign\s*in|log\s*in)/i.test(
     String(snapshot && snapshot.title || "")
   );
-  const wallDetected = navigatedToAuth || resultHasAuth || statusHasAuth || !ok && (loginCopy || denyCopy) || MUTATING_TOOLS.has(toolName) && loginCopy && Boolean(link) || MUTATING_TOOLS.has(toolName) && pageTitleLooksLikeLogin && loginCopy && Boolean(link) || loginCopy && Boolean(link) && NO_EFFECT_RE.test(resultText);
+  const wallDetected = navigatedToAuth || resultHasAuth || statusHasAuth || !ok && (loginCopy || denyCopy) || MUTATING_TOOLS.has(toolName) && loginCopy && Boolean(link) || MUTATING_TOOLS.has(toolName) && pageTitleLooksLikeLogin && loginCopy && Boolean(link) || loginCopy && Boolean(link) && NO_EFFECT_RE.test(resultText2);
   if (!wallDetected) return null;
   const mcpEndpoint = isMcpEndpoint(currentUrl) || isMcpEndpoint(beforeUrl) || statusHasAuth && MCP_HINT_RE.test(haystack);
-  const bareApiDenied = statusHasAuth && !snapshot && !resultText.trim();
+  const bareApiDenied = statusHasAuth && !snapshot && !resultText2.trim();
   if (mcpEndpoint || bareApiDenied) {
     const summary3 = mcpEndpoint ? "\u8FD9\u662F MCP \u670D\u52A1\u7AEF\u70B9\uFF08\u4E0D\u662F\u7F51\u9875\uFF09\uFF1A401/403 \u901A\u5E38\u662F\u7F3A\u5C11\u6216\u9519\u8BEF\u7684 Bearer Token\u3002" : "\u8BE5\u5730\u5740\u8FD4\u56DE 401/403 \u4E14\u6CA1\u6709\u53EF\u6253\u5F00\u7684\u7F51\u9875\u767B\u5F55\u9875\uFF1A\u8FD9\u662F\u670D\u52A1\u7AEF\u70B9\uFF0C\u901A\u5E38\u662F\u51ED\u636E\u7F3A\u5931\u6216\u9519\u8BEF\u3002";
     const message2 = mcpEndpoint ? summary3 + " \u8BF7\u76F4\u63A5\u7528\u5DF2\u914D\u7F6E\u7684 MCP \u5DE5\u5177\uFF08\u5DE5\u5177\u540D\u5F62\u5982 `mcp__<serverId>__<\u5DE5\u5177\u540D>`\uFF09\u8C03\u7528\u8BE5\u80FD\u529B\uFF1B\u82E5\u5DE5\u5177\u6CA1\u52A0\u8F7D\uFF0C\u5230\u8BBE\u7F6E\u9875\u300CMCP \u670D\u52A1\u5668\u300D\u68C0\u67E5\u8FD9\u53F0\u670D\u52A1\u5668\u7684\u5730\u5740\u4E0E Authorization\uFF08Bearer Token\uFF09\u3002\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740 \u2014\u2014 \u5B83\u53EA\u4F1A\u518D\u62FF\u5230\u4E00\u6B21 401/403\u3002" : summary3 + " \u8BF7\u5728\u8BBE\u7F6E\u9875/\u8BF7\u6C42\u5934\u91CC\u4FEE\u6B63\u51ED\u636E\u540E\u91CD\u8BD5\uFF0C\u4E0D\u8981\u7528 fetch_webpage \u53CD\u590D\u8BBF\u95EE\u8BE5\u5730\u5740\u3002";
@@ -6221,7 +6241,7 @@ function detectAuthChallenge(input) {
       endpointDenied: true
     };
   }
-  const permissionDenied = denyCopy || statusCode === 403 || /(无权限|没有权限|权限不足|permission\s+denied|access\s+denied|forbidden)/i.test(resultText);
+  const permissionDenied = denyCopy || statusCode === 403 || /(无权限|没有权限|权限不足|permission\s+denied|access\s+denied|forbidden)/i.test(resultText2);
   const reason = permissionDenied ? "permission-denied" : "login-required";
   const summary2 = permissionDenied ? "\u64CD\u4F5C\u88AB\u6743\u9650\u9650\u5236\uFF1A\u5F53\u524D\u767B\u5F55\u72B6\u6001\u6216\u8D26\u53F7\u6743\u9650\u4E0D\u8DB3\uFF0C\u9700\u8981\u767B\u5F55 / \u6388\u6743\u540E\u91CD\u8BD5\u3002" : "\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A\uFF1A\u5F53\u524D\u9875\u9762\u9700\u8981\u5148\u767B\u5F55\u540E\u624D\u80FD\u7EE7\u7EED\u3002";
   let loginUrl = "";
@@ -9746,8 +9766,8 @@ function buildInitialMessagesPure(input = {}) {
 }
 
 // lib/application/agent/jev-loop-state.ts
-var JEV_MAX_ATTEMPTS_PER_RUN = 36;
-var JEV_MAX_CONSECUTIVE_ACTIONS = 12;
+var JEV_HARD_MAX_ATTEMPTS_PER_RUN = 200;
+var JEV_HARD_MAX_CONSECUTIVE_ACTIONS = 50;
 function nonNegativeInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
@@ -9755,11 +9775,11 @@ function nonNegativeInteger(value) {
 function restoreJevLoopState(value) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
-    attempts: Math.min(nonNegativeInteger(source.attempts), JEV_MAX_ATTEMPTS_PER_RUN),
+    attempts: Math.min(nonNegativeInteger(source.attempts), JEV_HARD_MAX_ATTEMPTS_PER_RUN),
     fastActions: nonNegativeInteger(source.fastActions),
     consecutiveFastActions: Math.min(
       nonNegativeInteger(source.consecutiveFastActions),
-      JEV_MAX_CONSECUTIVE_ACTIONS
+      JEV_HARD_MAX_CONSECUTIVE_ACTIONS
     ),
     consecutiveFailures: nonNegativeInteger(source.consecutiveFailures),
     lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),
@@ -10400,6 +10420,9 @@ async function runParallelBatch(toolCalls, o) {
     isParallelSafe: (name) => getToolMetadata(name).parallelSafe === true,
     shouldSkip: (name, args) => {
       if (typeof o.isToolAllowed === "function" && !o.isToolAllowed(name)) return true;
+      if (typeof o.shouldExecuteSerially === "function" && o.shouldExecuteSerially(name, args)) {
+        return true;
+      }
       if (o.disabledTools.has(name)) return true;
       if (!validateToolCall(name, args).ok) return true;
       return o.approvalSettings.toolApproval !== false && toolNeedsApproval(name, o.approvalSettings, o.ctx.pageUrl) && !o.sessionApprovedTools.has(name);
@@ -11231,6 +11254,195 @@ function resultProgressByChange(store, name, res) {
   return prev !== void 0 && prev !== fp;
 }
 
+// lib/application/agent/publication-policy.ts
+var XHS_CREATOR_HOST = "creator.xiaohongshu.com";
+var PUBLISH_LABELS = /* @__PURE__ */ new Set(["\u53D1\u5E03", "\u7ACB\u5373\u53D1\u5E03", "\u786E\u8BA4\u53D1\u5E03"]);
+var CHARACTER_LIMIT = 500;
+var HISTORY_STATE = /(已发布|审核中|未通过)/;
+var EMPTY_HISTORY = /(暂无笔记|暂无内容|没有笔记|还没有发布)/;
+var OVERFLOW_WARNING = /最多\s*500\s*字|请删除后重试/;
+var MUTATING_PAGE_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "click_at",
+  "type_text",
+  "press_key",
+  "select_option",
+  "check_box",
+  "scroll_page",
+  "drag_element",
+  "upload_file",
+  "run_javascript",
+  "macro",
+  "undo_last_action"
+]);
+var OBSERVATION_TOOLS = /* @__PURE__ */ new Set([
+  "read_current_page",
+  "get_page_snapshot",
+  "inspect_element",
+  "get_ax_snapshot",
+  "read_table"
+]);
+function normalizedText(value) {
+  return String(value || "").replace(/\r\n/g, "\n");
+}
+function safeUrl(value) {
+  try {
+    return new URL(String(value || ""));
+  } catch {
+    return null;
+  }
+}
+function isXhsCreator(url) {
+  return safeUrl(url)?.hostname.toLowerCase() === XHS_CREATOR_HOST;
+}
+function isNoteManager(url) {
+  const parsed = safeUrl(url);
+  return Boolean(
+    parsed && parsed.hostname.toLowerCase() === XHS_CREATOR_HOST && /\/new\/note-manager(?:\/|$)/i.test(parsed.pathname)
+  );
+}
+function isPublishEditor(url) {
+  const parsed = safeUrl(url);
+  if (!parsed || parsed.hostname.toLowerCase() !== XHS_CREATOR_HOST) return false;
+  if (/\/new\/note-manager(?:\/|$)/i.test(parsed.pathname)) return false;
+  return /\/new\/note(?:\/|$)/i.test(parsed.pathname) || /\/publish\/publish(?:\/|$)/i.test(parsed.pathname);
+}
+function resultText(result) {
+  const snapshotText = normalizedText(result?.pageSnapshot?.text || result?.snapshot?.text);
+  const body = normalizedText(result?.result);
+  return [snapshotText, body].filter(Boolean).join("\n");
+}
+function ctxText(ctx) {
+  return [
+    normalizedText(ctx?.lastSnapshot?.text),
+    normalizedText(ctx?.lastReadFullText),
+    normalizedText(ctx?.lastEvidence)
+  ].filter(Boolean).join("\n");
+}
+function targetLabel(name, args, ctx) {
+  if (name !== "click_element") return "";
+  const ref = String(args?.ref || "").trim();
+  const selector = String(args?.selector || "").trim();
+  const elements = Array.isArray(ctx?.lastSnapshot?.elements) ? ctx.lastSnapshot.elements : [];
+  if (ref) {
+    const match = elements.find((element) => String(element?.ref || "") === ref);
+    if (match) {
+      return String(match.label || match.name || match.placeholder || "").replace(/\s+/g, " ").trim();
+    }
+  }
+  if (selector) {
+    const match = elements.find((element) => String(element?.selector || "") === selector);
+    if (match) {
+      return String(match.label || match.name || match.placeholder || "").replace(/\s+/g, " ").trim();
+    }
+  }
+  return String(args?.name || args?.text || "").replace(/\s+/g, " ").trim();
+}
+function parseXhsCharacterEvidence(text2) {
+  const raw = normalizedText(text2);
+  const overflowWarning = OVERFLOW_WARNING.test(raw);
+  let latest = null;
+  const pattern = /(\d{1,6})\s*\/\s*(\d{1,6})\s*(?:字|字符)?/g;
+  let match;
+  while (match = pattern.exec(raw)) {
+    const current = Number(match[1]);
+    const limit = Number(match[2]);
+    if (limit === CHARACTER_LIMIT && Number.isFinite(current)) {
+      latest = { current, limit };
+    }
+  }
+  return latest || overflowWarning ? {
+    current: latest?.current ?? CHARACTER_LIMIT + 1,
+    limit: latest?.limit ?? CHARACTER_LIMIT,
+    overflowWarning
+  } : null;
+}
+function hasHistoryEvidence(text2) {
+  const raw = normalizedText(text2);
+  if (EMPTY_HISTORY.test(raw)) return true;
+  if (!HISTORY_STATE.test(raw)) return false;
+  if (/(?:笔记)?标题\s*[:：]\s*\S{2,}/.test(raw)) return true;
+  const lines = raw.split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return lines.some(
+    (line) => line.length >= 4 && line.length <= 120 && !/^(笔记管理|全部|已发布|审核中|未通过|发布笔记|首页|数据|创作服务|新建笔记)$/.test(line)
+  );
+}
+function captureXhsPublicationEvidence(ctx, toolName, beforeUrl, result) {
+  const afterUrl = String(
+    result?.pageSnapshot?.url || result?.snapshot?.url || ctx?.pageUrl || beforeUrl || ""
+  );
+  if (!isXhsCreator(afterUrl) && !isXhsCreator(String(beforeUrl || ""))) return;
+  const state2 = ctx.publicationEvidence && typeof ctx.publicationEvidence === "object" ? ctx.publicationEvidence : {};
+  const hasFreshSnapshot = Boolean(result?.pageSnapshot || result?.snapshot);
+  const observedText = [
+    resultText(result),
+    hasFreshSnapshot ? "" : ctxText(ctx)
+  ].filter(Boolean).join("\n");
+  const character = parseXhsCharacterEvidence(observedText);
+  if (character && isPublishEditor(afterUrl)) {
+    state2.character = {
+      ...character,
+      capturedAt: Date.now(),
+      source: toolName
+    };
+  } else if (MUTATING_PAGE_TOOLS.has(toolName) && isPublishEditor(afterUrl)) {
+    delete state2.character;
+  }
+  const historyUrl = isNoteManager(afterUrl) ? afterUrl : isNoteManager(String(beforeUrl || "")) ? String(beforeUrl || "") : "";
+  if (historyUrl && OBSERVATION_TOOLS.has(toolName) && result?.ok !== false) {
+    const text2 = [resultText(result), ctxText(ctx)].filter(Boolean).join("\n");
+    if (hasHistoryEvidence(text2)) {
+      state2.history = {
+        url: historyUrl,
+        excerpt: text2.slice(0, 4e3),
+        capturedAt: Date.now()
+      };
+    }
+  }
+  ctx.publicationEvidence = state2;
+}
+function countBlockReason(character) {
+  if (!character) {
+    return "\u53D1\u5E03\u94FE\u8DEF\u524D\u7F6E\u6821\u9A8C\u5931\u8D25\uFF1A\u672A\u53D6\u5F97\u5F53\u524D\u7F16\u8F91\u5668\u201C\u6B63\u6587\u5B57\u6570 / 500 \u5B57\u201D\u7684\u6700\u65B0\u9875\u9762\u8BC1\u636E\u3002\u8BF7\u5148\u8C03\u7528 get_page_snapshot({maxText:4000}) \u6216 read_current_page \u786E\u8BA4\u8BA1\u6570\uFF0C\u518D\u70B9\u51FB\u201C\u751F\u6210\u56FE\u7247\u201D\u3002\u672C\u6B21\u672A\u6267\u884C\uFF0C\u4E5F\u672A\u8BF7\u6C42\u5BA1\u6279\u3002";
+  }
+  if (character.overflowWarning || character.current > character.limit) {
+    return "\u53D1\u5E03\u94FE\u8DEF\u524D\u7F6E\u6821\u9A8C\u5931\u8D25\uFF1A\u5C0F\u7EA2\u4E66\u6B63\u6587\u5DF2\u8D85\u8FC7 " + character.limit + " \u5B57\uFF08\u5F53\u524D " + character.current + " \u5B57\uFF09\u3002\u8BF7\u5148\u5220\u51CF\u5230\u9650\u989D\u5185\u5E76\u91CD\u65B0\u8BFB\u53D6\u9875\u9762\u8BA1\u6570\uFF1B\u672C\u6B21\u672A\u6267\u884C\uFF0C\u4E5F\u672A\u8BF7\u6C42\u5BA1\u6279\u3002";
+  }
+  return null;
+}
+function historyBlockReason(ctx) {
+  const history = ctx?.publicationEvidence?.history;
+  if (history && isNoteManager(history.url) && hasHistoryEvidence(history.excerpt)) {
+    return null;
+  }
+  return "\u53D1\u5E03\u94FE\u8DEF\u524D\u7F6E\u6821\u9A8C\u5931\u8D25\uFF1A\u672A\u68C0\u6D4B\u5230\u672C\u4EFB\u52A1\u5BF9\u5C0F\u7EA2\u4E66\u201C\u7B14\u8BB0\u7BA1\u7406\u201D\u9875\uFF08/new/note-manager\uFF09\u7684\u6709\u6548\u8BFB\u53D6\u8BC1\u636E\u3002\u8BF7\u5148\u8BFB\u53D6\u8BE5\u9875\uFF0C\u786E\u8BA4\u201C\u5DF2\u53D1\u5E03 / \u5BA1\u6838\u4E2D / \u672A\u901A\u8FC7\u201D\u72B6\u6001\u53CA\u5386\u53F2\u7B14\u8BB0\u6807\u9898\uFF08\u6216\u786E\u8BA4\u5217\u8868\u4E3A\u7A7A\uFF09\uFF0C\u518D\u8FD4\u56DE\u7F16\u8F91\u9875\u53D1\u5E03\u3002\u4EC5\u770B\u5230\u4FA7\u680F\u201C\u7B14\u8BB0\u7BA1\u7406\u201D\u6587\u5B57\u4E0D\u7B97\u68C0\u67E5\u3002\u672C\u6B21\u672A\u6267\u884C\uFF0C\u4E5F\u672A\u8BF7\u6C42\u5BA1\u6279\u3002";
+}
+function evaluateXhsPublicationGate(toolName, args, ctx) {
+  if (toolName !== "click_element") return { kind: "none" };
+  const pageUrl = String(ctx?.pageUrl || ctx?.lastSnapshot?.url || "");
+  if (!isXhsCreator(pageUrl) || !isPublishEditor(pageUrl)) return { kind: "none" };
+  const label = targetLabel(toolName, args || {}, ctx);
+  const selector = String(args?.selector || "").toLowerCase();
+  const testid = String(args?.testid || "").toLowerCase();
+  const publishTarget = PUBLISH_LABELS.has(label) || !label && /publish(?:-|_)btn|publish-button/.test(selector + " " + testid);
+  if (label === "\u751F\u6210\u56FE\u7247") {
+    const reason = countBlockReason(ctx?.publicationEvidence?.character);
+    return reason ? { kind: "block", action: "generate-image", reason } : { kind: "none" };
+  }
+  if (publishTarget) {
+    const countReason = countBlockReason(ctx?.publicationEvidence?.character);
+    if (countReason) return { kind: "block", action: "publish", reason: countReason };
+    const historyReason = historyBlockReason(ctx);
+    if (historyReason) return { kind: "block", action: "publish", reason: historyReason };
+    return {
+      kind: "confirm",
+      action: "publish",
+      reason: "\u53D1\u5E03\u662F\u4E0D\u53EF\u9006\u7684\u5916\u90E8\u64CD\u4F5C\uFF0C\u5FC5\u987B\u5728\u5B8C\u6210\u5B57\u6570\u4E0E\u5386\u53F2\u7B14\u8BB0\u68C0\u67E5\u540E\u7531\u7528\u6237\u6700\u7EC8\u786E\u8BA4\u3002"
+    };
+  }
+  return { kind: "none" };
+}
+
 // lib/application/agent/tool-call-pipeline.ts
 var RESEARCH_TRIGGER_TOOLS = /* @__PURE__ */ new Set([
   "fetch_webpage",
@@ -11296,6 +11508,7 @@ var ToolCallPipeline = class {
       ctx: state2.ctx,
       sessionApprovedTools: state2.sessionApprovedTools,
       isToolAllowed: (name) => this.isToolAllowed(name),
+      shouldExecuteSerially: (name, args) => evaluateXhsPublicationGate(name, args, state2.ctx).kind !== "none",
       budget: state2.budget,
       signal: this.signal,
       emit: state2.emit,
@@ -11380,46 +11593,75 @@ var ToolCallPipeline = class {
       if (metadata.requiresApproval === true) {
         approvalSettings = await readLiveApprovalSettings(state2.settings);
       }
-      if (!result && approvalSettings.toolApproval !== false && toolNeedsApproval(toolCall.name, approvalSettings, state2.ctx.pageUrl) && !state2.sessionApprovedTools.has(toolCall.name)) {
-        toolState.status = TOOL_STATUS.APPROVAL_REQUIRED;
-        state2.emitState(RUN_STATUS.WAITING_APPROVAL, {
-          callId,
-          tool: toolCall.name
-        });
-        const allowSession = metadata.alwaysRequireApproval !== true || resolveCodeExecutionApproval(approvalSettings) === "session";
-        const decision = await waitForToolApproval(
-          this.port,
-          callId,
+      if (!result) {
+        const publicationGate = evaluateXhsPublicationGate(
           toolCall.name,
-          toolCall.args,
-          this.signal,
-          state2.runId,
-          allowSession,
-          state2.emit,
-          lane
+          toolCall.args || {},
+          state2.ctx
         );
-        if (decision === "session" && allowSession) {
-          state2.sessionApprovedTools.add(toolCall.name);
+        let approvalRequired = false;
+        let allowSession = false;
+        let decision = null;
+        if (publicationGate.kind === "block") {
+          result = { ok: false, result: publicationGate.reason };
+          state2.trace({
+            phase: "publication-gate",
+            action: publicationGate.action,
+            status: "blocked",
+            reason: publicationGate.reason
+          });
+        } else if (publicationGate.kind === "confirm") {
+          approvalRequired = true;
+          state2.trace({
+            phase: "publication-gate",
+            action: publicationGate.action,
+            status: "confirmation-required",
+            reason: publicationGate.reason
+          });
+        } else if (approvalSettings.toolApproval !== false && toolNeedsApproval(toolCall.name, approvalSettings, state2.ctx.pageUrl) && !state2.sessionApprovedTools.has(toolCall.name)) {
+          approvalRequired = true;
+          allowSession = metadata.alwaysRequireApproval !== true || resolveCodeExecutionApproval(approvalSettings) === "session";
         }
-        if (decision !== "once" && decision !== "session") {
-          result = {
-            ok: false,
-            result: "\u7528\u6237\u672A\u6279\u51C6\u6267\u884C\u5DE5\u5177\u300C" + toolCall.name + "\u300D\uFF0C\u8BF7\u4E0D\u8981\u6267\u884C\u8BE5\u64CD\u4F5C\uFF1B\u53EF\u8BF4\u660E\u539F\u56E0\u6216\u7ED9\u51FA\u66FF\u4EE3\u65B9\u6848\u3002"
-          };
-          toolState.status = TOOL_STATUS.REJECTED;
-          state2.emit({
-            type: "tool-result",
+        if (approvalRequired) {
+          toolState.status = TOOL_STATUS.APPROVAL_REQUIRED;
+          state2.emitState(RUN_STATUS.WAITING_APPROVAL, {
             callId,
-            name: toolCall.name,
-            status: "rejected",
-            result: result.result,
+            tool: toolCall.name
+          });
+          decision = await waitForToolApproval(
+            this.port,
+            callId,
+            toolCall.name,
+            toolCall.args,
+            this.signal,
+            state2.runId,
+            allowSession,
+            state2.emit,
             lane
-          });
-          state2.emitState(RUN_STATUS.OBSERVING, {
-            callId,
-            tool: toolCall.name,
-            rejected: true
-          });
+          );
+          if (decision === "session" && allowSession) {
+            state2.sessionApprovedTools.add(toolCall.name);
+          }
+          if (decision !== "once" && decision !== "session") {
+            result = {
+              ok: false,
+              result: "\u7528\u6237\u672A\u6279\u51C6\u6267\u884C\u5DE5\u5177\u300C" + toolCall.name + "\u300D\uFF0C\u8BF7\u4E0D\u8981\u6267\u884C\u8BE5\u64CD\u4F5C\uFF1B\u53EF\u8BF4\u660E\u539F\u56E0\u6216\u7ED9\u51FA\u66FF\u4EE3\u65B9\u6848\u3002"
+            };
+            toolState.status = TOOL_STATUS.REJECTED;
+            state2.emit({
+              type: "tool-result",
+              callId,
+              name: toolCall.name,
+              status: "rejected",
+              result: result.result,
+              lane
+            });
+            state2.emitState(RUN_STATUS.OBSERVING, {
+              callId,
+              tool: toolCall.name,
+              rejected: true
+            });
+          }
         }
       }
       if (!result) {
@@ -11517,12 +11759,22 @@ var ToolCallPipeline = class {
       this.sanitizeResult(toolCall.name, result);
       this.emitScreenshot(result);
       if (result.pageSnapshot) state2.ctx.lastSnapshot = result.pageSnapshot;
+      else if (result.snapshot) state2.ctx.lastSnapshot = result.snapshot;
       state2.ctx.lastEvidence = evidenceAfter(
         state2.ctx.lastEvidence,
         toolCall,
         result,
         summarizeToolArgs
       );
+      try {
+        captureXhsPublicationEvidence(
+          state2.ctx,
+          toolCall.name,
+          authBeforeUrl,
+          result
+        );
+      } catch {
+      }
       if (EVIDENCE_READ_TOOLS.has(toolCall.name) && rawResult) {
         state2.ctx.lastReadFullText = rawResult;
       }
@@ -12143,14 +12395,14 @@ function targetDescription(element) {
     element.selectedLabel ? "\u5F53\u524D\u9009\u9879\u300C" + clip(element.selectedLabel, 80) + "\u300D" : ""
   ].filter(Boolean).join("\uFF0C");
 }
-function buildElementSpace(snapshot) {
+function buildElementSpace(snapshot, maxCandidates, minClickConfidence, minActionConfidence) {
   const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
   const table = [];
   const clickTargets = {};
   const typeTargets = {};
   const seen = /* @__PURE__ */ new Set();
   for (const element of elements) {
-    if (table.length >= JEV_MAX_ELEMENT_ACTIONS) break;
+    if (table.length >= maxCandidates) break;
     const canClick = isClickable(element);
     const canType = isTypeTarget(element);
     if (!canClick && !canType) continue;
@@ -12185,13 +12437,13 @@ function buildElementSpace(snapshot) {
       role,
       args: ref ? { ref } : { selector: String(element.selector || "") },
       description: targetDescription(element),
-      minConfidence: canClick ? JEV_MIN_CLICK_CONFIDENCE : JEV_MIN_ACTION_CONFIDENCE
+      minConfidence: canClick ? minClickConfidence : minActionConfidence
     };
     if (canClick) clickTargets[key] = definition;
     if (canType) {
       typeTargets[key] = {
         ...definition,
-        minConfidence: JEV_MIN_ACTION_CONFIDENCE
+        minConfidence: minActionConfidence
       };
     }
   }
@@ -12208,7 +12460,16 @@ function addChoice(operations, operation, description, options = {}) {
   };
 }
 function buildJevFastRequest(settings, context) {
-  const elementSpace = buildElementSpace(context.snapshot);
+  const maxCandidates = Number.isFinite(Number(settings.maxElementCandidates)) ? Math.max(5, Math.min(100, Math.floor(Number(settings.maxElementCandidates)))) : JEV_MAX_ELEMENT_ACTIONS;
+  const minReadConfidence = Number.isFinite(Number(settings.minReadConfidence)) ? Math.max(0, Math.min(1, Number(settings.minReadConfidence))) : JEV_MIN_READ_CONFIDENCE;
+  const minActionConfidence = Number.isFinite(Number(settings.minActionConfidence)) ? Math.max(0, Math.min(1, Number(settings.minActionConfidence))) : JEV_MIN_ACTION_CONFIDENCE;
+  const minClickConfidence = Number.isFinite(Number(settings.minClickConfidence)) ? Math.max(0, Math.min(1, Number(settings.minClickConfidence))) : JEV_MIN_CLICK_CONFIDENCE;
+  const elementSpace = buildElementSpace(
+    context.snapshot,
+    maxCandidates,
+    minClickConfidence,
+    minActionConfidence
+  );
   const targetOperations = [];
   if (Object.keys(elementSpace.clickTargets).length) targetOperations.push("CLICK");
   if (Object.keys(elementSpace.typeTargets).length) targetOperations.push("TYPE_TEXT");
@@ -12220,46 +12481,69 @@ function buildJevFastRequest(settings, context) {
   if (targets.CLICK) {
     addChoice(operations, "CLICK", "Click a visible element that directly advances the goal.", {
       toolName: "click_element",
-      targetQuestion: JEV_CLICK_TARGET_QUESTION
+      targetQuestion: JEV_CLICK_TARGET_QUESTION,
+      minConfidence: minClickConfidence
     });
   }
   if (targets.TYPE_TEXT) {
     addChoice(operations, "TYPE_TEXT", "Enter or replace text in an observed editable field.", {
       toolName: "type_text",
-      targetQuestion: JEV_TYPE_TEXT_TARGET_QUESTION
+      targetQuestion: JEV_TYPE_TEXT_TARGET_QUESTION,
+      minConfidence: minActionConfidence
     });
   }
   addChoice(operations, "READ_PAGE", "Read the current visible page text when the supplied text is incomplete.", {
-    toolName: "read_current_page"
+    toolName: "read_current_page",
+    minConfidence: minReadConfidence
   });
   if (/(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ""))) {
     addChoice(operations, "READ_TABLE", "Read a structured table or grid needed for the current goal.", {
-      toolName: "read_table"
+      toolName: "read_table",
+      minConfidence: minReadConfidence
     });
   }
   addChoice(operations, "ACCESSIBILITY", "Read the accessibility tree for custom controls or role/name targets.", {
     toolName: "get_ax_snapshot",
-    args: { limit: 80 }
+    args: { limit: 80 },
+    minConfidence: minReadConfidence
   });
   addChoice(operations, "DIAGNOSTICS", "Read browser diagnostics when the page or content script appears broken.", {
-    toolName: "read_diagnostics"
+    toolName: "read_diagnostics",
+    minConfidence: minReadConfidence
   });
   const scroll = context.snapshot?.scroll;
   if (Number(scroll?.y || 0) > 0) {
     addChoice(operations, "SCROLL_UP", "Scroll upward to reveal controls or content above the viewport.", {
       toolName: "scroll_page",
-      args: { y: -600 }
+      args: { y: -600 },
+      minConfidence: minReadConfidence
     });
   }
   if (scroll && Number(scroll.height || 0) > Number(scroll.y || 0) + Number(scroll.viewport || 0)) {
     addChoice(operations, "SCROLL_DOWN", "Scroll downward to reveal controls or content below the viewport.", {
       toolName: "scroll_page",
-      args: { y: 600 }
+      args: { y: 600 },
+      minConfidence: minReadConfidence
     });
   }
-  addChoice(operations, "WAIT", "Wait briefly and observe again when the needed control or result is still loading.");
-  addChoice(operations, "DONE", "Every requirement is visibly satisfied and independently checkable.");
-  addChoice(operations, "BLOCKED", "No offered operation can make safe progress.");
+  addChoice(
+    operations,
+    "WAIT",
+    "Wait briefly and observe again when the needed control or result is still loading.",
+    { minConfidence: minReadConfidence }
+  );
+  addChoice(
+    operations,
+    "DONE",
+    "Every requirement is visibly satisfied and independently checkable.",
+    { minConfidence: minReadConfidence }
+  );
+  addChoice(
+    operations,
+    "BLOCKED",
+    "No offered operation can make safe progress.",
+    { minConfidence: minReadConfidence }
+  );
   const criteria = {};
   for (const operation of Object.values(operations)) criteria[operation.operation] = operation.description;
   const questions = {
@@ -12358,7 +12642,7 @@ function interpretJevFastDecision(response, bundle) {
       description: "JEV \u9009\u62E9\u4E86\u672A\u63D0\u4F9B\u7684 operation\uFF1A" + operationAnswer.choice
     };
   }
-  if (operationAnswer.confidence < operation.minConfidence) {
+  if (!operation.targetQuestion && operationAnswer.confidence < operation.minConfidence) {
     return {
       kind: "blocked",
       reason: "low-confidence",
@@ -12436,8 +12720,8 @@ function interpretJevFastDecision(response, bundle) {
   }
   const operationConfidence = operationAnswer.confidence;
   const targetConfidence = targetAnswer ? targetAnswer.confidence : null;
-  const confidence = targetConfidence === null ? operationConfidence : Math.min(operationConfidence, targetConfidence);
-  if (confidence < operation.minConfidence || target && targetConfidence < target.minConfidence) {
+  const confidence = targetConfidence === null ? operationConfidence : targetConfidence;
+  if (target ? targetConfidence < target.minConfidence : confidence < operation.minConfidence) {
     return {
       kind: "blocked",
       reason: "low-confidence",
@@ -12598,8 +12882,10 @@ var JevFastController = class {
     if (this.state.intent === INTENTS.CHAT) return false;
     if (!settings.apiKey || !settings.model || !settings.baseUrl) return false;
     const loop = this.state.jevLoop;
-    if (loop.attempts >= JEV_MAX_ATTEMPTS_PER_RUN) return false;
-    if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
+    const maxAttempts = Number(settings.maxAttemptsPerRun) > 0 ? Math.floor(Number(settings.maxAttemptsPerRun)) : JEV_SETTINGS_DEFAULTS.maxAttemptsPerRun;
+    const maxActions = Number(settings.maxConsecutiveActions) > 0 ? Math.floor(Number(settings.maxConsecutiveActions)) : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    if (loop.attempts >= maxAttempts) return false;
+    if (loop.consecutiveFastActions >= maxActions) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
     if (this.lastBlockedRoute && this.currentRouteKey() === this.lastBlockedRoute) return false;
@@ -12629,7 +12915,8 @@ var JevFastController = class {
     const decisions = [];
     const toolOutcomes = [];
     let latencyMs = 0;
-    for (let step = 0; step < JEV_MAX_CONSECUTIVE_ACTIONS; step += 1) {
+    const maxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0 ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions)) : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    for (let step = 0; step < maxActions; step += 1) {
       if (!this.canAttempt()) break;
       const result = await this.runOnce(iter, persist);
       if (result.kind === "cancelled") return result;
@@ -12858,7 +13145,9 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
-      content: "JEV \u5FEB\u601D\u8003\uFF1A" + action.operation + (action.target ? " \u2192 " + action.target.label : ""),
+      // 快路径的结构化决策已通过 lane + jev-decision 事件展示。
+      // 不把内部编排文案写进聊天历史，否则慢模型会把“重新观察页面”当成用户要求复述。
+      content: "",
       tool_calls: [{
         id: callId,
         type: "function",
@@ -12885,7 +13174,7 @@ var JevFastController = class {
     };
     const assistantMessage = {
       role: "assistant",
-      content: "JEV \u5FEB\u601D\u8003\uFF1A\u91CD\u65B0\u89C2\u5BDF\u9875\u9762",
+      content: "",
       tool_calls: [{
         id: callId,
         type: "function",

@@ -31,6 +31,12 @@ test('设置页提供独立的远程 JEV 配置', () => {
     'jev-model',
     'jev-timeout',
     'jev-retries',
+    'jev-max-attempts',
+    'jev-max-actions',
+    'jev-max-candidates',
+    'jev-min-read',
+    'jev-min-action',
+    'jev-min-click',
     'jev-schema-version',
     'test-jev',
     'jev-status',
@@ -48,6 +54,15 @@ test('旧设置的 JEV 配置缺失字段时补默认值并限制数值范围', 
   assert.equal(mergeJevSettings({ requestTimeoutMs: 1 }).requestTimeoutMs, 15000);
   assert.equal(mergeJevSettings({ requestTimeoutMs: 999999 }).requestTimeoutMs, 120000);
   assert.equal(mergeJevSettings({ maxRetries: 99 }).maxRetries, 3);
+  assert.equal(mergeJevSettings({ maxAttemptsPerRun: 0 }).maxAttemptsPerRun, 1);
+  assert.equal(mergeJevSettings({ maxAttemptsPerRun: 999 }).maxAttemptsPerRun, 200);
+  assert.equal(mergeJevSettings({ maxConsecutiveActions: 0 }).maxConsecutiveActions, 1);
+  assert.equal(mergeJevSettings({ maxConsecutiveActions: 999 }).maxConsecutiveActions, 50);
+  assert.equal(mergeJevSettings({ maxElementCandidates: 1 }).maxElementCandidates, 5);
+  assert.equal(mergeJevSettings({ maxElementCandidates: 999 }).maxElementCandidates, 100);
+  assert.equal(mergeJevSettings({ minReadConfidence: -1 }).minReadConfidence, 0);
+  assert.equal(mergeJevSettings({ minActionConfidence: 2 }).minActionConfidence, 1);
+  assert.equal(mergeJevSettings({ minClickConfidence: 0.91 }).minClickConfidence, 0.91);
   assert.equal(mergeJevSettings({ baseUrl: ' https://example.com/// ' }).baseUrl, 'https://example.com');
   assert.equal(mergeJevSettings({ shadowMode: false }).shadowMode, false);
 });

@@ -1,7 +1,8 @@
-// The fast executor now owns a browser-action segment, so these bounds are
-// action-safety limits rather than "how often may JEV give advice" limits.
-export const JEV_MAX_ATTEMPTS_PER_RUN = 36;
-export const JEV_MAX_CONSECUTIVE_ACTIONS = 12;
+// Hard persistence guards. User-facing limits live in JevSettings and are
+// validated by mergeJevSettings; these constants only prevent corrupt resumed
+// state from resurrecting an unbounded loop.
+export const JEV_HARD_MAX_ATTEMPTS_PER_RUN = 200;
+export const JEV_HARD_MAX_CONSECUTIVE_ACTIONS = 50;
 
 export interface JevLoopState {
   attempts: number;
@@ -24,11 +25,11 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
     ? value as Record<string, unknown>
     : {};
   return {
-    attempts: Math.min(nonNegativeInteger(source.attempts), JEV_MAX_ATTEMPTS_PER_RUN),
+    attempts: Math.min(nonNegativeInteger(source.attempts), JEV_HARD_MAX_ATTEMPTS_PER_RUN),
     fastActions: nonNegativeInteger(source.fastActions),
     consecutiveFastActions: Math.min(
       nonNegativeInteger(source.consecutiveFastActions),
-      JEV_MAX_CONSECUTIVE_ACTIONS
+      JEV_HARD_MAX_CONSECUTIVE_ACTIONS
     ),
     consecutiveFailures: nonNegativeInteger(source.consecutiveFailures),
     lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),

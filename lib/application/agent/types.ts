@@ -10,6 +10,7 @@
 // 也不要用 `unknown` + 到处 `as` 冒充（那是把明面上的 any 换成更隐蔽的洞）。
 import type { KnowledgeBook, CitationMeta } from '../../domain/knowledge/model.ts';
 import type { JevSettings } from '../../shared/settings.ts';
+import type { PublicationEvidenceState } from './publication-policy.ts';
 
 /** Agent 预算（`settings.agentBudget` 与 `createBudget` 的产物）。 */
 export interface AgentBudget {
@@ -436,6 +437,7 @@ export interface RunCtx {
   lastSnapshot: PageSnapshotLike | null;
   lastEvidence: string;
   lastReadFullText: string;
+  publicationEvidence?: PublicationEvidenceState;
   mcpIndex: Map<string, McpToolIndexEntry>;
   mcpStatus: McpServerStatus[];
   visionBudget?: Record<string, number>;

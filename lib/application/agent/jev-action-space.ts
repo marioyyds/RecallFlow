@@ -16,6 +16,14 @@ export const JEV_MIN_ACTION_CONFIDENCE = 0.8;
 export const JEV_MIN_CLICK_CONFIDENCE = 0.86;
 export const JEV_MAX_ELEMENT_ACTIONS = 40;
 
+type JevPolicySettings = Pick<JevSettings, 'model'> & Partial<Pick<
+  JevSettings,
+  | 'maxElementCandidates'
+  | 'minReadConfidence'
+  | 'minActionConfidence'
+  | 'minClickConfidence'
+>>;
+
 export type JevOperation =
   | 'CLICK'
   | 'TYPE_TEXT'
@@ -227,7 +235,12 @@ function targetDescription(element: SnapshotElementLike): string {
   ].filter(Boolean).join('，');
 }
 
-function buildElementSpace(snapshot: PageSnapshotLike | null | undefined): {
+function buildElementSpace(
+  snapshot: PageSnapshotLike | null | undefined,
+  maxCandidates: number,
+  minClickConfidence: number,
+  minActionConfidence: number,
+): {
   elements: Array<Record<string, unknown>>;
   clickTargets: Record<string, JevTargetDefinition>;
   typeTargets: Record<string, JevTargetDefinition>;
@@ -238,7 +251,7 @@ function buildElementSpace(snapshot: PageSnapshotLike | null | undefined): {
   const typeTargets: Record<string, JevTargetDefinition> = {};
   const seen = new Set<string>();
   for (const element of elements) {
-    if (table.length >= JEV_MAX_ELEMENT_ACTIONS) break;
+    if (table.length >= maxCandidates) break;
     const canClick = isClickable(element);
     const canType = isTypeTarget(element);
     if (!canClick && !canType) continue;
@@ -273,13 +286,13 @@ function buildElementSpace(snapshot: PageSnapshotLike | null | undefined): {
       role,
       args: ref ? { ref } : { selector: String(element.selector || '') },
       description: targetDescription(element),
-      minConfidence: canClick ? JEV_MIN_CLICK_CONFIDENCE : JEV_MIN_ACTION_CONFIDENCE,
+      minConfidence: canClick ? minClickConfidence : minActionConfidence,
     };
     if (canClick) clickTargets[key] = definition;
     if (canType) {
       typeTargets[key] = {
         ...definition,
-        minConfidence: JEV_MIN_ACTION_CONFIDENCE,
+        minConfidence: minActionConfidence,
       };
     }
   }
@@ -314,10 +327,27 @@ function addChoice(
 }
 
 export function buildJevFastRequest(
-  settings: Pick<JevSettings, 'model'>,
+  settings: JevPolicySettings,
   context: JevFastContext
 ): JevFastRequestBundle {
-  const elementSpace = buildElementSpace(context.snapshot);
+  const maxCandidates = Number.isFinite(Number(settings.maxElementCandidates))
+    ? Math.max(5, Math.min(100, Math.floor(Number(settings.maxElementCandidates))))
+    : JEV_MAX_ELEMENT_ACTIONS;
+  const minReadConfidence = Number.isFinite(Number(settings.minReadConfidence))
+    ? Math.max(0, Math.min(1, Number(settings.minReadConfidence)))
+    : JEV_MIN_READ_CONFIDENCE;
+  const minActionConfidence = Number.isFinite(Number(settings.minActionConfidence))
+    ? Math.max(0, Math.min(1, Number(settings.minActionConfidence)))
+    : JEV_MIN_ACTION_CONFIDENCE;
+  const minClickConfidence = Number.isFinite(Number(settings.minClickConfidence))
+    ? Math.max(0, Math.min(1, Number(settings.minClickConfidence)))
+    : JEV_MIN_CLICK_CONFIDENCE;
+  const elementSpace = buildElementSpace(
+    context.snapshot,
+    maxCandidates,
+    minClickConfidence,
+    minActionConfidence,
+  );
   const targetOperations: JevOperation[] = [];
   if (Object.keys(elementSpace.clickTargets).length) targetOperations.push('CLICK');
   if (Object.keys(elementSpace.typeTargets).length) targetOperations.push('TYPE_TEXT');
@@ -331,34 +361,41 @@ export function buildJevFastRequest(
     addChoice(operations, 'CLICK', 'Click a visible element that directly advances the goal.', {
       toolName: 'click_element',
       targetQuestion: JEV_CLICK_TARGET_QUESTION,
+      minConfidence: minClickConfidence,
     });
   }
   if (targets.TYPE_TEXT) {
     addChoice(operations, 'TYPE_TEXT', 'Enter or replace text in an observed editable field.', {
       toolName: 'type_text',
       targetQuestion: JEV_TYPE_TEXT_TARGET_QUESTION,
+      minConfidence: minActionConfidence,
     });
   }
   addChoice(operations, 'READ_PAGE', 'Read the current visible page text when the supplied text is incomplete.', {
     toolName: 'read_current_page',
+    minConfidence: minReadConfidence,
   });
   if (/(table|grid|row|column|表|表格)/i.test(String(context.pageText || context.snapshot?.text || ''))) {
     addChoice(operations, 'READ_TABLE', 'Read a structured table or grid needed for the current goal.', {
       toolName: 'read_table',
+      minConfidence: minReadConfidence,
     });
   }
   addChoice(operations, 'ACCESSIBILITY', 'Read the accessibility tree for custom controls or role/name targets.', {
     toolName: 'get_ax_snapshot',
     args: { limit: 80 },
+    minConfidence: minReadConfidence,
   });
   addChoice(operations, 'DIAGNOSTICS', 'Read browser diagnostics when the page or content script appears broken.', {
     toolName: 'read_diagnostics',
+    minConfidence: minReadConfidence,
   });
   const scroll = context.snapshot?.scroll;
   if (Number(scroll?.y || 0) > 0) {
     addChoice(operations, 'SCROLL_UP', 'Scroll upward to reveal controls or content above the viewport.', {
       toolName: 'scroll_page',
       args: { y: -600 },
+      minConfidence: minReadConfidence,
     });
   }
   if (
@@ -368,11 +405,27 @@ export function buildJevFastRequest(
     addChoice(operations, 'SCROLL_DOWN', 'Scroll downward to reveal controls or content below the viewport.', {
       toolName: 'scroll_page',
       args: { y: 600 },
+      minConfidence: minReadConfidence,
     });
   }
-  addChoice(operations, 'WAIT', 'Wait briefly and observe again when the needed control or result is still loading.');
-  addChoice(operations, 'DONE', 'Every requirement is visibly satisfied and independently checkable.');
-  addChoice(operations, 'BLOCKED', 'No offered operation can make safe progress.');
+  addChoice(
+    operations,
+    'WAIT',
+    'Wait briefly and observe again when the needed control or result is still loading.',
+    { minConfidence: minReadConfidence }
+  );
+  addChoice(
+    operations,
+    'DONE',
+    'Every requirement is visibly satisfied and independently checkable.',
+    { minConfidence: minReadConfidence }
+  );
+  addChoice(
+    operations,
+    'BLOCKED',
+    'No offered operation can make safe progress.',
+    { minConfidence: minReadConfidence }
+  );
 
   const criteria: Record<string, string> = {};
   for (const operation of Object.values(operations)) criteria[operation.operation] = operation.description;
@@ -490,7 +543,10 @@ export function interpretJevFastDecision(
       description: 'JEV 选择了未提供的 operation：' + operationAnswer.choice,
     };
   }
-  if (operationAnswer.confidence < operation.minConfidence) {
+  if (
+    !operation.targetQuestion &&
+    operationAnswer.confidence < operation.minConfidence
+  ) {
     return {
       kind: 'blocked',
       reason: 'low-confidence',
@@ -570,10 +626,18 @@ export function interpretJevFastDecision(
 
   const operationConfidence = operationAnswer.confidence;
   const targetConfidence = targetAnswer ? targetAnswer.confidence : null;
+  // 有 target head 时，target 是真正决定“点谁/填哪”的证据。operation 是多分类
+  // head，概率会被其它同时可用的 operation 稀释；沿用 min(operation, target)
+  // 会让正确目标被一个结构性偏低的 operation 概率否决，也会让 UI 显示成功动作
+  // 只有很低置信度。operation 原值仍保留在 operationConfidence 供诊断。
   const confidence = targetConfidence === null
     ? operationConfidence
-    : Math.min(operationConfidence, targetConfidence);
-  if (confidence < operation.minConfidence || (target && targetConfidence! < target.minConfidence)) {
+    : targetConfidence;
+  if (
+    target
+      ? targetConfidence! < target.minConfidence
+      : confidence < operation.minConfidence
+  ) {
     return {
       kind: 'blocked',
       reason: 'low-confidence',

@@ -12,6 +12,7 @@ import {
 } from './jev-action-space.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
+import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
 import {
   writeJevDiagnostic,
   type JevDiagnosticRecord,
@@ -22,10 +23,6 @@ import {
   type JevTextResult,
 } from './jev-text-helper.ts';
 import { modelRequiresReasoningReplay } from './provider-history.ts';
-import {
-  JEV_MAX_ATTEMPTS_PER_RUN,
-  JEV_MAX_CONSECUTIVE_ACTIONS,
-} from './jev-loop-state.ts';
 
 export type JevFastRunResult =
   | { kind: 'skipped'; reason: string }
@@ -80,8 +77,14 @@ export class JevFastController {
     if (this.state.intent === INTENTS.CHAT) return false;
     if (!settings.apiKey || !settings.model || !settings.baseUrl) return false;
     const loop = this.state.jevLoop;
-    if (loop.attempts >= JEV_MAX_ATTEMPTS_PER_RUN) return false;
-    if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
+    const maxAttempts = Number(settings.maxAttemptsPerRun) > 0
+      ? Math.floor(Number(settings.maxAttemptsPerRun))
+      : JEV_SETTINGS_DEFAULTS.maxAttemptsPerRun;
+    const maxActions = Number(settings.maxConsecutiveActions) > 0
+      ? Math.floor(Number(settings.maxConsecutiveActions))
+      : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    if (loop.attempts >= maxAttempts) return false;
+    if (loop.consecutiveFastActions >= maxActions) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
     if (this.lastBlockedRoute && this.currentRouteKey() === this.lastBlockedRoute) return false;
@@ -120,7 +123,10 @@ export class JevFastController {
     const decisions: JevFastDecision[] = [];
     const toolOutcomes: ToolBatchOutcome[] = [];
     let latencyMs = 0;
-    for (let step = 0; step < JEV_MAX_CONSECUTIVE_ACTIONS; step += 1) {
+    const maxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0
+      ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions))
+      : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
+    for (let step = 0; step < maxActions; step += 1) {
       if (!this.canAttempt()) break;
       const result = await this.runOnce(iter, persist);
       if (result.kind === 'cancelled') return result;
@@ -382,9 +388,9 @@ export class JevFastController {
     };
     const assistantMessage = {
       role: 'assistant',
-      content: 'JEV 快思考：' +
-        action.operation +
-        (action.target ? ' → ' + action.target.label : ''),
+      // 快路径的结构化决策已通过 lane + jev-decision 事件展示。
+      // 不把内部编排文案写进聊天历史，否则慢模型会把“重新观察页面”当成用户要求复述。
+      content: '',
       tool_calls: [{
         id: callId,
         type: 'function',
@@ -417,7 +423,7 @@ export class JevFastController {
     };
     const assistantMessage = {
       role: 'assistant',
-      content: 'JEV 快思考：重新观察页面',
+      content: '',
       tool_calls: [{
         id: callId,
         type: 'function',

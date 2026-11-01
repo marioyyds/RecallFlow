@@ -40,6 +40,10 @@ import {
   ensureDownloadObservation,
   shouldObserveDownloads,
 } from './target-manager.ts';
+import {
+  captureXhsPublicationEvidence,
+  evaluateXhsPublicationGate,
+} from './publication-policy.ts';
 
 const RESEARCH_TRIGGER_TOOLS = new Set([
   'fetch_webpage',
@@ -138,6 +142,8 @@ export class ToolCallPipeline {
       ctx: state.ctx,
       sessionApprovedTools: state.sessionApprovedTools,
       isToolAllowed: (name: string) => this.isToolAllowed(name),
+      shouldExecuteSerially: (name: string, args: Record<string, unknown>) =>
+        evaluateXhsPublicationGate(name, args, state.ctx).kind !== 'none',
       budget: state.budget,
       signal: this.signal,
       emit: state.emit,
@@ -233,56 +239,86 @@ export class ToolCallPipeline {
       if (metadata.requiresApproval === true) {
         approvalSettings = await readLiveApprovalSettings(state.settings);
       }
-      if (
-        !result &&
-        approvalSettings.toolApproval !== false &&
-        toolNeedsApproval(toolCall.name, approvalSettings, state.ctx.pageUrl) &&
-        !state.sessionApprovedTools.has(toolCall.name)
-      ) {
-        toolState.status = TOOL_STATUS.APPROVAL_REQUIRED;
-        state.emitState(RUN_STATUS.WAITING_APPROVAL, {
-          callId,
-          tool: toolCall.name,
-        });
-        const allowSession =
-          metadata.alwaysRequireApproval !== true ||
-          resolveCodeExecutionApproval(approvalSettings) === 'session';
-        const decision = await waitForToolApproval(
-          this.port,
-          callId,
+      if (!result) {
+        const publicationGate = evaluateXhsPublicationGate(
           toolCall.name,
-          toolCall.args,
-          this.signal,
-          state.runId,
-          allowSession,
-          state.emit,
-          lane
+          toolCall.args || {},
+          state.ctx
         );
-        if (decision === 'session' && allowSession) {
-          state.sessionApprovedTools.add(toolCall.name);
-        }
-        if (decision !== 'once' && decision !== 'session') {
-          result = {
-            ok: false,
-            result:
-              '用户未批准执行工具「' +
-              toolCall.name +
-              '」，请不要执行该操作；可说明原因或给出替代方案。',
-          };
-          toolState.status = TOOL_STATUS.REJECTED;
-          state.emit({
-            type: 'tool-result',
-            callId,
-            name: toolCall.name,
-            status: 'rejected',
-            result: result.result,
-            lane,
+        let approvalRequired = false;
+        let allowSession = false;
+        let decision: unknown = null;
+        if (publicationGate.kind === 'block') {
+          result = { ok: false, result: publicationGate.reason };
+          state.trace({
+            phase: 'publication-gate',
+            action: publicationGate.action,
+            status: 'blocked',
+            reason: publicationGate.reason,
           });
-          state.emitState(RUN_STATUS.OBSERVING, {
+        } else if (publicationGate.kind === 'confirm') {
+          // 发布永远逐次确认：不受 toolApproval=false、站点信任或会话放行影响。
+          approvalRequired = true;
+          state.trace({
+            phase: 'publication-gate',
+            action: publicationGate.action,
+            status: 'confirmation-required',
+            reason: publicationGate.reason,
+          });
+        } else if (
+          approvalSettings.toolApproval !== false &&
+          toolNeedsApproval(toolCall.name, approvalSettings, state.ctx.pageUrl) &&
+          !state.sessionApprovedTools.has(toolCall.name)
+        ) {
+          approvalRequired = true;
+          allowSession =
+            metadata.alwaysRequireApproval !== true ||
+            resolveCodeExecutionApproval(approvalSettings) === 'session';
+        }
+
+        if (approvalRequired) {
+          toolState.status = TOOL_STATUS.APPROVAL_REQUIRED;
+          state.emitState(RUN_STATUS.WAITING_APPROVAL, {
             callId,
             tool: toolCall.name,
-            rejected: true,
           });
+          decision = await waitForToolApproval(
+            this.port,
+            callId,
+            toolCall.name,
+            toolCall.args,
+            this.signal,
+            state.runId,
+            allowSession,
+            state.emit,
+            lane
+          );
+          if (decision === 'session' && allowSession) {
+            state.sessionApprovedTools.add(toolCall.name);
+          }
+          if (decision !== 'once' && decision !== 'session') {
+            result = {
+              ok: false,
+              result:
+                '用户未批准执行工具「' +
+                toolCall.name +
+                '」，请不要执行该操作；可说明原因或给出替代方案。',
+            };
+            toolState.status = TOOL_STATUS.REJECTED;
+            state.emit({
+              type: 'tool-result',
+              callId,
+              name: toolCall.name,
+              status: 'rejected',
+              result: result.result,
+              lane,
+            });
+            state.emitState(RUN_STATUS.OBSERVING, {
+              callId,
+              tool: toolCall.name,
+              rejected: true,
+            });
+          }
         }
       }
 
@@ -389,12 +425,21 @@ export class ToolCallPipeline {
       this.sanitizeResult(toolCall.name, result);
       this.emitScreenshot(result);
       if (result.pageSnapshot) state.ctx.lastSnapshot = result.pageSnapshot;
+      else if (result.snapshot) state.ctx.lastSnapshot = result.snapshot;
       state.ctx.lastEvidence = evidenceAfter(
         state.ctx.lastEvidence,
         toolCall,
         result,
         summarizeToolArgs
       );
+      try {
+        captureXhsPublicationEvidence(
+          state.ctx,
+          toolCall.name,
+          authBeforeUrl,
+          result
+        );
+      } catch {}
       if (EVIDENCE_READ_TOOLS.has(toolCall.name) && rawResult) {
         state.ctx.lastReadFullText = rawResult;
       }
