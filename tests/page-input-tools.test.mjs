@@ -13,6 +13,7 @@ import {
   handlePageInputTool,
   PAGE_INPUT_TOOLS,
   THIN_PAGE_COMMANDS,
+  splitTrustedText,
 } from '../lib/application/agent/page-input-tools.ts';
 
 /** 造一套假依赖，并记录每次调用（便于断言"有没有升级 CDP"）。 */
@@ -86,20 +87,21 @@ test('type_text：合成失败时升级到 CDP 可信输入，并按观测算 ha
   assert.equal(r.cdp, true, '应标记走了 CDP');
   assert.equal(r.hadEffect, true, '前后指纹不同 → hadEffect 应为 true');
   assert.equal(r.verification.changed, true);
-  assert.match(r.result, /已用 CDP 可信输入 3 个字符/);
+  assert.match(r.result, /已用 CDP 事务式输入 3 个字符/);
   const ops = deps.calls.map((c) => c.op);
   assert.ok(ops.includes('cdp.evaluate'), '应聚焦目标元素');
   assert.ok(ops.includes('cdp.insertText'), '应插入文本');
   assert.ok(deps.calls.some((c) => c.op === 'cdp.insertText' && c.text === 'abc'));
 });
 
-test('type_text：clearFirst=true 时先全选（Ctrl+A）再插入', async () => {
+test('type_text：clearFirst=true 时先用 DOM 全选建立事务边界', async () => {
   const deps = mkDeps({ contentResult: { ok: false }, readValues: ['', 'x'] });
   await typeText(deps, { value: 'x', clearFirst: true });
-  const press = deps.calls.find((c) => c.op === 'cdp.pressKey');
-  assert.ok(press, '应发一次按键');
-  assert.equal(press.key, 'a');
-  assert.deepEqual(press.mods, ['CTRL']);
+  const focus = deps.calls.find(
+    (c) => c.op === 'cdp.evaluate' && String(c.expr).includes('el.select()')
+  );
+  assert.ok(focus, '应在可信输入前全选目标内容，做事务式替换');
+  assert.ok(!deps.calls.some((c) => c.op === 'cdp.pressKey'), '不应依赖 Ctrl+A 的焦点副作用');
 });
 
 test('type_text：子框架用 evaluateInFrame 聚焦（否则会聚焦到主框架的错误元素）', async () => {
@@ -138,12 +140,13 @@ test('type_text：找不到目标元素时不升级 CDP，返回合成失败原�
 
 test('type_text：contenteditable 场景 value 为 null 时插入空串（不插 "null"）', async () => {
   const deps = mkDeps({ contentResult: { ok: false }, readValues: ['', ''] });
-  await typeText(deps, { clearFirst: true });
+  const r = await typeText(deps, { clearFirst: true });
   const ins = deps.calls.find((c) => c.op === 'cdp.insertText');
-  assert.equal(ins.text, '', '缺 value 时应插入空串');
+  assert.equal(ins, undefined, '清空操作不应插入字符串 "null"');
+  assert.equal(r.strategy, 'cdp-clear-only');
 });
 
-test('type_text：富文本多行输入逐行插入，并以 Enter 建立段边界', async () => {
+test('type_text：富文本多行正文一次性事务写入，不再逐行按 Enter', async () => {
   const deps = mkDeps({
     contentResult: { ok: false, matchesIntent: false, partial: true },
     resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
@@ -151,11 +154,38 @@ test('type_text：富文本多行输入逐行插入，并以 Enter 建立段边�
   });
   const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
   const inserted = deps.calls.filter((c) => c.op === 'cdp.insertText').map((c) => c.text);
-  assert.deepEqual(inserted.slice(-2), ['第一行', '第二行'], '应逐行插入，而不是一整段硬塞');
-  assert.ok(deps.calls.some((c) => c.op === 'cdp.pressKey' && c.key === 'Enter'), '行间应派发可信 Enter');
+  assert.deepEqual(inserted, ['第一行\n第二行'], '块内换行应保留在同一个可信输入事务中');
+  assert.ok(!deps.calls.some((c) => c.op === 'cdp.pressKey' && c.key === 'Enter'), '不应逐行重入编辑器');
   assert.equal(r.ok, true);
-  assert.equal(r.strategy, 'cdp-line-by-line');
+  assert.equal(r.strategy, 'cdp-transactional');
   assert.equal(r.matchesIntent, true);
+});
+
+test('type_text：内容脚本半写入后，用 valueBefore 恢复基线再整体写入', async () => {
+  const expected = '已有开头\n新正文';
+  const deps = mkDeps({
+    contentResult: {
+      ok: false,
+      matchesIntent: false,
+      partial: true,
+      valueBefore: '已有开头',
+    },
+    resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
+    readValues: [expected],
+  });
+  const r = await typeText(deps, { value: '\n新正文' });
+  const inserted = deps.calls.filter((c) => c.op === 'cdp.insertText').map((c) => c.text);
+  assert.deepEqual(inserted, [expected]);
+  assert.equal(r.ok, true);
+  assert.equal(r.strategy, 'cdp-transactional');
+});
+
+test('splitTrustedText：长正文按段落切块且保留原文', () => {
+  const text = ('段落一\n' + '填充'.repeat(700) + '\n段落三').repeat(2);
+  const chunks = splitTrustedText(text, 1200);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every((chunk) => chunk.length <= 1200));
+  assert.equal(chunks.join(''), text);
 });
 
 test('type_text：CDP 富文本回读使用逻辑 DOM 文本，不按 innerText 的排版空行验收', async () => {
@@ -185,8 +215,8 @@ test('type_text：CDP 输入后回读不一致必须失败（不许假报成功�
   assert.equal(r.ok, false);
   assert.equal(r.partial, true);
   assert.equal(r.matchesIntent, false);
-  assert.match(r.result, /CDP 输入未达到预期/);
-  assert.match(r.result, /不要假设已写入/);
+  assert.match(r.result, /CDP 事务式输入未达到预期/);
+  assert.match(r.result, /不要原样重试同一路径/);
 });
 
 test('press_key：合成成功不碰 CDP；失败才升级', async () => {

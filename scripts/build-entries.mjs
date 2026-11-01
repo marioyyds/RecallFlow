@@ -75,7 +75,9 @@ export const ENTRIES = [
   // 2026-11-01: configurable JEV policy limits, target-confidence arbitration and
   // the deterministic Xiaohongshu publication gate measured 993537 bytes. Raise
   // explicitly to 971KB; no dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 971 * 1024 },
+  // Route-aware repeat protection and transactional CDP text insertion measured
+  // 997361 bytes. Raise explicitly to 975KB; no dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 975 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -86,7 +88,9 @@ export const ENTRIES = [
   // JEV runtime status rendering measured 564478 bytes; raise explicitly.
   // 2026-11-01: configurable attempt/action/candidate/confidence controls
   // measured 566551 bytes. Raise explicitly to 554KB; no dependency added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 554 * 1024 },
+  // WAIT confidence and no-progress retry controls measured 568347 bytes.
+  // Raise explicitly to 556KB; no dependency added.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 556 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -94,7 +98,9 @@ export const ENTRIES = [
   // 2026-10-31: shared logical readback measured 545104 bytes (533KB); 534KB.
   // Shared JEV protocol text crossed the old boundary by 61 bytes; measured
   // 546877 bytes. Raise to 535KB with explicit headroom.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 535 * 1024 },
+  // The expanded JEV settings shape is shared with skill pages; measured
+  // 548043 bytes. Raise explicitly to 536KB; no dependency added.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 536 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

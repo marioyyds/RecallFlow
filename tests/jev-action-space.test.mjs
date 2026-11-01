@@ -6,6 +6,7 @@ import {
   JEV_MIN_ACTION_CONFIDENCE,
   JEV_MIN_CLICK_CONFIDENCE,
   JEV_MIN_READ_CONFIDENCE,
+  JEV_MIN_WAIT_CONFIDENCE,
   JEV_OPERATION_QUESTION,
   JEV_TYPE_TEXT_TARGET_QUESTION,
   buildJevFastRequest,
@@ -238,7 +239,7 @@ test('有明确 target 时不因 operation 多分类概率偏低而过早否决'
   assert.equal(interpretJevFastDecision(lowRead, bundle).reason, 'low-confidence');
 });
 
-test('候选数和三档置信度使用设置覆盖值', () => {
+test('候选数和各动作置信度使用设置覆盖值', () => {
   const elements = Array.from({ length: 12 }, (_, index) => ({
     ref: 'rf-' + index,
     tag: 'button',
@@ -253,6 +254,7 @@ test('候选数和三档置信度使用设置覆盖值', () => {
       minReadConfidence: 0.61,
       minActionConfidence: 0.63,
       minClickConfidence: 0.65,
+      minWaitConfidence: 0.41,
     },
     {
       intent: 'browser_task',
@@ -264,6 +266,7 @@ test('候选数和三档置信度使用设置覆盖值', () => {
   assert.equal(custom.elements.length <= 5, true);
   assert.equal(custom.operations.CLICK.minConfidence, 0.65);
   assert.equal(custom.operations.READ_PAGE.minConfidence, 0.61);
+  assert.equal(custom.operations.WAIT.minConfidence, 0.41);
   const typeBundle = buildJevFastRequest(
     {
       model: 'jev-latest',
@@ -278,6 +281,83 @@ test('候选数和三档置信度使用设置覆盖值', () => {
   );
   assert.equal(typeBundle.operations.TYPE_TEXT.minConfidence, 0.63);
   assert.equal(typeBundle.targets.TYPE_TEXT['2'].minConfidence, 0.63);
+});
+
+test('TYPE_TEXT 排除已填写标题，并用可编辑能力样本识别正文编辑器', () => {
+  const snapshot = pageSnapshot({
+    elements: [
+      {
+        ref: 'rf-title',
+        tag: 'input',
+        role: 'textbox',
+        type: 'text',
+        label: '文章标题',
+        valuePresent: true,
+        inViewport: true,
+      },
+      {
+        ref: 'rf-body',
+        tag: 'pre',
+        role: '',
+        type: '',
+        label: '',
+        selector: 'pre.editor__inner:nth-of-type(1)',
+        valuePresent: undefined,
+        inViewport: true,
+      },
+    ],
+    capabilities: {
+      editables: {
+        count: 1,
+        samples: [
+          {
+            selector: 'pre.editor__inner:nth-of-type(1)',
+            kind: 'contenteditable',
+          },
+        ],
+      },
+    },
+  });
+  const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'editor',
+    instruction: '正文还没有填，继续撰写',
+    snapshot,
+  });
+  const targets = Object.values(bundle.targets.TYPE_TEXT || {});
+  assert.equal(targets.some((target) => target.ref === 'rf-title'), false);
+  const body = targets.find((target) => target.ref === 'rf-body');
+  assert.ok(body);
+  assert.equal(body.label, '正文编辑区');
+});
+
+test('WAIT 使用独立低风险阈值，不再与读取共用 0.72', () => {
+  const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'editor',
+    instruction: '等待编辑器加载',
+    snapshot: pageSnapshot({ elements: [], text: '正在加载' }),
+  });
+  const wait = interpretJevFastDecision(
+    responseFor(bundle, 'WAIT', JEV_MIN_WAIT_CONFIDENCE + 0.05),
+    bundle
+  );
+  assert.equal(wait.kind, 'act');
+  assert.equal(wait.operation, 'WAIT');
+
+  const strict = buildJevFastRequest(
+    { model: 'jev-latest', minWaitConfidence: 0.75 },
+    {
+      intent: 'browser_task',
+      phase: 'editor',
+      instruction: '等待编辑器加载',
+      snapshot: pageSnapshot({ elements: [], text: '正在加载' }),
+    }
+  );
+  assert.equal(
+    interpretJevFastDecision(responseFor(strict, 'WAIT', 0.65), strict).reason,
+    'low-confidence'
+  );
 });
 
 test('DONE 和 BLOCKED 是显式 operation，不是额外 noul', () => {
@@ -448,6 +528,57 @@ test('连续动作上限由设置控制，内部快思考文案不进入聊天�
     ),
     false
   );
+});
+
+test('同一动作在页面指纹变化后允许继续推进，不再第二次就移交', async () => {
+  const state = makeState(false);
+  state.settings.jev.maxConsecutiveActions = 3;
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'CLICK');
+    }
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions.length, 3);
+  assert.equal(calls.filter((name) => name === 'click_element').length, 3);
+  assert.equal(state.jevLoop.lastOutcome, 'act');
+});
+
+test('同一动作无进展的重试次数来自设置', async () => {
+  const state = makeState(false);
+  state.settings.jev.maxConsecutiveActions = 6;
+  state.settings.jev.maxRepeatedActionsWithoutProgress = 2;
+  let clicks = 0;
+  const fixedSnapshot = pageSnapshot({ fingerprint: 'fixed' });
+  const pipeline = {
+    async process(step) {
+      for (const call of step.toolCalls) {
+        state.toolCallCount += 1;
+        state.ranToolNames.push(call.name);
+        if (call.name === 'click_element') clicks += 1;
+        if (call.name === 'get_page_snapshot') state.ctx.lastSnapshot = fixedSnapshot;
+      }
+      return { kind: 'continue', toolMs: 1 };
+    },
+  };
+  const controller = new JevFastController(
+    state,
+    pipeline,
+    new AbortController().signal,
+    async (_settings, request) => {
+      return responseFor(bundleFromRequest(request), 'CLICK');
+    }
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions.length, 2);
+  assert.equal(clicks, 2);
+  assert.equal(state.jevLoop.lastOutcome, 'repeated-action');
 });
 
 test('TYPE_TEXT 由文本助手生成值，JEV 只负责 operation 和 target', async () => {

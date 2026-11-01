@@ -129,6 +129,11 @@
         </label>
       </div>
       <label class="field">
+        <span class="field-label">同一动作无进展时最多连续执行</span>
+        <input id="jev-max-repeated" type="number" min="1" max="10" step="1" placeholder="3">
+        <span class="hint">只有 URL 与页面指纹都没变化时才累计；页面变化、切换目标或参数变化会立即重置。</span>
+      </label>
+      <label class="field">
         <span class="field-label">每次最多提供候选元素</span>
         <input id="jev-max-candidates" type="number" min="5" max="100" step="1" placeholder="40">
         <span class="hint">只把最相关的有限个元素交给 JEV；增加候选会提高覆盖范围，也会增加请求延迟和成本。</span>
@@ -147,8 +152,12 @@
           <span class="field-label">点击类</span>
           <input id="jev-min-click" type="number" min="0" max="1" step="0.01" placeholder="0.86">
         </label>
+        <label class="field">
+          <span class="field-label">等待类</span>
+          <input id="jev-min-wait" type="number" min="0" max="1" step="0.01" placeholder="0.5">
+        </label>
       </div>
-      <span class="hint">点击类会同时检查 operation 与目标元素；目标元素可定位时不再因多分类 operation 概率略低而单点否决。</span>
+      <span class="hint">点击类会同时检查 operation 与目标元素；等待只是短暂观察，使用独立低风险阈值，但仍受同一路由最多重试次数限制。</span>
       <label class="field">
         <span class="field-label">请求协议版本</span>
         <input id="jev-schema-version" type="text" placeholder="jev.recallflow.v1" autocomplete="off">

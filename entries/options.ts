@@ -46,10 +46,12 @@ async function load() {
   $('jev-retries').value = String(s.jev.maxRetries);
   $('jev-max-attempts').value = String(s.jev.maxAttemptsPerRun);
   $('jev-max-actions').value = String(s.jev.maxConsecutiveActions);
+  $('jev-max-repeated').value = String(s.jev.maxRepeatedActionsWithoutProgress);
   $('jev-max-candidates').value = String(s.jev.maxElementCandidates);
   $('jev-min-read').value = String(s.jev.minReadConfidence);
   $('jev-min-action').value = String(s.jev.minActionConfidence);
   $('jev-min-click').value = String(s.jev.minClickConfidence);
+  $('jev-min-wait').value = String(s.jev.minWaitConfidence);
   $('jev-schema-version').value = s.jev.schemaVersion;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
@@ -278,10 +280,12 @@ function collectSettings() {
       maxRetries: $('jev-retries').value,
       maxAttemptsPerRun: $('jev-max-attempts').value,
       maxConsecutiveActions: $('jev-max-actions').value,
+      maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
       maxElementCandidates: $('jev-max-candidates').value,
       minReadConfidence: $('jev-min-read').value,
       minActionConfidence: $('jev-min-action').value,
       minClickConfidence: $('jev-min-click').value,
+      minWaitConfidence: $('jev-min-wait').value,
       schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
     }),
     ragEnabled: $('rag-enabled').checked,
@@ -367,10 +371,12 @@ $('test-jev').addEventListener('click', async () => {
     maxRetries: $('jev-retries').value,
     maxAttemptsPerRun: $('jev-max-attempts').value,
     maxConsecutiveActions: $('jev-max-actions').value,
+    maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
     maxElementCandidates: $('jev-max-candidates').value,
     minReadConfidence: $('jev-min-read').value,
     minActionConfidence: $('jev-min-action').value,
     minClickConfidence: $('jev-min-click').value,
+    minWaitConfidence: $('jev-min-wait').value,
     schemaVersion: $('jev-schema-version').value,
   });
   if (!settings.apiKey) {

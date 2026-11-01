@@ -4693,6 +4693,25 @@ function editableTextSummary(expected, actual) {
 }
 
 // lib/application/agent/page-input-tools.ts
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function splitTrustedText(text, maxChars = 1200) {
+  let remaining = String(text == null ? "" : text);
+  const chunks = [];
+  const limit = Math.max(64, Math.floor(maxChars));
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf("\n", limit);
+    cut = cut >= Math.floor(limit * 0.5) ? cut + 1 : limit;
+    if (cut > 0 && cut < remaining.length && /[\uD800-\uDBFF]/.test(remaining[cut - 1]) && /[\uDC00-\uDFFF]/.test(remaining[cut])) {
+      cut -= 1;
+    }
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
 async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
   const sel = JSON.stringify(String(selector || ""));
   const expr = "(() => { /* rf-read-editable */ const el = document.querySelector(" + sel + "); if (!el) return null; if (el.isContentEditable) { " + readContentEditableText.toString() + ' return readContentEditableText(el); } return typeof el.value === "string" ? el.value : null; })()';
@@ -4717,24 +4736,33 @@ async function typeText(deps, args) {
   const isSubframe = typeFrame != null && typeFrame !== 0;
   try {
     const sel = JSON.stringify(target.selector);
-    const focusExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return false; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } } else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(el.value.length, el.value.length); return true; })()';
+    const primaryBefore = typeof res?.valueBefore === "string" ? res.valueBefore : null;
+    const fallbackValue = primaryBefore === null ? await readEditableValue(
+      deps,
+      deps.ctx.tabId,
+      target.selector,
+      isSubframe,
+      typeFrame
+    ) : null;
+    const baseline = primaryBefore === null ? String(fallbackValue == null ? "" : fallbackValue) : primaryBefore;
+    const text = String(args.value == null ? "" : args.value);
+    const expected = args.clearFirst === true ? text : baseline + text;
+    const focusExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return false; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } } else if (typeof el.select === "function") el.select(); else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(0, el.value.length); return true; })()';
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
-    const text = String(args.value == null ? "" : args.value);
-    const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
-    const expected = args.clearFirst === true ? text : String(beforeValue == null ? "" : beforeValue) + text;
-    if (args.clearFirst === true) await deps.cdp.pressKey(deps.ctx.tabId, "a", ["CTRL"]);
-    let strategy = "cdp-insertText";
-    if (target.contentEditable && text.includes("\n")) {
-      strategy = "cdp-line-by-line";
-      const lines = text.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        if (i > 0) await deps.cdp.pressKey(deps.ctx.tabId, "Enter");
-        if (lines[i] || i === 0) await deps.cdp.insertText(deps.ctx.tabId, lines[i]);
+    let strategy = "cdp-transactional";
+    if (target.contentEditable && expected) {
+      const chunks = splitTrustedText(expected, 1200);
+      strategy = chunks.length > 1 ? "cdp-transactional-chunked" : "cdp-transactional";
+      for (const chunk of chunks) {
+        await deps.cdp.insertText(deps.ctx.tabId, chunk);
       }
+    } else if (expected) {
+      await deps.cdp.insertText(deps.ctx.tabId, expected);
     } else {
-      await deps.cdp.insertText(deps.ctx.tabId, text);
+      strategy = "cdp-clear-only";
     }
+    await delay(60);
     const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
     const summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
     const verified = actualValue !== null && actualValue !== void 0 && summary.matchesIntent;
@@ -4756,7 +4784,7 @@ async function typeText(deps, args) {
         deps.observedChange(before, after),
         verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165 " + text.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u6216\u68C0\u67E5\u76EE\u6807\u662F\u5426\u88AB\u9875\u9762\u63A5\u7BA1\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u4E8B\u52A1\u5F0F\u8F93\u5165 " + expected.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u4E8B\u52A1\u5F0F\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u5DE5\u5177\u5DF2\u5148\u6062\u590D\u5230\u5185\u5BB9\u811A\u672C\u5931\u8D25\u524D\u7684\u57FA\u7EBF\uFF0C\u518D\u7528\u4E00\u6B21\u6574\u4F53\u5199\u5165\u66FF\u6362\uFF1B\u4ECD\u4E0D\u4E00\u81F4\u65F6\u4E0D\u8981\u539F\u6837\u91CD\u8BD5\u540C\u4E00\u8DEF\u5F84\uFF0C\u8BF7\u68C0\u67E5\u7F16\u8F91\u5668\u662F\u5426\u6539\u5199\u4E86\u6BB5\u843D\u6216\u6539\u7528\u8BE5\u7AD9\u70B9\u4E13\u7528\u5199\u5165\u65B9\u5F0F\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;

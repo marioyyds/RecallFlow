@@ -4051,10 +4051,12 @@
     shadowMode: true,
     maxAttemptsPerRun: 36,
     maxConsecutiveActions: 12,
+    maxRepeatedActionsWithoutProgress: 3,
     maxElementCandidates: 40,
     minReadConfidence: 0.72,
     minActionConfidence: 0.8,
-    minClickConfidence: 0.86
+    minClickConfidence: 0.86,
+    minWaitConfidence: 0.5
   });
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
@@ -4150,10 +4152,16 @@
       shadowMode: raw.shadowMode !== false,
       maxAttemptsPerRun: boundedInteger("maxAttemptsPerRun", 1, 200),
       maxConsecutiveActions: boundedInteger("maxConsecutiveActions", 1, 50),
+      maxRepeatedActionsWithoutProgress: boundedInteger(
+        "maxRepeatedActionsWithoutProgress",
+        1,
+        10
+      ),
       maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
       minReadConfidence: boundedProbability("minReadConfidence"),
       minActionConfidence: boundedProbability("minActionConfidence"),
-      minClickConfidence: boundedProbability("minClickConfidence")
+      minClickConfidence: boundedProbability("minClickConfidence"),
+      minWaitConfidence: boundedProbability("minWaitConfidence")
     };
   }
   async function updateAISettings(patch) {

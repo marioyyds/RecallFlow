@@ -16,6 +16,37 @@ import { editableTextSummary, readContentEditableText } from '../../shared/edita
 import type { Caught } from './errors.ts';
 import type { PageInputDeps } from './tool-deps.ts';
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 可信输入的事务边界：长正文按段落附近切块，但块内保留真实换行，不再为每一行
+ * 派发 Enter。逐行 Enter 会让富文本编辑器的段落模型反复重入，CSDN 实测因此
+ * 插入重复段落。这里只负责切分，实际插入仍使用一次或少量 Input.insertText。
+ */
+export function splitTrustedText(text: unknown, maxChars = 1200): string[] {
+  let remaining = String(text == null ? '' : text);
+  const chunks: string[] = [];
+  const limit = Math.max(64, Math.floor(maxChars));
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf('\n', limit);
+    cut = cut >= Math.floor(limit * 0.5) ? cut + 1 : limit;
+    if (
+      cut > 0 &&
+      cut < remaining.length &&
+      /[\uD800-\uDBFF]/.test(remaining[cut - 1]) &&
+      /[\uDC00-\uDFFF]/.test(remaining[cut])
+    ) {
+      cut -= 1;
+    }
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut);
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 /** 从目标元素回读实际文本；用于 CDP 输入后的严格验收。 */
 async function readEditableValue(
   deps: PageInputDeps,
@@ -62,31 +93,50 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
   const isSubframe = typeFrame != null && typeFrame !== 0;
   try {
     const sel = JSON.stringify(target.selector);
+    // 内容脚本失败时可能已经写入了一部分。事务式降级必须使用它返回的 valueBefore
+    // 作为基线，不能读取“失败后”的编辑器值，否则会把半截内容当成原值再加一遍。
+    const primaryBefore =
+      typeof res?.valueBefore === 'string' ? res.valueBefore : null;
+    const fallbackValue =
+      primaryBefore === null
+        ? await readEditableValue(
+            deps,
+            deps.ctx.tabId,
+            target.selector,
+            isSubframe,
+            typeFrame as number
+          )
+        : null;
+    const baseline =
+      primaryBefore === null
+        ? String(fallbackValue == null ? '' : fallbackValue)
+        : primaryBefore;
+    const text = String(args.value == null ? '' : args.value);
+    const expected = args.clearFirst === true ? text : baseline + text;
+    // CDP 降级统一采用“先全选，再整体写入 expected”的事务语义。无论用户原来是否
+    // clearFirst，都先恢复到明确的最终值，避免内容脚本半写入 + CDP 追加造成重复。
     const focusExpr =
       '(() => { const el = document.querySelector(' + sel + '); if (!el) return false; el.focus();' +
-      ' if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);' +
+      ' if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el);' +
       ' const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } }' +
-      ' else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(el.value.length, el.value.length);' +
+      ' else if (typeof el.select === "function") el.select();' +
+      ' else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(0, el.value.length);' +
       ' return true; })()';
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
-    const text = String(args.value == null ? '' : args.value);
-    const beforeValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
-    const expected = args.clearFirst === true ? text : String(beforeValue == null ? '' : beforeValue) + text;
-    if (args.clearFirst === true) await deps.cdp.pressKey(deps.ctx.tabId, 'a', ['CTRL']);
-    let strategy = 'cdp-insertText';
-    if (target.contentEditable && text.includes('\n')) {
-      // ProseMirror/Tiptap 一类编辑器对一次性插入多行文本的换行处理不一致：
-      // 逐行插入 + 可信 Enter 更接近真实用户输入。
-      strategy = 'cdp-line-by-line';
-      const lines = text.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (i > 0) await deps.cdp.pressKey(deps.ctx.tabId, 'Enter');
-        if (lines[i] || i === 0) await deps.cdp.insertText(deps.ctx.tabId, lines[i]);
+    let strategy = 'cdp-transactional';
+    if (target.contentEditable && expected) {
+      const chunks = splitTrustedText(expected, 1200);
+      strategy = chunks.length > 1 ? 'cdp-transactional-chunked' : 'cdp-transactional';
+      for (const chunk of chunks) {
+        await deps.cdp.insertText(deps.ctx.tabId, chunk);
       }
+    } else if (expected) {
+      await deps.cdp.insertText(deps.ctx.tabId, expected);
     } else {
-      await deps.cdp.insertText(deps.ctx.tabId, text);
+      strategy = 'cdp-clear-only';
     }
+    await delay(60);
     const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
     const summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
     const verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
@@ -109,13 +159,13 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
         verified ? '已用 CDP 可信输入，并回读确认' : 'CDP 已输入，但回读值与预期不一致'
       ),
       result: verified
-        ? '已用 CDP 可信输入 ' +
-          text.length +
+        ? '已用 CDP 事务式输入 ' +
+          expected.length +
           ' 个字符（' +
           strategy +
           '，已回读确认）' +
           (after ? '\n' + deps.compactSnapshotSummary(after) : '')
-        : 'CDP 输入未达到预期（' +
+        : 'CDP 事务式输入未达到预期（' +
           strategy +
           '）：预期 ' +
           summary.expectedLength +
@@ -124,7 +174,7 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
           (summary.firstDifference.index >= 0 ? '，首个差异在 ' + summary.firstDifference.index : '') +
           '。实际值：' +
           JSON.stringify(String(actualValue == null ? '' : actualValue).slice(0, 120)) +
-          '。不要假设已写入，请改用粘贴/编辑器专用写入或检查目标是否被页面接管。' +
+          '。工具已先恢复到内容脚本失败前的基线，再用一次整体写入替换；仍不一致时不要原样重试同一路径，请检查编辑器是否改写了段落或改用该站点专用写入方式。' +
           (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
     if (result.verification) {

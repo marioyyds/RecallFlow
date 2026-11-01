@@ -12,6 +12,8 @@ export interface JevLoopState {
   lastAttemptAt: number;
   lastToolCallCount: number;
   lastActionSignature: string;
+  lastActionRouteKey: string;
+  sameActionStreak: number;
   lastOutcome: string;
 }
 
@@ -35,6 +37,8 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
     lastAttemptAt: nonNegativeInteger(source.lastAttemptAt),
     lastToolCallCount: nonNegativeInteger(source.lastToolCallCount),
     lastActionSignature: String(source.lastActionSignature || '').slice(0, 500),
+    lastActionRouteKey: String(source.lastActionRouteKey || '').slice(0, 1000),
+    sameActionStreak: Math.min(nonNegativeInteger(source.sameActionStreak), 10),
     lastOutcome: String(source.lastOutcome || '').slice(0, 80),
   };
 }

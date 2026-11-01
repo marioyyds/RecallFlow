@@ -236,45 +236,14 @@ export class JevFastController {
     }
     if (decision.kind === 'blocked') {
       this.state.jevLoop.consecutiveFastActions = 0;
+      this.state.jevLoop.sameActionStreak = 0;
+      this.state.jevLoop.lastActionRouteKey = '';
       this.appendBlocked(iter, decision.reason, decision.description);
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: decision.reason, latencyMs };
     }
 
-    const signature = decision.operation + ':' + JSON.stringify(decision.args);
-    if (
-      this.state.jevLoop.consecutiveFastActions > 0 &&
-      signature === this.state.jevLoop.lastActionSignature
-    ) {
-      this.state.jevLoop.consecutiveFastActions = 0;
-      this.state.jevLoop.lastOutcome = 'repeated-action';
-      this.appendBlocked(iter, 'repeated-action', 'JEV 连续选择了同一个动作');
-      await persist({ phase: 'jev_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: 'repeated-action', latencyMs };
-    }
-
     let action = decision;
-    if (action.operation === 'WAIT') {
-      await sleep(100);
-      const failuresBeforeWaitObservation = this.state.failedToolNames.length;
-      const observed = await this.observePage(iter, persist);
-      if (observed.kind === 'cancelled') return observed;
-      if (
-        observed.kind !== 'continue' ||
-        this.state.failedToolNames.length > failuresBeforeWaitObservation
-      ) {
-        this.appendBlocked(iter, 'observation-failed', '等待后无法重新观察页面');
-        return { kind: 'skipped', reason: 'observation-failed', latencyMs };
-      }
-      this.noteFastAction(signature);
-      return {
-        kind: 'act',
-        decisions: [decision],
-        latencyMs,
-        toolOutcomes: [observed],
-      };
-    }
-
     if (action.operation === 'TYPE_TEXT') {
       try {
         const generated = await this.textHelper(
@@ -299,6 +268,62 @@ export class JevFastController {
       }
     }
 
+    const signature = action.operation + ':' + JSON.stringify(action.args);
+    const routeKey = this.currentRouteKey();
+    const loop = this.state.jevLoop;
+    const previousActionIsComparable =
+      loop.lastActionRouteKey === routeKey &&
+      signature === loop.lastActionSignature;
+    const sameActionStreak = previousActionIsComparable
+      ? loop.sameActionStreak
+      : 0;
+    const configuredRepeatLimit = Number(
+      this.state.settings.jev.maxRepeatedActionsWithoutProgress
+    );
+    const repeatLimit =
+      Number.isFinite(configuredRepeatLimit) && configuredRepeatLimit >= 1
+        ? Math.min(10, Math.floor(configuredRepeatLimit))
+        : JEV_SETTINGS_DEFAULTS.maxRepeatedActionsWithoutProgress;
+    if (sameActionStreak >= repeatLimit) {
+      loop.consecutiveFastActions = 0;
+      loop.sameActionStreak = 0;
+      loop.lastOutcome = 'repeated-action';
+      this.appendBlocked(
+        iter,
+        'repeated-action',
+        '同一动作在当前页面状态下已连续尝试 ' +
+          sameActionStreak +
+          ' 次且无页面进展'
+      );
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'repeated-action', latencyMs };
+    }
+
+    if (action.operation === 'WAIT') {
+      await sleep(100);
+      const failuresBeforeWaitObservation = this.state.failedToolNames.length;
+      const observed = await this.observePage(iter, persist);
+      if (observed.kind === 'cancelled') return observed;
+      if (
+        observed.kind !== 'continue' ||
+        this.state.failedToolNames.length > failuresBeforeWaitObservation
+      ) {
+        this.appendBlocked(iter, 'observation-failed', '等待后无法重新观察页面');
+        return { kind: 'skipped', reason: 'observation-failed', latencyMs };
+      }
+      this.noteFastAction(
+        signature,
+        previousActionIsComparable ? sameActionStreak + 1 : 1,
+        routeKey
+      );
+      return {
+        kind: 'act',
+        decisions: [decision],
+        latencyMs,
+        toolOutcomes: [observed],
+      };
+    }
+
     const failuresBefore = this.state.failedToolNames.length;
     const outcome = await this.processTool(iter, persist, action);
     if (outcome.kind === 'cancelled') return outcome;
@@ -309,6 +334,9 @@ export class JevFastController {
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
+    this.state.jevLoop.sameActionStreak =
+      previousActionIsComparable ? sameActionStreak + 1 : 1;
+    this.state.jevLoop.lastActionRouteKey = routeKey;
     this.state.jevLoop.consecutiveFailures = failed
       ? this.state.jevLoop.consecutiveFailures + 1
       : 0;
@@ -333,6 +361,13 @@ export class JevFastController {
       this.appendBlocked(iter, 'observation-failed', '动作后无法重新观察页面');
       return { kind: 'skipped', reason: 'observation-failed', latencyMs };
     }
+    // 动作可能已经导航或改变了页面。路由变化说明这一步产生了可观测进展，
+    // 同一 action signature 的“无进展连击”必须清零，而不是因为动作相同就停。
+    const postActionRouteKey = this.currentRouteKey();
+    if (postActionRouteKey !== routeKey) {
+      this.state.jevLoop.sameActionStreak = 0;
+    }
+    this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
     if (this.state.jevLoop.consecutiveFailures >= 2) {
       this.appendBlocked(iter, 'tool-failure-limit', '快路径连续两次工具失败');
       await persist({ phase: 'jev_decision' }).catch(() => {});
@@ -346,10 +381,18 @@ export class JevFastController {
     };
   }
 
-  private noteFastAction(signature: string): void {
+  private noteFastAction(
+    signature: string,
+    sameActionStreak: number,
+    beforeRouteKey: string
+  ): void {
+    const postActionRouteKey = this.currentRouteKey();
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.lastActionSignature = signature;
+    this.state.jevLoop.sameActionStreak =
+      postActionRouteKey === beforeRouteKey ? sameActionStreak : 0;
+    this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
     this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastOutcome = 'act';
   }
@@ -448,6 +491,8 @@ export class JevFastController {
     this.state.jevLoop.consecutiveFastActions = 0;
     this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastActionSignature = '';
+    this.state.jevLoop.lastActionRouteKey = '';
+    this.state.jevLoop.sameActionStreak = 0;
     this.state.jevLoop.lastOutcome = 'slow-handoff';
   }
 

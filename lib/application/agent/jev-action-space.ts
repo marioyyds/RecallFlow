@@ -14,6 +14,7 @@ export const JEV_TYPE_TEXT_TARGET_QUESTION = 'type_text_target';
 export const JEV_MIN_READ_CONFIDENCE = 0.72;
 export const JEV_MIN_ACTION_CONFIDENCE = 0.8;
 export const JEV_MIN_CLICK_CONFIDENCE = 0.86;
+export const JEV_MIN_WAIT_CONFIDENCE = 0.5;
 export const JEV_MAX_ELEMENT_ACTIONS = 40;
 
 type JevPolicySettings = Pick<JevSettings, 'model'> & Partial<Pick<
@@ -22,6 +23,7 @@ type JevPolicySettings = Pick<JevSettings, 'model'> & Partial<Pick<
   | 'minReadConfidence'
   | 'minActionConfidence'
   | 'minClickConfidence'
+  | 'minWaitConfidence'
 >>;
 
 export type JevOperation =
@@ -212,12 +214,20 @@ function isClickable(element: SnapshotElementLike): boolean {
   );
 }
 
-function isTypeTarget(element: SnapshotElementLike): boolean {
+function isTypeTarget(
+  element: SnapshotElementLike,
+  editableSelectors: Set<string> = new Set()
+): boolean {
   if (!isVisible(element)) return false;
+  // 已填写字段不再进入 JEV 的 TYPE_TEXT target head。尤其标题填完后，多分类
+  // target 仍可能以 100% 概率再次选到它；慢思考负责“覆盖错误旧值”这类需要
+  // 明确 clearFirst 的场景，快路径不应自动重写已经有值的字段。
+  if (element.valuePresent === true) return false;
   const tag = String(element.tag || '').toLowerCase();
   const role = String(element.role || '').toLowerCase();
   const type = String(element.type || '').toLowerCase();
   if (UNSAFE_INPUT_TYPES.has(type)) return false;
+  if (editableSelectors.has(String(element.selector || ''))) return true;
   if (TEXT_ROLES.has(role)) return true;
   if (tag === 'textarea') return true;
   return tag === 'input' && TEXT_INPUT_TYPES.has(type);
@@ -250,10 +260,15 @@ function buildElementSpace(
   const clickTargets: Record<string, JevTargetDefinition> = {};
   const typeTargets: Record<string, JevTargetDefinition> = {};
   const seen = new Set<string>();
+  const editableSelectors = new Set(
+    (snapshot?.capabilities?.editables?.samples || [])
+      .map((sample) => String(sample.selector || ''))
+      .filter(Boolean)
+  );
   for (const element of elements) {
     if (table.length >= maxCandidates) break;
     const canClick = isClickable(element);
-    const canType = isTypeTarget(element);
+    const canType = isTypeTarget(element, editableSelectors);
     if (!canClick && !canType) continue;
     const target = elementTarget(element);
     const identity = target + '|' + element.role + '|' + elementLabel(element);
@@ -262,7 +277,11 @@ function buildElementSpace(
     const key = String(table.length + 1);
     const ref = String(element.ref || '');
     const role = String(element.role || element.tag || '');
-    const label = elementLabel(element);
+    const label =
+      elementLabel(element) ||
+      (canType && editableSelectors.has(String(element.selector || ''))
+        ? '正文编辑区'
+        : '');
     const operations = [];
     if (canClick) operations.push('CLICK');
     if (canType) operations.push('TYPE_TEXT');
@@ -342,6 +361,9 @@ export function buildJevFastRequest(
   const minClickConfidence = Number.isFinite(Number(settings.minClickConfidence))
     ? Math.max(0, Math.min(1, Number(settings.minClickConfidence)))
     : JEV_MIN_CLICK_CONFIDENCE;
+  const minWaitConfidence = Number.isFinite(Number(settings.minWaitConfidence))
+    ? Math.max(0, Math.min(1, Number(settings.minWaitConfidence)))
+    : JEV_MIN_WAIT_CONFIDENCE;
   const elementSpace = buildElementSpace(
     context.snapshot,
     maxCandidates,
@@ -412,7 +434,7 @@ export function buildJevFastRequest(
     operations,
     'WAIT',
     'Wait briefly and observe again when the needed control or result is still loading.',
-    { minConfidence: minReadConfidence }
+    { minConfidence: minWaitConfidence }
   );
   addChoice(
     operations,
