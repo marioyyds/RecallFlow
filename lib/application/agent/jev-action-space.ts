@@ -10,8 +10,11 @@ export const JEV_MIN_ACTION_CONFIDENCE = 0.72;
 export const JEV_MIN_CLICK_CONFIDENCE = 0.86;
 export const JEV_MAX_ELEMENT_ACTIONS = 10;
 export const JEV_HANDOFF_THRESHOLD = 0.5;
+export const JEV_HARD_HANDOFF_THRESHOLD = 0.85;
 export const JEV_MIN_EXPECTED_PROGRESS = 0.4;
 export const JEV_MIN_PAGE_READY = 0.5;
+export const JEV_MODERATE_CLICK_EXPECTED_PROGRESS = 0.5;
+export const JEV_MODERATE_CLICK_PAGE_READY = 0.6;
 
 export type JevToolName =
   | 'read_current_page'
@@ -240,15 +243,15 @@ export function buildJevFastRequest(
       [JEV_NEXT_ACTION_QUESTION]: {
         type: 'choice',
         instructions:
-          '选择当前最能推动任务的一项局部动作。优先观察或安全点击；发布、发送、删除、支付、内容生成和最终回答必须 escalate。',
+          '选择当前最能推动任务的一项局部动作。即使最终任务仍需慢思考，只要已有可靠候选能完成一个局部步骤，也应优先选择该动作，而不是因为整个任务复杂就选 escalate。发布、发送、删除、支付和实质内容生成必须 escalate。',
         criteria,
       },
       [JEV_HANDOFF_QUESTION]: {
         type: 'noul',
-        instructions: '当前是否应该立即把控制权交给慢思考？',
+        instructions: '当前候选动作是否必须交还慢思考才能安全推进？',
         criteria: {
-          true: '目标有歧义、需要生成实质内容、需要高风险写操作、页面不可靠或快路径已有失败',
-          false: '当前状态、页面和候选动作都足够明确，可以安全执行局部快动作',
+          true: '当前候选动作本身有歧义、需要生成或修改实质内容、属于高风险写操作、页面不可靠，或快路径已有失败',
+          false: '已经选定可推进当前步骤的局部候选动作；即使整个任务最终仍需要慢思考，也应由快思考先完成这个明确步骤',
         },
       },
       [JEV_EXPECTED_PROGRESS_QUESTION]: {
@@ -296,24 +299,6 @@ export function interpretJevFastDecision(
   if (!answer || answer.type !== 'choice') {
     return { kind: 'escalate', reason: 'invalid-answer', signals };
   }
-  if (handoff >= JEV_HANDOFF_THRESHOLD) {
-    return {
-      kind: 'escalate',
-      reason: 'handoff-requested',
-      choice: answer.choice,
-      confidence: answer.confidence,
-      signals,
-    };
-  }
-  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
-    return {
-      kind: 'escalate',
-      reason: 'low-expected-progress',
-      choice: answer.choice,
-      confidence: answer.confidence,
-      signals,
-    };
-  }
   if (answer.choice === 'escalate') {
     return {
       kind: 'escalate',
@@ -333,10 +318,44 @@ export function interpretJevFastDecision(
       signals,
     };
   }
+  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
+    return {
+      kind: 'escalate',
+      reason: 'low-expected-progress',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
+    };
+  }
   if (answer.confidence < action.minConfidence) {
     return {
       kind: 'escalate',
       reason: 'low-confidence',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
+    };
+  }
+  if (handoff >= JEV_HARD_HANDOFF_THRESHOLD) {
+    return {
+      kind: 'escalate',
+      reason: 'handoff-requested',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals,
+    };
+  }
+  if (
+    handoff >= JEV_HANDOFF_THRESHOLD &&
+    (action.toolName === 'click_element' || action.toolName === 'scroll_page') &&
+    (
+      expectedProgress < JEV_MODERATE_CLICK_EXPECTED_PROGRESS ||
+      pageReady < JEV_MODERATE_CLICK_PAGE_READY
+    )
+  ) {
+    return {
+      kind: 'escalate',
+      reason: 'handoff-requested',
       choice: answer.choice,
       confidence: answer.confidence,
       signals,
@@ -391,7 +410,14 @@ export function formatJevDecisionSummary(
   const prefix = shadow ? '⚡ 快思考（影子）' : '⚡ 快思考';
   const action = decision.kind === 'act'
     ? decision.description
-    : '移交慢思考：' + decision.reason;
+    : '移交慢思考：' + decision.reason +
+      (decision.choice
+        ? '（候选 ' + decision.choice +
+          (typeof decision.confidence === 'number'
+            ? '，' + Math.round(decision.confidence * 100) + '%'
+            : '') +
+          '）'
+        : '');
   const signals = decision.signals;
   const detail = signals
     ? '；handoff ' + Math.round(signals.handoff * 100) + '%' +

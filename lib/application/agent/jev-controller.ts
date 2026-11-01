@@ -37,6 +37,7 @@ export class JevFastController {
   private readonly signal: AbortSignal;
   private readonly callSystemOne: typeof callJevSystemOne;
   private readonly writeDiagnostic: typeof writeJevDiagnostic;
+  private lastHandoffRoute = '';
 
   constructor(
     state: AgentRunState,
@@ -62,7 +63,21 @@ export class JevFastController {
     if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
+    if (this.lastHandoffRoute && this.currentRouteKey() === this.lastHandoffRoute) return false;
     return true;
+  }
+
+  private currentRouteKey(): string {
+    const phase = deriveJevPhase(
+      this.state.ctx.pageUrl,
+      this.state.ctx.pageTitle,
+      this.state.ctx.lastSnapshot
+    );
+    return [
+      phase,
+      String(this.state.ctx.pageUrl || ''),
+      String(this.state.ctx.lastSnapshot?.fingerprint || ''),
+    ].join('|');
   }
 
   async runAvailable(
@@ -268,6 +283,7 @@ export class JevFastController {
     decision: JevFastDecision | null,
     detail = ''
   ): void {
+    this.lastHandoffRoute = this.currentRouteKey();
     this.state.trace({
       phase: 'jev-handoff',
       iter,

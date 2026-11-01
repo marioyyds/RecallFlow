@@ -11999,8 +11999,11 @@ var JEV_MIN_ACTION_CONFIDENCE = 0.72;
 var JEV_MIN_CLICK_CONFIDENCE = 0.86;
 var JEV_MAX_ELEMENT_ACTIONS = 10;
 var JEV_HANDOFF_THRESHOLD = 0.5;
+var JEV_HARD_HANDOFF_THRESHOLD = 0.85;
 var JEV_MIN_EXPECTED_PROGRESS = 0.4;
 var JEV_MIN_PAGE_READY = 0.5;
+var JEV_MODERATE_CLICK_EXPECTED_PROGRESS = 0.5;
+var JEV_MODERATE_CLICK_PAGE_READY = 0.6;
 var BASE_ACTIONS = [
   {
     key: "read_page",
@@ -12136,15 +12139,15 @@ function buildJevFastRequest(settings, context) {
     questions: {
       [JEV_NEXT_ACTION_QUESTION]: {
         type: "choice",
-        instructions: "\u9009\u62E9\u5F53\u524D\u6700\u80FD\u63A8\u52A8\u4EFB\u52A1\u7684\u4E00\u9879\u5C40\u90E8\u52A8\u4F5C\u3002\u4F18\u5148\u89C2\u5BDF\u6216\u5B89\u5168\u70B9\u51FB\uFF1B\u53D1\u5E03\u3001\u53D1\u9001\u3001\u5220\u9664\u3001\u652F\u4ED8\u3001\u5185\u5BB9\u751F\u6210\u548C\u6700\u7EC8\u56DE\u7B54\u5FC5\u987B escalate\u3002",
+        instructions: "\u9009\u62E9\u5F53\u524D\u6700\u80FD\u63A8\u52A8\u4EFB\u52A1\u7684\u4E00\u9879\u5C40\u90E8\u52A8\u4F5C\u3002\u5373\u4F7F\u6700\u7EC8\u4EFB\u52A1\u4ECD\u9700\u6162\u601D\u8003\uFF0C\u53EA\u8981\u5DF2\u6709\u53EF\u9760\u5019\u9009\u80FD\u5B8C\u6210\u4E00\u4E2A\u5C40\u90E8\u6B65\u9AA4\uFF0C\u4E5F\u5E94\u4F18\u5148\u9009\u62E9\u8BE5\u52A8\u4F5C\uFF0C\u800C\u4E0D\u662F\u56E0\u4E3A\u6574\u4E2A\u4EFB\u52A1\u590D\u6742\u5C31\u9009 escalate\u3002\u53D1\u5E03\u3001\u53D1\u9001\u3001\u5220\u9664\u3001\u652F\u4ED8\u548C\u5B9E\u8D28\u5185\u5BB9\u751F\u6210\u5FC5\u987B escalate\u3002",
         criteria
       },
       [JEV_HANDOFF_QUESTION]: {
         type: "noul",
-        instructions: "\u5F53\u524D\u662F\u5426\u5E94\u8BE5\u7ACB\u5373\u628A\u63A7\u5236\u6743\u4EA4\u7ED9\u6162\u601D\u8003\uFF1F",
+        instructions: "\u5F53\u524D\u5019\u9009\u52A8\u4F5C\u662F\u5426\u5FC5\u987B\u4EA4\u8FD8\u6162\u601D\u8003\u624D\u80FD\u5B89\u5168\u63A8\u8FDB\uFF1F",
         criteria: {
-          true: "\u76EE\u6807\u6709\u6B67\u4E49\u3001\u9700\u8981\u751F\u6210\u5B9E\u8D28\u5185\u5BB9\u3001\u9700\u8981\u9AD8\u98CE\u9669\u5199\u64CD\u4F5C\u3001\u9875\u9762\u4E0D\u53EF\u9760\u6216\u5FEB\u8DEF\u5F84\u5DF2\u6709\u5931\u8D25",
-          false: "\u5F53\u524D\u72B6\u6001\u3001\u9875\u9762\u548C\u5019\u9009\u52A8\u4F5C\u90FD\u8DB3\u591F\u660E\u786E\uFF0C\u53EF\u4EE5\u5B89\u5168\u6267\u884C\u5C40\u90E8\u5FEB\u52A8\u4F5C"
+          true: "\u5F53\u524D\u5019\u9009\u52A8\u4F5C\u672C\u8EAB\u6709\u6B67\u4E49\u3001\u9700\u8981\u751F\u6210\u6216\u4FEE\u6539\u5B9E\u8D28\u5185\u5BB9\u3001\u5C5E\u4E8E\u9AD8\u98CE\u9669\u5199\u64CD\u4F5C\u3001\u9875\u9762\u4E0D\u53EF\u9760\uFF0C\u6216\u5FEB\u8DEF\u5F84\u5DF2\u6709\u5931\u8D25",
+          false: "\u5DF2\u7ECF\u9009\u5B9A\u53EF\u63A8\u8FDB\u5F53\u524D\u6B65\u9AA4\u7684\u5C40\u90E8\u5019\u9009\u52A8\u4F5C\uFF1B\u5373\u4F7F\u6574\u4E2A\u4EFB\u52A1\u6700\u7EC8\u4ECD\u9700\u8981\u6162\u601D\u8003\uFF0C\u4E5F\u5E94\u7531\u5FEB\u601D\u8003\u5148\u5B8C\u6210\u8FD9\u4E2A\u660E\u786E\u6B65\u9AA4"
         }
       },
       [JEV_EXPECTED_PROGRESS_QUESTION]: {
@@ -12187,24 +12190,6 @@ function interpretJevFastDecision(response, actions) {
   if (!answer || answer.type !== "choice") {
     return { kind: "escalate", reason: "invalid-answer", signals };
   }
-  if (handoff >= JEV_HANDOFF_THRESHOLD) {
-    return {
-      kind: "escalate",
-      reason: "handoff-requested",
-      choice: answer.choice,
-      confidence: answer.confidence,
-      signals
-    };
-  }
-  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
-    return {
-      kind: "escalate",
-      reason: "low-expected-progress",
-      choice: answer.choice,
-      confidence: answer.confidence,
-      signals
-    };
-  }
   if (answer.choice === "escalate") {
     return {
       kind: "escalate",
@@ -12224,10 +12209,37 @@ function interpretJevFastDecision(response, actions) {
       signals
     };
   }
+  if (expectedProgress < JEV_MIN_EXPECTED_PROGRESS) {
+    return {
+      kind: "escalate",
+      reason: "low-expected-progress",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
+    };
+  }
   if (answer.confidence < action.minConfidence) {
     return {
       kind: "escalate",
       reason: "low-confidence",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
+    };
+  }
+  if (handoff >= JEV_HARD_HANDOFF_THRESHOLD) {
+    return {
+      kind: "escalate",
+      reason: "handoff-requested",
+      choice: answer.choice,
+      confidence: answer.confidence,
+      signals
+    };
+  }
+  if (handoff >= JEV_HANDOFF_THRESHOLD && (action.toolName === "click_element" || action.toolName === "scroll_page") && (expectedProgress < JEV_MODERATE_CLICK_EXPECTED_PROGRESS || pageReady < JEV_MODERATE_CLICK_PAGE_READY)) {
+    return {
+      kind: "escalate",
+      reason: "handoff-requested",
       choice: answer.choice,
       confidence: answer.confidence,
       signals
@@ -12265,7 +12277,7 @@ function compareJevShadowAction(suggestion, slowToolNames, finalText = "") {
 }
 function formatJevDecisionSummary(shadow, decision, latencyMs) {
   const prefix = shadow ? "\u26A1 \u5FEB\u601D\u8003\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u601D\u8003";
-  const action = decision.kind === "act" ? decision.description : "\u79FB\u4EA4\u6162\u601D\u8003\uFF1A" + decision.reason;
+  const action = decision.kind === "act" ? decision.description : "\u79FB\u4EA4\u6162\u601D\u8003\uFF1A" + decision.reason + (decision.choice ? "\uFF08\u5019\u9009 " + decision.choice + (typeof decision.confidence === "number" ? "\uFF0C" + Math.round(decision.confidence * 100) + "%" : "") + "\uFF09" : "");
   const signals = decision.signals;
   const detail = signals ? "\uFF1Bhandoff " + Math.round(signals.handoff * 100) + "% / \u8FDB\u5C55 " + Math.round(signals.expectedProgress * 100) + "% / \u9875\u9762 " + Math.round(signals.pageReady * 100) + "%" : "";
   return prefix + "\uFF1A" + action + detail + "\uFF08" + Math.round(latencyMs) + "ms\uFF09";
@@ -12303,6 +12315,7 @@ var JevFastController = class {
   signal;
   callSystemOne;
   writeDiagnostic;
+  lastHandoffRoute = "";
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic) {
     this.state = state2;
     this.pipeline = pipeline;
@@ -12320,7 +12333,20 @@ var JevFastController = class {
     if (loop.consecutiveFastActions >= JEV_MAX_CONSECUTIVE_ACTIONS) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
+    if (this.lastHandoffRoute && this.currentRouteKey() === this.lastHandoffRoute) return false;
     return true;
+  }
+  currentRouteKey() {
+    const phase = deriveJevPhase(
+      this.state.ctx.pageUrl,
+      this.state.ctx.pageTitle,
+      this.state.ctx.lastSnapshot
+    );
+    return [
+      phase,
+      String(this.state.ctx.pageUrl || ""),
+      String(this.state.ctx.lastSnapshot?.fingerprint || "")
+    ].join("|");
   }
   async runAvailable(iter, persist) {
     if (!this.canAttempt()) {
@@ -12506,6 +12532,7 @@ var JevFastController = class {
     this.state.jevLoop.lastOutcome = "slow-handoff";
   }
   appendHandoff(iter, reason, decision, detail = "") {
+    this.lastHandoffRoute = this.currentRouteKey();
     this.state.trace({
       phase: "jev-handoff",
       iter,

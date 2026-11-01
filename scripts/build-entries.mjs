@@ -66,7 +66,9 @@ export const ENTRIES = [
   // bytes; raise by 2KB. No dependency added.
   // JEV runtime diagnostics and the read-only diagnostics action add ~3KB;
   // measured 965325 bytes. Raise explicitly. No dependency added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 944 * 1024 },
+  // Action-level handoff gating and same-route cooldown measured 966975 bytes.
+  // Raise by 1KB explicitly. No dependency added.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 945 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

@@ -9,6 +9,7 @@ import {
   JEV_PAGE_READY_QUESTION,
   buildJevFastRequest,
   compareJevShadowAction,
+  formatJevDecisionSummary,
   interpretJevFastDecision,
 } from '../lib/application/agent/jev-action-space.ts';
 import { JevFastController } from '../lib/application/agent/jev-controller.ts';
@@ -102,20 +103,17 @@ test('高置信度只读建议转换为类型明确、参数受控的工具调�
   });
 });
 
-test('移交、进展和页面稳定度任一门控失败都升级慢思考', () => {
+test('中等 handoff 只风险门控动作，不再一票否决可靠的局部动作', () => {
   const { actions } = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'browsing',
     instruction: '读取订单表',
   });
-  assert.equal(
-    interpretJevFastDecision(response('read_table', 0.95, {}, { handoff: 0.6 }), actions).reason,
-    'handoff-requested'
+  const readDecision = interpretJevFastDecision(
+    response('read_table', 0.95, {}, { handoff: 0.63, expectedProgress: 0.66, pageReady: 0.65 }),
+    actions
   );
-  assert.equal(
-    interpretJevFastDecision(response('read_table', 0.95, {}, { expectedProgress: 0.2 }), actions).reason,
-    'low-expected-progress'
-  );
+  assert.equal(readDecision.kind, 'act', '只读动作在中等 handoff 下仍可安全执行');
 
   const dynamic = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
@@ -126,12 +124,42 @@ test('移交、进展和页面稳定度任一门控失败都升级慢思考', ()
       elements: [{ ref: 'rf-1', tag: 'button', label: '下一步', inViewport: true }],
     },
   });
+  const clickDecision = interpretJevFastDecision(
+    response('click_0', 0.95, {}, { handoff: 0.67, expectedProgress: 0.66, pageReady: 0.65 }),
+    dynamic.actions
+  );
+  assert.equal(clickDecision.kind, 'act', '有进展且页面可靠的安全点击不应被 67% handoff 否决');
+
+  assert.equal(
+    interpretJevFastDecision(
+      response('read_table', 0.95, {}, { handoff: 0.9, expectedProgress: 0.9, pageReady: 0.9 }),
+      actions
+    ).reason,
+    'handoff-requested',
+    '极高 handoff 仍然强制交给慢思考'
+  );
+  assert.equal(
+    interpretJevFastDecision(
+      response('read_table', 0.95, {}, { expectedProgress: 0.2 }),
+      actions
+    ).reason,
+    'low-expected-progress'
+  );
+
   assert.equal(
     interpretJevFastDecision(
       response('click_0', 0.95, {}, { pageReady: 0.2 }),
       dynamic.actions
     ).reason,
     'page-not-ready'
+  );
+  assert.equal(
+    interpretJevFastDecision(
+      response('click_0', 0.95, {}, { handoff: 0.67, expectedProgress: 0.4, pageReady: 0.55 }),
+      dynamic.actions
+    ).reason,
+    'handoff-requested',
+    '中等 handoff 下，进展或页面稳定度不足的点击仍要移交'
   );
 });
 
@@ -153,6 +181,22 @@ test('低置信度、模型升级和未知动作都升级到慢思考', () => {
     interpretJevFastDecision(response('click_element', 0.99), actions).reason,
     'unknown-action'
   );
+});
+
+test('移交摘要保留候选动作与置信度，便于判断是动作错误还是全局策略过保守', () => {
+  const { actions } = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'browsing',
+    instruction: '读取订单表',
+  });
+  const decision = interpretJevFastDecision(
+    response('read_table', 0.93, {}, { handoff: 0.9 }),
+    actions
+  );
+  const text = formatJevDecisionSummary(false, decision, 123);
+  assert.match(text, /移交慢思考：handoff-requested/);
+  assert.match(text, /候选 read_table，93%/);
+  assert.match(text, /123ms/);
 });
 
 test('影子模式比较 JEV 建议与慢思考首个动作', () => {
@@ -288,6 +332,38 @@ test('控制器在影子模式不执行工具', async () => {
   assert.equal(state.messages.length, 0);
   assert.equal(diagnostics.at(-1)?.state, 'shadow');
   assert.equal(diagnostics.at(-1)?.tool, 'read_table');
+});
+
+test('移交后同一页面状态进入冷却，快照或阶段变化才重新尝试', async () => {
+  const state = makeState(false);
+  let calls = 0;
+  const controller = new JevFastController(
+    state,
+    { process: async () => ({ kind: 'continue', toolMs: 0 }) },
+    new AbortController().signal,
+    async () => {
+      calls += 1;
+      return response('escalate', 0.99);
+    }
+  );
+
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.kind, 'skipped');
+  assert.equal(calls, 1);
+  assert.equal(state.jevLoop.attempts, 1);
+
+  state.toolCallCount += 1;
+  const cooldown = await controller.runAvailable(1, async () => {});
+  assert.equal(cooldown.kind, 'skipped');
+  assert.equal(calls, 1, '页面指纹和阶段都没变时不得重复询问同一个 handoff');
+  assert.equal(state.jevLoop.attempts, 1);
+
+  state.ctx.lastSnapshot = { fingerprint: 'fp-new', elements: [] };
+  state.toolCallCount += 1;
+  const changed = await controller.runAvailable(2, async () => {});
+  assert.equal(changed.kind, 'skipped');
+  assert.equal(calls, 2, '出现新页面快照后应允许重新判断');
+  assert.equal(state.jevLoop.attempts, 2);
 });
 
 test('页面状态变化后允许新的快思考片段，单片段最多连续三步', async () => {
