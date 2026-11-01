@@ -300,6 +300,8 @@ export const PANEL_CSS = `
     }
     .msg-actions button:hover { background: rgba(0,0,0,.06); color: #4a90d9; }
     .panel.dark .msg-actions button:hover { background: rgba(255,255,255,.08); color: #6aa5e0; }
+    .msg-runtime { margin-top: 2px; padding-left: 8px; font-size: 10.5px; line-height: 1.45; color: #98a0aa; user-select: none; }
+    .panel.dark .msg-runtime { color: #858c95; }
     .stopped-note { margin-top: 6px; font-size: 11.5px; color: #98a0aa; user-select: none; }
     .p-foot { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #e2e5ea; }
     .panel.dark .p-foot { border-color: #3a3f46; }
@@ -490,6 +492,8 @@ export const PANEL_CSS = `
       content: '🧠 慢思考'; color: #2563a6; background: rgba(74,144,217,.10);
       border: 1px solid rgba(74,144,217,.28);
     }
+    /* 思考块头部已经带有通道徽标；紧跟其后的正文不再重复显示同一徽标。 */
+    .think-block + .agent-content::before { display: none; content: none; }
     .panel.dark .agent-content.lane-fast::before {
       color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30);
     }

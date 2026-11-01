@@ -42,7 +42,7 @@ const exportHelper = sliceBetween('function messagesForExport', 'function buildT
 test('错误分支必须把失败轮次写进对话并落盘（否则刷新即丢失）', () => {
   assert.match(
     errorBranch,
-    /conversation\.push\(\s*buildFailedTurn/,
+    /const failedTurn = buildFailedTurn[\s\S]*conversation\.push\(\s*failedTurn\s*\)/,
     '错误分支没有把失败轮次 push 进 conversation —— 错误只存在于 DOM 里，「导出记录」与「会话交接」都看不到它'
   );
   assert.match(errorBranch, /saveConversation\(\)/, '错误分支没有 saveConversation —— 面板一刷新错误就没了');

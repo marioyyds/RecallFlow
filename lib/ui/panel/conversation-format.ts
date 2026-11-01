@@ -1,11 +1,34 @@
 // Pure HTML/text formatters shared by live and restored conversations.
 // ---- 轻量语法高亮 ----
+/** 把毫秒格式化成适合操作栏下方的短耗时。 */
+function formatElapsedDuration(value: any) {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 10) {
+    return (Math.round(totalSeconds * 10) / 10).toFixed(1).replace(/\.0$/, '') + 's';
+  }
+  if (totalSeconds < 60) return Math.round(totalSeconds) + 's';
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds - minutes * 60);
+  return minutes + 'm' + String(seconds).padStart(2, '0') + 's';
+}
+
 // AI 回复底部操作栏（元宝风格：复制等）
-function msgActionsHtml(isLast: any) {
+function msgActionsHtml(isLast: any, elapsedMs?: any, sessionElapsedMs?: any) {
+  const elapsed = formatElapsedDuration(elapsedMs);
+  const sessionElapsed = formatElapsedDuration(sessionElapsedMs);
+  const runtime = elapsed
+    ? '<div class="msg-runtime" title="本次运行耗时与会话累计耗时">⏱ 本次用时 ' +
+      elapsed +
+      (sessionElapsed ? ' · 会话累计 ' + sessionElapsed : '') +
+      '</div>'
+    : '';
   return (
     '<div class="msg-actions"><button class="act-copy" title="复制回答内容">⧉ 复制</button>' +
     (isLast ? '<button class="act-regen" title="按上一条指令重新生成">⟳ 重新生成</button>' : '') +
-    '</div>'
+    '</div>' +
+    runtime
   );
 }
 
@@ -80,6 +103,7 @@ function summarizeToolParts(parts: any) {
 
 export {
   argHint,
+  formatElapsedDuration,
   msgActionsHtml,
   sessionTimeText,
   summarizeToolParts,

@@ -543,6 +543,21 @@ test('golden: 思考记录默认折叠、按顺序穿插在对话中、点击后
   // 「先确认页面结构，再决定点击哪个按钮。」共 18 字
   expect(label).toBe('已思考（18 字）');
 
+  // 思考块后的正文不得再绘制同一慢思考徽标。
+  const adjacentLane = await panelStyle(
+    page,
+    '.think-block + .agent-content',
+    ['content', 'display'],
+    '::before'
+  );
+  expect(adjacentLane).not.toBeNull();
+  expect(adjacentLane.content).toBe('none');
+  expect(adjacentLane.display).toBe('none');
+
+  // 助手操作栏下方显示本轮与会话累计耗时。
+  await expect(page.locator(PANEL + ' .msg-runtime')).toContainText('本次用时', { timeout: 30_000 });
+  await expect(page.locator(PANEL + ' .msg-runtime')).toContainText('会话累计');
+
   // ⑦ **没有内层滚动条**：思考应该跟着对话一起滚，而不是自己一个小滚动区。
   // （CSS 里写死 max-height 不会报错，只有真浏览器算出来的 computed style 能证伪。）
   // 在**已展开**的那一块上验：这才是内层滚动条真的会出现（并能被抓到）的状态。

@@ -60,6 +60,7 @@ export interface TranscriptMessage {
   failed?: boolean;
   partial?: boolean;
   interrupted?: boolean;
+  elapsedMs?: number;
   /** 下面几个是**持久化时**补上的留痕字段（读回来才可能有） */
   partsOmitted?: number;
   partsTotal?: number;
@@ -89,6 +90,7 @@ export interface SerializedTranscriptMessage {
   plan?: unknown[];
   earlierMessagesOmitted?: number;
   messagesTotal?: number;
+  elapsedMs?: number;
 }
 
 export const PARTIAL_TURN_NOTE = '（本段在导出时尚未结束：任务仍在进行中，以下是已发生的部分）';
@@ -480,6 +482,7 @@ export function serializeConversationMessages(conversation: unknown): Serialized
       }
     }
     if (Array.isArray(m.plan)) copy.plan = m.plan;
+    if (Number.isFinite(Number(m.elapsedMs))) copy.elapsedMs = Math.max(0, Number(m.elapsedMs));
     return copy;
   });
 }

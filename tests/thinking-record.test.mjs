@@ -381,6 +381,11 @@ test('CSS：思考记录的样式真的随 PANEL_CSS 一起走', () => {
   assert.match(cssSrc, /\.think-head\s*\{/, '缺少 .think-head 样式');
   assert.match(cssSrc, /\.think-body\s*\{/, '缺少 .think-body 样式');
   assert.match(cssSrc, /\.think-block\[data-open="true"\] \.think-body\s*\{\s*display:\s*block/, '展开态应显示正文');
+  assert.match(
+    cssSrc,
+    /\.think-block \+ \.agent-content::before\s*\{[^}]*display:\s*none/,
+    '思考块后的正文不得重复显示同一通道徽标'
+  );
 });
 
 test('CSS：进行中的动画只在 data-state="running" 时跑', () => {
@@ -402,6 +407,13 @@ test('CSS：扫光动画必须用 @supports 包住（否则文字可能整个变
   const before = cssSrc.slice(Math.max(0, fillAt - 700), fillAt);
   assert.match(before, /@supports/, 'background-clip:text 的写法必须被 @supports 保护');
   assert.match(before, /background-clip: text/, '@supports 条件里应包含 background-clip: text');
+});
+
+test('chat：助手消息持久化并渲染本次与会话累计耗时', () => {
+  assert.match(chatSrc, /const elapsedMs = currentRunElapsedMs\(\)/);
+  assert.match(chatSrc, /failedTurn\.elapsedMs = currentRunElapsedMs\(\)/);
+  assert.match(chatSrc, /msgActionsHtml\(true, elapsedMs, sessionElapsedMs\)/);
+  assert.match(chatSrc, /messageElapsedMs\(m\), sessionElapsedMs/);
 });
 
 // ---------------------------------------------------------------- 打包产物

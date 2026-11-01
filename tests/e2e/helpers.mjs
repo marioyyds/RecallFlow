@@ -617,19 +617,19 @@ export function streamRestoreSnapshot(page) {
  *
  * @param {string[]} props 要读的属性名（驼峰，如 'maxHeight'）
  */
-export function panelStyle(page, selector, props) {
+export function panelStyle(page, selector, props, pseudo = null) {
   return page.evaluate(
-    ({ hostSel, sel, keys }) => {
+    ({ hostSel, sel, keys, pseudoSel }) => {
       const host = document.querySelector(hostSel);
       const root = host && host.shadowRoot ? host.shadowRoot : document;
       const el = root.querySelector(sel);
       if (!el) return null;
-      const cs = getComputedStyle(el);
+      const cs = getComputedStyle(el, pseudoSel || undefined);
       const out = {};
       for (const k of keys) out[k] = cs[k];
       return out;
     },
-    { hostSel: PANEL, sel: selector, keys: props }
+    { hostSel: PANEL, sel: selector, keys: props, pseudoSel: pseudo }
   );
 }
 

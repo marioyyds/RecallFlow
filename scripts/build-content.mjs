@@ -82,7 +82,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // by 7KB. No new dependency or duplicated module.
 // JEV decision/handoff details and lane tags are now retained in exported
 // transcripts. Measured 512051 bytes (500KB); raise by 2KB. No dependency.
-export const SIZE_BUDGET_BYTES = 502 * 1024;
+// 2026-11-01: per-message runtime metadata, persisted session elapsed time and
+// duplicate lane-badge suppression measured 516116 bytes. Raise explicitly to
+// 505KB; no dependency added.
+export const SIZE_BUDGET_BYTES = 505 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

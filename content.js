@@ -5044,8 +5044,23 @@
   };
 
   // lib/ui/panel/conversation-format.ts
-  function msgActionsHtml(isLast) {
-    return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>";
+  function formatElapsedDuration(value) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const totalSeconds = ms / 1e3;
+    if (totalSeconds < 10) {
+      return (Math.round(totalSeconds * 10) / 10).toFixed(1).replace(/\.0$/, "") + "s";
+    }
+    if (totalSeconds < 60) return Math.round(totalSeconds) + "s";
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.round(totalSeconds - minutes * 60);
+    return minutes + "m" + String(seconds).padStart(2, "0") + "s";
+  }
+  function msgActionsHtml(isLast, elapsedMs, sessionElapsedMs) {
+    const elapsed = formatElapsedDuration(elapsedMs);
+    const sessionElapsed = formatElapsedDuration(sessionElapsedMs);
+    const runtime = elapsed ? '<div class="msg-runtime" title="\u672C\u6B21\u8FD0\u884C\u8017\u65F6\u4E0E\u4F1A\u8BDD\u7D2F\u8BA1\u8017\u65F6">\u23F1 \u672C\u6B21\u7528\u65F6 ' + elapsed + (sessionElapsed ? " \xB7 \u4F1A\u8BDD\u7D2F\u8BA1 " + sessionElapsed : "") + "</div>" : "";
+    return '<div class="msg-actions"><button class="act-copy" title="\u590D\u5236\u56DE\u7B54\u5185\u5BB9">\u29C9 \u590D\u5236</button>' + (isLast ? '<button class="act-regen" title="\u6309\u4E0A\u4E00\u6761\u6307\u4EE4\u91CD\u65B0\u751F\u6210">\u27F3 \u91CD\u65B0\u751F\u6210</button>' : "") + "</div>" + runtime;
   }
   function argHint(args) {
     if (!args || typeof args !== "object") return "";
@@ -6033,6 +6048,8 @@
     }
     .msg-actions button:hover { background: rgba(0,0,0,.06); color: #4a90d9; }
     .panel.dark .msg-actions button:hover { background: rgba(255,255,255,.08); color: #6aa5e0; }
+    .msg-runtime { margin-top: 2px; padding-left: 8px; font-size: 10.5px; line-height: 1.45; color: #98a0aa; user-select: none; }
+    .panel.dark .msg-runtime { color: #858c95; }
     .stopped-note { margin-top: 6px; font-size: 11.5px; color: #98a0aa; user-select: none; }
     .p-foot { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #e2e5ea; }
     .panel.dark .p-foot { border-color: #3a3f46; }
@@ -6223,6 +6240,8 @@
       content: '\u{1F9E0} \u6162\u601D\u8003'; color: #2563a6; background: rgba(74,144,217,.10);
       border: 1px solid rgba(74,144,217,.28);
     }
+    /* \u601D\u8003\u5757\u5934\u90E8\u5DF2\u7ECF\u5E26\u6709\u901A\u9053\u5FBD\u6807\uFF1B\u7D27\u8DDF\u5176\u540E\u7684\u6B63\u6587\u4E0D\u518D\u91CD\u590D\u663E\u793A\u540C\u4E00\u5FBD\u6807\u3002 */
+    .think-block + .agent-content::before { display: none; content: none; }
     .panel.dark .agent-content.lane-fast::before {
       color: #c4a7ff; background: rgba(124,58,237,.20); border-color: rgba(196,167,255,.30);
     }
@@ -6849,6 +6868,7 @@
       citations: bound.citations,
       live: true,
       liveStatus: state.status,
+      elapsedMs: Math.max(0, Number(state.updatedAt) - Number(state.startedAt)),
       // 与发起页一致：流式过程中正文可以出现引用徽章，但底部“参考来源”只在收尾后显示。
       showCitations: state.status !== "running"
     };
@@ -8595,7 +8615,24 @@
     }
     return "";
   }
-  function assistantMessageHtml(m, index, viewLength) {
+  function messageElapsedMs(m) {
+    const value = Number(m && m.elapsedMs);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  }
+  function elapsedThroughMessage(messages, index) {
+    return messages.slice(0, index + 1).reduce((sum, message) => sum + messageElapsedMs(message), 0);
+  }
+  function committedSessionElapsedMs() {
+    return (panelSessionState.conversation || []).reduce(
+      (sum, message) => sum + messageElapsedMs(message),
+      0
+    );
+  }
+  function currentRunElapsedMs() {
+    const startedAt = Number(progressController.startedAt) || 0;
+    return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+  }
+  function assistantMessageHtml(m, index, viewLength, sessionElapsedMs) {
     const parts = Array.isArray(m.parts) ? m.parts : [];
     const terminalNotices = parts.filter((p) => p && p.type === "notice" && p.terminal === true && p.text);
     const flowHtml = parts.filter((p) => !(p && p.type === "notice" && p.terminal === true)).map((p) => partHtml(p, m.citations)).join("");
@@ -8606,7 +8643,7 @@
     const typingHtml = m.live && !flowHtml && !contentHtml ? '<span class="typing"><span></span><span></span><span></span></span>' : "";
     const sourceHtml = !m.live || m.showCitations ? citeSourcesHtml(m.citations) : "";
     const terminalHtml = terminalNotices.map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || "#16a34a") + '">' + escHtml(p.text) + "</div>").join("");
-    return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === viewLength - 1) : "") + "</div>";
+    return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === viewLength - 1, messageElapsedMs(m), sessionElapsedMs) : "") + "</div>";
   }
   function renderConversation() {
     if (!panelBody) return;
@@ -8624,7 +8661,7 @@
       if (m.role === "user") {
         return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + selectedTextMessageHtml(m.selectedText) + pickedSummaryHtml(m.pickedElements) + "</div>" + (m.live ? "" : userActionsHtml(index)) + "</div>";
       }
-      return assistantMessageHtml(m, index, view.length);
+      return assistantMessageHtml(m, index, view.length, elapsedThroughMessage(view, index));
     }).join("");
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);
@@ -10439,6 +10476,8 @@
         }
       }
       const acc = streamState.content;
+      const elapsedMs = currentRunElapsedMs();
+      const sessionElapsedMs = committedSessionElapsedMs() + elapsedMs;
       closePort();
       if (streamView.pendingAiMsg && streamView.pendingAiMsg.parentNode) {
         lastResponse = streamState.responseText;
@@ -10464,6 +10503,7 @@
             content: acc,
             toolSummary: summarizeToolParts(streamState.parts),
             parts: streamState.parts.slice(),
+            elapsedMs,
             // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
             // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
             plan: streamView.lastPlan.slice()
@@ -10474,7 +10514,10 @@
         note.className = "stopped-note";
         note.textContent = "\xB7 \u5DF2\u505C\u6B62\u751F\u6210";
         streamView.pendingAiMsg.appendChild(note);
-        streamView.pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
+        streamView.pendingAiMsg.insertAdjacentHTML(
+          "beforeend",
+          msgActionsHtml(true, elapsedMs, sessionElapsedMs)
+        );
       }
       endStream();
       fitPanelHeight();
@@ -10486,6 +10529,7 @@
       commitPendingVerifyPass();
       const turn = buildInterruptedTurn(streamState.parts, streamState.responseText, reasonText);
       if (!turn.parts.length && !String(streamState.responseText || "").trim()) return;
+      turn.elapsedMs = currentRunElapsedMs();
       panelSessionState.conversation.push(turn);
       saveConversation();
     }
@@ -10970,7 +11014,14 @@
             verifyEl.textContent = streamState.verifyPass.text;
             streamView.pendingAiMsg.appendChild(verifyEl);
           }
-          if (lastResponse) streamView.pendingAiMsg.insertAdjacentHTML("beforeend", msgActionsHtml(true));
+          const elapsedMs = currentRunElapsedMs();
+          const sessionElapsedMs = committedSessionElapsedMs() + elapsedMs;
+          if (lastResponse) {
+            streamView.pendingAiMsg.insertAdjacentHTML(
+              "beforeend",
+              msgActionsHtml(true, elapsedMs, sessionElapsedMs)
+            );
+          }
           commitPendingVerifyPass();
           const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
@@ -10981,7 +11032,7 @@
             }
             return p;
           }));
-          panelSessionState.conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: streamView.lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
+          panelSessionState.conversation.push({ role: "assistant", content: finalText, citations: finalCitations, plan: streamView.lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts, elapsedMs });
           saveConversation();
           if (!streamView.pendingAiMsg || !streamView.pendingAiMsg.isConnected) {
             try {
@@ -11008,7 +11059,9 @@
               anchor.appendChild(buildOpenSettingsButton());
             }
           }
-          panelSessionState.conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
+          const failedTurn = buildFailedTurn(streamState.parts, errText, streamState.responseText);
+          failedTurn.elapsedMs = currentRunElapsedMs();
+          panelSessionState.conversation.push(failedTurn);
           saveConversation();
           endStream();
           closePort();

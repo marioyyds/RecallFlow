@@ -1744,7 +1744,30 @@ function partHtml(p: any, citations: any) {
 }
 
 /** 单条 assistant 消息的 HTML。抽出来供“整轮重绘”与“只重绘 live 消息”共用。 */
-function assistantMessageHtml(m: any, index: any, viewLength: any) {
+function messageElapsedMs(m: any): number {
+  const value = Number(m && m.elapsedMs);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function elapsedThroughMessage(messages: any[], index: number): number {
+  return messages
+    .slice(0, index + 1)
+    .reduce((sum: number, message: any) => sum + messageElapsedMs(message), 0);
+}
+
+function committedSessionElapsedMs(): number {
+  return (panelSessionState.conversation || []).reduce(
+    (sum: number, message: any) => sum + messageElapsedMs(message),
+    0
+  );
+}
+
+function currentRunElapsedMs(): number {
+  const startedAt = Number(progressController.startedAt) || 0;
+  return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+}
+
+function assistantMessageHtml(m: any, index: any, viewLength: any, sessionElapsedMs: any) {
   const parts = Array.isArray(m.parts) ? m.parts : [];
   const terminalNotices = parts.filter((p: any) => p && p.type === 'notice' && p.terminal === true && p.text);
   const flowHtml = parts
@@ -1777,7 +1800,9 @@ function assistantMessageHtml(m: any, index: any, viewLength: any) {
     typingHtml +
     sourceHtml +
     terminalHtml +
-    (m.content && !m.live ? msgActionsHtml(index === viewLength - 1) : '') +
+    (m.content && !m.live
+      ? msgActionsHtml(index === viewLength - 1, messageElapsedMs(m), sessionElapsedMs)
+      : '') +
     '</div>'
   );
 }
@@ -1799,7 +1824,7 @@ function renderConversation() {
       if (m.role === 'user') {
         return '<div class="user-turn"><div class="msg user">' + escHtml(m.content) + selectedTextMessageHtml(m.selectedText) + pickedSummaryHtml(m.pickedElements) + '</div>' + (m.live ? '' : userActionsHtml(index)) + '</div>';
       }
-      return assistantMessageHtml(m, index, view.length);
+      return assistantMessageHtml(m, index, view.length, elapsedThroughMessage(view, index));
     })
     .join('');
   // 执行计划不入消息正文，而是回填到输入框上方的计划条 —— 单一位置，避免
@@ -3951,6 +3976,8 @@ function createPanelWithLayout(
       } catch (e: any) {}
     }
     const acc = streamState.content;
+    const elapsedMs = currentRunElapsedMs();
+    const sessionElapsedMs = committedSessionElapsedMs() + elapsedMs;
     closePort();
     if (streamView.pendingAiMsg && streamView.pendingAiMsg.parentNode) {
       lastResponse = streamState.responseText;
@@ -3982,6 +4009,7 @@ function createPanelWithLayout(
           content: acc,
           toolSummary: summarizeToolParts(streamState.parts),
           parts: streamState.parts.slice(),
+          elapsedMs,
           // 计划条的唯一来源就是消息里的 plan（renderConversation 取"最近一条带计划的助手消息"）：
           // 停止的这一轮若不记它，重开面板后计划条会回退到更早那一轮的状态。
           plan: streamView.lastPlan.slice(),
@@ -3993,7 +4021,10 @@ function createPanelWithLayout(
       note.textContent = '· 已停止生成';
       streamView.pendingAiMsg.appendChild(note);
       // 停止后的消息就是最后一条，给出「重新生成」入口。
-      streamView.pendingAiMsg.insertAdjacentHTML('beforeend', msgActionsHtml(true));
+      streamView.pendingAiMsg.insertAdjacentHTML(
+        'beforeend',
+        msgActionsHtml(true, elapsedMs, sessionElapsedMs)
+      );
     }
     endStream();
     fitPanelHeight();
@@ -4016,6 +4047,7 @@ function createPanelWithLayout(
     commitPendingVerifyPass();
     const turn = buildInterruptedTurn(streamState.parts, streamState.responseText, reasonText);
     if (!turn.parts!.length && !String(streamState.responseText || '').trim()) return;
+    turn.elapsedMs = currentRunElapsedMs();
     panelSessionState.conversation.push(turn);
     saveConversation();
   }
@@ -4578,7 +4610,14 @@ function createPanelWithLayout(
         }
         // 刚结束的这条就是最后一条消息，直接给出「重新生成」入口
         // （否则要等面板重开触发 renderConversation 才出现）。
-        if (lastResponse) streamView.pendingAiMsg.insertAdjacentHTML('beforeend', msgActionsHtml(true));
+        const elapsedMs = currentRunElapsedMs();
+        const sessionElapsedMs = committedSessionElapsedMs() + elapsedMs;
+        if (lastResponse) {
+          streamView.pendingAiMsg.insertAdjacentHTML(
+            'beforeend',
+            msgActionsHtml(true, elapsedMs, sessionElapsedMs)
+          );
+        }
         commitPendingVerifyPass();
         // 整条消息的每一段都过同一张映射表，保证正文、工具结果与参考来源区三者一致。
         const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p: any) => {
@@ -4593,7 +4632,7 @@ function createPanelWithLayout(
           }
           return p;
         }));
-        panelSessionState.conversation.push({ role: 'assistant', content: finalText, citations: finalCitations, plan: streamView.lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts });
+        panelSessionState.conversation.push({ role: 'assistant', content: finalText, citations: finalCitations, plan: streamView.lastPlan.slice(), toolSummary: summarizeToolParts(finalParts), parts: finalParts, elapsedMs });
         saveConversation();
         // 触底收尾：解析模型输出的「【可选操作】」小节，渲染可点击继续按钮。
         //
@@ -4630,7 +4669,9 @@ function createPanelWithLayout(
         // 原实现只把错误写进 DOM：于是「导出记录」与「会话交接」都看不到它，
         // 面板一刷新更是彻底消失 —— 而失败正是最需要交接给外部 AI 的时刻。
         // 必须赶在 endStream() 之前取 pendingParts：它会把进行中的状态全部清空。
-        panelSessionState.conversation.push(buildFailedTurn(streamState.parts, errText, streamState.responseText));
+        const failedTurn = buildFailedTurn(streamState.parts, errText, streamState.responseText);
+        failedTurn.elapsedMs = currentRunElapsedMs();
+        panelSessionState.conversation.push(failedTurn);
         saveConversation();
         endStream();
         closePort();

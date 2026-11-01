@@ -351,6 +351,7 @@ export function runStateToAssistantMessage(state: RunState) {
     citations: bound.citations,
     live: true,
     liveStatus: state.status,
+    elapsedMs: Math.max(0, Number(state.updatedAt) - Number(state.startedAt)),
     // 与发起页一致：流式过程中正文可以出现引用徽章，但底部“参考来源”只在收尾后显示。
     showCitations: state.status !== 'running',
   };
