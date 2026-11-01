@@ -142,7 +142,8 @@ body {
 }
 
 .field input[type="text"],
-.field input[type="password"] {
+.field input[type="password"],
+.field input[type="number"] {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 9px;

@@ -30,6 +30,7 @@
       <div class="settings-sidebar-inner">
         <span class="settings-sidebar-title">设置</span>
         <a href="#settings-connection">连接</a>
+        <a href="#settings-jev">JEV 快思考</a>
         <a href="#settings-behavior">RecallFlow 行为</a>
         <a href="#settings-scripts">用户脚本</a>
         <a href="#settings-mcp">MCP 服务器</a>
@@ -67,6 +68,53 @@
         <span class="field-label">API 地址</span>
         <input id="base-url" type="text" placeholder="https://api.deepseek.com">
         <span class="hint">一般无需修改</span>
+      </label>
+    </section>
+
+    <section class="card" id="settings-jev">
+      <h2><span class="ico">🧠</span> JEV 快思考</h2>
+      <span class="hint">JEV 是独立的远程结构化决策模型，不负责聊天或生成最终回答；最终回答仍使用上面的聊天模型。</span>
+      <label class="field switch-field">
+        <span class="field-label">启用 JEV 快思考</span>
+        <span class="hint">启用后，页面操作任务可优先调用 JEV 选择受限工具动作；高不确定性或高风险操作仍升级到聊天模型。</span>
+        <input id="jev-enabled" type="checkbox" class="switch">
+      </label>
+      <label class="field switch-field">
+        <span class="field-label">影子模式（推荐先启用）</span>
+        <span class="hint">只记录 JEV 的动作建议与置信度，不实际执行；关闭后才会让 JEV 执行受限的只读快路径动作。</span>
+        <input id="jev-shadow-mode" type="checkbox" class="switch">
+      </label>
+      <label class="field">
+        <span class="field-label">API 基础地址</span>
+        <input id="jev-base-url" type="text" placeholder="https://api.typesafe.ai" autocomplete="off">
+        <span class="hint">RecallFlow 使用 <code>/v1/systemone</code> 执行结构化判断，并通过 <code>/v1/models</code> 检查连接。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">API Key</span>
+        <div class="input-row">
+          <input id="jev-api-key" type="password" placeholder="JEV 服务凭证" autocomplete="off">
+          <button id="toggle-jev-key" class="icon-btn" type="button" title="显示/隐藏">👁</button>
+        </div>
+        <span class="hint">与聊天模型凭证分开保存；请求时以 Bearer Token 发送。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">模型标识</span>
+        <input id="jev-model" type="text" placeholder="jev-latest" autocomplete="off">
+      </label>
+      <div class="budget-row">
+        <label class="field">
+          <span class="field-label">请求超时（毫秒）</span>
+          <input id="jev-timeout" type="number" min="1000" max="120000" step="1000" placeholder="15000">
+        </label>
+        <label class="field">
+          <span class="field-label">最大重试次数</span>
+          <input id="jev-retries" type="number" min="0" max="3" step="1" placeholder="1">
+        </label>
+      </div>
+      <label class="field">
+        <span class="field-label">请求协议版本</span>
+        <input id="jev-schema-version" type="text" placeholder="jev.recallflow.v1" autocomplete="off">
+        <span class="hint">用于 RecallFlow 自身的请求/响应协议校验；默认 <code>jev.recallflow.v1</code>。</span>
       </label>
     </section>
 

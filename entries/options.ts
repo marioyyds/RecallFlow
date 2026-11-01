@@ -1,5 +1,12 @@
 // 设置页（API Key/模型/RAG/工具审批/快捷语句/MCP）
-import { AI_SETTINGS_KEY, AI_SETTINGS_DEFAULTS, getAISettings, resolveCodeExecutionApproval } from '../lib/shared/settings.ts';
+import {
+  AI_SETTINGS_KEY,
+  AI_SETTINGS_DEFAULTS,
+  JEV_SETTINGS_DEFAULTS,
+  getAISettings,
+  mergeJevSettings,
+  resolveCodeExecutionApproval,
+} from '../lib/shared/settings.ts';
 import { esc } from '../lib/shared/dom/html.ts';
 import { getUserscriptSettings, saveUserscriptSettings } from '../lib/userscript/settings.ts';
 import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
@@ -24,6 +31,14 @@ async function load() {
   $('api-key').value = s.apiKey;
   $('model').value = s.model;
   $('base-url').value = s.baseUrl;
+  $('jev-enabled').checked = s.jev.enabled;
+  $('jev-shadow-mode').checked = s.jev.shadowMode;
+  $('jev-base-url').value = s.jev.baseUrl;
+  $('jev-api-key').value = s.jev.apiKey;
+  $('jev-model').value = s.jev.model;
+  $('jev-timeout').value = String(s.jev.requestTimeoutMs);
+  $('jev-retries').value = String(s.jev.maxRetries);
+  $('jev-schema-version').value = s.jev.schemaVersion;
   $('rag-enabled').checked = !!s.ragEnabled;
   $('target-lang').value = s.targetLang;
   $('page-context').checked = s.pageContext !== false;
@@ -194,6 +209,16 @@ function collectSettings() {
     apiKey: $('api-key').value.trim(),
     model: $('model').value.trim() || AI_SETTINGS_DEFAULTS.model,
     baseUrl: $('base-url').value.trim().replace(/\/+$/, '') || AI_SETTINGS_DEFAULTS.baseUrl,
+    jev: mergeJevSettings({
+      enabled: $('jev-enabled').checked,
+      shadowMode: $('jev-shadow-mode').checked,
+      baseUrl: $('jev-base-url').value,
+      apiKey: $('jev-api-key').value,
+      model: $('jev-model').value,
+      requestTimeoutMs: $('jev-timeout').value,
+      maxRetries: $('jev-retries').value,
+      schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
+    }),
     ragEnabled: $('rag-enabled').checked,
     targetLang: $('target-lang').value.trim() || AI_SETTINGS_DEFAULTS.targetLang,
     pageContext: $('page-context').checked,
@@ -252,6 +277,14 @@ $('toggle-key').addEventListener('click', () => {
   $('toggle-key').textContent = el.type === 'password' ? '👁' : '🙈';
   $('toggle-key').setAttribute('aria-label', el.type === 'password' ? '显示 API Key' : '隐藏 API Key');
   $('toggle-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
+});
+
+$('toggle-jev-key').addEventListener('click', () => {
+  const el = $('jev-api-key');
+  el.type = el.type === 'password' ? 'text' : 'password';
+  $('toggle-jev-key').textContent = el.type === 'password' ? '👁' : '🙈';
+  $('toggle-jev-key').setAttribute('aria-label', el.type === 'password' ? '显示 JEV API Key' : '隐藏 JEV API Key');
+  $('toggle-jev-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
 });
 
 function collectMcp() {

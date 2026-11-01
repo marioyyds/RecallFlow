@@ -559,6 +559,16 @@ async function deleteItem(id) {
 var AI_SETTINGS_KEY = "aiSettings";
 var QUICK_PROMPT_LIMIT = 12;
 var SESSION_TO_KB_QUICK_PROMPT = "\u6574\u7406\u4F1A\u8BDD\u5230\u77E5\u8BC6\u5E93";
+var JEV_SETTINGS_DEFAULTS = Object.freeze({
+  enabled: false,
+  baseUrl: "https://api.typesafe.ai",
+  apiKey: "",
+  model: "jev-latest",
+  requestTimeoutMs: 15e3,
+  maxRetries: 1,
+  schemaVersion: "jev.recallflow.v1",
+  shadowMode: true
+});
 var AI_SETTINGS_DEFAULTS = {
   apiKey: "",
   model: "deepseek-flash",
@@ -605,7 +615,8 @@ var AI_SETTINGS_DEFAULTS = {
   // 开箱即用（用户明确要求先用默认 token 跑通，见 integrations/opencode/recallflow-mcp/index.js）。
   // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
   // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
-  bridgeToken: "recallflow-local-bridge-v1"
+  bridgeToken: "recallflow-local-bridge-v1",
+  jev: JEV_SETTINGS_DEFAULTS
 };
 function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
   const list = Array.isArray(saved) ? saved.map((item) => String(item || "").trim()).filter(Boolean) : [];
@@ -622,6 +633,25 @@ function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, 
   const missing = defaults.filter((item) => !list.includes(item));
   return [.../* @__PURE__ */ new Set([...missing, ...list])].slice(0, limit);
 }
+function mergeJevSettings(saved) {
+  const raw = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  const stringValue = (key, fallback) => {
+    const value = raw[key];
+    return typeof value === "string" && value.trim() ? value.trim() : fallback;
+  };
+  const timeout = Number(raw.requestTimeoutMs);
+  const retries = Number(raw.maxRetries);
+  return {
+    enabled: raw.enabled === true,
+    baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
+    apiKey: stringValue("apiKey", JEV_SETTINGS_DEFAULTS.apiKey),
+    model: stringValue("model", JEV_SETTINGS_DEFAULTS.model),
+    requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1e3 ? Math.min(Math.floor(timeout), 12e4) : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
+    maxRetries: Number.isFinite(retries) && retries >= 0 ? Math.min(Math.floor(retries), 3) : JEV_SETTINGS_DEFAULTS.maxRetries,
+    schemaVersion: stringValue("schemaVersion", JEV_SETTINGS_DEFAULTS.schemaVersion),
+    shadowMode: raw.shadowMode !== false
+  };
+}
 function resolveCodeExecutionApproval(settings) {
   const s = settings || {};
   const v = s.codeExecutionApproval !== void 0 && s.codeExecutionApproval !== null && s.codeExecutionApproval !== "" ? s.codeExecutionApproval : s.runJavascriptApproval;
@@ -631,6 +661,7 @@ async function getAISettings() {
   const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
   const saved = d[AI_SETTINGS_KEY] || {};
   const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved);
+  merged.jev = mergeJevSettings(saved.jev);
   if (Array.isArray(saved.quickPrompts)) {
     merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);
   }

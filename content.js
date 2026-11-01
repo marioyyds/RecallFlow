@@ -4040,6 +4040,16 @@
   var QUICK_PROMPT_LIMIT = 12;
   var SESSION_TO_KB_QUICK_PROMPT = "\u6574\u7406\u4F1A\u8BDD\u5230\u77E5\u8BC6\u5E93";
   var SESSION_TO_KB_INSTRUCTION = '\u8BF7\u628A\u5F53\u524D\u4F1A\u8BDD\u6574\u7406\u6210\u4E00\u7BC7\u7ED3\u6784\u6E05\u6670\u3001\u6392\u7248\u7F8E\u89C2\u7684 Markdown \u6587\u6863\uFF0C\u5E76\u4FDD\u5B58\u5230\u77E5\u8BC6\u5E93\u3002\n\n\u8981\u6C42\uFF1A\n1. \u5148\u901A\u8BFB\u6574\u6BB5\u4F1A\u8BDD\uFF0C\u63D0\u70BC\u4E3B\u7EBF\u3001\u7ED3\u8BBA\u3001\u6B65\u9AA4\u3001\u4EE3\u7801\u548C\u6CE8\u610F\u4E8B\u9879\uFF1B\u5408\u5E76\u91CD\u590D\u5185\u5BB9\uFF0C\u4E0D\u8981\u628A\u804A\u5929\u8BB0\u5F55\u9010\u53E5\u7167\u6284\u3002\n2. \u5148\u7528 knowledge_read({op:"search",query:"<\u4F1A\u8BDD\u4E3B\u9898>"}) \u68C0\u67E5\u662F\u5426\u5DF2\u6709\u540C\u4E3B\u9898\u7684\u201C\u4F1A\u8BDD\u6574\u7406\u201D\uFF1B\u82E5\u5DF2\u6709\uFF0C\u6CBF\u7528\u8BE5\u6761\u76EE id \u66F4\u65B0\uFF0C\u907F\u514D\u91CD\u590D\u65B0\u5EFA\u3002\n3. \u6587\u6863\u6807\u9898\u4F7F\u7528\u300C\u4F1A\u8BDD\u6574\u7406\uFF1A<\u7B80\u660E\u4E3B\u9898>\u300D\uFF0C\u6807\u7B7E\u7ED9\u51FA 3-6 \u4E2A\u5177\u4F53\u4E3B\u9898\u8BCD\uFF0Cstatus \u8BBE\u4E3A 2\u3002\n4. note \u5FC5\u987B\u662F\u5B8C\u6574\u3001\u53EF\u76F4\u63A5\u9605\u8BFB\u7684 Markdown\u3002\u5EFA\u8BAE\u7ED3\u6784\uFF1A\n# \u4F1A\u8BDD\u6574\u7406\uFF1A<\u4E3B\u9898>\n\n> \u7528 2-3 \u53E5\u8BDD\u6982\u62EC\u80CC\u666F\u3001\u76EE\u6807\u548C\u6700\u7EC8\u7ED3\u679C\u3002\n\n## \u80CC\u666F\u4E0E\u76EE\u6807\n\n## \u5173\u952E\u7ED3\u8BBA\n\n## \u5B9E\u65BD\u6B65\u9AA4 / \u65B9\u6848\n\n## \u4EE3\u7801\u4E0E\u914D\u7F6E\n\n## \u6CE8\u610F\u4E8B\u9879\u4E0E\u5751\n\n## \u5F85\u529E\u4E0E\u540E\u7EED\n\n## \u76F8\u5173\u94FE\u63A5\n\n5. \u6309\u5185\u5BB9\u5B9E\u9645\u9009\u62E9\u7AE0\u8282\uFF1B\u65E0\u5185\u5BB9\u7684\u7AE0\u8282\u53EF\u4EE5\u7701\u7565\uFF0C\u4E0D\u8981\u7F16\u9020\u3002\u6B65\u9AA4\u7528\u6709\u5E8F\u5217\u8868\uFF0C\u5BF9\u6BD4\u4FE1\u606F\u7528 Markdown \u8868\u683C\uFF0C\u547D\u4EE4\u548C\u914D\u7F6E\u7528 fenced code block\uFF0C\u884C\u5185\u6807\u8BC6\u7528 inline code\u3002\n6. \u4FDD\u7559\u4F1A\u8BDD\u4E2D\u51FA\u73B0\u7684\u5177\u4F53\u547D\u4EE4\u3001\u53C2\u6570\u3001\u6587\u4EF6\u8DEF\u5F84\u3001\u6570\u5B57\u548C\u7ED3\u8BBA\uFF0C\u5220\u9664\u5BD2\u6684\u3001\u91CD\u590D\u89E3\u91CA\u4E0E\u8FC7\u7A0B\u6027\u566A\u58F0\u3002\u6B63\u6587\u4E0D\u8981\u51FA\u73B0\u201C\u7528\u6237\u8BF4 / \u52A9\u624B\u8BF4\u201D\u3002\n7. \u8C03\u7528 add_entry({id?,type:"note",title,note,tags,status:2}) \u4FDD\u5B58\u3002\u66F4\u65B0\u5DF2\u6709\u6761\u76EE\u65F6\u4F20 id\uFF1B\u65B0\u5EFA\u65F6\u4E0D\u8981\u4F20 id\u3002\n8. \u4FDD\u5B58\u540E\u8C03\u7528 knowledge_read({op:"get",id}) \u8BFB\u56DE\uFF0C\u786E\u8BA4\u6807\u9898\u3001Markdown \u7ED3\u6784\u548C\u5173\u952E\u5185\u5BB9\u90FD\u5728\uFF0C\u518D\u5411\u7528\u6237\u62A5\u544A\u4FDD\u5B58\u7684\u6807\u9898\u548C id\u3002';
+  var JEV_SETTINGS_DEFAULTS = Object.freeze({
+    enabled: false,
+    baseUrl: "https://api.typesafe.ai",
+    apiKey: "",
+    model: "jev-latest",
+    requestTimeoutMs: 15e3,
+    maxRetries: 1,
+    schemaVersion: "jev.recallflow.v1",
+    shadowMode: true
+  });
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
     model: "deepseek-flash",
@@ -4086,7 +4096,8 @@
     // 开箱即用（用户明确要求先用默认 token 跑通，见 integrations/opencode/recallflow-mcp/index.js）。
     // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
     // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
-    bridgeToken: "recallflow-local-bridge-v1"
+    bridgeToken: "recallflow-local-bridge-v1",
+    jev: JEV_SETTINGS_DEFAULTS
   };
   function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
     const list = Array.isArray(saved) ? saved.map((item) => String(item || "").trim()).filter(Boolean) : [];
@@ -4106,10 +4117,34 @@
   function expandQuickPrompt(text) {
     return String(text || "").trim() === SESSION_TO_KB_QUICK_PROMPT ? SESSION_TO_KB_INSTRUCTION : String(text || "");
   }
+  function mergeJevSettings(saved) {
+    const raw = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    const stringValue = (key, fallback) => {
+      const value = raw[key];
+      return typeof value === "string" && value.trim() ? value.trim() : fallback;
+    };
+    const timeout = Number(raw.requestTimeoutMs);
+    const retries = Number(raw.maxRetries);
+    return {
+      enabled: raw.enabled === true,
+      baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
+      apiKey: stringValue("apiKey", JEV_SETTINGS_DEFAULTS.apiKey),
+      model: stringValue("model", JEV_SETTINGS_DEFAULTS.model),
+      requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1e3 ? Math.min(Math.floor(timeout), 12e4) : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
+      maxRetries: Number.isFinite(retries) && retries >= 0 ? Math.min(Math.floor(retries), 3) : JEV_SETTINGS_DEFAULTS.maxRetries,
+      schemaVersion: stringValue("schemaVersion", JEV_SETTINGS_DEFAULTS.schemaVersion),
+      shadowMode: raw.shadowMode !== false
+    };
+  }
   async function updateAISettings(patch) {
     const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
     const saved = d[AI_SETTINGS_KEY] || {};
     const next = Object.assign({}, saved, patch || {});
+    if (patch && Object.prototype.hasOwnProperty.call(patch, "jev")) {
+      const current = saved && typeof saved === "object" && saved.jev && typeof saved.jev === "object" ? saved.jev : {};
+      const incoming = patch.jev && typeof patch.jev === "object" && !Array.isArray(patch.jev) ? patch.jev : {};
+      next.jev = mergeJevSettings(Object.assign({}, current, incoming));
+    }
     await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
     return Object.assign({}, AI_SETTINGS_DEFAULTS, next);
   }
@@ -4117,6 +4152,7 @@
     const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
     const saved = d[AI_SETTINGS_KEY] || {};
     const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved);
+    merged.jev = mergeJevSettings(saved.jev);
     if (Array.isArray(saved.quickPrompts)) {
       merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);
     }

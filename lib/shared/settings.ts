@@ -24,6 +24,34 @@ export const SESSION_TO_KB_INSTRUCTION =
   '7. 调用 add_entry({id?,type:"note",title,note,tags,status:2}) 保存。更新已有条目时传 id；新建时不要传 id。\n' +
   '8. 保存后调用 knowledge_read({op:"get",id}) 读回，确认标题、Markdown 结构和关键内容都在，再向用户报告保存的标题和 id。';
 
+/**
+ * JEV 是独立的远程结构化决策模型，不是聊天模型。
+ *
+ * 这里只保存连接与协议配置；最终自然语言回答仍由 `model` / `baseUrl`
+ * 所指向的聊天 LLM 生成。endpoint 使用完整推理地址，避免假设厂商路径。
+ */
+export const JEV_SETTINGS_DEFAULTS = Object.freeze({
+  enabled: false,
+  baseUrl: 'https://api.typesafe.ai',
+  apiKey: '',
+  model: 'jev-latest',
+  requestTimeoutMs: 15000,
+  maxRetries: 1,
+  schemaVersion: 'jev.recallflow.v1',
+  shadowMode: true,
+});
+
+export interface JevSettings {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  requestTimeoutMs: number;
+  maxRetries: number;
+  schemaVersion: string;
+  shadowMode: boolean;
+}
+
 export const AI_SETTINGS_DEFAULTS = {
   apiKey: '',
   model: 'deepseek-flash',
@@ -71,6 +99,7 @@ export const AI_SETTINGS_DEFAULTS = {
   // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
   // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
   bridgeToken: 'recallflow-local-bridge-v1',
+  jev: JEV_SETTINGS_DEFAULTS as JevSettings,
 };
 
 /**
@@ -111,6 +140,33 @@ export function expandQuickPrompt(text: unknown): string {
     : String(text || '');
 }
 
+/** 合并旧版本缺失的 JEV 配置，并把数值限制在可安全请求的范围内。 */
+export function mergeJevSettings(saved: unknown): JevSettings {
+  const raw = saved && typeof saved === 'object' && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : {};
+  const stringValue = (key: keyof JevSettings, fallback: string) => {
+    const value = raw[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  };
+  const timeout = Number(raw.requestTimeoutMs);
+  const retries = Number(raw.maxRetries);
+  return {
+    enabled: raw.enabled === true,
+    baseUrl: stringValue('baseUrl', JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ''),
+    apiKey: stringValue('apiKey', JEV_SETTINGS_DEFAULTS.apiKey),
+    model: stringValue('model', JEV_SETTINGS_DEFAULTS.model),
+    requestTimeoutMs: Number.isFinite(timeout) && timeout >= 1000
+      ? Math.min(Math.floor(timeout), 120000)
+      : JEV_SETTINGS_DEFAULTS.requestTimeoutMs,
+    maxRetries: Number.isFinite(retries) && retries >= 0
+      ? Math.min(Math.floor(retries), 3)
+      : JEV_SETTINGS_DEFAULTS.maxRetries,
+    schemaVersion: stringValue('schemaVersion', JEV_SETTINGS_DEFAULTS.schemaVersion),
+    shadowMode: raw.shadowMode !== false,
+  };
+}
+
 /**
  * 解析「任意代码执行」的审批模式，兼容旧设置键名。
  *
@@ -140,8 +196,17 @@ export function resolveCodeExecutionApproval(settings?: Record<string, unknown> 
  */
 export async function updateAISettings(patch?: Record<string, unknown>): Promise<AISettings> {
   const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
-  const saved = d[AI_SETTINGS_KEY] || {};
+  const saved = (d[AI_SETTINGS_KEY] || {}) as Record<string, unknown>;
   const next = Object.assign({}, saved, patch || {});
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'jev')) {
+    const current = saved && typeof saved === 'object' && saved.jev && typeof saved.jev === 'object'
+      ? saved.jev
+      : {};
+    const incoming = patch.jev && typeof patch.jev === 'object' && !Array.isArray(patch.jev)
+      ? patch.jev
+      : {};
+    next.jev = mergeJevSettings(Object.assign({}, current, incoming));
+  }
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
   return Object.assign({}, AI_SETTINGS_DEFAULTS, next) as AISettings;
 }
@@ -150,6 +215,7 @@ export async function getAISettings(): Promise<AISettings> {
   const d = await chrome.storage.local.get(AI_SETTINGS_KEY);
   const saved = (d[AI_SETTINGS_KEY] || {}) as Record<string, unknown>;
   const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved) as AISettings;
+  merged.jev = mergeJevSettings(saved.jev);
   // 新版本新增的默认快捷指令会合并进已有用户设置：保留用户自定义项与顺序，去重后补齐新增项。
   if (Array.isArray(saved.quickPrompts)) {
     merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);

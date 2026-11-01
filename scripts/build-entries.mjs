@@ -53,11 +53,15 @@ export const ENTRIES = [
   // 902KB explicitly. No new dependency.
   // 2026-10-31: contenteditable logical readback adds ~1.9KB; measured
   // 924986 bytes (904KB). Raise explicitly. No new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 904 * 1024 },
+  // 2026-11-01: remote JEV settings defaults/schema add ~1.5KB to the shared
+  // settings surface; measured 926476 bytes (905KB). Raise explicitly.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 905 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 538 * 1024 },
+  // 2026-11-01: independent remote JEV configuration card adds ~2.6KB;
+  // measured 552273 bytes (540KB). No new dependency. Raise explicitly.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 540 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
