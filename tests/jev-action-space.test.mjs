@@ -140,9 +140,13 @@ test('JEV 使用 operation 与操作专属 target head，不再询问 handoff �
   assert.ok(bundle.targets.CLICK);
   assert.ok(bundle.targets.TYPE_TEXT);
   assert.equal(
-    bundle.targets.CLICK['2'].ref,
-    bundle.targets.TYPE_TEXT['2'].ref,
-    '同一可点击且可编辑元素必须在两个 target head 中共用编号'
+    Object.values(bundle.targets.CLICK).some((target) => target.ref === 'rf-2'),
+    false,
+    '文本输入框只应进入 TYPE_TEXT target head，不能以 CLICK 分支抢占'
+  );
+  assert.equal(
+    Object.values(bundle.targets.TYPE_TEXT).some((target) => target.ref === 'rf-2'),
+    true
   );
 });
 
@@ -199,7 +203,7 @@ test('operation 与所有 target head 能通过 TypeSafe 响应校验', () => {
   assert.equal(decision.target.label, '填写标题');
 });
 
-test('有明确 target 时不因 operation 多分类概率偏低而过早否决', () => {
+test('目标动作使用独立的 operation 分支下限，而非完整动作阈值', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
@@ -210,7 +214,7 @@ test('有明确 target 时不因 operation 多分类概率偏低而过早否决'
   const lowOperation = responseFor(
     bundle,
     'CLICK',
-    0.2
+    0.8
   );
   const decision = interpretJevFastDecision(lowOperation, bundle);
   assert.equal(decision.kind, 'act');
@@ -218,6 +222,12 @@ test('有明确 target 时不因 operation 多分类概率偏低而过早否决'
   assert.equal(decision.target.label, '上传图文');
   assert.equal(decision.targetConfidence, 0.95);
   assert.equal(decision.confidence, 0.95);
+
+  const belowBranchFloor = responseFor(bundle, 'CLICK', 0.6);
+  assert.equal(
+    interpretJevFastDecision(belowBranchFloor, bundle).reason,
+    'low-confidence'
+  );
 
   const lowTarget = responseFor(bundle, 'CLICK', 0.99);
   lowTarget.answers[JEV_CLICK_TARGET_QUESTION] = choice(
@@ -255,6 +265,7 @@ test('候选数和各动作置信度使用设置覆盖值', () => {
       minActionConfidence: 0.63,
       minClickConfidence: 0.65,
       minWaitConfidence: 0.41,
+      minTargetOperationConfidence: 0.55,
     },
     {
       intent: 'browser_task',
@@ -267,6 +278,7 @@ test('候选数和各动作置信度使用设置覆盖值', () => {
   assert.equal(custom.operations.CLICK.minConfidence, 0.65);
   assert.equal(custom.operations.READ_PAGE.minConfidence, 0.61);
   assert.equal(custom.operations.WAIT.minConfidence, 0.41);
+  assert.equal(custom.operations.CLICK.minBranchConfidence, 0.55);
   const typeBundle = buildJevFastRequest(
     {
       model: 'jev-latest',
@@ -371,7 +383,7 @@ test('慢思考已成功写入的目标不再进入下一轮快思考 TYPE_TEXT'
   assert.equal(targets.some((target) => target.ref === 'rf-body'), true);
 });
 
-test('WAIT 使用独立低风险阈值，不再与读取共用 0.72', () => {
+test('WAIT 使用独立低风险阈值，不再与读取共用同一门槛', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',

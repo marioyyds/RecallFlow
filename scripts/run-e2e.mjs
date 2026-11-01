@@ -92,6 +92,9 @@ function runE2E() {
   //     改由 tests/vision-messages.test.mjs 的 `visionEnabled:false` override 钉住，不是没人管。
   const phases = [
     { name: '黄金任务', spec: 'golden.spec.mjs', hold: '', visionShot: '' },
+    // Opt-in only: every test is skipped unless TYPESAFE_API_KEY is present.
+    // It verifies the real remote System One service through the loaded extension.
+    { name: '真实 JEV', spec: 'jev-real.spec.mjs', hold: '', visionShot: '' },
     // 面板滚动跟随（关掉会话再打开 / 回到标签页时贴底）。
     // 与黄金任务同档：**不需要**挂起流，也不需要截图，用默认夹具即可。
     { name: '滚动跟随', spec: 'scroll-follow.spec.mjs', hold: '', visionShot: '' },

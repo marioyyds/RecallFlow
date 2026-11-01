@@ -59,6 +59,23 @@ function coordPage() {
 </body></html>`;
 }
 
+// JEV 快路径专用：目标标签是安全的“继续”，不触碰提交/发布等高风险词。
+function jevClickPage() {
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>JEV 快路径</title></head>
+<body>
+  <h1>欢迎页</h1>
+  <p>确认基本信息后进入下一步。</p>
+  <button id="continue" type="button" role="button" aria-label="继续">继续</button>
+  <script>
+    window.__clicked = false;
+    document.getElementById('continue').addEventListener('click', () => {
+      window.__clicked = true;
+      document.getElementById('continue').textContent = '已继续';
+    });
+  </script>
+</body></html>`;
+}
+
 // 站内检索页：一个有代表性的"搜索 + 结果列表"页面。
 //
 // 为什么不能只用主站那个输入框凑：检索这个能力类的难点**不在输入**，而在
@@ -3362,6 +3379,7 @@ const llm = http.createServer((req, res) => {
     const sys = system && typeof system.content === 'string' ? system.content : '';
     const isRouter = sys.includes('意图路由器');
     const isVerifier = sys.includes('任务校验器');
+    const isJevTextHelper = sys.includes('exactly one key, text');
 
     // 慢速流模式下的**确定性挂起**：只发第一个分片，然后一直挂着不结束。
     // 为什么需要它：默认模拟流瞬间结束，"在生成中断开"这类测试只能靠 sleep 抢时机，
@@ -3384,12 +3402,24 @@ const llm = http.createServer((req, res) => {
     }
 
     // 意图路由 / 校验 / 非流式
-    if (isRouter || isVerifier || payload.stream === false) {
-      const content = isRouter
-        ? '{"intent":"browser","confidence":0.95,"reason":"e2e"}'
-        : isVerifier
-          ? '{"ok":true,"confidence":0.9,"reason":"e2e"}'
-          : 'ok';
+    if (isRouter || isVerifier || isJevTextHelper || payload.stream === false) {
+      let content = 'ok';
+      if (isJevTextHelper) {
+        const userMsg = [...messages].reverse().find((m) => m.role === 'user');
+        const context = String((userMsg && userMsg.content) || '');
+        const text = /hello-jev-live/.test(context)
+          ? 'hello-jev-live'
+          : /咖啡/.test(context)
+            ? '咖啡'
+            : /埃塞俄比亚|耶加雪菲/.test(context)
+              ? '上海市浦东新区 1 号'
+              : 'JEV 测试值';
+        content = JSON.stringify({ text });
+      } else if (isRouter) {
+        content = '{"intent":"browser","confidence":0.95,"reason":"e2e"}';
+      } else if (isVerifier) {
+        content = '{"ok":true,"confidence":0.9,"reason":"e2e"}';
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content } }], usage: { total_tokens: 5 } }));
       return;
@@ -3400,6 +3430,11 @@ const llm = http.createServer((req, res) => {
     // 页面文字能命中别的剧本触发词，导致静默跑错剧本）。
     const userText = instructionOf(userMsg && typeof userMsg.content === 'string' ? userMsg.content : '');
     const toolResults = messages.filter((m) => m.role === 'tool');
+    const toolSequence = messages.flatMap((m) =>
+      Array.isArray(m.tool_calls)
+        ? m.tool_calls.map((call) => String(call?.function?.name || ''))
+        : []
+    );
     const clicked = toolResults.some((m) => typeof m.content === 'string' && m.content.includes('已点击'));
 
     // 登录拦截场景：快照 → 点击业务按钮 → 页面出现登录墙。
@@ -3416,6 +3451,15 @@ const llm = http.createServer((req, res) => {
         return;
       }
       finalText(res, '该操作被登录拦截，请先通过面板里的登录入口完成登录后重试。', 60);
+      return;
+    }
+
+    if (userText.includes('JEV安全继续')) {
+      if (!clicked) {
+        toolStep(res, 'click_element', { role: 'button', name: '继续' });
+      } else {
+        finalText(res, '已进入下一步。', 20);
+      }
       return;
     }
 
@@ -3495,10 +3539,12 @@ const llm = http.createServer((req, res) => {
     //   ② 要**结构化取回**条目，而不是把整页文本倒给模型。
     // 用的工具与 fixtures/playbooks.mjs 的 'site-search' 声明一致 —— 由契约门禁保证不漂移。
     if (userText.includes(PLAYBOOKS['site-search'].trigger)) {
-      const done = toolResults.length;
-      if (done === 0) { toolStep(res, 'get_page_snapshot', { maxElements: 40, maxText: 400 }); return; }
-      if (done === 1) { toolStep(res, 'type_text', { role: 'textbox', name: '站内搜索', value: '咖啡' }); return; }
-      if (done === 2) { toolStep(res, 'click_element', { role: 'button', name: '搜索' }); return; }
+      const typedAt = toolSequence.indexOf('type_text');
+      const clickedAt = toolSequence.findIndex((name, index) => index > typedAt && name === 'click_element');
+      const waitedAt = toolSequence.findIndex((name, index) => index > clickedAt && name === 'wait_for_element');
+      const inspectedAt = toolSequence.findIndex((name, index) => index > waitedAt && name === 'inspect_element');
+      if (typedAt < 0) { toolStep(res, 'type_text', { role: 'textbox', name: '站内搜索', value: '咖啡' }); return; }
+      if (clickedAt < 0) { toolStep(res, 'click_element', { role: 'button', name: '搜索' }); return; }
       // ⚠ **必须先等结果渲染出来再读** —— 这一条原先漏了，于是成了 5 次里失败 1 次的**间歇性**用例。
       //
       // 夹具的搜索页是**刻意异步**的（`box.innerHTML = ''` 之后 `setTimeout(..., 120)` 才填充），
@@ -3509,8 +3555,8 @@ const llm = http.createServer((req, res) => {
       //
       // 这正是分页剧本里写明的那条纪律（"翻页后先 wait_for_element 再读"），检索这边当时没照做。
       // 全部 5 条是在**同一个同步循环**里 append 的，所以"等到任意一条出现"就等于"5 条都到齐了"。
-      if (done === 3) { toolStep(res, 'wait_for_element', { selector: '#results .result', state: 'visible' }); return; }
-      if (done === 4) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
+      if (waitedAt < 0) { toolStep(res, 'wait_for_element', { selector: '#results .result', state: 'visible' }); return; }
+      if (inspectedAt < 0) { toolStep(res, 'inspect_element', { op: 'text', selector: '#results' }); return; }
       finalText(
         res,
         '已取回结果：哥伦比亚 慧兰 水洗 ￥88；埃塞俄比亚 耶加雪菲 ￥108；云南 小粒咖啡 ￥68。',
@@ -4841,7 +4887,7 @@ const llm = http.createServer((req, res) => {
     }
 
     // 场景 B：主站按钮（role+name 定位）
-    if (!toolResults.length) {
+    if (!clicked) {
       sse(res, [toolCallDelta('click_element', { role: 'button', name: '提交' }), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]);
     } else {
       sse(res, [textDelta('已完成点击。'), { choices: [{ delta: {}, finish_reason: 'stop' }] }, { usage: { total_tokens: 42 } }]);
@@ -4954,6 +5000,7 @@ const main = http.createServer((req, res) => {
   res.end(
     req.url && req.url.startsWith('/custom') ? customElementsPage()
       : req.url && req.url.startsWith('/coord') ? coordPage()
+      : req.url && req.url.startsWith('/jev-click') ? jevClickPage()
       : req.url && req.url.startsWith('/search') ? searchPage()
         : req.url && req.url.startsWith('/auth-gate') ? authGatePage()
           : req.url && req.url.startsWith('/login') ? loginPage()

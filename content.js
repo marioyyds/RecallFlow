@@ -4053,10 +4053,11 @@
     maxConsecutiveActions: 12,
     maxRepeatedActionsWithoutProgress: 3,
     maxElementCandidates: 40,
-    minReadConfidence: 0.72,
+    minReadConfidence: 0.6,
     minActionConfidence: 0.8,
     minClickConfidence: 0.86,
-    minWaitConfidence: 0.5
+    minWaitConfidence: 0.5,
+    minTargetOperationConfidence: 0.75
   });
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
@@ -4161,7 +4162,8 @@
       minReadConfidence: boundedProbability("minReadConfidence"),
       minActionConfidence: boundedProbability("minActionConfidence"),
       minClickConfidence: boundedProbability("minClickConfidence"),
-      minWaitConfidence: boundedProbability("minWaitConfidence")
+      minWaitConfidence: boundedProbability("minWaitConfidence"),
+      minTargetOperationConfidence: boundedProbability("minTargetOperationConfidence")
     };
   }
   async function updateAISettings(patch) {

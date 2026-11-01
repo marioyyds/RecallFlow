@@ -572,10 +572,11 @@ var JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxConsecutiveActions: 12,
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
-  minReadConfidence: 0.72,
+  minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
-  minWaitConfidence: 0.5
+  minWaitConfidence: 0.5,
+  minTargetOperationConfidence: 0.75
 });
 var AI_SETTINGS_DEFAULTS = {
   apiKey: "",
@@ -677,7 +678,8 @@ function mergeJevSettings(saved) {
     minReadConfidence: boundedProbability("minReadConfidence"),
     minActionConfidence: boundedProbability("minActionConfidence"),
     minClickConfidence: boundedProbability("minClickConfidence"),
-    minWaitConfidence: boundedProbability("minWaitConfidence")
+    minWaitConfidence: boundedProbability("minWaitConfidence"),
+    minTargetOperationConfidence: boundedProbability("minTargetOperationConfidence")
   };
 }
 function resolveCodeExecutionApproval(settings) {
@@ -12368,7 +12370,7 @@ async function callJevSystemOne(settings, request, options = {}) {
 var JEV_OPERATION_QUESTION = "operation";
 var JEV_CLICK_TARGET_QUESTION = "click_target";
 var JEV_TYPE_TEXT_TARGET_QUESTION = "type_text_target";
-var JEV_MIN_READ_CONFIDENCE = 0.72;
+var JEV_MIN_READ_CONFIDENCE = 0.6;
 var JEV_MIN_ACTION_CONFIDENCE = 0.8;
 var JEV_MIN_CLICK_CONFIDENCE = 0.86;
 var JEV_MIN_WAIT_CONFIDENCE = 0.5;
@@ -12436,6 +12438,8 @@ function isClickable(element) {
   if (!label || RISKY_CLICK_LABEL.test(label)) return false;
   const tag = String(element.tag || "").toLowerCase();
   const role = String(element.role || "").toLowerCase();
+  const type = String(element.type || "").toLowerCase();
+  if (tag === "input" && TEXT_INPUT_TYPES.has(type)) return false;
   return CLICKABLE_TAGS.has(tag) || CLICKABLE_ROLES.has(role) || Boolean(element.hasPopup) || element.expanded === true || element.expanded === false;
 }
 function isTypeTarget(element, editableSelectors = /* @__PURE__ */ new Set()) {
@@ -12535,7 +12539,8 @@ function addChoice(operations, operation, description, options = {}) {
     toolName: options.toolName,
     args: options.args,
     targetQuestion: options.targetQuestion,
-    minConfidence: options.minConfidence ?? (operation === "CLICK" ? JEV_MIN_CLICK_CONFIDENCE : operation === "TYPE_TEXT" ? JEV_MIN_ACTION_CONFIDENCE : JEV_MIN_READ_CONFIDENCE)
+    minConfidence: options.minConfidence ?? (operation === "CLICK" ? JEV_MIN_CLICK_CONFIDENCE : operation === "TYPE_TEXT" ? JEV_MIN_ACTION_CONFIDENCE : JEV_MIN_READ_CONFIDENCE),
+    minBranchConfidence: options.minBranchConfidence ?? 0
   };
 }
 function buildJevFastRequest(settings, context) {
@@ -12544,6 +12549,7 @@ function buildJevFastRequest(settings, context) {
   const minActionConfidence = Number.isFinite(Number(settings.minActionConfidence)) ? Math.max(0, Math.min(1, Number(settings.minActionConfidence))) : JEV_MIN_ACTION_CONFIDENCE;
   const minClickConfidence = Number.isFinite(Number(settings.minClickConfidence)) ? Math.max(0, Math.min(1, Number(settings.minClickConfidence))) : JEV_MIN_CLICK_CONFIDENCE;
   const minWaitConfidence = Number.isFinite(Number(settings.minWaitConfidence)) ? Math.max(0, Math.min(1, Number(settings.minWaitConfidence))) : JEV_MIN_WAIT_CONFIDENCE;
+  const minTargetOperationConfidence = Number.isFinite(Number(settings.minTargetOperationConfidence)) ? Math.max(0, Math.min(1, Number(settings.minTargetOperationConfidence))) : 0.75;
   const elementSpace = buildElementSpace(
     context.snapshot,
     maxCandidates,
@@ -12565,14 +12571,16 @@ function buildJevFastRequest(settings, context) {
     addChoice(operations, "CLICK", "Click a visible element that directly advances the goal.", {
       toolName: "click_element",
       targetQuestion: JEV_CLICK_TARGET_QUESTION,
-      minConfidence: minClickConfidence
+      minConfidence: minClickConfidence,
+      minBranchConfidence: minTargetOperationConfidence
     });
   }
   if (targets.TYPE_TEXT) {
     addChoice(operations, "TYPE_TEXT", "Enter or replace text in an observed editable field.", {
       toolName: "type_text",
       targetQuestion: JEV_TYPE_TEXT_TARGET_QUESTION,
-      minConfidence: minActionConfidence
+      minConfidence: minActionConfidence,
+      minBranchConfidence: minTargetOperationConfidence
     });
   }
   addChoice(operations, "READ_PAGE", "Read the current visible page text when the supplied text is incomplete.", {
@@ -12803,6 +12811,14 @@ function interpretJevFastDecision(response, bundle) {
   }
   const operationConfidence = operationAnswer.confidence;
   const targetConfidence = targetAnswer ? targetAnswer.confidence : null;
+  if (target && operationConfidence < operation.minBranchConfidence) {
+    return {
+      kind: "blocked",
+      reason: "low-confidence",
+      confidence: Math.min(operationConfidence, targetConfidence || 0),
+      description: operation.operation + " \u76EE\u6807\u5206\u652F\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF08" + Math.round(operationConfidence * 100) + "% < " + Math.round(operation.minBranchConfidence * 100) + "%\uFF09"
+    };
+  }
   const confidence = targetConfidence === null ? operationConfidence : targetConfidence;
   if (target ? targetConfidence < target.minConfidence : confidence < operation.minConfidence) {
     return {

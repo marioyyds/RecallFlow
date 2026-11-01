@@ -43,10 +43,11 @@ export const JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxConsecutiveActions: 12,
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
-  minReadConfidence: 0.72,
+  minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
   minWaitConfidence: 0.5,
+  minTargetOperationConfidence: 0.75,
 });
 
 export interface JevSettings {
@@ -66,6 +67,7 @@ export interface JevSettings {
   minActionConfidence: number;
   minClickConfidence: number;
   minWaitConfidence: number;
+  minTargetOperationConfidence: number;
 }
 
 export const AI_SETTINGS_DEFAULTS = {
@@ -204,6 +206,7 @@ export function mergeJevSettings(saved: unknown): JevSettings {
     minActionConfidence: boundedProbability('minActionConfidence'),
     minClickConfidence: boundedProbability('minClickConfidence'),
     minWaitConfidence: boundedProbability('minWaitConfidence'),
+    minTargetOperationConfidence: boundedProbability('minTargetOperationConfidence'),
   };
 }
 

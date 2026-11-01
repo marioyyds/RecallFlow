@@ -142,7 +142,7 @@
       <div class="budget-row">
         <label class="field">
           <span class="field-label">读取类</span>
-          <input id="jev-min-read" type="number" min="0" max="1" step="0.01" placeholder="0.72">
+          <input id="jev-min-read" type="number" min="0" max="1" step="0.01" placeholder="0.6">
         </label>
         <label class="field">
           <span class="field-label">输入类</span>
@@ -157,6 +157,11 @@
           <input id="jev-min-wait" type="number" min="0" max="1" step="0.01" placeholder="0.5">
         </label>
       </div>
+      <label class="field">
+        <span class="field-label">目标动作分支最低置信度</span>
+        <input id="jev-min-target-operation" type="number" min="0" max="1" step="0.01" placeholder="0.75">
+        <span class="hint">CLICK / TYPE_TEXT 的目标 head 只回答“选哪个”，仍需 operation head 达到该下限，防止歧义目标因条件概率 100% 被误执行。</span>
+      </label>
       <span class="hint">点击类会同时检查 operation 与目标元素；等待只是短暂观察，使用独立低风险阈值，但仍受同一路由最多重试次数限制。</span>
       <label class="field">
         <span class="field-label">请求协议版本</span>

@@ -52,6 +52,7 @@ async function load() {
   $('jev-min-action').value = String(s.jev.minActionConfidence);
   $('jev-min-click').value = String(s.jev.minClickConfidence);
   $('jev-min-wait').value = String(s.jev.minWaitConfidence);
+  $('jev-min-target-operation').value = String(s.jev.minTargetOperationConfidence);
   $('jev-schema-version').value = s.jev.schemaVersion;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
@@ -286,6 +287,7 @@ function collectSettings() {
       minActionConfidence: $('jev-min-action').value,
       minClickConfidence: $('jev-min-click').value,
       minWaitConfidence: $('jev-min-wait').value,
+      minTargetOperationConfidence: $('jev-min-target-operation').value,
       schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
     }),
     ragEnabled: $('rag-enabled').checked,
@@ -377,6 +379,7 @@ $('test-jev').addEventListener('click', async () => {
     minActionConfidence: $('jev-min-action').value,
     minClickConfidence: $('jev-min-click').value,
     minWaitConfidence: $('jev-min-wait').value,
+    minTargetOperationConfidence: $('jev-min-target-operation').value,
     schemaVersion: $('jev-schema-version').value,
   });
   if (!settings.apiKey) {

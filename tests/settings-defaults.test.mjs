@@ -39,6 +39,7 @@ test('设置页提供独立的远程 JEV 配置', () => {
     'jev-min-action',
     'jev-min-click',
     'jev-min-wait',
+    'jev-min-target-operation',
     'jev-schema-version',
     'test-jev',
     'jev-status',
@@ -76,6 +77,11 @@ test('旧设置的 JEV 配置缺失字段时补默认值并限制数值范围', 
   assert.equal(mergeJevSettings({ minActionConfidence: 2 }).minActionConfidence, 1);
   assert.equal(mergeJevSettings({ minClickConfidence: 0.91 }).minClickConfidence, 0.91);
   assert.equal(mergeJevSettings({ minWaitConfidence: 0.44 }).minWaitConfidence, 0.44);
+  assert.equal(
+    mergeJevSettings({ minTargetOperationConfidence: 0.79 })
+      .minTargetOperationConfidence,
+    0.79
+  );
   assert.equal(mergeJevSettings({ baseUrl: ' https://example.com/// ' }).baseUrl, 'https://example.com');
   assert.equal(mergeJevSettings({ shadowMode: false }).shadowMode, false);
 });

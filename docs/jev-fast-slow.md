@@ -56,9 +56,9 @@ get_page_snapshot
 
 `TYPE_TEXT` 的字段值由聊天模型生成并校验为唯一 `text` 字段；校验失败时不会输入。JEV 生成的是完整字段值，因此执行参数固定带 `clearFirst:true`，不会在旧标题后追加第二遍。已经有值的输入框、以及本任务中快路径或慢路径已经成功写过的目标，都不会再进入 JEV 的 `TYPE_TEXT` target head。`WAIT` 只等待并重新观察，不执行页面写入。
 
-单次快路径片段默认最多连续执行 12 个动作，每个 run 默认最多 36 次 JEV 尝试；连续动作数、尝试数、候选元素数、读取/输入/点击/等待阈值和“同一动作无进展”连续执行上限都可在设置页调整。恢复态仍受 200 次尝试、50 个连续动作的持久化硬上限保护。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化后才允许重新尝试。
+单次快路径片段默认最多连续执行 12 个动作，每个 run 默认最多 36 次 JEV 尝试；连续动作数、尝试数、候选元素数、读取/输入/点击/等待阈值、目标动作分支下限和“同一动作无进展”连续执行上限都可在设置页调整。恢复态仍受 200 次尝试、50 个连续动作的持久化硬上限保护。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化后才允许重新尝试。
 
-`CLICK` / `TYPE_TEXT` 同时产生 operation 与目标 head。operation 是多分类判断，概率会被其它可用操作稀释；因此只要匹配 target 达到该操作的门槛就以 target 置信度推进，不再用 operation 概率二次否决。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。
+`CLICK` / `TYPE_TEXT` 同时产生 operation 与目标 head。operation 是多分类判断；target 是条件判断，即使 operation 分支错误也可能给出 100%。因此目标动作须同时满足：匹配 target 达到该操作门槛，且 operation 达到独立的分支下限。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。真实校准结果见 [JEV 阈值校准记录](./jev-threshold-calibration.md)。
 
 重复动作保护绑定到 `action + args + phase + URL + fingerprint`。页面发生变化会立即清零无进展连击；只有同一动作在当前页面状态下连续达到配置次数，才移交慢思考。
 

@@ -11,7 +11,7 @@ export const JEV_OPERATION_QUESTION = 'operation';
 export const JEV_CLICK_TARGET_QUESTION = 'click_target';
 export const JEV_TYPE_TEXT_TARGET_QUESTION = 'type_text_target';
 
-export const JEV_MIN_READ_CONFIDENCE = 0.72;
+export const JEV_MIN_READ_CONFIDENCE = 0.6;
 export const JEV_MIN_ACTION_CONFIDENCE = 0.8;
 export const JEV_MIN_CLICK_CONFIDENCE = 0.86;
 export const JEV_MIN_WAIT_CONFIDENCE = 0.5;
@@ -24,6 +24,7 @@ type JevPolicySettings = Pick<JevSettings, 'model'> & Partial<Pick<
   | 'minActionConfidence'
   | 'minClickConfidence'
   | 'minWaitConfidence'
+  | 'minTargetOperationConfidence'
 >>;
 
 export type JevOperation =
@@ -67,6 +68,7 @@ export interface JevOperationDefinition {
   args?: Record<string, unknown>;
   targetQuestion?: string;
   minConfidence: number;
+  minBranchConfidence: number;
 }
 
 export interface JevFastRequestBundle {
@@ -207,6 +209,11 @@ function isClickable(element: SnapshotElementLike): boolean {
   if (!label || RISKY_CLICK_LABEL.test(label)) return false;
   const tag = String(element.tag || '').toLowerCase();
   const role = String(element.role || '').toLowerCase();
+  const type = String(element.type || '').toLowerCase();
+  // 文本输入框的“点击”只是聚焦，不直接推进目标；把它放进 CLICK head 会让
+  // “填写标题”与 CLICK/TYPE_TEXT 两个 operation 竞争，真实校准中出现过
+  // CLICK 以 0.53~0.62 概率胜过 TYPE_TEXT 的错误分叉。
+  if (tag === 'input' && TEXT_INPUT_TYPES.has(type)) return false;
   return (
     CLICKABLE_TAGS.has(tag) ||
     CLICKABLE_ROLES.has(role) ||
@@ -341,6 +348,7 @@ function addChoice(
     args?: Record<string, unknown>;
     targetQuestion?: string;
     minConfidence?: number;
+    minBranchConfidence?: number;
   } = {}
 ): void {
   operations[operation] = {
@@ -356,6 +364,7 @@ function addChoice(
         : operation === 'TYPE_TEXT'
           ? JEV_MIN_ACTION_CONFIDENCE
           : JEV_MIN_READ_CONFIDENCE),
+    minBranchConfidence: options.minBranchConfidence ?? 0,
   };
 }
 
@@ -378,6 +387,10 @@ export function buildJevFastRequest(
   const minWaitConfidence = Number.isFinite(Number(settings.minWaitConfidence))
     ? Math.max(0, Math.min(1, Number(settings.minWaitConfidence)))
     : JEV_MIN_WAIT_CONFIDENCE;
+  const minTargetOperationConfidence =
+    Number.isFinite(Number(settings.minTargetOperationConfidence))
+      ? Math.max(0, Math.min(1, Number(settings.minTargetOperationConfidence)))
+      : 0.75;
   const elementSpace = buildElementSpace(
     context.snapshot,
     maxCandidates,
@@ -403,6 +416,7 @@ export function buildJevFastRequest(
       toolName: 'click_element',
       targetQuestion: JEV_CLICK_TARGET_QUESTION,
       minConfidence: minClickConfidence,
+      minBranchConfidence: minTargetOperationConfidence,
     });
   }
   if (targets.TYPE_TEXT) {
@@ -410,6 +424,7 @@ export function buildJevFastRequest(
       toolName: 'type_text',
       targetQuestion: JEV_TYPE_TEXT_TARGET_QUESTION,
       minConfidence: minActionConfidence,
+      minBranchConfidence: minTargetOperationConfidence,
     });
   }
   addChoice(operations, 'READ_PAGE', 'Read the current visible page text when the supplied text is incomplete.', {
@@ -667,6 +682,23 @@ export function interpretJevFastDecision(
 
   const operationConfidence = operationAnswer.confidence;
   const targetConfidence = targetAnswer ? targetAnswer.confidence : null;
+  if (
+    target &&
+    operationConfidence < operation.minBranchConfidence
+  ) {
+    return {
+      kind: 'blocked',
+      reason: 'low-confidence',
+      confidence: Math.min(operationConfidence, targetConfidence || 0),
+      description:
+        operation.operation +
+        ' 目标分支置信度不足（' +
+        Math.round(operationConfidence * 100) +
+        '% < ' +
+        Math.round(operation.minBranchConfidence * 100) +
+        '%）',
+    };
+  }
   // 有 target head 时，target 是真正决定“点谁/填哪”的证据。operation 是多分类
   // head，概率会被其它同时可用的 operation 稀释；沿用 min(operation, target)
   // 会让正确目标被一个结构性偏低的 operation 概率否决，也会让 UI 显示成功动作
