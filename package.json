@@ -16,6 +16,7 @@
     "check:types": "tsc --noEmit",
     "build:content": "node scripts/build-content.mjs",
     "build:entries": "node scripts/build-entries.mjs",
+    "package": "node scripts/package-extension.mjs",
     "test": "node scripts/run-all-checks.mjs",
     "test:e2e": "node scripts/run-e2e.mjs",
     "eval:webarena": "node scripts/run-webarena.mjs",

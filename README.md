@@ -48,6 +48,30 @@ upload / drag-and-drop / cascading selects, pagination and infinite scroll… Di
    **"Allow access to file URLs"**. After that, local pages behave like any web page (the floating ball appears on open), and saving/printing will not write the extension icon into your file
    (details and acceptance criteria in [docs/local-page-support.md](docs/local-page-support.md)).
 
+### Packaging a release
+
+The repo root *is* the unpacked extension, but it also holds sources, tests, scripts and docs — so a
+release package cannot simply be "zip the repository". Use the packaging script, which rebuilds the
+entry bundles and then packs **only the runtime files**:
+
+```bash
+npm run package                                      # rebuild + write release/recallflow-v<manifest.version>.zip
+node scripts/package-extension.mjs --no-build        # pack the existing artifacts as-is
+node scripts/package-extension.mjs --out /tmp/x.zip  # custom output path
+```
+
+The file list is derived, never hand-maintained: `manifest.json` references (icons, popup, service
+worker, options page, content scripts, web-accessible resources), the HTML pages (followed
+recursively — `popup.html` links the manager/options/skills/userscripts pages) plus every entry
+bundle from `scripts/build-entries.mjs` and `content.js`. A referenced-but-missing file fails the
+pack instead of producing an uninstallable zip, and source/test/script paths are rejected outright.
+The zip is deterministic (fixed DOS timestamps, sorted entries), so the same source yields the same
+bytes — distribution builds are reproducible and verifiable.
+
+Install from the package: unzip it, then `chrome://extensions` → Developer mode → "Load unpacked".
+`tests/package-extension.test.mjs` re-opens the produced zip with an independent PKZIP reader and
+checks every entry's CRC, so "the script didn't throw" is never mistaken for "the package installs".
+
 ## Agent design
 
 ```mermaid
