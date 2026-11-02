@@ -80,6 +80,9 @@ test('面板位置和尺寸跨 origin 使用同一份扩展存储布局', async 
   await expect.poll(() => readLayout()).toEqual(
     expect.objectContaining({
       version: 2,
+      // 拖过之后必须是自由浮动：`docked` 留着的话存档记的是右/下边锚定间距，
+      // 换页或改窗口尺寸会把面板又贴回右缘（就是「拖了却拖不走」）。
+      docked: false,
       left: expect.any(Number),
       top: expect.any(Number),
       width: expect.any(Number),

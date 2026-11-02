@@ -6352,6 +6352,9 @@
     }
     return snapshotFromParts(pos, size);
   }
+  function shouldAutoOpenEmbeddedPanel(layout) {
+    return Boolean(layout) && Boolean(layout.mode === "embedded");
+  }
   function readGlobalPanelLayout(value) {
     if (!value || typeof value !== "object") return emptySnapshot();
     return snapshotFromParts(value, value);
@@ -7481,6 +7484,7 @@
     },
     close: () => removePanel({ publish: false })
   });
+  var panelUiBootPromise = null;
   var runSession = createPanelRunSession();
   var panelSessionState = new PanelSessionState();
   var followedRun = new FollowedRunState();
@@ -10368,6 +10372,7 @@
       }
       panel._manualSize = true;
       panel._manualPos = true;
+      panel.classList.remove("docked");
       const r = panel.getBoundingClientRect();
       panel.style.right = "auto";
       panel.style.bottom = "auto";
@@ -11266,6 +11271,7 @@
         origTop: panel.getBoundingClientRect().top
       };
       panel._manualPos = true;
+      panel.classList.remove("docked");
       panel.style.right = "auto";
       panel.style.bottom = "auto";
       panel.style.left = dragState.origLeft + "px";
@@ -11315,6 +11321,19 @@
     }
     return true;
   }
+  async function maybeAutoOpenEmbeddedPanel() {
+    if (panel || panelVisibility.isOpen) return;
+    if (!isExtContextAlive()) return;
+    let layout = null;
+    try {
+      layout = panelLayoutStorage ? await loadGlobalPanelLayout(panelLayoutStorage, localStorage) : readPanelLayout(localStorage);
+    } catch (e) {
+      return;
+    }
+    if (!shouldAutoOpenEmbeddedPanel(layout)) return;
+    if (panel || panelVisibility.isOpen || !isExtContextAlive()) return;
+    await openPanel(0, 0, true, true);
+  }
   function maybeResumeRunAfterReload() {
     let attempts = 0;
     const MAX_ATTEMPTS = 12;
@@ -11339,7 +11358,8 @@
             } catch (e) {
             }
             try {
-              if (panelVisibility.ready) await panelVisibility.ready;
+              if (panelUiBootPromise) await panelUiBootPromise;
+              else if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
             if (!runSession.isRunning) adoptFinishedRunSnapshot(resp.snapshot);
@@ -11351,7 +11371,8 @@
             } catch (e) {
             }
             try {
-              if (panelVisibility.ready) await panelVisibility.ready;
+              if (panelUiBootPromise) await panelUiBootPromise;
+              else if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
             if (runSession.isRunning) return;
@@ -11373,7 +11394,7 @@
               showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
             }
             await panelVisibility.withSuppressed(async () => {
-              openPanel(0, 0, true, true);
+              await openPanel(0, 0, true, true);
             });
             const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
@@ -11580,7 +11601,7 @@
     } catch (e) {
     }
     try {
-      chrome.runtime.onMessage.addListener((msg) => {
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (!msg) return;
         if (msg.type === "kbPickResult") {
           if (streamView.pickUi) {
@@ -11600,6 +11621,8 @@
           });
         } else if (msg.type === "fab:show") {
           showFabFromRemote();
+          if (typeof sendResponse === "function") sendResponse({ ok: true, handled: "fab:show" });
+          return true;
         } else if (msg.type === "run:started") {
           handleRunStarted(msg);
         } else if (msg.type === "run:delta") {
@@ -11627,7 +11650,9 @@
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
-    panelVisibility.syncOnInit();
+    panelUiBootPromise = panelVisibility.syncOnInit().catch(() => {
+    }).then(() => maybeAutoOpenEmbeddedPanel()).catch(() => {
+    });
     maybeResumeRunAfterReload();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {

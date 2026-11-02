@@ -93,6 +93,7 @@ import {
   PANEL_MIN_WIDTH,
   readPanelLayout,
   readGlobalPanelLayout,
+  shouldAutoOpenEmbeddedPanel,
   saveGlobalPanelLayout,
   writePanelLayout,
   resolvePanelPlacement,
@@ -217,6 +218,9 @@ const panelVisibility = createPanelVisibilityController({
   },
   close: () => removePanel({ publish: false }),
 });
+// 「面板可见性 + 自动嵌入」的 boot 收尾 Promise：续跑逻辑必须等它落地再判断用户是否关了面板。
+// null = 还没跑到 boot 那一步（单测里直接调 initAssistant 之外的入口时就是 null）。
+let panelUiBootPromise: Promise<void> | null = null;
 const runSession = createPanelRunSession();
 const panelSessionState = new PanelSessionState();
 const followedRun = new FollowedRunState();
@@ -507,6 +511,14 @@ function createFabElement() {
 // origin 隻离、也不会被网站自己的 localStorage 清理影响，且 onChanged 能让
 // 所有标签页一起消失 / 一起回来。
 const FAB_HIDDEN_KEY = 'recallflow.fab.hidden.v1';
+
+// ---- 「新页面自动嵌入」的判据 ----
+//
+// 不另设一份「要不要自动开」的偏好：用户选嵌入态这个动作本身（布局存档里的
+// `mode: 'embedded'`）就是表态 —— 选过嵌入，此后每个新页面/新标签页 boot 时都把
+// 嵌入层拉起来（见 maybeAutoOpenEmbeddedPanel）；切回「浮层」即停用。
+// 关掉面板只关掉**当前这一页**，换页或刷新仍按嵌入模式再开 —— 这是 m00997 的明确要求
+// 「新页面自动嵌入层面板」。想彻底不要，就切回浮层（存档 mode 变 overlay）。
 let fabMenuEl: any = null;
 
 function removeFabMenu() {
@@ -3979,6 +3991,10 @@ function createPanelWithLayout(
     // 拉伸统一转自由定位：固定当前 left/top，避免 docked 底部锚点（bottom）在拉伸中
     // 与 top 混合导致面板底部“复位/跳动”。之后用 left/top/width/height 精确定位并 clamp。
     panel._manualPos = true;
+    // 拖拽 = 用户明确指定了位置：停靠态必须当场脱靠，否则存档仍按右/下边锚定写入
+    // （`docked:true` + `right`/`bottom`），换页或改窗口尺寸时面板又贴回右缘 ——
+    // 表现出来就是「拖了却拖不走」。脱靠后 left/top 才是真实位置，存档按自由浮动记录。
+    panel.classList.remove('docked');
     const r = panel.getBoundingClientRect();
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
@@ -5100,6 +5116,10 @@ function createPanelWithLayout(
       origTop: panel.getBoundingClientRect().top,
     };
     panel._manualPos = true;
+    // 拖动就是「我要它待在这个位置」：停靠态必须当场脱靠。留着 `docked` 类的话，
+    // 落盘仍按右/下边锚定间距记录（`docked:true` + `right:0`），换页、改窗口尺寸
+    // 时面板又贴回右缘 —— 用户看到的就是「拖了但拖不走」。脱靠后 left/top 才有效。
+    panel.classList.remove('docked');
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
     panel.style.left = dragState.origLeft + 'px';
@@ -5170,6 +5190,36 @@ function adoptFinishedRunSnapshot(snapshot: any) {
   return true;
 }
 
+/**
+ * boot 时把嵌入层拉起来 —— 「切换页面后嵌入层跟着走」的落地点（m00997）。
+ *
+ * 判据只有一条：布局存档记着 `mode: 'embedded'`。用户选过嵌入态，此后每个新页面 /
+ * 新标签页 boot 时都以嵌入态重开面板，不用先点悬浮球；从没选过的浏览器照旧按需打开，
+ * 默认体验不被这次改动改掉。
+ *
+ * 时序：必须排在 `syncOnInit()` **之后、`maybeResumeRunAfterReload()` 之前** ——
+ * 续跑逻辑用 `panelVisibility.isOpen` 判断「用户是不是主动关了面板」，如果自动开面板
+ * 排在它后面，一次可续跑的 run 会被判成「用户关掉了面板」而被静默停掉。
+ * 因此 boot 处把两步串成同一个 Promise 交给续跑逻辑等待（见 initAssistant 末尾）。
+ */
+async function maybeAutoOpenEmbeddedPanel(): Promise<void> {
+  if (panel || panelVisibility.isOpen) return; // 远端同步 / 续跑恢复已经开过
+  if (!isExtContextAlive()) return;
+  let layout: any = null;
+  try {
+    layout = panelLayoutStorage
+      ? await loadGlobalPanelLayout(panelLayoutStorage, localStorage)
+      : readPanelLayout(localStorage);
+  } catch (e: any) {
+    return;
+  }
+  // 从没进入过嵌入态 ⇒ 不自动开：默认体验（浮层、按需点悬浮球）不被这次改动改掉。
+  if (!shouldAutoOpenEmbeddedPanel(layout)) return;
+  // 等存储期间面板可能已被远端打开、或页面正在卸载。
+  if (panel || panelVisibility.isOpen || !isExtContextAlive()) return;
+  await openPanel(0, 0, true, true);
+}
+
 // 整页刷新后的自动续跑：问 SW 本 tab 是否有可续跑的 run，有则重开面板、用同一 runId 续跑。
 // abort 与落盘是异步的：SW 可能回 pending=true（会话还没写出来），只在 pending 时重试。
 function maybeResumeRunAfterReload() {
@@ -5192,7 +5242,10 @@ function maybeResumeRunAfterReload() {
             if (conversationLoadPromise) await conversationLoadPromise;
           } catch (e: any) {}
           try {
-            if (panelVisibility.ready) await panelVisibility.ready;
+            // 等「可见性同步 + 自动嵌入」整体落地：只等 ready 会在自动开面板之前就
+            // 读到 isOpen=false，把一次可续跑的 run 当成「用户关了面板」停掉。
+            if (panelUiBootPromise) await panelUiBootPromise;
+            else if (panelVisibility.ready) await panelVisibility.ready;
           } catch (e: any) {}
           if (!runSession.isRunning) adoptFinishedRunSnapshot(resp.snapshot);
           return;
@@ -5205,7 +5258,10 @@ function maybeResumeRunAfterReload() {
             if (conversationLoadPromise) await conversationLoadPromise;
           } catch (e: any) {}
           try {
-            if (panelVisibility.ready) await panelVisibility.ready;
+            // 等「可见性同步 + 自动嵌入」整体落地：只等 ready 会在自动开面板之前就
+            // 读到 isOpen=false，把一次可续跑的 run 当成「用户关了面板」停掉。
+            if (panelUiBootPromise) await panelUiBootPromise;
+            else if (panelVisibility.ready) await panelVisibility.ready;
           } catch (e: any) {}
           if (runSession.isRunning) return;
           // 面板被用户主动关过：刷新后**不得**再把面板拉开。后台 run 因整页刷新已经失去
@@ -5226,7 +5282,11 @@ function maybeResumeRunAfterReload() {
             showCitationHint('后台连接曾中断，已从已保存的进度继续本轮任务。');
           }
           await panelVisibility.withSuppressed(async () => {
-            openPanel(0, 0, true, true); // 先让 openPanel 把 run 挂到 runAgent
+            // ⚠ 必须 await：openPanel 读档是异步的（扩展存储 → createPanelWithLayout），
+            // 不等它建完就 invokeRunner，跑起来的是**上一个面板**闭包里的 run ——
+            // 它的 DOM（含审批条容器）已被这次 openPanel 移除，于是流式内容写进脱离文档的
+            // 节点：新面板看得到快照步骤，却永远看不到"等待确认"的审批条（golden :118）。
+            await openPanel(0, 0, true, true);
           });
           // 对话历史若已恢复出这条用户消息，就跳过重复 push（见 run 的 skipUserTurn）。
           const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
@@ -5467,7 +5527,11 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
 
   // 拾取结果/取消由后台回传（跨域 iframe 内的命中也会经后台回到顶层）。
   try {
-    chrome.runtime.onMessage.addListener((msg) => {
+    // 第三参 sendResponse 只有 fab:show 用 —— 弹窗在等一个「到底送达没有」的回答。
+    // 这里不接就会以 `return false` 关掉通道，发送端的回调拿到
+    // "The message port closed before a response was received"，于是**球明明已经回来了**，
+    // 弹窗仍弹「无法显示悬浮球，请刷新页面后重试」（真机实测复现，见 tests/e2e/fab-show.spec.mjs）。
+    chrome.runtime.onMessage.addListener((msg: any, _sender: any, sendResponse?: (value: unknown) => void) => {
       if (!msg) return;
       if (msg.type === 'kbPickResult') {
         if (streamView.pickUi) {
@@ -5486,6 +5550,10 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       } else if (msg.type === 'fab:show') {
         // 弹窗「悬浮球」按钮：找回被右键隐藏的悬浮球。
         showFabFromRemote();
+        // 回包 = 「本页的内容脚本活着、且已经跑过找回逻辑」。
+        // 弹窗据此区分「真的连不上」（需要刷新）与「只是没回话」（球已经回来了）。
+        if (typeof sendResponse === 'function') sendResponse({ ok: true, handled: 'fab:show' });
+        return true;
       } else if (msg.type === 'run:started') {
         handleRunStarted(msg);
       } else if (msg.type === 'run:delta') {
@@ -5526,7 +5594,13 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
   // 保存 promise 供 snapshotHandoff 等待，避免「对话还没读回来就打包交接包」的竞态。
   conversationLoadPromise = loadConversation();
   // 新页面继承全浏览器面板开合状态；远端切换时由 onMessage 的 panel:ui-changed 应用。
-  panelVisibility.syncOnInit();
+  // 同步落地后再按「自动嵌入」偏好把面板拉起来 —— 「切换页面后嵌入层跟着走」的接点。
+  // 两步串成一个 Promise 交给 maybeResumeRunAfterReload 等待（它要据此判断用户是否关了面板）。
+  panelUiBootPromise = panelVisibility
+    .syncOnInit()
+    .catch(() => {})
+    .then(() => maybeAutoOpenEmbeddedPanel())
+    .catch(() => {});
   // 整页刷新后自动接管"被中断的任务"：问 SW 本 tab 是否有可续跑的 run，
   // 有则重开面板、用同一 runId 续跑（SW 从持久化消息恢复，不重新执行）。
   maybeResumeRunAfterReload();

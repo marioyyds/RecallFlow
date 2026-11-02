@@ -53,8 +53,12 @@ export const ENTRIES = [
   // 902KB explicitly. No new dependency.
   // 2026-10-31: contenteditable logical readback adds ~1.9KB; measured
   // 924986 bytes (904KB). Raise explicitly. No new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 904 * 1024 },
-  { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
+  // 2026-11-02: 面板广播的补注入兜底（lib/shared/tab-broadcast.ts）与诊断拆分
+  // 增加约 1.5 KB，实测 926219 字节（904.5KB）。棘轮按实测上抬，无新依赖。
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 906 * 1024 },
+  // 2026-11-02: 「悬浮球」按钮改用补注入桥 + 失败语义区分（见 tests/fab-show-contract.test.mjs），
+  // 实测 40459 字节（39.5KB）。无新依赖。
+  { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 40 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
   { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 538 * 1024 },

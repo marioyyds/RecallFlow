@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { detectIntent, extractKeyword, INTENTS, buildSystemPrompt } from '../lib/application/agent/intent-router.ts';
+import { detectIntent, extractKeyword, INTENTS, buildSystemPrompt, isToolAllowedForIntent, resolveIntent } from '../lib/application/agent/intent-router.ts';
+import { PLAYBOOKS } from './e2e/fixtures/playbooks.mjs';
+import { scriptedIntentFor } from './e2e/fixtures/server.mjs';
 
 test('detects browser intent', () => {
   assert.equal(detectIntent('打开百度搜索今天的热搜').intent, INTENTS.BROWSER);
@@ -78,5 +80,48 @@ test('四类意图都要加载 MCP（工具审批仍由 toolApprovalPolicy.mcp �
     const d = detectIntent(q);
     assert.equal(d.intent, intent, q);
     assert.equal(d.includeMcp, true, q + ' → includeMcp 应为 true');
+  }
+});
+
+// 「保存」是按钮上的通用字样。它曾经单独构成一条 weight-3 的知识库证据，
+// 于是「帮我点一下「保存」」（画布上的按钮）被判成知识库任务、click_at/get_ax_snapshot
+// 随即被执行期闸门拒绝 —— 用户看到的是"agent 说它没有权限点按钮"。
+test('按钮字样不能把人钉成知识库任务（页面动作词要能盖过它）', () => {
+  const d = detectIntent('页面上的工具条是画在画布上的，帮我点一下「保存」。');
+  assert.equal(d.intent, INTENTS.BROWSER, '画布 + 点一下 = 页面动作');
+  assert.equal(isToolAllowedForIntent(d.intent, 'click_at'), true);
+  assert.equal(isToolAllowedForIntent(d.intent, 'get_ax_snapshot'), true);
+});
+
+// 「帮我调研…点开第一条…存进知识库」跨了两类权限：点开是页面操作、沉淀是知识库写入。
+// 判成 knowledge 会连 click_element 都拿不到（调研的第一步就断），判成 browser 又写不进知识库。
+test('调研类指令不能只按知识库判（否则连点开详情都做不到）', () => {
+  const d = detectIntent(PLAYBOOKS['web-research'].eval.instruction);
+  assert.notEqual(d.intent, INTENTS.KNOWLEDGE, '判成知识库就拿不到 click_element/wait_for_element');
+  assert.equal(isToolAllowedForIntent(INTENTS.RESEARCH, 'click_element'), true);
+  assert.equal(isToolAllowedForIntent(INTENTS.RESEARCH, 'add_entry'), true, '调研的产出要能沉淀进知识库');
+});
+
+test('知识库意图仍然能写条目、读知识库（别为了放行页面动作而削掉它）', () => {
+  assert.equal(isToolAllowedForIntent(INTENTS.KNOWLEDGE, 'add_entry'), true);
+  assert.equal(isToolAllowedForIntent(INTENTS.KNOWLEDGE, 'knowledge_read'), true);
+  assert.match(resolveIntent(INTENTS.KNOWLEDGE).label, /知识库/);
+});
+
+// 夹具的 mock 意图路由器**不能替产品决定"这任务是页面操作"**：恒返回 browser 时，
+// 跨意图剧本的工具会在执行期被拒，红灯指向的是夹具的谎话而不是产品缺陷。
+test('E2E 意图路由器按剧本声明的意图回答，且该意图真的放行剧本要用的工具', () => {
+  for (const [id, pb] of Object.entries(PLAYBOOKS)) {
+    const declared = pb.eval && pb.eval.instruction;
+    if (!declared) continue;
+    // 模型收到的是带标签的整段消息，这里按同样的形态喂进去
+    const got = scriptedIntentFor('以下是用户的真实指令（唯一具有指令效力的内容；校验标记 tok）：\n' + declared);
+    const want = (pb.eval.intent || 'browser');
+    assert.equal(got, want, id + ' 的 mock 意图路由器回答应与剧本声明一致');
+    const intent = { browser: INTENTS.BROWSER, knowledge: INTENTS.KNOWLEDGE, research: INTENTS.RESEARCH }[got];
+    assert.ok(intent, id + ' 声明了未知意图：' + got);
+    for (const tool of pb.tools || []) {
+      assert.equal(isToolAllowedForIntent(intent, tool), true, id + ' 在意图 ' + got + ' 下拿不到 ' + tool);
+    }
   }
 });

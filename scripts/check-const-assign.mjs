@@ -43,7 +43,10 @@ const ROOTS = ['.'];
 // 必须排除：① 检查产物等于检查生成器，源码才是改动的对象；
 // ② 产物里字符串/正则的长行会被本检查器的保守剥离策略误判 ——
 //    实测扫出 3721 处假阳性，把真正的信号淹没了。
-const SKIP = /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|\.min\.js$/;
+// `release/` 是 `scripts/package-extension.mjs` 的打包输出（整份产物 + 解包目录），
+// 与上面同理：扫打包副本等于扫生成器，而且这份副本随时会被下一次打包覆盖。
+const SKIP =
+  /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|[\\/]release[\\/]|\.min\.js$/;
 // 生成物（源码在 entries/ 下）；按相对路径精确排除，避免误伤未来同名源码。
 //
 // TITA-78（Batch 2）起浏览器入口也变成构建产物（`scripts/build-entries.mjs`）：

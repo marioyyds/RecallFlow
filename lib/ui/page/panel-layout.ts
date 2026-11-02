@@ -168,6 +168,17 @@ export function readPanelLayout(storage: LayoutStorageLike | null | undefined): 
   return snapshotFromParts(pos, size);
 }
 
+/**
+ * 新页面 boot 时要不要自动拉起嵌入层（「切换页面后嵌入层跟着走」，m00997）。
+ *
+ * 判据只有布局存档里的 `mode: 'embedded'`：用户把面板切成嵌入态这个动作本身，
+ * 就是「我要它一直嵌在页面上」的表态。从没选过嵌入的浏览器返回 false，
+ * 保持「按需点悬浮球」的默认体验 —— 自动弹面板只能由用户先选过才生效。
+ */
+export function shouldAutoOpenEmbeddedPanel(layout: PanelLayoutSnapshot | null | undefined): boolean {
+  return Boolean(layout) && Boolean((layout as PanelLayoutSnapshot).mode === 'embedded');
+}
+
 /** 解析扩展存储里的统一布局记录；损坏或旧形状返回空快照。 */
 export function readGlobalPanelLayout(value: unknown): PanelLayoutSnapshot {
   if (!value || typeof value !== 'object') return emptySnapshot();

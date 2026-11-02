@@ -177,10 +177,14 @@ function isCspEvalBlockError(message) {
   if (/content security policy/i.test(s) && /(eval|script-src)/i.test(s)) return true;
   return false;
 }
-function isContentScriptUnreachable(message) {
-  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
+function isNoReceiverError(message) {
+  return /Receiving end does not exist|Could not establish connection/i.test(
     String(message === void 0 || message === null ? "" : message)
   );
+}
+function isContentScriptUnreachable(message) {
+  if (isNoReceiverError(message)) return true;
+  return /message port closed/i.test(String(message === void 0 || message === null ? "" : message));
 }
 function describeContentScriptUnreachable(message, prefix) {
   const raw = String(message === void 0 || message === null ? "" : message);
@@ -8214,6 +8218,8 @@ var INTENT_DEFS = Object.freeze({
       "open_tab",
       "fetch_webpage",
       "web_search",
+      // 调研产出要能沉淀（web-research 技能本就声明 add_entry）；只读不写等于结论换页即失。
+      "add_entry",
       "wait_for_element",
       "get_attribute",
       "click_element",
@@ -8285,7 +8291,10 @@ var KEYWORD_RULES = [
       /(下载视频|视频下载|下载这个|展开全文|自动签到|去广告|抢购)/,
       /(去掉广告|去除广告|屏蔽广告|拦截广告|广告拦截)/,
       /(去掉|去除|移除|屏蔽|隐藏).{0,8}(广告|推广|弹窗)/,
-      /(广告|推广|弹窗).{0,8}(去掉|去除|移除|屏蔽|隐藏)/
+      /(广告|推广|弹窗).{0,8}(去掉|去除|移除|屏蔽|隐藏)/,
+      // 页面动作词："要在页面上动手"的最直接证据。缺了它，「帮我点一下「保存」」只剩
+      // 知识库规则的 `保存` 可命中，被判成知识库任务后 click_at 会被闸门拒绝（golden canvas 用例）。
+      /(点一下|点开|点击|按一下|双击|右键|画布|canvas|坐标|拖拽|拖到)/
     ]
   },
   {
@@ -8294,7 +8303,8 @@ var KEYWORD_RULES = [
     patterns: [
       /(看看|看一下|去看|我想看|我要看|帮我看看)/,
       /(小说|视频|电影|电视剧|动漫|B站|bilibili|百度|google|知乎|起点|淘宝|京东)/,
-      /(样式|字体|字号|颜色|标题|居中|滚动到|滚动|标注|调整)/,
+      // 「标题」常见于知识库指令（"标题用…"），当浏览器证据会把存条目的请求判成页面操作。
+      /(样式|字体|字号|颜色|居中|滚动到|滚动|标注|调整)/,
       /(关键信息|重点内容|重点句子|精华|关键点)/,
       /(脚本|userscript)/,
       /(隐藏|移除|去掉|屏蔽)/
@@ -8305,7 +8315,8 @@ var KEYWORD_RULES = [
     weight: 3,
     patterns: [
       /(知识库|收藏|笔记|错题|书签)/,
-      /(保存|收录|加入收藏|存入)/
+      // 裸 `保存|存入|收录` 是按钮字样；要求"动作+落点"配对。落点不含「知识库」——它已在上一条计分。
+      /(存进|存入|保存到|记到|写进|收录进|加入).{0,8}(笔记|收藏|收藏夹|错题|书签)/
     ]
   },
   {
@@ -8315,6 +8326,8 @@ var KEYWORD_RULES = [
       /(总结|概括|提炼)/,
       /(翻译|解释|分析|对比|比较|区别)/,
       /(查资料|查一下|资料)/,
+      // 显式调研动词：归成知识库会让 click_element 拿不到（调研第一步就断）。
+      /(调研|查证|考证|研究)/,
       /(为什么|是什么|怎么样|如何|原理)/,
       /(实现|编写|写代码|复现|代码)/,
       /(部署|怎么部署|如何部署|部署到|安装到)/,
@@ -13981,6 +13994,40 @@ function startMcpRelay() {
   }
 }
 
+// lib/shared/tab-broadcast.ts
+var INJECT_COOLDOWN_MS2 = 2e3;
+function createTabBroadcaster(chromeApi) {
+  const lastInjectAt2 = /* @__PURE__ */ new Map();
+  function inject(tabId) {
+    const now2 = Date.now();
+    if (now2 - Number(lastInjectAt2.get(tabId) || 0) < INJECT_COOLDOWN_MS2) return;
+    lastInjectAt2.set(tabId, now2);
+    try {
+      const scripting = chromeApi && chromeApi.scripting;
+      if (!scripting || typeof scripting.executeScript !== "function") return;
+      scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content.js"] }, () => {
+        void (chromeApi.runtime && chromeApi.runtime.lastError);
+      });
+    } catch (error) {
+    }
+  }
+  return {
+    send(tabId, payload) {
+      if (!Number.isInteger(tabId) || tabId <= 0) return;
+      try {
+        chromeApi.tabs.sendMessage(tabId, payload, { frameId: 0 }, () => {
+          const error = chromeApi.runtime && chromeApi.runtime.lastError;
+          if (error && isNoReceiverError(error.message)) inject(tabId);
+        });
+      } catch (error) {
+      }
+    },
+    reset() {
+      lastInjectAt2.clear();
+    }
+  };
+}
+
 // lib/shared/panel-sessions.ts
 var PSESS_INDEX_KEY = "recallflow.psess.index.v1";
 var PSESS_ACTIVE_KEY = "recallflow.psess.active.v1";
@@ -15477,13 +15524,14 @@ function panelSummary(state2) {
     seq: Number(s.seq) || 0
   };
 }
+var panelBroadcaster = createTabBroadcaster(chrome);
 function broadcastPanelSessions(state2, sourceTabId) {
   const payload = Object.assign({ type: "panel:sessions-changed" }, panelSummary(state2));
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
       if (tab.url && !isOperableUrl(tab.url)) continue;
-      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+      panelBroadcaster.send(tab.id, payload);
     }
   });
 }
@@ -15498,7 +15546,7 @@ function broadcastPanelUi(ui, sourceTabId) {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
       if (tab.url && !isOperableUrl(tab.url)) continue;
-      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+      panelBroadcaster.send(tab.id, payload);
     }
   });
 }
@@ -15816,6 +15864,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     chromeSessionStorage.remove("recallflow.conv." + tabId);
   } catch (e) {
   }
+});
+chrome.tabs.onActivated.addListener((info) => {
+  const tabId = Number(info && info.tabId);
+  if (!Number.isInteger(tabId) || tabId <= 0) return;
+  panelBroadcaster.send(tabId, { type: "panel:probe" });
 });
 var runRegistry = createTabRunRegistry();
 var REATTACH_GRACE_MS = 8e3;

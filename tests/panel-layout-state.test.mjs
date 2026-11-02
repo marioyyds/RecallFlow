@@ -22,6 +22,7 @@ import {
   readPanelLayout,
   writePanelLayout,
   readGlobalPanelLayout,
+  shouldAutoOpenEmbeddedPanel,
   loadGlobalPanelLayout,
   saveGlobalPanelLayout,
   resolvePanelPlacement,
@@ -360,4 +361,29 @@ test('panelAnchoredOffsets：右下角间距往返不漂移（必须用布局视
   assert.equal(placement.bottom, 0);
   // 再反算一次仍是 0（第二次开合不累加）。
   assert.deepEqual(panelAnchoredOffsets({ right: 1185, bottom: 785 }, viewport), { right: 0, bottom: 0 });
+});
+
+// ---- 新页面自动嵌入的判据 ----
+//
+// 自动开面板只能由用户先选过嵌入态触发：默认体验是「按需点悬浮球」，
+// 所以这份判据必须对「没选过 / 选了浮层 / 存档坏掉」一律返回 false。
+
+test('shouldAutoOpenEmbeddedPanel：只有存档 mode=embedded 才自动拉起嵌入层', () => {
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, mode: 'embedded', ratio: 0.3 })), true);
+});
+
+test('shouldAutoOpenEmbeddedPanel：浮层、空存档、坏数据都不自动开', () => {
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, mode: 'overlay' })), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, left: 100, top: 100 })), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout(null)), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout('garbage')), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(null), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(undefined), false);
+});
+
+test('shouldAutoOpenEmbeddedPanel：旧版只存位置的存档不自动开（没有嵌入概念）', () => {
+  const legacy = readPanelLayout(memoryStorage({
+    [PANEL_POS_KEY]: JSON.stringify({ left: 120, top: 90 }),
+  }));
+  assert.equal(shouldAutoOpenEmbeddedPanel(legacy), false);
 });

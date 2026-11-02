@@ -299,7 +299,7 @@ test('拖动 → 关闭 → 重开：位置与「已手动定位」状态都保�
   }
 });
 
-test('拖动到右下角：保存为 right/bottom 锚点，重开仍贴右下角', async () => {
+test('拖动到右下角：脱靠成自由浮动并落在原处，重开回到同一位置', async () => {
   const app = await boot();
   try {
     app.shortcut();
@@ -309,23 +309,26 @@ test('拖动到右下角：保存为 right/bottom 锚点，重开仍贴右下角
     app.dom.document.emit('mousemove', { clientX: 880, clientY: 320 });
     app.dom.document.emit('mouseup', {});
 
+    // 拖动即脱靠：存档记**像素坐标**而不是右/下边锚定间距。
+    // 留着 docked 的话，换页或改窗口尺寸会把面板又贴回右缘（「拖了却拖不走」）。
     const saved = await waitFor(
       () => {
         const value = savedLayout();
-        return value && value.right === 0 && value.bottom === 0 ? value : null;
+        return value && value.left === 880 && value.top === 320 ? value : null;
       },
-      '拖到右下角应记 right/bottom 间距'
+      '拖到右下角应记 left/top 像素位置'
     );
-    assert.equal(saved.left, null, '右下象限不再写死 left');
-    assert.equal(saved.top, null, '右下象限不再写死 top');
+    assert.equal(saved.docked, false, '拖动后必须不再停靠');
+    assert.equal(saved.right, null, '自由浮动面板不记右下角间距');
+    assert.equal(saved.bottom, null);
 
     panel.querySelector('.close').emit('click', {});
     await shortcutAgain(app);
     panel = wireLayout(await waitFor(app.panel, '重开面板'));
-    assert.equal(panel.style.right, '0px');
-    assert.equal(panel.style.bottom, '0px');
-    assert.equal(panel.style.left, 'auto');
-    assert.equal(panel.style.top, 'auto');
+    assert.equal(panel.style.left, '880px', '重开必须回到拖动后的位置（视觉上仍是右下角）');
+    assert.equal(panel.style.top, '320px');
+    assert.equal(panel.style.right, 'auto');
+    assert.equal(panel.style.bottom, 'auto');
   } finally {
     app.close();
   }

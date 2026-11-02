@@ -320,10 +320,14 @@ function isCspEvalBlockError(message) {
   if (/content security policy/i.test(s) && /(eval|script-src)/i.test(s)) return true;
   return false;
 }
-function isContentScriptUnreachable(message) {
-  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
+function isNoReceiverError(message) {
+  return /Receiving end does not exist|Could not establish connection/i.test(
     String(message === void 0 || message === null ? "" : message)
   );
+}
+function isContentScriptUnreachable(message) {
+  if (isNoReceiverError(message)) return true;
+  return /message port closed/i.test(String(message === void 0 || message === null ? "" : message));
 }
 function describeContentScriptUnreachable(message, prefix) {
   const raw = String(message === void 0 || message === null ? "" : message);

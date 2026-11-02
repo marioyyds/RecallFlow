@@ -191,10 +191,17 @@ export function createChromeStub(opts = {}) {
     contextMenus: { async create() {}, async removeAll() {} },
   };
 
-  /** 测试用：把一条消息投给所有 onMessage 监听器（模拟后台 → 内容脚本）。 */
-  chrome._emitMessage = (msg, sender) => {
+  /**
+   * 测试用：把一条消息投给所有 onMessage 监听器（模拟后台 → 内容脚本）。
+   *
+   * 第三参 sendResponse 与真机一致：监听器要**回包**就必须收下它并返回 true。
+   * 之前这里只传两个参数，于是"监听器到底回没回话"根本测不到 —— 而弹窗的
+   * 「悬浮球」按钮正是靠这个回答区分「送达了」与「连不上」（真机那个假警报 bug）。
+   */
+  chrome._emitMessage = (msg, sender, sendResponse) => {
     const out = [];
-    for (const fn of chrome.runtime.onMessage._listeners.slice()) out.push(fn(msg, sender || {}));
+    const respond = typeof sendResponse === 'function' ? sendResponse : () => {};
+    for (const fn of chrome.runtime.onMessage._listeners.slice()) out.push(fn(msg, sender || {}, respond));
     return out;
   };
 
