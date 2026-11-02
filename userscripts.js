@@ -71,6 +71,9 @@ var pendingInstall = null;
 var confirmResolve = null;
 var updatingAll = false;
 var lastFocus = null;
+function svgIcon(id, cls) {
+  return `<svg class="${cls}" aria-hidden="true"><use href="icons.svg#${id}"/></svg>`;
+}
 function send(type, payload) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(
@@ -102,7 +105,7 @@ function matchesHtml(matches) {
   if (!list.length) return "";
   const shown = list.slice(0, 3);
   const more = list.slice(3);
-  return `<div class="us-tags">${shown.map((m) => `<span class="us-tag">${esc(m)}</span>`).join("")}${more.length ? `<button class="us-tag us-tag-more" type="button" data-expand="1">\uFF0B${more.length} \u66F4\u591A</button>` : ""}</div>`;
+  return `<div class="us-tags">${shown.map((m) => `<span class="us-tag">${esc(m)}</span>`).join("")}${more.length ? `<button class="us-tag us-tag-more" type="button" data-expand="1">\u8FD8\u6709 ${more.length} \u4E2A</button>` : ""}</div>`;
 }
 function installedCardHtml(s) {
   const warns = s.warnings || [];
@@ -118,25 +121,25 @@ function installedCardHtml(s) {
         </div>
         ${s.description ? `<div class="us-card-desc">${esc(s.description)}</div>` : ""}
         ${matchesHtml(s.matches)}
-        ${warns.length ? `<div class="us-warning">\u26A0 ${esc(warns.join("\n"))}</div>` : ""}
+        ${warns.length ? `<div class="us-warning">${svgIcon("i-alert", "icon icon-sm")}<span>${esc(warns.join("\n"))}</span></div>` : ""}
       </div>
-      <label class="us-switch" title="${s.enabled ? "\u505C\u7528\u8BE5\u811A\u672C" : "\u542F\u7528\u8BE5\u811A\u672C"}">
-        <input type="checkbox" data-act="toggle" ${s.enabled ? "checked" : ""} aria-label="${esc(s.enabled ? "\u505C\u7528" : "\u542F\u7528")} ${esc(s.name)}">
-        <span class="us-switch-track" aria-hidden="true"></span>
-      </label>
-    </div>
-    <div class="us-card-actions">
-      <button class="mini primary" data-act="run" type="button" title="\u5728\u6700\u8FD1\u6D4F\u89C8\u7684\u7F51\u9875\u4E0A\u7ACB\u5373\u8FD0\u884C\uFF08\u4E0D\u8981\u6C42 URL \u5339\u914D\uFF09">\u25B6 \u8FD0\u884C</button>
-      <button class="mini" data-act="update" type="button">\u21BB \u66F4\u65B0</button>
-      <button class="mini" data-act="export" type="button">\u2B07 \u5BFC\u51FA</button>
-      <details class="us-more">
-        <summary class="mini" aria-label="\u66F4\u591A\u64CD\u4F5C">\u22EF</summary>
-        <div class="us-more-panel">
-          <button data-act="copy-url" type="button">\u590D\u5236\u5B89\u88C5\u94FE\u63A5</button>
-          ${s.homepageURL ? '<button data-act="open-home" type="button">\u6253\u5F00\u811A\u672C\u4E3B\u9875</button>' : ""}
-          <button data-act="uninstall" type="button" class="danger">\u5378\u8F7D\u811A\u672C</button>
-        </div>
-      </details>
+      <div class="us-card-tools">
+        <button class="icon-btn" data-act="run" type="button" title="\u5728\u6700\u8FD1\u6D4F\u89C8\u7684\u7F51\u9875\u4E0A\u7ACB\u5373\u8FD0\u884C\uFF08\u4E0D\u8981\u6C42 URL \u5339\u914D\uFF09" aria-label="\u7ACB\u5373\u8FD0\u884C ${esc(s.name)}">${svgIcon("i-send", "icon")}</button>
+        <button class="icon-btn" data-act="update" type="button" title="\u68C0\u67E5\u66F4\u65B0" aria-label="\u68C0\u67E5 ${esc(s.name)} \u7684\u66F4\u65B0">${svgIcon("i-refresh", "icon")}</button>
+        <button class="icon-btn" data-act="export" type="button" title="\u5BFC\u51FA\u811A\u672C\u6587\u4EF6" aria-label="\u5BFC\u51FA ${esc(s.name)}">${svgIcon("i-download", "icon")}</button>
+        <details class="us-more more-menu">
+          <summary class="icon-btn" aria-label="\u66F4\u591A\u64CD\u4F5C">${svgIcon("i-more", "icon")}</summary>
+          <div class="more-menu-panel">
+            <button data-act="copy-url" type="button">\u590D\u5236\u5B89\u88C5\u94FE\u63A5</button>
+            ${s.homepageURL ? '<button data-act="open-home" type="button">\u6253\u5F00\u811A\u672C\u4E3B\u9875</button>' : ""}
+            <button data-act="uninstall" type="button" class="danger">\u5378\u8F7D\u811A\u672C</button>
+          </div>
+        </details>
+        <label class="us-switch" title="${s.enabled ? "\u505C\u7528\u8BE5\u811A\u672C" : "\u542F\u7528\u8BE5\u811A\u672C"}">
+          <input type="checkbox" data-act="toggle" ${s.enabled ? "checked" : ""} aria-label="${esc(s.enabled ? "\u505C\u7528" : "\u542F\u7528")} ${esc(s.name)}">
+          <span class="us-switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
     </div>
   </div>`;
 }
@@ -208,9 +211,12 @@ async function updateAll() {
   updatingAll = true;
   const btn = $("us-update-all-btn");
   const progress = $("us-update-progress");
+  const label = $("us-update-label");
   btn.disabled = true;
+  btn.classList.add("is-busy");
+  if (label) label.textContent = "\u68C0\u67E5\u4E2D\u2026";
   progress.classList.remove("hidden");
-  progress.innerHTML = '<span class="us-spinner" aria-hidden="true"></span><span>\u6B63\u5728\u68C0\u67E5\u66F4\u65B0\u2026</span>';
+  progress.innerHTML = '<span class="us-progress-track" aria-hidden="true"></span><span>\u6B63\u5728\u68C0\u67E5\u66F4\u65B0\u2026</span>';
   try {
     const res = await send("userscript:updateAll");
     if (!res.ok) {
@@ -226,6 +232,8 @@ async function updateAll() {
   } finally {
     updatingAll = false;
     btn.disabled = false;
+    btn.classList.remove("is-busy");
+    if (label) label.textContent = "\u68C0\u67E5\u5168\u90E8\u66F4\u65B0";
     progress.classList.add("hidden");
     await refreshInstalled();
   }
@@ -305,8 +313,8 @@ function searchCardHtml(it) {
       </div>
     </div>
     <div class="us-card-actions">
-      <button class="mini primary" data-url="${esc(it.codeUrl)}" type="button">\u5B89\u88C5</button>
-      ${it.pageUrl ? `<a class="mini" href="${esc(it.pageUrl)}" target="_blank" rel="noreferrer">\u67E5\u770B\u8BE6\u60C5 \u2197</a>` : ""}
+      <button class="mini" data-url="${esc(it.codeUrl)}" type="button">${svgIcon("i-download", "icon icon-sm")}\u5B89\u88C5</button>
+      ${it.pageUrl ? `<a class="mini" href="${esc(it.pageUrl)}" target="_blank" rel="noreferrer">${svgIcon("i-external", "icon icon-sm")}\u67E5\u770B\u8BE6\u60C5</a>` : ""}
     </div>
   </div>`;
 }
@@ -337,7 +345,7 @@ function previewHtml(p) {
     ${matches.length ? `<div class="us-preview-section">\u8BBF\u95EE\u7684\u7F51\u7AD9</div><div class="us-tags">${matches.map((m) => `<span class="us-tag">${esc(m)}</span>`).join("")}</div>` : ""}
     ${grants.length ? `<div class="us-preview-section">\u7533\u8BF7\u7684 GM API</div><div class="us-tags">${grants.map((g) => `<span class="us-tag">${esc(g)}</span>`).join("")}</div>` : ""}
     ${requires.length ? `<div class="us-preview-section">\u5916\u90E8\u4F9D\u8D56</div><div class="us-tags">${requires.map((r) => `<span class="us-tag">${esc(r)}</span>`).join("")}</div>` : ""}
-    ${warns.length ? `<div class="us-warning">\u26A0 ${esc(warns.join("\n"))}</div>` : ""}
+    ${warns.length ? `<div class="us-warning">${svgIcon("i-alert", "icon icon-sm")}<span>${esc(warns.join("\n"))}</span></div>` : ""}
     <div class="us-preview-risk">\u811A\u672C\u53EF\u4EE5\u8BBF\u95EE\u5B83\u5339\u914D\u9875\u9762\u4E0A\u7684<b>\u6240\u6709\u5185\u5BB9</b>\uFF0C\u8BF7\u786E\u8BA4\u6765\u6E90\u53EF\u4FE1\u540E\u518D\u5B89\u88C5\u3002</div>`;
 }
 function showPreview(p) {

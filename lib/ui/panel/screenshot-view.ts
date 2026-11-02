@@ -68,7 +68,7 @@ export class PanelScreenshotView {
       const missing = id && this.missingIds.has(id);
       if (id && !missing) this.hydrate(id);
       return (
-        '<div class="agent-shot gone">🖼 截图' +
+        '<div class="agent-shot gone">截图' +
         (value.label ? '（' + this.ports.escape(String(value.label)) + '）' : '') +
         '：' +
         (!id
@@ -84,7 +84,7 @@ export class PanelScreenshotView {
       this.ports.escape(url) +
       '" alt="' +
       this.ports.escape(String(value.label || '页面截图')) +
-      '" loading="lazy"><span class="agent-shot-cap">🖼 ' +
+      '" loading="lazy"><span class="agent-shot-cap">截图 ' +
       this.ports.escape(this.caption(value)) +
       ' · 点击放大</span></div>'
     );

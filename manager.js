@@ -90,12 +90,13 @@ function bindStarKeyboard(root, onSelect) {
   });
 }
 function levelNameHtml(n) {
-  const st = STAR_LEVELS[Math.max(1, Math.min(3, Number(n) || 1))];
-  return `<span class="level-name" style="color:${st.color}">${st.name}</span>`;
+  const level = Math.max(1, Math.min(3, Number(n) || 1));
+  const st = STAR_LEVELS[level];
+  return `<span class="level-name" data-level="${level}">${st.name}</span>`;
 }
 function typeBadgeHtml(type) {
   const t = typeInfo(type);
-  return `<span class="type-badge" style="color:${t.color};background:${t.color}1A;border:1px solid ${t.color}40">${t.name}</span>`;
+  return `<span class="type-badge" data-type="${t.id}">${t.name}</span>`;
 }
 function tagsHtml(tags) {
   if (!Array.isArray(tags) || !tags.length) return "";
@@ -939,10 +940,10 @@ function allTags() {
 function renderTypeTabs() {
   const el = $("type-tabs");
   const all = knowledge.list();
-  let h = `<button class="type-tab${currentType === "all" ? " active" : ""}" data-type="all">\u5168\u90E8</button>`;
+  let h = `<button class="filter-chip type-tab${currentType === "all" ? " active" : ""}" type="button" data-type="all" aria-pressed="${currentType === "all"}">\u5168\u90E8 <span class="filter-count">${all.length}</span></button>`;
   ITEM_TYPES.forEach((t) => {
     const n = all.filter((i) => (i.type || "wrong") === t.id).length;
-    h += `<button class="type-tab${currentType === t.id ? " active" : ""}" data-type="${t.id}" style="--t:${t.color}">${t.name} <span class="cnt">${n}</span></button>`;
+    h += `<button class="filter-chip type-tab${currentType === t.id ? " active" : ""}" type="button" data-type="${t.id}" aria-pressed="${currentType === t.id}">${t.name} <span class="filter-count">${n}</span></button>`;
   });
   el.innerHTML = h;
 }
@@ -953,9 +954,9 @@ function renderTagFilter() {
     el.innerHTML = "";
     return;
   }
-  let h = `<button class="tag-filter-chip${currentTag === "all" ? " active" : ""}" data-tag="all">\u5168\u90E8\u6807\u7B7E</button>`;
+  let h = `<button class="filter-chip tag-filter-chip${currentTag === "all" ? " active" : ""}" type="button" data-tag="all" aria-pressed="${currentTag === "all"}">\u5168\u90E8\u6807\u7B7E</button>`;
   tags.forEach((t) => {
-    h += `<button class="tag-filter-chip${currentTag === t ? " active" : ""}" data-tag="${esc(t)}">${esc(t)}</button>`;
+    h += `<button class="filter-chip tag-filter-chip${currentTag === t ? " active" : ""}" type="button" data-tag="${esc(t)}" aria-pressed="${currentTag === t}">${esc(t)}</button>`;
   });
   el.innerHTML = h;
 }
@@ -1011,7 +1012,7 @@ function itemHtml(it) {
       </div>` : it.note ? `<div class="item-note" data-note>${esc(markdownExcerpt(it.note, 180))}</div>` : "";
   const tagEditHtml = editing ? `<input id="tag-editor" class="note-editor" value="${esc((it.tags || []).join(", "))}" placeholder="\u6807\u7B7E\uFF0C\u9017\u53F7\u5206\u9694">` : tagsHtml(it.tags);
   const cbHtml = `<input type="checkbox" class="item-select" ${selectedIds.has(it.id) ? "checked" : ""}>`;
-  return `<div class="item" data-id="${esc(it.id)}">
+  return `<div class="item${editing ? " editing" : ""}" data-id="${esc(it.id)}">
     <div class="item-head">
       ${cbHtml}
       ${typeBadgeHtml(it.type)}
@@ -1021,12 +1022,14 @@ function itemHtml(it) {
     <div class="item-meta">
       ${starBarHtml(it.status, true)}
       ${levelNameHtml(it.status)}
-      ${it.platformName ? `<span class="pf-name">${esc(it.platformName)}</span>` : ""}
+      ${it.platformName ? `<span class="tag-chip">${esc(it.platformName)}</span>` : ""}
     </div>
     <div class="note-row">${noteHtml}</div>
-    <div class="tag-row">${tagEditHtml}</div>
-    <div class="item-actions">
-      ${editing ? `<button class="mini primary" data-act="save">\u2713 \u4FDD\u5B58</button><button class="mini" data-act="cancel">\u2715 \u53D6\u6D88</button>` : `<button class="mini" data-act="read">\u{1F4D6} \u9605\u8BFB</button><button class="mini" data-act="edit">\u270E \u7F16\u8F91</button><button class="mini danger" data-act="del">\u{1F5D1} \u5220\u9664</button>`}
+    <div class="tag-row">
+      ${tagEditHtml}
+      <div class="item-actions">
+        ${editing ? `<button class="mini primary" type="button" data-act="save"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-check"/></svg>\u4FDD\u5B58</button><button class="mini" type="button" data-act="cancel"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-close"/></svg>\u53D6\u6D88</button>` : `<button class="mini" type="button" data-act="read"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-book"/></svg>\u9605\u8BFB</button><button class="mini" type="button" data-act="edit"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-edit"/></svg>\u7F16\u8F91</button><button class="mini danger" type="button" data-act="del"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-trash"/></svg>\u5220\u9664</button>`}
+      </div>
     </div>
   </div>`;
 }
@@ -1055,10 +1058,10 @@ function renderPagination(total, pageCount) {
   }
   nav.hidden = false;
   const tokens = pageTokens(current, pageCount);
-  nav.innerHTML = '<span class="kb-page-summary">\u7B2C ' + current + " / " + pageCount + " \u9875 \xB7 " + KB_PAGE_SIZE + ' \u6761/\u9875</span><button class="kb-page-btn" type="button" data-page="' + (current - 1) + '"' + (current === 1 ? " disabled" : "") + ">\u4E0A\u4E00\u9875</button>" + tokens.map((token) => {
+  nav.innerHTML = '<span class="kb-page-summary">\u5171 ' + total + " \u6761 \xB7 \u7B2C " + current + " / " + pageCount + ' \u9875</span><span class="kb-page-nav"><button class="kb-page-btn" type="button" data-page="' + (current - 1) + '"' + (current === 1 ? " disabled" : "") + ">\u4E0A\u4E00\u9875</button>" + tokens.map((token) => {
     if (token === "ellipsis") return '<span class="kb-page-ellipsis" aria-hidden="true">\u2026</span>';
     return '<button class="kb-page-btn' + (token === current ? " active" : "") + '" type="button" data-page="' + token + '"' + (token === current ? ' aria-current="page"' : "") + ">" + token + "</button>";
-  }).join("") + '<button class="kb-page-btn" type="button" data-page="' + (current + 1) + '"' + (current === pageCount ? " disabled" : "") + ">\u4E0B\u4E00\u9875</button>";
+  }).join("") + '<button class="kb-page-btn" type="button" data-page="' + (current + 1) + '"' + (current === pageCount ? " disabled" : "") + ">\u4E0B\u4E00\u9875</button></span>";
 }
 function render() {
   const listEl = $("list");
@@ -1070,7 +1073,7 @@ function render() {
   emptyEl.classList.toggle("hidden", items.length > 0);
   if (!items.length) {
     const hasAny = knowledge.size > 0;
-    emptyEl.innerHTML = hasAny ? '<span class="empty-ico">\u{1F50D}</span><p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p>' : '<span class="empty-ico">\u{1F4DA}</span><p>\u77E5\u8BC6\u5E93\u8FD8\u662F\u7A7A\u7684</p><p class="empty-hint">\u70B9\u51FB\u300C\u65B0\u5EFA\u7B14\u8BB0\u300D\u6216\u6536\u85CF\u7F51\u9875\u5F00\u59CB\u6536\u5F55</p>';
+    emptyEl.innerHTML = hasAny ? '<svg class="empty-ico" aria-hidden="true"><use href="icons.svg#i-search"/></svg><p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p><button class="btn btn-secondary empty-action" type="button" data-empty-action="clear">\u6E05\u9664\u5168\u90E8\u7B5B\u9009</button>' : '<svg class="empty-ico" aria-hidden="true"><use href="icons.svg#i-book"/></svg><p>\u77E5\u8BC6\u5E93\u8FD8\u662F\u7A7A\u7684</p><p class="empty-hint">\u70B9\u51FB\u300C\u65B0\u5EFA\u7B14\u8BB0\u300D\u6216\u6536\u85CF\u7F51\u9875\u5F00\u59CB\u6536\u5F55</p><button class="btn btn-secondary empty-action" type="button" data-empty-action="create">\u65B0\u5EFA\u7B14\u8BB0</button>';
   }
   listEl.innerHTML = paged.items.map(itemHtml).join("");
   listEl.scrollTop = prevTop;
@@ -1091,7 +1094,10 @@ function renderActiveFilters() {
   if (q) labels.push("\u641C\u7D22\uFF1A" + q);
   el.innerHTML = labels.length ? labels.map((x) => `<span class="active-filter-chip">${esc(x)}</span>`).join("") : '<span class="filter-empty">\u5168\u90E8\u5185\u5BB9</span>';
   const summary = $("advanced-filter-summary");
-  if (summary) summary.textContent = labels.length ? labels.join(" \xB7 ") : "\u5168\u90E8\u5185\u5BB9";
+  if (summary) {
+    summary.textContent = labels.length ? labels.join(" \xB7 ") : "";
+    summary.hidden = !labels.length;
+  }
   const details = $("advanced-filters");
   if (details && labels.length) details.open = true;
 }
@@ -1333,6 +1339,13 @@ $("sort-select").addEventListener("change", (e) => {
   render();
 });
 $("add-note-btn").addEventListener("click", createNote);
+$("empty").addEventListener("click", (e) => {
+  const btn = closestEl(e.target, "[data-empty-action]");
+  if (!btn) return;
+  const action = btn.dataset.emptyAction;
+  if (action === "create") $("add-note-btn").click();
+  else if (action === "clear") $("clear-filters").click();
+});
 $("kb-pagination").addEventListener("click", (e) => {
   const btn = closestEl(e.target, ".kb-page-btn");
   if (!btn || btn.disabled) return;

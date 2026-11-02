@@ -54,10 +54,10 @@ function allTags(): string[] {
 function renderTypeTabs() {
   const el = $('type-tabs');
   const all = knowledge.list();
-  let h = `<button class="type-tab${currentType === 'all' ? ' active' : ''}" data-type="all">全部</button>`;
+  let h = `<button class="filter-chip type-tab${currentType === 'all' ? ' active' : ''}" type="button" data-type="all" aria-pressed="${currentType === 'all'}">全部 <span class="filter-count">${all.length}</span></button>`;
   ITEM_TYPES.forEach((t) => {
     const n = all.filter((i) => (i.type || 'wrong') === t.id).length;
-    h += `<button class="type-tab${currentType === t.id ? ' active' : ''}" data-type="${t.id}" style="--t:${t.color}">${t.name} <span class="cnt">${n}</span></button>`;
+    h += `<button class="filter-chip type-tab${currentType === t.id ? ' active' : ''}" type="button" data-type="${t.id}" aria-pressed="${currentType === t.id}">${t.name} <span class="filter-count">${n}</span></button>`;
   });
   el.innerHTML = h;
 }
@@ -69,9 +69,9 @@ function renderTagFilter() {
     el.innerHTML = '';
     return;
   }
-  let h = `<button class="tag-filter-chip${currentTag === 'all' ? ' active' : ''}" data-tag="all">全部标签</button>`;
+  let h = `<button class="filter-chip tag-filter-chip${currentTag === 'all' ? ' active' : ''}" type="button" data-tag="all" aria-pressed="${currentTag === 'all'}">全部标签</button>`;
   tags.forEach((t) => {
-    h += `<button class="tag-filter-chip${currentTag === t ? ' active' : ''}" data-tag="${esc(t)}">${esc(t)}</button>`;
+    h += `<button class="filter-chip tag-filter-chip${currentTag === t ? ' active' : ''}" type="button" data-tag="${esc(t)}" aria-pressed="${currentTag === t}">${esc(t)}</button>`;
   });
   el.innerHTML = h;
 }
@@ -142,7 +142,7 @@ function itemHtml(it: KnowledgeItem): string {
     ? `<input id="tag-editor" class="note-editor" value="${esc((it.tags || []).join(', '))}" placeholder="标签，逗号分隔">`
     : tagsHtml(it.tags);
   const cbHtml = `<input type="checkbox" class="item-select" ${selectedIds.has(it.id) ? 'checked' : ''}>`;
-  return `<div class="item" data-id="${esc(it.id)}">
+  return `<div class="item${editing ? ' editing' : ''}" data-id="${esc(it.id)}">
     <div class="item-head">
       ${cbHtml}
       ${typeBadgeHtml(it.type)}
@@ -152,14 +152,16 @@ function itemHtml(it: KnowledgeItem): string {
     <div class="item-meta">
       ${starBarHtml(it.status, true)}
       ${levelNameHtml(it.status)}
-      ${it.platformName ? `<span class="pf-name">${esc(it.platformName)}</span>` : ''}
+      ${it.platformName ? `<span class="tag-chip">${esc(it.platformName)}</span>` : ''}
     </div>
     <div class="note-row">${noteHtml}</div>
-    <div class="tag-row">${tagEditHtml}</div>
-    <div class="item-actions">
-      ${editing
-        ? `<button class="mini primary" data-act="save">✓ 保存</button><button class="mini" data-act="cancel">✕ 取消</button>`
-        : `<button class="mini" data-act="read">📖 阅读</button><button class="mini" data-act="edit">✎ 编辑</button><button class="mini danger" data-act="del">🗑 删除</button>`}
+    <div class="tag-row">
+      ${tagEditHtml}
+      <div class="item-actions">
+        ${editing
+          ? `<button class="mini primary" type="button" data-act="save"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-check"/></svg>保存</button><button class="mini" type="button" data-act="cancel"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-close"/></svg>取消</button>`
+          : `<button class="mini" type="button" data-act="read"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-book"/></svg>阅读</button><button class="mini" type="button" data-act="edit"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-edit"/></svg>编辑</button><button class="mini danger" type="button" data-act="del"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-trash"/></svg>删除</button>`}
+      </div>
     </div>
   </div>`;
 }
@@ -192,14 +194,16 @@ function renderPagination(total: number, pageCount: number) {
   nav.hidden = false;
   const tokens = pageTokens(current, pageCount);
   nav.innerHTML =
-    '<span class="kb-page-summary">第 ' + current + ' / ' + pageCount + ' 页 · ' + KB_PAGE_SIZE + ' 条/页</span>' +
+    '<span class="kb-page-summary">共 ' + total + ' 条 · 第 ' + current + ' / ' + pageCount + ' 页</span>' +
+    '<span class="kb-page-nav">' +
     '<button class="kb-page-btn" type="button" data-page="' + (current - 1) + '"' + (current === 1 ? ' disabled' : '') + '>上一页</button>' +
     tokens.map((token) => {
       if (token === 'ellipsis') return '<span class="kb-page-ellipsis" aria-hidden="true">…</span>';
       return '<button class="kb-page-btn' + (token === current ? ' active' : '') + '" type="button" data-page="' + token + '"' +
         (token === current ? ' aria-current="page"' : '') + '>' + token + '</button>';
     }).join('') +
-    '<button class="kb-page-btn" type="button" data-page="' + (current + 1) + '"' + (current === pageCount ? ' disabled' : '') + '>下一页</button>';
+    '<button class="kb-page-btn" type="button" data-page="' + (current + 1) + '"' + (current === pageCount ? ' disabled' : '') + '>下一页</button>' +
+    '</span>';
 }
 
 function render() {
@@ -213,8 +217,8 @@ function render() {
   if (!items.length) {
     const hasAny = knowledge.size > 0;
     emptyEl.innerHTML = hasAny
-      ? '<span class="empty-ico">🔍</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
-      : '<span class="empty-ico">📚</span><p>知识库还是空的</p><p class="empty-hint">点击「新建笔记」或收藏网页开始收录</p>';
+      ? '<svg class="empty-ico" aria-hidden="true"><use href="icons.svg#i-search"/></svg><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p><button class="btn btn-secondary empty-action" type="button" data-empty-action="clear">清除全部筛选</button>'
+      : '<svg class="empty-ico" aria-hidden="true"><use href="icons.svg#i-book"/></svg><p>知识库还是空的</p><p class="empty-hint">点击「新建笔记」或收藏网页开始收录</p><button class="btn btn-secondary empty-action" type="button" data-empty-action="create">新建笔记</button>';
   }
   listEl.innerHTML = paged.items.map(itemHtml).join('');
   listEl.scrollTop = prevTop; // 恢复滚动位置
@@ -236,7 +240,10 @@ function renderActiveFilters() {
   if (q) labels.push('搜索：' + q);
   el.innerHTML = labels.length ? labels.map((x) => `<span class="active-filter-chip">${esc(x)}</span>`).join('') : '<span class="filter-empty">全部内容</span>';
   const summary = $('advanced-filter-summary');
-  if (summary) summary.textContent = labels.length ? labels.join(' · ') : '全部内容';
+  if (summary) {
+    summary.textContent = labels.length ? labels.join(' · ') : '';
+    summary.hidden = !labels.length;
+  }
   const details = $('advanced-filters');
   if (details && labels.length) details.open = true;
 }
@@ -490,6 +497,15 @@ $('sort-select').addEventListener('change', (e: Event) => {
 });
 
 $('add-note-btn').addEventListener('click', createNote);
+
+// 空状态只做动作转发，不复制新建 / 清除筛选的逻辑
+$('empty').addEventListener('click', (e: Event) => {
+  const btn = closestEl(e.target, '[data-empty-action]');
+  if (!btn) return;
+  const action = btn.dataset.emptyAction;
+  if (action === 'create') $('add-note-btn').click();
+  else if (action === 'clear') $('clear-filters').click();
+});
 
 $('kb-pagination').addEventListener('click', (e: Event) => {
   const btn = closestEl(e.target, '.kb-page-btn');

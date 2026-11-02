@@ -1,25 +1,26 @@
 :root {
-  color-scheme: dark;
-  --ink: #eeeeee;
-  --muted: #a9a9a9;
-  --brand: #8aa9ff;
-  --brand-soft: rgba(138, 169, 255, 0.12);
-  --brand-line: rgba(138, 169, 255, 0.34);
-  --link: #a8c0ff;
-  --bg: #0f0f0f;
-  --surface: #141414;
-  --surface-alt: #121212;
-  --surface-hover: #1a1a1a;
-  --header-bg: rgba(15, 15, 15, 0.86);
-  --footer-bg: #0b0b0b;
-  --line: #242424;
-  --line-strong: #303030;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-hover: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  color-scheme: light;
+  /* 与扩展同一个「纸与墨」体系：暖纸底 + 近白纸面 + 墨字 + 朱砂。
+     落地页刻意只做浅色（纸感是这个身份的一部分），不做深色反色版。 */
+  --ink: #211e19;
+  --ink-2: #575047;
+  --muted: #6f6659;
+  --accent: #a03a22;
+  --accent-hover: #8a2f1b;
+  --accent-soft: #f7ece7;
+  --bg: #f6f3ec;
+  --surface: #fffdf8;
+  --surface-alt: #f1ebdf;
+  --surface-hover: #fffefb;
+  --header-bg: rgba(246, 243, 236, 0.9);
+  --footer-bg: #f1ebdf;
+  --line: #e4ddd0;
+  --line-strong: #d3c9b7;
+  --radius: 4px;
+  --radius-sm: 3px;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Songti SC", "Noto Serif SC", serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
@@ -41,20 +42,24 @@ html {
 }
 
 ::selection {
-  background: rgba(138, 169, 255, 0.32);
-  color: #ffffff;
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 body {
   margin: 0;
   font-family: var(--font);
   font-size: 16px;
-  line-height: 1.7;
+  line-height: 1.72;
   color: var(--ink);
   background: var(--bg);
   overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
+/* 标题走衬线：这是「文档 / 刊物」的读感来源，也是一堆圆角无衬线 AI 落地页
+   最直接的对照面。正文仍是无衬线 —— 中文衬线在小字号屏幕上会糊。 */
 h1,
 h2,
 h3 {
@@ -64,19 +69,25 @@ h3 {
   font-weight: 600;
 }
 
+h1,
+h2 {
+  font-family: var(--font-display);
+}
+
 h1 {
-  font-size: clamp(2.25rem, 1.35rem + 3.4vw, 3.75rem);
+  font-size: clamp(2.1rem, 1.3rem + 3.2vw, 3.4rem);
   letter-spacing: -0.02em;
-  line-height: 1.08;
+  line-height: 1.1;
 }
 
 h2 {
-  font-size: clamp(1.7rem, 1.4rem + 1.1vw, 2.25rem);
+  font-size: clamp(1.6rem, 1.3rem + 1vw, 2.1rem);
   letter-spacing: -0.01em;
 }
 
 h3 {
   font-size: 1.0625rem;
+  letter-spacing: -0.005em;
 }
 
 p {
@@ -90,29 +101,29 @@ ol {
 }
 
 a {
-  color: var(--link);
+  color: var(--accent);
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
 a:hover {
-  color: #d2dfff;
+  color: var(--accent-hover);
 }
 
 :focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 code {
   font-family: var(--mono);
   font-size: 0.88em;
-  padding: 0.12em 0.4em;
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: #1d1d1d;
-  color: #d7e3ff;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  color: var(--ink);
 }
 
 img {
@@ -122,7 +133,7 @@ img {
 
 .container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1160px;
   margin-inline: auto;
   padding-inline: 24px;
 }
@@ -134,15 +145,15 @@ img {
   z-index: 20;
   padding: 0.6rem 1rem;
   border-radius: var(--radius-sm);
-  background: var(--brand);
-  color: #0f0f0f;
+  background: var(--accent);
+  color: #fffdf8;
   font-weight: 600;
   text-decoration: none;
 }
 
 .skip-link:focus {
   top: 12px;
-  color: #0f0f0f;
+  color: #fffdf8;
 }
 
 /* ---------- header ---------- */
@@ -153,7 +164,7 @@ img {
   z-index: 10;
   background: var(--header-bg);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(8px);
 }
 
 .header-inner {
@@ -162,7 +173,7 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem 1.5rem;
-  padding-block: 0.6rem;
+  padding-block: 0.55rem;
 }
 
 .brand {
@@ -179,38 +190,40 @@ img {
 
 .brand img {
   display: block;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
 }
 
 .site-nav {
   min-width: 0;
+  margin-inline-start: auto;
 }
 
 .site-nav ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.15rem 0.15rem;
+  gap: 0.15rem 0.4rem;
   list-style: none;
   justify-content: flex-end;
   margin: 0;
 }
 
+/* 导航是「文字 + 下划线」，不是一排药丸 —— 实心药丸 active 正是最典型的落地页长相 */
 .site-nav a {
   display: inline-block;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 16px;
+  padding: 8px 4px;
+  border-bottom: 1px solid transparent;
+  font-size: 0.9375rem;
   font-weight: 500;
   line-height: 1.2;
-  color: #bcbcbc;
+  color: var(--ink-2);
   text-decoration: none;
-  transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+  transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .site-nav a:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.06);
+  border-bottom-color: var(--accent);
   text-decoration: none;
 }
 
@@ -220,11 +233,10 @@ img {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 2px;
-  padding: 2px;
+  gap: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 
 .lang-btn {
@@ -232,39 +244,41 @@ img {
   min-height: 30px;
   padding: 0.2rem 0.65rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: 0;
   background: transparent;
-  color: #bcbcbc;
+  color: var(--ink-2);
   font-family: inherit;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
   transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
 }
 
+.lang-btn + .lang-btn {
+  border-left: 1px solid var(--line-strong);
+}
+
 .lang-btn:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-alt);
 }
 
 .lang-btn[aria-pressed="true"] {
-  background: var(--brand);
-  color: #0f0f0f;
+  background: var(--accent);
+  color: #fffdf8;
 }
 
 /* ---------- hero ---------- */
 
 .hero {
-  padding-block: clamp(3.5rem, 7vw, 6.5rem);
-  background:
-    radial-gradient(56rem 26rem at 50% -12%, rgba(138, 169, 255, 0.14), rgba(138, 169, 255, 0) 68%),
-    var(--bg);
+  padding-block: clamp(3rem, 6vw, 5.5rem);
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
 
 .hero-inner {
-  max-width: 900px;
+  max-width: 880px;
   margin-inline: auto;
   text-align: center;
 }
@@ -272,28 +286,38 @@ img {
 .hero-logo {
   display: block;
   width: 100%;
-  max-width: 360px;
+  max-width: 330px;
   height: auto;
-  margin: 0 auto 1.4rem;
-  filter: invert(1) hue-rotate(180deg);
+  margin: 0 auto 1.5rem;
+  /* 浅底上用原稿：invert + hue-rotate 是给深色页准备的反色，浅底会翻成一块脏色 */
 }
 
+/* 小标：等宽字 + 字间距 + 一枚朱砂方点，不做描边药丸 */
 .eyebrow {
-  display: inline-block;
-  margin-bottom: 1.1rem;
-  padding: 0.3rem 0.8rem;
-  border: 1px solid var(--brand-line);
-  border-radius: 999px;
-  background: var(--brand-soft);
-  color: #c3d1ff;
-  font-size: 0.875rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.2rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.eyebrow::before {
+  content: "";
+  display: block;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  background: var(--accent);
 }
 
 .lead {
-  font-size: clamp(1.0625rem, 0.98rem + 0.35vw, 1.25rem);
-  color: #c4c4c4;
+  font-size: clamp(1.0625rem, 0.98rem + 0.35vw, 1.1875rem);
+  color: var(--ink-2);
   max-width: 60ch;
   margin-inline: auto;
 }
@@ -303,7 +327,7 @@ img {
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.75rem;
-  margin: 1.9rem 0 1.5rem;
+  margin: 1.9rem 0 1.6rem;
 }
 
 .btn {
@@ -313,23 +337,23 @@ img {
   min-height: 44px;
   padding: 0.55rem 1.2rem;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
-  font-size: 0.9875rem;
+  border-radius: 5px;
+  font-size: 0.9375rem;
   font-weight: 600;
   text-decoration: none;
   transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease);
 }
 
 .btn-primary {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #0f0f0f;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fffdf8;
 }
 
 .btn-primary:hover {
-  background: #a6beff;
-  border-color: #a6beff;
-  color: #0f0f0f;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #fffdf8;
 }
 
 .btn-ghost {
@@ -338,8 +362,7 @@ img {
 }
 
 .btn-ghost:hover {
-  background: var(--surface-hover);
-  border-color: #3d3d3d;
+  border-color: var(--ink);
   color: var(--ink);
 }
 
@@ -353,7 +376,7 @@ img {
 /* ---------- sections ---------- */
 
 .section {
-  padding-block: clamp(3rem, 5.5vw, 4.75rem);
+  padding-block: clamp(2.75rem, 5vw, 4.25rem);
   scroll-margin-top: 88px;
 }
 
@@ -364,7 +387,7 @@ img {
 
 .section-lead {
   max-width: 72ch;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 /* ---------- quick start ---------- */
@@ -384,20 +407,19 @@ img {
   }
 }
 
+/* 卡片只靠 1px 发丝线分层；hover 只加深描边，不做「抬起来 + 大投影」 */
 .steps li {
   position: relative;
-  padding: 1.3rem 1.25rem 1.15rem 3.6rem;
+  padding: 1.25rem 1.2rem 1.15rem 3.4rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .steps li:hover {
   background: var(--surface-hover);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-hover);
 }
 
 .steps li::before {
@@ -408,14 +430,15 @@ img {
   top: 1.2rem;
   display: grid;
   place-items: center;
-  width: 1.85rem;
-  height: 1.85rem;
+  width: 1.6rem;
+  height: 1.6rem;
   border-radius: 50%;
-  background: var(--brand-soft);
-  border: 1px solid var(--brand-line);
-  color: #c3d1ff;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-family: var(--mono);
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
 }
 
 .steps h3 {
@@ -424,7 +447,7 @@ img {
 
 .steps p {
   margin: 0;
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 0.95rem;
 }
 
@@ -439,18 +462,16 @@ img {
 }
 
 .card {
-  padding: 1.3rem 1.25rem 1.15rem;
+  padding: 1.25rem 1.2rem 1.15rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .card:hover {
   background: var(--surface-hover);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-hover);
 }
 
 .card h3 {
@@ -461,13 +482,13 @@ img {
 .card p {
   margin: 0;
   font-size: 0.95rem;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 .capability-link {
   margin: 1.5rem 0 0;
   font-size: 0.95rem;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 /* ---------- demos ---------- */
@@ -490,20 +511,17 @@ img {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
   overflow: hidden;
-  transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: border-color 0.15s var(--ease);
 }
 
 .demo:hover {
-  background: var(--surface-hover);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-hover);
 }
 
 .demo-media {
   position: relative;
-  background: #0d1b2a;
+  background: #14120e;
   border-bottom: 1px solid var(--line);
   line-height: 0;
 }
@@ -514,7 +532,7 @@ img {
   height: auto;
   aspect-ratio: 800 / 410;
   object-fit: contain;
-  background: #0d1b2a;
+  background: #14120e;
 }
 
 .demo-media.is-frozen .demo-gif {
@@ -527,7 +545,7 @@ img {
   height: auto;
   aspect-ratio: 800 / 410;
   object-fit: contain;
-  background: #0d1b2a;
+  background: #14120e;
 }
 
 .gif-toggle {
@@ -536,25 +554,25 @@ img {
   bottom: 0.7rem;
   z-index: 1;
   min-height: 36px;
-  padding: 0.35rem 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.55);
+  padding: 0.35rem 0.8rem;
+  border: 1px solid rgba(255, 253, 248, 0.45);
   border-radius: var(--radius-sm);
-  background: rgba(15, 15, 15, 0.82);
-  color: #f0f0f0;
+  background: rgba(20, 18, 14, 0.82);
+  color: #fffdf8;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .gif-toggle:hover {
-  background: rgba(15, 15, 15, 0.95);
-  border-color: rgba(255, 255, 255, 0.8);
+  background: rgba(20, 18, 14, 0.95);
+  border-color: rgba(255, 253, 248, 0.75);
 }
 
 .demo figcaption {
-  padding: 1.05rem 1.2rem 1.15rem;
+  padding: 1rem 1.15rem 1.1rem;
 }
 
 .demo figcaption h3 {
@@ -565,7 +583,7 @@ img {
 .demo figcaption p {
   margin: 0;
   font-size: 0.95rem;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 .demo-note {
@@ -579,13 +597,11 @@ img {
 .diagram {
   display: block;
   width: 100%;
-  max-width: 900px;
+  max-width: 880px;
   height: auto;
   margin: 1.6rem 0 1.8rem;
-  /* 示意图是透明底的深色图稿（深蓝标题文字 + 深色块），深色页面上直接放会有一行字看不见。
-     整体反色 + 色相回转只把画稿本身翻成浅色版，透明背景仍然透出页面底色，
-     不在深色页面里镶一块白板。 */
-  filter: invert(1) hue-rotate(180deg);
+  /* 示意图是透明底的深色画稿（深蓝标题 + 深色块）：浅底上直接用原稿。
+     原先的 invert + hue-rotate 是给深色页面准备的反色，浅底会翻成一块脏灰。 */
 }
 
 .flow {
@@ -599,7 +615,7 @@ img {
 
 .flow-step {
   position: relative;
-  padding: 2.8rem 1.15rem 1.1rem;
+  padding: 2.7rem 1.15rem 1.1rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -619,14 +635,15 @@ img {
   top: 1rem;
   display: grid;
   place-items: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 1.6rem;
+  height: 1.6rem;
   border-radius: var(--radius-sm);
-  background: var(--brand-soft);
-  border: 1px solid var(--brand-line);
-  color: #c3d1ff;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-family: var(--mono);
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .flow-step h3 {
@@ -637,7 +654,7 @@ img {
 .flow-step p {
   margin: 0;
   font-size: 0.92rem;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 .design-notes {
@@ -645,7 +662,7 @@ img {
   gap: 0.6rem;
   max-width: 80ch;
   padding-left: 1.2rem;
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 0.95rem;
 }
 
@@ -654,16 +671,16 @@ img {
 }
 
 .design-notes li::marker {
-  color: var(--brand);
+  color: var(--accent);
 }
 
 /* ---------- mcp ---------- */
 
 .mcp {
-  padding: 1.3rem 1.35rem 0.6rem;
+  padding: 1.25rem 1.35rem 0.6rem;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-left: 4px solid var(--brand);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   max-width: 80ch;
 }
@@ -687,13 +704,12 @@ img {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
 }
 
 .doc-list li:hover {
   background: var(--surface-hover);
   border-color: var(--line-strong);
-  box-shadow: var(--shadow-hover);
 }
 
 .doc-list a {
@@ -705,7 +721,7 @@ img {
 .doc-list span {
   display: block;
   font-size: 0.92rem;
-  color: var(--muted);
+  color: var(--ink-2);
 }
 
 /* ---------- footer ---------- */
@@ -722,7 +738,7 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: 0.4rem 1.5rem;
-  font-size: 0.93rem;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 
@@ -759,11 +775,11 @@ img {
 
   .site-nav ul {
     justify-content: flex-start;
-    gap: 0;
+    gap: 0 1rem;
   }
 
   .steps li {
-    padding-left: 3.4rem;
+    padding-left: 3.3rem;
   }
 }
 

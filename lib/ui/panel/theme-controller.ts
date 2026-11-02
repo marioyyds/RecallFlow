@@ -64,9 +64,12 @@ export class PanelThemeController {
     const label = override
       ? '主题：' + (mode === 'dark' ? '深色' : '浅色') + '（点击切换）'
       : '主题：跟随系统（点击切换）';
-    this.button.textContent = override ? (mode === 'dark' ? '🌙' : '☀️') : '🌗';
+    // 图形由 CSS 按 data-theme 画（浅色 = 空心圆、深色 = 实心月、跟随系统 = 半明半暗），
+    // 不再往按钮里塞 🌙/☀️/🌗：emoji 在不同系统上的字形与基线都不可控。
+    this.button.textContent = '';
     this.button.title = label;
     this.button.setAttribute('aria-label', label);
+    this.button.setAttribute('data-theme', override || 'system');
   }
 
   cycle(): void {

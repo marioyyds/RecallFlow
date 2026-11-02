@@ -115,12 +115,12 @@ function setMcpStatusEl(el: HTMLElement, st: Dyn | null | undefined) {
   }
   if (st.ok) {
     el.className = 'mcp-status ok';
-    el.textContent = '✓ 已连接：' + st.toolCount + ' 个工具' + (st.ms ? '（' + st.ms + 'ms）' : '');
+    el.textContent = '已连接：' + st.toolCount + ' 个工具' + (st.ms ? '（' + st.ms + 'ms）' : '');
     return;
   }
   el.className = 'mcp-status bad';
   el.textContent =
-    '✗ 连接失败' + (st.status ? '（HTTP ' + st.status + '）' : '') + '：' + (st.error || '未知原因') +
+    '连接失败' + (st.status ? '（HTTP ' + st.status + '）' : '') + '：' + (st.error || '未知原因') +
     '。请检查地址是否可达，以及 Bearer Token 是否与服务端一致；MCP 端点用浏览器打开只会得到 401/403，它不是登录页。';
 }
 
@@ -139,7 +139,7 @@ function renderMcp(list: Dyn[]) {
       '<input class="mcp-url" placeholder="https://host/mcp" value="' + esc(s.url || '') + '">' +
       '<input class="mcp-token" placeholder="Bearer Token(可选)" value="' + esc((s.headers && s.headers.Authorization || '').replace(/^Bearer\s*/i, '')) + '">' +
       '<button class="mcp-test icon-btn" type="button" title="测试这台服务器能否连通">测试</button>' +
-      '<button class="mcp-del icon-btn" title="删除">✕</button>';
+      '<button class="mcp-del icon-btn" title="删除" aria-label="删除"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-close"/></svg></button>';
     const statusEl = document.createElement('div');
     setMcpStatusEl(statusEl, mcpLastStatus.get(mcpKeyOf(s)));
     row.appendChild(statusEl);
@@ -223,7 +223,7 @@ async function saveSettings() {
     defaultRunAt: $('us-run-at').value || 'document-idle',
   });
   setDirty(false);
-  toast('✓ 已保存', true);
+  toast('已保存', true);
 }
 
 $('save-btn').addEventListener('click', () => {
@@ -249,7 +249,6 @@ window.addEventListener('beforeunload', (e) => {
 $('toggle-key').addEventListener('click', () => {
   const el = $('api-key');
   el.type = el.type === 'password' ? 'text' : 'password';
-  $('toggle-key').textContent = el.type === 'password' ? '👁' : '🙈';
   $('toggle-key').setAttribute('aria-label', el.type === 'password' ? '显示 API Key' : '隐藏 API Key');
   $('toggle-key').setAttribute('aria-pressed', el.type === 'text' ? 'true' : 'false');
 });

@@ -33,18 +33,25 @@ test('PanelThemeController：三态覆盖并同步按钮语义', () => {
   controller.button = button;
   controller.apply();
   assert.equal(panel.classList.dark, false);
-  assert.equal(button.textContent, '🌗');
+  // 按钮里不再放 emoji 字形（🌗/🌙/☀️）：三态由 data-theme 表达、图形由 CSS 绘制，
+  // 语义仍挂在 title / aria-label 上，所以断言这三处，而不是某个字符。
+  assert.equal(button.textContent, '');
+  assert.equal(button.attrs['data-theme'], 'system');
+  assert.match(button.attrs['aria-label'], /主题：跟随系统/);
 
   controller.cycle();
   assert.equal(controller.savedOverride(), 'dark');
   assert.equal(panel.classList.dark, true);
+  assert.equal(button.attrs['data-theme'], 'dark');
+  assert.match(button.attrs['aria-label'], /主题：深色/);
   assert.match(button.title, /主题：深色/);
 
   controller.cycle();
   assert.equal(controller.savedOverride(), 'light');
   controller.cycle();
   assert.equal(controller.savedOverride(), '');
-  assert.equal(button.textContent, '🌗');
+  assert.equal(button.attrs['data-theme'], 'system');
+  assert.equal(button.textContent, '');
 });
 
 test('PanelProgressController：停止后清空事实，resume 复用已有时长', () => {

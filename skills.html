@@ -5,20 +5,23 @@
   <meta name="color-scheme" content="light dark">
   <title>RecallFlow - 技能</title>
   <link rel="stylesheet" href="base.css">
-  <link rel="stylesheet" href="manager.css">
   <link rel="stylesheet" href="skills.css">
 </head>
 <body>
   <div class="app-topbar">
     <header class="app-header">
       <div class="brand-group">
-        <div class="brand-mark" aria-hidden="true">R</div>
+        <img class="brand-mark" src="docs/assets/recallflow-mark.svg" alt="" width="28" height="28" aria-hidden="true">
         <div><h1>RecallFlow</h1><span class="page-caption">技能</span></div>
       </div>
       <div class="header-tools">
-        <span class="skill-total" id="skill-count">0</span> 个已注册
-        <button id="import-toggle" class="btn btn-secondary" type="button">导入 SKILL.md</button>
-        <button id="new-skill-btn" class="btn btn-primary" type="button">＋ 新建技能</button>
+        <span class="skill-count-note"><span id="skill-count" class="num">0</span> 个已注册</span>
+        <button id="import-toggle" class="btn btn-secondary" type="button">
+          <svg class="icon" aria-hidden="true"><use href="icons.svg#i-upload"/></svg>导入 SKILL.md
+        </button>
+        <button id="new-skill-btn" class="btn btn-primary" type="button">
+          <svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus"/></svg>新建技能
+        </button>
       </div>
     </header>
 
@@ -34,30 +37,30 @@
     <p class="skill-intro">技能采用 SkillHub 标准的 <code>SKILL.md</code> 形态（frontmatter + Markdown 正文）。内置技能为只读；你可新建、编辑、删除自定义技能，或从社区导入 / 导出 SKILL.md。</p>
 
     <section class="skill-toolbar" aria-label="技能筛选">
-      <label class="skill-search">
-        <span aria-hidden="true">⌕</span>
+      <label class="search-box skill-search">
+        <svg class="icon" aria-hidden="true"><use href="icons.svg#i-search"/></svg>
         <input id="skill-search" type="search" placeholder="搜索名称、描述、标签或关键词…" aria-label="搜索技能">
       </label>
       <div class="skill-kind-filters" id="skill-kind-filters" role="group" aria-label="按来源筛选">
-        <button class="skill-filter-chip active" type="button" data-kind="all" aria-pressed="true">全部</button>
-        <button class="skill-filter-chip" type="button" data-kind="builtin" aria-pressed="false">内置</button>
-        <button class="skill-filter-chip" type="button" data-kind="custom" aria-pressed="false">自定义</button>
+        <button class="filter-chip skill-filter-chip active" type="button" data-kind="all" aria-pressed="true">全部<span class="filter-count" id="skill-kind-count-all">0</span></button>
+        <button class="filter-chip skill-filter-chip" type="button" data-kind="builtin" aria-pressed="false">内置<span class="filter-count" id="skill-kind-count-builtin">0</span></button>
+        <button class="filter-chip skill-filter-chip" type="button" data-kind="custom" aria-pressed="false">自定义<span class="filter-count" id="skill-kind-count-custom">0</span></button>
       </div>
       <select id="skill-category-filter" class="skill-category-filter" aria-label="按分类筛选">
         <option value="all">全部分类</option>
       </select>
-      <span id="skill-visible-count" class="skill-visible-count"></span>
+      <span id="skill-visible-count" class="skill-visible-count num"></span>
     </section>
 
-    <section id="import-section" class="skill-import hidden">
+    <section id="import-section" class="skill-import hidden" aria-label="导入 SKILL.md">
       <h2 class="skill-import-title">导入 SKILL.md</h2>
       <p class="skill-import-hint">粘贴标准 SKILL.md 文本（含 <code>---</code> frontmatter），或选择本地文件。导入会按 <code>name</code> 覆盖同名自定义技能。</p>
       <textarea id="import-textarea" rows="8" placeholder="---&#10;name: my-skill&#10;description: 一句话描述&#10;---&#10;# 技能指令正文"></textarea>
       <div class="skill-import-actions">
-        <input id="import-file" type="file" accept=".md,.txt" style="flex:1; min-width:0">
+        <input id="import-file" type="file" accept=".md,.txt">
         <button id="import-run" class="btn btn-primary" type="button">解析并添加</button>
       </div>
-      <div id="import-msg" class="skill-import-msg hidden"></div>
+      <div id="import-msg" class="skill-import-msg hidden" role="status"></div>
     </section>
 
     <div id="skill-list" class="skill-list-wrap"></div>
@@ -66,7 +69,7 @@
 
   <div class="confirm-overlay hidden" id="skill-form-overlay" role="dialog" aria-modal="true" aria-labelledby="skill-form-title">
     <div class="confirm-dialog skill-form-dialog">
-      <h2 id="skill-form-title">新建技能</h2>
+      <h2 class="skill-form-title" id="skill-form-title">新建技能</h2>
       <div class="skill-form-body">
         <div class="skill-subtitle">基本信息</div>
         <label class="skill-field"><span>标识 name（kebab-case，唯一）</span><input id="f-name" type="text" placeholder="如 highlight-key-points"></label>

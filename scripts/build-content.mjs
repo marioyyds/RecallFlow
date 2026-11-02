@@ -86,7 +86,12 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // written as `!important` with a read-back check plus a <html> fallback, and the
 // drag/resize teardown also runs on window blur / pointerup. Measured 523002
 // bytes (511KB); raise by 6KB. No new dependency or duplicated module.
-export const SIZE_BUDGET_BYTES = 512 * 1024;
+// 2026-11-02: 面板视觉重写（纸与墨方向）。PANEL_CSS 从 664 行涨到 897 行 ——
+// 新增的是冷暖两套令牌、发丝线分层、CSS 绘制的图标标记（叉号 / chevron /
+// 三态计划点 / 半明半暗主题圆），以及导航/计划/审批/截图各块的排印规则；
+// 同时把 chat.ts 里的 emoji 与 ▸ ▾ × 这类字形全部换成文字 + CSS 标记。
+// 实测 529259 bytes (517KB)；上调 16KB。无新增依赖、无重复模块。
+export const SIZE_BUDGET_BYTES = 528 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

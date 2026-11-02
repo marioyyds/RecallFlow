@@ -97,23 +97,12 @@ function bindStarKeyboard(root, onSelect) {
     onSelect(idx + 1, cells[idx]);
   });
 }
-function levelNameHtml(n) {
-  const st = STAR_LEVELS[Math.max(1, Math.min(3, Number(n) || 1))];
-  return `<span class="level-name" style="color:${st.color}">${st.name}</span>`;
-}
-function typeBadgeHtml(type) {
-  const t = typeInfo(type);
-  return `<span class="type-badge" style="color:${t.color};background:${t.color}1A;border:1px solid ${t.color}40">${t.name}</span>`;
-}
 function tagsHtml(tags) {
   if (!Array.isArray(tags) || !tags.length) return "";
   return `<span class="tag-list">${tags.map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</span>`;
 }
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-function platformColor(id) {
-  return id === "other" ? "#95a5a6" : "#4a90d9";
 }
 
 // lib/shared/dom/toast.ts
@@ -784,6 +773,8 @@ var listQuery = "";
 var ADD_COLLAPSED_KEY = "recallflow-popup-add-collapsed";
 var POPUP_RECENT_LIMIT = 5;
 var $ = (id) => document.getElementById(id);
+var svg = (id, cls = "icon icon-sm") => `<svg class="${cls}" aria-hidden="true"><use href="icons.svg#i-${id}"/></svg>`;
+var levelHtml = (n) => `<span class="level-name" data-level="${Math.max(1, Math.min(3, Number(n) || 1))}">${(STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).name}</span>`;
 var closest = (target, selector) => target ? target.closest(selector) : null;
 function toast(msg, undoFn) {
   showToast(msg, { duration: 4e3, undoFn });
@@ -791,7 +782,7 @@ function toast(msg, undoFn) {
 function renderTypePicker() {
   const el = document.querySelector("#add-panel .type-group");
   el.innerHTML = ITEM_TYPES.map(
-    (t) => `<button class="type-btn${selectedType === t.id ? " active" : ""}" data-type="${t.id}" aria-pressed="${selectedType === t.id}" style="--t:${t.color}">${t.name}</button>`
+    (t) => `<button class="type-btn${selectedType === t.id ? " active" : ""}" data-type="${t.id}" aria-pressed="${selectedType === t.id}">${t.name}</button>`
   ).join("");
 }
 function syncStatusHighlight() {
@@ -799,7 +790,7 @@ function syncStatusHighlight() {
   if (!barEl) return;
   barEl.innerHTML = starBarHtml(selectedStatus, true);
   const nameEl = document.querySelector("#add-panel .star-picker-name");
-  if (nameEl) nameEl.innerHTML = levelNameHtml(selectedStatus);
+  if (nameEl) nameEl.innerHTML = levelHtml(selectedStatus);
 }
 function renderList() {
   const listEl = $("list");
@@ -816,8 +807,15 @@ function renderList() {
   items = sortItems(items, sortBy);
   emptyEl.classList.toggle("hidden", items.length > 0);
   if (!items.length) {
-    emptyEl.innerHTML = hasFilters ? '<span class="empty-ico">\u2315</span><p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p>' : '<span class="empty-ico">\u{1F4DA}</span><p>\u8FD8\u6CA1\u6709\u5185\u5BB9</p><p class="empty-hint">\u6253\u5F00\u7F51\u9875\u540E\u70B9\u5DE5\u5177\u680F\u56FE\u6807\u5373\u53EF\u5FEB\u901F\u6536\u5F55</p>';
+    emptyEl.innerHTML = hasFilters ? `${svg("search", "empty-ico")}<p>\u6CA1\u6709\u5339\u914D\u7684\u5185\u5BB9</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u7B5B\u9009\u6761\u4EF6\u6216\u641C\u7D22\u8BCD</p>` : `${svg("book", "empty-ico")}<p>\u8FD8\u6CA1\u6709\u5185\u5BB9</p><p class="empty-hint">\u6253\u5F00\u7F51\u9875\u540E\u70B9\u5DE5\u5177\u680F\u56FE\u6807\u5373\u53EF\u5FEB\u901F\u6536\u5F55</p>`;
   }
+  const allItems = knowledge.list();
+  document.querySelectorAll(".filter-chip").forEach((chip) => {
+    const f = chip.dataset.filter;
+    const n = f === "all" ? allItems.length : allItems.filter((i) => (i.type || "wrong") === f).length;
+    const c = chip.querySelector(".filter-count");
+    if (c) c.textContent = String(n);
+  });
   const total = knowledge.size;
   const shown = items.slice(0, POPUP_RECENT_LIMIT);
   listEl.innerHTML = shown.map(itemHtml).join("");
@@ -839,16 +837,16 @@ function itemHtml(it) {
   const urlLink = it.url ? `<span class="item-title" title="${esc(it.url)}">${esc(it.title)}</span>` : `<span class="item-title no-link">${esc(it.title)}</span>`;
   return `<div class="item" data-id="${esc(it.id)}">
     <div class="item-head">
-      ${typeBadgeHtml(type)}
+      <span class="type-badge">${typeInfo(type).name}</span>
       ${urlLink}
-      ${it.url ? '<button class="icon-btn open" title="\u6253\u5F00\u539F\u6587" aria-label="\u6253\u5F00\u539F\u6587">\u2197</button>' : ""}
-      <button class="icon-btn del" title="\u5220\u9664" aria-label="\u5220\u9664\u6761\u76EE">\u2715</button>
+      ${it.url ? `<button class="icon-btn open" title="\u6253\u5F00\u539F\u6587" aria-label="\u6253\u5F00\u539F\u6587">${svg("external")}</button>` : ""}
+      <button class="icon-btn del" title="\u5220\u9664" aria-label="\u5220\u9664\u6761\u76EE">${svg("trash")}</button>
     </div>
     ${it.note ? `<div class="item-note">${esc(markdownExcerpt(it.note, 120))}</div>` : ""}
     ${tagsHtml(it.tags)}
     <div class="item-meta">
       ${starBarHtml(it.status, true)}
-      ${levelNameHtml(it.status)}
+      ${levelHtml(it.status)}
       ${it.platformName ? `<span class="platform-mini">${esc(it.platformName)}</span>` : ""}
       <span class="time">${fmtTime(it.updatedAt)}</span>
     </div>
@@ -890,7 +888,6 @@ async function init() {
     $("add-title").textContent = currentTitle;
     const pEl = $("add-platform");
     pEl.textContent = platform.name;
-    pEl.style.background = platformColor(platform.id);
     pEl.classList.remove("hidden");
     const rec = knowledge.get(currentUrl);
     if (rec) {
@@ -912,7 +909,8 @@ async function init() {
   renderTypePicker();
   syncStatusHighlight();
   try {
-    setAddPanelCollapsed(localStorage.getItem(ADD_COLLAPSED_KEY) === "1", false);
+    const saved = localStorage.getItem(ADD_COLLAPSED_KEY);
+    setAddPanelCollapsed(saved === null ? true : saved === "1", false);
   } catch (e) {
   }
 }
@@ -948,7 +946,7 @@ $("add-btn").addEventListener("click", async () => {
       tags
     });
     $("add-exists").classList.remove("hidden");
-    btn.textContent = "\u5DF2\u4FDD\u5B58 \u2713";
+    btn.textContent = "\u5DF2\u4FDD\u5B58";
     renderList();
     toast("\u5DF2\u6536\u5F55\u5230\u77E5\u8BC6\u5E93");
     setTimeout(() => {
@@ -988,7 +986,7 @@ bindStarKeyboard(document, (v, cell) => {
   if (picker) {
     selectedStatus = v;
     const nameEl = document.querySelector("#add-panel .star-picker-name");
-    if (nameEl) nameEl.innerHTML = levelNameHtml(v);
+    if (nameEl) nameEl.innerHTML = levelHtml(v);
     return;
   }
   const itemEl = cell.closest(".item");
@@ -997,7 +995,7 @@ bindStarKeyboard(document, (v, cell) => {
     if (knowledge.get(id)) {
       void knowledge.update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() })).catch(() => toast("\u66F4\u65B0\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5"));
       const lvl = itemEl.querySelector(".level-name");
-      if (lvl) lvl.outerHTML = levelNameHtml(v);
+      if (lvl) lvl.outerHTML = levelHtml(v);
     }
   }
 });
@@ -1071,7 +1069,7 @@ $("list").addEventListener("click", async (e) => {
       const bar = itemEl.querySelector(".star-bar");
       if (bar) bar.querySelectorAll(".star-cell").forEach((c, i) => c.classList.toggle("on", i < a));
       const lvl = itemEl.querySelector(".level-name");
-      if (lvl) lvl.outerHTML = levelNameHtml(a);
+      if (lvl) lvl.outerHTML = levelHtml(a);
     }
     return;
   }

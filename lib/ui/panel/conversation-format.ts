@@ -3,7 +3,7 @@
 // AI 回复底部操作栏（元宝风格：复制等）
 function msgActionsHtml(isLast: any) {
   return (
-    '<div class="msg-actions"><button class="act-copy" title="复制回答内容">⧉ 复制</button>' +
+    '<div class="msg-actions"><button class="act-copy" title="复制回答内容">复制</button>' +
     (isLast ? '<button class="act-regen" title="按上一条指令重新生成">⟳ 重新生成</button>' : '') +
     '</div>'
   );
@@ -32,7 +32,7 @@ function argHint(args: any) {
 }
 
 function userActionsHtml(index: any) {
-  return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="撤销这条指令及其后续对话">↶ 撤销</button><button class="act-user-copy" title="复制这条指令">⧉ 复制</button></div>';
+  return '<div class="user-actions"><button class="act-rewind" data-turn-index="' + index + '" title="撤销这条指令及其后续对话">撤销</button><button class="act-user-copy" title="复制这条指令">复制</button></div>';
 }
 
 // 流式中面板被关闭后重新打开：恢复「正在生成的回复」UI。

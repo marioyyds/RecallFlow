@@ -5,18 +5,21 @@
   <meta name="color-scheme" content="light dark">
   <title>RecallFlow - 脚本中心</title>
   <link rel="stylesheet" href="base.css">
-  <link rel="stylesheet" href="manager.css">
   <link rel="stylesheet" href="userscripts.css">
 </head>
 <body>
   <div class="app-topbar">
     <header class="app-header">
       <div class="brand-group">
-        <div class="brand-mark" aria-hidden="true">R</div>
+        <img class="brand-mark" src="docs/assets/recallflow-mark.svg" alt="" width="28" height="28" aria-hidden="true">
         <div><h1>RecallFlow</h1><span class="page-caption">脚本中心</span></div>
       </div>
       <div class="header-tools">
-        <button id="us-update-all-btn" class="btn btn-secondary" type="button" title="逐个检查已安装脚本是否有新版本">↻ 检查全部更新</button>
+        <div id="us-update-progress" class="us-update-progress hidden" aria-live="polite"></div>
+        <button id="us-update-all-btn" class="btn btn-secondary" type="button" title="逐个检查已安装脚本是否有新版本">
+          <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-refresh"/></svg>
+          <span id="us-update-label">检查全部更新</span>
+        </button>
       </div>
     </header>
 
@@ -28,76 +31,83 @@
     </nav>
   </div>
 
-  <nav class="us-tabs" role="tablist" aria-label="脚本中心视图">
-    <button class="us-tab active" id="us-tab-installed" type="button" role="tab" aria-selected="true" aria-controls="us-view-installed" data-view="installed">
-      已安装<span class="us-tab-count" id="us-tab-installed-count">0</span>
-    </button>
-    <button class="us-tab" id="us-tab-discover" type="button" role="tab" aria-selected="false" aria-controls="us-view-discover" data-view="discover">
-      发现脚本
-    </button>
-  </nav>
+  <main class="us-page">
+    <nav class="us-tabs" role="tablist" aria-label="脚本中心视图">
+      <button class="us-tab active" id="us-tab-installed" type="button" role="tab" aria-selected="true" aria-controls="us-view-installed" data-view="installed">
+        已安装<span class="us-tab-count" id="us-tab-installed-count">0</span>
+      </button>
+      <button class="us-tab" id="us-tab-discover" type="button" role="tab" aria-selected="false" aria-controls="us-view-discover" data-view="discover">
+        发现脚本
+      </button>
+    </nav>
 
-  <section class="us-view active" id="us-view-installed" role="tabpanel" aria-labelledby="us-tab-installed">
-    <div class="us-stats" role="group" aria-label="按状态筛选">
-      <button class="us-stat active" data-filter="all" type="button" aria-pressed="true">
-        <b id="us-stat-all">0</b><span>全部</span>
-      </button>
-      <button class="us-stat" data-filter="enabled" type="button" aria-pressed="false">
-        <b id="us-stat-enabled">0</b><span>已启用</span>
-      </button>
-      <button class="us-stat" data-filter="disabled" type="button" aria-pressed="false">
-        <b id="us-stat-disabled">0</b><span>已停用</span>
-      </button>
-    </div>
-    <div class="us-toolbar">
-      <label class="search-box us-filter-box">
-        <span aria-hidden="true">⌕</span>
-        <input id="us-filter-input" type="search" placeholder="筛选已安装脚本（名称、描述、网址）…" aria-label="筛选已安装脚本">
-      </label>
-    </div>
-    <div class="us-update-progress hidden" id="us-update-progress" aria-live="polite"></div>
-    <div id="us-installed-list" class="us-list"></div>
-    <div id="us-empty" class="empty hidden">
-      <span class="empty-ico">🧩</span>
-      <p></p>
-      <p class="empty-hint"></p>
-      <button id="us-empty-discover" class="btn btn-primary" type="button">去发现脚本</button>
-    </div>
-  </section>
-
-  <section class="us-view hidden" id="us-view-discover" role="tabpanel" aria-labelledby="us-tab-discover">
-    <div class="us-install-card">
-      <div class="us-install-row">
-        <label class="search-box us-search">
-          <span aria-hidden="true">⌕</span>
-          <input id="us-search-input" type="search" placeholder="在 GreasyFork 搜索（视频下载、展开全文、去广告…）" aria-label="搜索 GreasyFork 脚本">
+    <section class="us-view active" id="us-view-installed" role="tabpanel" aria-labelledby="us-tab-installed">
+      <div class="us-toolbar">
+        <label class="search-box us-filter-box">
+          <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+          <input id="us-filter-input" type="search" placeholder="筛选已安装脚本（名称、描述、网址）…" aria-label="筛选已安装脚本">
         </label>
-        <button id="us-search-btn" class="btn btn-primary" type="button">搜索</button>
-      </div>
-      <div class="us-install-row">
-        <input id="us-url-input" type="url" placeholder="或粘贴 .user.js 脚本链接安装…" aria-label="脚本链接">
-        <button id="us-url-install-btn" class="btn btn-secondary" type="button">从链接安装</button>
-      </div>
-      <details class="us-code-install">
-        <summary>从代码粘贴安装（本地 / 测试脚本）</summary>
-        <div class="us-code-body">
-          <textarea id="us-code-input" rows="4" placeholder="粘贴 // ==UserScript== 元信息与脚本代码…" aria-label="脚本代码"></textarea>
-          <button id="us-code-install-btn" class="btn btn-secondary" type="button">从代码安装</button>
+        <div class="us-stats" role="group" aria-label="按状态筛选">
+          <button class="filter-chip us-stat active" data-filter="all" type="button" aria-pressed="true">
+            全部<span class="filter-count" id="us-stat-all">0</span>
+          </button>
+          <button class="filter-chip us-stat" data-filter="enabled" type="button" aria-pressed="false">
+            已启用<span class="filter-count" id="us-stat-enabled">0</span>
+          </button>
+          <button class="filter-chip us-stat" data-filter="disabled" type="button" aria-pressed="false">
+            已停用<span class="filter-count" id="us-stat-disabled">0</span>
+          </button>
         </div>
-      </details>
-    </div>
+      </div>
+      <div id="us-installed-list" class="us-list"></div>
+      <div id="us-empty" class="empty hidden">
+        <svg class="icon empty-ico" aria-hidden="true"><use href="icons.svg#i-puzzle"/></svg>
+        <p></p>
+        <p class="empty-hint"></p>
+        <button id="us-empty-discover" class="btn btn-primary" type="button">去发现脚本</button>
+      </div>
+    </section>
 
-    <div id="us-search-results" class="us-results hidden">
-      <h2 class="us-section-title" id="us-results-title">搜索结果</h2>
-      <div id="us-search-status" class="us-status" aria-live="polite"></div>
-      <div id="us-search-list"></div>
-    </div>
-  </section>
+    <section class="us-view hidden" id="us-view-discover" role="tabpanel" aria-labelledby="us-tab-discover">
+      <div class="us-install-card">
+        <div class="us-install-row">
+          <label class="search-box us-search">
+            <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+            <input id="us-search-input" type="search" placeholder="在 GreasyFork 搜索（视频下载、展开全文、去广告…）" aria-label="搜索 GreasyFork 脚本">
+          </label>
+          <button id="us-search-btn" class="btn btn-primary" type="button">搜索</button>
+        </div>
+        <div class="us-install-row">
+          <label class="us-field">
+            <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-link"/></svg>
+            <input id="us-url-input" type="url" placeholder="或粘贴 .user.js 脚本链接安装…" aria-label="脚本链接">
+          </label>
+          <button id="us-url-install-btn" class="btn btn-secondary" type="button">从链接安装</button>
+        </div>
+        <details class="us-code-install">
+          <summary>
+            <svg class="icon icon-sm us-chevron" aria-hidden="true"><use href="icons.svg#i-chevron-right"/></svg>
+            从代码粘贴安装（本地 / 测试脚本）
+          </summary>
+          <div class="us-code-body">
+            <textarea id="us-code-input" rows="4" placeholder="粘贴 // ==UserScript== 元信息与脚本代码…" aria-label="脚本代码"></textarea>
+            <button id="us-code-install-btn" class="btn btn-secondary" type="button">从代码安装</button>
+          </div>
+        </details>
+      </div>
+
+      <div id="us-search-results" class="us-results hidden">
+        <h2 class="us-section-title" id="us-results-title">搜索结果</h2>
+        <div id="us-search-status" class="us-status" aria-live="polite"></div>
+        <div id="us-search-list"></div>
+      </div>
+    </section>
+  </main>
 
   <div class="confirm-overlay hidden" id="us-preview-overlay">
     <div class="confirm-dialog us-preview" role="dialog" aria-modal="true" aria-labelledby="us-preview-name">
       <div class="us-preview-head">
-        <span class="us-card-icon" id="us-preview-icon" aria-hidden="true">🧩</span>
+        <span class="us-card-icon" id="us-preview-icon" aria-hidden="true"></span>
         <div class="us-preview-head-main">
           <div class="us-preview-title" id="us-preview-name"></div>
           <div class="us-preview-meta" id="us-preview-meta"></div>

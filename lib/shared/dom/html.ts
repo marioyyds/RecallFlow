@@ -78,14 +78,17 @@ export function bindStarKeyboard(root: HTMLElement | Document, onSelect: (value:
   });
 }
 
+// 等级名与类型徽标不再写内联十六进制色（那是旧配色的残渣，深浅色下都不受控）：
+// 只输出 data-* 语义钩子，颜色统一在 base.css 的纸与墨令牌里定义。
 export function levelNameHtml(n: number | string) {
-  const st = STAR_LEVELS[Math.max(1, Math.min(3, Number(n) || 1))];
-  return `<span class="level-name" style="color:${st.color}">${st.name}</span>`;
+  const level = Math.max(1, Math.min(3, Number(n) || 1));
+  const st = STAR_LEVELS[level];
+  return `<span class="level-name" data-level="${level}">${st.name}</span>`;
 }
 
 export function typeBadgeHtml(type: string) {
   const t = typeInfo(type);
-  return `<span class="type-badge" style="color:${t.color};background:${t.color}1A;border:1px solid ${t.color}40">${t.name}</span>`;
+  return `<span class="type-badge" data-type="${t.id}">${t.name}</span>`;
 }
 
 export function tagsHtml(tags: string[] | null | undefined) {

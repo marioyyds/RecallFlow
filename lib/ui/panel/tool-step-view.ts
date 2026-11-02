@@ -46,7 +46,7 @@ export function authChallengeHtml(auth: any): string {
     auth.reason === 'permission-denied' ? '权限限制' : auth.reason === 'mcp-token-required' ? '服务端点拒绝（凭据）' : '登录拦截';
   return (
     '<div class="auth-challenge" role="alert" data-auth-reason="' + esc(auth.reason || 'login-required') + '">' +
-      '<div class="auth-challenge-title">⚠ 操作被' + esc(reason) + '</div>' +
+      '<div class="auth-challenge-title">操作被' + esc(reason) + '</div>' +
       '<div class="auth-challenge-summary">' + esc(summary) + '</div>' +
       (loginUrl
         ? '<a class="auth-challenge-link" href="' + esc(loginUrl) + '" target="_blank" rel="noopener noreferrer">打开登录页</a>'

@@ -6993,11 +6993,11 @@ function setMcpStatusEl(el, st) {
   }
   if (st.ok) {
     el.className = "mcp-status ok";
-    el.textContent = "\u2713 \u5DF2\u8FDE\u63A5\uFF1A" + st.toolCount + " \u4E2A\u5DE5\u5177" + (st.ms ? "\uFF08" + st.ms + "ms\uFF09" : "");
+    el.textContent = "\u5DF2\u8FDE\u63A5\uFF1A" + st.toolCount + " \u4E2A\u5DE5\u5177" + (st.ms ? "\uFF08" + st.ms + "ms\uFF09" : "");
     return;
   }
   el.className = "mcp-status bad";
-  el.textContent = "\u2717 \u8FDE\u63A5\u5931\u8D25" + (st.status ? "\uFF08HTTP " + st.status + "\uFF09" : "") + "\uFF1A" + (st.error || "\u672A\u77E5\u539F\u56E0") + "\u3002\u8BF7\u68C0\u67E5\u5730\u5740\u662F\u5426\u53EF\u8FBE\uFF0C\u4EE5\u53CA Bearer Token \u662F\u5426\u4E0E\u670D\u52A1\u7AEF\u4E00\u81F4\uFF1BMCP \u7AEF\u70B9\u7528\u6D4F\u89C8\u5668\u6253\u5F00\u53EA\u4F1A\u5F97\u5230 401/403\uFF0C\u5B83\u4E0D\u662F\u767B\u5F55\u9875\u3002";
+  el.textContent = "\u8FDE\u63A5\u5931\u8D25" + (st.status ? "\uFF08HTTP " + st.status + "\uFF09" : "") + "\uFF1A" + (st.error || "\u672A\u77E5\u539F\u56E0") + "\u3002\u8BF7\u68C0\u67E5\u5730\u5740\u662F\u5426\u53EF\u8FBE\uFF0C\u4EE5\u53CA Bearer Token \u662F\u5426\u4E0E\u670D\u52A1\u7AEF\u4E00\u81F4\uFF1BMCP \u7AEF\u70B9\u7528\u6D4F\u89C8\u5668\u6253\u5F00\u53EA\u4F1A\u5F97\u5230 401/403\uFF0C\u5B83\u4E0D\u662F\u767B\u5F55\u9875\u3002";
 }
 function renderMcp(list) {
   const box = $("mcp-list");
@@ -7009,7 +7009,7 @@ function renderMcp(list) {
   list.forEach((s, i) => {
     const row = document.createElement("div");
     row.className = "mcp-row";
-    row.innerHTML = '<input class="mcp-id" placeholder="\u6807\u8BC6(\u82F1\u6587)" value="' + esc(s.id || "") + '"><input class="mcp-url" placeholder="https://host/mcp" value="' + esc(s.url || "") + '"><input class="mcp-token" placeholder="Bearer Token(\u53EF\u9009)" value="' + esc((s.headers && s.headers.Authorization || "").replace(/^Bearer\s*/i, "")) + '"><button class="mcp-test icon-btn" type="button" title="\u6D4B\u8BD5\u8FD9\u53F0\u670D\u52A1\u5668\u80FD\u5426\u8FDE\u901A">\u6D4B\u8BD5</button><button class="mcp-del icon-btn" title="\u5220\u9664">\u2715</button>';
+    row.innerHTML = '<input class="mcp-id" placeholder="\u6807\u8BC6(\u82F1\u6587)" value="' + esc(s.id || "") + '"><input class="mcp-url" placeholder="https://host/mcp" value="' + esc(s.url || "") + '"><input class="mcp-token" placeholder="Bearer Token(\u53EF\u9009)" value="' + esc((s.headers && s.headers.Authorization || "").replace(/^Bearer\s*/i, "")) + '"><button class="mcp-test icon-btn" type="button" title="\u6D4B\u8BD5\u8FD9\u53F0\u670D\u52A1\u5668\u80FD\u5426\u8FDE\u901A">\u6D4B\u8BD5</button><button class="mcp-del icon-btn" title="\u5220\u9664" aria-label="\u5220\u9664"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-close"/></svg></button>';
     const statusEl = document.createElement("div");
     setMcpStatusEl(statusEl, mcpLastStatus.get(mcpKeyOf(s)));
     row.appendChild(statusEl);
@@ -7086,7 +7086,7 @@ async function saveSettings() {
     defaultRunAt: $("us-run-at").value || "document-idle"
   });
   setDirty(false);
-  toast("\u2713 \u5DF2\u4FDD\u5B58", true);
+  toast("\u5DF2\u4FDD\u5B58", true);
 }
 $("save-btn").addEventListener("click", () => {
   saveSettings().catch((err) => toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + (err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF")));
@@ -7107,7 +7107,6 @@ window.addEventListener("beforeunload", (e) => {
 $("toggle-key").addEventListener("click", () => {
   const el = $("api-key");
   el.type = el.type === "password" ? "text" : "password";
-  $("toggle-key").textContent = el.type === "password" ? "\u{1F441}" : "\u{1F648}";
   $("toggle-key").setAttribute("aria-label", el.type === "password" ? "\u663E\u793A API Key" : "\u9690\u85CF API Key");
   $("toggle-key").setAttribute("aria-pressed", el.type === "text" ? "true" : "false");
 });

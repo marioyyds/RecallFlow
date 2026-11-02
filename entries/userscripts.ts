@@ -24,6 +24,11 @@ let confirmResolve: ((value: boolean) => void) | null = null;
 let updatingAll = false;
 let lastFocus: HTMLElement | null = null;
 
+/** 内联图标：icons.svg 是页面同级的 sprite 文件。 */
+function svgIcon(id: string, cls: string): string {
+  return `<svg class="${cls}" aria-hidden="true"><use href="icons.svg#${id}"/></svg>`;
+}
+
 function send(type: string, payload?: Dyn): Promise<Dyn> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type, ...payload }, (res) =>
@@ -61,7 +66,7 @@ function matchesHtml(matches: unknown): string {
   const shown = list.slice(0, 3);
   const more = list.slice(3);
   return `<div class="us-tags">${shown.map((m) => `<span class="us-tag">${esc(m)}</span>`).join('')}${
-    more.length ? `<button class="us-tag us-tag-more" type="button" data-expand="1">＋${more.length} 更多</button>` : ''
+    more.length ? `<button class="us-tag us-tag-more" type="button" data-expand="1">还有 ${more.length} 个</button>` : ''
   }</div>`;
 }
 
@@ -81,25 +86,25 @@ function installedCardHtml(s: Dyn): string {
         </div>
         ${s.description ? `<div class="us-card-desc">${esc(s.description)}</div>` : ''}
         ${matchesHtml(s.matches)}
-        ${warns.length ? `<div class="us-warning">⚠ ${esc(warns.join('\n'))}</div>` : ''}
+        ${warns.length ? `<div class="us-warning">${svgIcon('i-alert', 'icon icon-sm')}<span>${esc(warns.join('\n'))}</span></div>` : ''}
       </div>
-      <label class="us-switch" title="${s.enabled ? '停用该脚本' : '启用该脚本'}">
-        <input type="checkbox" data-act="toggle" ${s.enabled ? 'checked' : ''} aria-label="${esc(s.enabled ? '停用' : '启用')} ${esc(s.name)}">
-        <span class="us-switch-track" aria-hidden="true"></span>
-      </label>
-    </div>
-    <div class="us-card-actions">
-      <button class="mini primary" data-act="run" type="button" title="在最近浏览的网页上立即运行（不要求 URL 匹配）">▶ 运行</button>
-      <button class="mini" data-act="update" type="button">↻ 更新</button>
-      <button class="mini" data-act="export" type="button">⬇ 导出</button>
-      <details class="us-more">
-        <summary class="mini" aria-label="更多操作">⋯</summary>
-        <div class="us-more-panel">
-          <button data-act="copy-url" type="button">复制安装链接</button>
-          ${s.homepageURL ? '<button data-act="open-home" type="button">打开脚本主页</button>' : ''}
-          <button data-act="uninstall" type="button" class="danger">卸载脚本</button>
-        </div>
-      </details>
+      <div class="us-card-tools">
+        <button class="icon-btn" data-act="run" type="button" title="在最近浏览的网页上立即运行（不要求 URL 匹配）" aria-label="立即运行 ${esc(s.name)}">${svgIcon('i-send', 'icon')}</button>
+        <button class="icon-btn" data-act="update" type="button" title="检查更新" aria-label="检查 ${esc(s.name)} 的更新">${svgIcon('i-refresh', 'icon')}</button>
+        <button class="icon-btn" data-act="export" type="button" title="导出脚本文件" aria-label="导出 ${esc(s.name)}">${svgIcon('i-download', 'icon')}</button>
+        <details class="us-more more-menu">
+          <summary class="icon-btn" aria-label="更多操作">${svgIcon('i-more', 'icon')}</summary>
+          <div class="more-menu-panel">
+            <button data-act="copy-url" type="button">复制安装链接</button>
+            ${s.homepageURL ? '<button data-act="open-home" type="button">打开脚本主页</button>' : ''}
+            <button data-act="uninstall" type="button" class="danger">卸载脚本</button>
+          </div>
+        </details>
+        <label class="us-switch" title="${s.enabled ? '停用该脚本' : '启用该脚本'}">
+          <input type="checkbox" data-act="toggle" ${s.enabled ? 'checked' : ''} aria-label="${esc(s.enabled ? '停用' : '启用')} ${esc(s.name)}">
+          <span class="us-switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
     </div>
   </div>`;
 }
@@ -179,9 +184,13 @@ async function updateAll() {
   updatingAll = true;
   const btn = $('us-update-all-btn');
   const progress = $('us-update-progress');
+  const label = $('us-update-label');
   btn.disabled = true;
+  btn.classList.add('is-busy');
+  if (label) label.textContent = '检查中…';
   progress.classList.remove('hidden');
-  progress.innerHTML = '<span class="us-spinner" aria-hidden="true"></span><span>正在检查更新…</span>';
+  progress.innerHTML =
+    '<span class="us-progress-track" aria-hidden="true"></span><span>正在检查更新…</span>';
   try {
     const res = await send('userscript:updateAll');
     if (!res.ok) {
@@ -197,6 +206,8 @@ async function updateAll() {
   } finally {
     updatingAll = false;
     btn.disabled = false;
+    btn.classList.remove('is-busy');
+    if (label) label.textContent = '检查全部更新';
     progress.classList.add('hidden');
     await refreshInstalled();
   }
@@ -282,8 +293,8 @@ function searchCardHtml(it: Dyn): string {
       </div>
     </div>
     <div class="us-card-actions">
-      <button class="mini primary" data-url="${esc(it.codeUrl)}" type="button">安装</button>
-      ${it.pageUrl ? `<a class="mini" href="${esc(it.pageUrl)}" target="_blank" rel="noreferrer">查看详情 ↗</a>` : ''}
+      <button class="mini" data-url="${esc(it.codeUrl)}" type="button">${svgIcon('i-download', 'icon icon-sm')}安装</button>
+      ${it.pageUrl ? `<a class="mini" href="${esc(it.pageUrl)}" target="_blank" rel="noreferrer">${svgIcon('i-external', 'icon icon-sm')}查看详情</a>` : ''}
     </div>
   </div>`;
 }
@@ -318,7 +329,7 @@ function previewHtml(p: Dyn): string {
     ${matches.length ? `<div class="us-preview-section">访问的网站</div><div class="us-tags">${matches.map((m: string) => `<span class="us-tag">${esc(m)}</span>`).join('')}</div>` : ''}
     ${grants.length ? `<div class="us-preview-section">申请的 GM API</div><div class="us-tags">${grants.map((g: string) => `<span class="us-tag">${esc(g)}</span>`).join('')}</div>` : ''}
     ${requires.length ? `<div class="us-preview-section">外部依赖</div><div class="us-tags">${requires.map((r: string) => `<span class="us-tag">${esc(r)}</span>`).join('')}</div>` : ''}
-    ${warns.length ? `<div class="us-warning">⚠ ${esc(warns.join('\n'))}</div>` : ''}
+    ${warns.length ? `<div class="us-warning">${svgIcon('i-alert', 'icon icon-sm')}<span>${esc(warns.join('\n'))}</span></div>` : ''}
     <div class="us-preview-risk">脚本可以访问它匹配页面上的<b>所有内容</b>，请确认来源可信后再安装。</div>`;
 }
 

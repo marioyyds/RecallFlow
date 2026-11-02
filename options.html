@@ -11,7 +11,7 @@
   <div class="app-topbar">
     <header class="app-header">
       <div class="brand-group">
-        <div class="brand-mark" aria-hidden="true">R</div>
+        <img class="brand-mark" src="docs/assets/recallflow-mark.svg" alt="" width="28" height="28" aria-hidden="true">
         <div><h1>RecallFlow</h1><span class="page-caption">设置</span></div>
       </div>
       <div class="header-actions"></div>
@@ -29,191 +29,276 @@
     <aside class="settings-sidebar" aria-label="设置导航">
       <div class="settings-sidebar-inner">
         <span class="settings-sidebar-title">设置</span>
-        <a href="#settings-connection">连接</a>
+        <a class="active" href="#settings-connection">连接</a>
         <a href="#settings-behavior">RecallFlow 行为</a>
+        <a href="#settings-approval">审批与权限</a>
         <a href="#settings-scripts">用户脚本</a>
         <a href="#settings-mcp">MCP 服务器</a>
         <a href="#settings-prompts">快捷语句</a>
       </div>
     </aside>
-    <div class="settings-content">
-    <section class="card" id="settings-connection">
-      <h2><span class="ico">🔑</span> DeepSeek API</h2>
-      <label class="field">
-        <span class="field-label">API Key</span>
-        <div class="input-row">
-          <input id="api-key" type="password" placeholder="sk-..." autocomplete="off">
-          <button id="toggle-key" class="icon-btn" title="显示/隐藏">👁</button>
-        </div>
-        <span class="hint">在 platform.deepseek.com 申请，仅保存在本地浏览器</span>
-      </label>
-      <div class="connection-check">
-        <button id="test-connection" class="btn btn-secondary" type="button">测试连接</button>
-        <span id="connection-status" class="connection-status" role="status" aria-live="polite">尚未测试</span>
-      </div>
-      <label class="field">
-        <span class="field-label">模型</span>
-        <div class="input-row">
-          <input id="model" type="text" placeholder="deepseek-flash" list="model-list">
-          <datalist id="model-list">
-            <option value="deepseek-flash">deepseek-flash</option>
-            <option value="deepseek-chat">deepseek-chat</option>
-            <option value="deepseek-reasoner">deepseek-reasoner</option>
-          </datalist>
-        </div>
-        <span class="hint">deepseek-flash 快速通用（默认）/ deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；其余模型下只有等待动画。</span>
-      </label>
-      <label class="field">
-        <span class="field-label">API 地址</span>
-        <input id="base-url" type="text" placeholder="https://api.deepseek.com">
-        <span class="hint">一般无需修改</span>
-      </label>
-    </section>
 
-    <section class="card" id="settings-behavior">
-      <h2><span class="ico">🤖</span> RecallFlow 行为</h2>
-      <div class="settings-subsection-title">上下文与记忆</div>
-      <label class="field switch-field">
-        <span class="field-label">RAG 知识库检索</span>
-        <span class="hint">回答时自动把相关知识库条目作为上下文，让 AI 基于你的收藏回答</span>
-        <input id="rag-enabled" type="checkbox" class="switch">
-      </label>
-      <label class="field switch-field">
-        <span class="field-label">结合整页内容</span>
-        <span class="hint">回答时不仅看选中的文字，还把当前网页正文作为上下文一起发给 AI</span>
-        <input id="page-context" type="checkbox" class="switch">
-      </label>
-      <label class="field switch-field">
-        <span class="field-label">浏览器级输入（CDP）</span>
-        <span class="hint">用可信事件操作页面，支持 canvas / 虚拟列表 / 复杂组件与页面世界 JS；操作时会显示「正在调试」提示条，无需时可关闭</span>
-        <input id="cdp-enabled" type="checkbox" class="switch">
-      </label>
-      <div class="settings-subsection-title">审批与权限</div>
-      <div class="field">
-        <span class="field-label">CDP 权限</span>
-        <span class="hint">「debugger」权限在安装扩展时授予（Chrome 不支持将其设为可选权限）。若未授予，上面的浏览器级输入不可用，可在浏览器扩展详情页重新授权后刷新。</span>
-      </div>
-      <label class="field switch-field">
-        <span class="field-label">站点记忆</span>
-        <span class="hint">记住本网站成功定位过的元素选择器，减少重复探索（仅存本地）</span>
-        <input id="site-memory" type="checkbox" class="switch">
-      </label>
-      <label class="field switch-field">
-        <span class="field-label">完成前独立校验</span>
-        <span class="hint">声称完成时用一次轻量模型调用核对是否真的达成，未达成则反思重试（会多消耗少量 token）</span>
-        <input id="verifier-enabled" type="checkbox" class="switch">
-      </label>
-      <div class="approval-panel">
-        <div class="approval-head"><div><span class="field-label">自动批准工具</span><span class="hint">像 Cline 一样按能力类别设置；未勾选的操作会在执行前暂停并请求确认。</span></div><select id="approval-preset" aria-label="自动批准预设"><option value="custom">自定义</option><option value="safe">仅安全读取</option><option value="all">全部自动批准</option></select></div>
-        <div class="approval-list">
-          <label class="approval-item"><input id="approval-read" type="checkbox"><span class="approval-icon">⌕</span><span><b>读取项目与知识库</b><small>搜索、读取当前页面、列出标签页</small></span></label>
-          <label class="approval-item sub"><input id="approval-read-all" type="checkbox"><span class="approval-icon">▣</span><span><b>读取所有内容</b><small>允许读取类工具，不再逐次询问</small></span></label>
-          <label class="approval-item"><input id="approval-edit" type="checkbox"><span class="approval-icon">✎</span><span><b>编辑项目与知识库</b><small>新增、修改或删除收藏内容</small></span></label>
-          <label class="approval-item"><input id="approval-commands" type="checkbox"><span class="approval-icon">›_</span><span><b>执行页面命令</b><small>滚动、高亮、点击等页面操作</small></span></label>
-          <label class="approval-item"><input id="approval-browser" type="checkbox"><span class="approval-icon">◎</span><span><b>使用浏览器与网络</b><small>打开标签页、抓取外部网页</small></span></label>
-          <label class="approval-item"><input id="approval-mcp" type="checkbox"><span class="approval-icon">▤</span><span><b>使用 MCP 服务器</b><small>调用已配置的外部工具</small></span></label>
+    <div class="settings-content">
+      <section class="settings-section" id="settings-connection" aria-labelledby="conn-title">
+        <header class="group-head">
+          <span class="kicker">连接</span>
+          <h2 id="conn-title">DeepSeek API</h2>
+        </header>
+        <label class="field">
+          <span class="field-label">API Key</span>
+          <div class="input-row">
+            <input id="api-key" type="password" placeholder="sk-..." autocomplete="off">
+            <button id="toggle-key" class="icon-btn key-toggle" type="button" title="显示/隐藏" aria-label="显示 API Key" aria-pressed="false">
+              <svg class="icon reveal-on" aria-hidden="true"><use href="icons.svg#i-eye"/></svg>
+              <svg class="icon reveal-off" aria-hidden="true"><use href="icons.svg#i-eye-off"/></svg>
+            </button>
+          </div>
+          <span class="hint">在 platform.deepseek.com 申请，仅保存在本地浏览器</span>
+        </label>
+        <div class="connection-check">
+          <button id="test-connection" class="btn btn-secondary" type="button">测试连接</button>
+          <span id="connection-status" class="connection-status" role="status" aria-live="polite">尚未测试</span>
         </div>
-        <label class="approval-notify"><input id="approval-notify" type="checkbox"><span><b>启用审批通知</b><small>工具暂停等待确认时显示通知</small></span></label>
-        <input id="tool-approval" type="checkbox" hidden checked>
-      </div>
-      <label class="field">
-        <span class="field-label">用户脚本 / 技能写入审批</span>
-        <select id="code-exec-approval" class="us-select">
-          <option value="each">每次都要确认</option>
-          <option value="session">本任务内允许一次（推荐）</option>
-          <option value="auto">自动批准（不再询问）</option>
-        </select>
-        <span class="hint">
-          只约束 <b>run_userscript / install_userscript</b>（会从远程自动更新的第三方脚本）
-          与 <b>save_skill</b>（会进入今后系统提示的技能正文）。
-          <b>run_javascript 已归入「执行页面命令」</b>，由上面的页面命令自动批准开关控制。
-        </span>
-      </label>
-      <div class="settings-subsection-title">连接与开发</div>
-      <label class="field">
-        <span class="field-label">桥接 Token（本机 MCP 集成）</span>
-        <input id="bridge-token" type="password" autocomplete="off" placeholder="留空 = 用内置默认 token（recallflow-local-bridge-v1）">
-        <span class="hint">
-          需与启动 recallflow-mcp 时的环境变量 <code>RECALLFLOW_BRIDGE_TOKEN</code> 完全一致。
-          <b>留空即用内置默认值</b>，默认值和 server 侧默认值相同，因此不用配置也能连上。
-          注意默认值是公开常量：本机任何进程都能用它冒充本扩展、伪造证据快照；
-          在意证据可信度就换成随机串（两侧填同一个值）。
-          生成示例：<code>node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"</code>
-        </span>
-      </label>
-      <label class="field">
-        <span class="field-label">翻译目标语言</span>
-        <input id="target-lang" type="text" placeholder="中文">
-        <span class="hint">划词翻译的目标语言，如 中文 / English / 日本語</span>
-      </label>
-      <label class="field">
-        <span class="field-label">信任的站点（每行一个 origin）</span>
-        <textarea id="trusted-sites" rows="3" placeholder="https://example.com"></textarea>
-        <span class="hint">这些站点的写操作不再逐次确认（run_javascript 等高风险工具仍每次确认）。也可在对话中说「信任这个网站」由助手添加。</span>
-      </label>
-      <div class="settings-subsection-title">成本上限</div>
-      <div class="agent-budget">
-        <div class="approval-head"><div><span class="field-label">Agent 预算</span><span class="hint">不限制单任务的工具调用次数与推理轮数 —— 只保留成本兜底。</span></div></div>
-        <div class="budget-row">
+        <div class="field-grid model-grid">
           <label class="field">
-            <span class="field-label">单任务 token 成本上限</span>
-            <input id="budget-tokens" type="number" min="0" step="100000" placeholder="6000000">
+            <span class="field-label">模型</span>
+            <div class="input-row">
+              <input id="model" type="text" placeholder="deepseek-flash" list="model-list">
+              <datalist id="model-list">
+                <option value="deepseek-flash">deepseek-flash</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="deepseek-reasoner">deepseek-reasoner</option>
+              </datalist>
+            </div>
+            <span class="hint">deepseek-flash 快速通用（默认）/ deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；其余模型下只有等待动画。</span>
+          </label>
+          <label class="field">
+            <span class="field-label">API 地址</span>
+            <input id="base-url" type="text" placeholder="https://api.deepseek.com">
+            <span class="hint">一般无需修改</span>
           </label>
         </div>
-        <span class="hint">工具调用次数与推理轮数<b>不再设上限</b>：重复与空转由守卫提醒模型（只提醒、不阻止），任务靠 complete_task 或最终回答结束。这里只兜住花费 —— 留空或 0 表示不限制。</span>
-      </div>
-    </section>
+      </section>
 
-    <section class="card" id="settings-scripts">
-      <h2><span class="ico">🧩</span> 用户脚本</h2>
-      <div class="us-summary">
-        <div class="us-summary-main">
-          <span class="us-summary-title">脚本中心</span>
-          <span class="us-summary-meta" id="us-summary-meta">已安装 0 个 · 启用 0 个</span>
+      <section class="settings-section" id="settings-behavior" aria-labelledby="behavior-title">
+        <header class="group-head">
+          <span class="kicker">上下文与记忆</span>
+          <h2 id="behavior-title">RecallFlow 行为</h2>
+        </header>
+        <div class="switch-list">
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">RAG 知识库检索</span>
+              <span class="hint">回答时自动把相关知识库条目作为上下文，让 AI 基于你的收藏回答</span>
+            </span>
+            <input id="rag-enabled" type="checkbox" class="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">结合整页内容</span>
+              <span class="hint">回答时不仅看选中的文字，还把当前网页正文作为上下文一起发给 AI</span>
+            </span>
+            <input id="page-context" type="checkbox" class="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">浏览器级输入（CDP）</span>
+              <span class="hint">用可信事件操作页面，支持 canvas / 虚拟列表 / 复杂组件与页面世界 JS；操作时会显示「正在调试」提示条，无需时可关闭</span>
+            </span>
+            <input id="cdp-enabled" type="checkbox" class="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">站点记忆</span>
+              <span class="hint">记住本网站成功定位过的元素选择器，减少重复探索（仅存本地）</span>
+            </span>
+            <input id="site-memory" type="checkbox" class="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">完成前独立校验</span>
+              <span class="hint">声称完成时用一次轻量模型调用核对是否真的达成，未达成则反思重试（会多消耗少量 token）</span>
+            </span>
+            <input id="verifier-enabled" type="checkbox" class="switch">
+          </label>
         </div>
-        <a class="btn btn-ghost" href="userscripts.html">打开脚本管理</a>
+        <label class="field narrow">
+          <span class="field-label">翻译目标语言</span>
+          <input id="target-lang" type="text" placeholder="中文">
+          <span class="hint">划词翻译的目标语言，如 中文 / English / 日本語</span>
+        </label>
+      </section>
+
+      <section class="settings-section" id="settings-approval" aria-labelledby="approval-title">
+        <header class="group-head">
+          <span class="kicker">审批与权限</span>
+          <h2 id="approval-title">工具审批与成本</h2>
+        </header>
+        <div class="approval-panel">
+          <div class="approval-head">
+            <div class="approval-head-text">
+              <span class="field-label">自动批准工具</span>
+              <span class="hint">像 Cline 一样按能力类别设置；未勾选的操作会在执行前暂停并请求确认。</span>
+            </div>
+            <select id="approval-preset" aria-label="自动批准预设">
+              <option value="custom">自定义</option>
+              <option value="safe">仅安全读取</option>
+              <option value="all">全部自动批准</option>
+            </select>
+          </div>
+          <div class="approval-list">
+            <label class="approval-item">
+              <input id="approval-read" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+              <span class="approval-text"><b>读取项目与知识库</b><small>搜索、读取当前页面、列出标签页</small></span>
+            </label>
+            <label class="approval-item sub">
+              <input id="approval-read-all" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-eye"/></svg>
+              <span class="approval-text"><b>读取所有内容</b><small>允许读取类工具，不再逐次询问</small></span>
+            </label>
+            <label class="approval-item">
+              <input id="approval-edit" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-edit"/></svg>
+              <span class="approval-text"><b>编辑项目与知识库</b><small>新增、修改或删除收藏内容</small></span>
+            </label>
+            <label class="approval-item">
+              <input id="approval-commands" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-code"/></svg>
+              <span class="approval-text"><b>执行页面命令</b><small>滚动、高亮、点击等页面操作</small></span>
+            </label>
+            <label class="approval-item">
+              <input id="approval-browser" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-globe"/></svg>
+              <span class="approval-text"><b>使用浏览器与网络</b><small>打开标签页、抓取外部网页</small></span>
+            </label>
+            <label class="approval-item">
+              <input id="approval-mcp" type="checkbox">
+              <svg class="icon icon-sm approval-icon" aria-hidden="true"><use href="icons.svg#i-puzzle"/></svg>
+              <span class="approval-text"><b>使用 MCP 服务器</b><small>调用已配置的外部工具</small></span>
+            </label>
+          </div>
+          <label class="approval-notify">
+            <input id="approval-notify" type="checkbox">
+            <span class="approval-text"><b>启用审批通知</b><small>工具暂停等待确认时显示通知</small></span>
+          </label>
+          <input id="tool-approval" type="checkbox" hidden checked>
+        </div>
+
+        <div class="field-grid approval-grid">
+          <label class="field">
+            <span class="field-label">用户脚本 / 技能写入审批</span>
+            <select id="code-exec-approval" class="us-select">
+              <option value="each">每次都要确认</option>
+              <option value="session">本任务内允许一次（推荐）</option>
+              <option value="auto">自动批准（不再询问）</option>
+            </select>
+            <span class="hint">
+              只约束 <b>run_userscript / install_userscript</b>（会从远程自动更新的第三方脚本）
+              与 <b>save_skill</b>（会进入今后系统提示的技能正文）。
+              <b>run_javascript 已归入「执行页面命令」</b>，由上面的页面命令自动批准开关控制。
+            </span>
+          </label>
+          <div class="field info-field">
+            <span class="field-label">CDP 权限</span>
+            <span class="hint">「debugger」权限在安装扩展时授予（Chrome 不支持将其设为可选权限）。若未授予，上面的浏览器级输入不可用，可在浏览器扩展详情页重新授权后刷新。</span>
+          </div>
+        </div>
+
+        <label class="field">
+          <span class="field-label">信任的站点（每行一个 origin）</span>
+          <textarea id="trusted-sites" rows="3" placeholder="https://example.com"></textarea>
+          <span class="hint">这些站点的写操作不再逐次确认（run_javascript 等高风险工具仍每次确认）。也可在对话中说「信任这个网站」由助手添加。</span>
+        </label>
+
+        <div class="settings-subsection-title">成本上限</div>
+        <div class="field budget-field">
+          <span class="field-label">Agent 预算</span>
+          <div class="budget-line">
+            <span class="budget-caption">单任务 token 成本上限</span>
+            <input id="budget-tokens" type="number" min="0" step="100000" placeholder="6000000">
+          </div>
+          <span class="hint">不限制单任务的工具调用次数与推理轮数 —— 只保留成本兜底。</span>
+        </div>
+        <span class="hint">工具调用次数与推理轮数<b>不再设上限</b>：重复与空转由守卫提醒模型（只提醒、不阻止），任务靠 complete_task 或最终回答结束。这里只兜住花费 —— 留空或 0 表示不限制。</span>
+      </section>
+
+      <section class="settings-section" id="settings-scripts" aria-labelledby="scripts-title">
+        <header class="group-head">
+          <span class="kicker">用户脚本</span>
+          <h2 id="scripts-title">脚本中心</h2>
+        </header>
+        <div class="us-summary">
+          <div class="us-summary-main">
+            <span class="us-summary-title">脚本中心</span>
+            <span class="us-summary-meta" id="us-summary-meta">已安装 0 个 · 启用 0 个</span>
+          </div>
+          <a class="btn btn-ghost" href="userscripts.html">打开脚本管理</a>
+        </div>
+        <span class="hint section-intro">安装 GreasyFork 社区脚本，AI 可按需求搜索、安装并在当前页运行它们（下载视频、展开全文、去广告等）。</span>
+        <div class="switch-list">
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">允许 Agent 安装脚本</span>
+              <span class="hint">关闭后，AI 助手将无法自动安装脚本（已安装脚本的运行不受影响）</span>
+            </span>
+            <input id="us-agent-install" type="checkbox" class="switch">
+          </label>
+          <label class="switch-row">
+            <span class="switch-text">
+              <span class="switch-title">打开脚本中心时检查更新</span>
+              <span class="hint">进入脚本中心时自动逐个检查已安装脚本是否有新版本</span>
+            </span>
+            <input id="us-auto-update" type="checkbox" class="switch">
+          </label>
+        </div>
+        <label class="field narrow">
+          <span class="field-label">默认运行时机</span>
+          <select id="us-run-at" class="us-select">
+            <option value="document-start">页面加载前（document-start）</option>
+            <option value="document-end">DOM 就绪后（document-end）</option>
+            <option value="document-idle">页面空闲时（document-idle）</option>
+          </select>
+          <span class="hint">仅对未在脚本元信息中声明 @run-at 的脚本生效</span>
+        </label>
+      </section>
+
+      <section class="settings-section" id="settings-mcp" aria-labelledby="mcp-title">
+        <header class="group-head">
+          <span class="kicker">MCP 服务器</span>
+          <h2 id="mcp-title">Agent 工具扩展</h2>
+        </header>
+        <p class="hint section-intro">配置远程 MCP 服务器（Streamable HTTP），Agent 会自动连接并加载其工具（工具名以 mcp__ 开头）。<b>需把各服务器域名加入 manifest.json 的 host_permissions</b>，否则无法跨域访问。</p>
+        <p class="hint">工具在<b>所有意图</b>下都会加载（普通对话 / 浏览器 / 知识库 / 资料研究），是否需要逐次确认由上面的「使用 MCP 服务器」审批开关控制。每行下方显示这台服务器<b>最近一次连接结果</b>；失败多为 Bearer Token 未填写或与服务端不一致 —— MCP 端点没有登录页，用浏览器打开只会得到 401/403。</p>
+        <div id="mcp-list" class="mcp-list"></div>
+        <button id="mcp-add" class="btn btn-ghost mcp-add" type="button"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-plus"/></svg>添加服务器</button>
+        <label class="field">
+          <span class="field-label">桥接 Token（本机 MCP 集成）</span>
+          <input id="bridge-token" type="password" autocomplete="off" placeholder="留空 = 用内置默认 token（recallflow-local-bridge-v1）">
+          <span class="hint">
+            需与启动 recallflow-mcp 时的环境变量 <code>RECALLFLOW_BRIDGE_TOKEN</code> 完全一致。
+            <b>留空即用内置默认值</b>，默认值和 server 侧默认值相同，因此不用配置也能连上。
+            注意默认值是公开常量：本机任何进程都能用它冒充本扩展、伪造证据快照；
+            在意证据可信度就换成随机串（两侧填同一个值）。
+            生成示例：<code>node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"</code>
+          </span>
+        </label>
+      </section>
+
+      <section class="settings-section" id="settings-prompts" aria-labelledby="prompts-title">
+        <header class="group-head">
+          <span class="kicker">快捷语句</span>
+          <h2 id="prompts-title">对话快捷语句</h2>
+        </header>
+        <span class="hint section-intro">显示在 AI 对话框输入区上方，点击后直接发送。每行一条，最多 12 条。</span>
+        <textarea id="quick-prompts" rows="5" placeholder="总结全文&#10;翻译成中文&#10;解释这段内容"></textarea>
+      </section>
+
+      <div class="actions">
+        <button id="save-btn" class="btn btn-primary">保存设置</button>
+        <span id="save-state" class="save-state">已保存</span>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
       </div>
-      <span class="hint us-card-hint">安装 GreasyFork 社区脚本，AI 可按需求搜索、安装并在当前页运行它们（下载视频、展开全文、去广告等）。</span>
-      <label class="field switch-field">
-        <span class="field-label">允许 Agent 安装脚本</span>
-        <span class="hint">关闭后，AI 助手将无法自动安装脚本（已安装脚本的运行不受影响）</span>
-        <input id="us-agent-install" type="checkbox" class="switch">
-      </label>
-      <label class="field switch-field">
-        <span class="field-label">打开脚本中心时检查更新</span>
-        <span class="hint">进入脚本中心时自动逐个检查已安装脚本是否有新版本</span>
-        <input id="us-auto-update" type="checkbox" class="switch">
-      </label>
-      <label class="field">
-        <span class="field-label">默认运行时机</span>
-        <select id="us-run-at" class="us-select">
-          <option value="document-start">页面加载前（document-start）</option>
-          <option value="document-end">DOM 就绪后（document-end）</option>
-          <option value="document-idle">页面空闲时（document-idle）</option>
-        </select>
-        <span class="hint">仅对未在脚本元信息中声明 @run-at 的脚本生效</span>
-      </label>
-    </section>
-
-    <section class="card" id="settings-mcp">
-      <h2><span class="ico">🔌</span> MCP 服务器（Agent 工具扩展）</h2>
-      <span class="hint">配置远程 MCP 服务器（Streamable HTTP），Agent 会自动连接并加载其工具（工具名以 mcp__ 开头）。<b>需把各服务器域名加入 manifest.json 的 host_permissions</b>，否则无法跨域访问。</span>
-      <span class="hint">工具在<b>所有意图</b>下都会加载（普通对话 / 浏览器 / 知识库 / 资料研究），是否需要逐次确认由上面的「使用 MCP 服务器」审批开关控制。每行下方显示这台服务器<b>最近一次连接结果</b>；失败多为 Bearer Token 未填写或与服务端不一致 —— MCP 端点没有登录页，用浏览器打开只会得到 401/403。</span>
-      <div id="mcp-list" class="mcp-list"></div>
-      <button id="mcp-add" class="btn btn-ghost" type="button">+ 添加服务器</button>
-    </section>
-
-    <section class="card" id="settings-prompts">
-      <h2><span class="ico">⚡</span> 对话快捷语句</h2>
-      <span class="hint">显示在 AI 对话框输入区上方，点击后直接发送。每行一条，最多 12 条。</span>
-      <textarea id="quick-prompts" rows="5" placeholder="总结全文&#10;翻译成中文&#10;解释这段内容"></textarea>
-    </section>
-
-    <div class="actions">
-      <button id="save-btn" class="btn btn-primary">保存设置</button>
-      <span id="save-state" class="save-state">已保存</span>
-      <span id="status" class="status" role="status" aria-live="polite"></span>
-    </div>
     </div>
   </main>
 

@@ -858,7 +858,7 @@ function syncPanelSelectionPreview() {
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.className = 'p-text-clear';
-    clear.textContent = '✕';
+    clear.textContent = '';
     clear.title = '移除页面选文';
     clear.setAttribute('aria-label', '移除页面选文');
     clear.addEventListener('click', (e) => {
@@ -1565,7 +1565,7 @@ function thinkBlockHtml(text: any, opts: any) {
       '<button type="button" class="think-head">' +
         '<span class="think-dots"><span></span><span></span><span></span></span>' +
         '<span class="think-label">' + escHtml(thinkLabelText(o.done === true, body.length, o.truncated === true)) + '</span>' +
-        '<span class="think-caret" aria-hidden="true">▾</span>' +
+        '<span class="think-caret" aria-hidden="true"></span>' +
       '</button>' +
       '<div class="think-body">' + escHtml(body) + '</div>' +
     '</div>'
@@ -1627,12 +1627,12 @@ function renderCommittedParts(flow: any) {
       flow.appendChild(d);
     } else if (p.type === 'tool-call') {
       flow.appendChild(
-        toolStepElement('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000))
+        toolStepElement('', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000))
       );
     } else if (p.type === 'tool-result') {
       flow.appendChild(
         toolStepElement(
-          p.status === 'completed' ? '✓ 工具已完成：' : p.status === 'failed' ? '✗ 工具失败：' : '— 工具未执行：',
+          p.status === 'completed' ? '已完成：' : p.status === 'failed' ? '失败：' : '未执行：',
           p.name,
           '',
           p.status === 'failed' ? '错误信息' : '返回结果',
@@ -2028,11 +2028,11 @@ function showStreamingAnswer(host: any, text: any, citations: any) {
 /** 单个 part 的 HTML（整轮重绘与增量 part 节点共用）。 */
 function partHtml(p: any, citations: any) {
   if (p.type === 'tool-call') {
-    return toolStepHtml('🔧 ', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000));
+    return toolStepHtml('', p.name, argHint(p.args), '参数', clipDetail(JSON.stringify(p.args || {}, null, 2), 2000));
   }
   if (p.type === 'tool-result') {
     const html = toolStepHtml(
-      p.status === 'completed' ? '✓ 工具已完成：' : p.status === 'failed' ? '✗ 工具失败：' : '— 工具未执行：',
+      p.status === 'completed' ? '已完成：' : p.status === 'failed' ? '失败：' : '未执行：',
       p.name,
       '',
       p.status === 'failed' ? '错误信息' : '返回结果',
@@ -2101,7 +2101,14 @@ function renderConversation() {
   const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
   if (!view.length) {
     panelBody.className = 'p-body';
-    panelBody.innerHTML = '<div class="msg ai">' + (lastText ? '输入指令，AI 将基于选中文本执行。' : '输入指令，AI 将直接执行（可基于知识库）。') + '</div>';
+    const emptyHint = lastText ? '输入指令，AI 将基于选中文本执行。' : '输入指令，AI 将直接执行（可基于知识库）。';
+    // 空对话不留一个大空场：品牌标（装饰）+ 一句说明，居左顶格。
+    // 不用 emoji、不写「欢迎使用」「开始探索」这类空话，也不做居中的大插画。
+    panelBody.innerHTML =
+      '<div class="msg ai p-empty">' +
+      '<img class="p-empty-mark" src="' + extUrl('docs/assets/recallflow-mark.svg') + '" alt="">' +
+      '<p class="p-empty-line">' + emptyHint + '</p>' +
+      '</div>';
     renderPlan([]);
     return;
   }
@@ -2497,7 +2504,7 @@ function renderPlan(plan: any) {
   const items = streamView.lastPlan
     .map((p: any) => {
       const st = p.status === 'done' ? 'done' : p.status === 'in_progress' ? 'in_progress' : 'pending';
-      const mark = st === 'done' ? '✓' : st === 'in_progress' ? '▶' : '○';
+      const mark = '<span class="plan-mark ' + st + '"></span>';
       return '<div class="agent-plan-item ' + st + '">' + mark + ' ' + escHtml(p.text || '') + '</div>';
     })
     .join('');
@@ -2507,7 +2514,7 @@ function renderPlan(plan: any) {
       doneCount +
       '/' +
       total +
-      (allDone ? ' 步已完成' : current ? ' · ▶ ' + String(current.text || '').slice(0, 40) : '') +
+      (allDone ? ' 步已完成' : current ? ' · 进行中：' + String(current.text || '').slice(0, 40) : '') +
       '（点击展开）'
     : '执行计划 · ' + doneCount + '/' + total + '（点击收起）';
   streamView.planBar.classList.toggle('collapsed', collapsed);
@@ -2604,7 +2611,7 @@ function renderSessionButton() {
   if (!panelSessionBtnEl) return;
   const current = panelSessionState.panelSessionList.find((s: any) => s.id === panelSessionState.panelSessionId);
   const count = panelSessionState.panelSessionList.length;
-  panelSessionBtnEl.textContent = '🗂 会话' + (count ? ' ' + count : '');
+  panelSessionBtnEl.textContent = '会话' + (count ? ' ' + count : '');
   if (panelTitleEl) {
     const titleText = current && current.title ? current.title : 'RecallFlow';
     panelTitleEl.textContent = titleText;
@@ -2633,7 +2640,7 @@ function renderSessionMenu() {
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'session-menu-close';
-  close.textContent = '✕';
+  close.textContent = '';
   close.title = '关闭';
   close.addEventListener('click', closeSessionMenu);
   head.appendChild(label);
@@ -2672,7 +2679,7 @@ function renderSessionMenu() {
       ' tokens';
     const title = document.createElement('span');
     title.className = 'session-title';
-    title.textContent = (session.locked ? '● ' : '') + (session.title || '新会话');
+    title.textContent = (session.locked ? '锁定 · ' : '') + (session.title || '新会话');
     const meta = document.createElement('span');
     meta.className = 'session-meta';
     meta.textContent = sessionTimeText(session.updatedAt) + ' · ' + (Number(session.messageCount) || 0) + ' 条' +
@@ -2688,7 +2695,7 @@ function renderSessionMenu() {
     rename.type = 'button';
     rename.title = '重命名';
     rename.setAttribute('aria-label', '重命名会话');
-    rename.textContent = '✎';
+    rename.textContent = '改';
     rename.setAttribute('data-session-action', 'rename');
     rename.setAttribute('data-session-id', session.id);
     const exportBtn = document.createElement('button');
@@ -2702,7 +2709,7 @@ function renderSessionMenu() {
     del.type = 'button';
     del.title = '删除';
     del.setAttribute('aria-label', '删除会话');
-    del.textContent = '🗑';
+    del.textContent = '删';
     del.setAttribute('data-session-action', 'delete');
     del.setAttribute('data-session-id', session.id);
     actions.appendChild(rename);
@@ -3124,7 +3131,7 @@ async function exportPanelSession(id: any, btn: any) {
     downloadMarkdownFile(text, filename);
     if (btn) {
       const old = btn.textContent;
-      btn.textContent = '✓';
+      btn.textContent = '已导出';
       setTimeout(() => (btn.textContent = old), 1200);
     } else {
       showCitationHint('已下载会话记录：' + filename);
@@ -3383,7 +3390,7 @@ function createPanelWithLayout(
   panelTitleEl = title;
   const close = document.createElement('button');
   close.className = 'close';
-  close.textContent = '✕';
+  close.textContent = '';
   close.setAttribute('aria-label', '关闭 RecallFlow');
   close.addEventListener('click', () => removePanel());
   const usageChip = document.createElement('span');
@@ -3445,12 +3452,12 @@ function createPanelWithLayout(
       // 明确区分「已复制」与「已落库」：只复制未保存时 AI 还查不到这条会话。
       handoffBtn.textContent = okCopy
         ? okSave
-          ? '✓ 已复制并保存'
-          : '⚠ 已复制·未保存'
-        : '⚠ 复制失败';
+          ? '已复制并保存'
+          : '已复制，未保存'
+        : '复制失败';
       handoffBtn.classList.toggle('copied', Boolean(okCopy && okSave));
       setTimeout(() => {
-        handoffBtn.textContent = '⧉ ' + id;
+        handoffBtn.textContent = id;
         handoffBtn.classList.remove('copied');
       }, 1800);
     });
@@ -3609,7 +3616,7 @@ function createPanelWithLayout(
       const turn = userCopy.closest('.user-turn');
       const msgEl = turn && turn.querySelector('.msg.user');
       if (msgEl) navigator.clipboard.writeText(msgEl.textContent || '').then(() => {
-        userCopy.textContent = '✓ 已复制';
+        userCopy.textContent = '已复制';
         setTimeout(() => (userCopy.textContent = '⧉ 复制'), 1200);
       });
       return;
@@ -3620,7 +3627,7 @@ function createPanelWithLayout(
       const raw = msgEl && msgEl._raw;
       if (raw) {
         navigator.clipboard.writeText(raw).then(() => {
-          actBtn.textContent = '✓ 已复制';
+          actBtn.textContent = '已复制';
           setTimeout(() => (actBtn.textContent = '⧉ 复制'), 1200);
         });
       }
@@ -3863,18 +3870,18 @@ function createPanelWithLayout(
       txt.title = locatorText(p);
       const copy = document.createElement('button');
       copy.className = 'pick-copy';
-      copy.textContent = '⧉';
+      copy.textContent = '复制';
       copy.title = '复制定位：' + locatorText(p);
       copy.addEventListener('click', () => {
         const text = locatorText(p);
         navigator.clipboard.writeText(text).then(
-          () => { copy.textContent = '✓'; setTimeout(() => (copy.textContent = '⧉'), 1000); },
+          () => { copy.textContent = '已复制'; setTimeout(() => (copy.textContent = '复制'), 1000); },
           () => {}
         );
       });
       const clear = document.createElement('button');
       clear.className = 'pick-clear';
-      clear.textContent = '✕';
+      clear.textContent = '';
       clear.title = '移除该元素';
       clear.addEventListener('click', () => {
         streamView.pickedElements.splice(idx, 1);
@@ -4652,7 +4659,7 @@ function createPanelWithLayout(
       } else if (resp.type === 'tool-call') {
         streamState.appendPart({ type: 'tool-call', callId: resp.callId, name: resp.name, args: resp.args || {}, risk: resp.risk || 'unknown' });
         appendStep(
-          toolStepElement('🔧 ', resp.name, argHint(resp.args), '参数', clipDetail(JSON.stringify(resp.args || {}, null, 2), 2000))
+          toolStepElement('', resp.name, argHint(resp.args), '参数', clipDetail(JSON.stringify(resp.args || {}, null, 2), 2000))
         );
         if (resp.requiresApproval) {
           renderApprovalPrompt(approvalArea, conn, resp.callId, resp.name, resp.args, resp.risk, resp.allowSession);
@@ -4682,7 +4689,7 @@ function createPanelWithLayout(
         streamState.appendPart(resultPart);
         appendStep(
           toolStepElement(
-            resp.status === 'completed' ? '✓ 工具已完成：' : resp.status === 'failed' ? '✗ 工具失败：' : '— 工具未执行：',
+            resp.status === 'completed' ? '已完成：' : resp.status === 'failed' ? '失败：' : '未执行：',
             resp.name,
             '',
             resp.status === 'failed' ? '错误信息' : '返回结果',
@@ -4714,60 +4721,60 @@ function createPanelWithLayout(
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'stuck-warning') {
-        appendNoticePart('⚠ ' + (resp.message || '动作暂未产生可观察进展'), '#b45309');
+        appendNoticePart((resp.message || '动作暂未产生可观察进展'), '#b45309');
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'tool-disabled') {
-        appendNoticePart('⛔ 已停止使用工具「' + (resp.name || '') + '」：' + (resp.reason || ''), '#6b7280');
+        appendNoticePart('已停止使用工具「' + (resp.name || '') + '」：' + (resp.reason || ''), '#6b7280');
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'budget-exceeded') {
         streamState.markBudgetStopped();
-        appendNoticePart('⏹ ' + (resp.message || 'Agent 已达到安全上限并停止'), '#b91c1c');
+        appendNoticePart((resp.message || 'Agent 已达到安全上限并停止'), '#b91c1c');
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'tab-switched') {
-        appendNoticePart('↗ 已切换标签页：' + (resp.title || resp.url || ('tabId=' + resp.tabId)));
+        appendNoticePart('已切换标签页：' + (resp.title || resp.url || ('tabId=' + resp.tabId)));
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'tabs-closed') {
         const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
         if (count) {
-          appendNoticePart('🗑 任务结束，已自动关闭 ' + count + ' 个本次打开的标签页', '#6b7280');
+          appendNoticePart('任务结束，已自动关闭 ' + count + ' 个本次打开的标签页', '#6b7280');
           fitPanelHeight();
           pinToBottom();
         }
       } else if (resp.type === 'tabs-close-pending') {
         const count = Array.isArray(resp.tabIds) ? resp.tabIds.length : 0;
         if (count) {
-          appendNoticePart('🗂 任务结束，将在最终回复保存后关闭 ' + count + ' 个辅助标签页', '#6b7280');
+          appendNoticePart('任务结束，将在最终回复保存后关闭 ' + count + ' 个辅助标签页', '#6b7280');
           fitPanelHeight();
           pinToBottom();
         }
       } else if (resp.type === 'intent') {
-        appendNoticePart('🧭 意图识别：' + (resp.label || resp.intent || '普通对话'));
+        appendNoticePart('意图识别：' + (resp.label || resp.intent || '普通对话'));
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'intent-upgraded') {
-        appendNoticePart('🔄 已切换为' + (resp.label || '资料研究') + '模式，可用浏览器/网络工具继续');
+        appendNoticePart('已切换为' + (resp.label || '资料研究') + '模式，可用浏览器/网络工具继续');
         fitPanelHeight();
         pinToBottom();
       } else if (resp.type === 'verify') {
         let text = '';
         if (resp.ok) {
-          text = '✓ 完成前校验通过' + (resp.reason ? '：' + resp.reason : '');
+          text = '完成前校验通过' + (resp.reason ? '：' + resp.reason : '');
         } else if (resp.inconclusive) {
           // 校验器没给出结论（超时/报错），任务按通过放行。
           // 不能渲染成"校验未通过"—— 那是在同一句里既否决又放行。
           text = '… 未能完成校验：' + (resp.reason || '校验器不可用');
         } else if (resp.deterministic) {
           // 确定性规则命中：与 LLM 校验区分开，用户才好判断这条结论的来路。
-          text = '⚠ 完成前检查未通过（确定性规则，未消耗模型调用）：' + (resp.reason || '声称与实际动作不符');
+          text = '完成前检查未通过（确定性规则，未消耗模型调用）：' + (resp.reason || '声称与实际动作不符');
         } else if (resp.repeated) {
           // 同一份证据的重复送审：没花模型调用，直接判否并要求新证据。
-          text = '⚠ 校验未通过（证据与上次完全相同，未重复调用模型）：' + (resp.reason || '证据没有变化');
+          text = '校验未通过（证据与上次完全相同，未重复调用模型）：' + (resp.reason || '证据没有变化');
         } else {
-          text = '⚠ 校验未通过：' + (resp.reason || '目标可能未达成') + (resp.missing ? '（还差：' + resp.missing + '）' : '');
+          text = '校验未通过：' + (resp.reason || '目标可能未达成') + (resp.missing ? '（还差：' + resp.missing + '）' : '');
         }
         if (resp.ok === true) {
           // 校验通过发生在 complete_task 之后、最终回答之前。若立刻插进时间线，
@@ -4786,7 +4793,7 @@ function createPanelWithLayout(
       } else if (resp.type === 'skill') {
         const skills = Array.isArray(resp.skills) ? resp.skills : [];
         if (skills.length) {
-          appendNoticePart('🛠 启用技能：' + skills.map((s: any) => s.title || s.name).join('、'), '', 'agent-skill');
+          appendNoticePart('启用技能：' + skills.map((s: any) => s.title || s.name).join('、'), '', 'agent-skill');
           fitPanelHeight();
           pinToBottom();
         }

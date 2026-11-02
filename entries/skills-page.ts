@@ -59,51 +59,50 @@ function describeIntents(intents: unknown): string {
   return intents.map((i) => (INTENT_LABEL as Record<string, string>)[String(i)] || i).join('、');
 }
 
+function svgIcon(id: string, cls: string): string {
+  return '<svg class="' + cls + '" aria-hidden="true"><use href="icons.svg#' + id + '"/></svg>';
+}
+
 function renderSkill(skill: Dyn): string {
-  const meta = [
-    skill.version ? 'v' + skill.version : '',
-    skill.category || '',
-    skill.skill_type || '',
-  ].filter(Boolean).join(' · ');
-  const tags = Array.isArray(skill.tags) && skill.tags.length
-    ? `<div class="skill-tags">${skill.tags.map((t) => `<span class="skill-tag">${esc(t)}</span>`).join('')}</div>`
-    : '';
-  const badge = skill.builtin ? '<span class="skill-builtin-tag">内置 · 只读</span>' : '';
-  const ops = skill.builtin
-    ? ''
-    : `<button class="skill-act" data-act="edit" data-id="${esc(skill.name)}">编辑</button>
-       <button class="skill-act danger" data-act="delete" data-id="${esc(skill.name)}">删除</button>`;
-  const exportBtn = `<button class="skill-act" data-act="export" data-id="${esc(skill.name)}">导出</button>`;
   const intentText = describeIntents(skill.match && skill.match.intents);
   const keywordText = describeKeywords(skill);
+  const metaRows: string[][] = [];
+  if (skill.version) metaRows.push(['版本', 'v' + skill.version]);
+  if (skill.category) metaRows.push(['分类', skill.category]);
+  if (skill.skill_type) metaRows.push(['类型', skill.skill_type]);
+  metaRows.push(['触发意图', intentText], ['触发关键词', keywordText], ['依赖工具', (skill.tools || []).join(', ') || '无']);
+  const meta = metaRows.map(([k, v]) => `<span class="skill-meta-k">${esc(k)}</span><span class="skill-meta-v">${esc(v)}</span>`).join('');
+  const tags = Array.isArray(skill.tags) && skill.tags.length
+    ? `<div class="skill-tags">${skill.tags.map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('')}</div>`
+    : '';
+  const badge = skill.builtin ? '<span class="type-badge skill-badge">内置</span>' : '';
+  const customOps = skill.builtin
+    ? ''
+    : `<button class="mini skill-act" data-act="edit" data-id="${esc(skill.name)}">${svgIcon('i-edit', 'icon icon-sm')}编辑</button>
+       <button class="mini danger skill-act" data-act="delete" data-id="${esc(skill.name)}">${svgIcon('i-trash', 'icon icon-sm')}删除</button>`;
   return `
     <article class="skill-card" data-skill-name="${esc(skill.name)}">
-      <header class="skill-head">
-        <div class="skill-title-wrap">
-          <h2 class="skill-title">${esc(skill.title || skill.name)}</h2>
-          ${badge}
-        </div>
-        <div class="skill-head-actions">${exportBtn}${ops}</div>
-      </header>
-      <p class="skill-desc">${esc(skill.description)}</p>
-      ${meta ? `<div class="skill-meta-line">${esc(meta)}</div>` : ''}
-      <div class="skill-trigger-summary">
-        <span class="skill-trigger-pill"><b>意图</b>${esc(intentText)}</span>
-        <span class="skill-trigger-pill" title="${esc(keywordText)}"><b>关键词</b>${esc(keywordText)}</span>
+      <div class="skill-row">
+        <h2 class="skill-title">${esc(skill.title || skill.name)}</h2>
+        ${badge}
+        <p class="skill-desc">${esc(skill.description)}</p>
       </div>
       <details class="skill-details">
-        <summary>查看触发规则与正文</summary>
+        <summary>${svgIcon('i-chevron-down', 'icon icon-sm')}查看触发规则与正文</summary>
         <div class="skill-details-body">
-          <div class="skill-meta">
-            <span class="skill-meta-k">触发意图</span><span class="skill-meta-v">${esc(intentText)}</span>
-            <span class="skill-meta-k">触发关键词</span><span class="skill-meta-v">${esc(keywordText)}</span>
-            <span class="skill-meta-k">依赖工具</span><span class="skill-meta-v">${esc((skill.tools || []).join(', ') || '无')}</span>
-          </div>
+          <div class="skill-meta">${meta}</div>
           ${tags}
           <div class="skill-block-title">正文</div>
           <pre class="skill-content-preview">${esc(skill.content || '')}</pre>
         </div>
       </details>
+      <div class="skill-actions">
+        <span class="icon-btn skill-more" aria-hidden="true">${svgIcon('i-more', 'icon')}</span>
+        <div class="skill-action-row">
+          <button class="mini skill-act" data-act="export" data-id="${esc(skill.name)}">${svgIcon('i-download', 'icon icon-sm')}导出</button>
+          ${customOps}
+        </div>
+      </div>
     </article>`;
 }
 
@@ -138,19 +137,25 @@ function renderCategoryFilter() {
   select.value = skillCategory;
 }
 
-function renderPagination(totalPages: number) {
+function renderPagination(totalPages: number, total: number) {
   const nav = $('skill-pagination');
   if (!nav) return;
-  if (totalPages <= 1) {
+  const totalText = `<span class="page-total">共 ${total} 条</span>`;
+  if (!total) {
     nav.innerHTML = '';
     return;
   }
-  let html = `<button class="page-btn" data-page="${currentPage - 1}" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
-  for (let p = 1; p <= totalPages; p++) {
-    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p}</button>`;
+  if (totalPages <= 1) {
+    nav.innerHTML = totalText;
+    return;
   }
-  html += `<button class="page-btn" data-page="${currentPage + 1}" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
-  nav.innerHTML = html;
+  let html = totalText + '<div class="page-list">';
+  html += `<button class="page-btn page-step" data-page="${currentPage - 1}" aria-label="上一页" ${currentPage === 1 ? 'disabled' : ''}><svg class="icon" aria-hidden="true"><use href="icons.svg#i-chevron-right"/></svg></button>`;
+  for (let p = 1; p <= totalPages; p++) {
+    html += `<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}"${p === currentPage ? ' aria-current="page"' : ''}>${p}</button>`;
+  }
+  html += `<button class="page-btn page-step" data-page="${currentPage + 1}" aria-label="下一页" ${currentPage === totalPages ? 'disabled' : ''}><svg class="icon" aria-hidden="true"><use href="icons.svg#i-chevron-right"/></svg></button>`;
+  nav.innerHTML = html + '</div>';
 }
 
 function render() {
@@ -158,22 +163,33 @@ function render() {
   if (!wrap) return;
   const count = $('skill-count');
   if (count) count.textContent = String(allSkills.length);
+  const builtinCount = allSkills.filter((skill) => skill.builtin).length;
+  const kindCounts: Record<string, number> = {
+    all: allSkills.length,
+    builtin: builtinCount,
+    custom: allSkills.length - builtinCount,
+  };
+  Object.keys(kindCounts).forEach((kind) => {
+    const el = $('skill-kind-count-' + kind);
+    if (el) el.textContent = String(kindCounts[kind]);
+  });
   const skills = filteredSkills();
   const visibleCount = $('skill-visible-count');
-  if (visibleCount) visibleCount.textContent = '显示 ' + skills.length + ' / ' + allSkills.length;
+  if (visibleCount) visibleCount.textContent = skills.length + ' / ' + allSkills.length;
   if (!skills.length) {
     const filtering = Boolean(skillQuery.trim()) || skillKind !== 'all' || skillCategory !== 'all';
+    const emptyIco = svgIcon(filtering ? 'i-search' : 'i-spark', 'empty-ico');
     wrap.innerHTML = filtering
-      ? '<div class="empty"><span class="empty-ico">⌕</span><p>没有匹配的技能</p><p class="empty-hint">试试更换关键词、来源或分类</p></div>'
-      : '<div class="empty"><span class="empty-ico">🛠</span><p>还没有技能</p></div>';
-    renderPagination(1);
+      ? `<div class="empty">${emptyIco}<p>没有匹配的技能</p><p class="empty-hint">试试更换关键词、来源或分类</p></div>`
+      : `<div class="empty">${emptyIco}<p>还没有技能</p><p class="empty-hint">用「新建技能」创建，或导入一份 SKILL.md</p></div>`;
+    renderPagination(1, 0);
     return;
   }
   const totalPages = Math.ceil(skills.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
   const start = (currentPage - 1) * PAGE_SIZE;
   wrap.innerHTML = skills.slice(start, start + PAGE_SIZE).map(renderSkill).join('');
-  renderPagination(totalPages);
+  renderPagination(totalPages, skills.length);
 }
 
 function linesToArr(text: unknown): string[] {

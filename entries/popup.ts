@@ -1,13 +1,11 @@
 // 弹窗（快速收录 + 列表）
-import { STATUS, ITEM_TYPES } from '../lib/shared/constants.ts';
+import { STATUS, ITEM_TYPES, STAR_LEVELS } from '../lib/shared/constants.ts';
 import {
   starBarHtml,
-  levelNameHtml,
   esc,
-  typeBadgeHtml,
+  typeInfo,
   tagsHtml,
   bindStarKeyboard,
-  platformColor,
 } from '../lib/shared/dom/html.ts';
 import { showToast } from '../lib/shared/dom/toast.ts';
 import { debounce, markdownExcerpt, fmtTime, cleanTitle, parseTags } from '../lib/shared/text.ts';
@@ -43,6 +41,14 @@ const POPUP_RECENT_LIMIT = 5;
  */
 const $ = (id: string): any => document.getElementById(id);
 
+/** 内联 SVG 图标（禁止字形 / emoji 当图标）。 */
+const svg = (id: string, cls = 'icon icon-sm') =>
+  `<svg class="${cls}" aria-hidden="true"><use href="icons.svg#i-${id}"/></svg>`;
+
+/** 重要度名称（颜色交给 CSS，不内联色值）。 */
+const levelHtml = (n: number | string) =>
+  `<span class="level-name" data-level="${Math.max(1, Math.min(3, Number(n) || 1))}">${(STAR_LEVELS[Number(n)] || STAR_LEVELS[2]).name}</span>`;
+
 /** 事件目标 → 最近的匹配元素（原代码直接 e.target.closest(...)）。 */
 const closest = (target: EventTarget | null, selector: string): any =>
   target ? (target as Element).closest(selector) : null;
@@ -54,7 +60,7 @@ function toast(msg: string, undoFn?: (() => unknown) | null) {
 function renderTypePicker() {
   const el = document.querySelector('#add-panel .type-group') as HTMLElement;
   el.innerHTML = ITEM_TYPES.map(
-    (t) => `<button class="type-btn${selectedType === t.id ? ' active' : ''}" data-type="${t.id}" aria-pressed="${selectedType === t.id}" style="--t:${t.color}">${t.name}</button>`
+    (t) => `<button class="type-btn${selectedType === t.id ? ' active' : ''}" data-type="${t.id}" aria-pressed="${selectedType === t.id}">${t.name}</button>`
   ).join('');
 }
 
@@ -63,7 +69,7 @@ function syncStatusHighlight() {
   if (!barEl) return;
   barEl.innerHTML = starBarHtml(selectedStatus, true);
   const nameEl = document.querySelector('#add-panel .star-picker-name');
-  if (nameEl) nameEl.innerHTML = levelNameHtml(selectedStatus);
+  if (nameEl) nameEl.innerHTML = levelHtml(selectedStatus);
 }
 
 function renderList() {
@@ -83,9 +89,16 @@ function renderList() {
   emptyEl.classList.toggle('hidden', items.length > 0);
   if (!items.length) {
     emptyEl.innerHTML = hasFilters
-      ? '<span class="empty-ico">⌕</span><p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>'
-      : '<span class="empty-ico">📚</span><p>还没有内容</p><p class="empty-hint">打开网页后点工具栏图标即可快速收录</p>';
+      ? `${svg('search', 'empty-ico')}<p>没有匹配的内容</p><p class="empty-hint">试试更换筛选条件或搜索词</p>`
+      : `${svg('book', 'empty-ico')}<p>还没有内容</p><p class="empty-hint">打开网页后点工具栏图标即可快速收录</p>`;
   }
+  const allItems = knowledge.list();
+  document.querySelectorAll('.filter-chip').forEach((chip) => {
+    const f = (chip as HTMLElement).dataset.filter;
+    const n = f === 'all' ? allItems.length : allItems.filter((i) => (i.type || 'wrong') === f).length;
+    const c = chip.querySelector('.filter-count');
+    if (c) c.textContent = String(n);
+  });
   const total = knowledge.size;
   const shown = items.slice(0, POPUP_RECENT_LIMIT);
   listEl.innerHTML = shown.map(itemHtml).join('');
@@ -114,16 +127,16 @@ function itemHtml(it: KnowledgeItem): string {
     : `<span class="item-title no-link">${esc(it.title)}</span>`;
   return `<div class="item" data-id="${esc(it.id)}">
     <div class="item-head">
-      ${typeBadgeHtml(type)}
+      <span class="type-badge">${typeInfo(type).name}</span>
       ${urlLink}
-      ${it.url ? '<button class="icon-btn open" title="打开原文" aria-label="打开原文">↗</button>' : ''}
-      <button class="icon-btn del" title="删除" aria-label="删除条目">✕</button>
+      ${it.url ? `<button class="icon-btn open" title="打开原文" aria-label="打开原文">${svg('external')}</button>` : ''}
+      <button class="icon-btn del" title="删除" aria-label="删除条目">${svg('trash')}</button>
     </div>
     ${it.note ? `<div class="item-note">${esc(markdownExcerpt(it.note, 120))}</div>` : ''}
     ${tagsHtml(it.tags)}
     <div class="item-meta">
       ${starBarHtml(it.status, true)}
-      ${levelNameHtml(it.status)}
+      ${levelHtml(it.status)}
       ${it.platformName ? `<span class="platform-mini">${esc(it.platformName)}</span>` : ''}
       <span class="time">${fmtTime(it.updatedAt)}</span>
     </div>
@@ -181,7 +194,6 @@ async function init() {
     $('add-title').textContent = currentTitle;
     const pEl = $('add-platform');
     pEl.textContent = platform.name;
-    pEl.style.background = platformColor(platform.id);
     pEl.classList.remove('hidden');
 
     const rec = knowledge.get(currentUrl);
@@ -206,7 +218,8 @@ async function init() {
   renderTypePicker();
   syncStatusHighlight();
   try {
-    setAddPanelCollapsed(localStorage.getItem(ADD_COLLAPSED_KEY) === '1', false);
+    const saved = localStorage.getItem(ADD_COLLAPSED_KEY);
+    setAddPanelCollapsed(saved === null ? true : saved === '1', false);
   } catch (e) {}
 }
 
@@ -243,7 +256,7 @@ $('add-btn').addEventListener('click', async () => {
       tags,
     });
     $('add-exists').classList.remove('hidden');
-    btn.textContent = '已保存 ✓';
+    btn.textContent = '已保存';
     renderList();
     toast('已收录到知识库');
     setTimeout(() => { if (btn.isConnected) btn.textContent = '更新'; }, 1400);
@@ -286,7 +299,7 @@ bindStarKeyboard(document, (v, cell) => {
   if (picker) {
     selectedStatus = v;
     const nameEl = document.querySelector('#add-panel .star-picker-name');
-    if (nameEl) nameEl.innerHTML = levelNameHtml(v);
+    if (nameEl) nameEl.innerHTML = levelHtml(v);
     return;
   }
   const itemEl = cell.closest('.item');
@@ -297,7 +310,7 @@ bindStarKeyboard(document, (v, cell) => {
         .update(id, (item) => ({ ...item, status: v, updatedAt: Date.now() }))
         .catch(() => toast('更新失败，请重试'));
       const lvl = itemEl.querySelector('.level-name');
-      if (lvl) lvl.outerHTML = levelNameHtml(v);
+      if (lvl) lvl.outerHTML = levelHtml(v);
     }
   }
 });
@@ -379,7 +392,7 @@ $('list').addEventListener('click', async (e: Event) => {
       const bar = itemEl.querySelector('.star-bar');
       if (bar) bar.querySelectorAll('.star-cell').forEach((c: Element, i: number) => c.classList.toggle('on', i < a));
       const lvl = itemEl.querySelector('.level-name');
-      if (lvl) lvl.outerHTML = levelNameHtml(a);
+      if (lvl) lvl.outerHTML = levelHtml(a);
     }
     return;
   }

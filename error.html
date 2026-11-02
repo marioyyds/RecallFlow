@@ -6,116 +6,136 @@
 <meta name="color-scheme" content="light dark">
 <title>访问出错了 · RecallFlow</title>
 <style>
+  /* 独立错误页：不引 base.css，令牌与共享样式表保持同一套「纸与墨」取值。
+     改了 base.css 的令牌，这里要一起改（两处值必须一致，否则页面之间会互相打脸）。 */
   :root {
-    --primary: #4a90d9;
-    --primary-hover: #3a7cc4;
-    --primary-soft: #4a90d91a;
-    --bg: #f0f2f5;
-    --card: #ffffff;
-    --text: #333333;
-    --text-sub: #5f6b7a;
-    --text-faint: #6b7280;
-    --border: #e2e5ea;
-    --danger: #e74c3c;
-    --focus-ring: rgba(74, 144, 217, 0.4);
-    --radius-lg: 12px;
-    --radius-xl: 14px;
-    --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-    --shadow-hover: 0 8px 28px rgba(0, 0, 0, 0.12);
+    --bg: #f6f3ec;
+    --paper: #fffdf8;
+    --note: #f1ebdf;
+    --ink: #211e19;
+    --ink-2: #575047;
+    --ink-3: #6f6659;
+    --line: #e4ddd0;
+    --line-strong: #d3c9b7;
+    --accent: #a03a22;
+    --accent-hover: #8a2f1b;
+    --accent-soft: #f7ece7;
+    --danger: #a32c2c;
+    --warn: #8a5a12;
+    --focus-ring: rgba(160, 58, 34, .32);
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+      "Songti SC", "Noto Serif SC", serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+      "Liberation Mono", monospace;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --primary: #5b9be0;
-      --primary-hover: #6ea9e5;
-      --primary-soft: #5b9be033;
-      --bg: #1b1d21;
-      --card: #26292e;
-      --text: #e3e5e8;
-      --text-sub: #9aa0a8;
-      --text-faint: #7d838b;
-      --border: #3a3f46;
-      --danger: #e5604f;
-      --focus-ring: rgba(91, 155, 224, 0.55);
+      --bg: #191713;
+      --paper: #211e18;
+      --note: #2a2620;
+      --ink: #ede7db;
+      --ink-2: #b9b0a1;
+      --ink-3: #988e7e;
+      --line: #33302a;
+      --line-strong: #46413a;
+      --accent: #e08a63;
+      --accent-hover: #eda17d;
+      --accent-soft: #362622;
+      --danger: #e08a63;
+      --warn: #d9a94e;
+      --focus-ring: rgba(224, 138, 99, .38);
     }
   }
 
-  *,
-  *::before,
-  *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; }
 
   html, body { height: 100%; }
 
   body {
+    margin: 0;
     display: grid;
     place-items: center;
     padding: 24px;
     background: var(--bg);
-    color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC",
-      "Microsoft YaHei", sans-serif;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
-  .error-card {
-    width: min(480px, 100%);
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow);
-    padding: 40px 36px 32px;
-    text-align: center;
-    animation: pop 0.25s ease-out;
+  /* 一张「记录纸」：纸面靠 1px 发丝线与底色分层，不用大圆角大阴影。
+     投影只给真正浮起来的东西 —— 这里唯一浮着的是整张纸，所以只给最淡的一层。 */
+  .sheet {
+    width: min(460px, 100%);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(33, 30, 25, .05);
+    overflow: hidden;
+    animation: settle .18s ease-out;
   }
 
-  @keyframes pop {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
+  @keyframes settle {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
-  .error-icon {
-    display: grid;
-    place-items: center;
-    width: 64px;
-    height: 64px;
-    margin: 0 auto 20px;
-    border-radius: 20px;
-    background: var(--primary-soft);
-    color: var(--danger);
-  }
-
-  .error-icon svg { width: 32px; height: 32px; }
-
-  .error-code {
-    display: inline-flex;
+  .sheet-head {
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 12px;
-    margin-bottom: 14px;
-    border-radius: 999px;
-    background: var(--primary-soft);
-    color: var(--primary);
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
+    gap: 10px;
+    padding: 12px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--note);
   }
 
-  h1 { font-size: 20px; line-height: 1.4; margin-bottom: 10px; }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+
+  .sheet-head .rule { flex: 1 1 auto; height: 1px; background: var(--line-strong); opacity: .6; }
+
+  .sheet-body { padding: 26px 22px 22px; }
+
+  /* 图标：1.6px 描边的 SVG，不用 emoji、不放在彩色圆角方块里 */
+  .mark { display: flex; color: var(--accent); margin-bottom: 16px; }
+  .mark svg { width: 22px; height: 22px; }
+
+  h1 {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: 23px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -.01em;
+    color: var(--ink);
+  }
 
   p.message {
-    font-size: 14px;
-    line-height: 1.7;
-    color: var(--text-sub);
-    margin-bottom: 26px;
+    margin: 0 0 22px;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--ink-2);
     word-break: break-word;
   }
 
   .actions {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 10px;
+    gap: 8px;
     flex-wrap: wrap;
+    margin-bottom: 20px;
   }
 
   .btn {
@@ -123,81 +143,104 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 42px;
+    min-height: 44px;
     padding: 0 18px;
-    border-radius: 9px;
+    border-radius: 5px;
+    border: 1px solid transparent;
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
-    border: 1px solid transparent;
-    transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
     user-select: none;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
   }
 
-  .btn:active { transform: scale(0.98); }
+  /* 主按钮是唯一一块朱砂：它是这张纸上唯一「现在就做」的动作 */
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fffdf8; }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-  .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
-  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-secondary { background: transparent; border-color: var(--line-strong); color: var(--ink-2); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
 
-  .btn-secondary { background: var(--card); color: var(--text-sub); border-color: var(--border); }
-  .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
-
-  .btn:focus-visible,
-  .error-icon:focus-visible {
-    outline: 3px solid var(--focus-ring);
-    outline-offset: 2px;
-  }
-
-  .hint {
-    margin-top: 20px;
-    font-size: 12px;
-    color: var(--text-faint);
-    line-height: 1.6;
-  }
-
-  .checkbox {
+  .check {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 18px;
+    gap: 8px;
+    min-height: 32px;
     font-size: 12px;
-    color: var(--text-sub);
+    color: var(--ink-3);
     cursor: pointer;
     user-select: none;
   }
 
-  .checkbox input { accent-color: var(--primary); cursor: pointer; }
+  .check input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+
+  .sheet-foot {
+    padding: 12px 22px 16px;
+    border-top: 1px solid var(--line);
+    background: var(--note);
+  }
+
+  .hint { margin: 0; font-size: 11.5px; line-height: 1.7; color: var(--ink-3); }
+
+  .btn:focus-visible,
+  .check input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 
   @media (prefers-reduced-motion: reduce) {
-    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+  }
+
+  @media (max-width: 420px) {
+    body { padding: 16px; }
+    .sheet-head, .sheet-body, .sheet-foot { padding-left: 18px; padding-right: 18px; }
+    .actions { gap: 6px; }
+    .btn { flex: 1 1 auto; }
   }
 </style>
 </head>
 <body>
-  <main class="error-card" role="alert">
-    <div class="error-icon" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 2a7 7 0 0 0-7 7v3.6l-1.7 3.3A1 1 0 0 0 4.2 18h15.6a1 1 0 0 0 .9-2.1L19 12.6V9a7 7 0 0 0-7-7zm0 4a3 3 0 0 1 3 3v3h-2V9a1 1 0 0 0-2 0v3H9V9a3 3 0 0 1 3-3zm0 12a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 18z"/>
-      </svg>
+  <main class="sheet" role="alert" aria-labelledby="error-title">
+    <header class="sheet-head">
+      <span class="kicker" id="error-code">访问出错</span>
+      <span class="rule" aria-hidden="true"></span>
+    </header>
+
+    <div class="sheet-body">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 8v5"/>
+          <circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/>
+          <path d="M12 3.2 21 20H3z"/>
+        </svg>
+      </span>
+
+      <h1 id="error-title">页面加载失败</h1>
+      <p class="message" id="error-message">请稍后重试，或返回上一页。</p>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="button" id="btn-retry">重试</button>
+        <button class="btn btn-secondary" type="button" id="btn-back">返回上一页</button>
+        <button class="btn btn-secondary" type="button" id="btn-home">回到首页</button>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="auto-retry">
+        <span>60 秒后自动重试</span>
+      </label>
     </div>
 
-    <span class="error-code" id="error-code">访问出错</span>
-    <h1 id="error-title">页面加载失败</h1>
-    <p class="message" id="error-message">请稍后重试，或返回上一页。</p>
-
-    <div class="actions">
-      <button class="btn btn-primary" type="button" id="btn-retry">重试</button>
-      <button class="btn btn-secondary" type="button" id="btn-back">返回上一页</button>
-      <button class="btn btn-secondary" type="button" id="btn-home">回到首页</button>
-    </div>
-
-    <label class="checkbox">
-      <input type="checkbox" id="auto-retry"> 自动重试
-    </label>
-
-    <p class="hint">如果问题持续出现，请检查网络连接，或到「设置」里查看 API 配置。</p>
+    <footer class="sheet-foot">
+      <p class="hint">如果问题持续出现，请检查网络连接，或到「设置」里查看 API 配置。</p>
+    </footer>
   </main>
 
 <script>

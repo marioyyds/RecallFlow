@@ -6739,47 +6739,45 @@ function describeIntents(intents) {
   if (!Array.isArray(intents) || !intents.length) return "\u4E0D\u9650\u610F\u56FE";
   return intents.map((i) => INTENT_LABEL[String(i)] || i).join("\u3001");
 }
+function svgIcon(id, cls) {
+  return '<svg class="' + cls + '" aria-hidden="true"><use href="icons.svg#' + id + '"/></svg>';
+}
 function renderSkill(skill) {
-  const meta = [
-    skill.version ? "v" + skill.version : "",
-    skill.category || "",
-    skill.skill_type || ""
-  ].filter(Boolean).join(" \xB7 ");
-  const tags = Array.isArray(skill.tags) && skill.tags.length ? `<div class="skill-tags">${skill.tags.map((t) => `<span class="skill-tag">${esc2(t)}</span>`).join("")}</div>` : "";
-  const badge = skill.builtin ? '<span class="skill-builtin-tag">\u5185\u7F6E \xB7 \u53EA\u8BFB</span>' : "";
-  const ops = skill.builtin ? "" : `<button class="skill-act" data-act="edit" data-id="${esc2(skill.name)}">\u7F16\u8F91</button>
-       <button class="skill-act danger" data-act="delete" data-id="${esc2(skill.name)}">\u5220\u9664</button>`;
-  const exportBtn = `<button class="skill-act" data-act="export" data-id="${esc2(skill.name)}">\u5BFC\u51FA</button>`;
   const intentText = describeIntents(skill.match && skill.match.intents);
   const keywordText = describeKeywords(skill);
+  const metaRows = [];
+  if (skill.version) metaRows.push(["\u7248\u672C", "v" + skill.version]);
+  if (skill.category) metaRows.push(["\u5206\u7C7B", skill.category]);
+  if (skill.skill_type) metaRows.push(["\u7C7B\u578B", skill.skill_type]);
+  metaRows.push(["\u89E6\u53D1\u610F\u56FE", intentText], ["\u89E6\u53D1\u5173\u952E\u8BCD", keywordText], ["\u4F9D\u8D56\u5DE5\u5177", (skill.tools || []).join(", ") || "\u65E0"]);
+  const meta = metaRows.map(([k, v]) => `<span class="skill-meta-k">${esc2(k)}</span><span class="skill-meta-v">${esc2(v)}</span>`).join("");
+  const tags = Array.isArray(skill.tags) && skill.tags.length ? `<div class="skill-tags">${skill.tags.map((t) => `<span class="tag-chip">${esc2(t)}</span>`).join("")}</div>` : "";
+  const badge = skill.builtin ? '<span class="type-badge skill-badge">\u5185\u7F6E</span>' : "";
+  const customOps = skill.builtin ? "" : `<button class="mini skill-act" data-act="edit" data-id="${esc2(skill.name)}">${svgIcon("i-edit", "icon icon-sm")}\u7F16\u8F91</button>
+       <button class="mini danger skill-act" data-act="delete" data-id="${esc2(skill.name)}">${svgIcon("i-trash", "icon icon-sm")}\u5220\u9664</button>`;
   return `
     <article class="skill-card" data-skill-name="${esc2(skill.name)}">
-      <header class="skill-head">
-        <div class="skill-title-wrap">
-          <h2 class="skill-title">${esc2(skill.title || skill.name)}</h2>
-          ${badge}
-        </div>
-        <div class="skill-head-actions">${exportBtn}${ops}</div>
-      </header>
-      <p class="skill-desc">${esc2(skill.description)}</p>
-      ${meta ? `<div class="skill-meta-line">${esc2(meta)}</div>` : ""}
-      <div class="skill-trigger-summary">
-        <span class="skill-trigger-pill"><b>\u610F\u56FE</b>${esc2(intentText)}</span>
-        <span class="skill-trigger-pill" title="${esc2(keywordText)}"><b>\u5173\u952E\u8BCD</b>${esc2(keywordText)}</span>
+      <div class="skill-row">
+        <h2 class="skill-title">${esc2(skill.title || skill.name)}</h2>
+        ${badge}
+        <p class="skill-desc">${esc2(skill.description)}</p>
       </div>
       <details class="skill-details">
-        <summary>\u67E5\u770B\u89E6\u53D1\u89C4\u5219\u4E0E\u6B63\u6587</summary>
+        <summary>${svgIcon("i-chevron-down", "icon icon-sm")}\u67E5\u770B\u89E6\u53D1\u89C4\u5219\u4E0E\u6B63\u6587</summary>
         <div class="skill-details-body">
-          <div class="skill-meta">
-            <span class="skill-meta-k">\u89E6\u53D1\u610F\u56FE</span><span class="skill-meta-v">${esc2(intentText)}</span>
-            <span class="skill-meta-k">\u89E6\u53D1\u5173\u952E\u8BCD</span><span class="skill-meta-v">${esc2(keywordText)}</span>
-            <span class="skill-meta-k">\u4F9D\u8D56\u5DE5\u5177</span><span class="skill-meta-v">${esc2((skill.tools || []).join(", ") || "\u65E0")}</span>
-          </div>
+          <div class="skill-meta">${meta}</div>
           ${tags}
           <div class="skill-block-title">\u6B63\u6587</div>
           <pre class="skill-content-preview">${esc2(skill.content || "")}</pre>
         </div>
       </details>
+      <div class="skill-actions">
+        <span class="icon-btn skill-more" aria-hidden="true">${svgIcon("i-more", "icon")}</span>
+        <div class="skill-action-row">
+          <button class="mini skill-act" data-act="export" data-id="${esc2(skill.name)}">${svgIcon("i-download", "icon icon-sm")}\u5BFC\u51FA</button>
+          ${customOps}
+        </div>
+      </div>
     </article>`;
 }
 function filteredSkills() {
@@ -6810,39 +6808,56 @@ function renderCategoryFilter() {
   select.innerHTML = '<option value="all">\u5168\u90E8\u5206\u7C7B</option>' + categories.map((category) => `<option value="${esc2(category)}">${esc2(category)}</option>`).join("");
   select.value = skillCategory;
 }
-function renderPagination(totalPages) {
+function renderPagination(totalPages, total) {
   const nav = $("skill-pagination");
   if (!nav) return;
-  if (totalPages <= 1) {
+  const totalText = `<span class="page-total">\u5171 ${total} \u6761</span>`;
+  if (!total) {
     nav.innerHTML = "";
     return;
   }
-  let html = `<button class="page-btn" data-page="${currentPage - 1}" ${currentPage === 1 ? "disabled" : ""}>\u4E0A\u4E00\u9875</button>`;
-  for (let p = 1; p <= totalPages; p++) {
-    html += `<button class="page-btn ${p === currentPage ? "active" : ""}" data-page="${p}">${p}</button>`;
+  if (totalPages <= 1) {
+    nav.innerHTML = totalText;
+    return;
   }
-  html += `<button class="page-btn" data-page="${currentPage + 1}" ${currentPage === totalPages ? "disabled" : ""}>\u4E0B\u4E00\u9875</button>`;
-  nav.innerHTML = html;
+  let html = totalText + '<div class="page-list">';
+  html += `<button class="page-btn page-step" data-page="${currentPage - 1}" aria-label="\u4E0A\u4E00\u9875" ${currentPage === 1 ? "disabled" : ""}><svg class="icon" aria-hidden="true"><use href="icons.svg#i-chevron-right"/></svg></button>`;
+  for (let p = 1; p <= totalPages; p++) {
+    html += `<button class="page-btn ${p === currentPage ? "active" : ""}" data-page="${p}"${p === currentPage ? ' aria-current="page"' : ""}>${p}</button>`;
+  }
+  html += `<button class="page-btn page-step" data-page="${currentPage + 1}" aria-label="\u4E0B\u4E00\u9875" ${currentPage === totalPages ? "disabled" : ""}><svg class="icon" aria-hidden="true"><use href="icons.svg#i-chevron-right"/></svg></button>`;
+  nav.innerHTML = html + "</div>";
 }
 function render() {
   const wrap = $("skill-list");
   if (!wrap) return;
   const count = $("skill-count");
   if (count) count.textContent = String(allSkills.length);
+  const builtinCount = allSkills.filter((skill) => skill.builtin).length;
+  const kindCounts = {
+    all: allSkills.length,
+    builtin: builtinCount,
+    custom: allSkills.length - builtinCount
+  };
+  Object.keys(kindCounts).forEach((kind) => {
+    const el = $("skill-kind-count-" + kind);
+    if (el) el.textContent = String(kindCounts[kind]);
+  });
   const skills = filteredSkills();
   const visibleCount = $("skill-visible-count");
-  if (visibleCount) visibleCount.textContent = "\u663E\u793A " + skills.length + " / " + allSkills.length;
+  if (visibleCount) visibleCount.textContent = skills.length + " / " + allSkills.length;
   if (!skills.length) {
     const filtering = Boolean(skillQuery.trim()) || skillKind !== "all" || skillCategory !== "all";
-    wrap.innerHTML = filtering ? '<div class="empty"><span class="empty-ico">\u2315</span><p>\u6CA1\u6709\u5339\u914D\u7684\u6280\u80FD</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u5173\u952E\u8BCD\u3001\u6765\u6E90\u6216\u5206\u7C7B</p></div>' : '<div class="empty"><span class="empty-ico">\u{1F6E0}</span><p>\u8FD8\u6CA1\u6709\u6280\u80FD</p></div>';
-    renderPagination(1);
+    const emptyIco = svgIcon(filtering ? "i-search" : "i-spark", "empty-ico");
+    wrap.innerHTML = filtering ? `<div class="empty">${emptyIco}<p>\u6CA1\u6709\u5339\u914D\u7684\u6280\u80FD</p><p class="empty-hint">\u8BD5\u8BD5\u66F4\u6362\u5173\u952E\u8BCD\u3001\u6765\u6E90\u6216\u5206\u7C7B</p></div>` : `<div class="empty">${emptyIco}<p>\u8FD8\u6CA1\u6709\u6280\u80FD</p><p class="empty-hint">\u7528\u300C\u65B0\u5EFA\u6280\u80FD\u300D\u521B\u5EFA\uFF0C\u6216\u5BFC\u5165\u4E00\u4EFD SKILL.md</p></div>`;
+    renderPagination(1, 0);
     return;
   }
   const totalPages = Math.ceil(skills.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
   const start = (currentPage - 1) * PAGE_SIZE;
   wrap.innerHTML = skills.slice(start, start + PAGE_SIZE).map(renderSkill).join("");
-  renderPagination(totalPages);
+  renderPagination(totalPages, skills.length);
 }
 function linesToArr(text) {
   return String(text || "").split("\n").map((s) => s.trim()).filter(Boolean);

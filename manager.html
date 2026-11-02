@@ -10,10 +10,18 @@
 <body>
   <div class="app-topbar">
     <header class="app-header">
-      <div class="brand-group"><div class="brand-mark" aria-hidden="true">R</div><div><h1>RecallFlow</h1><span class="page-caption">资料库</span></div></div>
-      <div class="header-actions"><button id="add-note-btn" class="btn btn-primary"><span aria-hidden="true">＋</span> 新建笔记</button><details class="more-menu"><summary class="btn btn-secondary" aria-label="更多操作">⋯</summary><div class="more-menu-panel"><button id="import-btn">导入 JSON</button>
-      <input id="import-file" type="file" accept=".json" style="display:none">
-      <button id="export-btn">导出 JSON</button></div></details></div>
+      <div class="brand-group"><img class="brand-mark" src="docs/assets/recallflow-mark.svg" alt="" width="28" height="28" aria-hidden="true"><div><h1>RecallFlow</h1><span class="page-caption">知识库</span></div></div>
+      <div class="header-actions">
+        <button id="add-note-btn" class="btn btn-primary" type="button"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-plus"/></svg>新建笔记</button>
+        <details class="more-menu">
+          <summary aria-label="更多操作" title="更多操作"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-more"/></svg></summary>
+          <div class="more-menu-panel">
+            <button id="import-btn" type="button"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-upload"/></svg>导入 JSON</button>
+            <input id="import-file" type="file" accept=".json" style="display:none">
+            <button id="export-btn" type="button"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-download"/></svg>导出 JSON</button>
+          </div>
+        </details>
+      </div>
     </header>
 
     <nav class="module-nav" aria-label="模块导航">
@@ -24,65 +32,73 @@
     </nav>
   </div>
 
-  <div class="kb-toolbar">
-    <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索标题、备注或标签" aria-label="搜索笔记"><kbd>Ctrl K</kbd></label>
-  </div>
+  <main class="kb-page">
+    <div class="kb-toolbar">
+      <label class="search-box">
+        <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-search"/></svg>
+        <input id="search" type="search" placeholder="搜索标题、备注或标签" aria-label="搜索笔记">
+        <kbd class="search-kbd">Ctrl K</kbd>
+      </label>
+      <select id="sort-select" class="sort-select" title="排序方式">
+        <option value="updated">最近更新</option>
+        <option value="created">最近收录</option>
+        <option value="star-desc">重要度 高→低</option>
+        <option value="star-asc">重要度 低→高</option>
+      </select>
+      <details class="advanced-filters" id="advanced-filters">
+        <summary class="mini advanced-filter-toggle">
+          <svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-filter"/></svg>
+          <span>更多筛选</span>
+          <span id="advanced-filter-summary" class="advanced-filter-summary" hidden></span>
+        </summary>
+        <div class="advanced-filter-body">
+          <div class="tag-filter" id="tag-filter"></div>
+          <section class="active-filters" aria-live="polite"><span class="filter-label">当前筛选</span><div id="active-filter-list"><span class="filter-empty">全部内容</span></div><button id="clear-filters" class="link-button" type="button">清除全部</button></section>
 
-  <div class="bulk-bar hidden" id="bulk-bar">
-    <span class="bulk-count" id="bulk-count">0 项已选</span>
-    <button class="mini" id="bulk-select-all-btn">全选</button>
-    <button class="mini danger" id="bulk-delete-btn">删除选中</button>
-    <button class="mini" id="bulk-cancel-btn">取消</button>
-  </div>
-
-  <nav class="type-tabs" id="type-tabs"></nav>
-
-  <details class="advanced-filters" id="advanced-filters">
-    <summary><span>更多筛选</span><span id="advanced-filter-summary" class="advanced-filter-summary">全部内容</span></summary>
-    <div class="advanced-filter-body">
-      <div class="tag-filter" id="tag-filter"></div>
-      <section class="active-filters" aria-live="polite"><span class="filter-label">当前筛选</span><div id="active-filter-list"><span class="filter-empty">全部内容</span></div><button id="clear-filters" class="link-button" type="button">清除全部</button></section>
-
-      <section class="stats" id="stats">
-        <div class="stat-card" data-s="all">
-          <span class="num" id="st-total">0</span>
-          <span class="lbl">全部</span>
+          <section class="stats" id="stats">
+            <div class="stat-card" data-s="all">
+              <span class="num" id="st-total">0</span>
+              <span class="lbl">全部</span>
+            </div>
+            <div class="stat-card" data-s="1">
+              <span class="num" id="st-1">0</span>
+              <span class="lbl stars-lbl" data-stars="1"></span>
+            </div>
+            <div class="stat-card" data-s="2">
+              <span class="num" id="st-2">0</span>
+              <span class="lbl stars-lbl" data-stars="2"></span>
+            </div>
+            <div class="stat-card" data-s="3">
+              <span class="num" id="st-3">0</span>
+              <span class="lbl stars-lbl" data-stars="3"></span>
+            </div>
+          </section>
         </div>
-        <div class="stat-card" data-s="1">
-          <span class="num" id="st-1">0</span>
-          <span class="lbl stars-lbl" data-stars="1"></span>
-        </div>
-        <div class="stat-card" data-s="2">
-          <span class="num" id="st-2">0</span>
-          <span class="lbl stars-lbl" data-stars="2"></span>
-        </div>
-        <div class="stat-card" data-s="3">
-          <span class="num" id="st-3">0</span>
-          <span class="lbl stars-lbl" data-stars="3"></span>
-        </div>
-      </section>
+      </details>
     </div>
-  </details>
 
-  <div class="toolbar">
-    <select id="sort-select" class="sort-select" title="排序方式">
-      <option value="updated">最近更新</option>
-      <option value="created">最近收录</option>
-      <option value="star-desc">重要度 高→低</option>
-      <option value="star-asc">重要度 低→高</option>
-    </select>
-  </div>
+    <nav class="type-tabs" id="type-tabs" aria-label="按类型筛选"></nav>
 
-  <main id="list" class="list"></main>
-  <div id="empty" class="empty hidden"></div>
-  <nav id="kb-pagination" class="kb-pagination" aria-label="知识库分页"></nav>
+    <div class="bulk-bar hidden" id="bulk-bar">
+      <span class="bulk-count" id="bulk-count">0 项已选</span>
+      <button class="mini" id="bulk-select-all-btn" type="button">全选</button>
+      <button class="mini danger" id="bulk-delete-btn" type="button">删除选中</button>
+      <button class="mini" id="bulk-cancel-btn" type="button">取消</button>
+    </div>
+
+    <div id="list" class="list"></div>
+    <div id="empty" class="empty hidden"></div>
+    <nav id="kb-pagination" class="kb-pagination" aria-label="知识库分页"></nav>
+
+    <footer class="kb-footer">点击标题打开原文，点击「阅读」查看 Markdown 文档，点击星星改星级。</footer>
+  </main>
 
   <div class="confirm-overlay hidden" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-msg">
     <div class="confirm-dialog">
       <div class="confirm-msg" id="confirm-msg"></div>
       <div class="confirm-actions">
-        <button class="mini danger" id="confirm-yes">确认</button>
-        <button class="mini" id="confirm-no">取消</button>
+        <button class="mini" id="confirm-no" type="button">取消</button>
+        <button class="mini danger" id="confirm-yes" type="button">确认</button>
       </div>
     </div>
   </div>
@@ -94,18 +110,16 @@
           <h2 id="doc-title">文档</h2>
           <div id="doc-meta" class="doc-meta"></div>
         </div>
-        <button id="doc-close" class="doc-close" type="button" aria-label="关闭文档">✕</button>
+        <button id="doc-close" class="doc-close" type="button" aria-label="关闭文档"><svg class="icon" aria-hidden="true"><use href="icons.svg#i-close"/></svg></button>
       </header>
       <div id="doc-content" class="markdown-body"></div>
       <div class="doc-actions">
-        <button id="doc-open" class="mini" type="button">打开原文</button>
-        <button id="doc-edit" class="mini" type="button">编辑</button>
+        <button id="doc-open" class="mini" type="button"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-external"/></svg>打开原文</button>
+        <button id="doc-edit" class="mini" type="button"><svg class="icon icon-sm" aria-hidden="true"><use href="icons.svg#i-edit"/></svg>编辑</button>
         <button id="doc-close-bottom" class="mini primary" type="button">关闭</button>
       </div>
     </article>
   </div>
-
-  <footer>点击标题打开原文，点击“阅读”查看 Markdown 文档，点击星星改星级。</footer>
 
   <script type="module" src="manager.js"></script>
 </body>

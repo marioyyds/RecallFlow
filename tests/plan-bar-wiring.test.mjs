@@ -76,7 +76,9 @@ test('计划条只在「完成 ↔ 进行中」切换时回到默认，不打断
 test('计划条：收起那一行必须带上「进度 + 当前步骤」（信息量不能因收起而丢）', () => {
   const fn = sliceBetween('function renderPlan', 'function messagesForExport');
   assert.match(fn, /doneCount \+\s*'\/' \+\s*total/, '要显示进度');
-  assert.match(fn, /current \? ' · ▶ ' \+/, '要显示当前正在做的那一步');
+  // 字形 ▶ 已换成文字标签「进行中：」（图标不再用字符绘制），
+  // 但契约要求不变：收起的那一行仍必须点名「当前正在做哪一步」。
+  assert.match(fn, /current \? ' · 进行中：' \+/, '要显示当前正在做的那一步');
   assert.match(fn, /步已完成/, '全部完成时给出完成文案');
 });
 
