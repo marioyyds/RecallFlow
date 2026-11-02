@@ -27,7 +27,13 @@ async function boot(chromeOpts = {}) {
   const dom = installDomStub();
   const prevChrome = installChrome(chromeOpts);
   const mod = await import('../lib/ui/page/chat.ts?case=' + (seq += 1));
-  mod.initAssistant({ runtime: createChromeRuntimeAdapter() });
+  // 与真实入口对齐（entries/content.ts:170-173）：storage 也传进去 —— 不传的话
+  // 面板布局写盘会回落到网页 localStorage，嵌入态/悬浮球偏好的落盘就测不到。
+  const { createChromeStorageAdapter } = await import('../lib/adapters/chrome/storage.ts');
+  mod.initAssistant({
+    runtime: createChromeRuntimeAdapter(),
+    storage: createChromeStorageAdapter(globalThis.chrome.storage.local, globalThis.chrome),
+  });
   const host = () => dom.document.documentElement.querySelector('#__kb-ai-host');
   const shadow = () => (host() ? host().shadowRoot : null);
   const panel = () => {
@@ -198,6 +204,154 @@ test('后台转发的 panel:toggle 消息也能开关面板（焦点在子框架
     assert.ok(Array.isArray(replies), '_emitMessage 应真的投递到内容脚本的监听器');
     await waitFor(app.panel, '收到 panel:toggle 后应打开面板');
     assert.ok(app.fab().classList.contains('hidden'), '面板打开后 FAB 应隐藏');
+  } finally {
+    app.close();
+  }
+});
+
+// ---- 悬浮球右键菜单（修复：此前 fab 没有任何 contextmenu 监听，右键只会弹
+// 宿主页面的默认菜单，悬浮球没有任何退出途径 —— 用户报的正是这个 bug）----
+
+test('右键 FAB：必须弹出自己的菜单（打开面板 / 隐藏悬浮球）', async () => {
+  const app = await boot();
+  try {
+    app.fab().emit('contextmenu', { button: 2 });
+    const menu = app.shadow() ? app.shadow().querySelector('.fab-menu') : null;
+    assert.ok(menu, '右键必须弹出悬浮球自己的菜单（contextmenu 已被 preventDefault 拦下）');
+    const labels = menu.querySelectorAll('button').map((b) => String(b.textContent || ''));
+    assert.deepEqual(labels, ['打开面板', '隐藏悬浮球']);
+    assert.equal(menu.querySelectorAll('button.danger').length, 1, '「隐藏悬浮球」必须是危险项（红色）');
+  } finally {
+    app.close();
+  }
+});
+
+test('右键菜单「隐藏悬浮球」：球体摘掉、偏好落盘、宿主保留', async () => {
+  const app = await boot();
+  try {
+    app.fab().emit('contextmenu', { button: 2 });
+    const menu = app.shadow().querySelector('.fab-menu');
+    const hideBtn = menu.querySelectorAll('button').find((b) => b.classList.contains('danger'));
+    hideBtn.emit('click', {});
+    await waitFor(() => !app.fab(), '隐藏后悬浮球必须消失');
+    const saved = globalThis.chrome.storage.local._dump()['recallflow.fab.hidden.v1'];
+    assert.ok(saved && saved.hidden === true, '隐藏偏好必须写进扩展存储（跨标签页同步的依据）');
+    assert.ok(app.host(), '隐藏只摘球体，宿主必须保留（对话面板还要用）');
+  } finally {
+    app.close();
+  }
+});
+
+test('隐藏过的用户：刷新页面后悬浮球不再注入（偏好读回的通路）', async () => {
+  const app = await boot({ local: { 'recallflow.fab.hidden.v1': { hidden: true } } });
+  try {
+    await waitFor(() => !app.fab(), '隐藏过的用户初始不应注入悬浮球');
+    assert.ok(app.host(), '偏好只影响球体，宿主仍在');
+  } finally {
+    app.close();
+  }
+});
+
+test('fab:show 消息：被隐藏的悬浮球重新出现，隐藏偏好清掉', async () => {
+  const app = await boot({ local: { 'recallflow.fab.hidden.v1': { hidden: true } } });
+  try {
+    await waitFor(() => !app.fab(), '前提：悬浮球已被隐藏偏好摘掉');
+    const replies = globalThis.chrome._emitMessage({ type: 'fab:show' }, { frameId: 0 });
+    assert.ok(Array.isArray(replies), 'fab:show 必须真的投递到内容脚本的监听器');
+    await waitFor(app.fab, 'fab:show 后悬浮球必须回来');
+    const saved = globalThis.chrome.storage.local._dump()['recallflow.fab.hidden.v1'];
+    assert.ok(saved && saved.hidden === false, '找回必须清掉隐藏偏好（否则刷新后球又没了）');
+  } finally {
+    app.close();
+  }
+});
+
+// ---- 嵌入态：嵌在页面里面作为分栏（默认小比例、可调整大小、可切回浮层）----
+
+test('面板「嵌入」模式：整列贴右 + 页面正文右缩，切回「浮层」时还原', async () => {
+  const app = await boot();
+  try {
+    app.shortcut();
+    const panel = await waitFor(app.panel, '打开面板');
+    const modeBtn = await waitFor(() => panel.querySelector('.p-head .mode-btn'), '「嵌入/浮层」切换按钮');
+    assert.equal(String(modeBtn.textContent || ''), '嵌入', '浮层里按钮应显示可切换的目标「嵌入」');
+    modeBtn.emit('click', {});
+    assert.ok(panel.classList.contains('embedded'), '嵌入态必须有 .embedded 类');
+    assert.equal(String(panel.style.getPropertyValue('top') || ''), '', '嵌入态位置交给 CSS，不能写内联 top');
+    assert.ok(!panel.classList.contains('docked'), '嵌入态不是 docked 浮层');
+    const margin = app.dom.document.body.style.getPropertyValue('margin-right');
+    assert.equal(margin, Math.round(1200 * 0.3) + 'px', '页面正文必须右缩同等宽度（「嵌在页面里」的关键，默认比例 0.3）');
+    const width = parseInt(String(panel.style.getPropertyValue('width') || ''), 10);
+    assert.ok(width >= 280, '嵌入宽度不能小于最小列宽 280');
+    assert.ok(width <= Math.round(1200 * 0.6) + 1, '嵌入宽度不能超过 0.6 倍视口');
+    modeBtn.emit('click', {});
+    assert.ok(!panel.classList.contains('embedded'), '切回浮层后 .embedded 必须移除');
+    assert.ok(panel.classList.contains('docked'), '切回浮层应回到停靠形态');
+    assert.equal(
+      String(app.dom.document.body.style.getPropertyValue('margin-right') || ''),
+      '',
+      '切回浮层时页面边距必须还原'
+    );
+    assert.equal(String(modeBtn.textContent || ''), '嵌入', '按钮文案应始终显示切换目标');
+  } finally {
+    app.close();
+  }
+});
+
+test('嵌入态记忆：关面板再开仍回到嵌入态，比例跟存档走', async () => {
+  const app = await boot();
+  try {
+    app.shortcut();
+    const panel = await waitFor(app.panel, '第一次打开面板');
+    panel.querySelector('.p-head .mode-btn').emit('click', {});
+    await waitFor(() => {
+      const rec = globalThis.chrome.storage.local._dump()['recallflow.panel.layout.v1'];
+      return rec && rec.mode === 'embedded';
+    }, '嵌入态必须落盘 mode=embedded');
+    const rec = globalThis.chrome.storage.local._dump()['recallflow.panel.layout.v1'];
+    assert.ok(rec.ratio > 0 && rec.ratio <= 0.6, 'ratio 必须落在 (0, 0.6]');
+    panel.querySelector('.p-head .close').emit('click', {});
+    assert.equal(app.panel(), null, '前提：面板已关');
+    // 快捷键有 250ms 去抖：第一次打开距今若不足 250ms，第二次按键会被吞掉
+    await new Promise((r) => setTimeout(r, 300));
+    app.shortcut();
+    const reopened = await waitFor(app.panel, '第二次打开面板');
+    assert.ok(reopened.classList.contains('embedded'), '存档是嵌入态时，重开必须回到嵌入态');
+  } finally {
+    app.close();
+  }
+});
+
+test('嵌入态拉伸：左缘手柄只改宽度（比例记忆更新），右缘钉住', async () => {
+  const app = await boot();
+  try {
+    app.shortcut();
+    const panel = await waitFor(app.panel, '打开面板');
+    panel.querySelector('.p-head .mode-btn').emit('click', {});
+    const handle = await waitFor(() => panel.querySelector('.resize-handle.left'), '嵌入态左缘手柄');
+    const before = parseInt(String(panel.style.getPropertyValue('width') || ''), 10);
+    // 向左拖 60px：嵌入列变宽。注意：桩的 offsetWidth 固定 320（不随 style.width
+    // 变化），生产公式是 origWidth - dw —— 期望值按桩语义推导，但"手柄驱动宽度、
+    // 边距跟随、比例落盘、不转自由定位"这些行为断言与真实浏览器一致。
+    const origWidth = panel.offsetWidth;
+    const dw = 0 - 60;
+    const expected = Math.max(280, Math.min(Math.round(1200 * 0.6), origWidth - dw));
+    handle.emit('mousedown', { clientX: 60, clientY: 100, button: 0 });
+    app.dom.document.emit('mousemove', { clientX: 0, clientY: 100 });
+    app.dom.document.emit('mouseup', {});
+    const after = parseInt(String(panel.style.getPropertyValue('width') || ''), 10);
+    assert.equal(after, expected, '左缘手柄向左拖必须加宽（比例公式：origWidth - dw，夹在 [280, 0.6·vw]）');
+    assert.ok(after > before, '嵌入列确实变宽了');
+    assert.equal(
+      app.dom.document.body.style.getPropertyValue('margin-right'),
+      after + 'px',
+      '页面边距必须跟着新宽度走'
+    );
+    await waitFor(() => {
+      const rec = globalThis.chrome.storage.local._dump()['recallflow.panel.layout.v1'];
+      return rec && rec.ratio != null && Math.abs(rec.ratio - after / 1200) < 0.001;
+    }, '拉伸后的比例必须落盘');
+    assert.ok(!panel.classList.contains('floating') && !panel.classList.contains('docked'), '拉伸不能把面板转成自由定位');
   } finally {
     app.close();
   }

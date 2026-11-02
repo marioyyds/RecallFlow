@@ -13,9 +13,11 @@ import assert from 'node:assert/strict';
 
 import { PANEL_CSS } from '../lib/ui/page/panel-css.ts';
 
-/** 取出某个选择器的规则体（要求 `{` 紧跟选择器，故 `.panel.dark` 不会误配 `.panel`）。 */
+/** 取出某个选择器的规则体（要求 `{` 紧跟选择器，故 `.panel.dark` 不会误配 `.panel`；
+ *  且选择器必须从行首/前一条规则结束后开始 —— 否则 `.panel.embedded .resize-handle`
+ *  这类后代规则会被误当成 `.resize-handle` 本体）。 */
 function ruleBody(selector) {
-  const m = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(PANEL_CSS);
+  const m = new RegExp('(?:^|[}\\n]\\s*)' + selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(PANEL_CSS);
   return m ? m[1] : null;
 }
 

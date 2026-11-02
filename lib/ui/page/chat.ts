@@ -85,8 +85,12 @@ import {
   clampPanelIntoView,
   clampPanelAnchoredIntoView,
   panelAnchoredOffsets,
+  clampEmbeddedRatio,
   loadGlobalPanelLayout,
+  PANEL_EMBEDDED_DEFAULT_RATIO,
+  PANEL_EMBEDDED_MAX_RATIO,
   PANEL_LAYOUT_STORAGE_KEY,
+  PANEL_MIN_WIDTH,
   readPanelLayout,
   readGlobalPanelLayout,
   saveGlobalPanelLayout,
@@ -186,6 +190,15 @@ let panelTextEl: any = null;
 let fab: any = null;
 let fabDragState: any = null;
 let fabSuppressClickUntil = 0;
+// ---- 嵌入态（embedded）：面板「嵌在页面里的一栏」 ----
+// mode=false 为普通浮层（盖在页面上方）；true 为嵌入态：整列贴右缘、高度占满
+// 布局视口、宽度=PANEL_EMBEDDED_* 比例 × 布局视口，页面正文同步右缩同等宽度。
+// 这是模块内状态；跨会话 / 跨标签页记忆由布局存档的 mode/ratio 字段负责。
+let panelEmbeddedMode = false;
+let panelEmbeddedRatio = PANEL_EMBEDDED_DEFAULT_RATIO;
+// 嵌入态给页面留边距时挂的元素与其原 margin-right（面板关闭 / 退出嵌入态时还原）。
+let embeddedMarginTarget: HTMLElement | null = null;
+let embeddedMarginPrev = '';
 let lastShortcutToggleAt = 0;
 let panelTitleEl: any = null;
 let panelSessionMenuEl: any = null;
@@ -390,13 +403,27 @@ function ensureHost() {
   style.textContent = PANEL_CSS;
   shadow.appendChild(style);
 
+  createFabElement();
+  // 「隐藏悬浮球」偏好：右键退出过的用户不再注入球体（面板仍可经弹窗「助手」/ Alt+Shift+R 打开）。
+  loadFabHiddenPreference();
+
+  document.documentElement.appendChild(host);
+}
+
+/**
+ * 构建悬浮球（球体 + 图标 + 全部事件）。从 ensureHost 抽出来：
+ * 除了首次注入，「右键 → 隐藏悬浮球」之后想找回（弹窗「悬浮球」按钮 → fab:show 消息）
+ * 也要重建球体 —— 让两条路径共用同一段代码，避免两份事件接线漂移。
+ */
+function createFabElement() {
+  if (!shadow) return;
   fab = document.createElement('button');
   fab.className = 'fab';
   const fabIcon = document.createElement('img');
   fabIcon.src = extUrl('docs/assets/recallflow-mark.svg');
   fabIcon.alt = '';
   fab.appendChild(fabIcon);
-  fab.title = 'RecallFlow（Alt+Shift+R 打开/关闭，可上下拖动）';
+  fab.title = 'RecallFlow（Alt+Shift+R 打开/关闭，可上下拖动；右键可隐藏）';
   fab.setAttribute('aria-label', '打开 RecallFlow，快捷键 Alt+Shift+R');
   fab.addEventListener('click', (e: any) => {
     e.preventDefault();
@@ -456,13 +483,208 @@ function ensureHost() {
     e.stopPropagation();
     moveFabBy(e.key === 'ArrowUp' ? -16 : 16);
   });
+  // 右键 = 隐藏入口（用户报的 bug：右键悬浮球只会弹宿主页面自己的默认菜单，
+  // 全文件此前没有任何 contextmenu 监听，悬浮球没有任何退出途径）。
+  // preventDefault 挡掉页面默认菜单，弹自己的小菜单：「打开面板 / 隐藏悬浮球」。
+  // 隐藏写入扩展存储（所有标签页经 storage.onChanged 一起消失），
+  // 找回经弹窗的「悬浮球」按钮（fab:show 消息）。
+  fab.addEventListener('contextmenu', (e: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openFabMenu();
+  });
   shadow.appendChild(fab);
   // 面板此时必然是关的 ⇒ 一开始就是收起态（只露出一条边）。
   fabPeek.apply();
   applySavedFabPosition();
   loadFabPosition();
+}
 
-  document.documentElement.appendChild(host);
+// ---- 悬浮球右键菜单（打开面板 / 隐藏悬浮球）与「隐藏」偏好 ----
+//
+// 右键菜单一问一答地落在同一个 shadow root 里：`.fab-menu`（样式见 panel-css）。
+// 「隐藏」与 FAB 位置一样走扩展存储（recallflow.fab.hidden.v1）：扩展存储不按网页
+// origin 隻离、也不会被网站自己的 localStorage 清理影响，且 onChanged 能让
+// 所有标签页一起消失 / 一起回来。
+const FAB_HIDDEN_KEY = 'recallflow.fab.hidden.v1';
+let fabMenuEl: any = null;
+
+function removeFabMenu() {
+  if (!fabMenuEl) return;
+  try { document.removeEventListener('pointerdown', onFabMenuOutside, true); } catch (e: any) {}
+  fabMenuEl.remove();
+  fabMenuEl = null;
+}
+
+function onFabMenuOutside(e: any) {
+  if (!fabMenuEl) return;
+  // composedPath 判定才能正确穿透 shadow root：点到菜单自身（含球）不关闭。
+  const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+  if (path.includes(fabMenuEl)) return;
+  removeFabMenu();
+}
+
+function openFabMenu() {
+  if (!shadow) return;
+  removeFabMenu();
+  fabMenuEl = document.createElement('div');
+  fabMenuEl.className = 'fab-menu' + (themeController.preferred() === 'dark' ? ' dark' : '');
+  const items: Array<[string, string, () => void]> = [
+    ['打开面板', '', () => { removeFabMenu(); togglePanel(); }],
+    ['隐藏悬浮球', 'danger', () => { removeFabMenu(); exitFab(); }],
+  ];
+  for (const [label, cls, action] of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    if (cls) btn.className = cls;
+    btn.addEventListener('click', (e: any) => {
+      e.preventDefault();
+      e.stopPropagation();
+      action();
+    });
+    fabMenuEl.appendChild(btn);
+  }
+  shadow.appendChild(fabMenuEl);
+  // 摆在球左侧：球贴右缘，菜单向左展开，不会伸出视口右边界。
+  try {
+    const fabRect = fab ? fab.getBoundingClientRect() : null;
+    if (fabRect && fabMenuEl) {
+      const left = Math.max(4, fabRect.left - fabMenuEl.offsetWidth - 6);
+      fabMenuEl.style.left = left + 'px';
+      fabMenuEl.style.top = Math.max(4, fabRect.top) + 'px';
+    }
+  } catch (e: any) {}
+  // 点外面关闭（捕获阶段，先于页面自己的处理器；球上的右键已 stopPropagation，
+  // 不会误关菜单）。
+  document.addEventListener('pointerdown', onFabMenuOutside, true);
+}
+
+/** 右键「隐藏悬浮球」：写偏好 + 摘掉球体。所有标签页经 storage.onChanged 一起消失。 */
+function exitFab() {
+  removeFabMenu();
+  try {
+    chrome.storage.local.set({ [FAB_HIDDEN_KEY]: { hidden: true, updatedAt: Date.now() } });
+  } catch (e: any) {}
+  removeFabElement();
+}
+
+function removeFabElement() {
+  if (fab) {
+    fab.remove();
+    fab = null;
+  }
+  fabPeek.setHovered(false);
+  fabPeek.setFocused(false);
+  fabPeek.setDragging(false);
+}
+
+/** 初始化 / 宿主重建时读「隐藏」偏好：隐藏过的用户不再注入悬浮球。 */
+function loadFabHiddenPreference() {
+  try {
+    chrome.storage.local.get([FAB_HIDDEN_KEY], (r: any) => {
+      const entry = r && r[FAB_HIDDEN_KEY];
+      if (!entry || entry.hidden !== true) return;
+      removeFabElement();
+    });
+  } catch (e: any) {}
+}
+
+/** 弹窗「悬浮球」按钮（fab:show 消息）：清掉隐藏偏好并把球装回来。 */
+function showFabFromRemote() {
+  try {
+    chrome.storage.local.set({ [FAB_HIDDEN_KEY]: { hidden: false, updatedAt: Date.now() } }, () => {
+      // set 完成后再重建：ensureHost 里的 loadFabHiddenPreference 读到的已是「不隐藏」。
+      ensureHost();
+      if (!fab) createFabElement();
+      removeFabMenu();
+    });
+  } catch (e: any) {}
+}
+
+// ---- 嵌入态：摆放、页面边距、模式切换 ----
+//
+// 嵌入态与浮层的分界：浮层的位置（left/top 或 right/bottom）由 JS 逐轴写内联值；
+// 嵌入态的位置全部交给 CSS（.panel.embedded 的 top/right/bottom 0），JS 只写宽度
+// （= 比例 × 布局视口），并给页面正文同步右缩同等宽度 —— 这是「嵌在页面里面」
+// 与浮层的本质区别：页面内容会收窄，不会从面板底下穿过。
+
+/** 给页面正文留出与面板同宽的右边距（页面内容收窄）；关闭 / 退出嵌入态时还原。 */
+function applyEmbeddedPageMargin(width: number) {
+  if (typeof document === 'undefined') return;
+  const el: HTMLElement | null = document.body || document.documentElement;
+  if (!el) return;
+  if (embeddedMarginTarget !== el) {
+    // 挂载目标变了（SPA 整页换 body）：先还原上一次的，再记住新的原值。
+    removeEmbeddedPageMargin();
+    embeddedMarginTarget = el;
+    embeddedMarginPrev = el.style.getPropertyValue('margin-right');
+  }
+  el.style.setProperty('margin-right', width + 'px');
+}
+
+/** 还原页面正文边距（只在面板关闭或退出嵌入态时调用；幂等）。 */
+function removeEmbeddedPageMargin() {
+  const el = embeddedMarginTarget;
+  embeddedMarginTarget = null;
+  if (!el) return;
+  if (embeddedMarginPrev) el.style.setProperty('margin-right', embeddedMarginPrev);
+  else el.style.removeProperty('margin-right');
+  embeddedMarginPrev = '';
+}
+
+/** 嵌入态摆放：贴右整列、高度占满、宽度=比例×布局视口，并给页面同步收窄。
+ *  内联定位值全部清掉（内联会覆盖样式表），让 .panel.embedded 的 CSS 生效。 */
+function applyEmbeddedLayout() {
+  if (!panel) return;
+  panel.classList.remove('docked');
+  panel.classList.add('embedded');
+  for (const prop of ['left', 'top', 'right', 'bottom', 'height']) {
+    panel.style.removeProperty(prop);
+  }
+  const vw = panelViewport().width || 0;
+  const width = Math.max(PANEL_MIN_WIDTH, Math.round(vw * panelEmbeddedRatio));
+  panel.style.width = width + 'px';
+  panel._manualPos = false;
+  panel._manualSize = false;
+  if (panelBody) {
+    // 内容驱动的高度在嵌入态会顶掉整列布局：还原正文为 flex 自行滚动。
+    panelBody.style.flex = '';
+    panelBody.style.height = 'auto';
+    panelBody.style.overflowY = 'auto';
+  }
+  applyEmbeddedPageMargin(width);
+}
+
+/** 「嵌入 / 浮层」模式切换（p-head 的 mode-btn）。两个方向都回写布局存档。 */
+function togglePanelEmbeddedMode() {
+  if (!panel) return;
+  if (panel.classList.contains('embedded')) {
+    // 嵌入 → 浮层：还原页面边距，回到停靠默认位（右缘、默认间距）。
+    panel.classList.remove('embedded');
+    removeEmbeddedPageMargin();
+    panelEmbeddedMode = false;
+    const placement = resolvePanelPlacement({
+      docked: true,
+      viewport: panelViewport(),
+      size: { width: panel.offsetWidth, height: panel.offsetHeight },
+      dockGap: getDockGap(),
+    });
+    applyPanelPlacement(placement);
+  } else {
+    panelEmbeddedMode = true;
+    applyEmbeddedLayout();
+  }
+  syncEmbeddedModeButton();
+  void persistPanelLayoutNow({ size: false });
+  fitPanelHeight();
+}
+
+/** 更新 p-head 模式按钮的文案（嵌入态显示「浮层」= 回浮层的动作，反之亦然）。 */
+function syncEmbeddedModeButton() {
+  if (!panel) return;
+  const btn = panel.querySelector('.p-head .mode-btn');
+  if (btn) btn.textContent = panel.classList.contains('embedded') ? '浮层' : '嵌入';
 }
 
 /**
@@ -483,6 +705,9 @@ function resetDetachedHostState() {
     document.removeEventListener('keydown', panelKeyHandler, true);
     panelKeyHandler = null;
   }
+  // 嵌入态宿主被 SPA 换掉：页面正文边距也要还原（旧 body 已被丢弃，但引用必须清）。
+  panelEmbeddedMode = false;
+  removeEmbeddedPageMargin();
   panel = null;
   panelBody = null;
   panelCmdInput = null;
@@ -651,6 +876,10 @@ function removePanel(options?: any) {
   if (panel) {
     // 布局在拖动/缩放结束、窗口夹取和打开时已经写入全局存储。关闭本身不再回写：
     // 全局关闭会同时关闭所有标签页，旧标签页若在这里落盘，会用旧布局覆盖刚编辑的布局。
+    // 嵌入态面板关掉时先还原页面正文边距，页面立刻恢复原宽。
+    const wasEmbedded = panel.classList.contains('embedded');
+    panelEmbeddedMode = false;
+    if (wasEmbedded) removeEmbeddedPageMargin();
     panel.remove();
     panel = null;
     panelBody = null;
@@ -805,6 +1034,9 @@ export function fitPanelHeight() {
   const wasPinned = isPinnedForFollow();
   // 用户调整过窗口尺寸后，严格尊重用户配置，不再覆盖高度。
   if (panel._manualSize) return;
+  // 嵌入态高度由 CSS（top/bottom 0 + 正文 flex:1）占满整列；
+  // 内容驱动的高度会顶掉整列布局，宽度比例才是嵌入态要记的。
+  if (panel.classList.contains('embedded')) return;
 
   // ---- 快路径：面板已经饱和且 chrome 没变时，整次重排的结论与上一次一字不差 ----
   //
@@ -1046,6 +1278,19 @@ function persistPanelLayoutNow(opts?: any): Promise<any> {
   if (!panel) return Promise.resolve(null);
   // 面板脱离文档时 offset 全是 0：此时写盘会把用户存的尺寸覆盖成 0×0（见 resetDetachedHostState）。
   if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
+  if (panel.classList.contains('embedded')) {
+    // 嵌入态：位置由 CSS（top/right/bottom 0）决定，没有可写的坐标；
+    // 只记住宽度比例（ratio），浮层坐标字段全清 —— 否则下次按旧坐标还原浮层。
+    return queuePanelLayoutWrite({
+      docked: false,
+      manualPos: false,
+      mode: 'embedded',
+      ratio: panelEmbeddedRatio,
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+      writeSize: false,
+    });
+  }
   const r = panel.getBoundingClientRect();
   const docked = panel.classList.contains('docked');
   const manualPos = docked ? Boolean(panel._manualPos) : true;
@@ -1087,6 +1332,9 @@ function persistPanelLayoutNow(opts?: any): Promise<any> {
     docked,
     // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
     manualPos,
+    // 浮层要显式落 mode:'overlay'：否则存档里残留的 mode:'embedded' 会让下一次
+    // 打开重新进入嵌入态（用户已经退回了浮层）。
+    mode: 'overlay',
     // 只拖动（没拉伸过）时不要把自动高度固化成用户尺寸；否则重开会把拖动瞬间的
     // 内容高度当成手动尺寸，内容一变面板顶部就跟着漂。
     writeSize: opts && opts.size === false ? false : panel._manualSize === true,
@@ -1124,6 +1372,22 @@ function applyPanelPlacement(placement: any) {
 function applyGlobalPanelLayoutChange(value: unknown) {
   if (!panel) return;
   const layout = readGlobalPanelLayout(value);
+  if (layout.mode === 'embedded') {
+    // 另一个标签页转入了嵌入态：本页跟随（整列贴右 + 页面收窄）；
+    // 宽度比例一并同步，各窗口按自己的布局视口 × 共享比例取宽。
+    panelEmbeddedMode = true;
+    if (layout.ratio != null) panelEmbeddedRatio = clampEmbeddedRatio(layout.ratio);
+    applyEmbeddedLayout();
+    syncEmbeddedModeButton();
+    return;
+  }
+  if (panel.classList.contains('embedded')) {
+    // 另一个标签页转回了浮层：本页跟着退出嵌入态（还原页面正文边距）。
+    panelEmbeddedMode = false;
+    panel.classList.remove('embedded');
+    removeEmbeddedPageMargin();
+    syncEmbeddedModeButton();
+  }
   const viewport = panelViewport();
   const savedSize = clampPanelSize(layout as any, viewport);
   if (savedSize) {
@@ -1172,6 +1436,11 @@ function installPanelLayoutSync() {
 function clampPanelToViewport() {
   if (!panel) return;
   if (!panel.offsetWidth || !panel.offsetHeight) return;
+  if (panel.classList.contains('embedded')) {
+    // 嵌入态宽度 = 比例 × 布局视口，恒在视口内；且位置交给 .panel.embedded 的 CSS，
+    // 写内联坐标会顶掉 top/right/bottom 0，整列布局就散了。
+    return;
+  }
   const vp = panelViewport();
   const vw = vp.width;
   const vh = vp.height;
@@ -3042,6 +3311,15 @@ function createPanelWithLayout(
     panel.style.height = savedSize.height + 'px';
     panel._manualSize = true;
   }
+  // 嵌入态（上次关面板时是嵌入）：整列贴右、页面收窄、宽度按比例。
+  // 划词气泡打开的浮层不进入嵌入态 —— 气泡语义是「在选区旁边问」，整列会盖住选区；
+  // 恢复（restore）/ FAB / 快捷键路径跟随存档。
+  if (dockedIntent !== false && layout && layout.mode === 'embedded') {
+    panelEmbeddedMode = true;
+    panelEmbeddedRatio = clampEmbeddedRatio(layout.ratio != null ? layout.ratio : PANEL_EMBEDDED_DEFAULT_RATIO);
+  } else {
+    panelEmbeddedMode = false;
+  }
 
   const head = document.createElement('div');
   head.className = 'p-head';
@@ -3132,12 +3410,25 @@ function createPanelWithLayout(
   themeController.button.className = 'theme';
   themeController.button.addEventListener('click', () => themeController.cycle());
   themeController.apply();
+  // 「嵌入 / 浮层」模式切换：嵌入态 = 嵌在页面里的一栏（右缘整列 + 页面收窄）；
+  // 浮层 = 盖在页面上方（既有形态）。文案显示的是**点击后进入**的模式。
+  const modeBtn = document.createElement('button');
+  modeBtn.type = 'button';
+  modeBtn.className = 'mode-btn';
+  modeBtn.title = '在「嵌入页面」与「浮层」之间切换';
+  modeBtn.textContent = panelEmbeddedMode ? '浮层' : '嵌入';
+  modeBtn.addEventListener('click', (e: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePanelEmbeddedMode();
+  });
   head.appendChild(logo);
   head.appendChild(title);
   head.appendChild(usageChip);
   head.appendChild(panelSessionBtnEl);
   head.appendChild(handoffBtn);
   head.appendChild(themeController.button);
+  head.appendChild(modeBtn);
   head.appendChild(close);
   panel.appendChild(head);
   shadow.addEventListener('mousedown', (e: any) => {
@@ -3670,6 +3961,20 @@ function createPanelWithLayout(
   const startResize = (e: any, origin: any) => {
     e.preventDefault();
     e.stopPropagation();
+    if (panel.classList.contains('embedded')) {
+      // 嵌入态拉伸：只改宽度（左缘手柄，其余手柄在嵌入态已 display:none），
+      // 右缘钉住；不转自由定位 —— 转 left/top 内联会顶掉 top/bottom 0，整列高度就散了。
+      // 拖拽期间关掉宽度过渡，否则每帧都在追赶动画。
+      resizeState = {
+        startX: e.clientX,
+        startY: e.clientY,
+        origWidth: panel.offsetWidth,
+        origHeight: panel.offsetHeight,
+        origin,
+      };
+      panel.style.transition = 'none';
+      return;
+    }
     panel._manualSize = true;
     // 拉伸统一转自由定位：固定当前 left/top，避免 docked 底部锚点（bottom）在拉伸中
     // 与 top 混合导致面板底部“复位/跳动”。之后用 left/top/width/height 精确定位并 clamp。
@@ -3695,16 +4000,21 @@ function createPanelWithLayout(
 
   // 摆放：**所有**打开路径都走同一条规则（以前只有 docked 分支读存档，划词气泡
   // 直接按鼠标点摆，于是「从气泡打开的面板位置和关掉时不一样」）。存档里有手动位置
-  // 就用它，否则停靠默认位 / 鼠标点。
-  const placement = resolvePanelPlacement({
-    layout,
-    docked: dockedIntent,
-    point: { x, y },
-    viewport: panelViewport(),
-    size: { width: panel.offsetWidth, height: panel.offsetHeight },
-    dockGap: getDockGap(),
-  });
-  applyPanelPlacement(placement);
+  // 就用它，否则停靠默认位 / 鼠标点。嵌入态例外：位置交给 CSS（贴右整列），只定宽度。
+  let placement: any = null;
+  if (panelEmbeddedMode) {
+    applyEmbeddedLayout();
+  } else {
+    placement = resolvePanelPlacement({
+      layout,
+      docked: dockedIntent,
+      point: { x, y },
+      viewport: panelViewport(),
+      size: { width: panel.offsetWidth, height: panel.offsetHeight },
+      dockGap: getDockGap(),
+    });
+    applyPanelPlacement(placement);
+  }
 
   // 打开即落盘（只写位置，不写刚算出的自动高度）：
   // ① 用户拖过之后即使页面被 SPA 整棵换掉、扩展被重载、标签页崩溃，下次打开也回到原位；
@@ -3712,17 +4022,30 @@ function createPanelWithLayout(
   //    否则重开只能靠 CSS 默认值，窗口一变位置就跟着变。
   // ⚠ 这里**直接用 placement 的数值**，不回读 rect：宿主刚被 SPA 重挂时 rect 可能还是 0,0，
   //   回读会把刚恢复的位置就地写成 0,0（实测复现）。
-  void queuePanelLayoutWrite({
-    docked: placement.docked,
-    manualPos: placement.manualPos,
-    left: placement.left,
-    top: placement.top,
-    right: placement.right,
-    bottom: placement.bottom,
-    width: panel.offsetWidth,
-    height: panel.offsetHeight,
-    writeSize: false,
-  });
+  if (panelEmbeddedMode) {
+    // 嵌入态：坐标由 CSS（top/right/bottom 0）决定，只记 mode + 宽度比例。
+    void queuePanelLayoutWrite({
+      docked: false,
+      manualPos: false,
+      mode: 'embedded',
+      ratio: panelEmbeddedRatio,
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+      writeSize: false,
+    });
+  } else {
+    void queuePanelLayoutWrite({
+      docked: placement.docked,
+      manualPos: placement.manualPos,
+      left: placement.left,
+      top: placement.top,
+      right: placement.right,
+      bottom: placement.bottom,
+      width: panel.offsetWidth,
+      height: panel.offsetHeight,
+      writeSize: false,
+    });
+  }
 
   function endStream() {
     // 先丢弃仍在排队的流式渲染：下面的重置会把 pendingContentEl / pendingNarration
@@ -4767,6 +5090,8 @@ function createPanelWithLayout(
   // 拖拽
   head.addEventListener('mousedown', (e: any) => {
     if (e.target.closest('button')) return;
+    // 嵌入态整列钉在右缘（top/right/bottom 0）：拖拽要写 left/top 内联，会顶掉整列布局。
+    if (panel.classList.contains('embedded')) return;
     // 用视口坐标作起点，脱离 dock 底停靠（bottom）后立即固定到当前位置，保证后续平移基准正确。
     dragState = {
       startX: e.clientX,
@@ -4972,6 +5297,11 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
     // 窗口缩小后，用户手动摆放的面板可能大半个身子在视口外 —— 立刻夹回来并落盘，
     // 而不是等下一次打开才发现位置不对。
     clampPanelToViewport();
+    // 嵌入态：宽度 = 比例 × 视口，窗口变化后要重算，页面边距一并跟上。
+    if (panel && panel.classList.contains('embedded')) {
+      applyEmbeddedLayout();
+      persistPanelLayoutNow({ size: false });
+    }
     if (panel && panel._manualPos) persistPanelLayoutNow({ size: false });
   });
 
@@ -5023,6 +5353,18 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
     } else if (resizeState && panel) {
       const dw = e.clientX - resizeState.startX;
       const dh = e.clientY - resizeState.startY;
+      // 嵌入态拉伸：只改宽度（比例）与页面边距，右缘钉住；left/top/bottom 全交给 CSS。
+      if (panel.classList.contains('embedded')) {
+        const vp = panelViewport();
+        const maxEmbeddedW = Math.max(PANEL_MIN_WIDTH, Math.round(vp.width * PANEL_EMBEDDED_MAX_RATIO));
+        const w = Math.max(PANEL_MIN_WIDTH, Math.min(maxEmbeddedW, resizeState.origWidth - dw));
+        panelEmbeddedRatio = clampEmbeddedRatio(w / (vp.width || 1));
+        const width = Math.round(vp.width * panelEmbeddedRatio);
+        panel.style.width = width + 'px';
+        applyEmbeddedPageMargin(width);
+        persistPanelLayoutThrottled();
+        return;
+      }
       const minW = 280, minH = 320;
       const vp = panelViewport();
       const maxW = Math.max(minW, vp.width - 24);
@@ -5063,6 +5405,8 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
     // 拖拽/拉伸结束：立即持久化最终布局。
     if (dragState || resizeState) {
       if (layoutTimer) { clearTimeout(layoutTimer); layoutTimer = null; }
+      // 嵌入态拉伸结束：恢复宽度过渡（拖拽期间被 startResize 关掉了）。
+      if (panel && panel.classList.contains('embedded')) panel.style.transition = '';
       persistPanelLayoutNow();
     }
     dragState = null;
@@ -5100,6 +5444,18 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== 'local' || !changes) return;
       if (changes.aiSettings) refreshApiKeyBanner();
+      // 「隐藏悬浮球」偏好（右键 → 隐藏 / 弹窗 → 找回）跨标签页同步：
+      // 一个标签页隐藏，所有标签页的球一起消失；找回时一起回来。
+      if (changes[FAB_HIDDEN_KEY]) {
+        const hiddenEntry: any = changes[FAB_HIDDEN_KEY].newValue;
+        if (hiddenEntry && hiddenEntry.hidden === true) {
+          removeFabMenu();
+          removeFabElement();
+        } else if (hiddenEntry && hiddenEntry.hidden === false && !fab) {
+          ensureHost();
+          if (!fab) createFabElement();
+        }
+      }
       if (!changes[FAB_POSITION_KEY]) return;
       const next: any = changes[FAB_POSITION_KEY].newValue;
       const ratio = normalizeFabRatio(next && next.ratio);
@@ -5127,6 +5483,9 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
         handleRemotePanelSessions(msg).catch(() => {});
       } else if (msg.type === 'panel:ui-changed') {
         panelVisibility.apply(msg).catch(() => {});
+      } else if (msg.type === 'fab:show') {
+        // 弹窗「悬浮球」按钮：找回被右键隐藏的悬浮球。
+        showFabFromRemote();
       } else if (msg.type === 'run:started') {
         handleRunStarted(msg);
       } else if (msg.type === 'run:delta') {

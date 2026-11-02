@@ -1061,6 +1061,30 @@ $("open-assistant").addEventListener("click", async () => {
     toast("\u65E0\u6CD5\u6253\u5F00\u52A9\u624B\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
   }
 });
+var showFabBtn = $("show-fab");
+if (showFabBtn) showFabBtn.addEventListener("click", async () => {
+  try {
+    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
+    let tab = activeTab;
+    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
+      const tabs = await tabsPort.query({ currentWindow: true });
+      tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
+    }
+    if (!tab || !tab.url || !isOperableUrl(tab.url) || !tab.id) {
+      toast("\u8BF7\u5148\u6253\u5F00\u4E00\u4E2A\u7F51\u9875");
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: "fab:show" }, () => {
+      if (chrome.runtime.lastError) toast("\u65E0\u6CD5\u663E\u793A\u60AC\u6D6E\u7403\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
+      else {
+        toast("\u60AC\u6D6E\u7403\u5DF2\u663E\u793A");
+        setTimeout(() => window.close(), 500);
+      }
+    });
+  } catch (e) {
+    toast("\u65E0\u6CD5\u663E\u793A\u60AC\u6D6E\u7403\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
+  }
+});
 knowledge.subscribe(() => {
   renderList();
 });

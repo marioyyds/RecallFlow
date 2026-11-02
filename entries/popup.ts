@@ -437,6 +437,33 @@ $('open-assistant').addEventListener('click', async () => {
   }
 });
 
+// 「悬浮球」：找回被右键隐藏的悬浮球（content 端 fab:show）。
+// 走 tabs.sendMessage 直达当前网页 —— 与「助手」不同，这里不需要经后台中转。
+const showFabBtn = $('show-fab');
+if (showFabBtn) showFabBtn.addEventListener('click', async () => {
+  try {
+    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
+    let tab: TabSummary | undefined = activeTab;
+    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
+      const tabs = await tabsPort.query({ currentWindow: true });
+      tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
+    }
+    if (!tab || !tab.url || !isOperableUrl(tab.url) || !tab.id) {
+      toast('请先打开一个网页');
+      return;
+    }
+    chrome.tabs.sendMessage(tab.id, { type: 'fab:show' }, () => {
+      if (chrome.runtime.lastError) toast('无法显示悬浮球，请刷新页面后重试');
+      else {
+        toast('悬浮球已显示');
+        setTimeout(() => window.close(), 500);
+      }
+    });
+  } catch (e) {
+    toast('无法显示悬浮球，请刷新页面后重试');
+  }
+});
+
 knowledge.subscribe(() => {
   renderList();
 });

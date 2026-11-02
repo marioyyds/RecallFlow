@@ -45,6 +45,24 @@ export const PANEL_CSS = `
     }
     .panel.docked { max-height: calc(100vh - 24px); }
     @media (max-width: 640px) { .panel.docked { max-height: calc(100vh - 24px); } }
+    /* 嵌入态（embedded）：面板不再是浮层，而是「嵌在页面里的一栏」——
+       整列贴右缘、高度占满布局视口，宽度由 JS 按比例（panel-layout 的 PANEL_EMBEDDED_*）设置；
+       页面正文同步右缩同样宽度，内容不会从面板底下穿过。
+       位置（top/right/bottom）全部交给这段 CSS，JS 不写内联值（内联值会覆盖样式表）。
+       ⚠ 必须排在 .panel.docked 之后：两者同为两段类名选择器，后者声明在前。 */
+    .panel.embedded {
+      top: 0; right: 0; bottom: 0;
+      height: auto; max-height: none; max-width: none;
+      border-radius: 0;
+      border-left: 1px solid #e2e5ea;
+      box-shadow: -10px 0 28px rgba(0,0,0,.18);
+      animation: none;
+      transition: width .16s ease;
+    }
+    .panel.dark.embedded { border-left-color: #3a3f46; }
+    /* 嵌入态只有左缘可以拉伸（宽度=分栏比例），高度恒占满整列，其余手柄没有意义。 */
+    .panel.embedded .resize-handle { display: none; }
+    .panel.embedded .resize-handle.left { display: block; }
     .resize-handle {
       position: absolute; right: 0; bottom: 0;
       width: 18px; height: 18px; cursor: nwse-resize;
@@ -76,6 +94,10 @@ export const PANEL_CSS = `
     .panel.dark .p-head .title { color: #e3e5e8; }
     .p-head .usage { font-size: 11px; color: #98a0aa; margin-left: auto; margin-right: 6px; white-space: nowrap; }
     .p-head .close { border: none; background: none; color: #6b7280; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; min-width: 32px; min-height: 32px; }
+    .p-head .mode-btn { border: none; background: none; color: #55606e; font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+    .p-head .mode-btn:hover { background: #e8ecf2; }
+    .panel.dark .p-head .mode-btn { color: #b6bcc6; }
+    .panel.dark .p-head .mode-btn:hover { background: #333a44; }
     .p-head .close:hover { color: #e74c3c; background: rgba(0,0,0,.05); }
 /* 交接标识芯片：点一下把本次会话打包并复制可直接粘给 AI 的指令 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
@@ -401,6 +423,28 @@ export const PANEL_CSS = `
       .fab.peek { right: 16px; }
     }
     @media (hover: none) and (max-width: 600px) { .fab.peek { right: 12px; } }
+    /* 悬浮球右键菜单（打开面板 / 隐藏悬浮球）：挂在球所在的同一个 shadow root 里，
+       position:fixed 相对视口，摆在球左侧（球贴右缘，菜单向左展开）。
+       没有这个菜单时右键只会弹宿主页面自己的默认菜单 —— 悬浮球没有任何退出途径。 */
+    .fab-menu {
+      position: fixed; z-index: 2147483647;
+      display: flex; flex-direction: column; gap: 2px;
+      background: #fff; border: 1px solid #e2e5ea; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      padding: 6px; animation: kb-pop .12s ease;
+    }
+    .fab-menu button {
+      border: none; background: none; text-align: left; font-family: inherit;
+      font-size: 13px; color: #333; padding: 7px 12px; border-radius: 6px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .fab-menu button:hover { background: #f0f4f8; }
+    .fab-menu button.danger { color: #c0392b; }
+    .fab-menu button.danger:hover { background: #fdeeec; }
+    .fab-menu.dark { background: #26292e; border-color: #3a3f46; }
+    .fab-menu.dark button { color: #e3e5e8; }
+    .fab-menu.dark button:hover { background: #333a44; }
+    .fab-menu.dark button.danger { color: #ff8a80; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
     }

@@ -72,7 +72,7 @@ test('writePanelLayout：writeSize=false 只更新位置，不把自动高度当
 
 test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，不抛', () => {
   const broken = memoryStorage({ [PANEL_POS_KEY]: '{not json', [PANEL_SIZE_KEY]: '{"width":"x"}' });
-  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false });
+  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, mode: null, ratio: null, hasPos: false });
   assert.equal(readPanelLayout(null).hasPos, false);
 
   const partial = memoryStorage({ [PANEL_POS_KEY]: JSON.stringify({ left: 50, top: 60 }) });
@@ -84,7 +84,8 @@ test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，�
 test('readPanelLayout：读回 writePanelLayout 写的内容（往返一致）', () => {
   const s = memoryStorage();
   writePanelLayout(s, { width: 410, height: 520, left: 120, top: 90, docked: false, manualPos: true });
-  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, right: null, bottom: null, docked: false, hasPos: true });
+  // 网页级旧协议不落 mode/ratio（只有全局记录才带），读回来恒为 null。
+  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, right: null, bottom: null, docked: false, mode: null, ratio: null, hasPos: true });
 });
 
 test('全局布局：位置和尺寸写在同一个扩展存储记录里', async () => {
@@ -97,7 +98,7 @@ test('全局布局：位置和尺寸写在同一个扩展存储记录里', async
     docked: true,
     manualPos: true,
   });
-  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, right: null, bottom: null, docked: true, hasPos: true });
+  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, right: null, bottom: null, docked: true, mode: null, ratio: null, hasPos: true });
   assert.deepEqual(storage._dump(PANEL_LAYOUT_STORAGE_KEY), {
     version: PANEL_LAYOUT_VERSION,
     docked: true,
@@ -107,6 +108,8 @@ test('全局布局：位置和尺寸写在同一个扩展存储记录里', async
     bottom: null,
     width: 430,
     height: 510,
+    mode: null,
+    ratio: null,
   });
   assert.deepEqual(await loadGlobalPanelLayout(storage), saved);
 });
@@ -138,6 +141,8 @@ test('全局布局：只更新位置时保留已有用户尺寸', async () => {
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 });
@@ -156,6 +161,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
   assert.deepEqual(readGlobalPanelLayout(storage._dump(PANEL_LAYOUT_STORAGE_KEY)), {
@@ -166,6 +173,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 
@@ -178,6 +187,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 });

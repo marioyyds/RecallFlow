@@ -73,7 +73,14 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // 2026-10-31: contenteditable readback now derives logical block text instead
 // of trusting innerText's rendered margins. Measured 502657 bytes (491KB);
 // raise by 2KB. No new dependency.
-export const SIZE_BUDGET_BYTES = 492 * 1024;
+// 2026-10-31: two features land together. FAB context menu (right-click exit:
+// menu with open-panel / hide, hidden preference in chrome.storage.local with
+// cross-tab restore via fab:show) plus the embedded panel mode (.panel.embedded:
+// full-height right column, page body narrowed by the same margin, width =
+// ratio × layout viewport clamped to [0.2, 0.6] with default 0.3, resizable via
+// the left-edge handle, persisted as mode/ratio in the layout record). Measured
+// 516642 bytes (505KB); raise by 14KB. No new dependency or duplicated module.
+export const SIZE_BUDGET_BYTES = 506 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

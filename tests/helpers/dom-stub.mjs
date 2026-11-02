@@ -46,6 +46,34 @@ class Style {
   set cssText(v) { this._cssText = String(v == null ? '' : v); }
 }
 
+/**
+ * Style 实例包一层 Proxy：`style.width = '360px'` 这类**直接属性赋值**与
+ * `setProperty` 落在同一张表（真实 DOM 里两者等价）。页面代码两条形式都在用
+ * （applyPanelPlacement 直接赋值 left/top，applyEmbeddedPageMargin 用 setProperty），
+ * 桩不打通的话，getPropertyValue 读回的永远是空串 —— 测试只能断言到 NaN。
+ * 其余成员（方法/cssText 访问器）原样转发。其余 DOM 对象仍坚持显式成员、不用 Proxy。
+ */
+function createStyle() {
+  const style = new Style();
+  return new Proxy(style, {
+    get(target, prop) {
+      if (prop in target) {
+        const v = target[prop];
+        return typeof v === 'function' ? v.bind(target) : v;
+      }
+      return target._props.has(String(prop)) ? target._props.get(String(prop)) : undefined;
+    },
+    set(target, prop, value) {
+      if (prop in target) {
+        target[prop] = value;
+        return true;
+      }
+      target._props.set(String(prop), String(value == null ? '' : value));
+      return true;
+    },
+  });
+}
+
 /** 事件目标的最小实现：记录监听器，并提供"派发"给测试用。 */
 class EventTargetish {
   constructor() { this._listeners = new Map(); }
@@ -246,7 +274,7 @@ class Element extends EventTargetish {
     this.nodeType = 1;
     this.childNodes = [];
     this.parentNode = null;
-    this.style = new Style();
+    this.style = createStyle();
     this._classes = new Set();
     this.classList = new ClassList(this);
     this.dataset = {};
