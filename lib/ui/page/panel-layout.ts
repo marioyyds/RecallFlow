@@ -37,11 +37,16 @@ export const PANEL_MIN_HEIGHT = 320;
 // 与 CSS 的 `max-width: calc(100vw - 24px)` / `max-height: calc(100vh - 24px)` 同一个口径。
 export const PANEL_VIEWPORT_INSET = 24;
 export const PANEL_LAYOUT_VERSION = 2;
-// 嵌入态（embedded）宽度 = 布局视口宽度 × ratio：默认「小一点」（占 30%），
-// 允许用户调整的范围 [0.2, 0.6]。
-export const PANEL_EMBEDDED_DEFAULT_RATIO = 0.3;
+// 嵌入态（embedded）宽度 = 布局视口宽度 × ratio：默认「小一点」（占 35%），
+// 允许用户调整的范围 [0.2, 0.9]。
+//
+// 上限从 0.6 放宽到 0.9：用户反馈「嵌入框的对话窗太小、还不能调」——原来是拖到
+// 60% 就顶死，1280 视口下最多 768px，而对话区还要再扣掉内边距和滚动条。
+// 上限必须留一点余量（0.9 而不是 1.0），否则面板会顶掉整页、连「切回浮层」的
+// 头部按钮都还留在面板上，但页面完全没有可读区了。
+export const PANEL_EMBEDDED_DEFAULT_RATIO = 0.35;
 export const PANEL_EMBEDDED_MIN_RATIO = 0.2;
-export const PANEL_EMBEDDED_MAX_RATIO = 0.6;
+export const PANEL_EMBEDDED_MAX_RATIO = 0.9;
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
@@ -74,7 +79,7 @@ export function clampPanelSize(size: { width?: number; height?: number } | null 
   };
 }
 
-/** 嵌入态宽度比例：非法值回落默认 0.3，合法值夹到 [PANEL_EMBEDDED_MIN_RATIO, PANEL_EMBEDDED_MAX_RATIO]。 */
+/** 嵌入态宽度比例：非法值回落默认 0.35，合法值夹到 [PANEL_EMBEDDED_MIN_RATIO, PANEL_EMBEDDED_MAX_RATIO]。 */
 export function clampEmbeddedRatio(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return PANEL_EMBEDDED_DEFAULT_RATIO;

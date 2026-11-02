@@ -5716,7 +5716,22 @@
     .panel.dark.embedded { border-left-color: #3a3f46; }
     /* \u5D4C\u5165\u6001\u53EA\u6709\u5DE6\u7F18\u53EF\u4EE5\u62C9\u4F38\uFF08\u5BBD\u5EA6=\u5206\u680F\u6BD4\u4F8B\uFF09\uFF0C\u9AD8\u5EA6\u6052\u5360\u6EE1\u6574\u5217\uFF0C\u5176\u4F59\u624B\u67C4\u6CA1\u6709\u610F\u4E49\u3002 */
     .panel.embedded .resize-handle { display: none; }
-    .panel.embedded .resize-handle.left { display: block; }
+    /* \u5D4C\u5165\u6001\u552F\u4E00\u7684\u7F29\u653E\u5165\u53E3\u5C31\u662F\u5DE6\u7F18\uFF1A\u5FC5\u987B\u8BA9\u5B83**\u770B\u5F97\u89C1**\u3002
+       \u539F\u6765\u8FD9\u91CC\u662F\u4E00\u6761 10px \u5BBD\u7684\u900F\u660E\u70ED\u533A \u2014\u2014 \u754C\u9762\u4E0A\u6CA1\u6709\u4EFB\u4F55\u63D0\u793A\uFF0C\u7528\u6237\u53EA\u4F1A\u89C9\u5F97
+       \u300C\u8FD9\u4E2A\u680F\u600E\u4E48\u8C03\u90FD\u4E0D\u52A8\u300D\uFF08\u53CD\u9988\u539F\u8BDD\uFF1A\u5BF9\u8BDD\u7A97\u592A\u5C0F\u3001\u8FD8\u4E0D\u80FD\u8C03\u8282\uFF09\u3002
+       \u73B0\u5728\u5E38\u9A7B\u4E00\u6761\u7AD6\u5411\u6293\u624B\uFF0Chover / \u62D6\u52A8\u65F6\u53D8\u5F3A\u8C03\u8272\u3002 */
+    .panel.embedded .resize-handle.left { display: block; width: 12px; }
+    .panel.embedded .resize-handle.left::after {
+      display: block; content: '';
+      left: 4px; top: 50%; right: auto; bottom: auto;
+      transform: translateY(-50%);
+      width: 4px; height: 44px; border: 0; border-radius: 999px;
+      background: #c0c4cc; opacity: .8;
+      transition: background .15s, opacity .15s;
+    }
+    .panel.embedded .resize-handle.left:hover::after,
+    .panel.embedded .resize-handle.left:active::after { background: #4a90d9; opacity: 1; }
+    .panel.dark.embedded .resize-handle.left::after { background: #6b7480; }
     .resize-handle {
       position: absolute; right: 0; bottom: 0;
       width: 18px; height: 18px; cursor: nwse-resize;
@@ -5735,10 +5750,29 @@
       width: 9px; height: 9px;
       border-right: 2px solid #c0c4cc; border-bottom: 2px solid #c0c4cc;
       border-radius: 0 0 3px 0;
-      transition: border-color .15s;
-      opacity: 0;
+      transition: border-color .15s, opacity .15s;
+      /* \u6293\u63E1\u70B9\u5FC5\u987B\u5E38\u9A7B\u53EF\u89C1\u3002\u65E9\u671F\u7248\u672C\u662F opacity:0\uFF0C\u800C hover \u65F6\u53C8\u628A\u8FB9\u6846\u6539\u6210
+         transparent \u2014\u2014 \u7B49\u4E8E\u4ECE\u5934\u5230\u5C3E\u6CA1\u6709\u4EFB\u4F55\u89C6\u89C9\u63D0\u793A\uFF0C\u7528\u6237\u53EA\u80FD\u76F2\u731C\u8FB9\u7F18\u80FD\u62D6\u3002
+         \u8FD9\u5C31\u662F\u300C\u6574\u4E2A\u7A97\u53E3\u5927\u5C0F\u4E0D\u597D\u8C03\u8282\u300D\u7684\u76F4\u63A5\u539F\u56E0\uFF08\u624B\u67C4\u5176\u5B9E\u4E00\u76F4\u80FD\u62D6\uFF09\u3002 */
+      opacity: .55;
     }
-    .resize-handle:hover::after { border-color: transparent; }
+    .resize-handle:hover::after, .resize-handle:active::after { opacity: 1; border-color: #4a90d9; }
+    .panel.dark .resize-handle::after { border-color: #6b7480; }
+    .panel.dark .resize-handle:hover::after, .panel.dark .resize-handle:active::after { border-color: #6fa8e8; }
+    /* \u5E73\u8FB9\u624B\u67C4\u4E0D\u753B\u89D2\u843D L \u5F62\uFF08L \u4F1A\u843D\u5728\u9762\u677F\u5185\u4FA7\uFF0C\u770B\u7740\u50CF\u566A\u70B9\uFF09\uFF0C
+       \u6539\u4E3A hover \u65F6\u6CBF\u8BE5\u8FB9\u753B\u4E00\u6761\u5F3A\u8C03\u7EBF\uFF0C\u660E\u786E\u544A\u8BC9\u7528\u6237\u300C\u8FD9\u6761\u8FB9\u53EF\u4EE5\u62D6\u300D\u3002 */
+    .resize-handle.top::after, .resize-handle.bottom::after,
+    .resize-handle.left::after, .resize-handle.right::after { display: none; }
+    .resize-handle.top::before, .resize-handle.bottom::before,
+    .resize-handle.left::before, .resize-handle.right::before {
+      content: ''; position: absolute; background: #4a90d9; opacity: 0;
+      transition: opacity .15s; border-radius: 2px;
+    }
+    .resize-handle.top::before { left: 24%; right: 24%; top: 2px; height: 2px; }
+    .resize-handle.bottom::before { left: 24%; right: 24%; bottom: 2px; height: 2px; }
+    .resize-handle.left::before { top: 24%; bottom: 24%; left: 2px; width: 2px; }
+    .resize-handle.right::before { top: 24%; bottom: 24%; right: 2px; width: 2px; }
+    .resize-handle:hover::before, .resize-handle:active::before { opacity: .9; }
     .panel.dark { background: #26292e; }
     .p-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #f5f6f8; border-bottom: 1px solid #e2e5ea; cursor: grab; }
     .p-head:active { cursor: grabbing; }
@@ -5842,6 +5876,9 @@
     .p-body::-webkit-scrollbar-track { background: transparent; }
     .panel.dark .p-body { color: #e3e5e8; scrollbar-color: #3a3f46 transparent; }
     .panel.dark .p-body::-webkit-scrollbar-thumb { background: #3a3f46; }
+    /* \u5D4C\u5165\u6001\u6CA1\u6709\u53F3\u7F18\u624B\u67C4\uFF08\u53EA\u6709\u5DE6\u7F18\uFF09\uFF0C\u90A3\u6761\u4E3A\u624B\u67C4\u9884\u7559\u7684 10px \u53F3\u8FB9\u8DDD\u7EAF\u5C5E\u6D6A\u8D39\u5BBD\u5EA6 \u2014\u2014
+       \u5728\u672C\u6765\u5C31\u7A84\u7684\u4E00\u680F\u91CC\uFF0C\u6B63\u597D\u7B49\u4E8E\u767D\u6254 10px \u7684\u5BF9\u8BDD\u5BBD\u5EA6\u3002 */
+    .panel.embedded .p-body { margin-right: 0; }
     .panel.dark .p-body::-webkit-scrollbar-thumb:hover { background: #4a5058; }
     .p-body.loading { color: #999; }
     .panel.dark .p-body.loading { color: #9aa0a8; }
@@ -6012,6 +6049,11 @@
     .quick-prompt { flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; line-height: 1.35; cursor: pointer; white-space: normal; overflow-wrap: anywhere; text-align: left; }
     .quick-prompt:hover { background: #e5f0fb; }
     .panel.dark .quick-prompt { background: #293746; border-color: #3d5570; color: #9bc5eb; }
+    /* \u5D4C\u5165\u6001\u90A3\u4E00\u680F\u901A\u5E38\u53EA\u6709 380\u2013500px\uFF1A4 \u4E2A\u5FEB\u6377\u63D0\u793A\u4F1A\u6298\u6210\u4E24\u884C\uFF0C\u767D\u5403\u6389\u7EA6 30px \u5BF9\u8BDD\u533A\u3002
+       \u6539\u6210\u5355\u884C\u6A2A\u5411\u6EDA\u52A8\uFF0C\u9AD8\u5EA6\u7A33\u5B9A\u5728\u4E00\u884C \u2014\u2014 \u5BF9\u8BDD\u533A\u672C\u6765\u5C31\u7A84\uFF0C\u4E0D\u80FD\u8BA9\u5B83\u518D\u88AB\u6309\u94AE\u6324\u6389\u3002 */
+    .panel.embedded .quick-prompts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .panel.embedded .quick-prompts::-webkit-scrollbar { display: none; }
+    .panel.embedded .quick-prompt { flex: 0 0 auto; }
     .pick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
     .pick-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #3d6f9e; background: #eef5fd; border: 1px solid #c8d9ec; border-radius: 12px; padding: 3px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .panel.dark .pick-chip { background: #293746; border-color: #3d5570; color: #9bc5eb; }
@@ -6283,9 +6325,9 @@
   var PANEL_MIN_HEIGHT = 320;
   var PANEL_VIEWPORT_INSET = 24;
   var PANEL_LAYOUT_VERSION = 2;
-  var PANEL_EMBEDDED_DEFAULT_RATIO = 0.3;
+  var PANEL_EMBEDDED_DEFAULT_RATIO = 0.35;
   var PANEL_EMBEDDED_MIN_RATIO = 0.2;
-  var PANEL_EMBEDDED_MAX_RATIO = 0.6;
+  var PANEL_EMBEDDED_MAX_RATIO = 0.9;
   function isFiniteNumber(v) {
     return typeof v === "number" && Number.isFinite(v);
   }
@@ -7466,8 +7508,7 @@
   var fabSuppressClickUntil = 0;
   var panelEmbeddedMode = false;
   var panelEmbeddedRatio = PANEL_EMBEDDED_DEFAULT_RATIO;
-  var embeddedMarginTarget = null;
-  var embeddedMarginPrev = "";
+  var embeddedMarginApplied = [];
   var lastShortcutToggleAt = 0;
   var panelTitleEl = null;
   var panelSessionMenuEl = null;
@@ -7768,22 +7809,44 @@
   }
   function applyEmbeddedPageMargin(width) {
     if (typeof document === "undefined") return;
-    const el = document.body || document.documentElement;
-    if (!el) return;
-    if (embeddedMarginTarget !== el) {
-      removeEmbeddedPageMargin();
-      embeddedMarginTarget = el;
-      embeddedMarginPrev = el.style.getPropertyValue("margin-right");
+    const root = document.documentElement || null;
+    const body = document.body || null;
+    const primary = body && body !== root ? body : root;
+    if (!primary) return;
+    markEmbeddedMargin(primary);
+    primary.style.setProperty("margin-right", width + "px", "important");
+    const applied = embeddedMarginWidth(primary);
+    if (root && root !== primary && applied !== null && applied < width / 2) {
+      markEmbeddedMargin(root);
+      root.style.setProperty("margin-right", width + "px", "important");
     }
-    el.style.setProperty("margin-right", width + "px");
+  }
+  function embeddedMarginWidth(el) {
+    try {
+      const applied = parseFloat(getComputedStyle(el).marginRight);
+      return Number.isFinite(applied) ? applied : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function markEmbeddedMargin(el) {
+    if (embeddedMarginApplied.some((it) => it.el === el)) return;
+    embeddedMarginApplied.push({
+      el,
+      prev: el.style.getPropertyValue("margin-right"),
+      prevPriority: el.style.getPropertyPriority("margin-right")
+    });
   }
   function removeEmbeddedPageMargin() {
-    const el = embeddedMarginTarget;
-    embeddedMarginTarget = null;
-    if (!el) return;
-    if (embeddedMarginPrev) el.style.setProperty("margin-right", embeddedMarginPrev);
-    else el.style.removeProperty("margin-right");
-    embeddedMarginPrev = "";
+    const applied = embeddedMarginApplied;
+    embeddedMarginApplied = [];
+    for (const it of applied) {
+      try {
+        if (it.prev) it.el.style.setProperty("margin-right", it.prev, it.prevPriority || "");
+        else it.el.style.removeProperty("margin-right");
+      } catch (e) {
+      }
+    }
   }
   function applyEmbeddedLayout() {
     if (!panel) return;
@@ -11541,7 +11604,7 @@
         persistPanelLayoutThrottled();
       }
     });
-    document.addEventListener("mouseup", () => {
+    const endPointerGesture = () => {
       if (dragState || resizeState) {
         if (layoutTimer) {
           clearTimeout(layoutTimer);
@@ -11552,7 +11615,10 @@
       }
       dragState = null;
       resizeState = null;
-    });
+    };
+    document.addEventListener("mouseup", endPointerGesture);
+    window.addEventListener("blur", endPointerGesture);
+    window.addEventListener("pointerup", endPointerGesture);
     document.addEventListener("mouseup", (e) => {
       if (host && e.composedPath().includes(host)) return;
       const sel = window.getSelection();

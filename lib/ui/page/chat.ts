@@ -197,9 +197,12 @@ let fabSuppressClickUntil = 0;
 // 这是模块内状态；跨会话 / 跨标签页记忆由布局存档的 mode/ratio 字段负责。
 let panelEmbeddedMode = false;
 let panelEmbeddedRatio = PANEL_EMBEDDED_DEFAULT_RATIO;
-// 嵌入态给页面留边距时挂的元素与其原 margin-right（面板关闭 / 退出嵌入态时还原）。
-let embeddedMarginTarget: HTMLElement | null = null;
-let embeddedMarginPrev = '';
+// 嵌入态给页面留边距时改过的元素及其原 margin-right（面板关闭 / 退出嵌入态时还原）。
+// 记 (元素, 原值, 原优先级)：我们写的是 `!important`（页面用 `body{margin:0!important}`
+// 重置时普通内联声明会被压掉，面板就直接盖在页面上了），还原时必须把优先级也还原，
+// 否则页面原本的 `margin-right: 20px !important` 会被我们降级成普通声明。
+// 用数组是因为还可能退到 <html> 上（body 让位失效时），两个元素都要还原。
+let embeddedMarginApplied: Array<{ el: HTMLElement; prev: string; prevPriority: string }> = [];
 let lastShortcutToggleAt = 0;
 let panelTitleEl: any = null;
 let panelSessionMenuEl: any = null;
@@ -621,28 +624,63 @@ function showFabFromRemote() {
 // （= 比例 × 布局视口），并给页面正文同步右缩同等宽度 —— 这是「嵌在页面里面」
 // 与浮层的本质区别：页面内容会收窄，不会从面板底下穿过。
 
-/** 给页面正文留出与面板同宽的右边距（页面内容收窄）；关闭 / 退出嵌入态时还原。 */
+/** 给页面正文留出与面板同宽的右边距（页面内容收窄）；关闭 / 退出嵌入态时还原。
+ *
+ *  为什么写成 `!important` + 读回校验：
+ *   · 页面用 `body { margin: 0 !important }` 之类的重置时，普通内联声明会被压掉 →
+ *     正文一点都不收窄，面板直接盖在页面上（用户反馈的「某些页面嵌入框盖在页面上」）。
+ *   · 还有更狠的写法（`* { margin: 0 !important }`、`body { display: contents }`），
+ *     连 `!important` 内联也压不住/不产生盒子 → 这时退到 `<html>`：body 宽度是 auto，
+ *     父级一窄它就跟着窄，正文同样收窄。
+ *  写之前记住原值与原优先级，退出嵌入态时逐项还原（不能把页面的 important 降级）。 */
 function applyEmbeddedPageMargin(width: number) {
   if (typeof document === 'undefined') return;
-  const el: HTMLElement | null = document.body || document.documentElement;
-  if (!el) return;
-  if (embeddedMarginTarget !== el) {
-    // 挂载目标变了（SPA 整页换 body）：先还原上一次的，再记住新的原值。
-    removeEmbeddedPageMargin();
-    embeddedMarginTarget = el;
-    embeddedMarginPrev = el.style.getPropertyValue('margin-right');
+  const root: HTMLElement | null = document.documentElement || null;
+  const body: HTMLElement | null = document.body || null;
+  const primary = body && body !== root ? body : root;
+  if (!primary) return;
+  markEmbeddedMargin(primary);
+  primary.style.setProperty('margin-right', width + 'px', 'important');
+  // 只有「body 明显没让开」（读回来的右边距远小于目标，典型是被更狠的规则压掉
+  // 或 body 根本没生成盒子）才退到 <html>。**不能"没精确相等就退"** —— 那会在
+  // 已经生效的情况下再收窄一次父级，正文只剩半条。
+  const applied = embeddedMarginWidth(primary);
+  if (root && root !== primary && applied !== null && applied < width / 2) {
+    markEmbeddedMargin(root);
+    root.style.setProperty('margin-right', width + 'px', 'important');
   }
-  el.style.setProperty('margin-right', width + 'px');
+}
+
+/** 读回元素上真正生效的 margin-right（量不到返回 null，视作「不知道」）。 */
+function embeddedMarginWidth(el: HTMLElement) {
+  try {
+    const applied = parseFloat(getComputedStyle(el).marginRight);
+    return Number.isFinite(applied) ? applied : null;
+  } catch (e: any) {
+    return null;
+  }
+}
+
+/** 记录某个元素被我们改过的原 margin-right（含优先级），供还原使用。 */
+function markEmbeddedMargin(el: HTMLElement) {
+  if (embeddedMarginApplied.some((it) => it.el === el)) return;
+  embeddedMarginApplied.push({
+    el,
+    prev: el.style.getPropertyValue('margin-right'),
+    prevPriority: el.style.getPropertyPriority('margin-right'),
+  });
 }
 
 /** 还原页面正文边距（只在面板关闭或退出嵌入态时调用；幂等）。 */
 function removeEmbeddedPageMargin() {
-  const el = embeddedMarginTarget;
-  embeddedMarginTarget = null;
-  if (!el) return;
-  if (embeddedMarginPrev) el.style.setProperty('margin-right', embeddedMarginPrev);
-  else el.style.removeProperty('margin-right');
-  embeddedMarginPrev = '';
+  const applied = embeddedMarginApplied;
+  embeddedMarginApplied = [];
+  for (const it of applied) {
+    try {
+      if (it.prev) it.el.style.setProperty('margin-right', it.prev, it.prevPriority || '');
+      else it.el.style.removeProperty('margin-right');
+    } catch (e: any) {}
+  }
 }
 
 /** 嵌入态摆放：贴右整列、高度占满、宽度=比例×布局视口，并给页面同步收窄。
@@ -5461,8 +5499,11 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
       persistPanelLayoutThrottled();
     }
   });
-  document.addEventListener('mouseup', () => {
-    // 拖拽/拉伸结束：立即持久化最终布局。
+  // 结束一次拖拽 / 拉伸：持久化最终布局并把状态清干净。
+  // ⚠ 必须能在 mouseup **之外**被调用：把鼠标拖出窗口后在窗外松手（或触发 window blur）
+  //   时，`document` 上的 mouseup 收不到 —— 那时 resizeState 会一直挂着，嵌入态的
+  //   `transition: none` 也永远不恢复，下一次拉伸就没有宽度过渡动画。
+  const endPointerGesture = () => {
     if (dragState || resizeState) {
       if (layoutTimer) { clearTimeout(layoutTimer); layoutTimer = null; }
       // 嵌入态拉伸结束：恢复宽度过渡（拖拽期间被 startResize 关掉了）。
@@ -5471,7 +5512,10 @@ export function initAssistant(options: { runtime?: RuntimePort; dom?: DomPort; s
     }
     dragState = null;
     resizeState = null;
-  });
+  };
+  document.addEventListener('mouseup', endPointerGesture);
+  window.addEventListener('blur', endPointerGesture);
+  window.addEventListener('pointerup', endPointerGesture);
 
   document.addEventListener('mouseup', (e) => {
     if (host && e.composedPath().includes(host)) return;

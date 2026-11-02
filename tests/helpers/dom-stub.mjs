@@ -36,10 +36,18 @@ class ClassList {
 }
 
 class Style {
-  constructor() { this._props = new Map(); this._cssText = ''; }
-  setProperty(k, v) { this._props.set(String(k), String(v)); }
+  constructor() { this._props = new Map(); this._priorities = new Map(); this._cssText = ''; }
+  setProperty(k, v, priority) {
+    const key = String(k);
+    this._props.set(key, String(v));
+    // `!important` 也要记住：面板给页面留边距时写的是 important，退出嵌入态
+    // 必须把页面原本的优先级原样还原（否则会把页面自己的 important 悄悄降级）。
+    if (priority) this._priorities.set(key, String(priority));
+    else this._priorities.delete(key);
+  }
   getPropertyValue(k) { return this._props.get(String(k)) || ''; }
-  removeProperty(k) { this._props.delete(String(k)); }
+  getPropertyPriority(k) { return this._priorities.get(String(k)) || ''; }
+  removeProperty(k) { this._props.delete(String(k)); this._priorities.delete(String(k)); }
   // `style.cssText = '...'` 在页面代码里用得不少（一次性写整串内联样式）。
   // 不实现会静默丢掉这些样式 —— 桩不需要真的渲染，只需要不抛且留下痕迹。
   get cssText() { return this._cssText; }

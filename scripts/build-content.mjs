@@ -77,10 +77,16 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // menu with open-panel / hide, hidden preference in chrome.storage.local with
 // cross-tab restore via fab:show) plus the embedded panel mode (.panel.embedded:
 // full-height right column, page body narrowed by the same margin, width =
-// ratio × layout viewport clamped to [0.2, 0.6] with default 0.3, resizable via
-// the left-edge handle, persisted as mode/ratio in the layout record). Measured
-// 516642 bytes (505KB); raise by 14KB. No new dependency or duplicated module.
-export const SIZE_BUDGET_BYTES = 506 * 1024;
+// ratio × layout viewport, resizable via the left-edge handle, persisted as
+// mode/ratio in the layout record). Measured 516642 bytes (505KB); raise by 14KB.
+// No new dependency or duplicated module.
+// 2026-11-02: panel resize affordances became visible on every edge (grip dots /
+// hover line instead of a transparent 10px strip), the embedded column's width
+// range widened to [0.2, 0.9] with default 0.35, the narrowed page margin is now
+// written as `!important` with a read-back check plus a <html> fallback, and the
+// drag/resize teardown also runs on window blur / pointerup. Measured 523002
+// bytes (511KB); raise by 6KB. No new dependency or duplicated module.
+export const SIZE_BUDGET_BYTES = 512 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

@@ -46,7 +46,8 @@ const ROOTS = ['.'];
 // `release/` 是 `scripts/package-extension.mjs` 的打包输出（整份产物 + 解包目录），
 // 与上面同理：扫打包副本等于扫生成器，而且这份副本随时会被下一次打包覆盖。
 const SKIP =
-  /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|[\\/]release[\\/]|\.min\.js$/;
+  // 目录开头的路径（`release/...`）没有前导斜杠，所以匹配「开头或斜杠」两种边界。
+  /node_modules|[\\/]\.git[\\/]|[\\/]test-results[\\/]|[\\/]playwright-report[\\/]|[\\/]dist[\\/]|(^|[\\/])release[\\/]|\.min\.js$/;
 // 生成物（源码在 entries/ 下）；按相对路径精确排除，避免误伤未来同名源码。
 //
 // TITA-78（Batch 2）起浏览器入口也变成构建产物（`scripts/build-entries.mjs`）：

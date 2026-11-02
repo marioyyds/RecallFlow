@@ -13,6 +13,10 @@ import assert from 'node:assert/strict';
 import { installDomStub } from './helpers/dom-stub.mjs';
 import { installChrome, restoreChrome } from './helpers/chrome-stub.mjs';
 import { createChromeRuntimeAdapter } from '../lib/adapters/chrome/runtime.ts';
+import {
+  PANEL_EMBEDDED_DEFAULT_RATIO,
+  PANEL_EMBEDDED_MAX_RATIO,
+} from '../lib/ui/page/panel-layout.ts';
 
 let seq = 0;
 
@@ -280,10 +284,17 @@ test('面板「嵌入」模式：整列贴右 + 页面正文右缩，切回「�
     assert.equal(String(panel.style.getPropertyValue('top') || ''), '', '嵌入态位置交给 CSS，不能写内联 top');
     assert.ok(!panel.classList.contains('docked'), '嵌入态不是 docked 浮层');
     const margin = app.dom.document.body.style.getPropertyValue('margin-right');
-    assert.equal(margin, Math.round(1200 * 0.3) + 'px', '页面正文必须右缩同等宽度（「嵌在页面里」的关键，默认比例 0.3）');
+    assert.equal(
+      margin,
+      Math.round(1200 * PANEL_EMBEDDED_DEFAULT_RATIO) + 'px',
+      '页面正文必须右缩同等宽度（「嵌在页面里」的关键，默认比例从常量取）'
+    );
     const width = parseInt(String(panel.style.getPropertyValue('width') || ''), 10);
     assert.ok(width >= 280, '嵌入宽度不能小于最小列宽 280');
-    assert.ok(width <= Math.round(1200 * 0.6) + 1, '嵌入宽度不能超过 0.6 倍视口');
+    assert.ok(
+      width <= Math.round(1200 * PANEL_EMBEDDED_MAX_RATIO) + 1,
+      '嵌入宽度不能超过上限比例（旧上限 0.6 太紧，用户反馈「对话窗太小还不能调」）'
+    );
     modeBtn.emit('click', {});
     assert.ok(!panel.classList.contains('embedded'), '切回浮层后 .embedded 必须移除');
     assert.ok(panel.classList.contains('docked'), '切回浮层应回到停靠形态');
@@ -333,14 +344,18 @@ test('嵌入态拉伸：左缘手柄只改宽度（比例记忆更新），右�
     // 向左拖 60px：嵌入列变宽。注意：桩的 offsetWidth 固定 320（不随 style.width
     // 变化），生产公式是 origWidth - dw —— 期望值按桩语义推导，但"手柄驱动宽度、
     // 边距跟随、比例落盘、不转自由定位"这些行为断言与真实浏览器一致。
+    // 桩不做真实布局：offsetWidth 是常量 320，与面板当前的内联 width 无关。
+    // 嵌入式拉伸的公式读的是 `panel.offsetWidth`，所以这里把它对齐成真实几何
+    // （真实浏览器里 offsetWidth === 当前渲染宽度）。
+    panel.offsetWidth = before;
     const origWidth = panel.offsetWidth;
     const dw = 0 - 60;
-    const expected = Math.max(280, Math.min(Math.round(1200 * 0.6), origWidth - dw));
+    const expected = Math.max(280, Math.min(Math.round(1200 * PANEL_EMBEDDED_MAX_RATIO), origWidth - dw));
     handle.emit('mousedown', { clientX: 60, clientY: 100, button: 0 });
     app.dom.document.emit('mousemove', { clientX: 0, clientY: 100 });
     app.dom.document.emit('mouseup', {});
     const after = parseInt(String(panel.style.getPropertyValue('width') || ''), 10);
-    assert.equal(after, expected, '左缘手柄向左拖必须加宽（比例公式：origWidth - dw，夹在 [280, 0.6·vw]）');
+    assert.equal(after, expected, '左缘手柄向左拖必须加宽（比例公式：origWidth - dw，夹在 [280, maxRatio·vw]）');
     assert.ok(after > before, '嵌入列确实变宽了');
     assert.equal(
       app.dom.document.body.style.getPropertyValue('margin-right'),

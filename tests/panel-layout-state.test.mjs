@@ -26,6 +26,10 @@ import {
   loadGlobalPanelLayout,
   saveGlobalPanelLayout,
   resolvePanelPlacement,
+  PANEL_EMBEDDED_DEFAULT_RATIO,
+  PANEL_EMBEDDED_MIN_RATIO,
+  PANEL_EMBEDDED_MAX_RATIO,
+  clampEmbeddedRatio,
 } from '../lib/ui/page/panel-layout.ts';
 
 function memoryStorage(seed) {
@@ -386,4 +390,32 @@ test('shouldAutoOpenEmbeddedPanel：旧版只存位置的存档不自动开（�
     [PANEL_POS_KEY]: JSON.stringify({ left: 120, top: 90 }),
   }));
   assert.equal(shouldAutoOpenEmbeddedPanel(legacy), false);
+});
+
+// ---- 嵌入态宽度比例的边界 ----
+//
+// 起因（用户反馈）：「嵌入框的对话窗口明显太小了，还不能调节」。
+// 老上限 0.6 在 1280 视口下最多只能拉到 768px，比嵌入式侧栏该有的自由度小太多；
+// 但也不能给到 1.0 —— 整列铺满视口就等于「面板把页面吃掉了」，用户没有退路。
+
+test('嵌入态宽度比例：默认值在区间内，且上下限允许把对话区拉宽', () => {
+  assert.ok(PANEL_EMBEDDED_MIN_RATIO > 0 && PANEL_EMBEDDED_MIN_RATIO < PANEL_EMBEDDED_MAX_RATIO);
+  assert.ok(
+    PANEL_EMBEDDED_DEFAULT_RATIO >= PANEL_EMBEDDED_MIN_RATIO &&
+      PANEL_EMBEDDED_DEFAULT_RATIO <= PANEL_EMBEDDED_MAX_RATIO,
+    '默认比例必须落在 [min, max] 内，否则一打开就被 clamp 掉'
+  );
+  // 1280 视口：老上限 0.6 → 768px。现在必须能拉到更宽，同时给页面留出活路。
+  assert.ok(PANEL_EMBEDDED_MAX_RATIO > 0.6, '嵌入态宽度上限应放宽到 0.6 以上');
+  assert.ok(PANEL_EMBEDDED_MAX_RATIO < 1, '上限必须小于 1：铺满视口时页面完全没有可见区');
+});
+
+test('嵌入态宽度比例：越界回落边界，非法值回落默认', () => {
+  assert.equal(clampEmbeddedRatio(0.5), 0.5);
+  assert.equal(clampEmbeddedRatio(PANEL_EMBEDDED_MAX_RATIO + 0.5), PANEL_EMBEDDED_MAX_RATIO);
+  assert.equal(clampEmbeddedRatio(0.01), PANEL_EMBEDDED_MIN_RATIO);
+  // 0 / 负数 / NaN / 字符串垃圾都当「没有记录过」处理
+  for (const bad of [0, -1, NaN, 'abc', null, undefined, {}]) {
+    assert.equal(clampEmbeddedRatio(bad), PANEL_EMBEDDED_DEFAULT_RATIO, '非法值应回落默认：' + String(bad));
+  }
 });
