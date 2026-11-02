@@ -21,10 +21,26 @@ export function isCspEvalBlockError(message: unknown) {
   return false;
 }
 
-export function isContentScriptUnreachable(message: unknown) {
-  return /Receiving end does not exist|Could not establish connection|message port closed/i.test(
+/**
+ * 比 isContentScriptUnreachable 更窄的一族：**接收端根本不存在**。
+ *
+ * 为什么要单列：同属"连不上"的另一条
+ * `The message port closed before a response was received.` 含义完全不同 ——
+ * 那条说明监听器**收到了消息、只是没回话**（末尾 `return false` 就离开了）。对这种情况
+ * 补注入 content.js 毫无意义：注入出来的还是同一份脚本、同样不回话，唯一效果是让页面
+ * 里多执行一次脚本。只有"不存在接收端"才值得注入（见 lib/shared/tab-broadcast.ts）。
+ */
+export function isNoReceiverError(message: unknown) {
+  return /Receiving end does not exist|Could not establish connection/i.test(
     String(message === undefined || message === null ? '' : message)
   );
+}
+
+export function isContentScriptUnreachable(message: unknown) {
+  // 历史包袱：这一族把"端口关闭"也算进来（调用方多半只想问"页面还能不能对话"）。
+  // 需要区分"没送到"与"送到了没回话"的地方用 isNoReceiverError，别用地这条。
+  if (isNoReceiverError(message)) return true;
+  return /message port closed/i.test(String(message === undefined || message === null ? '' : message));
 }
 
 /**

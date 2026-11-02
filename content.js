@@ -5699,6 +5699,39 @@
     }
     .panel.docked { max-height: calc(100vh - 24px); }
     @media (max-width: 640px) { .panel.docked { max-height: calc(100vh - 24px); } }
+    /* \u5D4C\u5165\u6001\uFF08embedded\uFF09\uFF1A\u9762\u677F\u4E0D\u518D\u662F\u6D6E\u5C42\uFF0C\u800C\u662F\u300C\u5D4C\u5728\u9875\u9762\u91CC\u7684\u4E00\u680F\u300D\u2014\u2014
+       \u6574\u5217\u8D34\u53F3\u7F18\u3001\u9AD8\u5EA6\u5360\u6EE1\u5E03\u5C40\u89C6\u53E3\uFF0C\u5BBD\u5EA6\u7531 JS \u6309\u6BD4\u4F8B\uFF08panel-layout \u7684 PANEL_EMBEDDED_*\uFF09\u8BBE\u7F6E\uFF1B
+       \u9875\u9762\u6B63\u6587\u540C\u6B65\u53F3\u7F29\u540C\u6837\u5BBD\u5EA6\uFF0C\u5185\u5BB9\u4E0D\u4F1A\u4ECE\u9762\u677F\u5E95\u4E0B\u7A7F\u8FC7\u3002
+       \u4F4D\u7F6E\uFF08top/right/bottom\uFF09\u5168\u90E8\u4EA4\u7ED9\u8FD9\u6BB5 CSS\uFF0CJS \u4E0D\u5199\u5185\u8054\u503C\uFF08\u5185\u8054\u503C\u4F1A\u8986\u76D6\u6837\u5F0F\u8868\uFF09\u3002
+       \u26A0 \u5FC5\u987B\u6392\u5728 .panel.docked \u4E4B\u540E\uFF1A\u4E24\u8005\u540C\u4E3A\u4E24\u6BB5\u7C7B\u540D\u9009\u62E9\u5668\uFF0C\u540E\u8005\u58F0\u660E\u5728\u524D\u3002 */
+    .panel.embedded {
+      top: 0; right: 0; bottom: 0;
+      height: auto; max-height: none; max-width: none;
+      border-radius: 0;
+      border-left: 1px solid #e2e5ea;
+      box-shadow: -10px 0 28px rgba(0,0,0,.18);
+      animation: none;
+      transition: width .16s ease;
+    }
+    .panel.dark.embedded { border-left-color: #3a3f46; }
+    /* \u5D4C\u5165\u6001\u53EA\u6709\u5DE6\u7F18\u53EF\u4EE5\u62C9\u4F38\uFF08\u5BBD\u5EA6=\u5206\u680F\u6BD4\u4F8B\uFF09\uFF0C\u9AD8\u5EA6\u6052\u5360\u6EE1\u6574\u5217\uFF0C\u5176\u4F59\u624B\u67C4\u6CA1\u6709\u610F\u4E49\u3002 */
+    .panel.embedded .resize-handle { display: none; }
+    /* \u5D4C\u5165\u6001\u552F\u4E00\u7684\u7F29\u653E\u5165\u53E3\u5C31\u662F\u5DE6\u7F18\uFF1A\u5FC5\u987B\u8BA9\u5B83**\u770B\u5F97\u89C1**\u3002
+       \u539F\u6765\u8FD9\u91CC\u662F\u4E00\u6761 10px \u5BBD\u7684\u900F\u660E\u70ED\u533A \u2014\u2014 \u754C\u9762\u4E0A\u6CA1\u6709\u4EFB\u4F55\u63D0\u793A\uFF0C\u7528\u6237\u53EA\u4F1A\u89C9\u5F97
+       \u300C\u8FD9\u4E2A\u680F\u600E\u4E48\u8C03\u90FD\u4E0D\u52A8\u300D\uFF08\u53CD\u9988\u539F\u8BDD\uFF1A\u5BF9\u8BDD\u7A97\u592A\u5C0F\u3001\u8FD8\u4E0D\u80FD\u8C03\u8282\uFF09\u3002
+       \u73B0\u5728\u5E38\u9A7B\u4E00\u6761\u7AD6\u5411\u6293\u624B\uFF0Chover / \u62D6\u52A8\u65F6\u53D8\u5F3A\u8C03\u8272\u3002 */
+    .panel.embedded .resize-handle.left { display: block; width: 12px; }
+    .panel.embedded .resize-handle.left::after {
+      display: block; content: '';
+      left: 4px; top: 50%; right: auto; bottom: auto;
+      transform: translateY(-50%);
+      width: 4px; height: 44px; border: 0; border-radius: 999px;
+      background: #c0c4cc; opacity: .8;
+      transition: background .15s, opacity .15s;
+    }
+    .panel.embedded .resize-handle.left:hover::after,
+    .panel.embedded .resize-handle.left:active::after { background: #4a90d9; opacity: 1; }
+    .panel.dark.embedded .resize-handle.left::after { background: #6b7480; }
     .resize-handle {
       position: absolute; right: 0; bottom: 0;
       width: 18px; height: 18px; cursor: nwse-resize;
@@ -5717,10 +5750,29 @@
       width: 9px; height: 9px;
       border-right: 2px solid #c0c4cc; border-bottom: 2px solid #c0c4cc;
       border-radius: 0 0 3px 0;
-      transition: border-color .15s;
-      opacity: 0;
+      transition: border-color .15s, opacity .15s;
+      /* \u6293\u63E1\u70B9\u5FC5\u987B\u5E38\u9A7B\u53EF\u89C1\u3002\u65E9\u671F\u7248\u672C\u662F opacity:0\uFF0C\u800C hover \u65F6\u53C8\u628A\u8FB9\u6846\u6539\u6210
+         transparent \u2014\u2014 \u7B49\u4E8E\u4ECE\u5934\u5230\u5C3E\u6CA1\u6709\u4EFB\u4F55\u89C6\u89C9\u63D0\u793A\uFF0C\u7528\u6237\u53EA\u80FD\u76F2\u731C\u8FB9\u7F18\u80FD\u62D6\u3002
+         \u8FD9\u5C31\u662F\u300C\u6574\u4E2A\u7A97\u53E3\u5927\u5C0F\u4E0D\u597D\u8C03\u8282\u300D\u7684\u76F4\u63A5\u539F\u56E0\uFF08\u624B\u67C4\u5176\u5B9E\u4E00\u76F4\u80FD\u62D6\uFF09\u3002 */
+      opacity: .55;
     }
-    .resize-handle:hover::after { border-color: transparent; }
+    .resize-handle:hover::after, .resize-handle:active::after { opacity: 1; border-color: #4a90d9; }
+    .panel.dark .resize-handle::after { border-color: #6b7480; }
+    .panel.dark .resize-handle:hover::after, .panel.dark .resize-handle:active::after { border-color: #6fa8e8; }
+    /* \u5E73\u8FB9\u624B\u67C4\u4E0D\u753B\u89D2\u843D L \u5F62\uFF08L \u4F1A\u843D\u5728\u9762\u677F\u5185\u4FA7\uFF0C\u770B\u7740\u50CF\u566A\u70B9\uFF09\uFF0C
+       \u6539\u4E3A hover \u65F6\u6CBF\u8BE5\u8FB9\u753B\u4E00\u6761\u5F3A\u8C03\u7EBF\uFF0C\u660E\u786E\u544A\u8BC9\u7528\u6237\u300C\u8FD9\u6761\u8FB9\u53EF\u4EE5\u62D6\u300D\u3002 */
+    .resize-handle.top::after, .resize-handle.bottom::after,
+    .resize-handle.left::after, .resize-handle.right::after { display: none; }
+    .resize-handle.top::before, .resize-handle.bottom::before,
+    .resize-handle.left::before, .resize-handle.right::before {
+      content: ''; position: absolute; background: #4a90d9; opacity: 0;
+      transition: opacity .15s; border-radius: 2px;
+    }
+    .resize-handle.top::before { left: 24%; right: 24%; top: 2px; height: 2px; }
+    .resize-handle.bottom::before { left: 24%; right: 24%; bottom: 2px; height: 2px; }
+    .resize-handle.left::before { top: 24%; bottom: 24%; left: 2px; width: 2px; }
+    .resize-handle.right::before { top: 24%; bottom: 24%; right: 2px; width: 2px; }
+    .resize-handle:hover::before, .resize-handle:active::before { opacity: .9; }
     .panel.dark { background: #26292e; }
     .p-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #f5f6f8; border-bottom: 1px solid #e2e5ea; cursor: grab; }
     .p-head:active { cursor: grabbing; }
@@ -5730,6 +5782,10 @@
     .panel.dark .p-head .title { color: #e3e5e8; }
     .p-head .usage { font-size: 11px; color: #98a0aa; margin-left: auto; margin-right: 6px; white-space: nowrap; }
     .p-head .close { border: none; background: none; color: #6b7280; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; min-width: 32px; min-height: 32px; }
+    .p-head .mode-btn { border: none; background: none; color: #55606e; font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+    .p-head .mode-btn:hover { background: #e8ecf2; }
+    .panel.dark .p-head .mode-btn { color: #b6bcc6; }
+    .panel.dark .p-head .mode-btn:hover { background: #333a44; }
     .p-head .close:hover { color: #e74c3c; background: rgba(0,0,0,.05); }
 /* \u4EA4\u63A5\u6807\u8BC6\u82AF\u7247\uFF1A\u70B9\u4E00\u4E0B\u628A\u672C\u6B21\u4F1A\u8BDD\u6253\u5305\u5E76\u590D\u5236\u53EF\u76F4\u63A5\u7C98\u7ED9 AI \u7684\u6307\u4EE4 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
@@ -5820,6 +5876,9 @@
     .p-body::-webkit-scrollbar-track { background: transparent; }
     .panel.dark .p-body { color: #e3e5e8; scrollbar-color: #3a3f46 transparent; }
     .panel.dark .p-body::-webkit-scrollbar-thumb { background: #3a3f46; }
+    /* \u5D4C\u5165\u6001\u6CA1\u6709\u53F3\u7F18\u624B\u67C4\uFF08\u53EA\u6709\u5DE6\u7F18\uFF09\uFF0C\u90A3\u6761\u4E3A\u624B\u67C4\u9884\u7559\u7684 10px \u53F3\u8FB9\u8DDD\u7EAF\u5C5E\u6D6A\u8D39\u5BBD\u5EA6 \u2014\u2014
+       \u5728\u672C\u6765\u5C31\u7A84\u7684\u4E00\u680F\u91CC\uFF0C\u6B63\u597D\u7B49\u4E8E\u767D\u6254 10px \u7684\u5BF9\u8BDD\u5BBD\u5EA6\u3002 */
+    .panel.embedded .p-body { margin-right: 0; }
     .panel.dark .p-body::-webkit-scrollbar-thumb:hover { background: #4a5058; }
     .p-body.loading { color: #999; }
     .panel.dark .p-body.loading { color: #9aa0a8; }
@@ -5990,6 +6049,11 @@
     .quick-prompt { flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; line-height: 1.35; cursor: pointer; white-space: normal; overflow-wrap: anywhere; text-align: left; }
     .quick-prompt:hover { background: #e5f0fb; }
     .panel.dark .quick-prompt { background: #293746; border-color: #3d5570; color: #9bc5eb; }
+    /* \u5D4C\u5165\u6001\u90A3\u4E00\u680F\u901A\u5E38\u53EA\u6709 380\u2013500px\uFF1A4 \u4E2A\u5FEB\u6377\u63D0\u793A\u4F1A\u6298\u6210\u4E24\u884C\uFF0C\u767D\u5403\u6389\u7EA6 30px \u5BF9\u8BDD\u533A\u3002
+       \u6539\u6210\u5355\u884C\u6A2A\u5411\u6EDA\u52A8\uFF0C\u9AD8\u5EA6\u7A33\u5B9A\u5728\u4E00\u884C \u2014\u2014 \u5BF9\u8BDD\u533A\u672C\u6765\u5C31\u7A84\uFF0C\u4E0D\u80FD\u8BA9\u5B83\u518D\u88AB\u6309\u94AE\u6324\u6389\u3002 */
+    .panel.embedded .quick-prompts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .panel.embedded .quick-prompts::-webkit-scrollbar { display: none; }
+    .panel.embedded .quick-prompt { flex: 0 0 auto; }
     .pick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
     .pick-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #3d6f9e; background: #eef5fd; border: 1px solid #c8d9ec; border-radius: 12px; padding: 3px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .panel.dark .pick-chip { background: #293746; border-color: #3d5570; color: #9bc5eb; }
@@ -6055,6 +6119,28 @@
       .fab.peek { right: 16px; }
     }
     @media (hover: none) and (max-width: 600px) { .fab.peek { right: 12px; } }
+    /* \u60AC\u6D6E\u7403\u53F3\u952E\u83DC\u5355\uFF08\u6253\u5F00\u9762\u677F / \u9690\u85CF\u60AC\u6D6E\u7403\uFF09\uFF1A\u6302\u5728\u7403\u6240\u5728\u7684\u540C\u4E00\u4E2A shadow root \u91CC\uFF0C
+       position:fixed \u76F8\u5BF9\u89C6\u53E3\uFF0C\u6446\u5728\u7403\u5DE6\u4FA7\uFF08\u7403\u8D34\u53F3\u7F18\uFF0C\u83DC\u5355\u5411\u5DE6\u5C55\u5F00\uFF09\u3002
+       \u6CA1\u6709\u8FD9\u4E2A\u83DC\u5355\u65F6\u53F3\u952E\u53EA\u4F1A\u5F39\u5BBF\u4E3B\u9875\u9762\u81EA\u5DF1\u7684\u9ED8\u8BA4\u83DC\u5355 \u2014\u2014 \u60AC\u6D6E\u7403\u6CA1\u6709\u4EFB\u4F55\u9000\u51FA\u9014\u5F84\u3002 */
+    .fab-menu {
+      position: fixed; z-index: 2147483647;
+      display: flex; flex-direction: column; gap: 2px;
+      background: #fff; border: 1px solid #e2e5ea; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      padding: 6px; animation: kb-pop .12s ease;
+    }
+    .fab-menu button {
+      border: none; background: none; text-align: left; font-family: inherit;
+      font-size: 13px; color: #333; padding: 7px 12px; border-radius: 6px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .fab-menu button:hover { background: #f0f4f8; }
+    .fab-menu button.danger { color: #c0392b; }
+    .fab-menu button.danger:hover { background: #fdeeec; }
+    .fab-menu.dark { background: #26292e; border-color: #3a3f46; }
+    .fab-menu.dark button { color: #e3e5e8; }
+    .fab-menu.dark button:hover { background: #333a44; }
+    .fab-menu.dark button.danger { color: #ff8a80; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
     }
@@ -6239,6 +6325,9 @@
   var PANEL_MIN_HEIGHT = 320;
   var PANEL_VIEWPORT_INSET = 24;
   var PANEL_LAYOUT_VERSION = 2;
+  var PANEL_EMBEDDED_DEFAULT_RATIO = 0.35;
+  var PANEL_EMBEDDED_MIN_RATIO = 0.2;
+  var PANEL_EMBEDDED_MAX_RATIO = 0.9;
   function isFiniteNumber(v) {
     return typeof v === "number" && Number.isFinite(v);
   }
@@ -6260,8 +6349,13 @@
       height: Math.max(1, Math.min(vh - PANEL_VIEWPORT_INSET, Math.max(PANEL_MIN_HEIGHT, height)))
     };
   }
+  function clampEmbeddedRatio(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return PANEL_EMBEDDED_DEFAULT_RATIO;
+    return Math.min(PANEL_EMBEDDED_MAX_RATIO, Math.max(PANEL_EMBEDDED_MIN_RATIO, n));
+  }
   function emptySnapshot() {
-    return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false };
+    return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, mode: null, ratio: null, hasPos: false };
   }
   function snapshotFromParts(pos, size) {
     const out = emptySnapshot();
@@ -6277,10 +6371,12 @@
     }
     out.hasPos = (out.left != null || out.right != null) && (out.top != null || out.bottom != null);
     if (pos && typeof pos.docked === "boolean") out.docked = pos.docked;
+    if (pos && (pos.mode === "overlay" || pos.mode === "embedded")) out.mode = pos.mode;
+    if (pos && isFiniteNumber(Number(pos.ratio)) && Number(pos.ratio) > 0) out.ratio = Number(pos.ratio);
     return out;
   }
   function snapshotHasLayout(snapshot) {
-    return snapshot.hasPos || snapshot.width != null || snapshot.height != null || snapshot.docked != null;
+    return snapshot.hasPos || snapshot.width != null || snapshot.height != null || snapshot.docked != null || snapshot.mode != null || snapshot.ratio != null;
   }
   function readPanelLayout(storage) {
     if (!storage) return emptySnapshot();
@@ -6298,6 +6394,9 @@
     }
     return snapshotFromParts(pos, size);
   }
+  function shouldAutoOpenEmbeddedPanel(layout) {
+    return Boolean(layout) && Boolean(layout.mode === "embedded");
+  }
   function readGlobalPanelLayout(value) {
     if (!value || typeof value !== "object") return emptySnapshot();
     return snapshotFromParts(value, value);
@@ -6307,6 +6406,7 @@
     const s = snapshot || {};
     const width = Number(s.width);
     const height = Number(s.height);
+    const mode = s.mode === "overlay" ? "overlay" : s.mode === "embedded" ? "embedded" : null;
     const record = {
       width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
       height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
@@ -6314,7 +6414,9 @@
       top: s.manualPos === true && isFiniteNumber(s.top) ? Math.round(s.top) : null,
       right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
       bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
-      docked: s.docked === true
+      docked: s.docked === true,
+      mode,
+      ratio: isFiniteNumber(Number(s.ratio)) && Number(s.ratio) > 0 ? Math.round(Number(s.ratio) * 1e3) / 1e3 : null
     };
     try {
       if (s.writeSize !== false && record.width && record.height) {
@@ -6336,6 +6438,7 @@
     const s = snapshot || {};
     const width = Number(s.width);
     const height = Number(s.height);
+    const mode = s.mode === "overlay" ? "overlay" : s.mode === "embedded" ? "embedded" : null;
     return {
       version: PANEL_LAYOUT_VERSION,
       docked: s.docked === true,
@@ -6344,7 +6447,9 @@
       right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
       bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
       width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
-      height: Number.isFinite(height) && height > 0 ? Math.round(height) : null
+      height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+      mode,
+      ratio: isFiniteNumber(Number(s.ratio)) && Number(s.ratio) > 0 ? Math.round(Number(s.ratio) * 1e3) / 1e3 : null
     };
   }
   async function loadGlobalPanelLayout(storage, legacyStorage) {
@@ -7401,6 +7506,9 @@
   var fab = null;
   var fabDragState = null;
   var fabSuppressClickUntil = 0;
+  var panelEmbeddedMode = false;
+  var panelEmbeddedRatio = PANEL_EMBEDDED_DEFAULT_RATIO;
+  var embeddedMarginApplied = [];
   var lastShortcutToggleAt = 0;
   var panelTitleEl = null;
   var panelSessionMenuEl = null;
@@ -7417,6 +7525,7 @@
     },
     close: () => removePanel({ publish: false })
   });
+  var panelUiBootPromise = null;
   var runSession = createPanelRunSession();
   var panelSessionState = new PanelSessionState();
   var followedRun = new FollowedRunState();
@@ -7524,13 +7633,19 @@
     const style = document.createElement("style");
     style.textContent = PANEL_CSS;
     shadow.appendChild(style);
+    createFabElement();
+    loadFabHiddenPreference();
+    document.documentElement.appendChild(host);
+  }
+  function createFabElement() {
+    if (!shadow) return;
     fab = document.createElement("button");
     fab.className = "fab";
     const fabIcon = document.createElement("img");
     fabIcon.src = extUrl("docs/assets/recallflow-mark.svg");
     fabIcon.alt = "";
     fab.appendChild(fabIcon);
-    fab.title = "RecallFlow\uFF08Alt+Shift+R \u6253\u5F00/\u5173\u95ED\uFF0C\u53EF\u4E0A\u4E0B\u62D6\u52A8\uFF09";
+    fab.title = "RecallFlow\uFF08Alt+Shift+R \u6253\u5F00/\u5173\u95ED\uFF0C\u53EF\u4E0A\u4E0B\u62D6\u52A8\uFF1B\u53F3\u952E\u53EF\u9690\u85CF\uFF09";
     fab.setAttribute("aria-label", "\u6253\u5F00 RecallFlow\uFF0C\u5FEB\u6377\u952E Alt+Shift+R");
     fab.addEventListener("click", (e) => {
       e.preventDefault();
@@ -7589,11 +7704,194 @@
       e.stopPropagation();
       moveFabBy(e.key === "ArrowUp" ? -16 : 16);
     });
+    fab.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openFabMenu();
+    });
     shadow.appendChild(fab);
     fabPeek.apply();
     applySavedFabPosition();
     loadFabPosition();
-    document.documentElement.appendChild(host);
+  }
+  var FAB_HIDDEN_KEY = "recallflow.fab.hidden.v1";
+  var fabMenuEl = null;
+  function removeFabMenu() {
+    if (!fabMenuEl) return;
+    try {
+      document.removeEventListener("pointerdown", onFabMenuOutside, true);
+    } catch (e) {
+    }
+    fabMenuEl.remove();
+    fabMenuEl = null;
+  }
+  function onFabMenuOutside(e) {
+    if (!fabMenuEl) return;
+    const path = typeof e.composedPath === "function" ? e.composedPath() : [];
+    if (path.includes(fabMenuEl)) return;
+    removeFabMenu();
+  }
+  function openFabMenu() {
+    if (!shadow) return;
+    removeFabMenu();
+    fabMenuEl = document.createElement("div");
+    fabMenuEl.className = "fab-menu" + (themeController.preferred() === "dark" ? " dark" : "");
+    const items = [
+      ["\u6253\u5F00\u9762\u677F", "", () => {
+        removeFabMenu();
+        togglePanel();
+      }],
+      ["\u9690\u85CF\u60AC\u6D6E\u7403", "danger", () => {
+        removeFabMenu();
+        exitFab();
+      }]
+    ];
+    for (const [label, cls, action] of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      if (cls) btn.className = cls;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        action();
+      });
+      fabMenuEl.appendChild(btn);
+    }
+    shadow.appendChild(fabMenuEl);
+    try {
+      const fabRect = fab ? fab.getBoundingClientRect() : null;
+      if (fabRect && fabMenuEl) {
+        const left = Math.max(4, fabRect.left - fabMenuEl.offsetWidth - 6);
+        fabMenuEl.style.left = left + "px";
+        fabMenuEl.style.top = Math.max(4, fabRect.top) + "px";
+      }
+    } catch (e) {
+    }
+    document.addEventListener("pointerdown", onFabMenuOutside, true);
+  }
+  function exitFab() {
+    removeFabMenu();
+    try {
+      chrome.storage.local.set({ [FAB_HIDDEN_KEY]: { hidden: true, updatedAt: Date.now() } });
+    } catch (e) {
+    }
+    removeFabElement();
+  }
+  function removeFabElement() {
+    if (fab) {
+      fab.remove();
+      fab = null;
+    }
+    fabPeek.setHovered(false);
+    fabPeek.setFocused(false);
+    fabPeek.setDragging(false);
+  }
+  function loadFabHiddenPreference() {
+    try {
+      chrome.storage.local.get([FAB_HIDDEN_KEY], (r) => {
+        const entry = r && r[FAB_HIDDEN_KEY];
+        if (!entry || entry.hidden !== true) return;
+        removeFabElement();
+      });
+    } catch (e) {
+    }
+  }
+  function showFabFromRemote() {
+    try {
+      chrome.storage.local.set({ [FAB_HIDDEN_KEY]: { hidden: false, updatedAt: Date.now() } }, () => {
+        ensureHost();
+        if (!fab) createFabElement();
+        removeFabMenu();
+      });
+    } catch (e) {
+    }
+  }
+  function applyEmbeddedPageMargin(width) {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement || null;
+    const body = document.body || null;
+    const primary = body && body !== root ? body : root;
+    if (!primary) return;
+    markEmbeddedMargin(primary);
+    primary.style.setProperty("margin-right", width + "px", "important");
+    const applied = embeddedMarginWidth(primary);
+    if (root && root !== primary && applied !== null && applied < width / 2) {
+      markEmbeddedMargin(root);
+      root.style.setProperty("margin-right", width + "px", "important");
+    }
+  }
+  function embeddedMarginWidth(el) {
+    try {
+      const applied = parseFloat(getComputedStyle(el).marginRight);
+      return Number.isFinite(applied) ? applied : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function markEmbeddedMargin(el) {
+    if (embeddedMarginApplied.some((it) => it.el === el)) return;
+    embeddedMarginApplied.push({
+      el,
+      prev: el.style.getPropertyValue("margin-right"),
+      prevPriority: el.style.getPropertyPriority("margin-right")
+    });
+  }
+  function removeEmbeddedPageMargin() {
+    const applied = embeddedMarginApplied;
+    embeddedMarginApplied = [];
+    for (const it of applied) {
+      try {
+        if (it.prev) it.el.style.setProperty("margin-right", it.prev, it.prevPriority || "");
+        else it.el.style.removeProperty("margin-right");
+      } catch (e) {
+      }
+    }
+  }
+  function applyEmbeddedLayout() {
+    if (!panel) return;
+    panel.classList.remove("docked");
+    panel.classList.add("embedded");
+    for (const prop of ["left", "top", "right", "bottom", "height"]) {
+      panel.style.removeProperty(prop);
+    }
+    const vw = panelViewport().width || 0;
+    const width = Math.max(PANEL_MIN_WIDTH, Math.round(vw * panelEmbeddedRatio));
+    panel.style.width = width + "px";
+    panel._manualPos = false;
+    panel._manualSize = false;
+    if (panelBody) {
+      panelBody.style.flex = "";
+      panelBody.style.height = "auto";
+      panelBody.style.overflowY = "auto";
+    }
+    applyEmbeddedPageMargin(width);
+  }
+  function togglePanelEmbeddedMode() {
+    if (!panel) return;
+    if (panel.classList.contains("embedded")) {
+      panel.classList.remove("embedded");
+      removeEmbeddedPageMargin();
+      panelEmbeddedMode = false;
+      const placement = resolvePanelPlacement({
+        docked: true,
+        viewport: panelViewport(),
+        size: { width: panel.offsetWidth, height: panel.offsetHeight },
+        dockGap: getDockGap()
+      });
+      applyPanelPlacement(placement);
+    } else {
+      panelEmbeddedMode = true;
+      applyEmbeddedLayout();
+    }
+    syncEmbeddedModeButton();
+    void persistPanelLayoutNow({ size: false });
+    fitPanelHeight();
+  }
+  function syncEmbeddedModeButton() {
+    if (!panel) return;
+    const btn = panel.querySelector(".p-head .mode-btn");
+    if (btn) btn.textContent = panel.classList.contains("embedded") ? "\u6D6E\u5C42" : "\u5D4C\u5165";
   }
   function resetDetachedHostState() {
     if (streamView.picking) {
@@ -7608,6 +7906,8 @@
       document.removeEventListener("keydown", panelKeyHandler, true);
       panelKeyHandler = null;
     }
+    panelEmbeddedMode = false;
+    removeEmbeddedPageMargin();
     panel = null;
     panelBody = null;
     panelCmdInput = null;
@@ -7736,6 +8036,9 @@
     screenshotView.lightboxOpen = false;
     clearCiteHighlight();
     if (panel) {
+      const wasEmbedded = panel.classList.contains("embedded");
+      panelEmbeddedMode = false;
+      if (wasEmbedded) removeEmbeddedPageMargin();
       panel.remove();
       panel = null;
       panelBody = null;
@@ -7817,6 +8120,7 @@
     if (uiSuspended) return;
     const wasPinned = isPinnedForFollow();
     if (panel._manualSize) return;
+    if (panel.classList.contains("embedded")) return;
     const vp = panelViewport();
     const vw = vp.width;
     const vh = vp.height;
@@ -7946,6 +8250,17 @@
   function persistPanelLayoutNow(opts) {
     if (!panel) return Promise.resolve(null);
     if (!panel.offsetWidth || !panel.offsetHeight) return Promise.resolve(null);
+    if (panel.classList.contains("embedded")) {
+      return queuePanelLayoutWrite({
+        docked: false,
+        manualPos: false,
+        mode: "embedded",
+        ratio: panelEmbeddedRatio,
+        width: panel.offsetWidth,
+        height: panel.offsetHeight,
+        writeSize: false
+      });
+    }
     const r = panel.getBoundingClientRect();
     const docked = panel.classList.contains("docked");
     const manualPos = docked ? Boolean(panel._manualPos) : true;
@@ -7978,6 +8293,9 @@
       docked,
       // 浮动面板的 left/top 就是它的位置；停靠面板只有在用户拖动/拉伸过之后才算手动位置。
       manualPos,
+      // 浮层要显式落 mode:'overlay'：否则存档里残留的 mode:'embedded' 会让下一次
+      // 打开重新进入嵌入态（用户已经退回了浮层）。
+      mode: "overlay",
       // 只拖动（没拉伸过）时不要把自动高度固化成用户尺寸；否则重开会把拖动瞬间的
       // 内容高度当成手动尺寸，内容一变面板顶部就跟着漂。
       writeSize: opts && opts.size === false ? false : panel._manualSize === true
@@ -8002,6 +8320,19 @@
   function applyGlobalPanelLayoutChange(value) {
     if (!panel) return;
     const layout = readGlobalPanelLayout(value);
+    if (layout.mode === "embedded") {
+      panelEmbeddedMode = true;
+      if (layout.ratio != null) panelEmbeddedRatio = clampEmbeddedRatio(layout.ratio);
+      applyEmbeddedLayout();
+      syncEmbeddedModeButton();
+      return;
+    }
+    if (panel.classList.contains("embedded")) {
+      panelEmbeddedMode = false;
+      panel.classList.remove("embedded");
+      removeEmbeddedPageMargin();
+      syncEmbeddedModeButton();
+    }
     const viewport = panelViewport();
     const savedSize = clampPanelSize(layout, viewport);
     if (savedSize) {
@@ -8047,6 +8378,9 @@
   function clampPanelToViewport() {
     if (!panel) return;
     if (!panel.offsetWidth || !panel.offsetHeight) return;
+    if (panel.classList.contains("embedded")) {
+      return;
+    }
     const vp = panelViewport();
     const vw = vp.width;
     const vh = vp.height;
@@ -9531,6 +9865,12 @@
       panel.style.height = savedSize.height + "px";
       panel._manualSize = true;
     }
+    if (dockedIntent !== false && layout && layout.mode === "embedded") {
+      panelEmbeddedMode = true;
+      panelEmbeddedRatio = clampEmbeddedRatio(layout.ratio != null ? layout.ratio : PANEL_EMBEDDED_DEFAULT_RATIO);
+    } else {
+      panelEmbeddedMode = false;
+    }
     const head = document.createElement("div");
     head.className = "p-head";
     const logo = document.createElement("img");
@@ -9613,12 +9953,23 @@
     themeController.button.className = "theme";
     themeController.button.addEventListener("click", () => themeController.cycle());
     themeController.apply();
+    const modeBtn = document.createElement("button");
+    modeBtn.type = "button";
+    modeBtn.className = "mode-btn";
+    modeBtn.title = "\u5728\u300C\u5D4C\u5165\u9875\u9762\u300D\u4E0E\u300C\u6D6E\u5C42\u300D\u4E4B\u95F4\u5207\u6362";
+    modeBtn.textContent = panelEmbeddedMode ? "\u6D6E\u5C42" : "\u5D4C\u5165";
+    modeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePanelEmbeddedMode();
+    });
     head.appendChild(logo);
     head.appendChild(title);
     head.appendChild(usageChip);
     head.appendChild(panelSessionBtnEl);
     head.appendChild(handoffBtn);
     head.appendChild(themeController.button);
+    head.appendChild(modeBtn);
     head.appendChild(close);
     panel.appendChild(head);
     shadow.addEventListener("mousedown", (e) => {
@@ -10071,8 +10422,20 @@
     const startResize = (e, origin) => {
       e.preventDefault();
       e.stopPropagation();
+      if (panel.classList.contains("embedded")) {
+        resizeState = {
+          startX: e.clientX,
+          startY: e.clientY,
+          origWidth: panel.offsetWidth,
+          origHeight: panel.offsetHeight,
+          origin
+        };
+        panel.style.transition = "none";
+        return;
+      }
       panel._manualSize = true;
       panel._manualPos = true;
+      panel.classList.remove("docked");
       const r = panel.getBoundingClientRect();
       panel.style.right = "auto";
       panel.style.bottom = "auto";
@@ -10095,26 +10458,43 @@
       panel.appendChild(h);
     });
     shadow.appendChild(panel);
-    const placement = resolvePanelPlacement({
-      layout,
-      docked: dockedIntent,
-      point: { x, y },
-      viewport: panelViewport(),
-      size: { width: panel.offsetWidth, height: panel.offsetHeight },
-      dockGap: getDockGap()
-    });
-    applyPanelPlacement(placement);
-    void queuePanelLayoutWrite({
-      docked: placement.docked,
-      manualPos: placement.manualPos,
-      left: placement.left,
-      top: placement.top,
-      right: placement.right,
-      bottom: placement.bottom,
-      width: panel.offsetWidth,
-      height: panel.offsetHeight,
-      writeSize: false
-    });
+    let placement = null;
+    if (panelEmbeddedMode) {
+      applyEmbeddedLayout();
+    } else {
+      placement = resolvePanelPlacement({
+        layout,
+        docked: dockedIntent,
+        point: { x, y },
+        viewport: panelViewport(),
+        size: { width: panel.offsetWidth, height: panel.offsetHeight },
+        dockGap: getDockGap()
+      });
+      applyPanelPlacement(placement);
+    }
+    if (panelEmbeddedMode) {
+      void queuePanelLayoutWrite({
+        docked: false,
+        manualPos: false,
+        mode: "embedded",
+        ratio: panelEmbeddedRatio,
+        width: panel.offsetWidth,
+        height: panel.offsetHeight,
+        writeSize: false
+      });
+    } else {
+      void queuePanelLayoutWrite({
+        docked: placement.docked,
+        manualPos: placement.manualPos,
+        left: placement.left,
+        top: placement.top,
+        right: placement.right,
+        bottom: placement.bottom,
+        width: panel.offsetWidth,
+        height: panel.offsetHeight,
+        writeSize: false
+      });
+    }
     function endStream() {
       streamRender.cancel();
       cancelStreamPaintRetry();
@@ -10946,6 +11326,7 @@
     cmdInput.focus();
     head.addEventListener("mousedown", (e) => {
       if (e.target.closest("button")) return;
+      if (panel.classList.contains("embedded")) return;
       dragState = {
         startX: e.clientX,
         startY: e.clientY,
@@ -10953,6 +11334,7 @@
         origTop: panel.getBoundingClientRect().top
       };
       panel._manualPos = true;
+      panel.classList.remove("docked");
       panel.style.right = "auto";
       panel.style.bottom = "auto";
       panel.style.left = dragState.origLeft + "px";
@@ -11002,6 +11384,19 @@
     }
     return true;
   }
+  async function maybeAutoOpenEmbeddedPanel() {
+    if (panel || panelVisibility.isOpen) return;
+    if (!isExtContextAlive()) return;
+    let layout = null;
+    try {
+      layout = panelLayoutStorage ? await loadGlobalPanelLayout(panelLayoutStorage, localStorage) : readPanelLayout(localStorage);
+    } catch (e) {
+      return;
+    }
+    if (!shouldAutoOpenEmbeddedPanel(layout)) return;
+    if (panel || panelVisibility.isOpen || !isExtContextAlive()) return;
+    await openPanel(0, 0, true, true);
+  }
   function maybeResumeRunAfterReload() {
     let attempts = 0;
     const MAX_ATTEMPTS = 12;
@@ -11026,7 +11421,8 @@
             } catch (e) {
             }
             try {
-              if (panelVisibility.ready) await panelVisibility.ready;
+              if (panelUiBootPromise) await panelUiBootPromise;
+              else if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
             if (!runSession.isRunning) adoptFinishedRunSnapshot(resp.snapshot);
@@ -11038,7 +11434,8 @@
             } catch (e) {
             }
             try {
-              if (panelVisibility.ready) await panelVisibility.ready;
+              if (panelUiBootPromise) await panelUiBootPromise;
+              else if (panelVisibility.ready) await panelVisibility.ready;
             } catch (e) {
             }
             if (runSession.isRunning) return;
@@ -11060,7 +11457,7 @@
               showCitationHint("\u540E\u53F0\u8FDE\u63A5\u66FE\u4E2D\u65AD\uFF0C\u5DF2\u4ECE\u5DF2\u4FDD\u5B58\u7684\u8FDB\u5EA6\u7EE7\u7EED\u672C\u8F6E\u4EFB\u52A1\u3002");
             }
             await panelVisibility.withSuppressed(async () => {
-              openPanel(0, 0, true, true);
+              await openPanel(0, 0, true, true);
             });
             const last = panelSessionState.conversation.length ? panelSessionState.conversation[panelSessionState.conversation.length - 1] : null;
             const alreadyHas = last && last.role === "user" && String(last.content || "").trim() === String(resp.instruction).trim();
@@ -11121,6 +11518,10 @@
     window.addEventListener("resize", () => {
       if (fab) applySavedFabPosition();
       clampPanelToViewport();
+      if (panel && panel.classList.contains("embedded")) {
+        applyEmbeddedLayout();
+        persistPanelLayoutNow({ size: false });
+      }
       if (panel && panel._manualPos) persistPanelLayoutNow({ size: false });
     });
     document.addEventListener("keydown", (e) => {
@@ -11161,6 +11562,17 @@
       } else if (resizeState && panel) {
         const dw = e.clientX - resizeState.startX;
         const dh = e.clientY - resizeState.startY;
+        if (panel.classList.contains("embedded")) {
+          const vp2 = panelViewport();
+          const maxEmbeddedW = Math.max(PANEL_MIN_WIDTH, Math.round(vp2.width * PANEL_EMBEDDED_MAX_RATIO));
+          const w2 = Math.max(PANEL_MIN_WIDTH, Math.min(maxEmbeddedW, resizeState.origWidth - dw));
+          panelEmbeddedRatio = clampEmbeddedRatio(w2 / (vp2.width || 1));
+          const width = Math.round(vp2.width * panelEmbeddedRatio);
+          panel.style.width = width + "px";
+          applyEmbeddedPageMargin(width);
+          persistPanelLayoutThrottled();
+          return;
+        }
         const minW = 280, minH = 320;
         const vp = panelViewport();
         const maxW = Math.max(minW, vp.width - 24);
@@ -11192,17 +11604,21 @@
         persistPanelLayoutThrottled();
       }
     });
-    document.addEventListener("mouseup", () => {
+    const endPointerGesture = () => {
       if (dragState || resizeState) {
         if (layoutTimer) {
           clearTimeout(layoutTimer);
           layoutTimer = null;
         }
+        if (panel && panel.classList.contains("embedded")) panel.style.transition = "";
         persistPanelLayoutNow();
       }
       dragState = null;
       resizeState = null;
-    });
+    };
+    document.addEventListener("mouseup", endPointerGesture);
+    window.addEventListener("blur", endPointerGesture);
+    window.addEventListener("pointerup", endPointerGesture);
     document.addEventListener("mouseup", (e) => {
       if (host && e.composedPath().includes(host)) return;
       const sel = window.getSelection();
@@ -11231,6 +11647,16 @@
       chrome.storage.onChanged.addListener((changes, areaName) => {
         if (areaName !== "local" || !changes) return;
         if (changes.aiSettings) refreshApiKeyBanner();
+        if (changes[FAB_HIDDEN_KEY]) {
+          const hiddenEntry = changes[FAB_HIDDEN_KEY].newValue;
+          if (hiddenEntry && hiddenEntry.hidden === true) {
+            removeFabMenu();
+            removeFabElement();
+          } else if (hiddenEntry && hiddenEntry.hidden === false && !fab) {
+            ensureHost();
+            if (!fab) createFabElement();
+          }
+        }
         if (!changes[FAB_POSITION_KEY]) return;
         const next = changes[FAB_POSITION_KEY].newValue;
         const ratio = normalizeFabRatio2(next && next.ratio);
@@ -11241,7 +11667,7 @@
     } catch (e) {
     }
     try {
-      chrome.runtime.onMessage.addListener((msg) => {
+      chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if (!msg) return;
         if (msg.type === "kbPickResult") {
           if (streamView.pickUi) {
@@ -11259,6 +11685,10 @@
         } else if (msg.type === "panel:ui-changed") {
           panelVisibility.apply(msg).catch(() => {
           });
+        } else if (msg.type === "fab:show") {
+          showFabFromRemote();
+          if (typeof sendResponse === "function") sendResponse({ ok: true, handled: "fab:show" });
+          return true;
         } else if (msg.type === "run:started") {
           handleRunStarted(msg);
         } else if (msg.type === "run:delta") {
@@ -11286,7 +11716,9 @@
     ensureHost();
     watchHostKeepalive();
     conversationLoadPromise = loadConversation();
-    panelVisibility.syncOnInit();
+    panelUiBootPromise = panelVisibility.syncOnInit().catch(() => {
+    }).then(() => maybeAutoOpenEmbeddedPanel()).catch(() => {
+    });
     maybeResumeRunAfterReload();
     const kbSnippet = typeof URLSearchParams !== "undefined" && new URLSearchParams(location.search).get("kbSnippet") || "";
     if (kbSnippet) {

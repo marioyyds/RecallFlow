@@ -3312,6 +3312,32 @@ export function instructionOf(text) {
   return m ? s.slice(m.index + m[0].length) : s;
 }
 
+// **脚本化意图路由器**：剧本声明了 `eval.intent` 就照它回答，否则仍是 browser。
+//
+// 为什么不能恒返回 browser：意图判定在**产品里**是真实决策（`intent-router` 的 LLM 分类档），
+// 它决定模型能拿到哪些工具。夹具恒答 browser 等于替产品做了"这任务是页面操作"的判断，
+// 一旦剧本的真实工具集跨了意图（web-research 要点击 + 写知识库、knowledge-search 要写 + 读知识库），
+// 就会被执行期的意图闸门拒绝 —— 红的是夹具的选择，不是产品的能力。
+// 这也是 m01239 那 3 条 golden 的失败根因：脚本照剧本调工具，产品按"browser"只放行一半。
+const SCRIPTED_INTENT_DEFAULT = 'browser';
+
+export function scriptedIntentFor(instruction) {
+  const text = String(instruction || '').replace(/\s+/g, ' ').trim();
+  if (!text) return SCRIPTED_INTENT_DEFAULT;
+  // 取**被包含且最长**的那条剧本指令：有的剧本是另一条的延长版（知识库两条共享开头
+  // 「把这一页的三个要点存进知识库…」，只在后半句分叉），用前缀匹配会先撞上短的那条。
+  let best = null;
+  for (const pb of Object.values(PLAYBOOKS)) {
+    const declared = pb && pb.eval && typeof pb.eval.instruction === 'string' ? pb.eval.instruction : '';
+    if (!declared) continue;
+    const needle = declared.replace(/\s+/g, ' ').trim();
+    if (!needle || !text.includes(needle)) continue;
+    if (!best || needle.length > best.needle.length) best = { pb, needle };
+  }
+  if (!best) return SCRIPTED_INTENT_DEFAULT;
+  return (best.pb.eval && best.pb.eval.intent) || SCRIPTED_INTENT_DEFAULT;
+}
+
 async function proxyToRealModel(req, res, body, payload) {
   const upstream = await fetch(REAL_BASE.replace(/\/+$/, '') + '/chat/completions', {
     method: 'POST',
@@ -3385,8 +3411,12 @@ const llm = http.createServer((req, res) => {
 
     // 意图路由 / 校验 / 非流式
     if (isRouter || isVerifier || payload.stream === false) {
+      const routerUser = [...messages].reverse().find((m) => m.role === 'user');
+      const routerIntent = scriptedIntentFor(
+        instructionOf(routerUser && typeof routerUser.content === 'string' ? routerUser.content : '')
+      );
       const content = isRouter
-        ? '{"intent":"browser","confidence":0.95,"reason":"e2e"}'
+        ? JSON.stringify({ intent: routerIntent, confidence: 0.95, reason: 'e2e' })
         : isVerifier
           ? '{"ok":true,"confidence":0.9,"reason":"e2e"}'
           : 'ok';

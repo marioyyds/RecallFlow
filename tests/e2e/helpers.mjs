@@ -230,6 +230,9 @@ export async function launchExtension(options = {}) {
   if (options.startServers !== false) await startServers();
   const context = await chromium.launchPersistentContext(options.userDataDir || '', {
     headless: false,
+    // 可选：指定浏览器可执行文件（本机没装 Playwright 的 Chromium 时指向系统 Chrome，
+    // 如 /usr/bin/google-chrome）；不传走 Playwright 默认查找。
+    executablePath: options.executablePath,
     args: [
       `--disable-extensions-except=${EXT_PATH}`,
       `--load-extension=${EXT_PATH}`,

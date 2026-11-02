@@ -22,9 +22,14 @@ import {
   readPanelLayout,
   writePanelLayout,
   readGlobalPanelLayout,
+  shouldAutoOpenEmbeddedPanel,
   loadGlobalPanelLayout,
   saveGlobalPanelLayout,
   resolvePanelPlacement,
+  PANEL_EMBEDDED_DEFAULT_RATIO,
+  PANEL_EMBEDDED_MIN_RATIO,
+  PANEL_EMBEDDED_MAX_RATIO,
+  clampEmbeddedRatio,
 } from '../lib/ui/page/panel-layout.ts';
 
 function memoryStorage(seed) {
@@ -72,7 +77,7 @@ test('writePanelLayout：writeSize=false 只更新位置，不把自动高度当
 
 test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，不抛', () => {
   const broken = memoryStorage({ [PANEL_POS_KEY]: '{not json', [PANEL_SIZE_KEY]: '{"width":"x"}' });
-  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false });
+  assert.deepEqual(readPanelLayout(broken), { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, mode: null, ratio: null, hasPos: false });
   assert.equal(readPanelLayout(null).hasPos, false);
 
   const partial = memoryStorage({ [PANEL_POS_KEY]: JSON.stringify({ left: 50, top: 60 }) });
@@ -84,7 +89,8 @@ test('readPanelLayout：容错 —— 坏 JSON / 半截字段只丢那一段，�
 test('readPanelLayout：读回 writePanelLayout 写的内容（往返一致）', () => {
   const s = memoryStorage();
   writePanelLayout(s, { width: 410, height: 520, left: 120, top: 90, docked: false, manualPos: true });
-  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, right: null, bottom: null, docked: false, hasPos: true });
+  // 网页级旧协议不落 mode/ratio（只有全局记录才带），读回来恒为 null。
+  assert.deepEqual(readPanelLayout(s), { width: 410, height: 520, left: 120, top: 90, right: null, bottom: null, docked: false, mode: null, ratio: null, hasPos: true });
 });
 
 test('全局布局：位置和尺寸写在同一个扩展存储记录里', async () => {
@@ -97,7 +103,7 @@ test('全局布局：位置和尺寸写在同一个扩展存储记录里', async
     docked: true,
     manualPos: true,
   });
-  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, right: null, bottom: null, docked: true, hasPos: true });
+  assert.deepEqual(saved, { width: 430, height: 510, left: 310, top: 120, right: null, bottom: null, docked: true, mode: null, ratio: null, hasPos: true });
   assert.deepEqual(storage._dump(PANEL_LAYOUT_STORAGE_KEY), {
     version: PANEL_LAYOUT_VERSION,
     docked: true,
@@ -107,6 +113,8 @@ test('全局布局：位置和尺寸写在同一个扩展存储记录里', async
     bottom: null,
     width: 430,
     height: 510,
+    mode: null,
+    ratio: null,
   });
   assert.deepEqual(await loadGlobalPanelLayout(storage), saved);
 });
@@ -138,6 +146,8 @@ test('全局布局：只更新位置时保留已有用户尺寸', async () => {
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 });
@@ -156,6 +166,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
   assert.deepEqual(readGlobalPanelLayout(storage._dump(PANEL_LAYOUT_STORAGE_KEY)), {
@@ -166,6 +178,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 
@@ -178,6 +192,8 @@ test('全局布局：扩展存储为空时迁移网页旧布局，之后不再�
     right: null,
     bottom: null,
     docked: false,
+    mode: null,
+    ratio: null,
     hasPos: true,
   });
 });
@@ -349,4 +365,57 @@ test('panelAnchoredOffsets：右下角间距往返不漂移（必须用布局视
   assert.equal(placement.bottom, 0);
   // 再反算一次仍是 0（第二次开合不累加）。
   assert.deepEqual(panelAnchoredOffsets({ right: 1185, bottom: 785 }, viewport), { right: 0, bottom: 0 });
+});
+
+// ---- 新页面自动嵌入的判据 ----
+//
+// 自动开面板只能由用户先选过嵌入态触发：默认体验是「按需点悬浮球」，
+// 所以这份判据必须对「没选过 / 选了浮层 / 存档坏掉」一律返回 false。
+
+test('shouldAutoOpenEmbeddedPanel：只有存档 mode=embedded 才自动拉起嵌入层', () => {
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, mode: 'embedded', ratio: 0.3 })), true);
+});
+
+test('shouldAutoOpenEmbeddedPanel：浮层、空存档、坏数据都不自动开', () => {
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, mode: 'overlay' })), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout({ version: 2, left: 100, top: 100 })), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout(null)), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(readGlobalPanelLayout('garbage')), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(null), false);
+  assert.equal(shouldAutoOpenEmbeddedPanel(undefined), false);
+});
+
+test('shouldAutoOpenEmbeddedPanel：旧版只存位置的存档不自动开（没有嵌入概念）', () => {
+  const legacy = readPanelLayout(memoryStorage({
+    [PANEL_POS_KEY]: JSON.stringify({ left: 120, top: 90 }),
+  }));
+  assert.equal(shouldAutoOpenEmbeddedPanel(legacy), false);
+});
+
+// ---- 嵌入态宽度比例的边界 ----
+//
+// 起因（用户反馈）：「嵌入框的对话窗口明显太小了，还不能调节」。
+// 老上限 0.6 在 1280 视口下最多只能拉到 768px，比嵌入式侧栏该有的自由度小太多；
+// 但也不能给到 1.0 —— 整列铺满视口就等于「面板把页面吃掉了」，用户没有退路。
+
+test('嵌入态宽度比例：默认值在区间内，且上下限允许把对话区拉宽', () => {
+  assert.ok(PANEL_EMBEDDED_MIN_RATIO > 0 && PANEL_EMBEDDED_MIN_RATIO < PANEL_EMBEDDED_MAX_RATIO);
+  assert.ok(
+    PANEL_EMBEDDED_DEFAULT_RATIO >= PANEL_EMBEDDED_MIN_RATIO &&
+      PANEL_EMBEDDED_DEFAULT_RATIO <= PANEL_EMBEDDED_MAX_RATIO,
+    '默认比例必须落在 [min, max] 内，否则一打开就被 clamp 掉'
+  );
+  // 1280 视口：老上限 0.6 → 768px。现在必须能拉到更宽，同时给页面留出活路。
+  assert.ok(PANEL_EMBEDDED_MAX_RATIO > 0.6, '嵌入态宽度上限应放宽到 0.6 以上');
+  assert.ok(PANEL_EMBEDDED_MAX_RATIO < 1, '上限必须小于 1：铺满视口时页面完全没有可见区');
+});
+
+test('嵌入态宽度比例：越界回落边界，非法值回落默认', () => {
+  assert.equal(clampEmbeddedRatio(0.5), 0.5);
+  assert.equal(clampEmbeddedRatio(PANEL_EMBEDDED_MAX_RATIO + 0.5), PANEL_EMBEDDED_MAX_RATIO);
+  assert.equal(clampEmbeddedRatio(0.01), PANEL_EMBEDDED_MIN_RATIO);
+  // 0 / 负数 / NaN / 字符串垃圾都当「没有记录过」处理
+  for (const bad of [0, -1, NaN, 'abc', null, undefined, {}]) {
+    assert.equal(clampEmbeddedRatio(bad), PANEL_EMBEDDED_DEFAULT_RATIO, '非法值应回落默认：' + String(bad));
+  }
 });

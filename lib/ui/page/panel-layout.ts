@@ -13,12 +13,17 @@
 // 存档格式与摆放规则，而不是再对着源码做正则断言。
 //
 // 网页级旧存档协议（v2，只用于迁移）：
-//   `recallflow-panel-pos`  = { version: 2, docked: boolean, left: number|null, top: number|null }
+//   `recallflow-panel-pos`  = { version: 2, docked: boolean, left: number|null, top: number|null,
+//                               mode: 'overlay'|'embedded'|null, ratio: number|null }
 //   `recallflow-panel-size` = { version: 2, width: number, height: number }
 // 全浏览器统一布局（v2，运行时的权威来源）：
 //   `recallflow.panel.layout.v1` =
 //     { version: 2, docked: boolean, left: number|null, top: number|null,
-//       width: number|null, height: number|null }
+//       width: number|null, height: number|null,
+//       mode: 'overlay'|'embedded'|null, ratio: number|null }
+// `mode`：面板形态 —— 'overlay' 浮层（盖在页面上方）/ 'embedded' 嵌入（整列贴右缘、
+// 页面正文右缩让位）；null = 旧存档。`ratio`：嵌入态宽度占布局视口的比例（0.2–0.6），
+// 记比例而不记像素：窗口变宽窄时比例仍然成立，重开按新视口重算宽度。
 // 扩展存储不按网页 origin 隔离，也不会被网站自己的 localStorage 清理影响。
 // `left/top` 为 null 表示「自动停靠」——位置由 CSS 的 bottom/right 决定，会随视口变化；
 // 有值表示用户手动摆放过的像素位置。这样两种状态都能精确还原，不再靠 `top:auto` 猜。
@@ -32,6 +37,16 @@ export const PANEL_MIN_HEIGHT = 320;
 // 与 CSS 的 `max-width: calc(100vw - 24px)` / `max-height: calc(100vh - 24px)` 同一个口径。
 export const PANEL_VIEWPORT_INSET = 24;
 export const PANEL_LAYOUT_VERSION = 2;
+// 嵌入态（embedded）宽度 = 布局视口宽度 × ratio：默认「小一点」（占 35%），
+// 允许用户调整的范围 [0.2, 0.9]。
+//
+// 上限从 0.6 放宽到 0.9：用户反馈「嵌入框的对话窗太小、还不能调」——原来是拖到
+// 60% 就顶死，1280 视口下最多 768px，而对话区还要再扣掉内边距和滚动条。
+// 上限必须留一点余量（0.9 而不是 1.0），否则面板会顶掉整页、连「切回浮层」的
+// 头部按钮都还留在面板上，但页面完全没有可读区了。
+export const PANEL_EMBEDDED_DEFAULT_RATIO = 0.35;
+export const PANEL_EMBEDDED_MIN_RATIO = 0.2;
+export const PANEL_EMBEDDED_MAX_RATIO = 0.9;
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
@@ -64,6 +79,13 @@ export function clampPanelSize(size: { width?: number; height?: number } | null 
   };
 }
 
+/** 嵌入态宽度比例：非法值回落默认 0.35，合法值夹到 [PANEL_EMBEDDED_MIN_RATIO, PANEL_EMBEDDED_MAX_RATIO]。 */
+export function clampEmbeddedRatio(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return PANEL_EMBEDDED_DEFAULT_RATIO;
+  return Math.min(PANEL_EMBEDDED_MAX_RATIO, Math.max(PANEL_EMBEDDED_MIN_RATIO, n));
+}
+
 /**
  * 读回上次关闭时的布局。
  * 容错：任何一段 JSON 坏掉都只丢那一段，不抛；不认识的字段忽略。
@@ -76,6 +98,10 @@ export interface PanelLayoutSnapshot {
   right: number | null;
   bottom: number | null;
   docked: boolean | null;
+  /** 面板形态：'overlay' 浮层（盖在页面上方）/ 'embedded' 嵌入（整列贴右、页面收窄）；null = 旧存档。 */
+  mode: 'overlay' | 'embedded' | null;
+  /** 嵌入态宽度占布局视口的比例（0.2–0.6）。 */
+  ratio: number | null;
   hasPos: boolean;
 }
 
@@ -95,7 +121,7 @@ export interface PanelLayoutStorage {
 /** 读档的初始形态：所有字段都还没值。抽成函数是为了让返回类型一次说清，
  *  不必给一个模块级 const 补标注（本批的口径是「先给导出签名加类型」）。 */
 function emptySnapshot(): PanelLayoutSnapshot {
-  return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, hasPos: false };
+  return { width: null, height: null, left: null, top: null, right: null, bottom: null, docked: null, mode: null, ratio: null, hasPos: false };
 }
 
 function snapshotFromParts(pos: any, size: any): PanelLayoutSnapshot {
@@ -113,6 +139,9 @@ function snapshotFromParts(pos: any, size: any): PanelLayoutSnapshot {
   // 逐轴锚定：水平方向有 left 或 right、垂直方向有 top 或 bottom 就算有位置。
   out.hasPos = (out.left != null || out.right != null) && (out.top != null || out.bottom != null);
   if (pos && typeof pos.docked === 'boolean') out.docked = pos.docked;
+  // 形态与嵌入比例（v2 新字段）：只认已知取值，旧存档/损坏记录自然留 null。
+  if (pos && (pos.mode === 'overlay' || pos.mode === 'embedded')) out.mode = pos.mode;
+  if (pos && isFiniteNumber(Number(pos.ratio)) && Number(pos.ratio) > 0) out.ratio = Number(pos.ratio);
   return out;
 }
 
@@ -121,7 +150,9 @@ function snapshotHasLayout(snapshot: PanelLayoutSnapshot): boolean {
     snapshot.hasPos ||
     snapshot.width != null ||
     snapshot.height != null ||
-    snapshot.docked != null
+    snapshot.docked != null ||
+    snapshot.mode != null ||
+    snapshot.ratio != null
   );
 }
 
@@ -140,6 +171,17 @@ export function readPanelLayout(storage: LayoutStorageLike | null | undefined): 
     size = null;
   }
   return snapshotFromParts(pos, size);
+}
+
+/**
+ * 新页面 boot 时要不要自动拉起嵌入层（「切换页面后嵌入层跟着走」，m00997）。
+ *
+ * 判据只有布局存档里的 `mode: 'embedded'`：用户把面板切成嵌入态这个动作本身，
+ * 就是「我要它一直嵌在页面上」的表态。从没选过嵌入的浏览器返回 false，
+ * 保持「按需点悬浮球」的默认体验 —— 自动弹面板只能由用户先选过才生效。
+ */
+export function shouldAutoOpenEmbeddedPanel(layout: PanelLayoutSnapshot | null | undefined): boolean {
+  return Boolean(layout) && Boolean((layout as PanelLayoutSnapshot).mode === 'embedded');
 }
 
 /** 解析扩展存储里的统一布局记录；损坏或旧形状返回空快照。 */
@@ -165,13 +207,18 @@ export function writePanelLayout(
     bottom?: number;
     docked?: boolean;
     manualPos?: boolean;
+    mode?: string | null;
+    ratio?: number | null;
     writeSize?: boolean;
   } | null
-): { width: number | null; height: number | null; left: number | null; top: number | null; right: number | null; bottom: number | null; docked: boolean } | null {
+): { width: number | null; height: number | null; left: number | null; top: number | null; right: number | null; bottom: number | null; docked: boolean; mode: 'overlay' | 'embedded' | null; ratio: number | null } | null {
   if (!storage) return null;
   const s = snapshot || {};
   const width = Number(s.width);
   const height = Number(s.height);
+  // mode 只认两个字面量：普通 string 经 === 收窄不会变成字面量类型，必须显式分支。
+  const mode: 'overlay' | 'embedded' | null =
+    s.mode === 'overlay' ? 'overlay' : s.mode === 'embedded' ? 'embedded' : null;
   const record = {
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
@@ -180,6 +227,10 @@ export function writePanelLayout(
     right: s.manualPos === true && isFiniteNumber(s.right) ? Math.round(s.right) : null,
     bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
     docked: s.docked === true,
+    mode,
+    ratio: isFiniteNumber(Number(s.ratio)) && Number(s.ratio) > 0
+      ? Math.round(Number(s.ratio) * 1000) / 1000
+      : null,
   };
   try {
     if (s.writeSize !== false && record.width && record.height) {
@@ -207,10 +258,14 @@ function globalPanelLayoutRecord(snapshot: {
   bottom?: number;
   docked?: boolean;
   manualPos?: boolean;
+  mode?: string | null;
+  ratio?: number | null;
 } | null) {
   const s = snapshot || {};
   const width = Number(s.width);
   const height = Number(s.height);
+  const mode: 'overlay' | 'embedded' | null =
+    s.mode === 'overlay' ? 'overlay' : s.mode === 'embedded' ? 'embedded' : null;
   return {
     version: PANEL_LAYOUT_VERSION,
     docked: s.docked === true,
@@ -220,6 +275,10 @@ function globalPanelLayoutRecord(snapshot: {
     bottom: s.manualPos === true && isFiniteNumber(s.bottom) ? Math.round(s.bottom) : null,
     width: Number.isFinite(width) && width > 0 ? Math.round(width) : null,
     height: Number.isFinite(height) && height > 0 ? Math.round(height) : null,
+    mode,
+    ratio: isFiniteNumber(Number(s.ratio)) && Number(s.ratio) > 0
+      ? Math.round(Number(s.ratio) * 1000) / 1000
+      : null,
   };
 }
 
@@ -281,6 +340,8 @@ export async function saveGlobalPanelLayout(
     bottom?: number;
     docked?: boolean;
     manualPos?: boolean;
+    mode?: string | null;
+    ratio?: number | null;
     writeSize?: boolean;
   } | null
 ): Promise<ReturnType<typeof readGlobalPanelLayout> | null> {

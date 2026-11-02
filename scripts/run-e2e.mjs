@@ -101,6 +101,9 @@ function runE2E() {
     // 存档自毁闸：实时页面必须看得见悬浮球，而按「另存为」形态重建的副本必须看不见。
     // 不依赖 LLM，用默认夹具即可。
     { name: '存档零痕迹', spec: 'save-clean.spec.mjs', hold: '', visionShot: '' },
+    // 悬浮球找回（弹窗按钮的成功回执）与嵌入态跟随：
+    // 不依赖 LLM，也不需要挂起流，默认夹具即可。
+    { name: '悬浮球与嵌入跟随', spec: 'fab-show.spec.mjs', hold: '', visionShot: '' },
     { name: '设置提示', spec: 'settings-ui.spec.mjs', hold: '', visionShot: '' },
     // 面板叠在视频页上时，输入框里的空格不能冒泡成页面的播放/暂停快捷键。
     { name: '面板键盘隔离', spec: 'panel-keyboard-isolation.spec.mjs', hold: '', visionShot: '' },

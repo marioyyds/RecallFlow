@@ -60,3 +60,5 @@ webarena**
 # 而浏览器加载扩展时不会执行构建 —— 不提交它，扩展就无法加载。
 # 修改内容脚本请改 entries/content.js，然后重新构建（不要手工编辑 content.js）。
 # 对应的门禁：tests/silent-failure-regressions.test.mjs 会核对产物确实自包含且已调用入口。
+# 打包产物（scripts/package-extension.mjs 输出，勿提交）
+release/

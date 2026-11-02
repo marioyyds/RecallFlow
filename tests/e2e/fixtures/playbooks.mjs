@@ -426,6 +426,8 @@ export const PLAYBOOKS = Object.freeze({
     success: '三个要点（KB-1/KB-2/KB-3）都留在知识库里，且被读回、回到模型上下文',
     eval: {
       url: '/notes',
+      // 工具集 = 快照 + 写条目 + 读知识库，与 knowledge 意图的权限表一一对应。
+      intent: 'knowledge',
       instruction: '把这一页的三个要点存进知识库（标题用「检索性能优化」），每条加上 KB-1 / KB-2 / KB-3 的编号，然后从知识库读回来确认三条都在。',
       // ⚠ 这一类的状态**不在页面上**（知识库是扩展侧存储），所以没有页面判据 ——
       // 权威的保真检查在 E2E 里直接读 IndexedDB 的 entries/documents。
@@ -457,6 +459,9 @@ export const PLAYBOOKS = Object.freeze({
     success: '检索没命中时没有下"知识库里没有"的结论，而是换路子把那条记录读出来并核对',
     eval: {
       url: '/notes',
+      // 这条剧本的工具集是「快照 + 写条目 + 读知识库」，正是 knowledge 的全部权限；
+      // 判成 browser 会让 add_entry / knowledge_read 被闸门拒绝。
+      intent: 'knowledge',
       instruction:
         '把这一页的三个要点存进知识库（标题用「检索性能优化」，每条加上 KB-1 / KB-2 / KB-3 的编号），' +
         '然后回答我：知识库里有没有讲「页面打开很慢」的记录？找到的话把它读出来核对。',
@@ -1087,6 +1092,11 @@ export const PLAYBOOKS = Object.freeze({
     success: '点开第一条结果的详情（等异步渲染后读到 B+ 树要点）、把要点存进知识库',
     eval: {
       url: '/rsearch',
+      // 剧本声明的**真实意图**：夹具的 mock 意图路由器按它回话（见 server.mjs）。
+      // 这条剧本要「点开详情」还要「沉淀要点」——两件事跨了浏览器与知识库两类权限，
+      // 只有 research（点击 + 读知识库 + 写条目）能同时覆盖；恒返回 browser 会把它按页面操作跑，
+      // add_entry 随即被执行期闸门拒绝。
+      intent: 'research',
       instruction: '帮我调研「数据库索引」：在这个结果页点开第一条结果，把详情里关于 B+ 树的要点存进知识库（标题「数据库索引要点」）。',
       pageChecks: [
         { expr: "window.__opened === 'r1'", label: '第一条结果真的被点开' },

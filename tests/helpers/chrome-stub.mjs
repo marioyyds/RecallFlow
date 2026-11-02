@@ -29,33 +29,40 @@ function createStorageArea(initial = {}, stats) {
   return {
     // 仅供断言用：直接窥视当前内容，避免测试里再写一遍 get(null)。
     _dump: () => ({ ...store }),
-    async get(key) {
+    async get(key, callback) {
       stats.get += 1;
-      if (key === null || key === undefined) return { ...store };
-      if (Array.isArray(key)) {
-        const out = {};
+      let out;
+      if (key === null || key === undefined) {
+        out = { ...store };
+      } else if (Array.isArray(key)) {
+        out = {};
         for (const k of key) if (Object.prototype.hasOwnProperty.call(store, k)) out[k] = store[k];
-        return out;
-      }
-      if (typeof key === 'object') {
+      } else if (typeof key === 'object') {
         // MV3 允许 get({a: 1}) —— 第二个值是缺省值
-        const out = {};
+        out = {};
         for (const [k, dflt] of Object.entries(key)) {
           out[k] = Object.prototype.hasOwnProperty.call(store, k) ? store[k] : dflt;
         }
-        return out;
+      } else {
+        out = Object.prototype.hasOwnProperty.call(store, key) ? { [key]: store[key] } : {};
       }
-      return Object.prototype.hasOwnProperty.call(store, key) ? { [key]: store[key] } : {};
+      // MV3 的 get 同时支持 Promise 与 callback 形式；源码两条形式都在用
+      // （chat.ts 的 loadFabHiddenPreference / lastPickedList）。callback 不调到，
+      // 测试里那些路径会静默 no-op —— 真浏览器里却是生效的。
+      if (typeof callback === 'function') queueMicrotask(() => callback(out));
+      return out;
     },
-    async set(obj) {
+    async set(obj, callback) {
       stats.set += 1;
       stats.setKeys.push(Object.keys(obj));
       Object.assign(store, obj);
+      if (typeof callback === 'function') queueMicrotask(() => callback());
     },
-    async remove(key) {
+    async remove(key, callback) {
       stats.remove += 1;
       if (Array.isArray(key)) for (const k of key) delete store[k];
       else delete store[key];
+      if (typeof callback === 'function') queueMicrotask(() => callback());
     },
     async clear() {
       stats.remove += 1;
@@ -97,15 +104,15 @@ export function createChromeStub(opts = {}) {
       // ensureHost() 直接 return，整套 UI 一个节点都不建，而测试看不出原因。
       getManifest: () => ({ manifest_version: 3, name: 'RecallFlow', version: '0.0.0-test' }),
       sendMessage: async () => undefined,
-      // onMessage 要真的记住监听器：内容脚本的功能大半从这条通道进来
-      //（panel:toggle / run:* / kbPickResult）。写成空壳的话，任何消息驱动的行为都没法测。
-      onMessage: {
-        _listeners: [],
-        addListener(fn) { if (typeof fn === 'function') this._listeners.push(fn); },
-        removeListener(fn) {
-          const i = this._listeners.indexOf(fn);
-          if (i >= 0) this._listeners.splice(i, 1);
-        },
+      // onMessage 要真的记住监听器：内容脚本的功能大半从这条通道进来
+      //（panel:toggle / run:* / kbPickResult）。写成空壳的话，任何消息驱动的行为都没法测。
+      onMessage: {
+        _listeners: [],
+        addListener(fn) { if (typeof fn === 'function') this._listeners.push(fn); },
+        removeListener(fn) {
+          const i = this._listeners.indexOf(fn);
+          if (i >= 0) this._listeners.splice(i, 1);
+        },
       },
       onInstalled: { addListener() {}, removeListener() {} },
     },
@@ -184,13 +191,20 @@ export function createChromeStub(opts = {}) {
     contextMenus: { async create() {}, async removeAll() {} },
   };
 
-  /** 测试用：把一条消息投给所有 onMessage 监听器（模拟后台 → 内容脚本）。 */
-  chrome._emitMessage = (msg, sender) => {
-    const out = [];
-    for (const fn of chrome.runtime.onMessage._listeners.slice()) out.push(fn(msg, sender || {}));
-    return out;
-  };
-
+  /**
+   * 测试用：把一条消息投给所有 onMessage 监听器（模拟后台 → 内容脚本）。
+   *
+   * 第三参 sendResponse 与真机一致：监听器要**回包**就必须收下它并返回 true。
+   * 之前这里只传两个参数，于是"监听器到底回没回话"根本测不到 —— 而弹窗的
+   * 「悬浮球」按钮正是靠这个回答区分「送达了」与「连不上」（真机那个假警报 bug）。
+   */
+  chrome._emitMessage = (msg, sender, sendResponse) => {
+    const out = [];
+    const respond = typeof sendResponse === 'function' ? sendResponse : () => {};
+    for (const fn of chrome.runtime.onMessage._listeners.slice()) out.push(fn(msg, sender || {}, respond));
+    return out;
+  };
+
   return Object.assign(chrome, opts.overrides || {});
 }
 

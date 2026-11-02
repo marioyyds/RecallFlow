@@ -45,6 +45,39 @@ export const PANEL_CSS = `
     }
     .panel.docked { max-height: calc(100vh - 24px); }
     @media (max-width: 640px) { .panel.docked { max-height: calc(100vh - 24px); } }
+    /* 嵌入态（embedded）：面板不再是浮层，而是「嵌在页面里的一栏」——
+       整列贴右缘、高度占满布局视口，宽度由 JS 按比例（panel-layout 的 PANEL_EMBEDDED_*）设置；
+       页面正文同步右缩同样宽度，内容不会从面板底下穿过。
+       位置（top/right/bottom）全部交给这段 CSS，JS 不写内联值（内联值会覆盖样式表）。
+       ⚠ 必须排在 .panel.docked 之后：两者同为两段类名选择器，后者声明在前。 */
+    .panel.embedded {
+      top: 0; right: 0; bottom: 0;
+      height: auto; max-height: none; max-width: none;
+      border-radius: 0;
+      border-left: 1px solid #e2e5ea;
+      box-shadow: -10px 0 28px rgba(0,0,0,.18);
+      animation: none;
+      transition: width .16s ease;
+    }
+    .panel.dark.embedded { border-left-color: #3a3f46; }
+    /* 嵌入态只有左缘可以拉伸（宽度=分栏比例），高度恒占满整列，其余手柄没有意义。 */
+    .panel.embedded .resize-handle { display: none; }
+    /* 嵌入态唯一的缩放入口就是左缘：必须让它**看得见**。
+       原来这里是一条 10px 宽的透明热区 —— 界面上没有任何提示，用户只会觉得
+       「这个栏怎么调都不动」（反馈原话：对话窗太小、还不能调节）。
+       现在常驻一条竖向抓手，hover / 拖动时变强调色。 */
+    .panel.embedded .resize-handle.left { display: block; width: 12px; }
+    .panel.embedded .resize-handle.left::after {
+      display: block; content: '';
+      left: 4px; top: 50%; right: auto; bottom: auto;
+      transform: translateY(-50%);
+      width: 4px; height: 44px; border: 0; border-radius: 999px;
+      background: #c0c4cc; opacity: .8;
+      transition: background .15s, opacity .15s;
+    }
+    .panel.embedded .resize-handle.left:hover::after,
+    .panel.embedded .resize-handle.left:active::after { background: #4a90d9; opacity: 1; }
+    .panel.dark.embedded .resize-handle.left::after { background: #6b7480; }
     .resize-handle {
       position: absolute; right: 0; bottom: 0;
       width: 18px; height: 18px; cursor: nwse-resize;
@@ -63,10 +96,29 @@ export const PANEL_CSS = `
       width: 9px; height: 9px;
       border-right: 2px solid #c0c4cc; border-bottom: 2px solid #c0c4cc;
       border-radius: 0 0 3px 0;
-      transition: border-color .15s;
-      opacity: 0;
+      transition: border-color .15s, opacity .15s;
+      /* 抓握点必须常驻可见。早期版本是 opacity:0，而 hover 时又把边框改成
+         transparent —— 等于从头到尾没有任何视觉提示，用户只能盲猜边缘能拖。
+         这就是「整个窗口大小不好调节」的直接原因（手柄其实一直能拖）。 */
+      opacity: .55;
     }
-    .resize-handle:hover::after { border-color: transparent; }
+    .resize-handle:hover::after, .resize-handle:active::after { opacity: 1; border-color: #4a90d9; }
+    .panel.dark .resize-handle::after { border-color: #6b7480; }
+    .panel.dark .resize-handle:hover::after, .panel.dark .resize-handle:active::after { border-color: #6fa8e8; }
+    /* 平边手柄不画角落 L 形（L 会落在面板内侧，看着像噪点），
+       改为 hover 时沿该边画一条强调线，明确告诉用户「这条边可以拖」。 */
+    .resize-handle.top::after, .resize-handle.bottom::after,
+    .resize-handle.left::after, .resize-handle.right::after { display: none; }
+    .resize-handle.top::before, .resize-handle.bottom::before,
+    .resize-handle.left::before, .resize-handle.right::before {
+      content: ''; position: absolute; background: #4a90d9; opacity: 0;
+      transition: opacity .15s; border-radius: 2px;
+    }
+    .resize-handle.top::before { left: 24%; right: 24%; top: 2px; height: 2px; }
+    .resize-handle.bottom::before { left: 24%; right: 24%; bottom: 2px; height: 2px; }
+    .resize-handle.left::before { top: 24%; bottom: 24%; left: 2px; width: 2px; }
+    .resize-handle.right::before { top: 24%; bottom: 24%; right: 2px; width: 2px; }
+    .resize-handle:hover::before, .resize-handle:active::before { opacity: .9; }
     .panel.dark { background: #26292e; }
     .p-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #f5f6f8; border-bottom: 1px solid #e2e5ea; cursor: grab; }
     .p-head:active { cursor: grabbing; }
@@ -76,6 +128,10 @@ export const PANEL_CSS = `
     .panel.dark .p-head .title { color: #e3e5e8; }
     .p-head .usage { font-size: 11px; color: #98a0aa; margin-left: auto; margin-right: 6px; white-space: nowrap; }
     .p-head .close { border: none; background: none; color: #6b7280; font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 4px; border-radius: 4px; min-width: 32px; min-height: 32px; }
+    .p-head .mode-btn { border: none; background: none; color: #55606e; font-size: 11px; cursor: pointer; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+    .p-head .mode-btn:hover { background: #e8ecf2; }
+    .panel.dark .p-head .mode-btn { color: #b6bcc6; }
+    .panel.dark .p-head .mode-btn:hover { background: #333a44; }
     .p-head .close:hover { color: #e74c3c; background: rgba(0,0,0,.05); }
 /* 交接标识芯片：点一下把本次会话打包并复制可直接粘给 AI 的指令 */
 .p-head .handoff { border: 1px solid #d5d9e0; background: #fff; color: #55606e; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; cursor: pointer; padding: 2px 7px; border-radius: 999px; white-space: nowrap; margin-right: 4px; }
@@ -166,6 +222,9 @@ export const PANEL_CSS = `
     .p-body::-webkit-scrollbar-track { background: transparent; }
     .panel.dark .p-body { color: #e3e5e8; scrollbar-color: #3a3f46 transparent; }
     .panel.dark .p-body::-webkit-scrollbar-thumb { background: #3a3f46; }
+    /* 嵌入态没有右缘手柄（只有左缘），那条为手柄预留的 10px 右边距纯属浪费宽度 ——
+       在本来就窄的一栏里，正好等于白扔 10px 的对话宽度。 */
+    .panel.embedded .p-body { margin-right: 0; }
     .panel.dark .p-body::-webkit-scrollbar-thumb:hover { background: #4a5058; }
     .p-body.loading { color: #999; }
     .panel.dark .p-body.loading { color: #9aa0a8; }
@@ -336,6 +395,11 @@ export const PANEL_CSS = `
     .quick-prompt { flex: 0 1 auto; min-width: 0; max-width: 100%; border: 1px solid #c8d9ec; background: #f5f9fd; color: #3d6f9e; border-radius: 12px; padding: 5px 10px; min-height: 30px; font-size: 12px; line-height: 1.35; cursor: pointer; white-space: normal; overflow-wrap: anywhere; text-align: left; }
     .quick-prompt:hover { background: #e5f0fb; }
     .panel.dark .quick-prompt { background: #293746; border-color: #3d5570; color: #9bc5eb; }
+    /* 嵌入态那一栏通常只有 380–500px：4 个快捷提示会折成两行，白吃掉约 30px 对话区。
+       改成单行横向滚动，高度稳定在一行 —— 对话区本来就窄，不能让它再被按钮挤掉。 */
+    .panel.embedded .quick-prompts { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .panel.embedded .quick-prompts::-webkit-scrollbar { display: none; }
+    .panel.embedded .quick-prompt { flex: 0 0 auto; }
     .pick-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
     .pick-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #3d6f9e; background: #eef5fd; border: 1px solid #c8d9ec; border-radius: 12px; padding: 3px 8px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .panel.dark .pick-chip { background: #293746; border-color: #3d5570; color: #9bc5eb; }
@@ -401,6 +465,28 @@ export const PANEL_CSS = `
       .fab.peek { right: 16px; }
     }
     @media (hover: none) and (max-width: 600px) { .fab.peek { right: 12px; } }
+    /* 悬浮球右键菜单（打开面板 / 隐藏悬浮球）：挂在球所在的同一个 shadow root 里，
+       position:fixed 相对视口，摆在球左侧（球贴右缘，菜单向左展开）。
+       没有这个菜单时右键只会弹宿主页面自己的默认菜单 —— 悬浮球没有任何退出途径。 */
+    .fab-menu {
+      position: fixed; z-index: 2147483647;
+      display: flex; flex-direction: column; gap: 2px;
+      background: #fff; border: 1px solid #e2e5ea; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.2);
+      padding: 6px; animation: kb-pop .12s ease;
+    }
+    .fab-menu button {
+      border: none; background: none; text-align: left; font-family: inherit;
+      font-size: 13px; color: #333; padding: 7px 12px; border-radius: 6px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .fab-menu button:hover { background: #f0f4f8; }
+    .fab-menu button.danger { color: #c0392b; }
+    .fab-menu button.danger:hover { background: #fdeeec; }
+    .fab-menu.dark { background: #26292e; border-color: #3a3f46; }
+    .fab-menu.dark button { color: #e3e5e8; }
+    .fab-menu.dark button:hover { background: #333a44; }
+    .fab-menu.dark button.danger { color: #ff8a80; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
     }

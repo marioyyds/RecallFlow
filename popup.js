@@ -244,6 +244,82 @@ function isOperableUrl(url) {
   return isWebUrl(url) || isFileUrl(url);
 }
 
+// lib/shared/diagnostics.ts
+function isNoReceiverError(message) {
+  return /Receiving end does not exist|Could not establish connection/i.test(
+    String(message === void 0 || message === null ? "" : message)
+  );
+}
+function isContentScriptUnreachable(message) {
+  if (isNoReceiverError(message)) return true;
+  return /message port closed/i.test(String(message === void 0 || message === null ? "" : message));
+}
+
+// lib/shared/format/page-results.ts
+var DEFAULT_STYLE_PROPS = Object.freeze([
+  "font-size",
+  "line-height",
+  "color",
+  "background-color",
+  "width",
+  "height",
+  "display",
+  "visibility",
+  "opacity",
+  "overflow-x",
+  "position",
+  "z-index"
+]);
+
+// lib/shared/content-script-bridge.ts
+var INJECT_COOLDOWN_MS = 2e3;
+var lastInjectAt = /* @__PURE__ */ new Map();
+function normalizeFrameId(frameId) {
+  const fid = Number(frameId);
+  return Number.isInteger(fid) && fid >= 0 ? fid : 0;
+}
+function sendOnce(chromeApi, tabId, message, frameId) {
+  return new Promise((resolve, reject) => {
+    const callback = (response) => {
+      if (chromeApi.runtime.lastError) {
+        reject(new Error(chromeApi.runtime.lastError.message));
+        return;
+      }
+      resolve(response);
+    };
+    chromeApi.tabs.sendMessage(tabId, message, { frameId: normalizeFrameId(frameId) }, callback);
+  });
+}
+async function injectContentScript(chromeApi, tabId, frameId) {
+  if (!chromeApi || !chromeApi.scripting || typeof chromeApi.scripting.executeScript !== "function") {
+    return false;
+  }
+  const key = String(tabId) + ":" + normalizeFrameId(frameId);
+  const now = Date.now();
+  if (now - Number(lastInjectAt.get(key) || 0) < INJECT_COOLDOWN_MS) return false;
+  lastInjectAt.set(key, now);
+  try {
+    await chromeApi.scripting.executeScript({
+      target: { tabId: Number(tabId), frameIds: [normalizeFrameId(frameId)] },
+      files: ["content.js"]
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+async function sendTabMessageWithInjection(chromeApi, tabId, message, frameId) {
+  try {
+    return await sendOnce(chromeApi, tabId, message, frameId);
+  } catch (e) {
+    if (!isContentScriptUnreachable(e && e?.message)) throw e;
+    const injected = await injectContentScript(chromeApi, tabId, frameId);
+    if (!injected) throw e;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return await sendOnce(chromeApi, tabId, message, frameId);
+  }
+}
+
 // lib/domain/knowledge/query.ts
 function sortItems(list, sortBy2) {
   const arr = list.slice();
@@ -270,22 +346,6 @@ function sortItems(list, sortBy2) {
   }
   return arr;
 }
-
-// lib/shared/format/page-results.ts
-var DEFAULT_STYLE_PROPS = Object.freeze([
-  "font-size",
-  "line-height",
-  "color",
-  "background-color",
-  "width",
-  "height",
-  "display",
-  "visibility",
-  "opacity",
-  "overflow-x",
-  "position",
-  "z-index"
-]);
 
 // lib/shared/store.ts
 var DB_NAME = "recallflow-knowledge";
@@ -1041,14 +1101,15 @@ $("open-settings").addEventListener("click", (e) => {
   e.preventDefault();
   chrome.runtime.openOptionsPage();
 });
+async function pickOperableTab() {
+  const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
+  if (activeTab && activeTab.url && isOperableUrl(activeTab.url) && activeTab.id) return activeTab;
+  const tabs = await tabsPort.query({ currentWindow: true });
+  return tabs.find((item) => item && item.url && isOperableUrl(item.url) && item.id);
+}
 $("open-assistant").addEventListener("click", async () => {
   try {
-    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
-    let tab = activeTab;
-    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
-      const tabs = await tabsPort.query({ currentWindow: true });
-      tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
-    }
+    const tab = await pickOperableTab();
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {
       toast("\u8BF7\u5148\u6253\u5F00\u4E00\u4E2A\u7F51\u9875");
       return;
@@ -1059,6 +1120,30 @@ $("open-assistant").addEventListener("click", async () => {
     });
   } catch (e) {
     toast("\u65E0\u6CD5\u6253\u5F00\u52A9\u624B\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
+  }
+});
+var showFabBtn = $("show-fab");
+if (showFabBtn) showFabBtn.addEventListener("click", async () => {
+  try {
+    const tab = await pickOperableTab();
+    if (!tab || !tab.url || !isOperableUrl(tab.url) || !tab.id) {
+      toast("\u8BF7\u5148\u6253\u5F00\u4E00\u4E2A\u7F51\u9875");
+      return;
+    }
+    try {
+      await sendTabMessageWithInjection(chrome, tab.id, { type: "fab:show" }, 0);
+    } catch (e) {
+      const message = e?.message;
+      if (isNoReceiverError(message)) {
+        toast("\u65E0\u6CD5\u663E\u793A\u60AC\u6D6E\u7403\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
+        return;
+      }
+      if (!isContentScriptUnreachable(message)) throw e;
+    }
+    toast("\u60AC\u6D6E\u7403\u5DF2\u663E\u793A");
+    setTimeout(() => window.close(), 500);
+  } catch (e) {
+    toast("\u65E0\u6CD5\u663E\u793A\u60AC\u6D6E\u7403\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5");
   }
 });
 knowledge.subscribe(() => {

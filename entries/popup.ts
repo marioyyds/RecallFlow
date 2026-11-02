@@ -12,6 +12,8 @@ import {
 import { showToast } from '../lib/shared/dom/toast.ts';
 import { debounce, markdownExcerpt, fmtTime, cleanTitle, parseTags } from '../lib/shared/text.ts';
 import { detectPlatform, detectType, isFileUrl, isOperableUrl, normalizeUrl } from '../lib/shared/url.ts';
+import { sendTabMessageWithInjection } from '../lib/shared/content-script-bridge.ts';
+import { isContentScriptUnreachable, isNoReceiverError } from '../lib/shared/diagnostics.ts';
 import { sortItems } from '../lib/domain/knowledge/query.ts';
 import { createKnowledgeRepository } from '../lib/application/knowledge/repository.ts';
 import type { TabSummary } from '../lib/application/ports/tabs.ts';
@@ -414,16 +416,23 @@ $('open-settings').addEventListener('click', (e: Event) => {
   chrome.runtime.openOptionsPage();
 });
 
+/**
+ * 当前网页标签页：优先活动标签页；把 popup.html 当普通标签页打开时，
+ * 活动标签页是扩展页本身，此时回退到同窗口第一个可注入的网页。
+ *
+ * 两个按钮（打开助手 / 悬浮球）此前各自抄了一遍这段回退逻辑 —— 抄第二遍时
+ * 就有一处漏了 `tab.id` 的存在性检查。收进一个函数，两条路径的取舍从此一致。
+ */
+async function pickOperableTab(): Promise<TabSummary | undefined> {
+  const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
+  if (activeTab && activeTab.url && isOperableUrl(activeTab.url) && activeTab.id) return activeTab;
+  const tabs = await tabsPort.query({ currentWindow: true });
+  return tabs.find((item) => item && item.url && isOperableUrl(item.url) && item.id);
+}
+
 $('open-assistant').addEventListener('click', async () => {
   try {
-    const [activeTab] = await tabsPort.query({ active: true, currentWindow: true });
-    let tab: TabSummary | undefined = activeTab;
-    // 正常 popup 的 active tab 就是当前网页；把 popup.html 当普通标签页打开时，
-    // active tab 会是扩展页本身，此时回退到同窗口最近一个可注入的网页。
-    if (!tab || !tab.url || !isOperableUrl(tab.url)) {
-      const tabs = await tabsPort.query({ currentWindow: true });
-      tab = tabs.find((item) => item && item.url && isOperableUrl(item.url));
-    }
+    const tab = await pickOperableTab();
     if (!tab || !tab.url || !isOperableUrl(tab.url)) {
       toast('请先打开一个网页');
       return;
@@ -434,6 +443,39 @@ $('open-assistant').addEventListener('click', async () => {
     });
   } catch (e) {
     toast('无法打开助手，请刷新页面后重试');
+  }
+});
+
+// 「悬浮球」：找回被右键隐藏的悬浮球（content 端 fab:show）。
+// 走 tabs.sendMessage 直达当前网页 —— 与「助手」不同，这里不需要经后台中转。
+const showFabBtn = $('show-fab');
+if (showFabBtn) showFabBtn.addEventListener('click', async () => {
+  try {
+    const tab = await pickOperableTab();
+    if (!tab || !tab.url || !isOperableUrl(tab.url) || !tab.id) {
+      toast('请先打开一个网页');
+      return;
+    }
+    try {
+      // 用「连不上就补注入再重试」的桥，而不是裸 sendMessage：
+      // 扩展重载后旧标签页里的内容脚本已死（页面没刷新），裸发必然失败。
+      await sendTabMessageWithInjection(chrome, tab.id, { type: 'fab:show' }, 0);
+    } catch (e) {
+      // 「通道没回话」≠「没送到」：MV3 下回调会拿到
+      // "The message port closed before a response was received"，而内容脚本其实
+      // 已经跑完找回逻辑、球也回来了 —— 实测就是这么弹出一句假红字的。
+      // 所以只有明确「没有接收端 / 连不上」才报失败；端口关闭按"已送达"处理。
+      const message = (e as Error | null)?.message;
+      if (isNoReceiverError(message)) {
+        toast('无法显示悬浮球，请刷新页面后重试');
+        return;
+      }
+      if (!isContentScriptUnreachable(message)) throw e;
+    }
+    toast('悬浮球已显示');
+    setTimeout(() => window.close(), 500);
+  } catch (e) {
+    toast('无法显示悬浮球，请刷新页面后重试');
   }
 });
 

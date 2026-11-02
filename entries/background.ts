@@ -10,6 +10,7 @@ import { AutomationMessageRouter } from '../lib/application/background/automatio
 import { handleAiStreamConnection } from '../lib/application/background/ai-stream-router.ts';
 import { WorkspaceMessageRouter } from '../lib/application/background/workspace-router.ts';
 import { startMcpRelay } from '../lib/bridge/relay.ts';
+import { createTabBroadcaster } from '../lib/shared/tab-broadcast.ts';
 import { initTargetManager } from '../lib/application/agent/target-manager.ts';
 import { logError } from '../lib/shared/text.ts';
 import { isOperableUrl } from '../lib/shared/url.ts';
@@ -212,6 +213,21 @@ function panelSummary(state: Dyn) {
 }
 
 /**
+ * 面板广播的送达兜底：内容脚本不在时补注入一次（2s 冷却/标签页）。
+ *
+ * 为什么要广播端兜底：面板开合是**全浏览器**语义，广播是唯一送达路径。而扩展
+ * 重载 / 更新之后，**此前已打开的标签页**里的内容脚本全部成了孤儿（页面没刷新、
+ * 脚本已死）—— 广播对它们只会静默失败，表现就是"切到那个标签页，面板与嵌入层
+ * 都不跟过来"。扩展有 scripting + host 权限，可以就地补注入 content.js；脚本 boot
+ * 时会走 panelVisibility.syncOnInit() 读全局开合状态，于是它自己就把面板（含嵌入态）
+ * 恢复出来，不需要用户刷新页面。
+ *
+ * 判定细节（"必须只对没有接收端补注入"）与冷却都收在 lib/shared/tab-broadcast.ts，
+ * 那里有单测钉住 —— 这段逻辑很容易被后来的"顺手放宽"改坏。
+ */
+const panelBroadcaster = createTabBroadcaster(chrome);
+
+/**
  * 会话变更广播：只发摘要，收到消息的标签页按 activeId 再取正文。
  * 不回发给发起写入的标签页，避免它把自己的响应又当成一次远端更新。
  */
@@ -221,7 +237,7 @@ function broadcastPanelSessions(state: Dyn, sourceTabId: number | null | undefin
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
       if (tab.url && !isOperableUrl(tab.url)) continue;
-      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+      panelBroadcaster.send(tab.id, payload);
     }
   });
 }
@@ -237,7 +253,7 @@ function broadcastPanelUi(ui: Dyn, sourceTabId: number | null | undefined) {
     for (const tab of tabs || []) {
       if (!tab || tab.id == null || tab.id === sourceTabId) continue;
       if (tab.url && !isOperableUrl(tab.url)) continue;
-      chrome.tabs.sendMessage(tab.id, payload, { frameId: 0 }, () => void chrome.runtime.lastError);
+      panelBroadcaster.send(tab.id, payload);
     }
   });
 }
@@ -596,6 +612,25 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   try {
     chromeSessionStorage.remove('recallflow.conv.' + tabId);
   } catch (e) {}
+});
+
+// 切到某个标签页时补齐一次面板状态（UI + 会话摘要）。
+//
+// 为什么需要：扩展重载 / 更新之后，**此前已打开的标签页**里的内容脚本是孤儿
+//（页面没刷新、脚本已死），它既不会自己来问，也收不到广播。用户切过去看到的是
+// 一个"僵住的"面板（或干脆没有面板/嵌入层）——而"切标签页就跟随"正是这条功能
+// 最基本的期待。这里主动补一次：连不上就由 panelBroadcaster 补注入 content.js，
+// 脚本 boot 时 syncOnInit() 会把全局状态读回来。
+chrome.tabs.onActivated.addListener((info) => {
+  const tabId = Number(info && info.tabId);
+  if (!Number.isInteger(tabId) || tabId <= 0) return;
+  // 只发一个**探测**消息，不推状态：健康的标签页本来就在广播链路上，再灌一遍
+  // 全局状态会让它的面板按"被远端打开"的语义重放一次布局（实测会把用户拖好的
+  // 位置顶回停靠默认位）。孤儿标签页这边由补注入后脚本自己的 syncOnInit() 取回状态。
+  //
+  // 这条消息没有任何内容脚本会处理（`type` 不匹配任何分支），所以对健康标签页
+  // 是零副作用的；对孤儿标签页则必然得到"没有接收端"→ 补注入。
+  panelBroadcaster.send(tabId, { type: 'panel:probe' });
 });
 
 // controller / 最近 run / 输出通道 / reattach 宽限定时器必须一起维护。
