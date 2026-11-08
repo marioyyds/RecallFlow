@@ -3,6 +3,7 @@ import { getToolMetadata, compactSnapshotSummary } from './tools.ts';
 import { INTENTS } from './intent-router.ts';
 import { selectEvidence } from './evidence.ts';
 import { sliceSafe } from '../../shared/surrogates.ts';
+import { hasChatModelConfig } from '../../shared/settings.ts';
 
 export const EVIDENCE_READ_TOOLS = new Set([
   'read_current_page',
@@ -109,7 +110,7 @@ export function classifyTaskKind(ranToolNames: any) {
 
 export function shouldVerifyCompletion(intent: string, toolCallCount: number, settings: any) {
   if (!settings || settings.verifierEnabled === false) return false;
-  if (!settings.apiKey) return false;
+  if (!hasChatModelConfig(settings)) return false;
   if (!toolCallCount) return false;
   return intent === INTENTS.BROWSER || intent === INTENTS.RESEARCH;
 }

@@ -178,6 +178,19 @@ test('streamAgentStep: 400 且响应体为空时，错误信息带上请求形�
   assert.ok(!out.error.includes('"content"'), '只报形状，不报内容');
 });
 
+test('streamAgentStep: 400 诊断展示规范化后的真实角色序列', async () => {
+  globalThis.fetch = async () => errorResponse(400, 'System message must be at the beginning.');
+  const messages = [
+    { role: 'system', content: '基础' },
+    { role: 'system', content: '任务策略' },
+    { role: 'user', content: '执行' },
+  ];
+  const out = await streamAgentStep(null, SETTINGS, messages, undefined, [], () => {});
+  assert.ok(out.error.includes('roles=system,user'), out.error);
+  assert.ok(!out.error.includes('roles=system,system,user'), out.error);
+  assert.ok(out.error.includes('messages=2'), out.error);
+});
+
 test('streamAgentStep: 非 400 的错误不附加请求形状（信息保持精简）', async () => {
   globalThis.fetch = async () => errorResponse(500, 'server boom');
   const out = await streamAgentStep(null, SETTINGS, [{ role: 'user', content: 'x' }], undefined, [], () => {});
@@ -237,6 +250,22 @@ test('streamAgentStep: content 流式转发并累积，usage 原样返回', asyn
   assert.equal(events.filter((e) => e.type === 'chunk').length, 2);
 });
 
+test('streamAgentStep: vLLM/Qwen 请求只发送一条头部 system', async () => {
+  let payload;
+  globalThis.fetch = async (_url, init) => {
+    payload = JSON.parse(init.body);
+    return sseResponse(contentLines('ok'));
+  };
+  const messages = [
+    { role: 'system', content: '基础规则' },
+    { role: 'system', content: '任务策略' },
+    { role: 'user', content: '执行任务' },
+  ];
+  await streamAgentStep(null, { ...SETTINGS, model: 'Qwen3.8-27B' }, messages, undefined, [], () => {});
+  assert.deepEqual(payload.messages.map((message) => message.role), ['system', 'user']);
+  assert.equal(payload.messages[0].content, '基础规则\n\n任务策略');
+});
+
 test('streamAgentStep: tool_calls 分片增量拼接成完整参数', async () => {
   const lines = [
     'data: ' +
@@ -283,6 +312,31 @@ test('思维链：reasoning_content 流式转发为独立事件，且**不混进
   assert.equal(out.assistantMessage.content, '结论', '正文里不得混入思维链');
   assert.equal(events.filter((e) => e.type === 'chunk').length, 1);
   assert.equal(events.filter((e) => e.type === 'chunk')[0].text, '结论');
+});
+
+test('思维链：兼容 vLLM/网关的 reasoning、thinking 字段及对象形态', async () => {
+  const events = [];
+  globalThis.fetch = async () =>
+    sseResponse([
+      'data: ' + JSON.stringify({ choices: [{ delta: { reasoning: '先看' } }] }),
+      'data: ' + JSON.stringify({ choices: [{ delta: { reasoning: { content: '页面' } } }] }),
+      'data: ' + JSON.stringify({ choices: [{ delta: { thinking: { text: '再决定' } } }] }),
+      'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_text: '点击' } }] }),
+      'data: ' + JSON.stringify({ choices: [{ delta: { content: '正文' } }] }),
+      'data: [DONE]',
+    ]);
+  const out = await streamAgentStep(
+    null,
+    { ...SETTINGS, model: 'Qwen3.8-27B' },
+    [{ role: 'user', content: '执行' }],
+    undefined,
+    [],
+    (event) => events.push(event)
+  );
+  const reasoning = events.filter((event) => event.type === 'reasoning');
+  assert.equal(reasoning.map((event) => event.text).join(''), '先看页面再决定点击');
+  assert.equal(out.reasoning, '先看页面再决定点击');
+  assert.equal(events.filter((event) => event.type === 'chunk').map((event) => event.text).join(''), '正文');
 });
 
 test('思维链：没有 tools 时不注入 reasoning_content', async () => {

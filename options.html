@@ -39,14 +39,14 @@
     </aside>
     <div class="settings-content">
     <section class="card" id="settings-connection">
-      <h2><span class="ico">🔑</span> DeepSeek API</h2>
+      <h2><span class="ico">🔑</span> 聊天模型 API（OpenAI 兼容）</h2>
       <label class="field">
-        <span class="field-label">API Key</span>
+        <span class="field-label">API Key（可选）</span>
         <div class="input-row">
           <input id="api-key" type="password" placeholder="sk-..." autocomplete="off">
           <button id="toggle-key" class="icon-btn" title="显示/隐藏">👁</button>
         </div>
-        <span class="hint">在 platform.deepseek.com 申请，仅保存在本地浏览器</span>
+        <span class="hint">DeepSeek 云服务需填写；Ollama、vLLM、llama.cpp 等无需鉴权的本地服务可留空。仅保存在本地浏览器。</span>
       </label>
       <div class="connection-check">
         <button id="test-connection" class="btn btn-secondary" type="button">测试连接</button>
@@ -62,12 +62,12 @@
             <option value="deepseek-reasoner">deepseek-reasoner</option>
           </datalist>
         </div>
-        <span class="hint">deepseek-flash 快速通用（默认）/ deepseek-chat 通用 / deepseek-reasoner 深度推理。<b>只有 deepseek-reasoner 会返回思维链</b> —— 选它时对话面板才会出现可折叠的「思考记录」；其余模型下只有等待动画。</span>
+        <span class="hint">deepseek-flash 快速通用（默认）/ deepseek-chat 通用 / deepseek-reasoner 深度推理。是否显示可折叠的「思考记录」取决于模型与部署：DeepSeek 推理模型、以及启用 reasoning parser 的 vLLM/Qwen 会返回思考字段；vLLM 通常需在启动时配置 <code>--reasoning-parser qwen3</code>，具体参数以你的 vLLM 版本为准。</span>
       </label>
       <label class="field">
         <span class="field-label">API 地址</span>
         <input id="base-url" type="text" placeholder="https://api.deepseek.com">
-        <span class="hint">一般无需修改</span>
+        <span class="hint">本地 Qwen 等 OpenAI 兼容服务请填写其地址，例如 http://127.0.0.1:11434/v1</span>
       </label>
     </section>
 

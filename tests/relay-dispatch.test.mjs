@@ -28,7 +28,7 @@ const chromeStub = {
 globalThis.chrome = chromeStub;
 globalThis.WebSocket = class { constructor() {} addEventListener() {} send() {} close() {} };
 
-const { dispatch, __setAgentRunnerForTests } = await import('../lib/bridge/relay.ts');
+const { dispatch, __setAgentRunnerForTests, normalizeBridgePort } = await import('../lib/bridge/relay.ts');
 const { JOB_STATE } = await import('../lib/bridge/agent-job.ts');
 
 /**
@@ -41,6 +41,13 @@ const { JOB_STATE } = await import('../lib/bridge/agent-job.ts');
 let runnerBehavior = 'hang';
 /** 记录最近一次注入 runner 收到的 (payload, settings, signal)，供接线断言。 */
 let lastRun = null;
+
+test('normalizeBridgePort：合法 Worker 端口生效，非法值回落到 7801', () => {
+  assert.equal(normalizeBridgePort(7802), 7802);
+  assert.equal(normalizeBridgePort('7810'), 7810);
+  assert.equal(normalizeBridgePort(80), 7801);
+  assert.equal(normalizeBridgePort('nope'), 7801);
+});
 
 __setAgentRunnerForTests(async (port, payload, settings, book, signal) => {
   lastRun = { port, payload, settings, book, signal };

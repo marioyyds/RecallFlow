@@ -98,7 +98,7 @@ test('留存全文必须发生在截断之前', () => {
   // 锚点钉**语义**（这次改写就是截断），不钉具体切法：2026-10-16 把裸 slice 换成了
   // sliceSafe（防切裂代理对 → 请求体被服务端整单拒收），钉死字面量会连带把这条门禁钉红。
   // 本仓库里"截断处必须用 formatTruncationNotice"另有 expand-result.test.mjs §⑥ 钉着。
-  const truncateAt = indexOfLine(pipelineSrc, 'formatTruncationNotice(result.result.length, resultId)');
+  const truncateAt = indexOfLine(pipelineSrc, 'formatTruncationNotice(');
   assert.ok(rawAt < truncateAt, 'rawResult 必须在截断之前取');
 });
 

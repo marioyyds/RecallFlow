@@ -1185,7 +1185,7 @@ export const SKILL_REGISTRY = Object.freeze([
       '5. **读到「已到底」这类停止信号才停**：到底之后页面会给出明确标记（「已到底 / 没有更多」）。\n' +
       '   滚完一批就读一次快照确认它出没出现：**出现了才停**，没出现就回到第 3 步。\n' +
       '   ⚠ 绝不因为「滚了几次都看不到目标」就宣布「页面上没有这条」——那不是结论，只是还没加载到；\n' +
-      '6. **悬停前先确认目标在视口里**（快照里每个元素都带 `rect` / `inViewport`）。不在就先滚过去：\n' +
+      '6. **悬停前先确认目标在视口里**（看快照的 `inViewport`；几何细节用 `inspect_element({op:"inspect",ref})`）。不在就先滚过去：\n' +
       '   `scroll_page({ selector: "…", behavior: "auto" })` ——\n' +
       '   · CDP 的鼠标坐标是**视口坐标**，鼠标移不到视口外的东西上；\n' +
       '   · 用 `behavior: "auto"`（立即完成）而不是默认的平滑滚动，而且**滚完先读一次页面再 hover**：\n' +
@@ -1816,11 +1816,11 @@ export const SKILL_REGISTRY = Object.freeze([
     content:
       '# 给控件加阴影 / 描边\n\n' +
       '## 步骤\n' +
-      '1. `get_page_snapshot` 找到目标控件，记下它的 selector（优先语义定位，其次 CSS 选择器）；\n' +
-      '2. 加阴影用 `annotate({ op: "style", selector, styles: { boxShadow: "rgba(0,0,0,0.25) 0 6px 16px" } })`；\n' +
-      '   描边用 `annotate({ op: "outline", selector })`（默认橙色、约 1.5 秒后自动消失）；\n' +
-      '3. **读回计算值才算验证过**：`inspect_element({ op: "styles", selector, props: ["box-shadow"] })`，\n' +
-      '   确认 box-shadow 不再是 none；描边则用 `inspect_element({ op: "inspect", selector })` 确认命中。\n\n' +
+      '1. `get_page_snapshot` 找到目标控件并记 ref；selector/几何详情按 ref 用 inspect_element 按需读取；\n' +
+      '2. 加阴影用 `annotate({ op: "style", ref, styles: { boxShadow: "rgba(0,0,0,0.25) 0 6px 16px" } })`；\n' +
+      '   描边用 `annotate({ op: "outline", ref })`（默认橙色、约 1.5 秒后自动消失）；\n' +
+      '3. **读回计算值才算验证过**：`inspect_element({ op: "styles", ref, props: ["box-shadow"] })`，\n' +
+      '   确认 box-shadow 不再是 none；描边则用 `inspect_element({ op: "inspect", ref })` 确认命中。\n\n' +
       '## 为什么必须读回\n' +
       '`annotate` 回执「已修改 N 个元素」只证明调用发出去了：\n' +
       '取值可能非法被浏览器忽略，也可能被页面的 !important 覆盖 —— 回执看不出这些。\n' +

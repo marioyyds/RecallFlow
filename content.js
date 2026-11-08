@@ -428,6 +428,90 @@
   }
   var SNAPSHOT_CHAR_BUDGET = 8e3;
   var SNAPSHOT_FIXED_ALLOWANCE = 600;
+  function queryTerms(query) {
+    const source = String(query || "").toLowerCase();
+    const out = [];
+    const push = (value) => {
+      const term = value.trim().toLowerCase();
+      if (term.length >= 2 && out.indexOf(term) === -1) out.push(term);
+    };
+    for (const match of source.matchAll(/[a-z0-9_]+|[\u3400-\u9fff\uf900-\ufaff]+/g)) {
+      const token = match[0];
+      push(token);
+      if (/^[\u3400-\u9fff\uf900-\ufaff]+$/.test(token) && token.length > 4) {
+        for (let i = 0; i < Math.min(4, token.length - 3); i += 1) {
+          push(token.slice(i, i + 4));
+        }
+      }
+    }
+    return out.sort((a, b) => b.length - a.length).slice(0, 24);
+  }
+  function selectRelevantTextWindows(text, query, maxChars, contextChars = 220) {
+    const source = String(text || "");
+    const limit = Math.max(0, Math.floor(Number(maxChars) || 0));
+    if (!source || !limit) return "";
+    if (source.length <= limit) return source;
+    const terms = queryTerms(query);
+    if (!terms.length) return sliceSafe(source, 0, limit);
+    const lower = source.toLowerCase();
+    const radius = Math.max(40, Math.floor(Number(contextChars) || 220));
+    const spans = [];
+    let visits = 0;
+    for (const term of terms) {
+      let from = 0;
+      while (visits < 128) {
+        const at = lower.indexOf(term, from);
+        if (at < 0) break;
+        const left = Math.max(0, at - radius);
+        const before = source.slice(left, at);
+        const boundary = Math.max(
+          before.lastIndexOf("\n"),
+          before.lastIndexOf("\u3002"),
+          before.lastIndexOf("\uFF01"),
+          before.lastIndexOf("\uFF1F"),
+          before.lastIndexOf("\uFF1B"),
+          before.lastIndexOf("!"),
+          before.lastIndexOf("?"),
+          before.lastIndexOf(";")
+        );
+        spans.push({
+          start: boundary >= 0 ? left + boundary + 1 : at,
+          end: Math.min(source.length, at + term.length + radius)
+        });
+        visits += 1;
+        from = at + Math.max(1, term.length);
+      }
+      if (visits >= 128) break;
+    }
+    if (!spans.length) return sliceSafe(source, 0, limit);
+    spans.sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged = [];
+    for (const span of spans) {
+      const last = merged[merged.length - 1];
+      if (last && span.start <= last.end) {
+        last.end = Math.max(last.end, span.end);
+      } else {
+        merged.push({ ...span });
+      }
+    }
+    const parts = [];
+    let used = 0;
+    for (const span of merged) {
+      const prefix = parts.length ? "\n\u2026\n" : "";
+      const room = limit - used - prefix.length;
+      if (room <= 0) break;
+      const windowText = sliceSafe(source.slice(span.start, span.end), 0, room);
+      if (!windowText) continue;
+      parts.push(prefix + windowText);
+      used += prefix.length + windowText.length;
+    }
+    return parts.join("") || sliceSafe(source, 0, limit);
+  }
+  function projectSnapshotElementForModel(element) {
+    if (!element || typeof element !== "object") return element;
+    const { selector, rect, center, ...projected } = element;
+    return projected;
+  }
   function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
     const list = Array.isArray(described) ? described : [];
     const limit = Math.max(0, Number(budget) || 0);
@@ -445,6 +529,15 @@
       used += size;
     }
     return { elements, omittedBySize: list.length - elements.length };
+  }
+  function trimSnapshotElementsToBudget(elements, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
+    const list = Array.isArray(elements) ? elements : [];
+    const trimmed = trimElementsToBudget(
+      list.map(projectSnapshotElementForModel),
+      textLength,
+      budget
+    );
+    return { elements: list.slice(0, trimmed.elements.length), omittedBySize: trimmed.omittedBySize };
   }
   function paginateQueryResults(items, cursor, limit) {
     const list = Array.isArray(items) ? items : [];
@@ -749,18 +842,21 @@
       omittedRegions: Math.max(0, all.length - regions.length)
     };
   }
-  function snapshotRelevance(el, query) {
-    if (!query) return 0;
+  function snapshotRelevance(el, terms) {
+    if (!terms.length) return 0;
     const label = elementLabelForRanking(el).toLowerCase();
     const role = String(el.getAttribute("role") || "").toLowerCase();
     const tag = String(el.tagName || "").toLowerCase();
     const body = normalizeSnapshotText(el.textContent, 240).toLowerCase();
-    if (label === query) return 6e6;
-    if (label.startsWith(query)) return 4e6;
-    if (label.includes(query)) return 3e6;
-    if (role.includes(query) || tag.includes(query)) return 2e6;
-    if (body.includes(query)) return 15e5;
-    return 0;
+    let score = 0;
+    for (const term of terms) {
+      if (label === term) score += 6e6;
+      else if (label.startsWith(term)) score += 4e6;
+      else if (label.includes(term)) score += 3e6;
+      if (role.includes(term) || tag.includes(term)) score += 2e6;
+      else if (body.includes(term)) score += 15e5;
+    }
+    return score;
   }
   function rankSnapshotNodes(nodes, query = "") {
     const vw = window.innerWidth || document.documentElement.clientWidth;
@@ -768,6 +864,7 @@
     const cx = vw / 2;
     const cy = vh / 2;
     const q = normalizeSnapshotText(query, 200).toLowerCase();
+    const terms = queryTerms(q);
     const repetitions = /* @__PURE__ */ new Map();
     return nodes.map((el, order) => {
       const rect = el.getBoundingClientRect();
@@ -786,7 +883,7 @@
       return {
         el,
         order,
-        sortKey: visual + repeatPenalty - snapshotRelevance(el, q)
+        sortKey: visual + repeatPenalty - snapshotRelevance(el, terms)
       };
     }).sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
   }
@@ -1262,6 +1359,7 @@
       const requestedText = options.maxText === void 0 ? cursor > 0 ? 0 : 3e3 : Number(options.maxText);
       const maxText = Math.min(8e3, Math.max(0, Number.isFinite(requestedText) ? requestedText : 3e3));
       const query = normalizeSnapshotText(options.query, 200);
+      const textMode = maxText === 0 ? "none" : options.textMode === "none" ? "none" : options.textMode === "start" || options.textMode === "relevant" ? options.textMode : query ? "relevant" : "start";
       const capabilities = createPageCapabilities();
       const nodes = collectInteractiveInFrames(document, [], capabilities);
       const runtime = createPageRuntimeState();
@@ -1280,9 +1378,20 @@
       const ranked = rankSnapshotNodes(nodes, query);
       const windowed = ranked.slice(cursor, cursor + maxElements).map((x) => x.el);
       const describedAll = windowed.map((el, index) => describeElement(el, cursor + index));
-      const fullText = maxText > 0 ? extractPageText() : "";
-      const text = maxText > 0 ? fullText.slice(0, maxText) : "";
-      const { elements, omittedBySize } = trimElementsToBudget(
+      let fullText = "";
+      if (textMode === "start") fullText = extractPageText();
+      else if (textMode === "relevant") {
+        const main = findMainContent();
+        let root = document.body;
+        try {
+          const found = main && main.selector ? document.querySelector(main.selector) : null;
+          if (found) root = found;
+        } catch {
+        }
+        fullText = collectVisibleText(root, { maxChars: Math.min(4e4, Math.max(12e3, maxText * 8)) }) || extractPageText();
+      }
+      const text = textMode === "relevant" ? selectRelevantTextWindows(fullText, query, maxText) : textMode === "start" ? fullText.slice(0, maxText) : "";
+      const { elements, omittedBySize } = trimSnapshotElementsToBudget(
         describedAll,
         text.length + capabilityChars + outlineChars
       );
@@ -1321,6 +1430,7 @@
         mainContent: findMainContent(),
         capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : void 0,
         runtime,
+        textMode,
         counts: {
           interactive: nodes.length,
           shown: elements.length,
@@ -4151,6 +4261,11 @@
     bridgeToken: "recallflow-local-bridge-v1",
     jev: JEV_SETTINGS_DEFAULTS
   };
+  function hasChatModelConfig(settings) {
+    return Boolean(
+      String(settings && settings.baseUrl || "").trim() && String(settings && settings.model || "").trim()
+    );
+  }
   function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
     const list = Array.isArray(saved) ? saved.map((item) => String(item || "").trim()).filter(Boolean) : [];
     const legacyDefaults = /* @__PURE__ */ new Set([
@@ -8492,7 +8607,7 @@
     if (!streamView.apiKeyBanner) return;
     getAISettings().then((s) => {
       if (!streamView.apiKeyBanner) return;
-      const missing = !String(s && s.apiKey || "").trim();
+      const missing = !hasChatModelConfig(s);
       streamView.apiKeyBanner.style.display = missing ? "flex" : "none";
       fitPanelHeight();
     }).catch(() => {
@@ -10164,7 +10279,7 @@
     streamView.apiKeyBanner.className = "api-key-banner";
     streamView.apiKeyBanner.style.cssText = "display:none;margin:4px 0;padding:6px 8px;border:1px solid #f0c36d;background:#fff8e6;border-radius:6px;color:#8a5a00;font-size:12px;align-items:center;gap:8px;justify-content:space-between;";
     const apiKeyText = document.createElement("span");
-    apiKeyText.textContent = "\u5C1A\u672A\u914D\u7F6E API Key\uFF0C\u914D\u7F6E\u540E\u624D\u80FD\u5F00\u59CB\u5BF9\u8BDD\u3002";
+    apiKeyText.textContent = "\u5C1A\u672A\u914D\u7F6E\u6A21\u578B\u540D\u79F0\u6216 API \u5730\u5740\uFF0C\u914D\u7F6E\u540E\u624D\u80FD\u5F00\u59CB\u5BF9\u8BDD\u3002";
     const apiKeySettingsBtn = document.createElement("button");
     apiKeySettingsBtn.type = "button";
     apiKeySettingsBtn.className = "api-key-settings";

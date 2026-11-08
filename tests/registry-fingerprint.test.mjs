@@ -34,6 +34,7 @@ function computeRegistryFingerprint(registry) {
       mutatesState: t.mutatesState,
       alwaysAvailable: t.alwaysAvailable,
       alwaysRequireApproval: t.alwaysRequireApproval,
+      spillExempt: t.spillExempt,
       route: t.route,
       timeoutMs: t.timeoutMs,
     }))
@@ -230,7 +231,15 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //   f30c1047079b8523 — **有意改动**：`update_plan` 增加 PlanCard 契约。
   //                       步骤可选择声明 successPredicate / allowedOperations / leaseActions，
   //                       JEV 据此收紧动作空间并限制连续执行；工具数、权限与风险等级不变。
-  const EXPECTED = 'f30c1047079b8523';
+  //   4081790dcc1ddb2b — **有意改动**：get_page_snapshot 不再把元素的
+  //                       selector / rect / center 推进模型上下文，改由 ref 在页面执行层
+  //                       按需解析；inspect_element 描述同步给出按 ref 读取详情的入口。
+  //                       工具数量与权限元数据不变。
+  //   1846301b4d846749 — **有意改动**：get_page_snapshot 增加 textMode（auto/start/relevant/none），
+  //                       query 同时驱动元素排序与相关正文窗口；新增 spillExempt 元数据，
+  //                       让快照使用自身 8K 字段感知预算，而不再被通用 6K/3K 截断。
+  //                       工具数量与权限类别不变。
+  const EXPECTED = '1846301b4d846749';
   assert.equal(
     fp,
     EXPECTED,

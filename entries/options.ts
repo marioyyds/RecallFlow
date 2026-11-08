@@ -448,18 +448,14 @@ $('test-connection').addEventListener('click', async () => {
   const apiKey = $('api-key').value.trim();
   const baseUrl = $('base-url').value.trim().replace(/\/+$/, '') || AI_SETTINGS_DEFAULTS.baseUrl;
   status.className = 'connection-status';
-  if (!apiKey) {
-    status.textContent = '请先填写 API Key';
-    status.classList.add('error');
-    $('api-key').focus();
-    return;
-  }
   status.textContent = '正在测试…';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
+    const headers: Record<string, string> = {};
+    if (apiKey) headers.Authorization = 'Bearer ' + apiKey;
     const res = await fetch(baseUrl + '/models', {
-      headers: { Authorization: 'Bearer ' + apiKey },
+      headers,
       signal: controller.signal,
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);

@@ -269,6 +269,28 @@ test('get_page_snapshot：无 tabId 时失败', async () => {
   assert.match(r.result, /无法定位当前标签页/);
 });
 
+test('get_page_snapshot：模型投影省略 selector/rect/center，但完整快照仍保留执行元数据', async () => {
+  const element = {
+    ref: 'rf-1',
+    tag: 'button',
+    role: 'button',
+    label: '提交',
+    selector: '#submit',
+    rect: { x: 10, y: 20, width: 80, height: 30 },
+    center: { x: 50, y: 35 },
+    inViewport: true,
+  };
+  const r = await getPageSnapshotTool(
+    mkDeps({ snapshot: { elements: [element], text: '', counts: {}, mainContent: null } }),
+    {}
+  );
+  assert.match(r.result, /"ref":"rf-1"/);
+  assert.doesNotMatch(r.result, /"selector"|"rect"|"center"/);
+  assert.equal(r.snapshot.elements[0].selector, '#submit');
+  assert.deepEqual(r.snapshot.elements[0].rect, element.rect);
+  assert.deepEqual(r.snapshot.elements[0].center, element.center);
+});
+
 test('**关键**：页面有未处理对话框时先提示处理（快照读不到有效内容）', async () => {
   const deps = mkDeps({
     cdpAllowed: () => true,
@@ -350,19 +372,32 @@ test('get_page_snapshot：透传 query / cursor，并输出区域轮廓与继续
 test('**关键**：includeFrames 合并子框架后仍要过体积预算', async () => {
   // 否则多个框架的元素一起塞进来，会绕开快照自身的 SNAPSHOT_CHAR_BUDGET。
   let trimmedWith = null;
+  let projectedElements = null;
   const deps = mkDeps({
-    snapshot: { elements: [{ ref: 'a' }], text: 'y'.repeat(500), counts: { omittedBySize: 2 }, mainContent: null },
+    snapshot: {
+      elements: [{ ref: 'a', selector: '#a', rect: { x: 1 }, center: { x: 2 } }],
+      text: 'y'.repeat(500),
+      counts: { omittedBySize: 2 },
+      mainContent: null,
+    },
     getPageSnapshot: async (tabId, opts) => {
       if (opts.frameId === 3) return { elements: [{ ref: 'b' }], text: '' };
       return deps.snapshot;
     },
-    trimElementsToBudget: (els, textLen) => { trimmedWith = { count: els.length, textLen }; return { elements: els.slice(0, 1), omittedBySize: 5 }; },
+    trimElementsToBudget: (els, textLen) => {
+      trimmedWith = { count: els.length, textLen };
+      projectedElements = els;
+      return { elements: els.slice(0, 1), omittedBySize: 5 };
+    },
   });
   const r = await getPageSnapshotTool(deps, { includeFrames: true });
   assert.equal(r.ok, true);
   assert.ok(trimmedWith, '必须调用 trimElementsToBudget');
   assert.equal(trimmedWith.count, 2, '应先把顶层与子框架元素合并再裁剪');
   assert.equal(trimmedWith.textLen, 500, '应把正文长度一起传给预算函数');
+  assert.equal(projectedElements[0].selector, undefined, '预算输入应为模型投影');
+  assert.equal(projectedElements[0].rect, undefined, '预算不应再被隐藏几何字段挤占');
+  assert.equal(r.snapshot.elements[0].selector, '#a', '完整快照仍保留执行元数据');
   assert.equal(r.snapshot.counts.omittedBySize, 7, '省略数应累加（原有 2 + 本次 5）');
   assert.equal(r.snapshot.frames.length, 2, '应把框架清单也附回去');
   assert.match(r.result, /已合并 1 个子框架/);

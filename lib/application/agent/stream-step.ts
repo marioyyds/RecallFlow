@@ -7,6 +7,7 @@ import {
   modelRequiresReasoningReplay,
   prepareProviderMessages,
 } from './provider-history.ts';
+import { chatRequestHeaders } from '../../shared/settings.ts';
 
 /**
  * 以流式方式调用一次 Agent 步骤，解析 SSE 中的 content 与 tool_calls。
@@ -175,10 +176,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       try {
         resp = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + settings.apiKey,
-          },
+          headers: chatRequestHeaders(settings),
           body: JSON.stringify(body),
           signal: timeoutCtrl ? timeoutCtrl.signal : signal,
         });
@@ -213,16 +211,16 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       // 是旧写法先 json() 再 text() 把响应体读废了（见 readErrorDetail）。
       // 形状仍然有用，但**不再当成"服务端没说"的推断依据**。
       if (resp.status === 400) {
-        const roles = (Array.isArray(messages) ? messages : [])
+        const roles = providerMessages
           .map((m) => {
             if (!m || !m.role) return '?';
-            return m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length ? 'asst(tc)' : m.role;
+            return m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length ? 'asst(tc)' : String(m.role);
           })
           .join(',');
         detail +=
           (detail ? ' ' : '') +
           '[请求形状：model=' + body.model +
-          ' messages=' + (Array.isArray(messages) ? messages.length : 0) +
+          ' messages=' + providerMessages.length +
           ' roles=' + roles.slice(-400) +
           ' tools=' + ((body.tools && body.tools.length) || 0) +
           ' tool_choice=' + (body.tool_choice || '-') +
@@ -241,7 +239,7 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
             '）';
         }
       }
-      const err = new Error('DeepSeek 请求失败 (' + resp.status + '): ' + detail) as Caught;
+      const err = new Error('模型请求失败 (' + resp.status + '): ' + detail) as Caught;
       err.status = resp.status;
       err.bodyParseRejected = bodyParseRejected;
       if (attempt < MAX_RETRIES && isRetryableError(err)) {
@@ -273,6 +271,29 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
   const headersAt = Date.now();
   const streamStartAt = headersAt;
   let firstTokenAt = 0;
+
+  const reasoningText = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(reasoningText).join('');
+    if (!value || typeof value !== 'object') return '';
+    const record = value as Record<string, unknown>;
+    for (const key of ['text', 'content', 'reasoning_content', 'reasoning']) {
+      const text = reasoningText(record[key]);
+      if (text) return text;
+    }
+    return '';
+  };
+
+  const reasoningDelta = (delta: Record<string, unknown>): string => {
+    // vLLM 的 reasoning parser 标准输出是 reasoning_content；部分网关/版本
+    // 使用 reasoning / thinking，甚至把内容包成对象。按顺序取第一个非空字段，
+    // 避免同一段思考因多个别名同时出现而被重复展示。
+    for (const key of ['reasoning_content', 'reasoning', 'reasoning_text', 'thinking']) {
+      const text = reasoningText(delta[key]);
+      if (text) return text;
+    }
+    return '';
+  };
 
   const ensureTool: any = (i: any) => {
     while (toolAcc.length <= i) toolAcc.push({ index: toolAcc.length, id: '', name: '', args: '' });
@@ -322,18 +343,19 @@ export async function streamAgentStep(port: any, settings: any, messages: any, s
       const choice = json.choices && json.choices[0];
       if (!choice) continue;
       const delta = choice.delta || {};
+      const reasoningChunk = reasoningDelta(delta);
       // 首个可见增量即 prefill 结束 / decode 开始的分界点。
       // **思维链也算首个增量**：推理模型会先吐一大段 reasoning_content 才开始正文，
       // 若不计入，这段等待会被错算进 prefillMs，让「慢在哪一段」的判断失真。
-      if (!firstTokenAt && (delta.content || delta.reasoning_content || delta.tool_calls || choice.finish_reason)) {
+      if (!firstTokenAt && (delta.content || reasoningChunk || delta.tool_calls || choice.finish_reason)) {
         firstTokenAt = Date.now();
       }
       // 思维链：单独发一类事件（type: 'reasoning'），与正文 chunk 分开。
       // 分开的理由：面板要把它渲染成**默认折叠的思考记录**（用户点开才看全文）；
       // 若混进 chunk，面板就再也分不出哪段是思考、哪段是回答。
-      if (delta.reasoning_content) {
-        reasoningAcc += delta.reasoning_content;
-        (emit || ((event: any) => port.postMessage(event)))({ type: 'reasoning', lane: 'slow', text: delta.reasoning_content });
+      if (reasoningChunk) {
+        reasoningAcc += reasoningChunk;
+        (emit || ((event: any) => port.postMessage(event)))({ type: 'reasoning', lane: 'slow', text: reasoningChunk });
       }
       if (delta.content) {
         contentAcc += delta.content;

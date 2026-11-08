@@ -114,6 +114,7 @@ export const TOOL_REGISTRY = Object.freeze(
       parallelSafe: metadata.parallelSafe === true,
       alwaysAvailable: metadata.alwaysAvailable === true,
       alwaysRequireApproval: metadata.alwaysRequireApproval === true,
+      spillExempt: metadata.spillExempt === true,
       route: metadata.route || 'background',
       timeoutMs: Number(metadata.timeoutMs) > 0 ? Number(metadata.timeoutMs) : 0,
       openai: tool,
@@ -177,6 +178,7 @@ export function getToolMetadata(name: string) {
         route: definition.route,
         alwaysAvailable: definition.alwaysAvailable === true,
         alwaysRequireApproval: definition.alwaysRequireApproval === true,
+        spillExempt: definition.spillExempt === true,
         timeoutMs: Number(definition.timeoutMs) > 0 ? Number(definition.timeoutMs) : 0,
       }
     : { risk: 'unknown', requiresApproval: true, readOnly: false, mutatesState: true, route: 'background' };

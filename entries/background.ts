@@ -1,6 +1,6 @@
 // Service Worker 入口（ES Module）：AI 请求 / Agent 编排 / 页面命令转发的消息监听
 import { getBook } from '../lib/shared/store.ts';
-import { getAISettings } from '../lib/shared/settings.ts';
+import { getAISettings, hasChatModelConfig } from '../lib/shared/settings.ts';
 import { buildAiMessages } from '../lib/shared/rag.ts';
 import { callDeepSeek } from '../lib/application/agent/llm.ts';
 import { runAgentStream } from '../lib/application/agent/agent.ts';
@@ -442,10 +442,10 @@ try {
 
 async function handleAi(request: Dyn) {
   const settings = await getAISettings();
-  if (!settings.apiKey) {
+  if (!hasChatModelConfig(settings)) {
     return {
       ok: false,
-      error: '尚未配置 API Key，请点击插件图标 → 设置页填写。',
+      error: '尚未配置模型名称或 API 地址，请点击插件图标 → 设置页填写。',
       needSetup: true,
     };
   }

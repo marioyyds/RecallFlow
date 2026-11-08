@@ -65,10 +65,13 @@ export function expandResult(ctx: RunCtx, args: Record<string, unknown>) {
   const offset = Math.max(0, Number(args.offset) || 0);
   const limit = Math.min(4000, Math.max(200, Number(args.limit) || 2000));
   const piece = rangeSafe(text, offset, offset + limit);
+  const nextOffset = piece.end < piece.length ? piece.end : null;
   return {
     ok: true,
     result:
-      '结果 ' + id + ' [' + piece.start + ',' + piece.end + ') / 共 ' + piece.length + ' 字符：\n' + piece.text,
+      '结果 ' + id + ' [' + piece.start + ',' + piece.end + ') / 共 ' + piece.length + ' 字符' +
+      (nextOffset === null ? '（已到末尾）' : '；下一段 offset=' + nextOffset) +
+      '：\n' + piece.text,
   };
 }
 

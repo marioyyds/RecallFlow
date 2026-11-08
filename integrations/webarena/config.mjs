@@ -18,8 +18,15 @@ export function parseArgs(argv) {
     allowRisk: ['read', 'page', 'write', 'browser', 'network'],
     siteUrls: {},
     headers: {},
-    pollMs: 3000,
+    pollMs: 500,
     timeoutMs: 300000,
+    concurrency: 3,
+    siteReset: 'per-task',
+    resetWaitMs: 180000,
+    actionRetries: 1,
+    taskFormat: 'verified',
+    imageSet: 'verified',
+    captureHar: true,
     dryRun: false,
     profileDir: '',
     extPath: '',
@@ -36,6 +43,7 @@ export function parseArgs(argv) {
       return v;
     };
     if (a === '--dry-run') out.dryRun = true;
+    else if (a === '--no-har') out.captureHar = false;
     else if (a === '--resume') out.resume = true;
     else if (a === '--help' || a === '-h') out.help = true;
     else if (a === '--tasks') out.tasks = next();
@@ -47,6 +55,30 @@ export function parseArgs(argv) {
     else if (a === '--limit') out.limit = Number(next());
     else if (a === '--poll-ms') out.pollMs = Number(next());
     else if (a === '--timeout-ms') out.timeoutMs = Number(next());
+    else if (a === '--concurrency') out.concurrency = Number(next());
+    else if (a === '--site-reset') {
+      const mode = next().trim().toLowerCase();
+      if (!['none', 'run', 'per-task'].includes(mode)) {
+        throw new Error('--site-reset 只接受 none / run / per-task');
+      }
+      out.siteReset = mode;
+    }
+    else if (a === '--reset-wait-ms') out.resetWaitMs = Number(next());
+    else if (a === '--action-retries') out.actionRetries = Number(next());
+    else if (a === '--task-format') {
+      const format = next().trim().toLowerCase();
+      if (!['verified', 'original'].includes(format)) {
+        throw new Error('--task-format 只接受 verified / original');
+      }
+      out.taskFormat = format;
+    }
+    else if (a === '--image-set') {
+      const imageSet = next().trim().toLowerCase();
+      if (!['verified', 'original'].includes(imageSet)) {
+        throw new Error('--image-set 只接受 verified / original');
+      }
+      out.imageSet = imageSet;
+    }
     else if (a === '--allow-risk') out.allowRisk = next().split(',').map((x) => x.trim()).filter(Boolean);
     else if (a === '--site-url') {
       const raw = next();
@@ -63,8 +95,13 @@ export function parseArgs(argv) {
     else throw new Error('未知参数：' + a + '（用 --help 看用法）');
   }
   if (!Number.isFinite(out.limit) || out.limit < 0) out.limit = 0;
-  if (!Number.isFinite(out.pollMs) || out.pollMs < 200) out.pollMs = 3000;
+  if (!Number.isFinite(out.pollMs) || out.pollMs < 200) out.pollMs = 500;
   if (!Number.isFinite(out.timeoutMs) || out.timeoutMs < 1000) out.timeoutMs = 300000;
+  if (!Number.isInteger(out.concurrency) || out.concurrency < 1) out.concurrency = 3;
+  if (out.concurrency > 8) out.concurrency = 8;
+  if (!Number.isFinite(out.resetWaitMs) || out.resetWaitMs < 10000) out.resetWaitMs = 180000;
+  if (!Number.isInteger(out.actionRetries) || out.actionRetries < 0) out.actionRetries = 1;
+  if (out.actionRetries > 2) out.actionRetries = 2;
   return out;
 }
 
@@ -113,6 +150,27 @@ export function selectTasks(tasks, { taskIds = [], sites = [], limit = 0 } = {})
   }
   if (limit > 0) picked = picked.slice(0, limit);
   return picked;
+}
+
+/** 任务需要的站点锁；没有站点声明的任务单独串行，避免隐式共享账号。 */
+export function taskSiteScope(task) {
+  const sites = Array.isArray(task && task.sites)
+    ? task.sites.map((site) => String(site || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  return [...new Set(sites.length ? sites : ['__unscoped__'])];
+}
+
+/**
+ * 找第一条与当前活跃站点不冲突的任务。
+ *
+ * WebArena 每个站点只有一组测试账号；同一站点并发会触发 Magento
+ * “terminated by another user”之类的会话互踢。跨站点仍可并发。
+ */
+export function selectRunnableTaskIndex(tasks, activeSites) {
+  const active = activeSites instanceof Set ? activeSites : new Set(activeSites || []);
+  return (Array.isArray(tasks) ? tasks : []).findIndex((task) =>
+    taskSiteScope(task).every((site) => !active.has(site))
+  );
 }
 
 /**

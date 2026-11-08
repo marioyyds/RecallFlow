@@ -38,10 +38,13 @@ export function describeToolFailure(e: any, toolName: string) {
  * 看起来像它偷懒，实际是链接断了。抽成单一来源后，格式只有一个地方可改，
  * 而 `tests/expand-result.test.mjs` 用**真实的这条字符串**测那条链路。
  */
-export function formatTruncationNotice(totalChars: any, id: any) {
+export function formatTruncationNotice(totalChars: any, id: any, shownChars = 3000) {
+  const total = Math.max(0, Number(totalChars) || 0);
+  const shown = Math.min(total, Math.max(0, Number(shownChars) || 0));
   return (
-    '\n…（结果共 ' + totalChars + ' 字符，已截断；完整内容 id=' + id +
-    '，可用 expand_result(id="' + id + '") 分段读取）'
+    '\n…（结果共 ' + total + ' 字符，已截断；显示 [0,' + shown +
+    ')；完整内容 id=' + id + '，请用 expand_result(id="' + id +
+    '", offset:' + shown + ', limit:3000) 从缺口继续）'
   );
 }
 

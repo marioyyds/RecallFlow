@@ -86,7 +86,16 @@ export const ENTRIES = [
   // these changes reuse existing modules and add no dependency.
   // Navigation-aware abort hold and stale-target handling measured 1014642
   // bytes. Raise explicitly to 991KB; no dependency was added.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 991 * 1024 },
+  // Concurrent WebArena workers need a configurable relay port; dynamic endpoint
+  // selection measured 1014998 bytes. Raise explicitly to 993KB; no dependency was added.
+  // 2026-11-05: strict-provider system-message normalization and vLLM/Qwen
+  // reasoning-field aliases measured 1017085 bytes. Raise explicitly to 994KB;
+  // this is compatibility logic only, with no new dependency.
+  // 2026-11-09: model-facing snapshots now project out selector/rect/center,
+  // serialize structured elements before text, and query relevant text windows.
+  // The same shared modules measured 1021083 bytes here. Raise explicitly to
+  // 999KB; this is in-repo snapshot logic, not a new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 999 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -102,7 +111,12 @@ export const ENTRIES = [
   // Shared PlanCard schema increased the bundle to 571994 bytes. It is re-exported
   // through the shared tool surface; no dependency was added. Raise to 559KB.
   // Shared runtime and verification changes measured 572929 bytes; raise to 560KB.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 560 * 1024 },
+  // Snapshot execution metadata is projected out of the model-facing tool contract;
+  // the paired descriptions pushed the shared schema bundle to 573528 bytes.
+  // Raise explicitly to 561KB; no dependency was added.
+  // Structured-first snapshots and query-aware text modes measured 576956 bytes.
+  // Raise explicitly to 565KB; no dependency was added.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 565 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -115,7 +129,11 @@ export const ENTRIES = [
   // The same shared PlanCard contract measured 551339 bytes; raise explicitly
   // to 539KB. No new dependency was introduced.
   // Shared runtime/verification code measured 552274 bytes; raise to 540KB.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 540 * 1024 },
+  // The same compact-snapshot contract is rendered on the skills page;
+  // measured 552983 bytes. Raise explicitly to 541KB; no dependency was added.
+  // Query-aware snapshot text and structured-first output measured 556407 bytes.
+  // Raise explicitly to 545KB; no dependency was added.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 545 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

@@ -136,6 +136,7 @@ export interface PageSnapshotLike {
   query?: string;
   cursor?: number;
   nextCursor?: number | null;
+  textMode?: 'start' | 'relevant' | 'none';
   scroll?: { x: number; y: number; height?: number; viewport?: number } | null;
   capabilities?: Record<string, CapabilityBucketLike>;
   runtime?: PageRuntimeState | null;
@@ -346,6 +347,7 @@ export interface ToolMetadataEntry {
   route?: string;
   alwaysAvailable?: boolean;
   alwaysRequireApproval?: boolean;
+  spillExempt?: boolean;
   timeoutMs?: number;
   [key: string]: unknown;
 }

@@ -1,5 +1,5 @@
 // 网页端 AI 助手 UI：悬浮按钮(FAB)/划词气泡/对话面板 + Markdown 渲染 + 对话持久化
-import { getAISettings, updateAISettings, AI_SETTINGS_DEFAULTS, expandQuickPrompt } from '../../shared/settings.ts';
+import { getAISettings, updateAISettings, AI_SETTINGS_DEFAULTS, expandQuickPrompt, hasChatModelConfig } from '../../shared/settings.ts';
 import {
   composeProgressText,
   summarizePickedForMessage,
@@ -1390,13 +1390,13 @@ function showCitationHint(text: any) {
   setTimeout(() => { if (hint.parentNode) hint.parentNode.removeChild(hint); }, 5000);
 }
 
-/** 未配置 API Key 时常驻提示；配置后自动隐藏（storage.onChanged 会再次调用）。 */
+/** 模型端点未配置时常驻提示；API Key 为空本身是合法配置（本地模型）。 */
 function refreshApiKeyBanner() {
   if (!streamView.apiKeyBanner) return;
   getAISettings()
     .then((s) => {
       if (!streamView.apiKeyBanner) return;
-      const missing = !String((s && s.apiKey) || '').trim();
+      const missing = !hasChatModelConfig(s);
       streamView.apiKeyBanner.style.display = missing ? 'flex' : 'none';
       fitPanelHeight();
     })
@@ -3432,14 +3432,14 @@ function createPanelWithLayout(
   });
   getAISettings().then((s) => { const p = s.toolApprovalPolicy || { read: true }; approvalSettings.querySelectorAll('[data-policy]').forEach((x: any) => { x.checked = (p as any)[x.dataset.policy] === true; x.addEventListener('change', async () => { const policy = Object.fromEntries([...approvalSettings.querySelectorAll('[data-policy]')].map((y: any) => [y.dataset.policy, y.checked])); try { await updateAISettings({ toolApprovalPolicy: policy }); } catch (e: any) { warnExtDead(); } autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => (policy as any)[k] === true); refreshApprovalLabel(); }); }); autopilotEl.checked = ['read', 'edit', 'commands', 'browser', 'mcp'].every((k) => (p as any)[k] === true); refreshApprovalLabel(); }).catch(() => {});
 
-  // API Key 缺失提示常驻在输入区上方：用户一打开面板就能看到，不必先发一条消息。
+  // 模型端点缺失提示常驻在输入区上方；API Key 可选，本地模型留空也能直接使用。
   streamView.apiKeyBanner = document.createElement('div');
   streamView.apiKeyBanner.className = 'api-key-banner';
   streamView.apiKeyBanner.style.cssText =
     'display:none;margin:4px 0;padding:6px 8px;border:1px solid #f0c36d;background:#fff8e6;' +
     'border-radius:6px;color:#8a5a00;font-size:12px;align-items:center;gap:8px;justify-content:space-between;';
   const apiKeyText = document.createElement('span');
-  apiKeyText.textContent = '尚未配置 API Key，配置后才能开始对话。';
+  apiKeyText.textContent = '尚未配置模型名称或 API 地址，配置后才能开始对话。';
   const apiKeySettingsBtn = document.createElement('button');
   apiKeySettingsBtn.type = 'button';
   apiKeySettingsBtn.className = 'api-key-settings';

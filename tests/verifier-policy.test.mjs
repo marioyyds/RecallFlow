@@ -23,7 +23,11 @@ import assert from 'node:assert/strict';
 import { shouldVerifyCompletion, resolveVerifyIntent } from '../lib/application/agent/agent.ts';
 import { INTENTS } from '../lib/application/agent/intent-router.ts';
 
-const SETTINGS = { apiKey: 'k' };
+const SETTINGS = {
+  apiKey: 'k',
+  baseUrl: 'https://api.deepseek.com',
+  model: 'deepseek-chat',
+};
 
 test('只对会操作页面的意图校验：闲聊 / 知识库类任务一律不校验', () => {
   // 这类任务占多数，而它们没有"页面状态是否真的变了"可验 —— 校验等于白花一次调用
@@ -46,9 +50,19 @@ test('没调用过任何工具就不校验（没有可验的动作）', () => {
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, undefined, SETTINGS), false);
 });
 
-test('用户可以关掉它；没配 API Key 也不能调（否则会静默失败）', () => {
+test('用户可以关掉它；模型端点未配置时也不能调（否则会静默失败）', () => {
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, { apiKey: 'k', verifierEnabled: false }), false);
-  assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, { verifierEnabled: true }), false, '缺 apiKey 时不调');
+  assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, { verifierEnabled: true }), false, '缺模型端点时不调');
+  assert.equal(
+    shouldVerifyCompletion(INTENTS.BROWSER, 5, {
+      verifierEnabled: true,
+      apiKey: '',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'qwen3-coder',
+    }),
+    true,
+    '本地模型可以没有 API Key'
+  );
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, null), false);
   assert.equal(shouldVerifyCompletion(INTENTS.BROWSER, 5, undefined), false);
 });

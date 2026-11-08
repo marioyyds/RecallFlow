@@ -40,6 +40,7 @@ import {
   ensureDownloadObservation,
   shouldObserveDownloads,
 } from './target-manager.ts';
+import { shouldSpillToolResult } from './tool-results.ts';
 import {
   captureXhsPublicationEvidence,
   evaluateXhsPublicationGate,
@@ -411,7 +412,7 @@ export class ToolCallPipeline {
       this.applyCitations(result);
       await this.applyTabTarget(result);
       const rawResult = typeof result.result === 'string' ? result.result : '';
-      if (rawResult.length > CONTEXT_TUNING.spillResultChars) {
+      if (shouldSpillToolResult(metadata, rawResult)) {
         const resultId = 'res-' + sequence;
         try {
           state.ctx.resultStore.set(resultId, result.result);
@@ -420,8 +421,14 @@ export class ToolCallPipeline {
           state.ctx.resultIds.add(resultId);
         } catch {}
         result.result =
-          sliceSafe(result.result, 0, CONTEXT_TUNING.spillInlineChars) +
-          formatTruncationNotice(result.result.length, resultId);
+          sliceSafe(result.result, 0, CONTEXT_TUNING.spillInlineChars);
+        result.result =
+          result.result +
+          formatTruncationNotice(
+            rawResult.length,
+            resultId,
+            result.result.length
+          );
       }
       this.sanitizeResult(toolCall.name, result);
       this.emitScreenshot(result);

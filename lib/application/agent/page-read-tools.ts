@@ -17,7 +17,11 @@
 // 纯函数直接 import，不走 deps 注入：它没有"需要替换"的场景，
 // 而走 deps 会让**所有**既有调用方（含本仓库两条既有测试）都得补这个依赖，破坏面大于收益。
 import { describeContentScriptUnreachable } from '../../shared/diagnostics.ts';
-import { formatSnapshotOutline } from '../../shared/format/page-results.ts';
+import {
+  formatSnapshotResultForModel,
+  formatSnapshotOutline,
+  projectSnapshotElementForModel,
+} from '../../shared/format/page-results.ts';
 import type { Caught } from './errors.ts';
 import type {
   PageSnapshotLike,
@@ -289,6 +293,7 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         maxText: args.maxText,
         query: args.query,
         cursor: args.cursor,
+        textMode: args.textMode,
         frameId: fid,
       });
       if (!snapshot) return { ok: false, result: '未能读取该框架的 DOM 快照（frameId=' + fid + '，可能无内容脚本）。' };
@@ -297,9 +302,11 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         ok: true,
         hadEffect: false,
         snapshot: tagged,
-        result:
-          '框架 ' + fid + ' 的 DOM 快照：\n' + JSON.stringify(tagged) +
-          formatSnapshotOutline(tagged),
+        result: formatSnapshotResultForModel(
+          tagged,
+          '框架 ' + fid + ' 的 DOM 快照：\n',
+          formatSnapshotOutline(tagged)
+        ),
       };
     }
     const snapshot = await deps.getPageSnapshot(tabId, args);
@@ -330,7 +337,8 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         ? '\n⚠ 另有 ' +
           omittedBySize +
           ' 个可交互元素因**快照体积预算**未列出（elements 按"离视口中心远近"排序，视口外的排在后面、先被裁）。' +
-          '需要它们时：先用 scroll_page 把它滚进视口再读一次，或直接按 selector / role+name 操作（不必先"看到"）。'
+          '需要它们时：先用 scroll_page 把它滚进视口再读一次，或直接按 ref / role+name 操作（不必先"看到"）；' +
+          '需要 selector 或几何信息时用 inspect_element({op:"inspect",ref}) 按需读取。'
         : '';
     // includeFrames：合并所有子框架（含跨域 iframe）的可交互元素，ref 带 f<frameId>: 前缀。
     if (args.includeFrames === true) {
@@ -372,7 +380,17 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
       // 能力元数据同样计入：子框架的能力样本也是随快照发给模型的正文。
       const mergedCapabilities = mergeFrameCapabilities(snapshot.capabilities, perFrameCapabilities);
       const capabilityChars = mergedCapabilities ? JSON.stringify(mergedCapabilities).length : 0;
-      const trimmed = deps.trimElementsToBudget(capped, String(snapshot.text || '').length + capabilityChars);
+      // 预算按模型可见投影计算。selector / rect / center 仍留在完整元素中，
+      // 但不挤占其他交互元素的模型侧名额。
+      const projectedCapped = capped.map(projectSnapshotElementForModel);
+      const trimmedProjected = deps.trimElementsToBudget(
+        projectedCapped,
+        String(snapshot.text || '').length + capabilityChars
+      );
+      const trimmed = {
+        elements: capped.slice(0, trimmedProjected.elements.length),
+        omittedBySize: trimmedProjected.omittedBySize,
+      };
       const merged = Object.assign({}, snapshot, {
         elements: trimmed.elements,
         capabilities: mergedCapabilities || undefined,
@@ -403,23 +421,27 @@ export async function getPageSnapshotTool(deps: PageReadDeps, args: Record<strin
         ok: true,
         hadEffect: false,
         snapshot: merged,
-        result:
-          '当前页面 DOM 快照（已合并 ' + readFrameIds.length + ' 个子框架）：\n' + JSON.stringify(merged) +
+        result: formatSnapshotResultForModel(
+          merged,
+          '当前页面 DOM 快照（已合并 ' + readFrameIds.length + ' 个子框架）：\n',
           '\n提示：带 f<frameId>: 前缀的 ref 属于对应 iframe，动作时直接原样传回 ref 即可。' +
-          formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) +
-          frameWarning + mainHint + omitHint +
-          (sameOriginFrameIds.length
-            ? '\n同源框架 ' + sameOriginFrameIds.join('、') + ' 已由顶层快照穿透读取，未重复合并。'
-            : ''),
+            formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) +
+            frameWarning + mainHint + omitHint +
+            (sameOriginFrameIds.length
+              ? '\n同源框架 ' + sameOriginFrameIds.join('、') + ' 已由顶层快照穿透读取，未重复合并。'
+              : '')
+        ),
       };
     }
     return {
       ok: true,
       hadEffect: false,
       snapshot,
-      result:
-        '当前页面 DOM 快照：\n' + JSON.stringify(snapshot) +
-        outlineHint + capHint + mainHint + omitHint,
+      result: formatSnapshotResultForModel(
+        snapshot,
+        '当前页面 DOM 快照：\n',
+        outlineHint + capHint + mainHint + omitHint
+      ),
     };
   } catch (e) {
     return { ok: false, result: describeContentScriptUnreachable((e as Caught).message, '读取 DOM 快照失败：') };

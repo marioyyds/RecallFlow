@@ -14,6 +14,7 @@
 // 那些请求绝大多数是 Agent 自己的多步工作（逐步校验暴露邀请码 → 补齐 → 重试）。
 // 现在每次真模型 eval 都会单独打印校验器调用数，失控会立刻看得见。
 import { callDeepSeek, makeAbortError } from './llm.ts';
+import { hasChatModelConfig } from '../../shared/settings.ts';
 
 export const VERIFIER_SYSTEM = `你是 RecallFlow 的任务校验器。根据「用户目标」「Agent 声称的结果」「本次任务性质」和「页面/环境证据」，判断目标是否真的达成。
 只输出严格 JSON：
@@ -57,7 +58,7 @@ const VERIFIER_MAX_TOKENS = 400;
 
 // 返回 { ok, confidence, reason, missing, suggestion } 或 null（校验失败时调用方按“通过”处理，避免阻塞）。
 export async function verifyCompletion(settings: any, { instruction, claim, evidence, pageUrl, pageTitle, taskKind }: any, signal: AbortSignal) {
-  if (!settings || !settings.apiKey) return null;
+  if (!settings || !hasChatModelConfig(settings)) return null;
   const kind = taskKind === 'read' ? 'read（本次只有读取类操作，没有改动页面）' : 'mutation（本次有页面写操作）';
   const user = [
     '用户目标：' + String(instruction || '').slice(0, 1000),

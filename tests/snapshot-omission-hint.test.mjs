@@ -31,7 +31,7 @@ test('提示必须给出**下一步**（滚进视口 / 直接按选择器操作�
 test('排序机制有代码依据：elements 按键值排序后截断（不是文档顺序）', () => {
   assert.match(PAGE, /inViewDist/, 'page-text.js 里确实按"离视口中心远近"排序');
   assert.match(PAGE, /ranked\.slice\(cursor, cursor \+ maxElements\)/, '也确实按 cursor + maxElements 分页');
-  assert.match(PAGE, /trimElementsToBudget\(\s*describedAll,\s*text\.length \+ capabilityChars \+ outlineChars\s*\)/, '并再过体积预算');
+  assert.match(PAGE, /trimSnapshotElementsToBudget\(\s*describedAll,\s*text\.length \+ capabilityChars \+ outlineChars\s*\)/, '并按模型投影再过体积预算');
 });
 
 test('capabilities 也占同一个快照预算（不能绕过体积裁剪）', () => {

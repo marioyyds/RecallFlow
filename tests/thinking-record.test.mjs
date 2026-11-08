@@ -22,20 +22,22 @@ const bundle = fs.readFileSync('content.js', 'utf8');
 
 // ---------------------------------------------------------------- 后台侧
 
-test('agent.js：把 reasoning_content 发成独立事件，而不是混进 chunk', () => {
-  assert.match(agentSrc, /delta\.reasoning_content/, '应读取 delta.reasoning_content');
+test('agent.js：把各 provider 的 reasoning 字段发成独立事件，而不是混进 chunk', () => {
+  assert.match(agentSrc, /reasoningDelta\(/, '应通过 reasoning 字段归一化函数读取');
+  assert.match(agentSrc, /reasoning_content/, '必须兼容标准 reasoning_content');
+  assert.match(agentSrc, /reasoning_text/, '必须兼容网关使用的 reasoning_text');
+  assert.match(agentSrc, /thinking/, '必须兼容 thinking 字段');
   assert.match(
     agentSrc,
     /type:\s*'reasoning'/,
     '必须发 type:reasoning 事件 —— 混进 chunk 后，面板就再也分不出哪段是思考、哪段是回答'
   );
   // 思维链不能混进正文累积
-  const reasoningBlock = agentSrc.slice(agentSrc.indexOf('delta.reasoning_content') - 200);
   assert.ok(
-    !/contentAcc\s*\+=\s*delta\.reasoning_content/.test(agentSrc),
+    !/contentAcc\s*\+=\s*reasoningChunk/.test(agentSrc),
     '思维链不得累加进 contentAcc（那会让它变成正文的一部分）'
   );
-  assert.ok(reasoningBlock.includes('reasoningAcc'), '应累积到独立的 reasoningAcc');
+  assert.match(agentSrc, /reasoningAcc\s*\+=\s*reasoningChunk/, '应累积到独立的 reasoningAcc');
 });
 
 test('agent.js：思维链算作首个增量（否则思考耗时会被错算进 prefill）', () => {
@@ -43,10 +45,10 @@ test('agent.js：思维链算作首个增量（否则思考耗时会被错算进
     .split('\n')
     .find((l) => l.includes('firstTokenAt = Date.now()'));
   assert.ok(firstTokenLine, '应能找到首个增量的判定行');
-  // 判定条件里必须包含 reasoning_content
+  // 判定条件里必须包含归一化后的 reasoningChunk（覆盖 reasoning_content 及其别名）
   const condLine = agentSrc.split('\n').find((l) => l.includes('if (!firstTokenAt &&'));
   assert.ok(condLine, '应能找到判定条件');
-  assert.match(condLine, /delta\.reasoning_content/, '判定条件应包含 reasoning_content：' + condLine);
+  assert.match(condLine, /reasoningChunk/, '判定条件应包含 reasoningChunk：' + condLine);
 });
 
 test('agent.js：assistantMessage **不带**思维链（写回会破坏前缀缓存）', () => {

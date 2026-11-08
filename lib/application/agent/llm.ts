@@ -3,6 +3,8 @@
 // 出站消毒（孤立代理对）：内容里带半个代理对时，服务端在**解析请求体**阶段就整单拒收 400。
 // 这条路径（意图分类 / 独立校验）的输入里也夹着页面原文（证据片段），所以同样必须过一遍。
 import { sanitizeMessages } from '../../shared/surrogates.ts';
+import { chatRequestHeaders } from '../../shared/settings.ts';
+import { normalizeProviderMessages } from './provider-history.ts';
 
 async function callDeepSeekOnce(settings: any, messages: any, signal?: AbortSignal) {
   // ⚠ 已经中断就别发请求。`signal.addEventListener('abort')` 对**已经 abort 过**的 signal
@@ -26,7 +28,7 @@ async function callDeepSeekOnce(settings: any, messages: any, signal?: AbortSign
   try {
     const body: any = {
       model: settings.model,
-      messages,
+      messages: normalizeProviderMessages(messages),
       temperature: 0.3,
       stream: false,
     };
@@ -36,10 +38,7 @@ async function callDeepSeekOnce(settings: any, messages: any, signal?: AbortSign
     if (settings.jsonMode) body.response_format = { type: 'json_object' };
     resp = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + settings.apiKey,
-      },
+      headers: chatRequestHeaders(settings),
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -80,7 +79,7 @@ async function callDeepSeekOnce(settings: any, messages: any, signal?: AbortSign
     } catch (e) {
       detail = '';
     }
-    const err: any = new Error('DeepSeek 请求失败 (' + resp.status + '): ' + detail);
+    const err: any = new Error('模型请求失败 (' + resp.status + '): ' + detail);
     err.status = resp.status;
     throw err;
   }

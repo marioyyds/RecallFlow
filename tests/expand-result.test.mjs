@@ -31,6 +31,8 @@ test('① 截断通知里必须带 id，且写明"可用 expand_result 取回"',
   assert.match(n, /expand_result/, '要告诉模型取回手段');
   assert.match(n, /已截断/, '要说明当前内容是截断的');
   assert.match(n, /9000/, '要给出原始长度（判断值不值得取）');
+  assert.match(n, /\[0,3000\)/, '要说明模型实际看到的范围');
+  assert.match(n, /offset:3000/, '续读必须从缺口起点开始，避免跳过字符');
 });
 
 test('② 历史折叠后 id **仍在**（这是 A5 的核心：折叠不能吃掉可恢复性）', () => {
@@ -61,6 +63,7 @@ test('④ 分页取回：offset/limit 生效，limit 被夹在合理区间', () 
   assert.match(first.result, /\[0,2000\)/, '要回报实际区间');
   const second = expandResult(c, { id: 'res-12', offset: 2000, limit: 2000 });
   assert.match(second.result, /\[2000,4000\)/);
+  assert.match(second.result, /下一段 offset=4000/, '分页回执要直接给出下一段位置');
   assert.notEqual(first.result, second.result, '不同区间必须是不同内容');
   // limit 下界 200 / 上界 4000
   assert.match(expandResult(c, { id: 'res-12', limit: 1 }).result, /\[0,200\)/, '过小的 limit 应被夹到 200');
@@ -88,7 +91,7 @@ test('⑥ 跨模块的格式耦合必须有单一来源（防止改成一处、�
   ].map((file) => fs.readFileSync(file, 'utf8'));
   const ctxSrc = fs.readFileSync('lib/application/agent/context.ts', 'utf8');
   assert.match(agentSrc, /export function formatTruncationNotice/, '通知格式要由本函数提供');
-  assert.match(pipelineSrc, /formatTruncationNotice\(result\.result\.length, resultId\)/, '截断处必须用它，不许再手拼字符串');
+  assert.match(pipelineSrc, /formatTruncationNotice\(\s*rawResult\.length,\s*resultId,\s*result\.result\.length\s*\)/, '截断处必须用它，并报告实际可见字符数');
   // context.js 仍然靠正则解析这条通知 —— 这正是需要"单一来源 + 用真实字符串测"的原因
   assert.match(ctxSrc, /ID_NOTICE_RE/, 'context.js 仍会解析通知里的 id');
   // 真字符串必须能被 context.js 的正则认出来（等价于 §② 的断言，但直接盯正则）

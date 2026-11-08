@@ -3,11 +3,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AgentJobStore, JOB_STATE, finalAnswerFrom } from '../lib/bridge/agent-job.ts';
+import { AgentJobStore, JOB_EVENT_LIMIT, JOB_STATE, finalAnswerFrom } from '../lib/bridge/agent-job.ts';
 
 function store(opts) {
   return new AgentJobStore(opts);
 }
+
+test('默认事件窗口足以保存完整 WebArena 长任务', () => {
+  assert.ok(JOB_EVENT_LIMIT >= 50000, '轨迹源至少保留 50,000 条事件');
+});
 
 test('create：返回 running job，且带可用的 cursor 起点', () => {
   const s = store();

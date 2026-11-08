@@ -210,6 +210,139 @@ export const SNAPSHOT_CHAR_BUDGET = 8000;
 const SNAPSHOT_FIXED_ALLOWANCE = 600;
 
 /**
+ * 从任务查询中取出可用于相关度排序和正文窗口定位的词。
+ *
+ * 分隔后的完整词最高优先；较长的中文串再补少量四字窗口，
+ * 避免“斗破苍穹最新一集视频结果”这种自然语言查询因为不是一个完整 label
+ * 而完全匹配不到“斗破苍穹 EP218”。
+ */
+export function queryTerms(query: unknown) {
+  const source = String(query || '').toLowerCase();
+  const out: string[] = [];
+  const push = (value: string) => {
+    const term = value.trim().toLowerCase();
+    if (term.length >= 2 && out.indexOf(term) === -1) out.push(term);
+  };
+  for (const match of source.matchAll(/[a-z0-9_]+|[\u3400-\u9fff\uf900-\ufaff]+/g)) {
+    const token = match[0];
+    push(token);
+    if (/^[\u3400-\u9fff\uf900-\ufaff]+$/.test(token) && token.length > 4) {
+      for (let i = 0; i < Math.min(4, token.length - 3); i += 1) {
+        push(token.slice(i, i + 4));
+      }
+    }
+  }
+  return out.sort((a, b) => b.length - a.length).slice(0, 24);
+}
+
+/**
+ * 从页面正文里选与 query 最相关的窗口，而不是永远只取页面开头的 N 字。
+ * 无命中时回退到开头，保持旧行为；命中窗口按原文顺序合并，避免重复上下文。
+ */
+export function selectRelevantTextWindows(
+  text: unknown,
+  query: unknown,
+  maxChars: unknown,
+  contextChars = 220
+) {
+  const source = String(text || '');
+  const limit = Math.max(0, Math.floor(Number(maxChars) || 0));
+  if (!source || !limit) return '';
+  if (source.length <= limit) return source;
+
+  const terms = queryTerms(query);
+  if (!terms.length) return sliceSafe(source, 0, limit);
+  const lower = source.toLowerCase();
+  const radius = Math.max(40, Math.floor(Number(contextChars) || 220));
+  const spans: Array<{ start: number; end: number }> = [];
+  let visits = 0;
+  for (const term of terms) {
+    let from = 0;
+    while (visits < 128) {
+      const at = lower.indexOf(term, from);
+      if (at < 0) break;
+      // 有句末/换行边界时从上一句开头保留上下文；没有边界时从命中词本身开始。
+      // 后者专门避免搜索/推荐页的重复导航串被当成“相关正文”带进窗口。
+      const left = Math.max(0, at - radius);
+      const before = source.slice(left, at);
+      const boundary = Math.max(
+        before.lastIndexOf('\n'),
+        before.lastIndexOf('。'),
+        before.lastIndexOf('！'),
+        before.lastIndexOf('？'),
+        before.lastIndexOf('；'),
+        before.lastIndexOf('!'),
+        before.lastIndexOf('?'),
+        before.lastIndexOf(';')
+      );
+      spans.push({
+        start: boundary >= 0 ? left + boundary + 1 : at,
+        end: Math.min(source.length, at + term.length + radius),
+      });
+      visits += 1;
+      from = at + Math.max(1, term.length);
+    }
+    if (visits >= 128) break;
+  }
+  if (!spans.length) return sliceSafe(source, 0, limit);
+  spans.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span.start <= last.end) {
+      last.end = Math.max(last.end, span.end);
+    } else {
+      merged.push({ ...span });
+    }
+  }
+
+  const parts: string[] = [];
+  let used = 0;
+  for (const span of merged) {
+    const prefix = parts.length ? '\n…\n' : '';
+    const room = limit - used - prefix.length;
+    if (room <= 0) break;
+    const windowText = sliceSafe(source.slice(span.start, span.end), 0, room);
+    if (!windowText) continue;
+    parts.push(prefix + windowText);
+    used += prefix.length + windowText.length;
+  }
+  return parts.join('') || sliceSafe(source, 0, limit);
+}
+
+/**
+ * 模型侧快照元素投影。
+ *
+ * 完整快照里的 selector / rect / center 是执行层元数据：
+ * - selector 用于 ref 失效后的受控回退和内部工具兼容；
+ * - rect / center 是快照时刻的几何观测，真正动作前必须重新测量；
+ * - 模型只需要稳定 ref、语义和状态即可选择目标。
+ *
+ * 它们仍留在完整 snapshot 中（ToolResult/JEV/trace 可用），但不进入
+ * get_page_snapshot 的结果文本。需要时通过 inspect_element({op:"inspect",ref})
+ * 按需读取，避免每次观察都让重复的 CSS 路径和坐标占据上下文。
+ */
+export function projectSnapshotElementForModel(element: any) {
+  if (!element || typeof element !== 'object') return element;
+  const { selector, rect, center, ...projected } = element;
+  return projected;
+}
+
+/** 只投影 elements；轮廓、能力提示和其他快照元数据保持原样。 */
+export function projectSnapshotForModel(snapshot: any) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot;
+  const { text, elements, runtime, ...rest } = snapshot;
+  const projected: any = {};
+  if (Array.isArray(elements)) {
+    projected.elements = elements.map(projectSnapshotElementForModel);
+  }
+  if (runtime !== undefined) projected.runtime = runtime;
+  Object.assign(projected, rest);
+  if (typeof text === 'string') projected.text = text;
+  return projected;
+}
+
+/**
  * 按字符预算裁剪要发给模型的元素列表（纯函数）。
  *
  * 放在共享层而不是 lib/page/page-text.js：快照在内容脚本里构建，但
@@ -237,6 +370,64 @@ export function trimElementsToBudget(described: any, textLength: number, budget 
     used += size;
   }
   return { elements, omittedBySize: list.length - elements.length };
+}
+
+/** 按模型投影后的元素体积裁剪，同时返回带完整执行元数据的原元素。 */
+export function trimSnapshotElementsToBudget(
+  elements: any,
+  textLength: number,
+  budget = SNAPSHOT_CHAR_BUDGET
+) {
+  const list = Array.isArray(elements) ? elements : [];
+  const trimmed = trimElementsToBudget(
+    list.map(projectSnapshotElementForModel),
+    textLength,
+    budget
+  );
+  return { elements: list.slice(0, trimmed.elements.length), omittedBySize: trimmed.omittedBySize };
+}
+
+/**
+ * 生成模型可读的最终快照文本，并施加包含提示语在内的硬预算。
+ *
+ * 与通用 spill 的区别：快照本身知道哪些字段最重要。超预算时只缩正文，
+ * 不把 elements / runtime / cursor 等动作信息推到 res-N 后面；
+ * 正文缩到 0 后仍超预算才保持结构化内容，由上层避免再套一次通用截断。
+ */
+export function formatSnapshotResultForModel(
+  snapshot: any,
+  leadingText = '',
+  trailingText = '',
+  budget = SNAPSHOT_CHAR_BUDGET
+) {
+  if (!snapshot || typeof snapshot !== 'object') return String(snapshot || '');
+  const projected = projectSnapshotForModel(snapshot);
+  const originalText = typeof projected.text === 'string' ? projected.text : '';
+  const limit = Math.max(0, Math.floor(Number(budget) || SNAPSHOT_CHAR_BUDGET));
+  const render = (textLength: number) => {
+    const candidate = Object.assign({}, projected);
+    if (originalText) {
+      candidate.text = sliceSafe(originalText, 0, Math.max(0, textLength));
+      if (textLength < originalText.length) {
+        candidate.textNotice =
+          '正文按快照输出预算截短：显示 ' + candidate.text.length + '/' + originalText.length +
+          ' 字符；需要更多正文请用 read_current_page，或给 get_page_snapshot 更精确的 query。';
+      }
+    }
+    return leadingText + JSON.stringify(candidate) + trailingText;
+  };
+
+  let result = render(originalText.length);
+  if (result.length <= limit || !originalText) return result;
+  let low = 0;
+  let high = originalText.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (render(mid).length <= limit) low = mid;
+    else high = mid - 1;
+  }
+  result = render(low);
+  return result.length <= limit ? result : render(0);
 }
 
 /**

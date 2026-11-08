@@ -79,8 +79,10 @@ export async function configureExtension(context, settings) {
 export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {}) {
   const list = Array.isArray(sites) ? sites : [];
   const needsShopping = list.includes('shopping');
+  const needsShoppingAdmin = list.includes('shopping_admin');
   const needsReddit = list.includes('reddit');
-  if (!needsShopping && !needsReddit) return;
+  const needsGitlab = list.includes('gitlab');
+  if (!needsShopping && !needsShoppingAdmin && !needsReddit && !needsGitlab) return;
   const page = await context.newPage();
   try {
     if (needsShopping) {
@@ -121,6 +123,40 @@ export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {
         console.warn('[login] reddit 会话已失效且没有可用凭据（继续）');
       }
     }
+    if (needsShoppingAdmin) {
+      const baseUrl = (logins.shopping_admin && logins.shopping_admin.baseUrl) || siteUrls.SHOPPING_ADMIN || 'http://localhost:7780/admin';
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!/\/admin\//.test(new URL(page.url()).pathname)) {
+        // Already authenticated and redirected to the Magento admin app.
+      } else if (logins.shopping_admin && logins.shopping_admin.username) {
+        await page.getByPlaceholder('user name').fill(logins.shopping_admin.username);
+        await page.getByPlaceholder('password').fill(logins.shopping_admin.password);
+        await page.getByRole('button', { name: /sign in/i }).click();
+        await page.waitForURL((u) => u.pathname !== '/admin' && u.pathname !== '/admin/', { timeout: 30000 }).catch(() => {});
+        if (new URL(page.url()).pathname === '/admin' || new URL(page.url()).pathname === '/admin/') {
+          console.warn('[login] shopping_admin 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
+        }
+      } else {
+        console.warn('[login] shopping_admin 会话已失效且没有可用凭据（继续）');
+      }
+    }
+    if (needsGitlab) {
+      const baseUrl = (logins.gitlab && logins.gitlab.baseUrl) || siteUrls.GITLAB || 'http://localhost:8023';
+      await page.goto(new URL('/users/sign_in', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!/\/users\/sign_in/.test(page.url())) {
+        // Already authenticated through the profile.
+      } else if (logins.gitlab && logins.gitlab.username) {
+        await page.fill('#user_login', logins.gitlab.username);
+        await page.fill('#user_password', logins.gitlab.password);
+        await page.getByRole('button', { name: /sign in/i }).click();
+        await page.waitForURL((u) => !/\/users\/sign_in/.test(u.pathname), { timeout: 30000 }).catch(() => {});
+        if (/\/users\/sign_in/.test(new URL(page.url()).pathname)) {
+          console.warn('[login] gitlab 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
+        }
+      } else {
+        console.warn('[login] gitlab 会话已失效且没有可用凭据（继续）');
+      }
+    }
   } catch (e) {
     console.warn('[login] 站点登录异常（继续）：' + String((e && e.message) || e));
   } finally {
@@ -129,9 +165,8 @@ export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {
 }
 
 /** 构造扩展设置：真模型 + 开 CDP + 关逐次审批干扰（桥接侧仍按 allowRisk 逐次判定）。 */
-export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, agentBudget, extra } = {}) {
-  return Object.assign(
-    {
+export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, bridgePort, agentBudget, jev, extra } = {}) {
+  const settings = {
       apiKey: String(apiKey || ''),
       baseUrl: baseUrl || 'https://api.deepseek.com',
       model: model || 'deepseek-chat',
@@ -146,10 +181,21 @@ export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, agentBud
       toolApproval: true,
       toolApprovalPolicy: { read: true, edit: true, commands: true, browser: true, mcp: true },
       bridgeToken: bridgeToken || 'recallflow-local-bridge-v1',
+      bridgePort: Number.isInteger(Number(bridgePort)) ? Number(bridgePort) : 7801,
       agentBudget: agentBudget || {},
-    },
-    extra || {}
-  );
+  };
+  let jevOverride = jev;
+  if (typeof jevOverride === 'string' && jevOverride.trim()) {
+    try {
+      jevOverride = JSON.parse(jevOverride);
+    } catch (error) {
+      throw new Error('RECALLFLOW_EVAL_JEV_SETTINGS 不是合法 JSON');
+    }
+  }
+  if (jevOverride && typeof jevOverride === 'object' && !Array.isArray(jevOverride)) {
+    settings.jev = Object.assign({}, jevOverride);
+  }
+  return Object.assign(settings, extra || {});
 }
 
 export async function closeBrowser(context) {

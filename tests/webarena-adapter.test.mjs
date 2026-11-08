@@ -81,6 +81,15 @@ test('buildInstruction：mutate/navigate 的占位用 null（不是空数组）'
   assert.match(s, /"retrieved_data": null/);
 });
 
+test('buildInstruction：mutate/navigate 要求验证真实后置条件', () => {
+  const mutate = buildInstruction({ intent: 'disable product', startUrls: ['http://a/'], expectedAction: 'mutate' });
+  assert.match(mutate, /真正提交变更/);
+  assert.match(mutate, /read_diagnostics/);
+  const navigate = buildInstruction({ intent: 'open shoes sorted by price', startUrls: ['http://s/'], expectedAction: 'navigate' });
+  assert.match(navigate, /目标页面/);
+  assert.match(navigate, /排序|筛选/);
+});
+
 test('buildInstruction：检索判据要区分 explicitly / 语义匹配，且姓名照抄', () => {
   const s = buildInstruction(normalizeTask(task7));
   assert.match(s, /explicitly/, '必须告诉模型任务里的 explicitly 是严格条件');

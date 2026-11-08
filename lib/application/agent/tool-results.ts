@@ -11,8 +11,20 @@
 // 页面文本（尤其数学/表情密集的页面）充满星形平面字符，按码元下标截断会切裂代理对，
 // 进而让整个请求体在服务端解析阶段被拒（见 surrogates.js 的事故说明）。
 import { sliceSafe } from '../../shared/surrogates.ts';
+import { CONTEXT_TUNING } from './context-tuning.ts';
 import type { Caught } from './errors.ts';
 import type { PageSnapshotLike, ToolResult } from './types.ts';
+
+/**
+ * 大结果是否应交给通用 6K/3K spill。
+ *
+ * 工具若已有自己的字段感知预算（目前是 get_page_snapshot），不能再用通用截断：
+ * 通用截断只保留字符串开头，会把排在正文之后的结构化 elements / runtime 整段切掉。
+ */
+export function shouldSpillToolResult(metadata: { spillExempt?: unknown } | null | undefined, rawResult: unknown) {
+  return metadata?.spillExempt !== true &&
+    String(rawResult == null ? '' : rawResult).length > CONTEXT_TUNING.spillResultChars;
+}
 
 /**
  * 由 CDP 抛出的错误生成简短原因。

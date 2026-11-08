@@ -34,7 +34,10 @@ export const TOOL_METADATA: Record<string, ToolMetadataEntry> = {
   // 写（add_entry）与删（remove_entry）**刻意保持独立** —— 见 lib/assistant/knowledge.js 文件头。
   knowledge_read: { risk: 'read', readOnly: true, parallelSafe: true, route: 'background' },
   read_current_page: { risk: 'read', readOnly: true, parallelSafe: true, route: 'content' },
-  get_page_snapshot: { risk: 'read', readOnly: true, parallelSafe: true, route: 'content' },
+  // The snapshot already enforces its own model-facing hard budget. Sending it
+  // through the generic 6K/3K spill would discard the elements/runtime that the
+  // per-tool budget deliberately preserved.
+  get_page_snapshot: { risk: 'read', readOnly: true, parallelSafe: true, spillExempt: true, route: 'content' },
   // C-4 合并：原 read_console / read_network / list_downloads → read_diagnostics(kind)。
   // 三者原本都是 read/readOnly/parallelSafe，权限无差异，因此合并**不改变任何权限语义**。
   // route 取 'content'（console/network 走内容脚本；downloads 的实现本身在后台，不受 route 影响）。

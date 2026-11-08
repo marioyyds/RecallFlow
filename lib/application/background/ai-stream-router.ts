@@ -2,6 +2,8 @@
 import { RunChannel } from '../agent/run-channel.ts';
 import type { RunControllerLike } from '../agent/run-registry.ts';
 import { sanitizeMessages } from '../../shared/surrogates.ts';
+import { chatRequestHeaders, hasChatModelConfig } from '../../shared/settings.ts';
+import { normalizeProviderMessages } from '../agent/provider-history.ts';
 
 type Dyn = Record<string, any>;
 type RunController = RunControllerLike;
@@ -215,8 +217,8 @@ export function handleAiStreamConnection(port: any, deps: AiStreamDependencies) 
         return;
       }
       const settings = await getAISettings();
-      if (!settings.apiKey) {
-        port.postMessage({ type: 'error', needSetup: true, error: '尚未配置 API Key，请点击插件图标 → 设置页填写。' });
+      if (!hasChatModelConfig(settings)) {
+        port.postMessage({ type: 'error', needSetup: true, error: '尚未配置模型名称或 API 地址，请点击插件图标 → 设置页填写。' });
         return;
       }
       const book = await getBook();
@@ -337,13 +339,10 @@ export function handleAiStreamConnection(port: any, deps: AiStreamDependencies) 
       } catch (e) {}
       const resp = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + settings.apiKey,
-        },
+        headers: chatRequestHeaders(settings),
         body: JSON.stringify({
           model: settings.model,
-          messages,
+          messages: normalizeProviderMessages(messages),
           temperature: 0.3,
           stream: true,
         }),
@@ -360,7 +359,7 @@ export function handleAiStreamConnection(port: any, deps: AiStreamDependencies) 
         } catch (e) {
           detail = await resp.text();
         }
-        port.postMessage({ type: 'error', error: 'DeepSeek 请求失败 (' + resp.status + '): ' + detail });
+        port.postMessage({ type: 'error', error: '模型请求失败 (' + resp.status + '): ' + detail });
         return;
       }
 

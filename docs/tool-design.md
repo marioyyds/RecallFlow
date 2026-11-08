@@ -10,7 +10,7 @@
 | 要素 | 位置 | 作用 |
 | --- | --- | --- |
 | Schema | `TOOL_SCHEMAS` | 给模型的函数签名（name / description / parameters） |
-| 风险元数据 | `TOOL_METADATA` | `risk`、`requiresApproval`、`readOnly`、`alwaysRequireApproval`、`route` |
+| 风险元数据 | `TOOL_METADATA` | `risk`、`requiresApproval`、`readOnly`、`alwaysRequireApproval`、`spillExempt`、`route` |
 | 执行器 | `executeTool` 的 case | 真正执行，并返回统一结果结构 |
 
 原则：**Schema 与权限策略共源、不漂移**。任何一方改动都必须同步另外两处。
@@ -76,6 +76,10 @@ index    命中第 N 个匹配（从 0 起，处理重复结构），可选
 - **写操作**必须提供 `changed` / `alreadySatisfied`（或 `hadEffect`），供 `verifyPageAction` 与 stuck detector 判断"有没有进展"。
 - **读操作**的返回值必须截断（长文本、JSON 化结果约定上限，如正文 8000、DOM 快照 8000、JS 结果 2000），防止爆 token。
 - `get_page_snapshot` 采用渐进披露：首轮发送区域轮廓和代表性元素（默认 40 个、正文 3000 字符），剩余元素通过 `query` 相关性排序、`nextCursor` 分页或 `inspect_element({op:"query",region,cursor})` 精确读取。省略必须带数量和恢复路径。
+- `get_page_snapshot` 对模型只投影 `ref / tag / role / label / 状态 / inViewport`；`selector / rect / center` 仍保存在完整 snapshot 与页面元素注册表中，由 `click_element({ref})` 等执行层自行解析并在动作前重新测量。模型需要这些细节时用 `inspect_element({op:"inspect",ref})` 按需读取。快照体积预算按模型投影计算，不用执行层元数据挤掉可操作元素。
+- 快照模型文本的顺序固定为 `elements / runtime / ... / text`：结构化动作信息先出现，正文超预算时只缩 `text`，不能把元素、运行态或分页游标挤到通用 overflow 里。`get_page_snapshot` 声明 `spillExempt`，因为它已有包含提示语在内的 8K 字段感知预算；其它超过 6K 的结果仍走 3K inline + `resultStore` + `expand_result`。
+- `query` 同时用于元素排序和正文窗口定位。`textMode:"auto"` 在有 query 时取相关窗口、否则取页面开头；搜索/列表页只需看控件时传 `maxText:0`，资讯/文章正文优先用 `read_current_page` 或 `textMode:"relevant"`。
+- 通用截断通知必须报告实际可见区间与下一段 offset。`expand_result` 是普通大结果被截断后的恢复路径，不是页面探索的常规步骤；快照超预算时用更精确的 `query`、`cursor` 或 `maxText:0`。
 - 不返回 `undefined` 裸值；无内容返回 `（空）` 或 `（空内容）`。
 
 ## 7. 错误信息：必须给「替代路径」

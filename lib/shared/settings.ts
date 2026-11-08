@@ -126,6 +126,28 @@ export const AI_SETTINGS_DEFAULTS = {
  */
 export type AISettings = typeof AI_SETTINGS_DEFAULTS & Record<string, unknown>;
 
+/**
+ * 聊天模型是否具备发起请求所需的最小配置。
+ *
+ * API Key 不参与这个判断：本地 OpenAI 兼容服务（如 Ollama / vLLM / llama.cpp）
+ * 可以完全不需要鉴权。远程服务缺密钥时，让真实请求返回 401/403，比在客户端
+ * 把"空 API Key"误判成"模型未配置"更准确。
+ */
+export function hasChatModelConfig(settings?: Record<string, unknown> | null): boolean {
+  return Boolean(
+    String(settings && settings.baseUrl || '').trim() &&
+    String(settings && settings.model || '').trim()
+  );
+}
+
+/** OpenAI 兼容请求头；空 API Key 时不发送 Authorization，而不是发送 "Bearer "。 */
+export function chatRequestHeaders(settings?: Record<string, unknown> | null): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const apiKey = String(settings && settings.apiKey || '').trim();
+  if (apiKey) headers.Authorization = 'Bearer ' + apiKey;
+  return headers;
+}
+
 /** 已有用户补齐新增默认项；新增项优先，确保 12 条已满时也不会被静默挤掉。 */
 export function mergeQuickPrompts(
   saved: unknown,

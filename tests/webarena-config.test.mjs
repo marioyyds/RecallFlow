@@ -5,14 +5,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin } from '../integrations/webarena/config.mjs';
+import { parseArgs, validateAllowRisk, loadTasksFromJson, selectTasks, applySiteUrls, detectUnresolvedSites, parseLogin, selectRunnableTaskIndex, taskSiteScope } from '../integrations/webarena/config.mjs';
 
 test('parseArgs：默认值合理（allowRisk 不含 destructive/external）', () => {
   const o = parseArgs(['--tasks', 't.json']);
   assert.equal(o.tasks, 't.json');
   assert.deepEqual(o.allowRisk, ['read', 'page', 'write', 'browser', 'network']);
   assert.equal(o.dryRun, false);
-  assert.equal(o.pollMs, 3000);
+  assert.equal(o.pollMs, 500);
+  assert.equal(o.concurrency, 3);
+  assert.equal(o.siteReset, 'per-task');
+  assert.equal(o.actionRetries, 1);
 });
 
 test('parseArgs：--task-id 逗号分隔且可重复累积', () => {
@@ -28,8 +31,39 @@ test('parseArgs：未知参数抛错（不静默忽略拼错的 flag）', () => 
 test('parseArgs：非法数值回落到安全默认值', () => {
   const o = parseArgs(['--limit', 'abc', '--poll-ms', '0', '--timeout-ms', '5']);
   assert.equal(o.limit, 0);
-  assert.equal(o.pollMs, 3000);
+  assert.equal(o.pollMs, 500);
   assert.equal(o.timeoutMs, 300000);
+  assert.equal(o.concurrency, 3);
+});
+
+test('parseArgs：--concurrency 限制在 1..8', () => {
+  assert.equal(parseArgs(['--tasks', 't.json', '--concurrency', '4']).concurrency, 4);
+  assert.equal(parseArgs(['--tasks', 't.json', '--concurrency', '99']).concurrency, 8);
+  assert.equal(parseArgs(['--tasks', 't.json', '--concurrency', '0']).concurrency, 3);
+});
+
+test('parseArgs：任务格式默认 Verified，可显式切到原始 WebArena', () => {
+  assert.equal(parseArgs(['--tasks', 't.json']).taskFormat, 'verified');
+  assert.equal(parseArgs(['--tasks', 't.json', '--task-format', 'original']).taskFormat, 'original');
+  assert.throws(() => parseArgs(['--tasks', 't.json', '--task-format', 'legacy']), /verified \/ original/);
+});
+
+test('parseArgs：原始 WebArena 模式可关闭不需要的 HAR 录制', () => {
+  assert.equal(parseArgs(['--tasks', 't.json']).captureHar, true);
+  assert.equal(parseArgs(['--tasks', 't.json', '--no-har']).captureHar, false);
+});
+
+test('parseArgs：站点重置模式和等待上限显式可配且校验枚举', () => {
+  assert.equal(parseArgs(['--tasks', 't.json', '--site-reset', 'run']).siteReset, 'run');
+  assert.equal(parseArgs(['--tasks', 't.json', '--site-reset', 'none']).siteReset, 'none');
+  assert.equal(parseArgs(['--tasks', 't.json', '--reset-wait-ms', '240000']).resetWaitMs, 240000);
+  assert.throws(() => parseArgs(['--tasks', 't.json', '--site-reset', 'sometimes']), /none \/ run \/ per-task/);
+});
+
+test('parseArgs：动作补执行次数限制在 0..2', () => {
+  assert.equal(parseArgs(['--tasks', 't.json', '--action-retries', '0']).actionRetries, 0);
+  assert.equal(parseArgs(['--tasks', 't.json', '--action-retries', '9']).actionRetries, 2);
+  assert.equal(parseArgs(['--tasks', 't.json', '--action-retries', 'bad']).actionRetries, 1);
 });
 
 test('validateAllowRisk：high / 未知类别一律拒绝，read 允许（可写可不写）', () => {
@@ -107,6 +141,26 @@ test('selectTasks：sites 只保留**完全落在**允许站点内的任务', ()
   // 多站点任务若有一个站点不在允许集合里，跑它只会得到与 agent 无关的失败 → 排除。
   assert.deepEqual(selectTasks(tasks, { sites: ['shopping', 'reddit'] }).map((t) => t.task_id), [1, 2, 4]);
   assert.deepEqual(selectTasks(tasks, { sites: [] }).map((t) => t.task_id), [1, 2, 3, 4]);
+});
+
+test('账号感知调度：同一站点不并发，跨站点可以立刻并发', () => {
+  const tasks = [
+    { task_id: 0, sites: ['shopping_admin'] },
+    { task_id: 1, sites: ['shopping_admin'] },
+    { task_id: 2, sites: ['shopping'] },
+    { task_id: 3, sites: ['reddit'] },
+    { task_id: 4, sites: ['shopping', 'reddit'] },
+  ];
+  const active = new Set();
+  assert.equal(selectRunnableTaskIndex(tasks, active), 0);
+  active.add('shopping_admin');
+  assert.equal(selectRunnableTaskIndex(tasks, active), 2, '跳过同站点任务，改跑 shopping');
+  active.add('shopping');
+  assert.equal(selectRunnableTaskIndex(tasks, active), 3, '再并发 reddit');
+  active.add('reddit');
+  assert.equal(selectRunnableTaskIndex(tasks, active), -1, '三个站点都占用时不能启动跨站任务');
+  assert.deepEqual(taskSiteScope(tasks[4]), ['shopping', 'reddit']);
+  assert.deepEqual(taskSiteScope({ sites: [] }), ['__unscoped__']);
 });
 
 test('parseLogin：按第一个冒号切，密码里可以再带冒号；空用户/空密码视为未配置', () => {

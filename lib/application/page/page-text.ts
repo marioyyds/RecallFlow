@@ -3,7 +3,11 @@
 // - extractPageSnapshot：给模型观察/动作验证用的「可交互元素 + 正文」快照。
 //   改进点：更全的可交互选择器、视口优先排序、稳定 ref（跨快照复用）、更丰富的状态字段。
 import { PAGE_TEXT_EXCLUDE, isPageContentExcluded, isElementCollectExcluded } from './citation.ts';
-import { trimElementsToBudget } from '../../shared/format/page-results.ts';
+import {
+  queryTerms,
+  selectRelevantTextWindows,
+  trimSnapshotElementsToBudget,
+} from '../../shared/format/page-results.ts';
 import { sliceSafe } from '../../shared/surrogates.ts';
 
 export function extractPageText(options: ExtractPageTextOptions = {}): string {
@@ -149,6 +153,7 @@ export interface PageSnapshot {
   scroll?: { x: number; y: number; height: number; viewport: number };
   /** 由 hashSnapshot 事后补上（构造时先不给，避免多出一个空串字段） */
   fingerprint?: string;
+  textMode?: 'start' | 'relevant' | 'none';
   error?: string;
 }
 
@@ -455,18 +460,21 @@ function buildPageOutline(nodes: Element[]): PageOutline | undefined {
   };
 }
 
-function snapshotRelevance(el: Element, query: string) {
-  if (!query) return 0;
+function snapshotRelevance(el: Element, terms: string[]) {
+  if (!terms.length) return 0;
   const label = elementLabelForRanking(el).toLowerCase();
   const role = String(el.getAttribute('role') || '').toLowerCase();
   const tag = String(el.tagName || '').toLowerCase();
   const body = normalizeSnapshotText(el.textContent, 240).toLowerCase();
-  if (label === query) return 6_000_000;
-  if (label.startsWith(query)) return 4_000_000;
-  if (label.includes(query)) return 3_000_000;
-  if (role.includes(query) || tag.includes(query)) return 2_000_000;
-  if (body.includes(query)) return 1_500_000;
-  return 0;
+  let score = 0;
+  for (const term of terms) {
+    if (label === term) score += 6_000_000;
+    else if (label.startsWith(term)) score += 4_000_000;
+    else if (label.includes(term)) score += 3_000_000;
+    if (role.includes(term) || tag.includes(term)) score += 2_000_000;
+    else if (body.includes(term)) score += 1_500_000;
+  }
+  return score;
 }
 
 /**
@@ -479,6 +487,7 @@ function rankSnapshotNodes(nodes: Element[], query = '') {
   const cx = vw / 2;
   const cy = vh / 2;
   const q = normalizeSnapshotText(query, 200).toLowerCase();
+  const terms = queryTerms(q);
   const repetitions = new Map<string, number>();
   return nodes
     .map((el, order) => {
@@ -498,7 +507,7 @@ function rankSnapshotNodes(nodes: Element[], query = '') {
       return {
         el,
         order,
-        sortKey: visual + repeatPenalty - snapshotRelevance(el, q),
+        sortKey: visual + repeatPenalty - snapshotRelevance(el, terms),
       };
     })
     .sort((a, b) => a.sortKey - b.sortKey || a.order - b.order);
@@ -1061,7 +1070,13 @@ export function isElementRendered(el: Element | null): boolean {
 }
 
 export function extractPageSnapshot(
-  options: { maxElements?: number; maxText?: number; query?: string; cursor?: number } = {}
+  options: {
+    maxElements?: number;
+    maxText?: number;
+    query?: string;
+    cursor?: number;
+    textMode?: 'auto' | 'start' | 'relevant' | 'none';
+  } = {}
 ): PageSnapshot {
   try {
     const body = document.body;
@@ -1073,6 +1088,16 @@ export function extractPageSnapshot(
       options.maxText === undefined ? (cursor > 0 ? 0 : 3000) : Number(options.maxText);
     const maxText = Math.min(8000, Math.max(0, Number.isFinite(requestedText) ? requestedText : 3000));
     const query = normalizeSnapshotText(options.query, 200);
+    const textMode: 'start' | 'relevant' | 'none' =
+      maxText === 0
+        ? 'none'
+        : options.textMode === 'none'
+          ? 'none'
+          : options.textMode === 'start' || options.textMode === 'relevant'
+            ? options.textMode
+            : query
+              ? 'relevant'
+              : 'start';
     const capabilities = createPageCapabilities();
     const nodes = collectInteractiveInFrames(document, [], capabilities);
     const runtime = createPageRuntimeState();
@@ -1096,12 +1121,29 @@ export function extractPageSnapshot(
     const describedAll = windowed.map((el, index) => describeElement(el, cursor + index));
     // cursor 翻页默认 maxText=0：不要再克隆整页正文，也不要让子框架为未使用的文本
     // 做一轮抽取。动作校验路径会显式传 maxText，因此不影响变化检测。
-    const fullText = maxText > 0 ? extractPageText() : '';
-    const text = maxText > 0 ? fullText.slice(0, maxText) : '';
+    let fullText = '';
+    if (textMode === 'start') fullText = extractPageText();
+    else if (textMode === 'relevant') {
+      const main = findMainContent();
+      let root: Element = document.body;
+      try {
+        const found = main && main.selector ? document.querySelector(main.selector) : null;
+        if (found) root = found;
+      } catch {}
+      fullText =
+        collectVisibleText(root, { maxChars: Math.min(40000, Math.max(12000, maxText * 8)) }) ||
+        extractPageText();
+    }
+    const text =
+      textMode === 'relevant'
+        ? selectRelevantTextWindows(fullText, query, maxText)
+        : textMode === 'start'
+          ? fullText.slice(0, maxText)
+          : '';
     // 体积预算：见 SNAPSHOT_CHAR_BUDGET 与 trimElementsToBudget 的说明。
     // capabilities / outline 也要计入同一个体积预算：它们和 elements 一样随快照发给模型。
     // 不把这一项算进去，元素列表就会以为自己还有整整一份预算而膨胀。
-    const { elements, omittedBySize } = trimElementsToBudget(
+    const { elements, omittedBySize } = trimSnapshotElementsToBudget(
       describedAll,
       text.length + capabilityChars + outlineChars
     );
@@ -1140,6 +1182,7 @@ export function extractPageSnapshot(
       mainContent: findMainContent(),
       capabilities: Object.keys(capabilitySummary).length ? capabilitySummary : undefined,
       runtime,
+      textMode,
       counts: {
         interactive: nodes.length,
         shown: elements.length,

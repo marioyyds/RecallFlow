@@ -303,6 +303,23 @@ function formatCurrentPageResult(input) {
 }
 var SNAPSHOT_CHAR_BUDGET = 8e3;
 var SNAPSHOT_FIXED_ALLOWANCE = 600;
+function projectSnapshotElementForModel(element) {
+  if (!element || typeof element !== "object") return element;
+  const { selector, rect, center, ...projected } = element;
+  return projected;
+}
+function projectSnapshotForModel(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  const { text: text2, elements, runtime, ...rest } = snapshot;
+  const projected = {};
+  if (Array.isArray(elements)) {
+    projected.elements = elements.map(projectSnapshotElementForModel);
+  }
+  if (runtime !== void 0) projected.runtime = runtime;
+  Object.assign(projected, rest);
+  if (typeof text2 === "string") projected.text = text2;
+  return projected;
+}
 function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
   const list = Array.isArray(described) ? described : [];
   const limit = Math.max(0, Number(budget) || 0);
@@ -320,6 +337,33 @@ function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDG
     used += size;
   }
   return { elements, omittedBySize: list.length - elements.length };
+}
+function formatSnapshotResultForModel(snapshot, leadingText = "", trailingText = "", budget = SNAPSHOT_CHAR_BUDGET) {
+  if (!snapshot || typeof snapshot !== "object") return String(snapshot || "");
+  const projected = projectSnapshotForModel(snapshot);
+  const originalText = typeof projected.text === "string" ? projected.text : "";
+  const limit = Math.max(0, Math.floor(Number(budget) || SNAPSHOT_CHAR_BUDGET));
+  const render = (textLength) => {
+    const candidate = Object.assign({}, projected);
+    if (originalText) {
+      candidate.text = sliceSafe(originalText, 0, Math.max(0, textLength));
+      if (textLength < originalText.length) {
+        candidate.textNotice = "\u6B63\u6587\u6309\u5FEB\u7167\u8F93\u51FA\u9884\u7B97\u622A\u77ED\uFF1A\u663E\u793A " + candidate.text.length + "/" + originalText.length + " \u5B57\u7B26\uFF1B\u9700\u8981\u66F4\u591A\u6B63\u6587\u8BF7\u7528 read_current_page\uFF0C\u6216\u7ED9 get_page_snapshot \u66F4\u7CBE\u786E\u7684 query\u3002";
+      }
+    }
+    return leadingText + JSON.stringify(candidate) + trailingText;
+  };
+  let result = render(originalText.length);
+  if (result.length <= limit || !originalText) return result;
+  let low = 0;
+  let high = originalText.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (render(mid).length <= limit) low = mid;
+    else high = mid - 1;
+  }
+  result = render(low);
+  return result.length <= limit ? result : render(0);
 }
 function formatSnapshotOutline(snapshot) {
   const s = snapshot && typeof snapshot === "object" ? snapshot : {};
@@ -1541,7 +1585,7 @@ var SKILL_REGISTRY = Object.freeze([
     category: "browser-automation",
     tags: ["\u65E0\u9650\u6EDA\u52A8", "\u61D2\u52A0\u8F7D", "\u60AC\u505C\u9884\u89C8", "hover"],
     skill_type: "prompt-template",
-    content: '# \u65E0\u9650\u6EDA\u52A8 + hover \u9884\u89C8\n\n## \u4E24\u4E2A\u75C7\u72B6\n- **\u6EDA\u4E0D\u5230\u5C31\u770B\u4E0D\u5230**\uFF1A\u5185\u5BB9\u662F\u6309\u6279**\u5F02\u6B65\u8FFD\u52A0**\u7684\uFF0C\u4E00\u5F00\u59CB\u5FEB\u7167\u91CC\u53EA\u6709\u7B2C\u4E00\u6279 \u2014\u2014\n  \u300C\u5FEB\u7167\u91CC\u6CA1\u6709\u76EE\u6807\u300D**\u4E0D\u7B49\u4E8E**\u300C\u9875\u9762\u4E0A\u6CA1\u6709\u8FD9\u6761\u300D\uFF1B\n- **\u60AC\u505C\u624D\u6709**\uFF1A\u9884\u89C8/\u63D0\u793A\u6587\u672C\u53EF\u80FD\u538B\u6839\u4E0D\u5728\u9875\u9762\u91CC\uFF08\u9F20\u6807\u79FB\u4E0A\u53BB\u624D\u53BB\u53D6\u3001\u624D\u6E32\u67D3\uFF09\uFF0C\n  \u800C\u4E14**\u9F20\u6807\u4E00\u79FB\u5F00\u5C31\u6CA1\u4E86**\u3002\n\n## \u6B65\u9AA4\n1. \u5148 `get_page_snapshot` \u770B**\u5DF2\u7ECF\u52A0\u8F7D\u4E86\u4EC0\u4E48**\uFF08\u8BB0\u4E0B\u5F53\u524D\u6761\u6570/\u72B6\u6001\u884C\uFF0C\u7528\u5B83\u5224\u65AD\u6709\u6CA1\u6709\u65B0\u7684\u4E00\u6279\u8FDB\u6765\uFF09\uFF1B\n2. **\u522B\u628A\u300C\u52A0\u8F7D\u66F4\u591A\u300D\u6309\u94AE\u5F53\u6210\u63A8\u8FDB\u624B\u6BB5**\uFF1A\u8FD9\u7C7B\u9875\u9762\u4E0A\u5B83\u7ECF\u5E38\u662F\u5931\u6548\u7684\uFF08\u4E5F\u53EF\u80FD\u53CD\u8FC7\u6765 \u2014\u2014 \u53EA\u6709\u6309\u94AE\u6709\u6548\uFF09\u3002\n   \u70B9\u4E00\u6B21\u770B\u5B83\u600E\u4E48\u8BF4\uFF1B\u5B83\u82E5\u8BF4\u300C\u8BF7\u5728\u5E95\u90E8\u7EE7\u7EED\u6EDA\u52A8\u300D\uFF0C\u5C31\u6539\u8D70\u6EDA\u52A8\uFF0C**\u8BD5\u51FA\u65E0\u6548\u5C31\u522B\u53CD\u590D\u70B9**\uFF1B\n3. **\u6EDA\u5230\u5E95\u89E6\u53D1\u52A0\u8F7D**\uFF1A`scroll_page({ y: 2000 })` \u2014\u2014 \u4E0D\u5E26\u76EE\u6807\u65F6 `y` \u6EDA\u7684\u662F**\u7A97\u53E3**\uFF0C\n   \u7ED9\u4E00\u4E2A\u8FDC\u5927\u4E8E\u9875\u9762\u9AD8\u5EA6\u7684\u503C\u6700\u7701\u4E8B\uFF08\u4F1A\u88AB\u81EA\u52A8\u9650\u5236\u5230\u5E95\u90E8\uFF09\uFF1B\n4. **\u6EDA\u4E00\u6B21\u53EA\u52A0\u8F7D\u4E00\u6279**\uFF0C\u6240\u4EE5\u8282\u594F\u5FC5\u987B\u662F\u300C\u6EDA\u52A8 \u2192 \u7B49\u65B0\u5185\u5BB9 \u2192 \u518D\u6EDA\u300D\uFF1A\n   - \u7B49\u65B0\u5185\u5BB9\u6302\u4E0A DOM\uFF1A`wait_for_element({ selector: "<\u65B0\u6279\u7684\u7B2C\u4E00\u6761>", state: "attached" })`\uFF1B\n   - \u26A0 \u8FFD\u52A0\u4E4B\u540E\u9875\u9762\u53D8\u9AD8\uFF0C**\u5F53\u524D\u4F4D\u7F6E\u4E0D\u518D\u662F\u5E95\u90E8**\uFF0C\u800C\u4E14**\u4E0D\u4F1A\u518D\u89E6\u53D1 scroll \u4E8B\u4EF6** \u2014\u2014\n     \u6240\u4EE5\u5FC5\u987B**\u518D\u6EDA\u4E00\u6B21**\u3002\u5C11\u4E86\u8FD9\u4E00\u6B65\u4F1A\u8BEF\u5224\u6210\u300C\u6EDA\u4E0D\u52A8\u4E86 / \u5DF2\u7ECF\u5230\u5E95\u300D\uFF1B\n5. **\u8BFB\u5230\u300C\u5DF2\u5230\u5E95\u300D\u8FD9\u7C7B\u505C\u6B62\u4FE1\u53F7\u624D\u505C**\uFF1A\u5230\u5E95\u4E4B\u540E\u9875\u9762\u4F1A\u7ED9\u51FA\u660E\u786E\u6807\u8BB0\uFF08\u300C\u5DF2\u5230\u5E95 / \u6CA1\u6709\u66F4\u591A\u300D\uFF09\u3002\n   \u6EDA\u5B8C\u4E00\u6279\u5C31\u8BFB\u4E00\u6B21\u5FEB\u7167\u786E\u8BA4\u5B83\u51FA\u6CA1\u51FA\u73B0\uFF1A**\u51FA\u73B0\u4E86\u624D\u505C**\uFF0C\u6CA1\u51FA\u73B0\u5C31\u56DE\u5230\u7B2C 3 \u6B65\u3002\n   \u26A0 \u7EDD\u4E0D\u56E0\u4E3A\u300C\u6EDA\u4E86\u51E0\u6B21\u90FD\u770B\u4E0D\u5230\u76EE\u6807\u300D\u5C31\u5BA3\u5E03\u300C\u9875\u9762\u4E0A\u6CA1\u6709\u8FD9\u6761\u300D\u2014\u2014\u90A3\u4E0D\u662F\u7ED3\u8BBA\uFF0C\u53EA\u662F\u8FD8\u6CA1\u52A0\u8F7D\u5230\uFF1B\n6. **\u60AC\u505C\u524D\u5148\u786E\u8BA4\u76EE\u6807\u5728\u89C6\u53E3\u91CC**\uFF08\u5FEB\u7167\u91CC\u6BCF\u4E2A\u5143\u7D20\u90FD\u5E26 `rect` / `inViewport`\uFF09\u3002\u4E0D\u5728\u5C31\u5148\u6EDA\u8FC7\u53BB\uFF1A\n   `scroll_page({ selector: "\u2026", behavior: "auto" })` \u2014\u2014\n   \xB7 CDP \u7684\u9F20\u6807\u5750\u6807\u662F**\u89C6\u53E3\u5750\u6807**\uFF0C\u9F20\u6807\u79FB\u4E0D\u5230\u89C6\u53E3\u5916\u7684\u4E1C\u897F\u4E0A\uFF1B\n   \xB7 \u7528 `behavior: "auto"`\uFF08\u7ACB\u5373\u5B8C\u6210\uFF09\u800C\u4E0D\u662F\u9ED8\u8BA4\u7684\u5E73\u6ED1\u6EDA\u52A8\uFF0C\u800C\u4E14**\u6EDA\u5B8C\u5148\u8BFB\u4E00\u6B21\u9875\u9762\u518D hover**\uFF1A\n     \u9875\u9762\u8FD8\u5728\u6EDA\u52A8\u65F6 hover \u7528\u7684\u662F**\u65E7\u5750\u6807**\uFF1B\u66F4\u9EBB\u70E6\u7684\u662F\u6D4F\u89C8\u5668\u5728\u6EDA\u52A8\u4E4B\u540E\u4F1A\u6309**\u771F\u5B9E\u5149\u6807\u4F4D\u7F6E**\n     \u91CD\u7B97\u4E00\u6B21 hover \u72B6\u6001\uFF0C\u521A hover \u4E0A\u7684\u5143\u7D20\u53EF\u80FD\u7ACB\u523B\u88AB"\u632A\u8D70"\uFF1B\n7. **\u7528\u771F\u4E8B\u4EF6\u60AC\u505C**\uFF1A`hover_element({ text: "\u76EE\u6807\u6587\u672C" })`\uFF08\u7ECF CDP \u6D3E\u53D1**\u53EF\u4FE1**\u9F20\u6807\u4E8B\u4EF6\uFF09\u3002\n   \u81EA\u5DF1\u9020\u4E8B\u4EF6\uFF08`dispatchEvent`\uFF09**\u6CA1\u6709\u7528**\uFF1A\u9875\u9762\u5904\u7406 hover \u65F6\u5F80\u5F80\u53EA\u8BA4\u53EF\u4FE1\u4E8B\u4EF6\uFF1B\n8. **\u60AC\u505C\u4E4B\u540E\u7D27\u63A5\u7740\u8BFB\u56DE**\uFF08\u8FD9\u4E24\u6B65\u4E4B\u95F4\u4E0D\u8981\u63D2\u5165\u522B\u7684\u52A8\u4F5C\uFF09\uFF1A\n   - \u7B49\u9884\u89C8\u586B\u5145\uFF1A`wait_for_element({ selector: "#<\u9884\u89C8\u8282\u70B9>", state: "text_contains", text: "\u2026" })`\n     \u2014\u2014 \u9884\u89C8\u5E38\u5E38\u662F\u4E00\u6B21**\u5F02\u6B65\u53D6\u6570**\uFF0Chover \u5B8C\u7ACB\u523B\u8BFB\u4F1A\u8BFB\u5230\u7A7A\uFF1B\n   - \u8BFB\uFF1A`inspect_element({ op: "text", selector: "#<\u9884\u89C8\u8282\u70B9>" })`\uFF0C\u6216\u91CD\u65B0 `get_page_snapshot` \u8BFB\u6B63\u6587\u3002\n     \u9884\u89C8\u6587\u672C\u901A\u5E38\u5728**\u5B50\u8282\u70B9 / popover** \u91CC\uFF0C\u4E0D\u5728\u88AB\u60AC\u505C\u7684\u90A3\u4E2A\u5143\u7D20\u81EA\u5DF1\u7684\u6587\u672C\u91CC\u3002\n\n## \u56DB\u6761\u7EAA\u5F8B\n- **popover \u662F"\u5F53\u4E0B"\u7684\uFF0C\u522B\u53EA\u4F9D\u8D56\u5B83**\uFF1A\u9F20\u6807\u4E00\u79FB\u5F00\u5B83\u5C31\u7A7A\u4E86\uFF0C\u800C\u771F\u5B9E\u5149\u6807\u968F\u65F6\u53EF\u80FD\u52A8\n  \uFF08\u54EA\u6015\u4F60\u4EC0\u4E48\u90FD\u6CA1\u505A\uFF09\u3002\u9875\u9762\u82E5\u53E6\u6709\u4E00\u5904"\u6700\u8FD1\u67E5\u770B"/\u8BE6\u60C5\u8BB0\u5F55\uFF0C**\u4F18\u5148\u8BFB\u90A3\u4E00\u5904** \u2014\u2014 \u5B83\u66F4\u8010\u4E45\uFF1B\n  \u8981\u8BFB popover\uFF0C\u5C31\u5728 hover \u4E4B\u540E**\u7D27\u63A5\u7740**\u8BFB\uFF08\u4E2D\u95F4\u522B\u70B9\u51FB\u3001\u522B hover \u522B\u7684\u5143\u7D20\uFF09\u3002\n- **hover \u6CA1\u8BFB\u5230 \u2260 \u9875\u9762\u4E0A\u6CA1\u6709**\uFF1A\u5148\u6000\u7591"\u9F20\u6807\u88AB\u632A\u8D70\u4E86 / \u9884\u89C8\u8FD8\u6CA1\u586B\u5145"\uFF0C**\u518D hover \u4E00\u6B21**\u6216\u7B49\u4E00\u4E0B\uFF0C\n  \u800C\u4E0D\u662F\u76F4\u63A5\u56DE\u7B54"\u9875\u9762\u4E0A\u6CA1\u6709\u8BA2\u5355\u53F7"\uFF1B\n- **\u522B\u7528 `run_javascript` \u53BB\u8BBE `scrollTop` \u6216\u53D6\u9884\u89C8**\uFF1A\u6EDA\u52A8\u6709\u4E00\u7B49\u516C\u6C11\uFF08`scroll_page`\uFF09\uFF0C\n  \u800C\u53D6\u9884\u89C8\u7ED5\u5F00\u4F1A**\u8DF3\u8FC7 hover \u672C\u8EAB**\uFF08\u5185\u5BB9\u6839\u672C\u6CA1\u751F\u6210\uFF09\uFF0C\u8FD8\u767D\u82B1\u4E00\u6B21\u9AD8\u5371\u5BA1\u6279\uFF1B\n- **\u505C\u6B62\u9760\u4FE1\u53F7\uFF0C\u4E0D\u9760\u6B21\u6570**\uFF1A\u53EA\u51ED\u300C\u6EDA\u4E86 N \u6B21\u300D\u505C\u4E0B\uFF0C\u8981\u4E48\u505C\u65E9\u4E86\uFF08\u6F0F\u5185\u5BB9\uFF09\u3001\u8981\u4E48\u505C\u4E0D\u4E0B\u6765\uFF08\u4E00\u76F4\u91CD\u6EDA\uFF09\u3002\n',
+    content: '# \u65E0\u9650\u6EDA\u52A8 + hover \u9884\u89C8\n\n## \u4E24\u4E2A\u75C7\u72B6\n- **\u6EDA\u4E0D\u5230\u5C31\u770B\u4E0D\u5230**\uFF1A\u5185\u5BB9\u662F\u6309\u6279**\u5F02\u6B65\u8FFD\u52A0**\u7684\uFF0C\u4E00\u5F00\u59CB\u5FEB\u7167\u91CC\u53EA\u6709\u7B2C\u4E00\u6279 \u2014\u2014\n  \u300C\u5FEB\u7167\u91CC\u6CA1\u6709\u76EE\u6807\u300D**\u4E0D\u7B49\u4E8E**\u300C\u9875\u9762\u4E0A\u6CA1\u6709\u8FD9\u6761\u300D\uFF1B\n- **\u60AC\u505C\u624D\u6709**\uFF1A\u9884\u89C8/\u63D0\u793A\u6587\u672C\u53EF\u80FD\u538B\u6839\u4E0D\u5728\u9875\u9762\u91CC\uFF08\u9F20\u6807\u79FB\u4E0A\u53BB\u624D\u53BB\u53D6\u3001\u624D\u6E32\u67D3\uFF09\uFF0C\n  \u800C\u4E14**\u9F20\u6807\u4E00\u79FB\u5F00\u5C31\u6CA1\u4E86**\u3002\n\n## \u6B65\u9AA4\n1. \u5148 `get_page_snapshot` \u770B**\u5DF2\u7ECF\u52A0\u8F7D\u4E86\u4EC0\u4E48**\uFF08\u8BB0\u4E0B\u5F53\u524D\u6761\u6570/\u72B6\u6001\u884C\uFF0C\u7528\u5B83\u5224\u65AD\u6709\u6CA1\u6709\u65B0\u7684\u4E00\u6279\u8FDB\u6765\uFF09\uFF1B\n2. **\u522B\u628A\u300C\u52A0\u8F7D\u66F4\u591A\u300D\u6309\u94AE\u5F53\u6210\u63A8\u8FDB\u624B\u6BB5**\uFF1A\u8FD9\u7C7B\u9875\u9762\u4E0A\u5B83\u7ECF\u5E38\u662F\u5931\u6548\u7684\uFF08\u4E5F\u53EF\u80FD\u53CD\u8FC7\u6765 \u2014\u2014 \u53EA\u6709\u6309\u94AE\u6709\u6548\uFF09\u3002\n   \u70B9\u4E00\u6B21\u770B\u5B83\u600E\u4E48\u8BF4\uFF1B\u5B83\u82E5\u8BF4\u300C\u8BF7\u5728\u5E95\u90E8\u7EE7\u7EED\u6EDA\u52A8\u300D\uFF0C\u5C31\u6539\u8D70\u6EDA\u52A8\uFF0C**\u8BD5\u51FA\u65E0\u6548\u5C31\u522B\u53CD\u590D\u70B9**\uFF1B\n3. **\u6EDA\u5230\u5E95\u89E6\u53D1\u52A0\u8F7D**\uFF1A`scroll_page({ y: 2000 })` \u2014\u2014 \u4E0D\u5E26\u76EE\u6807\u65F6 `y` \u6EDA\u7684\u662F**\u7A97\u53E3**\uFF0C\n   \u7ED9\u4E00\u4E2A\u8FDC\u5927\u4E8E\u9875\u9762\u9AD8\u5EA6\u7684\u503C\u6700\u7701\u4E8B\uFF08\u4F1A\u88AB\u81EA\u52A8\u9650\u5236\u5230\u5E95\u90E8\uFF09\uFF1B\n4. **\u6EDA\u4E00\u6B21\u53EA\u52A0\u8F7D\u4E00\u6279**\uFF0C\u6240\u4EE5\u8282\u594F\u5FC5\u987B\u662F\u300C\u6EDA\u52A8 \u2192 \u7B49\u65B0\u5185\u5BB9 \u2192 \u518D\u6EDA\u300D\uFF1A\n   - \u7B49\u65B0\u5185\u5BB9\u6302\u4E0A DOM\uFF1A`wait_for_element({ selector: "<\u65B0\u6279\u7684\u7B2C\u4E00\u6761>", state: "attached" })`\uFF1B\n   - \u26A0 \u8FFD\u52A0\u4E4B\u540E\u9875\u9762\u53D8\u9AD8\uFF0C**\u5F53\u524D\u4F4D\u7F6E\u4E0D\u518D\u662F\u5E95\u90E8**\uFF0C\u800C\u4E14**\u4E0D\u4F1A\u518D\u89E6\u53D1 scroll \u4E8B\u4EF6** \u2014\u2014\n     \u6240\u4EE5\u5FC5\u987B**\u518D\u6EDA\u4E00\u6B21**\u3002\u5C11\u4E86\u8FD9\u4E00\u6B65\u4F1A\u8BEF\u5224\u6210\u300C\u6EDA\u4E0D\u52A8\u4E86 / \u5DF2\u7ECF\u5230\u5E95\u300D\uFF1B\n5. **\u8BFB\u5230\u300C\u5DF2\u5230\u5E95\u300D\u8FD9\u7C7B\u505C\u6B62\u4FE1\u53F7\u624D\u505C**\uFF1A\u5230\u5E95\u4E4B\u540E\u9875\u9762\u4F1A\u7ED9\u51FA\u660E\u786E\u6807\u8BB0\uFF08\u300C\u5DF2\u5230\u5E95 / \u6CA1\u6709\u66F4\u591A\u300D\uFF09\u3002\n   \u6EDA\u5B8C\u4E00\u6279\u5C31\u8BFB\u4E00\u6B21\u5FEB\u7167\u786E\u8BA4\u5B83\u51FA\u6CA1\u51FA\u73B0\uFF1A**\u51FA\u73B0\u4E86\u624D\u505C**\uFF0C\u6CA1\u51FA\u73B0\u5C31\u56DE\u5230\u7B2C 3 \u6B65\u3002\n   \u26A0 \u7EDD\u4E0D\u56E0\u4E3A\u300C\u6EDA\u4E86\u51E0\u6B21\u90FD\u770B\u4E0D\u5230\u76EE\u6807\u300D\u5C31\u5BA3\u5E03\u300C\u9875\u9762\u4E0A\u6CA1\u6709\u8FD9\u6761\u300D\u2014\u2014\u90A3\u4E0D\u662F\u7ED3\u8BBA\uFF0C\u53EA\u662F\u8FD8\u6CA1\u52A0\u8F7D\u5230\uFF1B\n6. **\u60AC\u505C\u524D\u5148\u786E\u8BA4\u76EE\u6807\u5728\u89C6\u53E3\u91CC**\uFF08\u770B\u5FEB\u7167\u7684 `inViewport`\uFF1B\u51E0\u4F55\u7EC6\u8282\u7528 `inspect_element({op:"inspect",ref})`\uFF09\u3002\u4E0D\u5728\u5C31\u5148\u6EDA\u8FC7\u53BB\uFF1A\n   `scroll_page({ selector: "\u2026", behavior: "auto" })` \u2014\u2014\n   \xB7 CDP \u7684\u9F20\u6807\u5750\u6807\u662F**\u89C6\u53E3\u5750\u6807**\uFF0C\u9F20\u6807\u79FB\u4E0D\u5230\u89C6\u53E3\u5916\u7684\u4E1C\u897F\u4E0A\uFF1B\n   \xB7 \u7528 `behavior: "auto"`\uFF08\u7ACB\u5373\u5B8C\u6210\uFF09\u800C\u4E0D\u662F\u9ED8\u8BA4\u7684\u5E73\u6ED1\u6EDA\u52A8\uFF0C\u800C\u4E14**\u6EDA\u5B8C\u5148\u8BFB\u4E00\u6B21\u9875\u9762\u518D hover**\uFF1A\n     \u9875\u9762\u8FD8\u5728\u6EDA\u52A8\u65F6 hover \u7528\u7684\u662F**\u65E7\u5750\u6807**\uFF1B\u66F4\u9EBB\u70E6\u7684\u662F\u6D4F\u89C8\u5668\u5728\u6EDA\u52A8\u4E4B\u540E\u4F1A\u6309**\u771F\u5B9E\u5149\u6807\u4F4D\u7F6E**\n     \u91CD\u7B97\u4E00\u6B21 hover \u72B6\u6001\uFF0C\u521A hover \u4E0A\u7684\u5143\u7D20\u53EF\u80FD\u7ACB\u523B\u88AB"\u632A\u8D70"\uFF1B\n7. **\u7528\u771F\u4E8B\u4EF6\u60AC\u505C**\uFF1A`hover_element({ text: "\u76EE\u6807\u6587\u672C" })`\uFF08\u7ECF CDP \u6D3E\u53D1**\u53EF\u4FE1**\u9F20\u6807\u4E8B\u4EF6\uFF09\u3002\n   \u81EA\u5DF1\u9020\u4E8B\u4EF6\uFF08`dispatchEvent`\uFF09**\u6CA1\u6709\u7528**\uFF1A\u9875\u9762\u5904\u7406 hover \u65F6\u5F80\u5F80\u53EA\u8BA4\u53EF\u4FE1\u4E8B\u4EF6\uFF1B\n8. **\u60AC\u505C\u4E4B\u540E\u7D27\u63A5\u7740\u8BFB\u56DE**\uFF08\u8FD9\u4E24\u6B65\u4E4B\u95F4\u4E0D\u8981\u63D2\u5165\u522B\u7684\u52A8\u4F5C\uFF09\uFF1A\n   - \u7B49\u9884\u89C8\u586B\u5145\uFF1A`wait_for_element({ selector: "#<\u9884\u89C8\u8282\u70B9>", state: "text_contains", text: "\u2026" })`\n     \u2014\u2014 \u9884\u89C8\u5E38\u5E38\u662F\u4E00\u6B21**\u5F02\u6B65\u53D6\u6570**\uFF0Chover \u5B8C\u7ACB\u523B\u8BFB\u4F1A\u8BFB\u5230\u7A7A\uFF1B\n   - \u8BFB\uFF1A`inspect_element({ op: "text", selector: "#<\u9884\u89C8\u8282\u70B9>" })`\uFF0C\u6216\u91CD\u65B0 `get_page_snapshot` \u8BFB\u6B63\u6587\u3002\n     \u9884\u89C8\u6587\u672C\u901A\u5E38\u5728**\u5B50\u8282\u70B9 / popover** \u91CC\uFF0C\u4E0D\u5728\u88AB\u60AC\u505C\u7684\u90A3\u4E2A\u5143\u7D20\u81EA\u5DF1\u7684\u6587\u672C\u91CC\u3002\n\n## \u56DB\u6761\u7EAA\u5F8B\n- **popover \u662F"\u5F53\u4E0B"\u7684\uFF0C\u522B\u53EA\u4F9D\u8D56\u5B83**\uFF1A\u9F20\u6807\u4E00\u79FB\u5F00\u5B83\u5C31\u7A7A\u4E86\uFF0C\u800C\u771F\u5B9E\u5149\u6807\u968F\u65F6\u53EF\u80FD\u52A8\n  \uFF08\u54EA\u6015\u4F60\u4EC0\u4E48\u90FD\u6CA1\u505A\uFF09\u3002\u9875\u9762\u82E5\u53E6\u6709\u4E00\u5904"\u6700\u8FD1\u67E5\u770B"/\u8BE6\u60C5\u8BB0\u5F55\uFF0C**\u4F18\u5148\u8BFB\u90A3\u4E00\u5904** \u2014\u2014 \u5B83\u66F4\u8010\u4E45\uFF1B\n  \u8981\u8BFB popover\uFF0C\u5C31\u5728 hover \u4E4B\u540E**\u7D27\u63A5\u7740**\u8BFB\uFF08\u4E2D\u95F4\u522B\u70B9\u51FB\u3001\u522B hover \u522B\u7684\u5143\u7D20\uFF09\u3002\n- **hover \u6CA1\u8BFB\u5230 \u2260 \u9875\u9762\u4E0A\u6CA1\u6709**\uFF1A\u5148\u6000\u7591"\u9F20\u6807\u88AB\u632A\u8D70\u4E86 / \u9884\u89C8\u8FD8\u6CA1\u586B\u5145"\uFF0C**\u518D hover \u4E00\u6B21**\u6216\u7B49\u4E00\u4E0B\uFF0C\n  \u800C\u4E0D\u662F\u76F4\u63A5\u56DE\u7B54"\u9875\u9762\u4E0A\u6CA1\u6709\u8BA2\u5355\u53F7"\uFF1B\n- **\u522B\u7528 `run_javascript` \u53BB\u8BBE `scrollTop` \u6216\u53D6\u9884\u89C8**\uFF1A\u6EDA\u52A8\u6709\u4E00\u7B49\u516C\u6C11\uFF08`scroll_page`\uFF09\uFF0C\n  \u800C\u53D6\u9884\u89C8\u7ED5\u5F00\u4F1A**\u8DF3\u8FC7 hover \u672C\u8EAB**\uFF08\u5185\u5BB9\u6839\u672C\u6CA1\u751F\u6210\uFF09\uFF0C\u8FD8\u767D\u82B1\u4E00\u6B21\u9AD8\u5371\u5BA1\u6279\uFF1B\n- **\u505C\u6B62\u9760\u4FE1\u53F7\uFF0C\u4E0D\u9760\u6B21\u6570**\uFF1A\u53EA\u51ED\u300C\u6EDA\u4E86 N \u6B21\u300D\u505C\u4E0B\uFF0C\u8981\u4E48\u505C\u65E9\u4E86\uFF08\u6F0F\u5185\u5BB9\uFF09\u3001\u8981\u4E48\u505C\u4E0D\u4E0B\u6765\uFF08\u4E00\u76F4\u91CD\u6EDA\uFF09\u3002\n',
     x: {
       intents: ["browser_task"],
       keywords: ["\u4FE1\u606F\u6D41|\u65E0\u9650\u6EDA\u52A8|\u81EA\u52A8\u52A0\u8F7D|\u6EDA\u5230\u5E95|\u5DF2\u5230\u5E95|\u5F80\u4E0B\u6EDA|\u4E00\u76F4\u52A0\u8F7D", "\u60AC\u505C|hover|\u9F20\u6807\u79FB\u4E0A\u53BB|\u9884\u89C8|\u63D0\u793A\u6587\u672C"],
@@ -1796,7 +1840,7 @@ var SKILL_REGISTRY = Object.freeze([
     category: "browser",
     tags: ["\u9634\u5F71", "\u63CF\u8FB9", "\u6837\u5F0F", "\u63A7\u4EF6"],
     skill_type: "prompt-template",
-    content: '# \u7ED9\u63A7\u4EF6\u52A0\u9634\u5F71 / \u63CF\u8FB9\n\n## \u6B65\u9AA4\n1. `get_page_snapshot` \u627E\u5230\u76EE\u6807\u63A7\u4EF6\uFF0C\u8BB0\u4E0B\u5B83\u7684 selector\uFF08\u4F18\u5148\u8BED\u4E49\u5B9A\u4F4D\uFF0C\u5176\u6B21 CSS \u9009\u62E9\u5668\uFF09\uFF1B\n2. \u52A0\u9634\u5F71\u7528 `annotate({ op: "style", selector, styles: { boxShadow: "rgba(0,0,0,0.25) 0 6px 16px" } })`\uFF1B\n   \u63CF\u8FB9\u7528 `annotate({ op: "outline", selector })`\uFF08\u9ED8\u8BA4\u6A59\u8272\u3001\u7EA6 1.5 \u79D2\u540E\u81EA\u52A8\u6D88\u5931\uFF09\uFF1B\n3. **\u8BFB\u56DE\u8BA1\u7B97\u503C\u624D\u7B97\u9A8C\u8BC1\u8FC7**\uFF1A`inspect_element({ op: "styles", selector, props: ["box-shadow"] })`\uFF0C\n   \u786E\u8BA4 box-shadow \u4E0D\u518D\u662F none\uFF1B\u63CF\u8FB9\u5219\u7528 `inspect_element({ op: "inspect", selector })` \u786E\u8BA4\u547D\u4E2D\u3002\n\n## \u4E3A\u4EC0\u4E48\u5FC5\u987B\u8BFB\u56DE\n`annotate` \u56DE\u6267\u300C\u5DF2\u4FEE\u6539 N \u4E2A\u5143\u7D20\u300D\u53EA\u8BC1\u660E\u8C03\u7528\u53D1\u51FA\u53BB\u4E86\uFF1A\n\u53D6\u503C\u53EF\u80FD\u975E\u6CD5\u88AB\u6D4F\u89C8\u5668\u5FFD\u7565\uFF0C\u4E5F\u53EF\u80FD\u88AB\u9875\u9762\u7684 !important \u8986\u76D6 \u2014\u2014 \u56DE\u6267\u770B\u4E0D\u51FA\u8FD9\u4E9B\u3002\n\u6240\u4EE5\u5224\u636E\u662F**\u8BA1\u7B97\u540E\u7684\u6837\u5F0F\u503C**\uFF0C\u4E0D\u662F\u56DE\u6267\u6587\u6848\u3002',
+    content: '# \u7ED9\u63A7\u4EF6\u52A0\u9634\u5F71 / \u63CF\u8FB9\n\n## \u6B65\u9AA4\n1. `get_page_snapshot` \u627E\u5230\u76EE\u6807\u63A7\u4EF6\u5E76\u8BB0 ref\uFF1Bselector/\u51E0\u4F55\u8BE6\u60C5\u6309 ref \u7528 inspect_element \u6309\u9700\u8BFB\u53D6\uFF1B\n2. \u52A0\u9634\u5F71\u7528 `annotate({ op: "style", ref, styles: { boxShadow: "rgba(0,0,0,0.25) 0 6px 16px" } })`\uFF1B\n   \u63CF\u8FB9\u7528 `annotate({ op: "outline", ref })`\uFF08\u9ED8\u8BA4\u6A59\u8272\u3001\u7EA6 1.5 \u79D2\u540E\u81EA\u52A8\u6D88\u5931\uFF09\uFF1B\n3. **\u8BFB\u56DE\u8BA1\u7B97\u503C\u624D\u7B97\u9A8C\u8BC1\u8FC7**\uFF1A`inspect_element({ op: "styles", ref, props: ["box-shadow"] })`\uFF0C\n   \u786E\u8BA4 box-shadow \u4E0D\u518D\u662F none\uFF1B\u63CF\u8FB9\u5219\u7528 `inspect_element({ op: "inspect", ref })` \u786E\u8BA4\u547D\u4E2D\u3002\n\n## \u4E3A\u4EC0\u4E48\u5FC5\u987B\u8BFB\u56DE\n`annotate` \u56DE\u6267\u300C\u5DF2\u4FEE\u6539 N \u4E2A\u5143\u7D20\u300D\u53EA\u8BC1\u660E\u8C03\u7528\u53D1\u51FA\u53BB\u4E86\uFF1A\n\u53D6\u503C\u53EF\u80FD\u975E\u6CD5\u88AB\u6D4F\u89C8\u5668\u5FFD\u7565\uFF0C\u4E5F\u53EF\u80FD\u88AB\u9875\u9762\u7684 !important \u8986\u76D6 \u2014\u2014 \u56DE\u6267\u770B\u4E0D\u51FA\u8FD9\u4E9B\u3002\n\u6240\u4EE5\u5224\u636E\u662F**\u8BA1\u7B97\u540E\u7684\u6837\u5F0F\u503C**\uFF0C\u4E0D\u662F\u56DE\u6267\u6587\u6848\u3002',
     x: {
       intents: ["browser_task"],
       keywords: ["\u52A0\u9634\u5F71|\u9634\u5F71|box-shadow", "\u63CF\u8FB9|\u63CF\u4E2A\u8FB9|\u52A0\u4E2A\u6846|\u7A81\u51FA"],
@@ -2797,13 +2841,18 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "get_page_snapshot",
-      description: "\u8BFB\u53D6\u5F53\u524D\u7F51\u9875\u7684\u7ED3\u6784\u5316 DOM \u5FEB\u7167\uFF1AURL\u3001\u6807\u9898\u3001\u6B63\u6587\u6458\u8981\u3001\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u53EF\u4EA4\u4E92\u5143\u7D20\u3002\u9ED8\u8BA4\u662F\u4F4E\u4F53\u79EF\u8F6E\u5ED3\uFF1B\u6BCF\u4E2A\u5143\u7D20\u5E26\u7A33\u5B9A ref\u3001selector \u4E0E\u89C6\u53E3\u5750\u6807 center\u3002\u5DF2\u77E5\u76EE\u6807\u8BCD\u65F6\u4F20 query \u63D0\u9AD8\u76F8\u5173\u5143\u7D20\u6392\u5E8F\uFF1B\u8FD8\u6709\u5143\u7D20\u672A\u5C55\u793A\u65F6\u7528 nextCursor \u7EE7\u7EED\u8BFB\u53D6\u3002\u9875\u9762\u64CD\u4F5C\u524D\u540E\u53EF\u7528\u5B83\u5224\u65AD\u52A8\u4F5C\u662F\u5426\u751F\u6548\u3002",
+      description: '\u8BFB\u53D6\u5F53\u524D\u7F51\u9875\u7684\u7ED3\u6784\u5316 DOM \u5FEB\u7167\uFF1AURL\u3001\u6807\u9898\u3001\u4EA4\u4E92\u5143\u7D20\u3001\u533A\u57DF\u8F6E\u5ED3\u3001\u8FD0\u884C\u6001\u4E0E\u53EF\u9009\u6B63\u6587\u3002\u5143\u7D20\u542B\u7A33\u5B9A ref\u3001\u8BED\u4E49\u3001\u72B6\u6001\u548C inViewport\uFF1Bselector/rect/center \u7531\u6267\u884C\u5C42\u4FDD\u5B58\uFF0C\u52A8\u4F5C\u76F4\u63A5\u4F20 ref\u3002query \u4F1A\u540C\u65F6\u63D0\u9AD8\u5143\u7D20\u6392\u5E8F\u5E76\u9ED8\u8BA4\u62BD\u53D6\u76F8\u5173\u6B63\u6587\u7A97\u53E3\uFF1B\u641C\u7D22/\u5217\u8868\u9875\u4F18\u5148 maxText:0\u3002\u9700\u8981\u5143\u7D20\u8BE6\u60C5\u7528 inspect_element({op:"inspect",ref})\uFF1BnextCursor \u7EE7\u7EED\u8BFB\u5143\u7D20\u3002',
       parameters: {
         type: "object",
         properties: {
           maxElements: { type: "integer", description: "\u672C\u6B21\u5206\u9875\u6700\u591A\u8FD4\u56DE\u591A\u5C11\u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\uFF0C\u9ED8\u8BA4 40\uFF0C\u6700\u5927 120" },
-          maxText: { type: "integer", description: "\u6B63\u6587\u6458\u8981\u6700\u5927\u5B57\u7B26\u6570\uFF0C\u9ED8\u8BA4 3000\uFF0C\u6700\u5927 8000\uFF1Bcursor>0 \u65F6\u9ED8\u8BA4 0\uFF0C\u907F\u514D\u91CD\u590D\u53D1\u9001\u6B63\u6587" },
-          query: { type: "string", description: "\u53EF\u9009\uFF1A\u76EE\u6807\u8BCD\u6216\u4EFB\u52A1\u63CF\u8FF0\uFF0C\u7528\u4E8E\u628A\u76F8\u5173\u5143\u7D20\u6392\u5230\u672C\u8F6E\u524D\u9762\uFF1B\u4E0D\u4F1A\u66FF\u4EE3\u7CBE\u786E\u7684 inspect_element \u67E5\u8BE2" },
+          maxText: { type: "integer", description: "\u6B63\u6587\u6700\u5927\u5B57\u7B26\u6570\uFF0C\u9ED8\u8BA4 3000\uFF0C\u6700\u5927 8000\uFF1Bcursor>0 \u65F6\u9ED8\u8BA4 0\u3002\u641C\u7D22/\u5217\u8868\u9875\u5EFA\u8BAE\u4F20 0" },
+          textMode: {
+            type: "string",
+            enum: ["auto", "start", "relevant", "none"],
+            description: "auto\uFF1A\u6709 query \u65F6\u53D6\u76F8\u5173\u7A97\u53E3\uFF0C\u5426\u5219\u53D6\u5F00\u5934\uFF1Bstart\uFF1A\u9875\u9762\u5F00\u5934\uFF1Brelevant\uFF1A\u56F4\u7ED5 query\uFF1Bnone\uFF1A\u4E0D\u8981\u6B63\u6587"
+          },
+          query: { type: "string", description: "\u76EE\u6807\u8BCD\u6216\u4EFB\u52A1\u63CF\u8FF0\uFF1B\u7528\u4E8E\u5143\u7D20\u76F8\u5173\u6392\u5E8F\u548C relevant \u6B63\u6587\u7A97\u53E3\uFF0C\u4E0D\u4F1A\u66FF\u4EE3 inspect_element \u7CBE\u786E\u67E5\u8BE2" },
           cursor: { type: "integer", description: "\u5206\u9875\u6E38\u6807\u3002last snapshot \u8FD4\u56DE nextCursor \u65F6\u539F\u6837\u4F20\u5165\uFF0C\u8BFB\u53D6\u4E0B\u4E00\u6279\uFF1B\u9875\u9762\u5BFC\u822A\u6216\u5927\u5E45\u91CD\u6E32\u67D3\u540E\u91CD\u65B0\u4ECE 0 \u5F00\u59CB" },
           frameId: { type: "integer", description: "\u53EA\u8BFB\u53D6\u6307\u5B9A iframe \u7684\u5FEB\u7167\uFF08frameId \u6765\u81EA list_frames\uFF09\uFF1B\u5143\u7D20 ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00" },
           includeFrames: { type: "boolean", description: "\u662F\u5426\u5408\u5E76\u6240\u6709\u5B50\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF09\u7684\u53EF\u4EA4\u4E92\u5143\u7D20\uFF0C\u9ED8\u8BA4 false" }
@@ -3212,7 +3261,7 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "inspect_element",
-      description: "\u4FA6\u67E5\u5143\u7D20\uFF08\u53EA\u8BFB\uFF09\u3002op\uFF1Ainspect \u7ED3\u6784 / text \u6587\u672C / styles \u8BA1\u7B97\u6837\u5F0F / table \u8868\u683C / options \u4E0B\u62C9\u9009\u9879 / query \u5019\u9009\u67E5\u8BE2\u3002inspect \u8FD4\u56DE count\uFF08\u771F\u5B9E\u547D\u4E2D\u6570\uFF0Cmatches \u6700\u591A 8 \u6761\uFF09\u3001visibleCount\u3001selector/visible/shadowDepth/\u5C3A\u5BF8/\u7956\u5148\u94FE\uFF1Bcount \u4E3A\u51C6\uFF0C\u4E0D\u8981\u7528 matches.length\u3002query \u6309 selector/text/role+name/testid \u8FD4\u56DE\u5019\u9009\u7684 ref/rect/center/role/name/customElement/shadowDepth\uFF0C\u652F\u6301 region \u9650\u5B9A\u4E0E cursor \u5206\u9875\uFF1Bref \u53EF\u76F4\u63A5\u7528\u4E8E\u540E\u7EED\u52A8\u4F5C\uFF0C\u66FF\u4EE3\u63A2\u7D22\u6027 run_javascript\u3002styles \u7528\u4E8E\u9A8C\u8BC1\u6837\u5F0F\u771F\u7684\u751F\u6548\uFF08!important/\u975E\u6CD5\u503C\u4F1A\u8BA9\u201C\u5DF2\u4FEE\u6539\u201D\u5047\u6210\u529F\uFF09\u3002table \u4F1A\u6B63\u786E\u5C55\u5F00 rowspan/colspan\uFF1B\u9009\u9879\u6E05\u5355\u7528 options\u3002",
+      description: "\u4FA6\u67E5\u5143\u7D20\uFF08\u53EA\u8BFB\uFF09\u3002op\uFF1Ainspect \u7ED3\u6784/text \u6587\u672C/styles \u8BA1\u7B97\u6837\u5F0F/table \u8868\u683C/options \u9009\u9879/query \u5019\u9009\u67E5\u8BE2\u3002inspect \u7684 count \u662F\u771F\u5B9E\u547D\u4E2D\u6570\uFF0Cmatches \u6700\u591A 8 \u6761\uFF1B\u542B selector/\u53EF\u89C1\u6027/Shadow \u6DF1\u5EA6/\u5C3A\u5BF8/\u7956\u5148\u94FE\u3002query \u6309 selector/text/role+name/testid \u8FD4\u56DE ref/rect/center/role/name/customElement/shadowDepth\uFF0C\u652F\u6301 region \u4E0E cursor\uFF1Bref \u53EF\u76F4\u63A5\u7528\u4E8E\u540E\u7EED\u52A8\u4F5C\u3002styles \u9A8C\u8BC1\u8BA1\u7B97\u540E\u7684\u6837\u5F0F\uFF1Btable \u5C55\u5F00\u5408\u5E76\u5355\u5143\u683C\uFF1Boptions \u8BFB\u4E0B\u62C9\u9009\u9879\u3002",
       parameters: {
         type: "object",
         properties: {
@@ -3613,7 +3662,10 @@ var TOOL_METADATA = {
   // 写（add_entry）与删（remove_entry）**刻意保持独立** —— 见 lib/assistant/knowledge.js 文件头。
   knowledge_read: { risk: "read", readOnly: true, parallelSafe: true, route: "background" },
   read_current_page: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
-  get_page_snapshot: { risk: "read", readOnly: true, parallelSafe: true, route: "content" },
+  // The snapshot already enforces its own model-facing hard budget. Sending it
+  // through the generic 6K/3K spill would discard the elements/runtime that the
+  // per-tool budget deliberately preserved.
+  get_page_snapshot: { risk: "read", readOnly: true, parallelSafe: true, spillExempt: true, route: "content" },
   // C-4 合并：原 read_console / read_network / list_downloads → read_diagnostics(kind)。
   // 三者原本都是 read/readOnly/parallelSafe，权限无差异，因此合并**不改变任何权限语义**。
   // route 取 'content'（console/network 走内容脚本；downloads 的实现本身在后台，不受 route 影响）。
@@ -3975,6 +4027,26 @@ function localTargetArgs(args) {
   delete out.frameId;
   return out;
 }
+
+// lib/application/agent/context-tuning.ts
+var CONTEXT_TUNING = Object.freeze({
+  // ---- 历史折叠 ----
+  // 按 **token 估算**而不是字符数：中英文密度差约 4 倍，同样 6 万字符，
+  // 英文约 1.5 万 token 尚可接受，中文却接近 6 万 token —— 按字符数设阈值对中文形同虚设。
+  collapseTokens: 16e3,
+  // 折叠时**完整保留**最近几条工具结果，其余压成"头 + 尾"。
+  collapseKeepFull: 6,
+  collapseHeadChars: 300,
+  // ---- 大结果暂存 ----
+  // 超过这个长度就把全文挪进 resultStore，消息里只留开头 + id（供 expand_result 取回）。
+  // 阈值刻意放宽：截得太早会把"本来一次读得完"的结果变成一次额外的 expand_result 往返，
+  // 而每一轮往返都是一次完整的模型请求。
+  spillResultChars: 6e3,
+  spillInlineChars: 3e3,
+  // ---- 落盘会话 ----
+  sessionMessageMaxChars: 12e3,
+  sessionMaxTailMessages: 39
+});
 
 // lib/application/agent/tool-results.ts
 function summarizeCdpError(e) {
@@ -4585,9 +4657,10 @@ function expandResult(ctx, args) {
   const offset = Math.max(0, Number(args.offset) || 0);
   const limit = Math.min(4e3, Math.max(200, Number(args.limit) || 2e3));
   const piece = rangeSafe(text2, offset, offset + limit);
+  const nextOffset = piece.end < piece.length ? piece.end : null;
   return {
     ok: true,
-    result: "\u7ED3\u679C " + id + " [" + piece.start + "," + piece.end + ") / \u5171 " + piece.length + " \u5B57\u7B26\uFF1A\n" + piece.text
+    result: "\u7ED3\u679C " + id + " [" + piece.start + "," + piece.end + ") / \u5171 " + piece.length + " \u5B57\u7B26" + (nextOffset === null ? "\uFF08\u5DF2\u5230\u672B\u5C3E\uFF09" : "\uFF1B\u4E0B\u4E00\u6BB5 offset=" + nextOffset) + "\uFF1A\n" + piece.text
   };
 }
 async function getRunTrace(deps, args) {
@@ -5656,6 +5729,7 @@ async function getPageSnapshotTool(deps, args) {
         maxText: args.maxText,
         query: args.query,
         cursor: args.cursor,
+        textMode: args.textMode,
         frameId: fid
       });
       if (!snapshot2) return { ok: false, result: "\u672A\u80FD\u8BFB\u53D6\u8BE5\u6846\u67B6\u7684 DOM \u5FEB\u7167\uFF08frameId=" + fid + "\uFF0C\u53EF\u80FD\u65E0\u5185\u5BB9\u811A\u672C\uFF09\u3002" };
@@ -5664,7 +5738,11 @@ async function getPageSnapshotTool(deps, args) {
         ok: true,
         hadEffect: false,
         snapshot: tagged,
-        result: "\u6846\u67B6 " + fid + " \u7684 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(tagged) + formatSnapshotOutline(tagged)
+        result: formatSnapshotResultForModel(
+          tagged,
+          "\u6846\u67B6 " + fid + " \u7684 DOM \u5FEB\u7167\uFF1A\n",
+          formatSnapshotOutline(tagged)
+        )
       };
     }
     const snapshot = await deps.getPageSnapshot(tabId, args);
@@ -5673,7 +5751,7 @@ async function getPageSnapshotTool(deps, args) {
     const outlineHint = formatSnapshotOutline(snapshot);
     const mainHint = snapshot.mainContent && snapshot.mainContent.selector ? "\n\u26A0 \u7591\u4F3C\u6B63\u6587\u5BB9\u5668\uFF1A" + snapshot.mainContent.selector + "\uFF08\u7EA6 " + snapshot.mainContent.textLength + " \u5B57\uFF09\u2014\u2014 \u9690\u85CF\u5E7F\u544A/\u63A8\u5E7F\u65F6\u4E0D\u8981\u6574\u4F53\u9690\u85CF\u5B83\u6216\u5176\u7956\u5148\u3002" : "";
     const omittedBySize = Number(snapshot.counts && snapshot.counts.omittedBySize || 0);
-    const omitHint = omittedBySize > 0 ? "\n\u26A0 \u53E6\u6709 " + omittedBySize + ' \u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\u56E0**\u5FEB\u7167\u4F53\u79EF\u9884\u7B97**\u672A\u5217\u51FA\uFF08elements \u6309"\u79BB\u89C6\u53E3\u4E2D\u5FC3\u8FDC\u8FD1"\u6392\u5E8F\uFF0C\u89C6\u53E3\u5916\u7684\u6392\u5728\u540E\u9762\u3001\u5148\u88AB\u88C1\uFF09\u3002\u9700\u8981\u5B83\u4EEC\u65F6\uFF1A\u5148\u7528 scroll_page \u628A\u5B83\u6EDA\u8FDB\u89C6\u53E3\u518D\u8BFB\u4E00\u6B21\uFF0C\u6216\u76F4\u63A5\u6309 selector / role+name \u64CD\u4F5C\uFF08\u4E0D\u5FC5\u5148"\u770B\u5230"\uFF09\u3002' : "";
+    const omitHint = omittedBySize > 0 ? "\n\u26A0 \u53E6\u6709 " + omittedBySize + ' \u4E2A\u53EF\u4EA4\u4E92\u5143\u7D20\u56E0**\u5FEB\u7167\u4F53\u79EF\u9884\u7B97**\u672A\u5217\u51FA\uFF08elements \u6309"\u79BB\u89C6\u53E3\u4E2D\u5FC3\u8FDC\u8FD1"\u6392\u5E8F\uFF0C\u89C6\u53E3\u5916\u7684\u6392\u5728\u540E\u9762\u3001\u5148\u88AB\u88C1\uFF09\u3002\u9700\u8981\u5B83\u4EEC\u65F6\uFF1A\u5148\u7528 scroll_page \u628A\u5B83\u6EDA\u8FDB\u89C6\u53E3\u518D\u8BFB\u4E00\u6B21\uFF0C\u6216\u76F4\u63A5\u6309 ref / role+name \u64CD\u4F5C\uFF08\u4E0D\u5FC5\u5148"\u770B\u5230"\uFF09\uFF1B\u9700\u8981 selector \u6216\u51E0\u4F55\u4FE1\u606F\u65F6\u7528 inspect_element({op:"inspect",ref}) \u6309\u9700\u8BFB\u53D6\u3002' : "";
     if (args.includeFrames === true) {
       const maxElements = Math.min(120, Math.max(1, Number(args.maxElements) || 40));
       const frames = await listFramesRaw(deps, tabId);
@@ -5702,7 +5780,15 @@ async function getPageSnapshotTool(deps, args) {
       const capped = elements.slice(0, maxElements);
       const mergedCapabilities = mergeFrameCapabilities(snapshot.capabilities, perFrameCapabilities);
       const capabilityChars = mergedCapabilities ? JSON.stringify(mergedCapabilities).length : 0;
-      const trimmed = deps.trimElementsToBudget(capped, String(snapshot.text || "").length + capabilityChars);
+      const projectedCapped = capped.map(projectSnapshotElementForModel);
+      const trimmedProjected = deps.trimElementsToBudget(
+        projectedCapped,
+        String(snapshot.text || "").length + capabilityChars
+      );
+      const trimmed = {
+        elements: capped.slice(0, trimmedProjected.elements.length),
+        omittedBySize: trimmedProjected.omittedBySize
+      };
       const merged = Object.assign({}, snapshot, {
         elements: trimmed.elements,
         capabilities: mergedCapabilities || void 0,
@@ -5724,14 +5810,22 @@ async function getPageSnapshotTool(deps, args) {
         ok: true,
         hadEffect: false,
         snapshot: merged,
-        result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF08\u5DF2\u5408\u5E76 " + readFrameIds.length + " \u4E2A\u5B50\u6846\u67B6\uFF09\uFF1A\n" + JSON.stringify(merged) + "\n\u63D0\u793A\uFF1A\u5E26 f<frameId>: \u524D\u7F00\u7684 ref \u5C5E\u4E8E\u5BF9\u5E94 iframe\uFF0C\u52A8\u4F5C\u65F6\u76F4\u63A5\u539F\u6837\u4F20\u56DE ref \u5373\u53EF\u3002" + formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) + frameWarning + mainHint + omitHint + (sameOriginFrameIds.length ? "\n\u540C\u6E90\u6846\u67B6 " + sameOriginFrameIds.join("\u3001") + " \u5DF2\u7531\u9876\u5C42\u5FEB\u7167\u7A7F\u900F\u8BFB\u53D6\uFF0C\u672A\u91CD\u590D\u5408\u5E76\u3002" : "")
+        result: formatSnapshotResultForModel(
+          merged,
+          "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF08\u5DF2\u5408\u5E76 " + readFrameIds.length + " \u4E2A\u5B50\u6846\u67B6\uFF09\uFF1A\n",
+          "\n\u63D0\u793A\uFF1A\u5E26 f<frameId>: \u524D\u7F00\u7684 ref \u5C5E\u4E8E\u5BF9\u5E94 iframe\uFF0C\u52A8\u4F5C\u65F6\u76F4\u63A5\u539F\u6837\u4F20\u56DE ref \u5373\u53EF\u3002" + formatSnapshotOutline(merged) + formatCapabilityHint(merged.capabilities) + frameWarning + mainHint + omitHint + (sameOriginFrameIds.length ? "\n\u540C\u6E90\u6846\u67B6 " + sameOriginFrameIds.join("\u3001") + " \u5DF2\u7531\u9876\u5C42\u5FEB\u7167\u7A7F\u900F\u8BFB\u53D6\uFF0C\u672A\u91CD\u590D\u5408\u5E76\u3002" : "")
+        )
       };
     }
     return {
       ok: true,
       hadEffect: false,
       snapshot,
-      result: "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF1A\n" + JSON.stringify(snapshot) + outlineHint + capHint + mainHint + omitHint
+      result: formatSnapshotResultForModel(
+        snapshot,
+        "\u5F53\u524D\u9875\u9762 DOM \u5FEB\u7167\uFF1A\n",
+        outlineHint + capHint + mainHint + omitHint
+      )
     };
   } catch (e) {
     return { ok: false, result: describeContentScriptUnreachable(e.message, "\u8BFB\u53D6 DOM \u5FEB\u7167\u5931\u8D25\uFF1A") };
@@ -6397,6 +6491,7 @@ var TOOL_REGISTRY = Object.freeze(
       parallelSafe: metadata.parallelSafe === true,
       alwaysAvailable: metadata.alwaysAvailable === true,
       alwaysRequireApproval: metadata.alwaysRequireApproval === true,
+      spillExempt: metadata.spillExempt === true,
       route: metadata.route || "background",
       timeoutMs: Number(metadata.timeoutMs) > 0 ? Number(metadata.timeoutMs) : 0,
       openai: tool
@@ -7690,18 +7785,14 @@ $("test-connection").addEventListener("click", async () => {
   const apiKey2 = $("api-key").value.trim();
   const baseUrl = $("base-url").value.trim().replace(/\/+$/, "") || AI_SETTINGS_DEFAULTS.baseUrl;
   status.className = "connection-status";
-  if (!apiKey2) {
-    status.textContent = "\u8BF7\u5148\u586B\u5199 API Key";
-    status.classList.add("error");
-    $("api-key").focus();
-    return;
-  }
   status.textContent = "\u6B63\u5728\u6D4B\u8BD5\u2026";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8e3);
   try {
+    const headers = {};
+    if (apiKey2) headers.Authorization = "Bearer " + apiKey2;
     const res = await fetch(baseUrl + "/models", {
-      headers: { Authorization: "Bearer " + apiKey2 },
+      headers,
       signal: controller.signal
     });
     if (!res.ok) throw new Error("HTTP " + res.status);

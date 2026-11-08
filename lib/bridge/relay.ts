@@ -10,15 +10,14 @@ import { BRIDGE_METHODS } from '../shared/bridge-methods.ts';
 import { validateBridgeWrite } from '../shared/bridge-write-policy.ts';
 import { normalizeAllowRisk, checkAgentToolBudget, preApprovedToolNames } from '../shared/bridge-agent-policy.ts';
 import { AgentJobStore, JOB_STATE } from './agent-job.ts';
-import { getAISettings } from '../shared/settings.ts';
+import { getAISettings, hasChatModelConfig } from '../shared/settings.ts';
 import { getBook } from '../shared/store.ts';
 import { runAgentStream } from '../application/agent/agent.ts';
 import { screenshotAttempts } from '../shared/vision-copy.ts';
 import { DEFAULT_SCREENSHOT_BUDGET_MS, captureWithLadder } from '../application/agent/screenshot-tool.ts';
 import * as cdp from '../backend/cdp.ts';
 
-const RELAY_HOST = '127.0.0.1:7801';
-const RELAY_HTTP = 'http://' + RELAY_HOST;
+export const DEFAULT_BRIDGE_PORT = 7801;
 
 type BridgeParams = Record<string, unknown>;
 
@@ -81,7 +80,17 @@ export interface TruncateResult {
 // WS 的 token 只能放在查询串里：浏览器 WebSocket API 无法设置请求头。
 // 这是本文件唯一把 token 放进 URL 的位置（HTTP 通道走请求头）。
 function relayWsUrl(): string {
-  return 'ws://' + RELAY_HOST + '/?token=' + encodeURIComponent(relayToken);
+  return 'ws://127.0.0.1:' + relayPort + '/?token=' + encodeURIComponent(relayToken);
+}
+
+function relayHttpUrl(): string {
+  return 'http://127.0.0.1:' + relayPort;
+}
+
+/** 评测并发 Worker 使用不同端口；普通用户设置缺省时继续用 7801。 */
+export function normalizeBridgePort(value: unknown): number {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : DEFAULT_BRIDGE_PORT;
 }
 
 // 与 MCP server 共享的本地桥接 token。
@@ -93,18 +102,21 @@ function relayWsUrl(): string {
 // 覆盖方式：设置页「桥接 Token」填自定义值，server 侧设同一个 RECALLFLOW_BRIDGE_TOKEN。
 export const DEFAULT_BRIDGE_TOKEN = 'recallflow-local-bridge-v1';
 let relayToken = '';
+let relayPort = DEFAULT_BRIDGE_PORT;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let httpLoopRunning = false;
 
-async function loadRelayToken(): Promise<string> {
+async function loadRelayConfig(): Promise<string> {
   try {
     const settings = await getAISettings();
     relayToken = String((settings && settings.bridgeToken) || '').trim();
+    relayPort = normalizeBridgePort(settings && settings.bridgePort);
   } catch (e) {
     relayToken = '';
+    relayPort = DEFAULT_BRIDGE_PORT;
   }
   // 留空即用内置默认值（与 server 的默认值一致，因此无需任何配置即可连通）。
   if (!relayToken) relayToken = DEFAULT_BRIDGE_TOKEN;
@@ -117,7 +129,7 @@ function authHeaders(): Record<string, string> {
 }
 
 async function connectWs(): Promise<void> {
-  if (!(await loadRelayToken())) return;
+  if (!(await loadRelayConfig())) return;
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   try {
     socket = new WebSocket(relayWsUrl());
@@ -199,7 +211,7 @@ async function httpLoop(): Promise<void> {
   if (httpLoopRunning) return;
   // 没配置 token 就不要开始轮询：否则每 3 秒对 127.0.0.1 发一次注定 401 的请求，
   // 既刷控制台也掩盖真正的原因（用户还没填 token）。
-  if (!(await loadRelayToken())) return;
+  if (!(await loadRelayConfig())) return;
   httpLoopRunning = true;
   while (httpLoopRunning) {
     try {
@@ -207,8 +219,8 @@ async function httpLoop(): Promise<void> {
       // 这也让评测可以为每次运行生成一次性 token（只让本次启动的扩展连上 7801，
       // 避免本机另一个浏览器里的扩展把请求抢走 —— 两个扩展同时连同一个 server 时，
       // 请求可能被路由到版本不同的那个，症状是 "unknown method: agent_task_status"）。
-      await loadRelayToken();
-      const res = await fetch(RELAY_HTTP + '/poll', { cache: 'no-store', headers: authHeaders() });
+      await loadRelayConfig();
+      const res = await fetch(relayHttpUrl() + '/poll', { cache: 'no-store', headers: authHeaders() });
       const data = (await res.json()) as { requests?: RelayRequest[] } | null;
       const requests = (data && data.requests) || [];
       for (const req of requests) {
@@ -224,7 +236,7 @@ async function httpLoop(): Promise<void> {
         }
         if (session !== undefined && session !== null) payload.session = session;
         try {
-          await fetch(RELAY_HTTP + '/result', {
+          await fetch(relayHttpUrl() + '/result', {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
             body: JSON.stringify(payload),
@@ -370,10 +382,10 @@ async function agentTaskStart(params: BridgeParams): Promise<Record<string, unkn
   (async () => {
     try {
       const settings = await getAISettings();
-      // API Key 前置检查：不查的话任务会开工即失败，而错误来自 LLM 层，容易被看成本地故障。
-      if (!settings.apiKey) {
+      // 模型端点前置检查：本地 OpenAI 兼容服务可以没有 API Key，不能把空密钥当未配置。
+      if (!hasChatModelConfig(settings)) {
         agentJobs.finish(job.id, JOB_STATE.FAILED, {
-          error: '尚未配置 API Key（扩展设置页填写后重试）。扩展内 agent 需要它才能规划与执行。',
+          error: '尚未配置模型名称或 API 地址（扩展设置页填写后重试）。',
         });
         return;
       }

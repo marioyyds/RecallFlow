@@ -106,13 +106,18 @@ export const TOOL_SCHEMAS = [
     function: {
       name: 'get_page_snapshot',
       description:
-        '读取当前网页的结构化 DOM 快照：URL、标题、正文摘要、区域轮廓与代表性可交互元素。默认是低体积轮廓；每个元素带稳定 ref、selector 与视口坐标 center。已知目标词时传 query 提高相关元素排序；还有元素未展示时用 nextCursor 继续读取。页面操作前后可用它判断动作是否生效。',
+        '读取当前网页的结构化 DOM 快照：URL、标题、交互元素、区域轮廓、运行态与可选正文。元素含稳定 ref、语义、状态和 inViewport；selector/rect/center 由执行层保存，动作直接传 ref。query 会同时提高元素排序并默认抽取相关正文窗口；搜索/列表页优先 maxText:0。需要元素详情用 inspect_element({op:"inspect",ref})；nextCursor 继续读元素。',
       parameters: {
         type: 'object',
         properties: {
           maxElements: { type: 'integer', description: '本次分页最多返回多少个可交互元素，默认 40，最大 120' },
-          maxText: { type: 'integer', description: '正文摘要最大字符数，默认 3000，最大 8000；cursor>0 时默认 0，避免重复发送正文' },
-          query: { type: 'string', description: '可选：目标词或任务描述，用于把相关元素排到本轮前面；不会替代精确的 inspect_element 查询' },
+          maxText: { type: 'integer', description: '正文最大字符数，默认 3000，最大 8000；cursor>0 时默认 0。搜索/列表页建议传 0' },
+          textMode: {
+            type: 'string',
+            enum: ['auto', 'start', 'relevant', 'none'],
+            description: 'auto：有 query 时取相关窗口，否则取开头；start：页面开头；relevant：围绕 query；none：不要正文',
+          },
+          query: { type: 'string', description: '目标词或任务描述；用于元素相关排序和 relevant 正文窗口，不会替代 inspect_element 精确查询' },
           cursor: { type: 'integer', description: '分页游标。last snapshot 返回 nextCursor 时原样传入，读取下一批；页面导航或大幅重渲染后重新从 0 开始' },
           frameId: { type: 'integer', description: '只读取指定 iframe 的快照（frameId 来自 list_frames）；元素 ref 会自动带 f<frameId>: 前缀' },
           includeFrames: { type: 'boolean', description: '是否合并所有子框架（含跨域 iframe）的可交互元素，默认 false' },
@@ -546,11 +551,10 @@ export const TOOL_SCHEMAS = [
     function: {
       name: 'inspect_element',
       description:
-        '侦查元素（只读）。op：inspect 结构 / text 文本 / styles 计算样式 / table 表格 / options 下拉选项 / query 候选查询。' +
-        'inspect 返回 count（真实命中数，matches 最多 8 条）、visibleCount、selector/visible/shadowDepth/尺寸/祖先链；count 为准，不要用 matches.length。' +
-        'query 按 selector/text/role+name/testid 返回候选的 ref/rect/center/role/name/customElement/shadowDepth，支持 region 限定与 cursor 分页；ref 可直接用于后续动作，替代探索性 run_javascript。' +
-        'styles 用于验证样式真的生效（!important/非法值会让“已修改”假成功）。' +
-        'table 会正确展开 rowspan/colspan；选项清单用 options。',
+        '侦查元素（只读）。op：inspect 结构/text 文本/styles 计算样式/table 表格/options 选项/query 候选查询。' +
+        'inspect 的 count 是真实命中数，matches 最多 8 条；含 selector/可见性/Shadow 深度/尺寸/祖先链。' +
+        'query 按 selector/text/role+name/testid 返回 ref/rect/center/role/name/customElement/shadowDepth，支持 region 与 cursor；ref 可直接用于后续动作。' +
+        'styles 验证计算后的样式；table 展开合并单元格；options 读下拉选项。',
       parameters: {
         type: 'object',
         properties: {

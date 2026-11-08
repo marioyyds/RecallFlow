@@ -12,7 +12,11 @@ export const JOB_STATE = Object.freeze({
 export type JobState = (typeof JOB_STATE)[keyof typeof JOB_STATE];
 
 export const JOB_STALL_MS = 90000;
-export const JOB_EVENT_LIMIT = 400;
+// 评测会把长任务的完整事件序列保存下来。400 条在数百到数千条流式事件的真实任务里
+// 很快被挤爆，且裁剪发生在服务端轮询之前，客户端无法补回。50,000 条为最长的
+// WebArena 任务留出充足余量；评测端仍会主动检查 omitted / seq 缺口，绝不把残缺轨迹
+// 标成完整。
+export const JOB_EVENT_LIMIT = 50_000;
 export const JOB_KEEP = 20;
 
 export interface AgentJobEvent {
