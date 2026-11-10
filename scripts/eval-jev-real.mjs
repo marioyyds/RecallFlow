@@ -5,10 +5,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  JEV_EDGE_ABSTAIN,
+  JEV_EDGE_QUESTION,
   JEV_CLICK_TARGET_QUESTION,
   JEV_OPERATION_QUESTION,
   JEV_TYPE_TEXT_TARGET_QUESTION,
+  buildJevEdgeRequest,
   buildJevFastRequest,
+  interpretJevEdgeDecision,
   interpretJevFastDecision,
 } from '../lib/application/agent/jev-action-space.ts';
 import { callJevSystemOne } from '../lib/application/agent/jev-client.ts';
@@ -16,6 +20,56 @@ import { JEV_CALIBRATION_SCENARIOS } from '../tests/e2e/jev-scenarios.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, '.jev-eval');
+const HEAD = process.argv.includes('--head=edge') ? 'edge' : 'operation';
+const GRID = process.argv.includes('--grid');
+
+function edgeTemplate(id, overrides = {}) {
+  return {
+    id,
+    from: 'PRFormPage',
+    to: 'PRFormPage',
+    g: '创建 PR',
+    action: {
+      tool: 'click_element',
+      argsTemplate: { selector: '#' + id },
+      risk: 'low',
+    },
+    slots: [],
+    s: { semanticAnchor: { role: 'button', name: id } },
+    r: 'low',
+    phiMinus: [{ kind: 'url_pattern', expr: '/pull/compare', source: 'structured' }],
+    phiPlus: { kind: 'diff_exists', expr: 'page_diff', source: 'structured' },
+    provenance: {
+      recordIds: [id],
+      verifiedAt: Date.now(),
+      siteKey: 'https://gitcode.com',
+      ttlMs: 1_800_000,
+    },
+    status: 'verified',
+    ...overrides,
+  };
+}
+
+const EDGE_CALIBRATION_SCENARIOS = [
+  ['edge-exact', '继续创建这个 PR', 'e1', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-title', '把标题改成新版本', 'e2', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-description', '更新描述正文', 'e3', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-source', '选择源分支 feat/v2', 'e1', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-target', '选择目标分支 release/1.2', 'e2', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-no-diff', '已经存在 PR 时不要重复创建', 'e3', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-blocked', '创建按钮被遮挡', 'e1', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-selector', 'selector 改版后继续', 'e2', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-counter', '描述字符计数不一致', 'e3', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-url', '点击创建后 URL 未变化', 'e1', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-history', '使用上次的 PR 标题', 'ABSTAIN', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-exists', 'PR 已经存在', 'e2', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+  ['edge-done', '独立验证不可用', 'ABSTAIN', [edgeTemplate('e1'), edgeTemplate('e2'), edgeTemplate('e3')]],
+].map(([id, instruction, expectedEdgeId, candidates]) => ({
+  id,
+  instruction,
+  expectedEdgeId,
+  candidates,
+}));
 
 function configuredProxy() {
   const raw =
@@ -118,6 +172,7 @@ function settings(min = {}) {
     maxConsecutiveActions: 12,
     maxRepeatedActionsWithoutProgress: 3,
     maxElementCandidates: 40,
+    minEdgeConfidence: 0.8,
     minReadConfidence: 0.6,
     minActionConfidence: 0.8,
     minClickConfidence: 0.86,
@@ -157,13 +212,90 @@ function sampleOutcome(scenario, bundle, response, latencyMs) {
     scenario: scenario.id,
     actualOperation,
     operationConfidence: Number(operation?.confidence) || 0,
-    operationProbabilities: operation?.probabilities || {},
     target,
     latencyMs,
     correctOperation: actualOperation === expected.operation,
     correctTarget: expected.targetLabel ? target?.label === expected.targetLabel : true,
     accepted: interpretJevFastDecision(response, bundle).kind === 'act',
   };
+}
+
+function edgeSampleOutcome(scenario, bundle, response, latencyMs) {
+  const answer = response.answers[JEV_EDGE_QUESTION];
+  const actualEdgeId = answer?.choice || '';
+  const decision = interpretJevEdgeDecision(response, bundle);
+  return {
+    scenario: scenario.id,
+    actualEdgeId,
+    confidence: Number(answer?.confidence) || 0,
+    latencyMs,
+    correct: actualEdgeId === scenario.expectedEdgeId,
+    accepted: decision.kind === 'edge',
+  };
+}
+
+function edgeThresholdScore(samples, thresholds) {
+  let correctAccepted = 0;
+  let falseAccepted = 0;
+  let expectedRejected = 0;
+  let ambiguousRejected = 0;
+  for (const sample of samples) {
+    const scenario = EDGE_CALIBRATION_SCENARIOS.find((item) => item.id === sample.scenario);
+    const threshold = thresholds.minEdgeConfidence;
+    const accepted =
+      sample.actualEdgeId !== JEV_EDGE_ABSTAIN &&
+      sample.confidence >= threshold;
+    if (accepted && sample.correct) correctAccepted += 1;
+    if (accepted && !sample.correct) falseAccepted += 1;
+    if (!accepted && scenario?.expectedEdgeId === JEV_EDGE_ABSTAIN) ambiguousRejected += 1;
+    if (!accepted && scenario?.expectedEdgeId !== JEV_EDGE_ABSTAIN) expectedRejected += 1;
+  }
+  return { ...thresholds, correctAccepted, falseAccepted, expectedRejected, ambiguousRejected };
+}
+
+function edgeSweep(samples) {
+  const values = (from, to, step) => {
+    const out = [];
+    for (let value = from; value <= to + 1e-9; value += step) {
+      out.push(Number(value.toFixed(3)));
+    }
+    return out;
+  };
+  const results = [];
+  for (const minEdgeConfidence of values(0.5, 0.95, 0.025)) {
+    results.push(edgeThresholdScore(samples, { minEdgeConfidence }));
+  }
+  return results
+    .filter((item) => item.falseAccepted === 0)
+    .sort(
+      (a, b) =>
+        b.correctAccepted - a.correctAccepted ||
+        a.expectedRejected - b.expectedRejected ||
+        b.minEdgeConfidence - a.minEdgeConfidence
+    )
+    .slice(0, 10);
+}
+
+function summarizeEdge(samples) {
+  const byScenario = {};
+  for (const sample of samples) {
+    (byScenario[sample.scenario] ||= []).push(sample);
+  }
+  return Object.fromEntries(
+    Object.entries(byScenario).map(([id, rows]) => [
+      id,
+      {
+        rounds: rows.length,
+        choices: rows.map((row) => row.actualEdgeId),
+        confidence: {
+          min: Math.min(...rows.map((row) => row.confidence)),
+          max: Math.max(...rows.map((row) => row.confidence)),
+        },
+        correct: rows.filter((row) => row.correct && row.accepted).length,
+        accepted: rows.filter((row) => row.accepted).length,
+      },
+    ])
+  );
 }
 
 function thresholdScore(samples, thresholds) {
@@ -275,22 +407,36 @@ async function main() {
   }
   const rounds = Math.max(1, Math.min(5, Number(process.env.JEV_EVAL_ROUNDS) || 3));
   const samples = [];
-  for (const scenario of JEV_CALIBRATION_SCENARIOS) {
-    const bundle = buildJevFastRequest(settings(), {
-      intent: 'browser_task',
-      phase: 'evals',
-      instruction: scenario.instruction,
-      pageUrl: scenario.snapshot.url,
-      pageTitle: scenario.snapshot.title,
-      pageText: scenario.snapshot.text,
-      snapshot: scenario.snapshot,
-    });
+  const scenarios = HEAD === 'edge' ? EDGE_CALIBRATION_SCENARIOS : JEV_CALIBRATION_SCENARIOS;
+  for (const scenario of scenarios) {
+    const bundle = HEAD === 'edge'
+      ? buildJevEdgeRequest(settings(), {
+          intent: 'browser_task',
+          goal: scenario.instruction,
+          phase: 'evals',
+          pageUrl: 'https://gitcode.com/owner/repo/pull/compare',
+          pageTitle: 'Create Pull Request',
+          candidates: scenario.candidates,
+        })
+      : buildJevFastRequest(settings(), {
+          intent: 'browser_task',
+          phase: 'evals',
+          instruction: scenario.instruction,
+          pageUrl: scenario.snapshot.url,
+          pageTitle: scenario.snapshot.title,
+          pageText: scenario.snapshot.text,
+          snapshot: scenario.snapshot,
+        });
     for (let round = 0; round < rounds; round += 1) {
       const started = Date.now();
       const response = await callJevSystemOne(settings(), bundle.request, {
         fetchImpl: proxyAwareFetch,
       });
-      samples.push(sampleOutcome(scenario, bundle, response, Date.now() - started));
+      samples.push(
+        HEAD === 'edge'
+          ? edgeSampleOutcome(scenario, bundle, response, Date.now() - started)
+          : sampleOutcome(scenario, bundle, response, Date.now() - started)
+      );
       process.stdout.write('.');
     }
   }
@@ -298,11 +444,20 @@ async function main() {
   const report = {
     generatedAt: new Date().toISOString(),
     model: settings().model,
+    head: HEAD,
+    grid: GRID,
     rounds,
-    scenarios: JEV_CALIBRATION_SCENARIOS.length,
+    scenarios: scenarios.length,
+    sampleCount: samples.length,
+    thresholdNote:
+      'edge 阈值必须在 edge head 的 live 样本上重扫；24 个旧 operation 样本不能沿用。',
     samples,
-    summary: summarize(samples),
-    recommended: sweep(samples).slice(0, 10),
+    summary: HEAD === 'edge' ? summarizeEdge(samples) : summarize(samples),
+    recommended: GRID
+      ? HEAD === 'edge'
+        ? edgeSweep(samples)
+        : sweep(samples).slice(0, 10)
+      : [],
   };
   await fs.mkdir(OUT_DIR, { recursive: true });
   const outFile = path.join(OUT_DIR, 'latest-report.json');

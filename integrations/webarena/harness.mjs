@@ -7,6 +7,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { TRACE_GRAPH_KEY } from '../../lib/application/agent/tracegraph-store.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** 仓库根 —— `--load-extension` 要指向它。 */
@@ -57,13 +58,91 @@ export async function launchBrowser({ userDataDir = '', harPath = '', extPath = 
  * 知识库 / 站点记忆 / 技能 / 会话都是空的 —— 否则上一条任务存下的东西会让下一条的
  * 结果既不可复现、也无法归因。
  */
-export async function configureExtension(context, settings) {
+export async function configureExtension(
+  context,
+  settings,
+  { preserveTraceGraph = false, seedTraceGraph = null } = {}
+) {
   const [sw] = context.serviceWorkers();
   if (!sw) throw new Error('拿不到扩展的 service worker（扩展没起来？）');
-  await sw.evaluate(async (s) => {
+  await sw.evaluate(async ({ s, traceGraphKey, keepTraceGraph, seedGraph }) => {
+    let graph = null;
+    if (keepTraceGraph) {
+      const existing = await chrome.storage.local.get(traceGraphKey);
+      graph = existing && existing[traceGraphKey] ? existing[traceGraphKey] : null;
+    }
     await chrome.storage.local.clear();
     await chrome.storage.local.set({ aiSettings: s });
-  }, settings);
+    if (seedGraph) graph = seedGraph;
+    if (graph) await chrome.storage.local.set({ [traceGraphKey]: graph });
+  }, {
+    s: settings,
+    traceGraphKey: TRACE_GRAPH_KEY,
+    keepTraceGraph: preserveTraceGraph,
+    seedGraph: seedTraceGraph,
+  });
+}
+
+async function loginShopping(page, baseUrl, credentials) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await page.goto(new URL('/customer/account/login/', baseUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+      if (!/customer\/account\/login/.test(page.url())) return true;
+      if (!credentials || !credentials.email) return false;
+      await page.fill('#email', credentials.email);
+      await page.fill('#pass', credentials.password);
+      await page.click('button.action.login');
+      await page
+        .waitForURL((u) => !/\/customer\/account\/login/.test(u.pathname), { timeout: 20000 })
+        .catch(() => {});
+      if (!/customer\/account\/login/.test(page.url())) return true;
+    } catch {}
+    await page.waitForTimeout(1500 * attempt);
+  }
+  return false;
+}
+
+async function loginReddit(page, baseUrl, credentials) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await page.goto(new URL('/login', baseUrl).toString(), {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+      if (!/\/login/.test(new URL(page.url()).pathname)) return true;
+      if (!credentials || !credentials.username) return false;
+      await page.fill('#login-username', credentials.username);
+      await page.fill('#login-password', credentials.password);
+      await page.getByRole('button', { name: 'Log in' }).click();
+      await page.waitForURL((u) => !/\/login/.test(u.pathname), { timeout: 15000 }).catch(() => {});
+      if (!/\/login/.test(new URL(page.url()).pathname)) return true;
+    } catch {}
+    await page.waitForTimeout(1500 * attempt);
+  }
+  return false;
+}
+
+async function loginShoppingAdmin(page, baseUrl, credentials) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      if (!/\/admin\//.test(new URL(page.url()).pathname)) return true;
+      if (!credentials || !credentials.username) return false;
+      await page.getByPlaceholder('user name').fill(credentials.username);
+      await page.getByPlaceholder('password').fill(credentials.password);
+      await page.getByRole('button', { name: /sign in/i }).click();
+      await page
+        .waitForURL((u) => u.pathname !== '/admin' && u.pathname !== '/admin/', { timeout: 30000 })
+        .catch(() => {});
+      const path = new URL(page.url()).pathname;
+      if (path !== '/admin' && path !== '/admin/') return true;
+    } catch {}
+    await page.waitForTimeout(1500 * attempt);
+  }
+  return false;
 }
 
 /**
@@ -76,68 +155,43 @@ export async function configureExtension(context, settings) {
  * 登录使用同一个 persistent context，所以 cookie 对扩展开的 tab 同样有效。
  * 失败只告警、不中断：游客可做的任务仍然能跑。
  */
-export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {}) {
+export async function prepareSiteLogin(
+  context,
+  sites,
+  logins = {},
+  siteUrls = {},
+  { requireLogin = false } = {}
+) {
   const list = Array.isArray(sites) ? sites : [];
   const needsShopping = list.includes('shopping');
   const needsShoppingAdmin = list.includes('shopping_admin');
   const needsReddit = list.includes('reddit');
   const needsGitlab = list.includes('gitlab');
-  if (!needsShopping && !needsShoppingAdmin && !needsReddit && !needsGitlab) return;
+  if (!needsShopping && !needsShoppingAdmin && !needsReddit && !needsGitlab) {
+    return { ok: true, failures: [] };
+  }
   const page = await context.newPage();
+  const failures = [];
   try {
     if (needsShopping) {
       const baseUrl = (logins.shopping && logins.shopping.baseUrl) || siteUrls.SHOPPING || 'http://localhost:7770';
-      await page.goto(new URL('/customer/account/login/', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
-      if (!/customer\/account\/login/.test(page.url())) {
-        // 已经是登录态（profile 里已有 cookie），不用再填。
-      } else if (logins.shopping && logins.shopping.email) {
-        await page.fill('#email', logins.shopping.email);
-        await page.fill('#pass', logins.shopping.password);
-        await page.click('button.action.login');
-        // 注意不能等 /customer/account/：登录页自身的 URL 也匹配它。
-        // 等的是"离开登录页"，否则会在点击后立刻误判成功（随后又被下面的检查纠正成失败）。
-        await page
-          .waitForURL((u) => !/\/customer\/account\/login/.test(u.pathname), { timeout: 20000 })
-          .catch(() => {});
-        if (/customer\/account\/login/.test(page.url())) {
-          console.warn('[login] shopping 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
-        }
-      } else {
-        console.warn('[login] shopping 会话已失效且没有可用凭据（继续；需要登录的任务会返回 PERMISSION_DENIED）');
+      if (!(await loginShopping(page, baseUrl, logins.shopping))) {
+        failures.push('shopping');
+        console.warn('[login] shopping 登录失败');
       }
     }
     if (needsReddit) {
       const baseUrl = (logins.reddit && logins.reddit.baseUrl) || siteUrls.REDDIT || 'http://localhost:9999';
-      await page.goto(new URL('/login', baseUrl).toString(), { waitUntil: 'domcontentloaded', timeout: 60000 });
-      if (!/\/login/.test(page.url())) {
-        // 已是登录态
-      } else if (logins.reddit && logins.reddit.username) {
-        await page.fill('#login-username', logins.reddit.username);
-        await page.fill('#login-password', logins.reddit.password);
-        await page.getByRole('button', { name: 'Log in' }).click();
-        await page.waitForURL((u) => !/\/login/.test(u.pathname), { timeout: 15000 }).catch(() => {});
-        if (/\/login/.test(new URL(page.url()).pathname)) {
-          console.warn('[login] reddit 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
-        }
-      } else {
-        console.warn('[login] reddit 会话已失效且没有可用凭据（继续）');
+      if (!(await loginReddit(page, baseUrl, logins.reddit))) {
+        failures.push('reddit');
+        console.warn('[login] reddit 登录失败');
       }
     }
     if (needsShoppingAdmin) {
       const baseUrl = (logins.shopping_admin && logins.shopping_admin.baseUrl) || siteUrls.SHOPPING_ADMIN || 'http://localhost:7780/admin';
-      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      if (!/\/admin\//.test(new URL(page.url()).pathname)) {
-        // Already authenticated and redirected to the Magento admin app.
-      } else if (logins.shopping_admin && logins.shopping_admin.username) {
-        await page.getByPlaceholder('user name').fill(logins.shopping_admin.username);
-        await page.getByPlaceholder('password').fill(logins.shopping_admin.password);
-        await page.getByRole('button', { name: /sign in/i }).click();
-        await page.waitForURL((u) => u.pathname !== '/admin' && u.pathname !== '/admin/', { timeout: 30000 }).catch(() => {});
-        if (new URL(page.url()).pathname === '/admin' || new URL(page.url()).pathname === '/admin/') {
-          console.warn('[login] shopping_admin 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
-        }
-      } else {
-        console.warn('[login] shopping_admin 会话已失效且没有可用凭据（继续）');
+      if (!(await loginShoppingAdmin(page, baseUrl, logins.shopping_admin))) {
+        failures.push('shopping_admin');
+        console.warn('[login] shopping_admin 登录失败');
       }
     }
     if (needsGitlab) {
@@ -151,9 +205,11 @@ export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {
         await page.getByRole('button', { name: /sign in/i }).click();
         await page.waitForURL((u) => !/\/users\/sign_in/.test(u.pathname), { timeout: 30000 }).catch(() => {});
         if (/\/users\/sign_in/.test(new URL(page.url()).pathname)) {
+          failures.push('gitlab');
           console.warn('[login] gitlab 登录失败（继续；需要登录的任务会返回 PERMISSION_DENIED）');
         }
       } else {
+        failures.push('gitlab');
         console.warn('[login] gitlab 会话已失效且没有可用凭据（继续）');
       }
     }
@@ -162,10 +218,14 @@ export async function prepareSiteLogin(context, sites, logins = {}, siteUrls = {
   } finally {
     await page.close().catch(() => {});
   }
+  if (requireLogin && failures.length) {
+    throw new Error('必需站点登录失败：' + [...new Set(failures)].join(', '));
+  }
+  return { ok: failures.length === 0, failures: [...new Set(failures)] };
 }
 
 /** 构造扩展设置：真模型 + 开 CDP + 关逐次审批干扰（桥接侧仍按 allowRisk 逐次判定）。 */
-export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, bridgePort, agentBudget, jev, extra } = {}) {
+export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, bridgePort, agentBudget, jev, traceGraph, extra } = {}) {
   const settings = {
       apiKey: String(apiKey || ''),
       baseUrl: baseUrl || 'https://api.deepseek.com',
@@ -194,6 +254,21 @@ export function webarenaSettings({ apiKey, baseUrl, model, bridgeToken, bridgePo
   }
   if (jevOverride && typeof jevOverride === 'object' && !Array.isArray(jevOverride)) {
     settings.jev = Object.assign({}, jevOverride);
+  }
+  let traceGraphOverride = traceGraph;
+  if (typeof traceGraphOverride === 'string' && traceGraphOverride.trim()) {
+    try {
+      traceGraphOverride = JSON.parse(traceGraphOverride);
+    } catch (error) {
+      throw new Error('RECALLFLOW_EVAL_TRACEGRAPH_SETTINGS 不是合法 JSON');
+    }
+  }
+  if (
+    traceGraphOverride &&
+    typeof traceGraphOverride === 'object' &&
+    !Array.isArray(traceGraphOverride)
+  ) {
+    settings.traceGraph = Object.assign({}, traceGraphOverride);
   }
   return Object.assign(settings, extra || {});
 }

@@ -43,6 +43,9 @@ export const JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxConsecutiveActions: 12,
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
+  minEdgeConfidence: 0.8,
+  // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
+  // these remain for the non-TraceGraph JEV fallback.
   minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
@@ -63,12 +66,37 @@ export interface JevSettings {
   maxConsecutiveActions: number;
   maxRepeatedActionsWithoutProgress: number;
   maxElementCandidates: number;
+  /** TraceGraph edge 选择的唯一 confidence 门限。 */
+  minEdgeConfidence: number;
+  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minReadConfidence: number;
+  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minActionConfidence: number;
+  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minClickConfidence: number;
+  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minWaitConfidence: number;
+  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minTargetOperationConfidence: number;
 }
+
+/**
+ * tracegraph.v2 的回滚开关。默认关闭；record 档只录制，live 档才允许 JEV
+ * 在确定性守卫之后执行证据边。shadowMode 只做安全对照，不产生收益数字。
+ */
+export interface TraceGraphSettings {
+  enabled: boolean;
+  mode: 'record' | 'live';
+  shadowMode: boolean;
+  ttlMs: number;
+}
+
+export const TRACE_GRAPH_SETTINGS_DEFAULTS: Readonly<TraceGraphSettings> = Object.freeze({
+  enabled: false,
+  mode: 'record',
+  shadowMode: true,
+  ttlMs: 30 * 60 * 1000,
+});
 
 export const AI_SETTINGS_DEFAULTS = {
   apiKey: '',
@@ -118,6 +146,7 @@ export const AI_SETTINGS_DEFAULTS = {
   // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
   bridgeToken: 'recallflow-local-bridge-v1',
   jev: JEV_SETTINGS_DEFAULTS as JevSettings,
+  traceGraph: TRACE_GRAPH_SETTINGS_DEFAULTS as TraceGraphSettings,
 };
 
 /**
@@ -203,6 +232,17 @@ export function mergeJevSettings(saved: unknown): JevSettings {
       ? Math.max(0, Math.min(1, value))
       : Number(JEV_SETTINGS_DEFAULTS[key]);
   };
+  const legacyEdgeThreshold = Math.max(
+    Number.isFinite(Number(raw.minActionConfidence))
+      ? Math.max(0, Math.min(1, Number(raw.minActionConfidence)))
+      : JEV_SETTINGS_DEFAULTS.minActionConfidence,
+    Number.isFinite(Number(raw.minTargetOperationConfidence))
+      ? Math.max(0, Math.min(1, Number(raw.minTargetOperationConfidence)))
+      : JEV_SETTINGS_DEFAULTS.minTargetOperationConfidence
+  );
+  const minEdgeConfidence = Number.isFinite(Number(raw.minEdgeConfidence))
+    ? boundedProbability('minEdgeConfidence')
+    : legacyEdgeThreshold;
   return {
     enabled: raw.enabled === true,
     baseUrl: stringValue('baseUrl', JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ''),
@@ -224,11 +264,28 @@ export function mergeJevSettings(saved: unknown): JevSettings {
       10
     ),
     maxElementCandidates: boundedInteger('maxElementCandidates', 5, 100),
+    minEdgeConfidence,
     minReadConfidence: boundedProbability('minReadConfidence'),
     minActionConfidence: boundedProbability('minActionConfidence'),
     minClickConfidence: boundedProbability('minClickConfidence'),
     minWaitConfidence: boundedProbability('minWaitConfidence'),
     minTargetOperationConfidence: boundedProbability('minTargetOperationConfidence'),
+  };
+}
+
+export function mergeTraceGraphSettings(saved: unknown): TraceGraphSettings {
+  const raw = saved && typeof saved === 'object' && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : {};
+  const ttl = Number(raw.ttlMs);
+  return {
+    enabled: raw.enabled === true,
+    mode: raw.mode === 'live' ? 'live' : 'record',
+    shadowMode: raw.shadowMode !== false,
+    ttlMs:
+      Number.isFinite(ttl) && ttl > 0
+        ? Math.min(Math.floor(ttl), 24 * 60 * 60 * 1000)
+        : TRACE_GRAPH_SETTINGS_DEFAULTS.ttlMs,
   };
 }
 
@@ -272,6 +329,15 @@ export async function updateAISettings(patch?: Record<string, unknown>): Promise
       : {};
     next.jev = mergeJevSettings(Object.assign({}, current, incoming));
   }
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'traceGraph')) {
+    const current = saved && typeof saved === 'object' && saved.traceGraph && typeof saved.traceGraph === 'object'
+      ? saved.traceGraph
+      : {};
+    const incoming = patch.traceGraph && typeof patch.traceGraph === 'object' && !Array.isArray(patch.traceGraph)
+      ? patch.traceGraph
+      : {};
+    next.traceGraph = mergeTraceGraphSettings(Object.assign({}, current, incoming));
+  }
   await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
   return Object.assign({}, AI_SETTINGS_DEFAULTS, next) as AISettings;
 }
@@ -281,6 +347,7 @@ export async function getAISettings(): Promise<AISettings> {
   const saved = (d[AI_SETTINGS_KEY] || {}) as Record<string, unknown>;
   const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved) as AISettings;
   merged.jev = mergeJevSettings(saved.jev);
+  merged.traceGraph = mergeTraceGraphSettings(saved.traceGraph);
   // 新版本新增的默认快捷指令会合并进已有用户设置：保留用户自定义项与顺序，去重后补齐新增项。
   if (Array.isArray(saved.quickPrompts)) {
     merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);

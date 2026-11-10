@@ -4,6 +4,7 @@ import {
   recordTraceStep,
   validateToolCall,
 } from './tools.ts';
+import { REPLAYABLE_TOOLS } from './macros.ts';
 import { toolNeedsApproval } from './approval-policy.ts';
 import { detectAuthChallenge, authChallengeNotice } from './auth-challenge.ts';
 import { resolveCodeExecutionApproval } from '../../shared/settings.ts';
@@ -36,6 +37,7 @@ import {
 } from './tool-execution.ts';
 import { CompletionCoordinator } from './agent-completion.ts';
 import type { AgentRunState } from './agent-run-state.ts';
+import type { ToolResult } from './types.ts';
 import {
   ensureDownloadObservation,
   shouldObserveDownloads,
@@ -103,6 +105,7 @@ export class ToolCallPipeline {
   ): Promise<ToolBatchOutcome> {
     const state = this.state;
     const lane = step && step.lane === 'fast' ? 'fast' : 'slow';
+    const skipApproval = step && step.skipApproval === true;
     const pendingReflections: string[] = [];
     const downloadTask = shouldObserveDownloads(
       state.detected.sourceText || state.instruction
@@ -143,6 +146,7 @@ export class ToolCallPipeline {
       settings: state.settings,
       ctx: state.ctx,
       sessionApprovedTools: state.sessionApprovedTools,
+      skipApproval,
       isToolAllowed: (name: string) => this.isToolAllowed(name),
       shouldExecuteSerially: (name: string, args: Record<string, unknown>) =>
         evaluateXhsPublicationGate(name, args, state.ctx).kind !== 'none',
@@ -186,6 +190,7 @@ export class ToolCallPipeline {
       };
       let result: any;
       let authBeforeUrl = state.ctx.pageUrl;
+      const traceBeforeSnapshot = state.ctx.lastSnapshot;
       const validation = validateToolCall(toolCall.name, toolCall.args || {});
       if (!validation.ok) {
         result = { ok: false, result: validation.error };
@@ -238,7 +243,7 @@ export class ToolCallPipeline {
       }
 
       let approvalSettings = state.settings;
-      if (metadata.requiresApproval === true) {
+      if (!skipApproval && metadata.requiresApproval === true) {
         approvalSettings = await readLiveApprovalSettings(state.settings);
       }
       if (!result) {
@@ -258,7 +263,7 @@ export class ToolCallPipeline {
             status: 'blocked',
             reason: publicationGate.reason,
           });
-        } else if (publicationGate.kind === 'confirm') {
+        } else if (!skipApproval && publicationGate.kind === 'confirm') {
           // 发布永远逐次确认：不受 toolApproval=false、站点信任或会话放行影响。
           approvalRequired = true;
           state.trace({
@@ -268,6 +273,7 @@ export class ToolCallPipeline {
             reason: publicationGate.reason,
           });
         } else if (
+          !skipApproval &&
           approvalSettings.toolApproval !== false &&
           toolNeedsApproval(toolCall.name, approvalSettings, state.ctx.pageUrl) &&
           !state.sessionApprovedTools.has(toolCall.name)
@@ -459,7 +465,35 @@ export class ToolCallPipeline {
         state.ctx.lastReadFullText = rawResult;
       }
       try {
-        recordTraceStep(state.ctx, toolCall.name, toolCall.args, result);
+        let traceAfterSnapshot = state.ctx.lastSnapshot;
+        if (
+          state.settings?.traceGraph?.enabled === true &&
+          REPLAYABLE_TOOLS.has(toolCall.name) &&
+          toolCall.name !== 'get_page_snapshot'
+        ) {
+          const observation = await executeAnyTool(
+            'get_page_snapshot',
+            { maxText: 1200 },
+            state.ctx
+          ) as ToolResult | null | undefined;
+          const observedSnapshot =
+            observation?.pageSnapshot ||
+            observation?.snapshot ||
+            state.ctx.lastSnapshot;
+          if (observedSnapshot) {
+            traceAfterSnapshot = observedSnapshot;
+            state.ctx.lastSnapshot = observedSnapshot;
+          }
+          state.trace({
+            phase: 'tracegraph-observe',
+            name: toolCall.name,
+            ok: observation?.ok !== false,
+          });
+        }
+        recordTraceStep(state.ctx, toolCall.name, toolCall.args, result, {
+          beforeSnapshot: traceBeforeSnapshot,
+          afterSnapshot: traceAfterSnapshot,
+        });
       } catch {}
       state.messages.push({
         role: 'tool',

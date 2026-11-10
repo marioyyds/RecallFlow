@@ -22,6 +22,13 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
   const jevLive = jev.filter((e) => e.mode === 'live');
   const jevCompares = list.filter((e) => e && e.phase === 'jev-shadow-compare');
   const jevHandoffs = list.filter((e) => e && e.phase === 'jev-handoff');
+  const traceHandoffs = list.filter((e) => e && e.phase === 'tracegraph-handoff');
+  const r3 = list.filter((e) => e && e.phase === 'tracegraph-r3');
+  const handoffReasons: Record<string, number> = {};
+  for (const entry of [...jevHandoffs, ...traceHandoffs]) {
+    const reason = String(entry.reason || 'unknown');
+    handoffReasons[reason] = (handoffReasons[reason] || 0) + 1;
+  }
   const complete = (list.find((e) => e && e.phase === 'complete') || {}) as TraceRecordEntry;
 
   const byTool: Record<string, number> = {};
@@ -60,6 +67,17 @@ export function summarizeRunTrace(entries: TraceRecordEntry[] | null | undefined
     jevShadowCompared: jevCompares.length,
     jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
     jevHandoffs: jevHandoffs.length,
+    wrongWrites: list.filter((e) => e && e.phase === 'tracegraph-wrong-write').length,
+    slowTurns: list.filter((e) => e && e.phase === 'tracegraph-slow-turn').length,
+    handoffReasons,
+    edgeReuse: r3.filter((e) => e.decision === 'REUSE').length,
+    edgeRewrite: r3.filter((e) => e.decision === 'REWRITE').length,
+    edgeReject: r3.filter((e) => e.decision === 'REJECT').length,
+    phiPlusFailures: list.filter((e) => e && e.phase === 'tracegraph-phi-plus-fail').length,
+    candidateCount: list
+      .filter((e) => e && e.phase === 'tracegraph-candidates')
+      .reduce((n, e) => n + num(e.count), 0),
+    blockedEdgeHits: list.filter((e) => e && e.phase === 'tracegraph-blocked-edge-hit').length,
   };
 }
 
@@ -90,6 +108,18 @@ export function formatRunMetrics(m: RunMetricsSummary): string {
     if (m.jevShadowCompared) {
       lines.push('JEV 影子一致 ' + m.jevShadowAgreed + '/' + m.jevShadowCompared);
     }
+  }
+  if (m.candidateCount || m.blockedEdgeHits || m.slowTurns) {
+    const reasons = Object.entries(m.handoffReasons || {})
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => reason + '×' + count)
+      .join('、');
+    lines.push(
+      'TraceGraph 候选 ' + m.candidateCount +
+      ' / 工具失败封边 ' + m.blockedEdgeHits +
+      ' / 慢思考 ' + m.slowTurns
+    );
+    if (reasons) lines.push('移交原因：' + reasons);
   }
   return lines.join('\n');
 }

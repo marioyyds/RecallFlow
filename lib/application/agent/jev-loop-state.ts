@@ -20,11 +20,22 @@ export interface JevLoopState {
   planActions: number;
   readFallbackKey: string;
   lastOutcome: string;
+  blockedEdgeIds: string[];
+  executedEdges: string[];
+  wrongWrites: number;
+  slowTurns: number;
+  handoffReasons: Record<string, number>;
 }
 
 function nonNegativeInteger(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function stringList(value: unknown, max = 64): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))].slice(-max)
+    : [];
 }
 
 export function restoreJevLoopState(value: unknown): JevLoopState {
@@ -53,5 +64,19 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
     ),
     readFallbackKey: String(source.readFallbackKey || '').slice(0, 1000),
     lastOutcome: String(source.lastOutcome || '').slice(0, 80),
+    blockedEdgeIds: stringList(source.blockedEdgeIds),
+    executedEdges: stringList(source.executedEdges),
+    wrongWrites: nonNegativeInteger(source.wrongWrites),
+    slowTurns: nonNegativeInteger(source.slowTurns),
+    handoffReasons:
+      source.handoffReasons &&
+      typeof source.handoffReasons === 'object' &&
+      !Array.isArray(source.handoffReasons)
+        ? Object.fromEntries(
+            Object.entries(source.handoffReasons as Record<string, unknown>)
+              .map(([key, count]) => [key.slice(0, 80), nonNegativeInteger(count)])
+              .filter(([, count]) => Number(count) > 0)
+          )
+        : {},
   };
 }

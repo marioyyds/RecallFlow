@@ -5,6 +5,7 @@ import {
   JEV_SETTINGS_DEFAULTS,
   getAISettings,
   mergeJevSettings,
+  mergeTraceGraphSettings,
   resolveCodeExecutionApproval,
 } from '../lib/shared/settings.ts';
 import { esc } from '../lib/shared/dom/html.ts';
@@ -13,11 +14,24 @@ import { USERSCRIPTS_KEY } from '../lib/userscript/store.ts';
 // 复用后台那一套握手（initialize → notifications/initialized → tools/list），
 // 这样「设置页显示的结果」与「Agent 真正连的结果」是同一份代码，不会各说各话。
 import { probeMcpServer, MCP_STATUS_STORAGE_KEY } from '../lib/application/agent/mcp.ts';
-import { listJevModels } from '../lib/application/agent/jev-client.ts';
+import { probeJevConnection } from '../lib/application/agent/jev-client.ts';
+import { TRACE_GRAPH_KEY } from '../lib/application/agent/trace-graph-types.ts';
 import {
   readJevDiagnostic,
   type JevDiagnosticRecord,
 } from '../lib/application/agent/jev-diagnostics.ts';
+import {
+  formatTraceGraphAge,
+  parseTraceGraphView,
+  type TraceGraphLayout,
+  type TraceGraphLayoutEdge,
+  type TraceGraphLayoutNode,
+  type TraceGraphView,
+} from '../lib/ui/options/tracegraph-view.ts';
+import {
+  createTraceGraphCanvas,
+  type TraceGraphCanvasController,
+} from '../lib/ui/options/tracegraph-canvas.ts';
 
 /** MCP 服务器配置 / 最近连接结果：字段由 mcp.js 与设置页共同约定。 */
 type Dyn = Record<string, any>;
@@ -31,6 +45,12 @@ const $q = (root: Element | Document, selector: string): any => root.querySelect
 let settingsDirty = false;
 let settingsLoading = true;
 let jevLastDiagnostic: JevDiagnosticRecord | null = null;
+let traceGraphViews: TraceGraphView[] = [];
+
+const traceGraphCanvasControllers = new WeakMap<
+  HTMLElement,
+  TraceGraphCanvasController
+>();
 
 async function load() {
   const s = await getAISettings();
@@ -48,14 +68,15 @@ async function load() {
   $('jev-max-actions').value = String(s.jev.maxConsecutiveActions);
   $('jev-max-repeated').value = String(s.jev.maxRepeatedActionsWithoutProgress);
   $('jev-max-candidates').value = String(s.jev.maxElementCandidates);
-  $('jev-min-read').value = String(s.jev.minReadConfidence);
-  $('jev-min-action').value = String(s.jev.minActionConfidence);
-  $('jev-min-click').value = String(s.jev.minClickConfidence);
-  $('jev-min-wait').value = String(s.jev.minWaitConfidence);
-  $('jev-min-target-operation').value = String(s.jev.minTargetOperationConfidence);
+  $('jev-min-edge-confidence').value = String(s.jev.minEdgeConfidence);
   $('jev-schema-version').value = s.jev.schemaVersion;
+  $('tracegraph-enabled').checked = s.traceGraph?.enabled === true;
+  $('tracegraph-mode').value = s.traceGraph?.mode === 'live' ? 'live' : 'record';
+  $('tracegraph-shadow-mode').checked = s.traceGraph?.shadowMode !== false;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
+  await migrateTraceGraphEdges();
+  await refreshTraceGraphExplorer();
   $('rag-enabled').checked = !!s.ragEnabled;
   $('target-lang').value = s.targetLang;
   $('page-context').checked = s.pageContext !== false;
@@ -132,6 +153,469 @@ function renderJevRuntimeStatus() {
   el.className = className;
   el.textContent =
     current + ' 最近运行' + (when ? '（' + when + '）' : '：') + attempts + ' · ' + latest + '。';
+}
+
+function formatTraceGraphTime(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '未知时间';
+  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+}
+
+function traceGraphTargets(expanded = false): {
+  canvas: HTMLElement | null;
+  detail: HTMLElement | null;
+} {
+  return expanded
+    ? {
+        canvas: $('tracegraph-dialog-canvas'),
+        detail: $('tracegraph-dialog-detail'),
+      }
+    : {
+        canvas: $('tracegraph-canvas'),
+        detail: $('tracegraph-detail'),
+      };
+}
+
+function selectedTraceGraphView(): TraceGraphView | null {
+  const select = $('tracegraph-site-select') as HTMLSelectElement | null;
+  if (!select) return null;
+  return traceGraphViews.find((item) => item.siteKey === select.value) || null;
+}
+
+function traceGraphCanvasController(
+  canvas: HTMLElement
+): TraceGraphCanvasController {
+  const existing = traceGraphCanvasControllers.get(canvas);
+  if (existing) return existing;
+  const controller = createTraceGraphCanvas(canvas, {
+    onSelectNode(node, layout) {
+      renderTraceGraphNodeDetail(canvas, node, layout);
+    },
+    onSelectEdge(edge) {
+      renderTraceGraphEdgeDetail(canvas, edge);
+    },
+    onClearSelection() {
+      renderTraceGraphCanvasHint(canvas);
+    },
+  });
+  traceGraphCanvasControllers.set(canvas, controller);
+  return controller;
+}
+
+async function refreshTraceGraphExplorer() {
+  const canvas = $('tracegraph-canvas');
+  const summary = $('tracegraph-view-summary');
+  const select = $('tracegraph-site-select') as HTMLSelectElement;
+  if (!canvas || !summary || !select) return;
+  summary.className = 'tracegraph-summary';
+  summary.textContent = '正在读取本地 TraceGraph…';
+  try {
+    const stored = await chrome.storage.local.get(TRACE_GRAPH_KEY);
+    const all = stored?.[TRACE_GRAPH_KEY];
+    const records = all && typeof all === 'object' && !Array.isArray(all)
+      ? Object.values(all)
+      : [];
+    traceGraphViews = records
+      .map((item) => parseTraceGraphView(item))
+      .filter((item): item is TraceGraphView => Boolean(item))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const previous = select.value;
+    select.replaceChildren();
+    if (!traceGraphViews.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = '暂无图';
+      select.appendChild(option);
+      select.disabled = true;
+      const expand = $('tracegraph-expand') as HTMLButtonElement | null;
+      if (expand) expand.disabled = true;
+      const remove = $('tracegraph-delete-site') as HTMLButtonElement | null;
+      if (remove) remove.disabled = true;
+      ($('tracegraph-dialog') as HTMLDialogElement | null)?.close();
+      summary.className = 'tracegraph-summary empty';
+      summary.textContent = '本地还没有可展示的 TraceGraph。开启录制并完成一次产生可验证变化的页面动作后，这里会显示状态和边。';
+      renderTraceGraphEmpty('暂无轨迹图', '图数据只保存在本地浏览器，不会上传。');
+      return;
+    }
+    for (const view of traceGraphViews) {
+      const option = document.createElement('option');
+      option.value = view.siteKey;
+      option.textContent = view.siteKey;
+      select.appendChild(option);
+    }
+    select.disabled = false;
+    select.value = traceGraphViews.some((view) => view.siteKey === previous)
+      ? previous
+      : traceGraphViews[0].siteKey;
+    renderSelectedTraceGraph();
+  } catch (error) {
+    summary.className = 'tracegraph-summary error';
+    summary.textContent =
+      '读取 TraceGraph 失败：' +
+      (error instanceof Error ? error.message : String(error));
+    renderTraceGraphEmpty('无法读取图数据', '请刷新设置页后重试。');
+  }
+}
+
+async function migrateTraceGraphEdges() {
+  try {
+    await chrome.runtime.sendMessage({ type: 'tracegraph:rebuild' });
+  } catch {
+    // The read-only fallback still renders the stored graph if the worker is
+    // unavailable; the next TraceGraph load will normalize it again.
+  }
+}
+
+function renderTraceGraphEmpty(title: string, detail = '') {
+  renderTraceGraphEmptyIn($('tracegraph-canvas'), $('tracegraph-detail'), title, detail);
+}
+
+function renderTraceGraphEmptyIn(
+  canvas: HTMLElement | null,
+  detailEl: HTMLElement | null,
+  title: string,
+  detail = ''
+) {
+  if (!canvas) return;
+  const box = document.createElement('div');
+  box.className = 'tracegraph-empty';
+  const strong = document.createElement('strong');
+  strong.textContent = title;
+  box.appendChild(strong);
+  if (detail) {
+    const span = document.createElement('span');
+    span.textContent = detail;
+    box.appendChild(span);
+  }
+  canvas.replaceChildren(box);
+  traceGraphCanvasControllers.get(canvas)?.clear();
+  if (detailEl) {
+    const empty = document.createElement('div');
+    empty.className = 'tracegraph-detail-empty';
+    empty.textContent = detail || '暂无可查看的状态。';
+    detailEl.replaceChildren(empty);
+  }
+}
+
+function renderSelectedTraceGraph() {
+  const view = selectedTraceGraphView();
+  const expand = $('tracegraph-expand') as HTMLButtonElement | null;
+  const remove = $('tracegraph-delete-site') as HTMLButtonElement | null;
+  if (!view) {
+    if (expand) expand.disabled = true;
+    if (remove) remove.disabled = true;
+    ($('tracegraph-dialog') as HTMLDialogElement | null)?.close();
+    renderTraceGraphEmpty('暂无可展示的图');
+    return;
+  }
+  if (expand) expand.disabled = !view.states.length || !view.edges.length;
+  if (remove) remove.disabled = false;
+  const summary = $('tracegraph-view-summary');
+  if (summary) {
+    summary.className = 'tracegraph-summary active';
+    summary.textContent = [
+      '本地轨迹图',
+      view.states.length + ' 个状态',
+      view.edges.length + ' 条边',
+      view.recordCount + ' 条原始记录',
+      '更新于 ' + formatTraceGraphTime(view.updatedAt),
+      formatTraceGraphAge(view.ageMs),
+    ].join(' · ');
+  }
+  renderTraceGraph(view);
+  const dialog = $('tracegraph-dialog') as HTMLDialogElement | null;
+  if (dialog?.open) renderTraceGraph(view, true);
+}
+
+function renderTraceGraph(view: TraceGraphView, expanded = false) {
+  const { canvas, detail } = traceGraphTargets(expanded);
+  if (!canvas) return;
+  if (!view.states.length || !view.edges.length) {
+    const title = view.states.length ? '已有状态，但还没有可执行边' : '图里还没有状态';
+    const hint = view.states.length
+      ? '只有成功且产生可验证变化、同时属于可重放工具的动作，才会生成边。'
+      : '继续执行页面动作后刷新；登录、支付和内网页不会构图。';
+    renderTraceGraphEmptyIn(canvas, detail, title, hint);
+    return;
+  }
+  traceGraphCanvasController(canvas).render(view);
+  renderTraceGraphCanvasHint(canvas);
+}
+
+function traceGraphDetailFor(canvas: HTMLElement): HTMLElement | null {
+  return canvas.id === 'tracegraph-dialog-canvas'
+    ? $('tracegraph-dialog-detail')
+    : $('tracegraph-detail');
+}
+
+function renderTraceGraphCanvasHint(canvas: HTMLElement) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const layout = traceGraphCanvasControllers.get(canvas)?.getLayout();
+  const empty = document.createElement('div');
+  empty.className = 'tracegraph-detail-empty';
+  empty.textContent = layout
+    ? '画布已居中。拖动画布平移，滚轮缩放；拖动节点调整布局，拖动边调整弯曲度，点击节点或边查看详情。'
+    : '拖动画布平移，滚轮缩放；点击节点或边查看详情。';
+  detail.replaceChildren(empty);
+  if (!layout?.nodes.length) return;
+  const quick = document.createElement('div');
+  quick.className = 'tracegraph-quick-select';
+  const label = document.createElement('div');
+  label.className = 'tracegraph-detail-section';
+  label.textContent = '状态';
+  quick.appendChild(label);
+  for (const node of layout.nodes) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tracegraph-quick-node';
+    button.textContent = node.name;
+    button.addEventListener('click', () => {
+      traceGraphCanvasControllers.get(canvas)?.selectNode(node.name);
+    });
+    quick.appendChild(button);
+  }
+  detail.appendChild(quick);
+}
+
+function traceGraphEdgeRow(
+  canvas: HTMLElement,
+  edge: TraceGraphLayoutEdge
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'tracegraph-detail-edge';
+  const head = document.createElement('div');
+  head.className = 'tracegraph-detail-edge-row';
+  const title = document.createElement('button');
+  title.type = 'button';
+  title.className = 'tracegraph-detail-edge-title tracegraph-edge-select';
+  title.textContent = edge.from + ' → ' + edge.to;
+  title.addEventListener('click', () => {
+    traceGraphCanvasControllers.get(canvas)?.selectEdge(edge.id);
+  });
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'tracegraph-inline-delete';
+  remove.textContent = '删除边';
+  remove.addEventListener('click', () => {
+    deleteTraceGraphSelection(
+      { edgeIds: [edge.id] },
+      '删除这条轨迹边？其对应录制证据也会一并移除。',
+      remove
+    ).catch(() => {});
+  });
+  head.append(title, remove);
+  row.appendChild(head);
+  const meta = document.createElement('div');
+  meta.className = 'tracegraph-detail-edge-meta';
+  meta.textContent = [
+    edge.tool,
+    edge.targetLabel ? '目标：' + edge.targetLabel : '',
+    edge.risk,
+    edge.status,
+    edge.slots.length ? '@' + edge.slots.join(', @') : '无 slot',
+    edge.recordCount + ' 条记录',
+    edge.verifiedAt ? '验证于 ' + formatTraceGraphTime(edge.verifiedAt) : '',
+  ].filter(Boolean).join(' · ');
+  row.appendChild(meta);
+  if (edge.goal) {
+    const goal = document.createElement('div');
+    goal.className = 'tracegraph-detail-edge-goal';
+    goal.textContent = edge.goal;
+    row.appendChild(goal);
+  }
+  const args = document.createElement('code');
+  args.className = 'tracegraph-detail-edge-args';
+  args.textContent = 'args ' + edge.argsTemplate;
+  row.appendChild(args);
+  return row;
+}
+
+function renderTraceGraphNodeDetail(
+  canvas: HTMLElement,
+  node: TraceGraphLayoutNode,
+  layout: TraceGraphLayout
+) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const incident = layout.edges.filter((edge) => edge.from === node.name || edge.to === node.name);
+  const head = document.createElement('div');
+  head.className = 'tracegraph-detail-head';
+  const name = document.createElement('strong');
+  name.textContent = node.name;
+  const badge = document.createElement('span');
+  badge.className = 'tracegraph-detail-badge';
+  badge.textContent = '入 ' + node.incoming + ' · 出 ' + node.outgoing;
+  head.append(name, badge);
+  detail.replaceChildren(head);
+
+  const actions = document.createElement('div');
+  actions.className = 'tracegraph-detail-actions';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'tracegraph-inline-delete';
+  remove.textContent = '删除此节点';
+  remove.disabled = incident.length === 0;
+  remove.title = incident.length
+    ? '删除节点及其全部入边、出边和对应录制证据'
+    : '孤立节点可直接删除';
+  remove.addEventListener('click', () => {
+    deleteTraceGraphSelection(
+      { stateNames: [node.name] },
+      '删除节点“' + node.name + '”及其全部关联边？对应录制证据也会一并移除。',
+      remove
+    ).catch(() => {});
+  });
+  actions.appendChild(remove);
+  detail.appendChild(actions);
+
+  const facts = document.createElement('div');
+  facts.className = 'tracegraph-detail-facts';
+  for (const line of [
+    node.urlPattern ? 'URL：' + node.urlPattern : 'URL：未记录',
+    '静态 atom：' + node.staticAtoms + ' · 动态 atom：' + node.dynamicAtoms,
+  ]) {
+    const item = document.createElement('div');
+    item.textContent = line;
+    facts.appendChild(item);
+  }
+  detail.appendChild(facts);
+
+  const edgeTitle = document.createElement('div');
+  edgeTitle.className = 'tracegraph-detail-section';
+  edgeTitle.textContent = incident.length ? '相关边（' + incident.length + '）' : '相关边';
+  detail.appendChild(edgeTitle);
+  if (!incident.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tracegraph-detail-empty';
+    empty.textContent = '这个状态目前没有已验证的入边或出边。';
+    detail.appendChild(empty);
+  }
+  for (const edge of incident.slice(0, 12)) {
+    detail.appendChild(traceGraphEdgeRow(canvas, edge));
+  }
+  if (incident.length > 12) {
+    const more = document.createElement('div');
+    more.className = 'tracegraph-detail-empty';
+    more.textContent = '另有 ' + (incident.length - 12) + ' 条边未展开。';
+    detail.appendChild(more);
+  }
+}
+
+function renderTraceGraphEdgeDetail(
+  canvas: HTMLElement,
+  edge: TraceGraphLayoutEdge
+) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const head = document.createElement('div');
+  head.className = 'tracegraph-detail-head';
+  const title = document.createElement('strong');
+  title.textContent = edge.from + ' → ' + edge.to;
+  const badge = document.createElement('span');
+  badge.className = 'tracegraph-detail-badge';
+  badge.textContent = edge.tool;
+  head.append(title, badge);
+  detail.replaceChildren(head);
+
+  const actions = document.createElement('div');
+  actions.className = 'tracegraph-detail-actions';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'tracegraph-inline-delete';
+  remove.textContent = '删除这条边';
+  remove.addEventListener('click', () => {
+    deleteTraceGraphSelection(
+      { edgeIds: [edge.id] },
+      '删除这条轨迹边？其对应录制证据也会一并移除。',
+      remove
+    ).catch(() => {});
+  });
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'tracegraph-inline-secondary';
+  back.textContent = '取消选择';
+  back.addEventListener('click', () => {
+    traceGraphCanvasControllers.get(canvas)?.clearSelection();
+  });
+  actions.append(remove, back);
+  detail.appendChild(actions);
+
+  const facts = document.createElement('div');
+  facts.className = 'tracegraph-detail-facts';
+  for (const line of [
+    'edge：' + edge.id,
+    '动作：' + edge.tool + ' · 风险：' + edge.risk,
+    edge.targetLabel ? '语义目标：' + edge.targetLabel : '语义目标：未记录',
+    'slots：' + (edge.slots.length ? '@' + edge.slots.join(', @') : '无'),
+    '证据：' + edge.recordCount + ' 条 · ' + edge.status,
+  ]) {
+    const item = document.createElement('div');
+    item.textContent = line;
+    facts.appendChild(item);
+  }
+  detail.appendChild(facts);
+  if (edge.goal) {
+    const goal = document.createElement('div');
+    goal.className = 'tracegraph-detail-edge-goal';
+    goal.textContent = edge.goal;
+    detail.appendChild(goal);
+  }
+  const args = document.createElement('code');
+  args.className = 'tracegraph-detail-edge-args';
+  args.textContent = 'args ' + edge.argsTemplate;
+  detail.appendChild(args);
+}
+
+async function deleteTraceGraphSelection(
+  selection: { edgeIds?: string[]; stateNames?: string[] },
+  confirmation: string,
+  trigger?: HTMLButtonElement
+) {
+  const view = selectedTraceGraphView();
+  if (!view || !window.confirm(confirmation)) return;
+  if (trigger) trigger.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'tracegraph:delete-selection',
+      siteKey: view.siteKey,
+      selection,
+    });
+    if (!response?.ok) throw new Error(response?.error || '删除失败');
+    await refreshTraceGraphExplorer();
+  } catch (error) {
+    if (trigger) trigger.disabled = false;
+    const summary = $('tracegraph-view-summary');
+    if (summary) {
+      summary.className = 'tracegraph-summary error';
+      summary.textContent =
+        '删除轨迹失败：' + (error instanceof Error ? error.message : String(error));
+    }
+    throw error;
+  }
+}
+
+async function deleteSelectedTraceGraph(trigger?: HTMLButtonElement) {
+  const view = selectedTraceGraphView();
+  if (!view || !window.confirm('删除 ' + view.siteKey + ' 的整张轨迹图？原始录制证据也会一并移除。')) {
+    return;
+  }
+  if (trigger) trigger.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'tracegraph:delete-site',
+      siteKey: view.siteKey,
+    });
+    if (!response?.ok) throw new Error(response?.error || '删除失败');
+    await refreshTraceGraphExplorer();
+  } catch (error) {
+    if (trigger) trigger.disabled = false;
+    const summary = $('tracegraph-view-summary');
+    if (summary) {
+      summary.className = 'tracegraph-summary error';
+      summary.textContent =
+        '删除轨迹图失败：' + (error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 async function renderUserscriptSummary() {
@@ -283,12 +767,13 @@ function collectSettings() {
       maxConsecutiveActions: $('jev-max-actions').value,
       maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
       maxElementCandidates: $('jev-max-candidates').value,
-      minReadConfidence: $('jev-min-read').value,
-      minActionConfidence: $('jev-min-action').value,
-      minClickConfidence: $('jev-min-click').value,
-      minWaitConfidence: $('jev-min-wait').value,
-      minTargetOperationConfidence: $('jev-min-target-operation').value,
+      minEdgeConfidence: $('jev-min-edge-confidence').value,
       schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
+    }),
+    traceGraph: mergeTraceGraphSettings({
+      enabled: $('tracegraph-enabled').checked,
+      mode: $('tracegraph-mode').value,
+      shadowMode: $('tracegraph-shadow-mode').checked,
     }),
     ragEnabled: $('rag-enabled').checked,
     targetLang: $('target-lang').value.trim() || AI_SETTINGS_DEFAULTS.targetLang,
@@ -326,8 +811,14 @@ $('save-btn').addEventListener('click', () => {
   saveSettings().catch((err) => toast('保存失败：' + (err && err.message ? err.message : '未知错误')));
 });
 
-document.querySelector('.settings-content')!.addEventListener('input', markDirty);
-document.querySelector('.settings-content')!.addEventListener('change', markDirty);
+function markSettingsDirty(event: Event) {
+  const target = event.target as Element | null;
+  if (target?.closest?.('[data-settings-ui]')) return;
+  markDirty();
+}
+
+document.querySelector('.settings-content')!.addEventListener('input', markSettingsDirty);
+document.querySelector('.settings-content')!.addEventListener('change', markSettingsDirty);
 
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -362,6 +853,79 @@ $('toggle-jev-key').addEventListener('click', () => {
   $(id).addEventListener('change', renderJevRuntimeStatus);
 });
 
+$('tracegraph-site-select').addEventListener('change', renderSelectedTraceGraph);
+$('tracegraph-refresh').addEventListener('click', () => {
+  refreshTraceGraphExplorer().catch((error) => {
+    const summary = $('tracegraph-view-summary');
+    if (summary) {
+      summary.className = 'tracegraph-summary error';
+      summary.textContent =
+        '刷新 TraceGraph 失败：' +
+        (error instanceof Error ? error.message : String(error));
+    }
+  });
+});
+$('tracegraph-delete-site').addEventListener('click', () => {
+  deleteSelectedTraceGraph($('tracegraph-delete-site') as HTMLButtonElement).catch(() => {});
+});
+
+$('tracegraph-expand').addEventListener('click', () => {
+  const dialog = $('tracegraph-dialog') as HTMLDialogElement | null;
+  const view = selectedTraceGraphView();
+  if (!dialog || !view || typeof dialog.showModal !== 'function') return;
+  if (!dialog.open) dialog.showModal();
+  $('tracegraph-expand').setAttribute('aria-pressed', 'true');
+  const title = $('tracegraph-dialog-title');
+  const summary = $('tracegraph-dialog-summary');
+  if (title) title.textContent = 'TraceGraph · ' + view.siteKey;
+  if (summary) {
+    summary.className = 'tracegraph-summary active';
+    summary.textContent = [
+      '本地轨迹图',
+      view.states.length + ' 个状态',
+      view.edges.length + ' 条边',
+      view.recordCount + ' 条原始记录',
+    ].join(' · ');
+  }
+  renderTraceGraph(view, true);
+});
+
+$('tracegraph-dialog-close').addEventListener('click', () => {
+  ($('tracegraph-dialog') as HTMLDialogElement | null)?.close();
+});
+
+$('tracegraph-zoom-in').addEventListener('click', () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.zoom(1.2);
+});
+
+$('tracegraph-zoom-out').addEventListener('click', () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.zoom(1 / 1.2);
+});
+
+$('tracegraph-zoom-reset').addEventListener('click', () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.fit(true);
+});
+
+const traceGraphDialog = $('tracegraph-dialog') as HTMLDialogElement | null;
+if (traceGraphDialog) {
+  traceGraphDialog.addEventListener('click', (event) => {
+    if (event.target === traceGraphDialog) traceGraphDialog.close();
+  });
+  traceGraphDialog.addEventListener('close', () => {
+    $('tracegraph-expand').setAttribute('aria-pressed', 'false');
+  });
+}
+
+if (chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local' || !changes[TRACE_GRAPH_KEY]) return;
+    refreshTraceGraphExplorer().catch(() => {});
+  });
+}
+
 $('test-jev').addEventListener('click', async () => {
   const status = $('jev-status');
   status.className = 'connection-status';
@@ -375,11 +939,7 @@ $('test-jev').addEventListener('click', async () => {
     maxConsecutiveActions: $('jev-max-actions').value,
     maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
     maxElementCandidates: $('jev-max-candidates').value,
-    minReadConfidence: $('jev-min-read').value,
-    minActionConfidence: $('jev-min-action').value,
-    minClickConfidence: $('jev-min-click').value,
-    minWaitConfidence: $('jev-min-wait').value,
-    minTargetOperationConfidence: $('jev-min-target-operation').value,
+    minEdgeConfidence: $('jev-min-edge-confidence').value,
     schemaVersion: $('jev-schema-version').value,
   });
   if (!settings.apiKey) {
@@ -390,15 +950,16 @@ $('test-jev').addEventListener('click', async () => {
   }
   status.textContent = '正在测试…';
   try {
-    const result = await listJevModels(settings);
-    const found = result.models.some((item) => item.name === settings.model);
-    if (found) {
+    const probe = await probeJevConnection(settings);
+    if (probe.modelListed) {
       status.textContent = '连接成功，模型可用';
+      status.classList.add('ok');
+    } else if (probe.systemOneVerified) {
+      status.textContent = '连接成功，System One 探测通过（当前专用模型未出现在通用目录中）';
       status.classList.add('ok');
     } else {
       status.textContent =
-        '连接成功，但当前模型不在可用列表中：' +
-        result.models.map((item) => item.name).join('、');
+        '连接成功，但当前模型既不在目录中，System One 也未完成验证。';
       status.classList.add('error');
     }
   } catch (error) {

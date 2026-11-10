@@ -108,6 +108,7 @@ export async function runParallelBatch(toolCalls: any, o: any) {
       }
       if (o.disabledTools.has(name)) return true;
       if (!validateToolCall(name, args).ok) return true;
+      if (o.skipApproval === true) return false;
       return (
         o.approvalSettings.toolApproval !== false &&
         toolNeedsApproval(name, o.approvalSettings, o.ctx.pageUrl) &&

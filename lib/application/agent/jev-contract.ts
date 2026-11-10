@@ -63,7 +63,6 @@ export interface JevChoiceAnswer {
   type: 'choice';
   choice: string;
   confidence: number;
-  probabilities: Record<string, number>;
 }
 
 export interface JevScoreAnswer {
@@ -136,11 +135,14 @@ function text(value: unknown, path: string): string {
   return value;
 }
 
-function count(value: unknown, path: string): number {
-  if (!Number.isInteger(value) || Number(value) < 0) {
-    throw new JevProtocolError('必须是非负整数', path);
+function count(value: unknown, path: string, fallback?: number): number {
+  if (value === undefined || value === null) {
+    if (fallback !== undefined) return fallback;
+  } else if (typeof value === 'number' || typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= 0) return parsed;
   }
-  return Number(value);
+  throw new JevProtocolError('必须是非负整数', path);
 }
 
 function probability(value: unknown, path: string): number {
@@ -186,7 +188,6 @@ export function parseJevAnswer(value: unknown, path = 'answer'): JevAnswer {
       type,
       choice: text(source.choice, path + '.choice'),
       confidence: probability(source.confidence, path + '.confidence'),
-      probabilities: numericMap(source.probabilities, path + '.probabilities'),
     };
   }
   if (type === 'score') {
@@ -252,27 +253,42 @@ export function parseJevSystemOneResponse(
       );
     }
   }
-  const usage = record(source.usage, 'response.usage');
+  const usage = source.usage === undefined || source.usage === null
+    ? {}
+    : record(source.usage, 'response.usage');
   return {
     model: text(source.model, 'response.model'),
     answers,
     usage: {
-      input_tokens: count(usage.input_tokens, 'response.usage.input_tokens'),
-      output_tokens: count(usage.output_tokens, 'response.usage.output_tokens'),
+      input_tokens: count(
+        usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens,
+        'response.usage.input_tokens',
+        0
+      ),
+      output_tokens: count(
+        usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens,
+        'response.usage.output_tokens',
+        0
+      ),
     },
   };
 }
 
 export function parseJevModelList(value: unknown): JevModelList {
   const source = record(value, 'response');
-  if (!Array.isArray(source.models)) {
-    throw new JevProtocolError('必须是数组', 'response.models');
+  const models = Array.isArray(source.models)
+    ? source.models
+    : Array.isArray(source.data)
+      ? source.data
+      : null;
+  if (!models) {
+    throw new JevProtocolError('必须是 models/data 数组', 'response.models');
   }
   return {
-    models: source.models.map((item, index) => {
+    models: models.map((item, index) => {
       const model = record(item, 'response.models.' + index);
       return {
-        name: text(model.name, 'response.models.' + index + '.name'),
+        name: text(model.name ?? model.id, 'response.models.' + index + '.name'),
         description: String(model.description || ''),
         release_date: String(model.release_date || ''),
       };

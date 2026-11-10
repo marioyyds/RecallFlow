@@ -6,6 +6,8 @@
   "description": "RecallFlow browser extension (MV3).",
   "scripts": {
     "test:unit": "node --test \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",
+    "test:tracegraph": "node --test \"tests/tracegraph/*.test.mjs\"",
+    "eval:r3": "node scripts/r3-replay-eval.mjs --cases=13 --defects=6",
     "test:cov": "node scripts/coverage-baseline.mjs --print",
     "test:cov:write": "node scripts/coverage-baseline.mjs",
     "test:watch": "node --test --watch \"tests/*.test.mjs\" \"integrations/opencode/recallflow-mcp/test/*.test.mjs\"",

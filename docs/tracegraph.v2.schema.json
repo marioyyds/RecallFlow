@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://recallflow.local/schemas/tracegraph.v2.schema.json",
+  "title": "RecallFlow tracegraph.v2",
+  "description": "证据约束的轨迹复用图：L0 应用模型 + L1 证据边 + 录制证据。图只提名，不授权、不执行。",
+  "type": "object",
+  "required": ["version", "siteKey", "updatedAt", "ttlMs", "l0", "l1", "records", "patchLog"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 2 },
+    "siteKey": { "type": "string", "minLength": 1 },
+    "updatedAt": { "type": "integer", "minimum": 0 },
+    "ttlMs": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Compatibility metadata only; it no longer invalidates stored graphs."
+    },
+    "l0": { "$ref": "#/$defs/L0" },
+    "l1": { "$ref": "#/$defs/L1" },
+    "records": { "type": "array", "items": { "$ref": "#/$defs/TraceRecord" } },
+    "patchLog": { "type": "array", "items": { "$ref": "#/$defs/PatchEntry" } }
+  },
+  "$defs": {
+    "L0": {
+      "type": "object",
+      "required": ["states", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "states": { "type": "array", "items": { "$ref": "#/$defs/StateTemplate" } },
+        "operations": { "type": "array", "items": { "$ref": "#/$defs/Operation" } }
+      }
+    },
+    "StateTemplate": {
+      "type": "object",
+      "required": ["id", "name", "urlPattern", "staticAtoms", "dynamicAtoms"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "urlPattern": { "type": "string" },
+        "staticAtoms": { "type": "array", "items": { "type": "string" } },
+        "dynamicAtoms": { "type": "array", "items": { "type": "string" } },
+        "fingerprint": { "type": "string", "description": "仅审计留档，禁止参与 atomSignature 计算" }
+      }
+    },
+    "Operation": {
+      "type": "object",
+      "required": ["id", "name", "description", "srcState", "dstState", "inputSlots", "semanticAnchor", "patchable"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string", "description": "含 behaviorNotes：界面看不出、跑一次才知道的行为" },
+        "srcState": { "type": "string" },
+        "dstState": { "type": "string" },
+        "inputSlots": { "type": "array", "items": { "type": "string" } },
+        "outputSchema": { "type": "object" },
+        "semanticAnchor": { "$ref": "#/$defs/SemanticAnchor" },
+        "selectorHint": { "type": "string" },
+        "waitMs": { "type": "integer", "minimum": 0 },
+        "patchable": { "type": "boolean" }
+      }
+    },
+    "SemanticAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "role": { "type": "string" },
+        "name": { "type": "string" },
+        "text": { "type": "string" },
+        "urlPattern": { "type": "string" }
+      }
+    },
+    "L1": {
+      "type": "object",
+      "required": ["edges"],
+      "additionalProperties": false,
+      "properties": {
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/Edge" } }
+      }
+    },
+    "Edge": {
+      "type": "object",
+      "required": ["id", "from", "to", "g", "action", "slots", "s", "r", "phiMinus", "phiPlus", "provenance", "status"],
+      "additionalProperties": false,
+      "description": "禁止出现 recordedValue / defaultValue / 历史偏好默认值；任务值只能来自当前指令",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "identityVersion": { "const": 3 },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "g": { "type": "string", "description": "稳定动作意图与目标摘要，不包含 PlanCard 文案" },
+        "planVersion": { "type": "integer" },
+        "successPredicate": { "type": "string" },
+        "action": {
+          "type": "object",
+          "required": ["tool", "argsTemplate", "risk"],
+          "additionalProperties": false,
+          "properties": {
+            "tool": { "type": "string" },
+            "argsTemplate": { "type": "object", "description": "含 @slot 占位符，不含具体任务值" },
+            "risk": { "$ref": "#/$defs/Risk" }
+          }
+        },
+        "slots": { "type": "array", "items": { "$ref": "#/$defs/SlotSpec" } },
+        "s": {
+          "type": "object",
+          "required": ["semanticAnchor"],
+          "additionalProperties": false,
+          "properties": {
+            "selector": { "type": "string" },
+            "semanticAnchor": { "$ref": "#/$defs/SemanticAnchor" }
+          }
+        },
+        "r": { "$ref": "#/$defs/Risk" },
+        "phiMinus": { "type": "array", "items": { "$ref": "#/$defs/PhiRule" } },
+        "phiPlus": { "$ref": "#/$defs/PhiRule" },
+        "semanticSplit": {
+          "type": "object",
+          "required": ["slowOnly", "replayable"],
+          "additionalProperties": false,
+          "properties": {
+            "slowOnly": { "type": "array", "items": { "type": "string" } },
+            "replayable": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["recordIds", "verifiedAt", "siteKey", "ttlMs"],
+          "additionalProperties": false,
+          "properties": {
+            "recordIds": { "type": "array", "items": { "type": "string" } },
+            "verifiedAt": { "type": "integer", "minimum": 0 },
+            "siteKey": { "type": "string" },
+            "ttlMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "status": { "enum": ["verified", "blocked", "superseded"] }
+      }
+    },
+    "SlotSpec": {
+      "type": "object",
+      "required": ["name", "type", "source", "highRisk"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "enum": ["string", "markdown", "number", "enum", "branch", "target"] },
+        "source": { "const": "current_instruction" },
+        "constraint": { "type": "string" },
+        "highRisk": { "type": "boolean" }
+      }
+    },
+    "PhiKind": {
+      "enum": [
+        "url_pattern", "counter", "value_equals", "element_present",
+        "element_visible", "no_dialog", "not_satisfied", "text_contains", "diff_exists"
+      ],
+      "description": "白名单。禁止 changed / innerText / screenshot / visible_text"
+    },
+    "PhiRule": {
+      "type": "object",
+      "required": ["kind", "expr", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "$ref": "#/$defs/PhiKind" },
+        "expr": { "type": "string" },
+        "observed": { "type": "string", "description": "仅录制时样例，不作为判定依据" },
+        "source": { "const": "structured" }
+      }
+    },
+    "Risk": { "enum": ["low", "medium", "high"] },
+    "TraceRecord": {
+      "type": "object",
+      "required": ["id", "seq", "tool", "argsRedacted", "before", "after", "result", "ts"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "tool": { "type": "string" },
+        "argsRedacted": { "type": "object", "description": "值脱敏" },
+        "before": { "$ref": "#/$defs/Evidence" },
+        "after": { "$ref": "#/$defs/Evidence" },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": { "type": "string" },
+            "name": { "type": "string" },
+            "text": { "type": "string" },
+            "selector": { "type": "string" },
+            "urlPattern": { "type": "string" }
+          }
+        },
+        "result": {
+          "type": "object",
+          "required": ["ok", "summary"],
+          "additionalProperties": false,
+          "properties": {
+            "ok": { "type": "boolean" },
+            "summary": { "type": "string" }
+          }
+        },
+        "planStep": { "type": "string" },
+        "planVersion": { "type": "integer" },
+        "successPredicate": { "type": "string" },
+        "verification": { "type": "string" },
+        "risk": { "type": "string" },
+        "ts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Evidence": {
+      "type": "object",
+      "required": ["url", "urlPattern", "title", "atomSignature", "counters", "controls", "dialog"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string" },
+        "urlPattern": { "type": "string" },
+        "title": { "type": "string" },
+        "atomSignature": { "type": "string" },
+        "counters": { "type": "object", "additionalProperties": { "type": "number" } },
+        "controls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "name"],
+            "additionalProperties": false,
+            "properties": {
+              "role": { "type": "string" },
+              "name": { "type": "string" },
+              "ref": { "type": "string" },
+              "selector": { "type": "string" },
+              "disabled": { "type": "boolean" },
+              "urlPattern": { "type": "string" },
+              "valuePresent": { "type": "boolean" },
+              "checked": { "type": "boolean" },
+              "expanded": { "type": "boolean" }
+            }
+          }
+        },
+        "dialog": { "type": ["string", "null"] },
+        "fingerprint": { "type": "string", "description": "仅审计，不进节点键" }
+      }
+    },
+    "PatchEntry": {
+      "type": "object",
+      "required": ["id", "ts", "fields", "accepted", "rejectedFields"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "ts": { "type": "integer", "minimum": 0 },
+        "fields": { "type": "object" },
+        "accepted": { "type": "boolean" },
+        "rejectedFields": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

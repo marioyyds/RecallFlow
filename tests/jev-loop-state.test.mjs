@@ -25,6 +25,11 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     planActions: 0,
     readFallbackKey: '',
     lastOutcome: '',
+    blockedEdgeIds: [],
+    executedEdges: [],
+    wrongWrites: 0,
+    slowTurns: 0,
+    handoffReasons: {},
   });
   const restored = restoreJevLoopState({
     attempts: 999,

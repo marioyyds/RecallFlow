@@ -22,3 +22,26 @@ test('未提供 JEV 覆盖时不伪造快思考配置', () => {
   assert.equal(settings.jev, undefined);
   assert.equal(settings.bridgePort, 7801);
 });
+
+test('webarenaSettings：TraceGraph 可用 JSON 覆盖并保持默认关闭', () => {
+  assert.equal(webarenaSettings({ apiKey: 'chat-test' }).traceGraph, undefined);
+  const live = webarenaSettings({
+    apiKey: 'chat-test',
+    traceGraph: JSON.stringify({
+      enabled: true,
+      mode: 'live',
+      shadowMode: false,
+      ttlMs: 1800000,
+    }),
+  });
+  assert.deepEqual(live.traceGraph, {
+    enabled: true,
+    mode: 'live',
+    shadowMode: false,
+    ttlMs: 1800000,
+  });
+  assert.throws(
+    () => webarenaSettings({ apiKey: 'chat-test', traceGraph: '{oops' }),
+    /RECALLFLOW_EVAL_TRACEGRAPH_SETTINGS 不是合法 JSON/
+  );
+});

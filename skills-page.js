@@ -2483,6 +2483,129 @@ async function recallTrace(url, opts = {}) {
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
 
+// lib/application/agent/macros.ts
+var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "type_text",
+  "press_key",
+  "select_option",
+  "check_box",
+  "scroll_page",
+  "wait_for_element",
+  "open_tab"
+]);
+async function macroSave(deps, args) {
+  const name = String(args && args.name || "").trim();
+  if (!name) return { ok: false, result: 'macro(op="save") \u9700\u8981 name\u3002' };
+  let trace = Array.isArray(deps.trace) ? deps.trace : [];
+  let fromPreviousRun = false;
+  let previousAgeMs = 0;
+  let previousDropped = 0;
+  if (!trace.length && typeof deps.recallTrace === "function") {
+    const last = await Promise.resolve().then(() => deps.recallTrace(deps.pageUrl)).catch(() => null);
+    if (last && Array.isArray(last.steps) && last.steps.length) {
+      trace = last.steps;
+      fromPreviousRun = true;
+      previousAgeMs = Number(last.ageMs) || 0;
+      previousDropped = Number(last.dropped) || 0;
+    }
+  }
+  const beforeFilter = trace.length;
+  trace = trace.filter((s) => s && typeof s.tool === "string" && s.args && typeof s.args === "object" && REPLAYABLE_TOOLS.has(s.tool));
+  const skipped = beforeFilter - trace.length;
+  if (!trace.length) {
+    return {
+      ok: false,
+      result: (skipped > 0 ? "\u8FD9\u4E00\u6279\u8F68\u8FF9\u91CC\u6709 " + skipped + " \u6B65\u90FD\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF08\u5DF2\u5254\u9664\uFF09\uFF0C\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u6B65\u9AA4\u3002\n" : "\u672C\u8F6E\u4EFB\u52A1\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u53EF\u91CD\u653E\u52A8\u4F5C\uFF0C\u672C\u7AD9\u70B9\u4E5F\u6CA1\u6709\u6700\u8FD1\u53EF\u6C89\u6DC0\u7684\u8F68\u8FF9\u3002\n") + "\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u4F1A\u88AB\u8BB0\u5F55\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + '\uFF08\u4E14\u9700\u8981\u62FF\u5230\u7A33\u5B9A\u7684 selector\uFF09\uFF1B`click_at`\uFF08\u5750\u6807\u70B9\u51FB\uFF09\u4E0E `run_javascript` **\u4E0D\u8FDB\u5B8F**\u3002\n\u8981\u6C89\u6DC0\u6210\u5B8F\uFF1A\u8BF7\u7528\u4E0A\u9762\u8FD9\u4E9B\u5DE5\u5177\u628A\u6D41\u7A0B\u5B8C\u6574\u505A\u4E00\u904D\uFF0C**\u505A\u5B8C\u7ACB\u523B** macro({op:"save", name:"\u2026"})\u3002'
+    };
+  }
+  const saved = await deps.saveMacro(deps.pageUrl, { name, description: args && args.description, steps: trace });
+  if (!saved) return { ok: false, result: "\u4FDD\u5B58\u5B8F\u5931\u8D25\uFF08\u7F3A\u5C11\u540D\u79F0\u6216\u6B65\u9AA4\uFF09\u3002" };
+  const source = fromPreviousRun ? "\u26A0 \u8FD9 " + saved.steps.length + " \u6B65\u6765\u81EA**\u4E0A\u4E00\u8F6E\u4EFB\u52A1**\u5728\u672C\u7AD9\u70B9\u7684\u8F68\u8FF9\uFF08\u7EA6 " + Math.max(1, Math.round(previousAgeMs / 6e4)) + " \u5206\u949F\u524D\uFF09\uFF0C\u4E0D\u662F\u672C\u8F6E\u3002" + (previousDropped > 0 ? "\u53E6\u6709 " + previousDropped + " \u6B65\u56E0\u8D85\u957F\u672A\u7EB3\u5165\u3002" : "") + '\u56DE\u653E\u524D\u8BF7\u5148\u6838\u5BF9\u6B65\u9AA4\u662F\u5426\u7B26\u5408\u9884\u671F\uFF08macro({op:"list"})\uFF0C\u6216\u5148\u8BD5\u8DD1\u4E00\u6B21\uFF09\u3002' : "";
+  const droppedNote = skipped > 0 ? "\uFF08\u53E6\u6709 " + skipped + " \u6B65\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF0C\u5DF2\u5254\u9664\uFF09" : "";
+  return {
+    ok: true,
+    result: "\u5DF2\u4FDD\u5B58\u5B8F\u300C" + saved.name + "\u300D\uFF08" + saved.steps.length + " \u6B65\uFF09\u3002" + droppedNote + source + '\u4EE5\u540E\u53EF\u7528 macro({op:"run", name:"' + saved.name + '"}) \u56DE\u653E\u3002'
+  };
+}
+async function macroList(deps) {
+  const macros = await deps.listMacros(deps.pageUrl);
+  if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
+  const text = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
+  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text };
+}
+async function macroRun(deps, args) {
+  const name = String(args && args.name || "").trim();
+  if (!name) return { ok: false, result: 'macro(op="run") \u9700\u8981 name\u3002' };
+  const macro = await deps.getMacro(deps.pageUrl, name);
+  if (!macro) {
+    let names = [];
+    try {
+      names = (await deps.listMacros(deps.pageUrl)).map((m) => m.name);
+    } catch (e) {
+    }
+    return {
+      ok: false,
+      result: "\u672A\u627E\u5230\u5B8F\u300C" + name + "\u300D\u3002" + (names.length ? "\u672C\u7AD9\u53EF\u7528\u7684\u5B8F\u540D\u5982\u4E0B\uFF0C\u8BF7\u7167\u6284 name \u7684\u503C\uFF08\u4E0D\u662F\u63CF\u8FF0\uFF09\uFF1A\n" + names.map((n) => "  - " + n).join("\n") : "\u672C\u7AD9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002")
+    };
+  }
+  const steps = Array.isArray(macro.steps) ? macro.steps : [];
+  if (!steps.length) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u6CA1\u6709\u6B65\u9AA4\u3002" };
+  const ctx = deps.ctx;
+  const log = [];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (!REPLAYABLE_TOOLS.has(s && s.tool)) {
+      const toolName = String(s && s.tool || "");
+      return {
+        ok: false,
+        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u8C03\u7528\u4E86\u4E0D\u5141\u8BB8\u56DE\u653E\u7684\u5DE5\u5177\u300C" + toolName + "\u300D\uFF0C\u5DF2\u505C\u6B62\u3002\n\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u53EF\u4EE5\u88AB\u5B8F\u56DE\u653E\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + "\u3002\n\u82E5\u786E\u5B9E\u9700\u8981\u8BE5\u64CD\u4F5C\uFF0C\u8BF7\u6539\u7528\u5BF9\u5E94\u7684\u5185\u7F6E\u5DE5\u5177\u5355\u72EC\u6267\u884C\uFF08\u9AD8\u98CE\u9669\u5DE5\u5177\u4ECD\u9700\u9010\u6B21\u5BA1\u6279\uFF09\u3002"
+      };
+    }
+    const stepValidation = deps.validateToolCall(s.tool, s.args || {});
+    if (!stepValidation.ok) {
+      return {
+        ok: false,
+        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u53C2\u6570\u975E\u6CD5\uFF1A" + stepValidation.error
+      };
+    }
+    let r;
+    try {
+      r = await deps.executeTool(s.tool, s.args, ctx);
+    } catch (e) {
+      r = { ok: false, result: e && e.message ? e.message : String(e) };
+    }
+    const failed = r && r.ok === false;
+    log.push("[" + (i + 1) + "/" + steps.length + "] " + s.tool + (failed ? " \u2717 " + String(r.result || "").slice(0, 120) : " \u2713"));
+    if (r && Number.isInteger(Number(r.targetTabId))) {
+      ctx.tabId = Number(r.targetTabId);
+      if (r.targetTab) {
+        ctx.pageUrl = r.targetTab.url || ctx.pageUrl;
+        ctx.pageTitle = r.targetTab.title || ctx.pageTitle;
+      }
+    }
+    if (failed) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u5728\u7B2C " + (i + 1) + " \u6B65\u5931\u8D25\uFF0C\u5DF2\u505C\u6B62\uFF1A\n" + log.join("\n") };
+  }
+  await deps.bumpMacroHits(deps.pageUrl, name).catch(() => {
+  });
+  return { ok: true, result: "\u5DF2\u56DE\u653E\u5B8F\u300C" + name + "\u300D\uFF08" + steps.length + " \u6B65\uFF09\uFF1A\n" + log.join("\n") };
+}
+var MACRO_OPS = ["save", "list", "run"];
+async function macroTool(deps, args) {
+  const op = String(args && args.op || "").trim();
+  if (!op) return { ok: false, result: "macro \u9700\u8981 op \u53C2\u6570\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+  if (op === "save") return await macroSave(deps, args);
+  if (op === "list") return await macroList(deps);
+  if (op === "run") return await macroRun(deps, args);
+  return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+}
+
+// lib/application/agent/trace-graph-types.ts
+var TRACE_GRAPH_TTL_MS = 30 * 60 * 1e3;
+
+// lib/application/agent/tracegraph-store.ts
+var writeQueue = Promise.resolve();
+
 // lib/application/agent/target-manager.ts
 var state = /* @__PURE__ */ new Map();
 var observedDownloadTabs = /* @__PURE__ */ new Set();
@@ -4032,121 +4155,69 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/application/agent/macros.ts
-var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
-  "click_element",
-  "type_text",
-  "press_key",
-  "select_option",
-  "check_box",
-  "scroll_page",
-  "wait_for_element",
-  "open_tab"
+// lib/application/agent/plan-contract.ts
+var PLAN_FAST_OPERATIONS = Object.freeze([
+  "CLICK",
+  "TYPE_TEXT",
+  "READ_PAGE",
+  "READ_TABLE",
+  "ACCESSIBILITY",
+  "DIAGNOSTICS",
+  "SCROLL_UP",
+  "SCROLL_DOWN",
+  "WAIT"
 ]);
-async function macroSave(deps, args) {
-  const name = String(args && args.name || "").trim();
-  if (!name) return { ok: false, result: 'macro(op="save") \u9700\u8981 name\u3002' };
-  let trace = Array.isArray(deps.trace) ? deps.trace : [];
-  let fromPreviousRun = false;
-  let previousAgeMs = 0;
-  let previousDropped = 0;
-  if (!trace.length && typeof deps.recallTrace === "function") {
-    const last = await Promise.resolve().then(() => deps.recallTrace(deps.pageUrl)).catch(() => null);
-    if (last && Array.isArray(last.steps) && last.steps.length) {
-      trace = last.steps;
-      fromPreviousRun = true;
-      previousAgeMs = Number(last.ageMs) || 0;
-      previousDropped = Number(last.dropped) || 0;
-    }
+var PLAN_MAX_LEASE_ACTIONS = 50;
+var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
+function cleanText(value, maxChars) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+function cleanStepId(value, index) {
+  const candidate = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
+}
+function normalizePlanOperations(value) {
+  if (!Array.isArray(value)) return void 0;
+  const operations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of value) {
+    const operation = String(raw || "").trim().toUpperCase();
+    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
+    seen.add(operation);
+    operations.push(operation);
   }
-  const beforeFilter = trace.length;
-  trace = trace.filter((s) => s && typeof s.tool === "string" && s.args && typeof s.args === "object" && REPLAYABLE_TOOLS.has(s.tool));
-  const skipped = beforeFilter - trace.length;
-  if (!trace.length) {
-    return {
-      ok: false,
-      result: (skipped > 0 ? "\u8FD9\u4E00\u6279\u8F68\u8FF9\u91CC\u6709 " + skipped + " \u6B65\u90FD\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF08\u5DF2\u5254\u9664\uFF09\uFF0C\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u6B65\u9AA4\u3002\n" : "\u672C\u8F6E\u4EFB\u52A1\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u53EF\u91CD\u653E\u52A8\u4F5C\uFF0C\u672C\u7AD9\u70B9\u4E5F\u6CA1\u6709\u6700\u8FD1\u53EF\u6C89\u6DC0\u7684\u8F68\u8FF9\u3002\n") + "\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u4F1A\u88AB\u8BB0\u5F55\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + '\uFF08\u4E14\u9700\u8981\u62FF\u5230\u7A33\u5B9A\u7684 selector\uFF09\uFF1B`click_at`\uFF08\u5750\u6807\u70B9\u51FB\uFF09\u4E0E `run_javascript` **\u4E0D\u8FDB\u5B8F**\u3002\n\u8981\u6C89\u6DC0\u6210\u5B8F\uFF1A\u8BF7\u7528\u4E0A\u9762\u8FD9\u4E9B\u5DE5\u5177\u628A\u6D41\u7A0B\u5B8C\u6574\u505A\u4E00\u904D\uFF0C**\u505A\u5B8C\u7ACB\u523B** macro({op:"save", name:"\u2026"})\u3002'
-    };
-  }
-  const saved = await deps.saveMacro(deps.pageUrl, { name, description: args && args.description, steps: trace });
-  if (!saved) return { ok: false, result: "\u4FDD\u5B58\u5B8F\u5931\u8D25\uFF08\u7F3A\u5C11\u540D\u79F0\u6216\u6B65\u9AA4\uFF09\u3002" };
-  const source = fromPreviousRun ? "\u26A0 \u8FD9 " + saved.steps.length + " \u6B65\u6765\u81EA**\u4E0A\u4E00\u8F6E\u4EFB\u52A1**\u5728\u672C\u7AD9\u70B9\u7684\u8F68\u8FF9\uFF08\u7EA6 " + Math.max(1, Math.round(previousAgeMs / 6e4)) + " \u5206\u949F\u524D\uFF09\uFF0C\u4E0D\u662F\u672C\u8F6E\u3002" + (previousDropped > 0 ? "\u53E6\u6709 " + previousDropped + " \u6B65\u56E0\u8D85\u957F\u672A\u7EB3\u5165\u3002" : "") + '\u56DE\u653E\u524D\u8BF7\u5148\u6838\u5BF9\u6B65\u9AA4\u662F\u5426\u7B26\u5408\u9884\u671F\uFF08macro({op:"list"})\uFF0C\u6216\u5148\u8BD5\u8DD1\u4E00\u6B21\uFF09\u3002' : "";
-  const droppedNote = skipped > 0 ? "\uFF08\u53E6\u6709 " + skipped + " \u6B65\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF0C\u5DF2\u5254\u9664\uFF09" : "";
-  return {
-    ok: true,
-    result: "\u5DF2\u4FDD\u5B58\u5B8F\u300C" + saved.name + "\u300D\uFF08" + saved.steps.length + " \u6B65\uFF09\u3002" + droppedNote + source + '\u4EE5\u540E\u53EF\u7528 macro({op:"run", name:"' + saved.name + '"}) \u56DE\u653E\u3002'
+  return operations;
+}
+function normalizePlanLease(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return void 0;
+  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
+}
+function normalizePlanStep(value, index) {
+  const step = {
+    id: cleanStepId(value.id, index),
+    text: cleanText(value.text, 120),
+    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
   };
-}
-async function macroList(deps) {
-  const macros = await deps.listMacros(deps.pageUrl);
-  if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
-  const text = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
-  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text };
-}
-async function macroRun(deps, args) {
-  const name = String(args && args.name || "").trim();
-  if (!name) return { ok: false, result: 'macro(op="run") \u9700\u8981 name\u3002' };
-  const macro = await deps.getMacro(deps.pageUrl, name);
-  if (!macro) {
-    let names = [];
-    try {
-      names = (await deps.listMacros(deps.pageUrl)).map((m) => m.name);
-    } catch (e) {
-    }
-    return {
-      ok: false,
-      result: "\u672A\u627E\u5230\u5B8F\u300C" + name + "\u300D\u3002" + (names.length ? "\u672C\u7AD9\u53EF\u7528\u7684\u5B8F\u540D\u5982\u4E0B\uFF0C\u8BF7\u7167\u6284 name \u7684\u503C\uFF08\u4E0D\u662F\u63CF\u8FF0\uFF09\uFF1A\n" + names.map((n) => "  - " + n).join("\n") : "\u672C\u7AD9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002")
-    };
+  const successPredicate = cleanText(value.successPredicate, 240);
+  if (successPredicate) step.successPredicate = successPredicate;
+  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
+    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
   }
-  const steps = Array.isArray(macro.steps) ? macro.steps : [];
-  if (!steps.length) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u6CA1\u6709\u6B65\u9AA4\u3002" };
-  const ctx = deps.ctx;
-  const log = [];
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    if (!REPLAYABLE_TOOLS.has(s && s.tool)) {
-      const toolName = String(s && s.tool || "");
-      return {
-        ok: false,
-        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u8C03\u7528\u4E86\u4E0D\u5141\u8BB8\u56DE\u653E\u7684\u5DE5\u5177\u300C" + toolName + "\u300D\uFF0C\u5DF2\u505C\u6B62\u3002\n\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u53EF\u4EE5\u88AB\u5B8F\u56DE\u653E\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + "\u3002\n\u82E5\u786E\u5B9E\u9700\u8981\u8BE5\u64CD\u4F5C\uFF0C\u8BF7\u6539\u7528\u5BF9\u5E94\u7684\u5185\u7F6E\u5DE5\u5177\u5355\u72EC\u6267\u884C\uFF08\u9AD8\u98CE\u9669\u5DE5\u5177\u4ECD\u9700\u9010\u6B21\u5BA1\u6279\uFF09\u3002"
-      };
-    }
-    const stepValidation = deps.validateToolCall(s.tool, s.args || {});
-    if (!stepValidation.ok) {
-      return {
-        ok: false,
-        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u53C2\u6570\u975E\u6CD5\uFF1A" + stepValidation.error
-      };
-    }
-    let r;
-    try {
-      r = await deps.executeTool(s.tool, s.args, ctx);
-    } catch (e) {
-      r = { ok: false, result: e && e.message ? e.message : String(e) };
-    }
-    const failed = r && r.ok === false;
-    log.push("[" + (i + 1) + "/" + steps.length + "] " + s.tool + (failed ? " \u2717 " + String(r.result || "").slice(0, 120) : " \u2713"));
-    if (r && Number.isInteger(Number(r.targetTabId))) {
-      ctx.tabId = Number(r.targetTabId);
-      if (r.targetTab) {
-        ctx.pageUrl = r.targetTab.url || ctx.pageUrl;
-        ctx.pageTitle = r.targetTab.title || ctx.pageTitle;
-      }
-    }
-    if (failed) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u5728\u7B2C " + (i + 1) + " \u6B65\u5931\u8D25\uFF0C\u5DF2\u505C\u6B62\uFF1A\n" + log.join("\n") };
-  }
-  await deps.bumpMacroHits(deps.pageUrl, name).catch(() => {
-  });
-  return { ok: true, result: "\u5DF2\u56DE\u653E\u5B8F\u300C" + name + "\u300D\uFF08" + steps.length + " \u6B65\uFF09\uFF1A\n" + log.join("\n") };
+  const leaseActions = normalizePlanLease(value.leaseActions);
+  if (leaseActions != null) step.leaseActions = leaseActions;
+  return step;
 }
-var MACRO_OPS = ["save", "list", "run"];
-async function macroTool(deps, args) {
-  const op = String(args && args.op || "").trim();
-  if (!op) return { ok: false, result: "macro \u9700\u8981 op \u53C2\u6570\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
-  if (op === "save") return await macroSave(deps, args);
-  if (op === "list") return await macroList(deps);
-  if (op === "run") return await macroRun(deps, args);
-  return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+function describePlanStep(step) {
+  const parts = [step.text];
+  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
+  if (step.allowedOperations) {
+    parts.push(
+      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+    );
+  }
+  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
+  return parts.join("\uFF1B");
 }
 
 // lib/application/agent/knowledge.ts
@@ -4390,6 +4461,13 @@ function summarizeRunTrace(entries) {
   const jevLive = jev.filter((e) => e.mode === "live");
   const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
   const jevHandoffs = list.filter((e) => e && e.phase === "jev-handoff");
+  const traceHandoffs = list.filter((e) => e && e.phase === "tracegraph-handoff");
+  const r3 = list.filter((e) => e && e.phase === "tracegraph-r3");
+  const handoffReasons = {};
+  for (const entry of [...jevHandoffs, ...traceHandoffs]) {
+    const reason = String(entry.reason || "unknown");
+    handoffReasons[reason] = (handoffReasons[reason] || 0) + 1;
+  }
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -4424,7 +4502,16 @@ function summarizeRunTrace(entries) {
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
     jevShadowCompared: jevCompares.length,
     jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
-    jevHandoffs: jevHandoffs.length
+    jevHandoffs: jevHandoffs.length,
+    wrongWrites: list.filter((e) => e && e.phase === "tracegraph-wrong-write").length,
+    slowTurns: list.filter((e) => e && e.phase === "tracegraph-slow-turn").length,
+    handoffReasons,
+    edgeReuse: r3.filter((e) => e.decision === "REUSE").length,
+    edgeRewrite: r3.filter((e) => e.decision === "REWRITE").length,
+    edgeReject: r3.filter((e) => e.decision === "REJECT").length,
+    phiPlusFailures: list.filter((e) => e && e.phase === "tracegraph-phi-plus-fail").length,
+    candidateCount: list.filter((e) => e && e.phase === "tracegraph-candidates").reduce((n, e) => n + num(e.count), 0),
+    blockedEdgeHits: list.filter((e) => e && e.phase === "tracegraph-blocked-edge-hit").length
   };
 }
 function formatRunMetrics(m) {
@@ -4446,72 +4533,14 @@ function formatRunMetrics(m) {
       lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
     }
   }
-  return lines.join("\n");
-}
-
-// lib/application/agent/plan-contract.ts
-var PLAN_FAST_OPERATIONS = Object.freeze([
-  "CLICK",
-  "TYPE_TEXT",
-  "READ_PAGE",
-  "READ_TABLE",
-  "ACCESSIBILITY",
-  "DIAGNOSTICS",
-  "SCROLL_UP",
-  "SCROLL_DOWN",
-  "WAIT"
-]);
-var PLAN_MAX_LEASE_ACTIONS = 50;
-var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
-function cleanText(value, maxChars) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
-}
-function cleanStepId(value, index) {
-  const candidate = String(value || "").trim();
-  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
-}
-function normalizePlanOperations(value) {
-  if (!Array.isArray(value)) return void 0;
-  const operations = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of value) {
-    const operation = String(raw || "").trim().toUpperCase();
-    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
-    seen.add(operation);
-    operations.push(operation);
-  }
-  return operations;
-}
-function normalizePlanLease(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 1) return void 0;
-  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
-}
-function normalizePlanStep(value, index) {
-  const step = {
-    id: cleanStepId(value.id, index),
-    text: cleanText(value.text, 120),
-    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
-  };
-  const successPredicate = cleanText(value.successPredicate, 240);
-  if (successPredicate) step.successPredicate = successPredicate;
-  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
-    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
-  }
-  const leaseActions = normalizePlanLease(value.leaseActions);
-  if (leaseActions != null) step.leaseActions = leaseActions;
-  return step;
-}
-function describePlanStep(step) {
-  const parts = [step.text];
-  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
-  if (step.allowedOperations) {
-    parts.push(
-      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+  if (m.candidateCount || m.blockedEdgeHits || m.slowTurns) {
+    const reasons = Object.entries(m.handoffReasons || {}).sort((a, b) => b[1] - a[1]).map(([reason, count]) => reason + "\xD7" + count).join("\u3001");
+    lines.push(
+      "TraceGraph \u5019\u9009 " + m.candidateCount + " / \u5DE5\u5177\u5931\u8D25\u5C01\u8FB9 " + m.blockedEdgeHits + " / \u6162\u601D\u8003 " + m.slowTurns
     );
+    if (reasons) lines.push("\u79FB\u4EA4\u539F\u56E0\uFF1A" + reasons);
   }
-  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
-  return parts.join("\uFF1B");
+  return lines.join("\n");
 }
 
 // lib/application/agent/run-state-tools.ts

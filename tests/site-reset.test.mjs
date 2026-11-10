@@ -43,3 +43,24 @@ test('site reset：原始 WebArena 三站镜像与容器名独立配置', () => 
   const reddit = buildDockerRunArgs('reddit', { imageSet: 'original' });
   assert.equal(reddit.at(-1), 'webarenaimages/postmill-populated-exposed-withimg:latest');
 });
+
+test('site reset：原始 Magento 容器改写到本机端口，避免重定向到训练集群域名', () => {
+  const shoppingCommands = WEBARENA_ORIGINAL_SITE_CONTAINERS.shopping.postCreateCommands;
+  const adminCommands = WEBARENA_ORIGINAL_SITE_CONTAINERS.shopping_admin.postCreateCommands;
+  assert.ok(shoppingCommands.some((command) =>
+    command.join(' ').includes('web/unsecure/base_url http://localhost:7770/')));
+  assert.ok(shoppingCommands.some((command) =>
+    command.join(' ').includes('web/secure/base_url http://localhost:7770/')));
+  assert.ok(adminCommands.some((command) =>
+    command.join(' ').includes('web/unsecure/base_url http://localhost:7780/')));
+  assert.ok(adminCommands.some((command) =>
+    command.join(' ').includes('web/secure/base_url http://localhost:7780/')));
+});
+
+test('site reset：原始站点必须等待数据库真正就绪', () => {
+  assert.ok(WEBARENA_ORIGINAL_SITE_CONTAINERS.shopping.readinessCommand.includes('setup:db:status'));
+  assert.ok(WEBARENA_ORIGINAL_SITE_CONTAINERS.shopping_admin.readinessCommand.includes('setup:db:status'));
+  assert.deepEqual(WEBARENA_ORIGINAL_SITE_CONTAINERS.reddit.readinessCommand, [
+    'pg_isready', '-h', '127.0.0.1', '-p', '5432',
+  ]);
+});

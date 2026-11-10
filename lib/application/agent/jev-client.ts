@@ -16,6 +16,12 @@ export interface JevClientOptions {
   fetchImpl?: FetchImpl;
 }
 
+export interface JevConnectionProbe {
+  models: JevModelList;
+  modelListed: boolean;
+  systemOneVerified: boolean;
+}
+
 export class JevClientError extends Error {
   readonly code: string;
   readonly status?: number;
@@ -30,32 +36,66 @@ export class JevClientError extends Error {
 
 export function jevBaseUrl(settings: Pick<JevSettings, 'baseUrl'>): string {
   const raw = String(settings.baseUrl || '').trim();
-  if (!raw) throw new JevClientError('CONFIG', '未配置 TypeSafe API 地址');
+  if (!raw) throw new JevClientError('CONFIG', '未配置 JEV API 地址');
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new JevClientError('CONFIG', 'TypeSafe API 地址格式无效');
+    throw new JevClientError('CONFIG', 'JEV API 地址格式无效');
   }
+  url.search = '';
+  url.hash = '';
   const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    throw new JevClientError('CONFIG', 'TypeSafe API 必须使用 HTTPS（本机开发除外）');
+    throw new JevClientError('CONFIG', 'JEV API 必须使用 HTTPS（本机开发除外）');
   }
   return url.toString().replace(/\/+$/, '');
 }
 
 export function jevSystemOneUrl(settings: Pick<JevSettings, 'baseUrl'>): string {
-  return jevBaseUrl(settings) + '/v1/systemone';
+  const base = jevBaseUrl(settings);
+  const path = new URL(base).pathname.replace(/\/+$/, '');
+  // 支持四类常见填法：
+  //   https://host
+  //   https://host/v1
+  //   https://host/compatible-mode/v1
+  //   https://host/compatible-mode/v1/systemone（完整推理地址）
+  if (/\/systemone$/i.test(path)) return base;
+  if (/\/v1$/i.test(path)) return base + '/systemone';
+  if (/\/compatible-mode$/i.test(path)) return base + '/v1/systemone';
+  return base + '/v1/systemone';
 }
 
 export function jevModelsUrl(settings: Pick<JevSettings, 'baseUrl'>): string {
-  return jevBaseUrl(settings) + '/v1/models';
+  return jevSystemOneUrl(settings).replace(/\/systemone\/?$/i, '/models');
 }
 
 function apiKey(settings: Pick<JevSettings, 'apiKey'>): string {
   const value = String(settings.apiKey || '').trim();
-  if (!value) throw new JevClientError('CONFIG', '未配置 TypeSafe API Key');
+  if (!value) throw new JevClientError('CONFIG', '未配置 JEV API Key');
   return value;
+}
+
+/**
+ * DASHSCOPE 的 systemone curl 直接使用原始 token：
+ *   Authorization: $DASHSCOPE_API_KEY
+ * TypeSafe 则要求 Bearer。按 provider endpoint 区分，避免用户粘错时二次加
+ * Bearer；如果用户已经把 scheme 写进 key，也原样透传。
+ */
+export function jevAuthorizationHeader(
+  settings: Pick<JevSettings, 'baseUrl' | 'apiKey'>,
+  targetUrl = jevSystemOneUrl(settings)
+): string {
+  const key = apiKey(settings);
+  if (/^Bearer\s+/i.test(key)) return key;
+  let url: URL | null = null;
+  try {
+    url = new URL(targetUrl);
+  } catch {}
+  const rawScheme =
+    Boolean(url && /(?:^|\.)aliyuncs\.com$/i.test(url.hostname)) ||
+    /\/compatible-mode(?:\/|$)/i.test(url?.pathname || '');
+  return rawScheme ? key : 'Bearer ' + key;
 }
 
 function retryableStatus(status: number): boolean {
@@ -113,13 +153,13 @@ async function requestJson(
     } catch (error) {
       if (external && external.aborted) throw makeAbortError();
       if (timedOut) {
-        throw new JevClientError('TIMEOUT', 'TypeSafe 请求超时（' + timeoutMs + 'ms）');
+        throw new JevClientError('TIMEOUT', 'JEV 请求超时（' + timeoutMs + 'ms）');
       }
       if (attempt < retries) {
         await sleep(500 * Math.pow(2, attempt));
         continue;
       }
-      throw new JevClientError('NETWORK', 'TypeSafe 连接失败：' + errorMessage(error));
+      throw new JevClientError('NETWORK', 'JEV 连接失败：' + errorMessage(error));
     } finally {
       clearTimeout(timer);
       if (external) external.removeEventListener('abort', onAbort);
@@ -128,7 +168,7 @@ async function requestJson(
       try {
         return await resp.json();
       } catch {
-        throw new JevClientError('PROTOCOL', 'TypeSafe 返回了无效 JSON', resp.status);
+        throw new JevClientError('PROTOCOL', 'JEV 服务返回了无效 JSON', resp.status);
       }
     }
     const detail = await readErrorDetail(resp);
@@ -139,7 +179,7 @@ async function requestJson(
     if (resp.status === 451) {
       throw new JevClientError(
         'REGION_BLOCKED',
-        'TypeSafe 当前网络区域不可用（HTTP 451）' +
+        'JEV 当前网络区域不可用（HTTP 451）' +
           (detail ? '：' + detail : '') +
           '。请切换可用的网络出口后重试。',
         resp.status
@@ -147,7 +187,7 @@ async function requestJson(
     }
     throw new JevClientError(
       'HTTP',
-      'TypeSafe 请求失败 (' + resp.status + ')' + (detail ? '：' + detail : ''),
+      'JEV 请求失败 (' + resp.status + ')' + (detail ? '：' + detail : ''),
       resp.status
     );
   }
@@ -165,9 +205,10 @@ export async function listJevModels(
   settings: JevSettings,
   options: JevClientOptions = {}
 ): Promise<JevModelList> {
-  const raw = await requestJson(settings, jevModelsUrl(settings), {
+  const endpoint = jevModelsUrl(settings);
+  const raw = await requestJson(settings, endpoint, {
     method: 'GET',
-    headers: { Authorization: 'Bearer ' + apiKey(settings) },
+    headers: { Authorization: jevAuthorizationHeader(settings, endpoint) },
   }, options);
   return parseJevModelList(raw);
 }
@@ -178,16 +219,49 @@ export async function callJevSystemOne(
   options: JevClientOptions = {}
 ): Promise<JevSystemOneResponse> {
   if (!request.model) {
-    throw new JevClientError('CONFIG', '请求缺少 TypeSafe 模型名');
+    throw new JevClientError('CONFIG', '请求缺少 JEV 模型名');
   }
   const body = sanitizeLoneSurrogates(JSON.stringify(request));
-  const raw = await requestJson(settings, jevSystemOneUrl(settings), {
+  const endpoint = jevSystemOneUrl(settings);
+  const raw = await requestJson(settings, endpoint, {
     method: 'POST',
     headers: {
-      Authorization: 'Bearer ' + apiKey(settings),
+      Authorization: jevAuthorizationHeader(settings, endpoint),
       'Content-Type': 'application/json',
     },
     body,
   }, options);
   return parseJevSystemOneResponse(raw, request.questions);
+}
+
+/**
+ * 连接检测分两段：
+ *   1. `/models` 验证 endpoint 与认证；
+ *   2. 某些专用 systemone 模型（例如 decision-model-preview）不会出现在
+ *      通用模型目录中，因此未列出时再用一个最小 noul 请求验证实际路由。
+ * 只有 System One 探测也失败，才判定当前模型不可用。
+ */
+export async function probeJevConnection(
+  settings: JevSettings,
+  options: JevClientOptions = {}
+): Promise<JevConnectionProbe> {
+  const models = await listJevModels(settings, options);
+  const modelListed = models.models.some((item) => item.name === settings.model);
+  if (modelListed) {
+    return { models, modelListed: true, systemOneVerified: false };
+  }
+  await callJevSystemOne(settings, {
+    model: settings.model,
+    state: {
+      purpose: 'recallflow_connection_probe',
+      ts: Date.now(),
+    },
+    questions: {
+      reachable: {
+        type: 'noul',
+        instructions: 'Is this endpoint responding to a structured System One request?',
+      },
+    },
+  }, options);
+  return { models, modelListed: false, systemOneVerified: true };
 }

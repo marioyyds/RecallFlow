@@ -304,6 +304,12 @@ export async function runAgentLoop(
       jevFast.traceShadowComparison(pendingJevShadow, step);
       pendingJevShadow = null;
     }
+    state.jevLoop.slowTurns += 1;
+    state.trace({
+      phase: 'tracegraph-slow-turn',
+      iter,
+      count: state.jevLoop.slowTurns,
+    });
     recordUsage(state, step, iter);
     state.emit({ type: 'usage', totalTokens: state.totalTokens });
 

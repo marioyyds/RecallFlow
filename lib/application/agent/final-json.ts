@@ -100,3 +100,31 @@ export function shouldRetryFinalJson(input: {
   if (input.summary !== undefined && hasFinalJsonBlock(input.summary)) return false;
   return true;
 }
+
+/** A single formatting-only correction for strict exact-match answer tasks. */
+export const BARE_ANSWER_RETRY_PROMPT =
+  '你刚才的最终答复里混入了说明文字，但任务的 exact_match 评分只接受答案值本身。' +
+  '**不要重新执行任务，也不要新增、删除或改变任何事实与结论**；' +
+  '只从上面的答复中保留已有的最终答案，原样输出答案值。' +
+  '不要写解释、步骤、引号外层包装或“答案是”等前缀；如果答案包含多个条目，' +
+  '保持任务要求的原始分隔方式。';
+
+/**
+ * Detect a likely non-bare exact-match answer. The retry is deliberately
+ * formatting-only: the evaluator remains strict after the correction.
+ */
+export function shouldRetryBareFinalAnswer(input: {
+  settings?: { requireBareFinalAnswer?: unknown } | null;
+  content?: unknown;
+  summary?: unknown;
+  alreadyRetried?: boolean;
+} = {}): boolean {
+  if (input.settings?.requireBareFinalAnswer !== true || input.alreadyRetried) return false;
+  const content = String(input.content ?? '').trim();
+  const summary = String(input.summary ?? '').trim();
+  const text = content || summary;
+  if (!text) return false;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 1) return true;
+  return /^(我|已|根据|完成|任务已完成|the\s+answer\s+is|answer\s*:|result\s*:|答案是)/i.test(text);
+}

@@ -9,7 +9,7 @@
 // 纪律：这里只写**真实形状**。不要为了少改代码写 `[key: string]: any`，
 // 也不要用 `unknown` + 到处 `as` 冒充（那是把明面上的 any 换成更隐蔽的洞）。
 import type { KnowledgeBook, CitationMeta } from '../../domain/knowledge/model.ts';
-import type { JevSettings } from '../../shared/settings.ts';
+import type { JevSettings, TraceGraphSettings } from '../../shared/settings.ts';
 import type { PublicationEvidenceState } from './publication-policy.ts';
 import type { CompletedTypeTarget } from './jev-write-ledger.ts';
 
@@ -67,6 +67,7 @@ export interface AgentSettings {
   jsonMode?: boolean;
   intentLlmAlways?: boolean;
   jev: JevSettings;
+  traceGraph?: TraceGraphSettings;
   ts?: number;
 }
 
@@ -149,6 +150,8 @@ export interface PageSnapshotLike {
     inViewport?: number;
     forms?: number;
   };
+  /** 结构化计数证据（例如编辑器字符数 2078）；值不进入 atomSignature。 */
+  counters?: Record<string, number>;
   frames?: FrameInfo[];
   frameRead?: { read: number[]; failed: number[]; total: number };
   frameId?: number;
@@ -335,6 +338,15 @@ export interface RunMetricsSummary {
   jevShadowCompared: number;
   jevShadowAgreed: number;
   jevHandoffs: number;
+  wrongWrites: number;
+  slowTurns: number;
+  handoffReasons: Record<string, number>;
+  edgeReuse: number;
+  edgeRewrite: number;
+  edgeReject: number;
+  phiPlusFailures: number;
+  candidateCount: number;
+  blockedEdgeHits: number;
 }
 
 /** 工具元数据（`tool-metadata.ts` 的条目）。 */
@@ -467,6 +479,8 @@ export interface RunCtx {
   lastReadFullText: string;
   publicationEvidence?: PublicationEvidenceState;
   completedTypeTargets?: CompletedTypeTarget[];
+  /** 当前指令中显式给出的 typed slots；只供 tracegraph 绑定，不接受历史默认值。 */
+  traceGraphSlots?: Record<string, unknown>;
   verificationState?: 'verified' | 'unverified' | 'rejected' | 'not-run';
   mcpIndex: Map<string, McpToolIndexEntry>;
   mcpStatus: McpServerStatus[];

@@ -25,9 +25,11 @@ export async function runAgentStream(
 export { buildPartialStep, streamAgentStep } from './stream-step.ts';
 export { deadlineDecision, resolveAgentBudgetGuard } from './budget.ts';
 export {
+  BARE_ANSWER_RETRY_PROMPT,
   FINAL_JSON_RETRY_PROMPT,
   findContractJson,
   hasFinalJsonBlock,
+  shouldRetryBareFinalAnswer,
   shouldRetryFinalJson,
 } from './final-json.ts';
 export {

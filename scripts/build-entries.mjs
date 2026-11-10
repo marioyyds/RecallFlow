@@ -95,7 +95,15 @@ export const ENTRIES = [
   // serialize structured elements before text, and query relevant text windows.
   // The same shared modules measured 1021083 bytes here. Raise explicitly to
   // 999KB; this is in-repo snapshot logic, not a new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 999 * 1024 },
+  // 2026-11-09: strict original-WebArena exact-match tasks need one
+  // formatting-only completion correction (reusing the existing final-format
+  // path). tracegraph.v2 then adds the pure graph/guard/store/patcher engine,
+  // templated state/URL abstraction, explicit slot binding and live edge
+  // evidence logging. Measured 1088012 bytes; raise explicitly to 1064KB.
+  // Target-aware edge identity migration measured 1090064 bytes; raise
+  // explicitly to 1066KB. Semantic-target grounding measured 1095478 bytes;
+  // raise explicitly to 1072KB, no new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1072 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -116,7 +124,17 @@ export const ENTRIES = [
   // Raise explicitly to 561KB; no dependency was added.
   // Structured-first snapshots and query-aware text modes measured 576956 bytes.
   // Raise explicitly to 565KB; no dependency was added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 565 * 1024 },
+  // Shared settings now includes the disabled-by-default TraceGraph rollback
+  // switch. JEV connection testing also performs the minimal System One probe
+  // used when a dedicated decision model is absent from the generic catalog.
+  // Measured 587221 bytes; raise explicitly to 575KB, no new dependency.
+  // Interactive TraceGraph explorer adds the read-only graph view without
+  // importing the recording engine. Parallel-edge lane routing measured
+  // 614762 bytes; pan/zoom viewport measured 621272 bytes. Raise explicitly
+  // to 610KB, no new dependency.
+  // Canvas node/edge dragging and in-place graph deletion measured 638577 bytes.
+  // Raise explicitly to 628KB; this is the in-repo renderer, no dependency added.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 628 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -133,7 +151,8 @@ export const ENTRIES = [
   // measured 552983 bytes. Raise explicitly to 541KB; no dependency was added.
   // Query-aware snapshot text and structured-first output measured 556407 bytes.
   // Raise explicitly to 545KB; no dependency was added.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 545 * 1024 },
+  // Same shared settings delta as options; measured 558352 bytes.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 547 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

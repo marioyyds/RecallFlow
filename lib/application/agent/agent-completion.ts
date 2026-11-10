@@ -16,7 +16,9 @@ import {
 } from './verification-policy.ts';
 import { runCompletionVerification } from './agent-finalization.ts';
 import {
+  BARE_ANSWER_RETRY_PROMPT,
   FINAL_JSON_RETRY_PROMPT,
+  shouldRetryBareFinalAnswer,
   shouldRetryFinalJson,
 } from './final-json.ts';
 import type { AgentRunState } from './agent-run-state.ts';
@@ -36,6 +38,16 @@ function evidenceText(state: AgentRunState): string {
     state.ctx.lastSnapshot ? compactSnapshotSummary(state.ctx.lastSnapshot) : '',
     state.ctx.lastEvidence || '',
   ].join('\n');
+}
+
+/**
+ * `complete_task` 是终态写操作：独立校验不可用或已拒绝时不能由快路径的
+ * `done` 信号替代。未触发校验的纯读取/对话任务不受这条限制。
+ */
+export function completionAllowsTaskCommit(
+  verificationState: AgentRunState['ctx']['verificationState']
+): boolean {
+  return verificationState !== 'unverified' && verificationState !== 'rejected';
 }
 
 /** Applies deterministic and model-backed completion checks for complete_task. */
@@ -72,6 +84,34 @@ export class CompletionCoordinator {
       totalTokens: state.totalTokens,
     });
     return FINAL_JSON_RETRY_PROMPT;
+  }
+
+  private bareAnswerReflection(content: unknown, summary?: unknown): string | null {
+    const state = this.state;
+    if (
+      !shouldRetryBareFinalAnswer({
+        settings: state.settings,
+        content,
+        summary,
+        alreadyRetried: state.finalFormatRetryUsed,
+      })
+    ) {
+      return null;
+    }
+    state.finalFormatRetryUsed = true;
+    state.emit({
+      type: 'format-retry',
+      reason: 'non-bare-final-answer',
+      ...(summary !== undefined ? { via: 'complete_task' } : {}),
+    });
+    state.trace({
+      phase: 'format-retry',
+      reason: 'non-bare-final-answer',
+      ...(summary !== undefined ? { via: 'complete_task' } : {}),
+      toolCalls: state.toolCallCount,
+      totalTokens: state.totalTokens,
+    });
+    return BARE_ANSWER_RETRY_PROMPT;
   }
 
   async reviewCompleteTask(result: any, signal: AbortSignal, iter: number): Promise<CompleteTaskDecision> {
@@ -204,6 +244,22 @@ export class CompletionCoordinator {
     );
     if (retry) return { kind: 'reflect', reflection: retry };
 
+    const bareRetry = this.bareAnswerReflection(
+      this.latestAssistantContent(),
+      String(result?.result || '任务已完成。')
+    );
+    if (bareRetry) return { kind: 'reflect', reflection: bareRetry };
+
+    if (!completionAllowsTaskCommit(state.ctx.verificationState)) {
+      return {
+        kind: 'reflect',
+        reflection:
+          '独立完成校验不可用或未通过，当前不能调用 complete_task。' +
+          '请重新读取结构化页面证据并再次执行终局校验；在校验真正通过前，' +
+          '不得把任务标记为已完成，也不得声称已验证。',
+      };
+    }
+
     return {
       kind: 'complete',
       summary: String(result?.result || '任务已完成。'),
@@ -216,6 +272,8 @@ export class CompletionCoordinator {
     const claim = String(content || '');
     const formatRetry = this.finalJsonReflection(claim);
     if (formatRetry) return formatRetry;
+    const bareRetry = this.bareAnswerReflection(claim);
+    if (bareRetry) return bareRetry;
     if (
       !claim.trim() ||
       !shouldVerifyCompletion(

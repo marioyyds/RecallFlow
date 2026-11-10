@@ -419,6 +419,518 @@ body {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+/* ---- TraceGraph 可视化 ---- */
+.tracegraph-explorer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.tracegraph-explorer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.tracegraph-explorer .settings-subsection-title {
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+}
+
+.tracegraph-explorer-head .hint {
+  display: block;
+  max-width: 610px;
+}
+
+.tracegraph-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.tracegraph-toolbar select {
+  min-width: 190px;
+  max-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 30px 7px 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.tracegraph-summary {
+  margin: 12px 0 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-sub);
+}
+
+.tracegraph-summary.active { color: var(--success); }
+.tracegraph-summary.error { color: #b45309; }
+
+.tracegraph-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 244px;
+  gap: 10px;
+  min-height: 300px;
+}
+
+.tracegraph-canvas,
+.tracegraph-detail {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px),
+    var(--bg);
+  background-size: 24px 24px;
+}
+
+.tracegraph-canvas-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 300px;
+  max-height: 520px;
+}
+
+.tracegraph-canvas-shell > .tracegraph-canvas {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+.tracegraph-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 300px;
+  max-height: 520px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.tracegraph-canvas:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.tracegraph-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.tracegraph-interactive-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.tracegraph-canvas.has-interactive-target .tracegraph-interactive-canvas {
+  cursor: pointer;
+}
+
+.tracegraph-canvas.is-node-dragging .tracegraph-interactive-canvas {
+  cursor: move;
+}
+
+.tracegraph-zoom-fab {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, #e5484d 78%, #000);
+  border-radius: 50%;
+  background: #e5484d;
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(190, 32, 38, .34);
+  cursor: zoom-in;
+  transition: transform .14s ease, background .14s ease, box-shadow .14s ease;
+}
+
+.tracegraph-zoom-fab:hover {
+  background: #cf3038;
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 10px 26px rgba(190, 32, 38, .42);
+}
+
+.tracegraph-zoom-fab:focus-visible {
+  outline: 3px solid color-mix(in srgb, #e5484d 35%, transparent);
+  outline-offset: 3px;
+}
+
+.tracegraph-zoom-fab:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.tracegraph-zoom-fab svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tracegraph-empty {
+  min-height: 298px;
+  display: grid;
+  place-content: center;
+  gap: 7px;
+  padding: 24px;
+  color: var(--text-sub);
+  text-align: center;
+  font-size: 12px;
+}
+
+.tracegraph-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.tracegraph-detail {
+  padding: 13px;
+  max-height: 520px;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.tracegraph-detail-empty {
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.tracegraph-quick-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tracegraph-quick-select .tracegraph-detail-section {
+  flex: 0 0 100%;
+  margin: 0;
+  padding-top: 0;
+  border: 0;
+}
+
+.tracegraph-quick-node {
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--text-sub);
+  font: inherit;
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tracegraph-quick-node:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.tracegraph-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tracegraph-detail-head strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.tracegraph-detail-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+}
+
+.tracegraph-detail-facts {
+  display: grid;
+  gap: 4px;
+  color: var(--text-sub);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tracegraph-detail-section {
+  margin: 14px 0 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-sub);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tracegraph-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.tracegraph-inline-delete,
+.tracegraph-inline-secondary {
+  padding: 4px 8px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.tracegraph-inline-delete {
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 9%, var(--card));
+  color: var(--danger);
+}
+
+.tracegraph-inline-delete:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.tracegraph-inline-delete:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+.tracegraph-inline-secondary {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-sub);
+}
+
+.tracegraph-inline-secondary:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.tracegraph-detail-edge {
+  margin-bottom: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+}
+
+.tracegraph-detail-edge-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.tracegraph-detail-edge-title {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.tracegraph-edge-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tracegraph-edge-select:hover {
+  color: var(--primary);
+}
+
+.tracegraph-detail-edge-meta,
+.tracegraph-detail-edge-goal {
+  margin-top: 3px;
+  color: var(--text-sub);
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.tracegraph-detail-edge-args {
+  display: block;
+  margin-top: 5px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-sub);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.tracegraph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.tracegraph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tracegraph-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.tracegraph-dot.verified { background: var(--primary); }
+.tracegraph-dot.blocked { background: var(--text-faint); }
+
+.tracegraph-dialog {
+  width: min(1280px, 96vw);
+  max-width: 96vw;
+  height: min(900px, 92vh);
+  max-height: 92vh;
+  margin: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
+  overflow: hidden;
+}
+
+.tracegraph-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.tracegraph-dialog::backdrop {
+  background: rgba(10, 14, 20, .62);
+  backdrop-filter: blur(3px);
+}
+
+.tracegraph-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 2px 10px;
+}
+
+.tracegraph-dialog-head strong {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.tracegraph-dialog-head .tracegraph-summary {
+  margin: 4px 0 0;
+}
+
+.tracegraph-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.tracegraph-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+}
+
+.tracegraph-zoom-control {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.tracegraph-zoom-control:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.tracegraph-zoom-level {
+  min-width: 42px;
+  color: var(--text-sub);
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.tracegraph-dialog-close {
+  flex: none;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.tracegraph-frame-expanded {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 290px;
+}
+
+.tracegraph-frame-expanded > .tracegraph-canvas {
+  height: 100%;
+  max-height: none;
+}
+
+.tracegraph-frame-expanded .tracegraph-canvas,
+.tracegraph-frame-expanded .tracegraph-detail {
+  height: 100%;
+  max-height: none;
+}
+
+html:has(.tracegraph-dialog[open]) {
+  overflow: hidden;
+}
+
 @media (max-width: 620px) {
   body {
     --settings-gutter: 12px;
@@ -459,5 +971,41 @@ body {
   .actions {
     flex-wrap: wrap;
     gap: 8px;
+  }
+  .tracegraph-explorer-head,
+  .tracegraph-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .tracegraph-toolbar select {
+    width: 100%;
+    max-width: none;
+  }
+  .tracegraph-frame {
+    grid-template-columns: 1fr;
+  }
+  .tracegraph-canvas,
+  .tracegraph-canvas-shell,
+  .tracegraph-detail {
+    max-height: 420px;
+  }
+  .tracegraph-dialog {
+    width: 98vw;
+    height: 96vh;
+    padding: 10px;
+  }
+  .tracegraph-dialog-head {
+    flex-direction: row;
+  }
+  .tracegraph-dialog-actions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+  .tracegraph-zoom-controls {
+    transform: scale(.9);
+    transform-origin: top right;
+  }
+  .tracegraph-frame-expanded {
+    overflow: auto;
   }
 }

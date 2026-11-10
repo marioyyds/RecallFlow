@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-import { AI_SETTINGS_DEFAULTS, JEV_SETTINGS_DEFAULTS, mergeJevSettings } from '../lib/shared/settings.ts';
+import {
+  AI_SETTINGS_DEFAULTS,
+  JEV_SETTINGS_DEFAULTS,
+  mergeJevSettings,
+  mergeTraceGraphSettings,
+  TRACE_GRAPH_SETTINGS_DEFAULTS,
+} from '../lib/shared/settings.ts';
 
 const OPTIONS_HTML = fs.readFileSync('options.html', 'utf8');
 
@@ -35,14 +41,31 @@ test('设置页提供独立的远程 JEV 配置', () => {
     'jev-max-actions',
     'jev-max-repeated',
     'jev-max-candidates',
-    'jev-min-read',
-    'jev-min-action',
-    'jev-min-click',
-    'jev-min-wait',
-    'jev-min-target-operation',
+    'jev-min-edge-confidence',
     'jev-schema-version',
     'test-jev',
     'jev-status',
+  ]) {
+    assert.match(OPTIONS_HTML, new RegExp('id="' + id + '"'));
+  }
+  for (const id of [
+    'tracegraph-enabled',
+    'tracegraph-mode',
+    'tracegraph-shadow-mode',
+    'tracegraph-site-select',
+    'tracegraph-refresh',
+    'tracegraph-expand',
+    'tracegraph-dialog',
+    'tracegraph-dialog-close',
+    'tracegraph-dialog-canvas',
+    'tracegraph-dialog-detail',
+    'tracegraph-zoom-out',
+    'tracegraph-zoom-reset',
+    'tracegraph-zoom-level',
+    'tracegraph-zoom-in',
+    'tracegraph-view-summary',
+    'tracegraph-canvas',
+    'tracegraph-detail',
   ]) {
     assert.match(OPTIONS_HTML, new RegExp('id="' + id + '"'));
   }
@@ -73,6 +96,16 @@ test('旧设置的 JEV 配置缺失字段时补默认值并限制数值范围', 
   );
   assert.equal(mergeJevSettings({ maxElementCandidates: 1 }).maxElementCandidates, 5);
   assert.equal(mergeJevSettings({ maxElementCandidates: 999 }).maxElementCandidates, 100);
+  assert.equal(mergeJevSettings({ minEdgeConfidence: -1 }).minEdgeConfidence, 0);
+  assert.equal(mergeJevSettings({ minEdgeConfidence: 2 }).minEdgeConfidence, 1);
+  assert.equal(mergeJevSettings({ minEdgeConfidence: 0.84 }).minEdgeConfidence, 0.84);
+  assert.equal(
+    mergeJevSettings({
+      minActionConfidence: 0.91,
+      minTargetOperationConfidence: 0.75,
+    }).minEdgeConfidence,
+    0.91
+  );
   assert.equal(mergeJevSettings({ minReadConfidence: -1 }).minReadConfidence, 0);
   assert.equal(mergeJevSettings({ minActionConfidence: 2 }).minActionConfidence, 1);
   assert.equal(mergeJevSettings({ minClickConfidence: 0.91 }).minClickConfidence, 0.91);
@@ -84,4 +117,27 @@ test('旧设置的 JEV 配置缺失字段时补默认值并限制数值范围', 
   );
   assert.equal(mergeJevSettings({ baseUrl: ' https://example.com/// ' }).baseUrl, 'https://example.com');
   assert.equal(mergeJevSettings({ shadowMode: false }).shadowMode, false);
+});
+
+test('TraceGraph 默认关闭，record/live 与 shadow 开关可安全合并', () => {
+  assert.equal(TRACE_GRAPH_SETTINGS_DEFAULTS.enabled, false);
+  assert.equal(TRACE_GRAPH_SETTINGS_DEFAULTS.mode, 'record');
+  assert.equal(TRACE_GRAPH_SETTINGS_DEFAULTS.shadowMode, true);
+  assert.equal(mergeTraceGraphSettings({ enabled: true, mode: 'live', shadowMode: false }).mode, 'live');
+  assert.equal(mergeTraceGraphSettings({ mode: 'typo', ttlMs: 1 }).mode, 'record');
+  assert.equal(mergeTraceGraphSettings({ ttlMs: 1 }).ttlMs, 1);
+});
+
+test('设置页只暴露当前 edge confidence，不展示旧动作分类阈值', () => {
+  for (const removedId of [
+    'jev-min-read',
+    'jev-min-action',
+    'jev-min-click',
+    'jev-min-wait',
+    'jev-min-target-operation',
+  ]) {
+    assert.doesNotMatch(OPTIONS_HTML, new RegExp('id="' + removedId + '"'));
+  }
+  assert.match(OPTIONS_HTML, /id="jev-min-edge-confidence"/);
+  assert.match(OPTIONS_HTML, /Confidence 阈值/);
 });

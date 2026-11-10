@@ -18,6 +18,10 @@ import { sliceSafe } from '../../shared/surrogates.ts';
 import { rememberElement } from './site-memory.ts';
 import { saveMacro, listMacros, getMacro, bumpMacroHits, rememberTrace, recallTrace } from './macro-store.ts';
 import {
+  appendTraceRecord,
+  traceRecordFromTransition,
+} from './tracegraph-store.ts';
+import {
   handleDialog,
   getPendingDialogs,
   getDownloads,
@@ -43,6 +47,7 @@ export { compactSnapshotSummary };
 import { readDiagnostics } from './diagnostics.ts';
 // C-4 合并：宏三件套收敛为 macro(op)。REPLAYABLE_TOOLS 的唯一来源也在这里。
 import { macroTool, REPLAYABLE_TOOLS } from './macros.ts';
+import { activePlanStep } from './plan-contract.ts';
 // C-4 合并：知识库只读三件套收敛为 knowledge_read(op)（写/删保持独立，理由见该文件头）。
 import { knowledgeRead } from './knowledge.ts';
 // C-1 拆分：标签页族（list_tabs / switch_tab / open_tab）移到独立模块，闭包依赖改为显式注入。
@@ -408,13 +413,23 @@ function rememberTarget(ctx: RunCtx, target: ResolvedTarget) {
 // 定义在 ./macros.js（**唯一来源**）：记录时（recordTraceStep）与回放时（macro op=run）
 // 必须用同一份白名单 —— 两处各写一份就会漂移，而漂移的后果是回放能执行记录时不允许的工具。
 
-export function recordTraceStep(ctx: RunCtx, name: string, args: Record<string, unknown>, res: ToolResult | null | undefined) {
+export function recordTraceStep(
+  ctx: RunCtx,
+  name: string,
+  args: Record<string, unknown>,
+  res: ToolResult | null | undefined,
+  observed?: {
+    beforeSnapshot?: PageSnapshotLike | null;
+    afterSnapshot?: PageSnapshotLike | null;
+  }
+) {
   if (!ctx || !Array.isArray(ctx.trace)) return;
-  if (!REPLAYABLE_TOOLS.has(name)) return;
   if (!res || res.ok === false) return;
   const a = args || {};
   let step = null;
-  if (name === 'open_tab') {
+  if (!REPLAYABLE_TOOLS.has(name)) {
+    step = null;
+  } else if (name === 'open_tab') {
     if (a.url) step = { tool: name, args: Object.assign({ url: a.url }, a.newTab ? { newTab: true } : {}) };
   } else {
     const selector = res.selector;
@@ -444,6 +459,61 @@ export function recordTraceStep(ctx: RunCtx, name: string, args: Record<string, 
     //（实测 RF-FY6PUP：「沉淀为技能」是在发布流程跑完的下一轮才说的），
     // 而 ctx.trace 只活在本次运行里。写入时机与代价见 macro-store.js 的说明。
     rememberTrace(ctx.pageUrl, ctx.trace).catch(() => {});
+  }
+
+  // P0 证据录制与宏录制分离：宏仍只保存可执行 {tool,args}；TraceGraph 额外
+  // 保存结构化前后证据。默认关闭，因此未开启 traceGraph 时执行路径行为不变。
+  const graphSettings = ctx.settings?.traceGraph;
+  if (
+    graphSettings?.enabled === true &&
+    res &&
+    ctx.lastSnapshot
+  ) {
+    const afterSnapshot =
+      observed?.afterSnapshot ||
+      res.pageSnapshot ||
+      (res.snapshot as PageSnapshotLike | undefined) ||
+      ctx.lastSnapshot;
+    const beforeSnapshot = observed?.beforeSnapshot || ctx.lastSnapshot;
+    const structuredChange =
+      Boolean(beforeSnapshot && afterSnapshot) &&
+      (
+        String(beforeSnapshot?.url || '') !== String(afterSnapshot?.url || '') ||
+        String(beforeSnapshot?.fingerprint || '') !== String(afterSnapshot?.fingerprint || '')
+      );
+    const graphVerified = res.verification?.verified === true || structuredChange;
+    const planStep = activePlanStep(ctx.plan);
+    const seq = ctx.trace.length;
+    const record = traceRecordFromTransition({
+      id:
+        String(ctx.sessionId || 'run') +
+        ':' +
+        seq +
+        ':' +
+        Date.now().toString(36),
+      seq,
+      tool: name,
+      args: step?.args || args,
+      beforeSnapshot,
+      afterSnapshot,
+      result: {
+        ok: true,
+        summary: String(res.result || ''),
+      },
+      planStep: String(planStep?.text || ''),
+      planVersion: Number(ctx.planVersion) || 0,
+      successPredicate: String(planStep?.successPredicate || ''),
+      verification:
+        graphVerified
+          ? String(
+              res.verification?.verified === true
+                ? res.verification.reason || '结构化动作验证通过'
+                : '结构化前后快照发生变化'
+            )
+          : '',
+      risk: String(graphVerified ? getToolMetadata(name).risk : ''),
+    });
+    appendTraceRecord(ctx.pageUrl, record, { ttlMs: graphSettings.ttlMs }).catch(() => {});
   }
 }
 

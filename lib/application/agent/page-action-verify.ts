@@ -10,6 +10,8 @@
 // 把语义集中到一处以后，"什么情况下可以声称 verified"这件事只有一个答案。
 //
 import type { ActionVerification, PageSnapshotLike, ToolResult } from './types.ts';
+import type { Edge, Evidence } from './trace-graph-types.ts';
+import { verifyEdgePostcondition as verifyTraceGraphPostcondition } from './trace-graph.ts';
 
 // 三态语义（与 buildActionVerification 一致）：
 //   executed    动作已派发（不表示产生了页面变化）
@@ -85,4 +87,17 @@ export function verifyPageAction(command: string, before: PageSnapshotLike | nul
     scrollChanged,
     reason,
   };
+}
+
+/**
+ * 历史 TraceGraph 回放与诊断出口。live edge controller 不调用本函数：
+ * JEV 选边、Grounding 后直接执行，再重新观察页面。
+ */
+export function verifyEdgePostcondition(
+  edge: Edge,
+  before: Evidence,
+  after: Evidence,
+  bound: Record<string, unknown>
+): { ok: boolean; reason: string } {
+  return verifyTraceGraphPostcondition(edge, before, after, bound);
 }

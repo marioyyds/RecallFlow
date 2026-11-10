@@ -31,6 +31,7 @@
         <span class="settings-sidebar-title">设置</span>
         <a href="#settings-connection">连接</a>
         <a href="#settings-jev">JEV 快思考</a>
+        <a href="#settings-tracegraph">轨迹复用</a>
         <a href="#settings-behavior">RecallFlow 行为</a>
         <a href="#settings-scripts">用户脚本</a>
         <a href="#settings-mcp">MCP 服务器</a>
@@ -85,9 +86,9 @@
         <input id="jev-shadow-mode" type="checkbox" class="switch">
       </label>
       <label class="field">
-        <span class="field-label">API 基础地址</span>
-        <input id="jev-base-url" type="text" placeholder="https://api.typesafe.ai" autocomplete="off">
-        <span class="hint">RecallFlow 使用 <code>/v1/systemone</code> 执行结构化判断，并通过 <code>/v1/models</code> 检查连接。</span>
+        <span class="field-label">API 地址 / System One 完整地址</span>
+        <input id="jev-base-url" type="text" placeholder="https://llm-xxx.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone" autocomplete="off">
+        <span class="hint">可填写基础地址、<code>/v1</code>、<code>/compatible-mode/v1</code>，或完整的 <code>/systemone</code> 地址；RecallFlow 不会重复拼接路径。阿里云 MaaS 使用原始 Authorization token，TypeSafe 使用 Bearer。</span>
       </label>
       <label class="field">
         <span class="field-label">API Key</span>
@@ -138,36 +139,128 @@
         <input id="jev-max-candidates" type="number" min="5" max="100" step="1" placeholder="40">
         <span class="hint">只把最相关的有限个元素交给 JEV；增加候选会提高覆盖范围，也会增加请求延迟和成本。</span>
       </label>
-      <div class="settings-subsection-title">三档置信度阈值</div>
-      <div class="budget-row">
-        <label class="field">
-          <span class="field-label">读取类</span>
-          <input id="jev-min-read" type="number" min="0" max="1" step="0.01" placeholder="0.6">
-        </label>
-        <label class="field">
-          <span class="field-label">输入类</span>
-          <input id="jev-min-action" type="number" min="0" max="1" step="0.01" placeholder="0.8">
-        </label>
-        <label class="field">
-          <span class="field-label">点击类</span>
-          <input id="jev-min-click" type="number" min="0" max="1" step="0.01" placeholder="0.86">
-        </label>
-        <label class="field">
-          <span class="field-label">等待类</span>
-          <input id="jev-min-wait" type="number" min="0" max="1" step="0.01" placeholder="0.5">
-        </label>
-      </div>
+      <div class="settings-subsection-title">Edge 决策</div>
       <label class="field">
-        <span class="field-label">目标动作分支最低置信度</span>
-        <input id="jev-min-target-operation" type="number" min="0" max="1" step="0.01" placeholder="0.75">
-        <span class="hint">CLICK / TYPE_TEXT 的目标 head 只回答“选哪个”，仍需 operation head 达到该下限，防止歧义目标因条件概率 100% 被误执行。</span>
+        <span class="field-label">Confidence 阈值</span>
+        <input id="jev-min-edge-confidence" type="number" min="0" max="1" step="0.01" placeholder="0.8">
+        <span class="hint">JEV 对所选 edge 返回的 confidence 低于该值时直接弃权并交给慢思考。置信度只决定选边或弃权，不替代当前目标 Grounding。</span>
       </label>
-      <span class="hint">点击类会同时检查 operation 与目标元素；等待只是短暂观察，使用独立低风险阈值，但仍受同一路由最多重试次数限制。</span>
       <label class="field">
         <span class="field-label">请求协议版本</span>
         <input id="jev-schema-version" type="text" placeholder="jev.recallflow.v1" autocomplete="off">
         <span class="hint">用于 RecallFlow 自身的请求/响应协议校验；默认 <code>jev.recallflow.v1</code>。</span>
       </label>
+    </section>
+
+    <section class="card" id="settings-tracegraph">
+      <h2><span class="ico">🕸️</span> TraceGraph 轨迹复用</h2>
+      <span class="hint">把已验证的前后页面证据形成 L0/L1 图。JEV 选择 edge 后，系统会在当前快照中重新定位目标的 ref，再直接执行该动作；找不到唯一目标时交给慢思考。</span>
+      <label class="field switch-field">
+        <span class="field-label">启用 TraceGraph 录制</span>
+        <span class="hint">默认关闭。开启后只记录脱敏的结构化证据；登录、支付和内网页会排除。</span>
+        <input id="tracegraph-enabled" type="checkbox" class="switch">
+      </label>
+      <label class="field">
+        <span class="field-label">运行档位</span>
+        <select id="tracegraph-mode">
+          <option value="record">仅录制（P0）</option>
+          <option value="live">Edge 快路径（灰度）</option>
+        </select>
+        <span class="hint">live 仍需同时启用 JEV。建议先在 live 档位打开影子模式验证安全性。</span>
+      </label>
+      <label class="field switch-field">
+        <span class="field-label">Edge 影子模式</span>
+        <span class="hint">只记录 edge 选择与置信度，不产生动作；影子模式不能用来计算收益。</span>
+        <input id="tracegraph-shadow-mode" type="checkbox" class="switch">
+      </label>
+      <div class="tracegraph-explorer" data-settings-ui>
+        <div class="tracegraph-explorer-head">
+          <div>
+            <div class="settings-subsection-title">已学习的轨迹图</div>
+            <span class="hint">查看和管理本地按站点保存的 TraceGraph。节点代表页面状态模板，箭头代表已验证的可重放动作；画布、节点和边都可以直接拖动。</span>
+          </div>
+          <div class="tracegraph-toolbar">
+            <select id="tracegraph-site-select" aria-label="选择站点图" disabled>
+              <option value="">暂无图</option>
+            </select>
+            <button id="tracegraph-refresh" class="btn btn-secondary" type="button">刷新</button>
+            <button id="tracegraph-delete-site" class="btn btn-danger" type="button" disabled>删除图</button>
+          </div>
+        </div>
+        <div id="tracegraph-view-summary" class="tracegraph-summary" role="status" aria-live="polite">
+          正在读取本地 TraceGraph…
+        </div>
+        <div class="tracegraph-frame">
+          <div class="tracegraph-canvas-shell">
+            <div id="tracegraph-canvas" class="tracegraph-canvas" aria-label="TraceGraph 图可视化"></div>
+            <button
+              id="tracegraph-expand"
+              class="tracegraph-zoom-fab"
+              type="button"
+              aria-label="放大查看 TraceGraph"
+              aria-haspopup="dialog"
+              aria-controls="tracegraph-dialog"
+              aria-pressed="false"
+              title="放大查看"
+              disabled
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M8.5 3H3v5.5M15.5 3H21v5.5M8.5 21H3v-5.5M15.5 21H21v-5.5M3 8.5 8.5 3M21 8.5 15.5 3M3 15.5 8.5 21M21 15.5 15.5 21"/>
+              </svg>
+            </button>
+          </div>
+          <aside id="tracegraph-detail" class="tracegraph-detail" aria-live="polite">
+            <div class="tracegraph-detail-empty">拖动背景平移，滚轮缩放；拖动节点或边调整布局，点击查看详情。</div>
+          </aside>
+        </div>
+        <div class="tracegraph-legend" aria-label="图例">
+          <span><i class="tracegraph-dot verified"></i>已验证边</span>
+          <span><i class="tracegraph-dot blocked"></i>非可执行边</span>
+          <span>边标签：工具名</span>
+          <span>虚线：边未验证</span>
+          <span>画布 / 节点 / 边均可拖动</span>
+        </div>
+      </div>
+      <dialog
+        id="tracegraph-dialog"
+        class="tracegraph-dialog"
+        aria-labelledby="tracegraph-dialog-title"
+        data-settings-ui
+      >
+        <div class="tracegraph-dialog-head">
+          <div>
+            <strong id="tracegraph-dialog-title">TraceGraph</strong>
+            <span id="tracegraph-dialog-summary" class="tracegraph-summary"></span>
+          </div>
+          <div class="tracegraph-dialog-actions">
+            <div class="tracegraph-zoom-controls" aria-label="画布缩放">
+              <button id="tracegraph-zoom-out" class="tracegraph-zoom-control" type="button" aria-label="缩小">−</button>
+              <button id="tracegraph-zoom-reset" class="tracegraph-zoom-control" type="button">居中</button>
+              <span id="tracegraph-zoom-level" class="tracegraph-zoom-level" aria-live="polite">100%</span>
+              <button id="tracegraph-zoom-in" class="tracegraph-zoom-control" type="button" aria-label="放大">＋</button>
+            </div>
+            <button
+              id="tracegraph-dialog-close"
+              class="icon-btn tracegraph-dialog-close"
+              type="button"
+              aria-label="关闭放大的 TraceGraph"
+              title="关闭"
+            >×</button>
+          </div>
+        </div>
+        <div class="tracegraph-frame tracegraph-frame-expanded">
+          <div
+            id="tracegraph-dialog-canvas"
+            class="tracegraph-canvas"
+            aria-label="放大的 TraceGraph 图可视化"
+          ></div>
+          <aside
+            id="tracegraph-dialog-detail"
+            class="tracegraph-detail"
+            aria-live="polite"
+          ></aside>
+        </div>
+      </dialog>
     </section>
 
     <section class="card" id="settings-behavior">

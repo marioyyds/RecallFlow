@@ -2,14 +2,25 @@ import type { AgentRunState } from './agent-run-state.ts';
 import type { ToolBatchOutcome, ToolCallPipeline } from './tool-call-pipeline.ts';
 import { callJevSystemOne } from './jev-client.ts';
 import {
+  buildJevEdgeRequest,
   buildJevFastRequest,
   compareJevShadowAction,
   deriveJevPhase,
   formatJevDecisionSummary,
+  interpretJevEdgeDecision,
   interpretJevFastDecision,
   type JevFastAction,
   type JevFastDecision,
 } from './jev-action-space.ts';
+import {
+  bindSlots,
+  evidenceFromSnapshot,
+  extractExplicitSlots,
+  groundEdgeAction,
+  nominate,
+} from './trace-graph.ts';
+import { loadTraceGraph } from './tracegraph-store.ts';
+import { REPLAYABLE_TOOLS } from './macros.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
@@ -53,6 +64,7 @@ export class JevFastController {
   private readonly callSystemOne: typeof callJevSystemOne;
   private readonly writeDiagnostic: typeof writeJevDiagnostic;
   private readonly textHelper: TextHelper;
+  private readonly loadGraph: typeof loadTraceGraph;
   private lastBlockedRoute = '';
   private toolSequence = 0;
 
@@ -62,7 +74,8 @@ export class JevFastController {
     signal: AbortSignal,
     callSystemOne: typeof callJevSystemOne = callJevSystemOne,
     writeDiagnostic: typeof writeJevDiagnostic = writeJevDiagnostic,
-    textHelper: TextHelper = generateJevFieldText
+    textHelper: TextHelper = generateJevFieldText,
+    loadGraph: typeof loadTraceGraph = loadTraceGraph
   ) {
     this.state = state;
     this.pipeline = pipeline;
@@ -70,6 +83,7 @@ export class JevFastController {
     this.callSystemOne = callSystemOne;
     this.writeDiagnostic = writeDiagnostic;
     this.textHelper = textHelper;
+    this.loadGraph = loadGraph;
   }
 
   private syncPlanContract(): ReturnType<typeof activePlanStep> {
@@ -157,6 +171,7 @@ export class JevFastController {
     const decisions: JevFastDecision[] = [];
     const toolOutcomes: ToolBatchOutcome[] = [];
     let latencyMs = 0;
+    let skippedReason = 'no-action';
     const configuredMaxActions = Number(this.state.settings.jev.maxConsecutiveActions) > 0
       ? Math.floor(Number(this.state.settings.jev.maxConsecutiveActions))
       : JEV_SETTINGS_DEFAULTS.maxConsecutiveActions;
@@ -170,13 +185,16 @@ export class JevFastController {
       if (result.kind === 'cancelled') return result;
       latencyMs += result.latencyMs || 0;
       if (result.kind === 'shadow') return result;
-      if (result.kind !== 'act') break;
+      if (result.kind !== 'act') {
+        skippedReason = result.reason;
+        break;
+      }
       decisions.push(...result.decisions);
       toolOutcomes.push(...result.toolOutcomes);
     }
     return decisions.length
       ? { kind: 'act', decisions, latencyMs, toolOutcomes }
-      : { kind: 'skipped', reason: 'no-action' };
+      : { kind: 'skipped', reason: skippedReason };
   }
 
   private async runOnce(
@@ -192,6 +210,9 @@ export class JevFastController {
       this.state.ctx.pageTitle,
       this.state.ctx.lastSnapshot
     );
+    if (this.traceGraphActive()) {
+      return this.runTraceGraphOnce(iter, persist, phase);
+    }
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -257,7 +278,6 @@ export class JevFastController {
         confidence: decision.confidence || 0,
         operationConfidence: decision.confidence || 0,
         targetConfidence: null,
-        probabilities: decision.probabilities || {},
       };
       this.state.jevLoop.readFallbackKey = fallbackKey;
       readFallback = true;
@@ -474,6 +494,292 @@ export class JevFastController {
     };
   }
 
+  private traceGraphActive(): boolean {
+    const graph = this.state.settings.traceGraph;
+    return graph?.enabled === true && graph.mode === 'live';
+  }
+
+  private traceEdgeHandoff(iter: number, reason: string, detail = ''): void {
+    this.state.trace({
+      phase: 'tracegraph-handoff',
+      iter,
+      reason,
+      detail,
+    });
+    this.appendBlocked(iter, reason, detail);
+  }
+
+  private edgeConfidenceDetail(
+    decision: Extract<
+      ReturnType<typeof interpretJevEdgeDecision>,
+      { kind: 'blocked' }
+    >
+  ): string {
+    return [
+      decision.description,
+      'confidence=' + Number(decision.confidence || 0).toFixed(4),
+    ].filter(Boolean).join('；');
+  }
+
+  private addBlockedEdge(edgeId: string): void {
+    this.state.jevLoop.blockedEdgeIds = [
+      ...new Set([...this.state.jevLoop.blockedEdgeIds, edgeId]),
+    ].slice(-64);
+    this.state.trace({
+      phase: 'tracegraph-blocked-edge-hit',
+      edgeId,
+    });
+  }
+
+  private async runTraceGraphOnce(
+    iter: number,
+    persist: (extra: Record<string, unknown>) => Promise<unknown>,
+    phase: string
+  ): Promise<JevFastRunResult & { latencyMs?: number }> {
+    const settings = this.state.settings;
+    const graphSettings = settings.traceGraph;
+    if (!graphSettings) return { kind: 'skipped', reason: 'tracegraph-disabled' };
+    const graph = await this.loadGraph(this.state.ctx.pageUrl).catch(() => null);
+    const before = evidenceFromSnapshot(this.state.ctx.lastSnapshot);
+    const planStep = activePlanStep(this.state.ctx.plan);
+    const graphSlots = {
+      ...extractExplicitSlots(
+        this.state.detected.sourceText || this.state.instruction
+      ),
+      ...extractExplicitSlots(planStep?.text),
+      ...(this.state.ctx.traceGraphSlots || {}),
+    };
+    const stateName = before.atomSignature.split('#')[0];
+    const blockedMatches = graph?.l1.edges.filter(
+      (item) =>
+        item.from === stateName &&
+        this.state.jevLoop.blockedEdgeIds.includes(item.id)
+    ) || [];
+    for (const item of blockedMatches) {
+      this.state.trace({
+        phase: 'tracegraph-blocked-edge-hit',
+        iter,
+        edgeId: item.id,
+      });
+    }
+    const nominated = graph
+      ? nominate(graph, {
+          siteKey: graph.siteKey,
+          atomSignature: before.atomSignature,
+          intent: this.state.detected.sourceText || this.state.instruction,
+          blockedEdgeIds: new Set(this.state.jevLoop.blockedEdgeIds),
+          executedEdges: new Set(this.state.jevLoop.executedEdges),
+          controlNames: before.controls.map((control) => control.name),
+        })
+      : [];
+    const candidates = nominated.filter(
+      (item) => bindSlots(item, { slots: graphSlots }).ok
+    );
+    this.state.trace({
+      phase: 'tracegraph-candidates',
+      iter,
+      count: candidates.length,
+      nominated: nominated.length,
+      filteredUnbound: nominated.length - candidates.length,
+      state: stateName || '',
+    });
+    this.state.emit({
+      type: 'tracegraph-metrics',
+      phase: 'candidates',
+      count: candidates.length,
+      nominated: nominated.length,
+      filteredUnbound: nominated.length - candidates.length,
+    });
+    if (!candidates.length) {
+      this.traceEdgeHandoff(iter, 'edge-no-candidates', '当前状态没有可用的已验证证据边');
+      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'edge-no-candidates' };
+    }
+
+    const bundle = buildJevEdgeRequest(settings.jev, {
+      intent: this.state.intent,
+      goal: this.state.detected.sourceText || this.state.instruction,
+      phase,
+      pageUrl: this.state.ctx.pageUrl,
+      pageTitle: this.state.ctx.pageTitle,
+      candidates,
+      observation: before,
+      slots: graphSlots,
+      planStep: planStep?.text,
+      successPredicate: planStep?.successPredicate,
+    });
+    const startedAt = Date.now();
+    let response: JevSystemOneResponse;
+    try {
+      response = await this.callSystemOne(settings.jev, bundle.request, {
+        signal: this.signal,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.state.trace({
+        phase: 'jev',
+        iter,
+        mode: 'live',
+        head: 'edge',
+        status: 'error',
+        reason,
+      });
+      this.traceEdgeHandoff(iter, 'request-failed', reason);
+      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'request-failed' };
+    }
+    const latencyMs = Date.now() - startedAt;
+    this.state.totalTokens += response.usage.input_tokens + response.usage.output_tokens;
+    const decision = interpretJevEdgeDecision(response, bundle);
+    this.state.trace({
+      phase: 'jev',
+      iter,
+      mode: graphSettings.shadowMode ? 'shadow' : 'live',
+      head: 'edge',
+      phaseName: phase,
+      decision,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+    if (graphSettings.shadowMode) {
+      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'tracegraph-shadow' };
+    }
+    if (decision.kind === 'blocked') {
+      this.state.emit({
+        type: 'tracegraph-metrics',
+        phase: 'edge-decision',
+        decision: 'BLOCKED',
+        reason: decision.reason,
+        confidence: decision.confidence || 0,
+      });
+      this.traceEdgeHandoff(
+        iter,
+        'edge-' + decision.reason,
+        this.edgeConfidenceDetail(decision)
+      );
+      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'edge-' + decision.reason, latencyMs };
+    }
+
+    const edge = candidates.find((item) => item.id === decision.edgeId);
+    this.state.emit({
+      type: 'tracegraph-metrics',
+      phase: 'edge-decision',
+      decision: 'EDGE',
+      edgeId: decision.edgeId,
+      confidence: decision.confidence,
+    });
+    if (!edge) {
+      this.traceEdgeHandoff(iter, 'edge-unknown', decision.edgeId);
+      return { kind: 'skipped', reason: 'edge-unknown', latencyMs };
+    }
+    if (!REPLAYABLE_TOOLS.has(edge.action.tool)) {
+      this.state.trace({
+        phase: 'tracegraph-edge',
+        iter,
+        edgeId: edge.id,
+        decision: 'REJECT',
+        reason: 'tool-not-replayable',
+      });
+      this.traceEdgeHandoff(iter, 'edge-tool-rejected', edge.action.tool);
+      return { kind: 'skipped', reason: 'edge-tool-rejected', latencyMs };
+    }
+
+    const binding = bindSlots(edge, {
+      slots: graphSlots,
+    });
+    if (!binding.ok) {
+      this.state.trace({
+        phase: 'tracegraph-grounding',
+        iter,
+        edgeId: edge.id,
+        decision: 'REJECT',
+        reason: 'unbound-slots',
+        missing: binding.missing,
+      });
+      this.traceEdgeHandoff(
+        iter,
+        'edge-unbound-slots',
+        binding.missing.map((slot) => '@' + slot).join('、')
+      );
+      return { kind: 'skipped', reason: 'edge-unbound-slots', latencyMs };
+    }
+    const grounded = groundEdgeAction(edge, before, binding.bound);
+    if (!grounded.ok || !grounded.args) {
+      const reason = grounded.reason || 'target-missing';
+      this.state.trace({
+        phase: 'tracegraph-grounding',
+        iter,
+        edgeId: edge.id,
+        decision: 'REJECT',
+        reason,
+        candidates: grounded.candidates,
+      });
+      this.traceEdgeHandoff(
+        iter,
+        'edge-' + reason,
+        'candidates=' + grounded.candidates
+      );
+      return { kind: 'skipped', reason: 'edge-' + reason, latencyMs };
+    }
+    this.state.trace({
+      phase: 'tracegraph-grounding',
+      iter,
+      edgeId: edge.id,
+      decision: 'GROUNDED',
+      basis: grounded.target?.basis || '',
+      target: grounded.target?.name || grounded.target?.role || '',
+    });
+    const action: JevFastAction = {
+      kind: 'act',
+      operation:
+        edge.action.tool === 'type_text'
+          ? 'TYPE_TEXT'
+          : edge.action.tool === 'click_element'
+            ? 'CLICK'
+            : 'READ_PAGE',
+      actionKey: edge.id,
+      toolName: edge.action.tool as JevFastAction['toolName'],
+      args: grounded.args,
+      description: edge.g,
+      confidence: decision.confidence,
+      operationConfidence: decision.confidence,
+      targetConfidence: null,
+    };
+    const failuresBefore = this.state.failedToolNames.length;
+    const outcome = await this.processTool(iter, persist, action, {
+      skipApproval: true,
+    });
+    if (outcome.kind === 'cancelled') return outcome;
+    if (outcome.kind === 'complete') {
+      this.state.jevLoop.executedEdges.push(edge.id);
+      return { kind: 'skipped', reason: 'complete-tool', latencyMs };
+    }
+    if (this.state.failedToolNames.length > failuresBefore) {
+      this.addBlockedEdge(edge.id);
+      this.traceEdgeHandoff(iter, 'edge-tool-failed', edge.action.tool);
+      return { kind: 'skipped', reason: 'edge-tool-failed', latencyMs };
+    }
+    const observed = await this.observePage(iter, persist);
+    if (observed.kind === 'cancelled') return observed;
+
+    this.state.jevLoop.executedEdges = [
+      ...new Set([...this.state.jevLoop.executedEdges, edge.id]),
+    ].slice(-64);
+    this.state.jevLoop.fastActions += 1;
+    this.state.jevLoop.consecutiveFastActions += 1;
+    this.state.jevLoop.planActions += 1;
+    this.state.jevLoop.lastOutcome = 'edge-act';
+    return {
+      kind: 'act',
+      decisions: [action],
+      latencyMs,
+      toolOutcomes: [outcome, observed],
+    };
+  }
+
   private noteFastAction(
     signature: string,
     sameActionStreak: number,
@@ -518,7 +824,8 @@ export class JevFastController {
   private async processTool(
     iter: number,
     persist: (extra: Record<string, unknown>) => Promise<unknown>,
-    action: JevFastAction
+    action: JevFastAction,
+    options: { skipApproval?: boolean } = {}
   ): Promise<ToolBatchOutcome> {
     const callId = 'jev-' + iter + '-' + (++this.toolSequence);
     const toolCall = {
@@ -548,6 +855,7 @@ export class JevFastController {
       assistantMessage,
       toolCalls: [toolCall],
       lane: 'fast',
+      ...(options.skipApproval ? { skipApproval: true } : {}),
     }, iter, persist);
   }
 
@@ -600,6 +908,8 @@ export class JevFastController {
     detail = ''
   ): void {
     this.lastBlockedRoute = this.currentRouteKey();
+    this.state.jevLoop.handoffReasons[reason] =
+      (this.state.jevLoop.handoffReasons[reason] || 0) + 1;
     this.state.trace({
       phase: 'jev-handoff',
       iter,

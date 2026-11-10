@@ -14,6 +14,11 @@ import { initTargetManager } from '../lib/application/agent/target-manager.ts';
 import { logError } from '../lib/shared/text.ts';
 import { isOperableUrl } from '../lib/shared/url.ts';
 import { normalizeHistory } from '../lib/application/agent/context.ts';
+import {
+  deleteStoredTraceGraph,
+  deleteStoredTraceGraphSelection,
+  rebuildStoredTraceGraphs,
+} from '../lib/application/agent/tracegraph-store.ts';
 import { saveHandoff, getHandoff, listHandoffs } from '../lib/shared/handoff-store.ts';
 import { loadAgentSession } from '../lib/application/agent/session-store.ts';
 import {
@@ -479,6 +484,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'getTabId') {
     sendResponse({ tabId: sender.tab ? sender.tab.id : null });
     return false;
+  }
+  if (msg && msg.type === 'tracegraph:rebuild') {
+    rebuildStoredTraceGraphs()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error?.message || String(error) })
+      );
+    return true;
+  }
+  if (msg && msg.type === 'tracegraph:delete-site') {
+    deleteStoredTraceGraph(String(msg.siteKey || ''))
+      .then((deleted) => sendResponse({ ok: true, deleted }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error?.message || String(error) })
+      );
+    return true;
+  }
+  if (msg && msg.type === 'tracegraph:delete-selection') {
+    deleteStoredTraceGraphSelection(
+      String(msg.siteKey || ''),
+      msg.selection && typeof msg.selection === 'object'
+        ? msg.selection
+        : {}
+    )
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) =>
+        sendResponse({ ok: false, error: error?.message || String(error) })
+      );
+    return true;
   }
   if (msg && msg.type === 'ai') {
     handleAi(msg.payload || msg)

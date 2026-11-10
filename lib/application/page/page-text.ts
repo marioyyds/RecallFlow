@@ -150,6 +150,8 @@ export interface PageSnapshot {
     forms: number;
     headings: number;
   };
+  /** `2078/65535` 等结构化计数证据；供动作后置断言使用。 */
+  counters?: Record<string, number>;
   scroll?: { x: number; y: number; height: number; viewport: number };
   /** 由 hashSnapshot 事后补上（构造时先不给，避免多出一个空串字段） */
   fingerprint?: string;
@@ -178,6 +180,19 @@ export interface PageRuntimeState {
 // 不需要走入文本的标签。
 const TEXT_SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'IFRAME', 'SVG', 'CANVAS']);
 const BLOCKISH_DISPLAY = /^(block|flex|grid|list-item|table|table-row|table-cell|table-caption|flow-root)$/;
+
+function extractSnapshotCounters(text: string): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  for (const match of String(text || '').matchAll(/(?:^|[\s(（])([^\s:：/]{1,40})\s*[:：]?\s*(\d+)\s*\/\s*(\d+)/g)) {
+    const name = String(match[1] || '')
+      .replace(/[^\p{L}\p{N}_-]+/gu, '')
+      .toLowerCase();
+    if (!name) continue;
+    out[name] = Number(match[2]);
+    out[name + 'Max'] = Number(match[3]);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 function isHiddenForText(el: Element, computedStyle: CSSStyleDeclaration | null): boolean {
   try {
@@ -1192,6 +1207,7 @@ export function extractPageSnapshot(
         forms: document.forms ? document.forms.length : 0,
         headings: document.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
       },
+      counters: extractSnapshotCounters(fullText),
       scroll: {
         x: Math.round(window.scrollX || 0),
         y: Math.round(window.scrollY || 0),

@@ -64,18 +64,10 @@ function pageSnapshot(overrides = {}) {
 }
 
 function choice(ids, selected, confidence = 0.95) {
-  const others = ids.filter((id) => id !== selected);
-  const rest = others.length ? (1 - confidence) / others.length : 0;
   return {
     type: 'choice',
     choice: selected,
     confidence,
-    probabilities: Object.fromEntries(
-      ids.map((id) => [
-        id,
-        id === selected ? (others.length ? confidence : 1) : rest,
-      ])
-    ),
   };
 }
 
@@ -177,7 +169,6 @@ test('高置信 CLICK 只消费 click_target，不依赖 TYPE_TEXT target', () =
   response.answers[JEV_TYPE_TEXT_TARGET_QUESTION] = {
     choice: 'invented',
     confidence: 0.1,
-    probabilities: Object.fromEntries(Object.keys(bundle.targets.TYPE_TEXT).map((key) => [key, 0.1])),
   };
   const decision = interpretJevFastDecision(response, bundle);
   assert.equal(decision.kind, 'act');

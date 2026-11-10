@@ -2,12 +2,28 @@
 
 ## 定位
 
-RecallFlow 使用 TypeSafe 的远程 JEV 作为浏览器内循环控制器，而不是每一步执行前的“是否移交”分类器。
+RecallFlow 使用远程 JEV 的 `/systemone` 协议作为浏览器内循环控制器，而不是每一步执行前的“是否移交”分类器。兼容 TypeSafe，也接受阿里云 MaaS 这一类完整 endpoint。
 
-- `POST /v1/systemone`：一次请求评估当前页面的 operation 和所有 operation-specific target head。
-- `GET /v1/models`：列出当前凭据可用的模型。
+- `POST <systemone endpoint>`：一次请求评估当前页面的 operation 和所有 operation-specific target head。
+- `GET <models endpoint>`：列出当前凭据可用的模型；设置页连接测试使用该路径。
 - JEV 不生成聊天回复，也不生成字段文本。
 - 研究、规划、正文生成和最终验证由慢思考负责。
+
+设置里的 API 地址可以填基础 origin、以 `/v1` 或 `/compatible-mode/v1` 结尾的
+base URL，也可以直接粘贴完整的 `/systemone` URL；客户端不会重复拼接路径。
+例如阿里云 MaaS：
+
+```text
+https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone
+```
+
+该 provider 按 curl 示例发送原始 `Authorization: <DASHSCOPE_API_KEY>`；TypeSafe
+保持 `Authorization: Bearer <key>`。如果 API Key 已自带 `Bearer ` 前缀，客户端
+不会重复添加。
+
+设置页的连接测试先检查通用 `/models` 目录；如果专用模型（例如
+`decision-model-preview`）没有出现在目录中，会再发一个最小 `noul` System One
+请求验证实际路由。只有该探测也失败时，才报告当前模型不可用。
 
 实现参考 `browser-use/jev-ultrafast` 的 operation + target、speculative fan-out 和确定性页面守卫。
 
@@ -40,8 +56,8 @@ RecallFlow 使用 TypeSafe 的远程 JEV 作为浏览器内循环控制器，而
 代码级校验包括：
 
 - operation 与 target 必须在本次请求的候选集合中；
-- choice 必须是概率最大的候选项；
-- 概率总和必须为 1（允许 API 浮点误差）；
+- choice 必须是本次请求允许的候选项之一；
+- confidence 必须是 `[0, 1]` 内的有限数字，并用于对应动作或 edge 的门限判断；
 - operation 和匹配 target 均需达到动作类型对应的置信度；
 - target 只能映射到已观察的 ref，不接受模型生成的 selector、坐标或 JavaScript。
 

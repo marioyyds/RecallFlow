@@ -610,6 +610,16 @@
   }
   var TEXT_SKIP_TAGS = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "IFRAME", "SVG", "CANVAS"]);
   var BLOCKISH_DISPLAY = /^(block|flex|grid|list-item|table|table-row|table-cell|table-caption|flow-root)$/;
+  function extractSnapshotCounters(text) {
+    const out = {};
+    for (const match of String(text || "").matchAll(/(?:^|[\s(（])([^\s:：/]{1,40})\s*[:：]?\s*(\d+)\s*\/\s*(\d+)/g)) {
+      const name = String(match[1] || "").replace(/[^\p{L}\p{N}_-]+/gu, "").toLowerCase();
+      if (!name) continue;
+      out[name] = Number(match[2]);
+      out[name + "Max"] = Number(match[3]);
+    }
+    return Object.keys(out).length ? out : void 0;
+  }
   function isHiddenForText(el, computedStyle) {
     try {
       const cs = computedStyle || window.getComputedStyle(el);
@@ -1440,6 +1450,7 @@
           forms: document.forms ? document.forms.length : 0,
           headings: document.querySelectorAll("h1,h2,h3,h4,h5,h6").length
         },
+        counters: extractSnapshotCounters(fullText),
         scroll: {
           x: Math.round(window.scrollX || 0),
           y: Math.round(window.scrollY || 0),
@@ -4206,11 +4217,20 @@
     maxConsecutiveActions: 12,
     maxRepeatedActionsWithoutProgress: 3,
     maxElementCandidates: 40,
+    minEdgeConfidence: 0.8,
+    // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
+    // these remain for the non-TraceGraph JEV fallback.
     minReadConfidence: 0.6,
     minActionConfidence: 0.8,
     minClickConfidence: 0.86,
     minWaitConfidence: 0.5,
     minTargetOperationConfidence: 0.75
+  });
+  var TRACE_GRAPH_SETTINGS_DEFAULTS = Object.freeze({
+    enabled: false,
+    mode: "record",
+    shadowMode: true,
+    ttlMs: 30 * 60 * 1e3
   });
   var AI_SETTINGS_DEFAULTS = {
     apiKey: "",
@@ -4259,7 +4279,8 @@
     // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
     // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
     bridgeToken: "recallflow-local-bridge-v1",
-    jev: JEV_SETTINGS_DEFAULTS
+    jev: JEV_SETTINGS_DEFAULTS,
+    traceGraph: TRACE_GRAPH_SETTINGS_DEFAULTS
   };
   function hasChatModelConfig(settings) {
     return Boolean(
@@ -4300,6 +4321,11 @@
       const value = Number(raw[key]);
       return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : Number(JEV_SETTINGS_DEFAULTS[key]);
     };
+    const legacyEdgeThreshold = Math.max(
+      Number.isFinite(Number(raw.minActionConfidence)) ? Math.max(0, Math.min(1, Number(raw.minActionConfidence))) : JEV_SETTINGS_DEFAULTS.minActionConfidence,
+      Number.isFinite(Number(raw.minTargetOperationConfidence)) ? Math.max(0, Math.min(1, Number(raw.minTargetOperationConfidence))) : JEV_SETTINGS_DEFAULTS.minTargetOperationConfidence
+    );
+    const minEdgeConfidence = Number.isFinite(Number(raw.minEdgeConfidence)) ? boundedProbability("minEdgeConfidence") : legacyEdgeThreshold;
     return {
       enabled: raw.enabled === true,
       baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
@@ -4317,11 +4343,22 @@
         10
       ),
       maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
+      minEdgeConfidence,
       minReadConfidence: boundedProbability("minReadConfidence"),
       minActionConfidence: boundedProbability("minActionConfidence"),
       minClickConfidence: boundedProbability("minClickConfidence"),
       minWaitConfidence: boundedProbability("minWaitConfidence"),
       minTargetOperationConfidence: boundedProbability("minTargetOperationConfidence")
+    };
+  }
+  function mergeTraceGraphSettings(saved) {
+    const raw = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+    const ttl = Number(raw.ttlMs);
+    return {
+      enabled: raw.enabled === true,
+      mode: raw.mode === "live" ? "live" : "record",
+      shadowMode: raw.shadowMode !== false,
+      ttlMs: Number.isFinite(ttl) && ttl > 0 ? Math.min(Math.floor(ttl), 24 * 60 * 60 * 1e3) : TRACE_GRAPH_SETTINGS_DEFAULTS.ttlMs
     };
   }
   async function updateAISettings(patch) {
@@ -4333,6 +4370,11 @@
       const incoming = patch.jev && typeof patch.jev === "object" && !Array.isArray(patch.jev) ? patch.jev : {};
       next.jev = mergeJevSettings(Object.assign({}, current, incoming));
     }
+    if (patch && Object.prototype.hasOwnProperty.call(patch, "traceGraph")) {
+      const current = saved && typeof saved === "object" && saved.traceGraph && typeof saved.traceGraph === "object" ? saved.traceGraph : {};
+      const incoming = patch.traceGraph && typeof patch.traceGraph === "object" && !Array.isArray(patch.traceGraph) ? patch.traceGraph : {};
+      next.traceGraph = mergeTraceGraphSettings(Object.assign({}, current, incoming));
+    }
     await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
     return Object.assign({}, AI_SETTINGS_DEFAULTS, next);
   }
@@ -4341,6 +4383,7 @@
     const saved = d[AI_SETTINGS_KEY] || {};
     const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved);
     merged.jev = mergeJevSettings(saved.jev);
+    merged.traceGraph = mergeTraceGraphSettings(saved.traceGraph);
     if (Array.isArray(saved.quickPrompts)) {
       merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);
     }

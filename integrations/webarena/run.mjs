@@ -35,6 +35,24 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MCP_DIR = path.join(ROOT, 'integrations', 'opencode', 'recallflow-mcp');
+const DEFAULT_MIN_FREE_GB = 8;
+
+function remainingDiskBytes(targetDir) {
+  try {
+    const stats = fs.statfsSync(targetDir);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function minimumFreeBytes() {
+  const configured = Number(process.env.RECALLFLOW_EVAL_MIN_FREE_GB);
+  const gigabytes = Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_MIN_FREE_GB;
+  return gigabytes * 1024 ** 3;
+}
 
 const HELP = `RecallFlow × WebArena-Verified 评测编排器
 
@@ -200,11 +218,27 @@ async function runOne({ raw, opts, client, settings, outDir, workerLabel = '' })
     if (task.sites.includes('reddit') && opts.redditState && fs.existsSync(opts.redditState)) states.push(opts.redditState);
     context = await launchBrowser({ userDataDir: opts.profileDir || '', harPath, extPath: opts.extPath || undefined, extraHTTPHeaders: opts.headers, storageState: states });
     // 先做会话 preflight，再把墙钟预算写进扩展设置（预算从 agent 真正开工时算）。
-    await prepareSiteLogin(context, task.sites, opts.logins || {}, opts.siteUrls || {});
+    await prepareSiteLogin(context, task.sites, opts.logins || {}, opts.siteUrls || {}, {
+      requireLogin: raw.require_login === true,
+    });
     const timeoutMs = Number(opts.timeoutMs) || 300000;
     const { deadlineAt, wrapUpAt } = deadlineForTask({ timeoutMs, startedMs: Date.now() });
     const taskSettings = Object.assign({}, settings, { deadlineAt, wrapUpAt });
-    await configureExtension(context, taskSettings);
+    if (
+      originalMode &&
+      task.eval &&
+      task.eval.reference_answers &&
+      Object.prototype.hasOwnProperty.call(task.eval.reference_answers, 'exact_match')
+    ) {
+      taskSettings.requireBareFinalAnswer = true;
+    }
+    await configureExtension(context, taskSettings, {
+      preserveTraceGraph: opts.preserveTraceGraph === true,
+      seedTraceGraph:
+        opts.traceGraphSeedPath && fs.existsSync(opts.traceGraphSeedPath)
+          ? JSON.parse(fs.readFileSync(opts.traceGraphSeedPath, 'utf8'))
+          : null,
+    });
     await client.waitForExtension(60000);
     const opened = await client.openTab(task.startUrls[0]);
     if (!opened || opened.ok === false) throw new Error('open_tab 失败：' + JSON.stringify(opened));
@@ -463,7 +497,12 @@ async function main() {
     model: process.env.RECALLFLOW_EVAL_MODEL || process.env.RECALLFLOW_WEBARENA_MODEL,
     bridgeToken,
     jev: process.env.RECALLFLOW_EVAL_JEV_SETTINGS || null,
+    traceGraph: process.env.RECALLFLOW_EVAL_TRACEGRAPH_SETTINGS || null,
   });
+  const preserveTraceGraph = /^(1|true|yes)$/i.test(
+    String(process.env.RECALLFLOW_EVAL_PRESERVE_TRACEGRAPH || '')
+  );
+  const traceGraphSeedPath = process.env.RECALLFLOW_EVAL_TRACEGRAPH_SEED || '';
   if (opts.taskFormat === 'original') settings.requireFinalJsonBlock = false;
 
   // 需要登录的站点凭据（公开数据集不再带 storage_state；按站点登录一次）。
@@ -528,6 +567,17 @@ async function main() {
         else resolve();
       };
       const pump = () => {
+        const freeBytes = remainingDiskBytes(outDir);
+        const minFreeBytes = minimumFreeBytes();
+        if (freeBytes < minFreeBytes) {
+          if (activeTasks === 0) {
+            finish(new Error(
+              '磁盘可用空间低于安全阈值：' + Math.floor(freeBytes / 1024 ** 3) +
+              ' GB < ' + Math.round(minFreeBytes / 1024 ** 3) + ' GB；已在启动新任务前停止'
+            ));
+          }
+          return;
+        }
         let launched;
         do {
           launched = false;
@@ -544,7 +594,14 @@ async function main() {
             process.stdout.write('\n[' + worker.label + '] ▶ task ' + taskId + '（账号锁：' + scope.join('+') + '）\n');
             runOne({
               raw,
-              opts: Object.assign({}, opts, { allowRisk, logins, shoppingState, redditState }),
+              opts: Object.assign({}, opts, {
+                allowRisk,
+                logins,
+                shoppingState,
+                redditState,
+                preserveTraceGraph,
+                traceGraphSeedPath,
+              }),
               client: worker.client,
               settings: worker.settings,
               outDir,

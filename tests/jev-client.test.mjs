@@ -4,9 +4,11 @@ import assert from 'node:assert/strict';
 import {
   JevClientError,
   callJevSystemOne,
+  jevAuthorizationHeader,
   jevModelsUrl,
   jevSystemOneUrl,
   listJevModels,
+  probeJevConnection,
 } from '../lib/application/agent/jev-client.ts';
 import {
   JevProtocolError,
@@ -39,6 +41,109 @@ test('TypeSafe URL 使用固定 OpenAPI 路径且拒绝非本机 HTTP', () => {
   );
 });
 
+test('JEV URL 兼容完整 systemone 与 compatible-mode 基础地址', () => {
+  const endpoint =
+    'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone';
+  assert.equal(jevSystemOneUrl({ baseUrl: endpoint }), endpoint);
+  assert.equal(jevModelsUrl({ baseUrl: endpoint }),
+    'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models');
+  assert.equal(
+    jevSystemOneUrl({
+      baseUrl: 'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    }),
+    endpoint
+  );
+  assert.equal(
+    jevSystemOneUrl({
+      baseUrl: 'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode',
+    }),
+    endpoint
+  );
+});
+
+test('阿里云 MaaS 使用原始 Authorization，TypeSafe 保持 Bearer', () => {
+  const endpoint =
+    'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone';
+  assert.equal(
+    jevAuthorizationHeader({ baseUrl: endpoint, apiKey: 'dashscope-secret' }),
+    'dashscope-secret'
+  );
+  assert.equal(
+    jevAuthorizationHeader({
+      baseUrl: 'https://api.typesafe.ai',
+      apiKey: 'typesafe-secret',
+    }),
+    'Bearer typesafe-secret'
+  );
+  assert.equal(
+    jevAuthorizationHeader({ baseUrl: endpoint, apiKey: 'Bearer already-prefixed' }),
+    'Bearer already-prefixed'
+  );
+});
+
+test('阿里云 MaaS 完整 systemone 请求原样发送 state/questions 与原始 token', async () => {
+  let captured;
+  const endpoint =
+    'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone';
+  const request = {
+    model: 'decision-model-preview',
+    state: {
+      ticket_id: 'T-1001',
+      content: '订单支付后超过 24 小时仍未到账',
+    },
+    questions: {
+      department: {
+        type: 'choice',
+        instructions: '应该由哪个团队处理？',
+        criteria: { billing: '支付、退款和账单问题', technical: '产品故障和集成问题' },
+      },
+      escalate: {
+        type: 'noul',
+        instructions: '是否需要立即通知值班人员？',
+      },
+      severity: {
+        type: 'score',
+        instructions: '这个问题有多严重？',
+        criteria: ['轻微', '部分受影响', '核心不可用', '严重业务影响'],
+      },
+    },
+  };
+  const result = await callJevSystemOne({
+    ...settings,
+    baseUrl: endpoint,
+    apiKey: 'dashscope-secret',
+  }, request, {
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return response({
+        model: 'decision-model-preview',
+        answers: {
+          department: {
+            type: 'choice',
+            choice: 'billing',
+            confidence: 0.96,
+          },
+          escalate: { type: 'noul', noul: 0.91 },
+          severity: {
+            type: 'score',
+            score: 2,
+            confidence: 0.89,
+            legend: { 0: '轻微', 1: '部分受影响', 2: '核心不可用', 3: '严重业务影响' },
+            probabilities: { 0: 0.02, 1: 0.04, 2: 0.89, 3: 0.05 },
+          },
+        },
+        usage: { input_tokens: 20, output_tokens: 5 },
+      });
+    },
+  });
+  assert.equal(captured.url, endpoint);
+  assert.equal(captured.init.headers.Authorization, 'dashscope-secret');
+  assert.deepEqual(JSON.parse(captured.init.body), request);
+  assert.equal(result.answers.department.choice, 'billing');
+  assert.equal(result.answers.escalate.noul, 0.91);
+  assert.equal(result.answers.severity.score, 2);
+});
+
 test('System One 请求携带认证与结构化问题，并解析 choice 答案', async () => {
   let captured;
   const fetchImpl = async (url, init) => {
@@ -50,7 +155,6 @@ test('System One 请求携带认证与结构化问题，并解析 choice 答案'
           type: 'choice',
           choice: 'read_table',
           confidence: 0.91,
-          probabilities: { read_table: 0.91, escalate: 0.09 },
         },
       },
       usage: { input_tokens: 42, output_tokens: 3 },
@@ -123,11 +227,84 @@ test('模型列表探测解析 TypeSafe 返回结构', async () => {
   assert.equal(result.models[0].name, 'jev-latest');
 });
 
+test('模型列表兼容 OpenAI/MaaS 的 data[].id 结构', async () => {
+  let authorization = '';
+  const result = await listJevModels({
+    ...settings,
+    baseUrl:
+      'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone',
+  }, {
+    fetchImpl: async (_url, init) => {
+      authorization = init.headers.Authorization;
+      return response({
+        object: 'list',
+        data: [{ id: 'decision-model-preview', owned_by: 'aliyun' }],
+      });
+    },
+  });
+  assert.equal(authorization, 'test-secret');
+  assert.equal(result.models[0].name, 'decision-model-preview');
+});
+
+test('专用 systemone 模型不在通用目录时，用最小探测确认实际可用', async () => {
+  const calls = [];
+  const endpoint =
+    'https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone';
+  const probe = await probeJevConnection({
+    ...settings,
+    baseUrl: endpoint,
+    apiKey: 'dashscope-secret',
+    model: 'decision-model-preview',
+  }, {
+    fetchImpl: async (url, init) => {
+      calls.push({ url, method: init.method, authorization: init.headers.Authorization });
+      if (url.endsWith('/models')) {
+        return response({
+          object: 'list',
+          data: [{ id: 'kimi-k3.1-pro' }, { id: 'qwen3.8-max' }],
+        });
+      }
+      const body = JSON.parse(init.body);
+      assert.equal(body.model, 'decision-model-preview');
+      assert.equal(body.questions.reachable.type, 'noul');
+      return response({
+        model: 'decision-model-preview',
+        answers: { reachable: { type: 'noul', noul: 0.99 } },
+        usage: { input_tokens: 4, output_tokens: 1 },
+      });
+    },
+  });
+  assert.equal(probe.modelListed, false);
+  assert.equal(probe.systemOneVerified, true);
+  assert.deepEqual(calls.map((item) => item.method), ['GET', 'POST']);
+  assert.equal(calls[1].url, endpoint);
+  assert.equal(calls[1].authorization, 'dashscope-secret');
+});
+
+test('目录已列出当前模型时连接探测不再额外调用 systemone', async () => {
+  let calls = 0;
+  const probe = await probeJevConnection({
+    ...settings,
+    model: 'qwen3.8-max',
+  }, {
+    fetchImpl: async () => {
+      calls += 1;
+      return response({
+        object: 'list',
+        data: [{ id: 'qwen3.8-max' }],
+      });
+    },
+  });
+  assert.equal(probe.modelListed, true);
+  assert.equal(probe.systemOneVerified, false);
+  assert.equal(calls, 1);
+});
+
 test('协议校验拒绝缺失、越界和类型不匹配的答案', () => {
   assert.throws(
     () => parseJevSystemOneResponse({
       model: 'jev-latest',
-      answers: { action: { type: 'choice', choice: 'read_table', confidence: 1.2, probabilities: {} } },
+      answers: { action: { type: 'choice', choice: 'read_table', confidence: 1.2 } },
       usage: { input_tokens: 1, output_tokens: 1 },
     }),
     JevProtocolError
@@ -147,5 +324,39 @@ test('协议校验拒绝缺失、越界和类型不匹配的答案', () => {
       usage: { input_tokens: 1, output_tokens: 1 },
     }, { action: { type: 'choice', criteria: { read_table: 'read' } } }),
     JevProtocolError
+  );
+});
+
+test('System One usage 兼容数字字符串、OpenAI 字段名与省略 usage', () => {
+  const questions = { ok: { type: 'noul' } };
+  const stringly = parseJevSystemOneResponse({
+    model: 'decision-model-preview',
+    answers: { ok: { type: 'noul', noul: 0.9 } },
+    usage: { input_tokens: '12', output_tokens: '3' },
+  }, questions);
+  assert.deepEqual(stringly.usage, { input_tokens: 12, output_tokens: 3 });
+
+  const openai = parseJevSystemOneResponse({
+    model: 'decision-model-preview',
+    answers: { ok: { type: 'noul', noul: 0.9 } },
+    usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24 },
+  }, questions);
+  assert.deepEqual(openai.usage, { input_tokens: 20, output_tokens: 4 });
+
+  const missing = parseJevSystemOneResponse({
+    model: 'decision-model-preview',
+    answers: { ok: { type: 'noul', noul: 0.9 } },
+  }, questions);
+  assert.deepEqual(missing.usage, { input_tokens: 0, output_tokens: 0 });
+
+  assert.throws(
+    () => parseJevSystemOneResponse({
+      model: 'decision-model-preview',
+      answers: { ok: { type: 'noul', noul: 0.9 } },
+      usage: { input_tokens: '12.5', output_tokens: 3 },
+    }, questions),
+    (error) =>
+      error instanceof JevProtocolError &&
+      error.message.includes('必须是非负整数')
   );
 });

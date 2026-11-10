@@ -11,7 +11,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { FINAL_JSON_RETRY_PROMPT, hasFinalJsonBlock, shouldRetryFinalJson } from '../lib/application/agent/agent.ts';
+import {
+  BARE_ANSWER_RETRY_PROMPT,
+  FINAL_JSON_RETRY_PROMPT,
+  hasFinalJsonBlock,
+  shouldRetryBareFinalAnswer,
+  shouldRetryFinalJson,
+} from '../lib/application/agent/agent.ts';
 import { webarenaSettings } from '../integrations/webarena/harness.mjs';
 
 test('hasFinalJsonBlock：围栏 JSON 与裸任务对象都算已有（但必须有 task_type/status）', () => {
@@ -53,4 +59,17 @@ test('补正提示：明确不重做任务、不新增事实，并保持原有�
   assert.match(FINAL_JSON_RETRY_PROMPT, /不要重新执行任务/);
   assert.match(FINAL_JSON_RETRY_PROMPT, /不要新增任何事实或结论/);
   assert.match(FINAL_JSON_RETRY_PROMPT, /不要包装成对象/);
+});
+
+test('shouldRetryBareFinalAnswer：只对显式 exact-match 且非裸答案触发一次', () => {
+  const settings = { requireBareFinalAnswer: true };
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: '答案：Red Shirt\n\nRed Shirt' }), true);
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: '答案是 Red Shirt' }), true);
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: '任务已完成：Red Shirt' }), true);
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: 'Red Shirt' }), false);
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: '', summary: '任务已完成：Red Shirt\n证据：...' }), true);
+  assert.equal(shouldRetryBareFinalAnswer({ settings, content: '答案\n第二行', alreadyRetried: true }), false);
+  assert.equal(shouldRetryBareFinalAnswer({ content: '答案\n第二行' }), false);
+  assert.match(BARE_ANSWER_RETRY_PROMPT, /不要重新执行任务/);
+  assert.match(BARE_ANSWER_RETRY_PROMPT, /只从上面的答复中保留已有的最终答案/);
 });

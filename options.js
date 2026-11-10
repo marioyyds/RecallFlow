@@ -21,11 +21,20 @@ var JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxConsecutiveActions: 12,
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
+  minEdgeConfidence: 0.8,
+  // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
+  // these remain for the non-TraceGraph JEV fallback.
   minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
   minWaitConfidence: 0.5,
   minTargetOperationConfidence: 0.75
+});
+var TRACE_GRAPH_SETTINGS_DEFAULTS = Object.freeze({
+  enabled: false,
+  mode: "record",
+  shadowMode: true,
+  ttlMs: 30 * 60 * 1e3
 });
 var AI_SETTINGS_DEFAULTS = {
   apiKey: "",
@@ -74,7 +83,8 @@ var AI_SETTINGS_DEFAULTS = {
   // 安全性取舍：默认值是公开的，本机任何进程都能用它冒充扩展、伪造证据快照；
   // 要收紧就在「设置页 → 桥接 Token」和 server 的 RECALLFLOW_BRIDGE_TOKEN 里同时换成长随机串。
   bridgeToken: "recallflow-local-bridge-v1",
-  jev: JEV_SETTINGS_DEFAULTS
+  jev: JEV_SETTINGS_DEFAULTS,
+  traceGraph: TRACE_GRAPH_SETTINGS_DEFAULTS
 };
 function mergeQuickPrompts(saved, defaults = AI_SETTINGS_DEFAULTS.quickPrompts, limit = QUICK_PROMPT_LIMIT) {
   const list = Array.isArray(saved) ? saved.map((item) => String(item || "").trim()).filter(Boolean) : [];
@@ -107,6 +117,11 @@ function mergeJevSettings(saved) {
     const value = Number(raw[key]);
     return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : Number(JEV_SETTINGS_DEFAULTS[key]);
   };
+  const legacyEdgeThreshold = Math.max(
+    Number.isFinite(Number(raw.minActionConfidence)) ? Math.max(0, Math.min(1, Number(raw.minActionConfidence))) : JEV_SETTINGS_DEFAULTS.minActionConfidence,
+    Number.isFinite(Number(raw.minTargetOperationConfidence)) ? Math.max(0, Math.min(1, Number(raw.minTargetOperationConfidence))) : JEV_SETTINGS_DEFAULTS.minTargetOperationConfidence
+  );
+  const minEdgeConfidence = Number.isFinite(Number(raw.minEdgeConfidence)) ? boundedProbability("minEdgeConfidence") : legacyEdgeThreshold;
   return {
     enabled: raw.enabled === true,
     baseUrl: stringValue("baseUrl", JEV_SETTINGS_DEFAULTS.baseUrl).replace(/\/+$/, ""),
@@ -124,11 +139,22 @@ function mergeJevSettings(saved) {
       10
     ),
     maxElementCandidates: boundedInteger("maxElementCandidates", 5, 100),
+    minEdgeConfidence,
     minReadConfidence: boundedProbability("minReadConfidence"),
     minActionConfidence: boundedProbability("minActionConfidence"),
     minClickConfidence: boundedProbability("minClickConfidence"),
     minWaitConfidence: boundedProbability("minWaitConfidence"),
     minTargetOperationConfidence: boundedProbability("minTargetOperationConfidence")
+  };
+}
+function mergeTraceGraphSettings(saved) {
+  const raw = saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+  const ttl = Number(raw.ttlMs);
+  return {
+    enabled: raw.enabled === true,
+    mode: raw.mode === "live" ? "live" : "record",
+    shadowMode: raw.shadowMode !== false,
+    ttlMs: Number.isFinite(ttl) && ttl > 0 ? Math.min(Math.floor(ttl), 24 * 60 * 60 * 1e3) : TRACE_GRAPH_SETTINGS_DEFAULTS.ttlMs
   };
 }
 function resolveCodeExecutionApproval(settings) {
@@ -141,6 +167,7 @@ async function getAISettings() {
   const saved = d[AI_SETTINGS_KEY] || {};
   const merged = Object.assign({}, AI_SETTINGS_DEFAULTS, saved);
   merged.jev = mergeJevSettings(saved.jev);
+  merged.traceGraph = mergeTraceGraphSettings(saved.traceGraph);
   if (Array.isArray(saved.quickPrompts)) {
     merged.quickPrompts = mergeQuickPrompts(saved.quickPrompts);
   }
@@ -237,10 +264,42 @@ async function saveScript(script) {
 }
 
 // lib/shared/surrogates.ts
+var REPLACEMENT = "\uFFFD";
 var isHigh = (c) => c >= 55296 && c <= 56319;
 var isLow = (c) => c >= 56320 && c <= 57343;
-function alignRange(text2, start, end) {
-  const s = String(text2 === void 0 || text2 === null ? "" : text2);
+function loneSurrogateIndexes(text3) {
+  const s = String(text3 === void 0 || text3 === null ? "" : text3);
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (isHigh(c)) {
+      const next = s.charCodeAt(i + 1);
+      if (isLow(next)) {
+        i += 1;
+      } else {
+        out.push(i);
+      }
+    } else if (isLow(c)) {
+      out.push(i);
+    }
+  }
+  return out;
+}
+function sanitizeLoneSurrogates(text3, replacement = REPLACEMENT) {
+  if (typeof text3 !== "string" || !text3) return text3;
+  const idx = loneSurrogateIndexes(text3);
+  if (!idx.length) return text3;
+  const rep = String(replacement);
+  let out = "";
+  let prev = 0;
+  for (const i of idx) {
+    out += text3.slice(prev, i) + rep;
+    prev = i + 1;
+  }
+  return out + text3.slice(prev);
+}
+function alignRange(text3, start, end) {
+  const s = String(text3 === void 0 || text3 === null ? "" : text3);
   const len = s.length;
   const clamp = (v, fallback) => {
     if (v === void 0 || v === null) return fallback;
@@ -255,13 +314,13 @@ function alignRange(text2, start, end) {
   if (b > 0 && b < len && isLow(s.charCodeAt(b)) && isHigh(s.charCodeAt(b - 1))) b -= 1;
   return { start: a, end: b };
 }
-function sliceSafe(text2, start, end) {
-  const s = String(text2 === void 0 || text2 === null ? "" : text2);
+function sliceSafe(text3, start, end) {
+  const s = String(text3 === void 0 || text3 === null ? "" : text3);
   const { start: a, end: b } = alignRange(s, start, end);
   return s.slice(a, b);
 }
-function rangeSafe(text2, start, end) {
-  const s = String(text2 === void 0 || text2 === null ? "" : text2);
+function rangeSafe(text3, start, end) {
+  const s = String(text3 === void 0 || text3 === null ? "" : text3);
   const { start: a, end: b } = alignRange(s, start, end);
   return { start: a, end: b, text: s.slice(a, b), length: s.length };
 }
@@ -293,8 +352,8 @@ function formatCurrentPageResult(input) {
     return head + "\u8FD9\u662F\u300C\u6587\u6848\u53EF\u89C1\u6027\u6838\u67E5\u300D\u7684\u7ED3\u679C\uFF0C**\u4E0D\u542B\u9875\u9762\u6B63\u6587**\u3002\u5982\u9700\u6B63\u6587\uFF0C\u8BF7\u518D\u6B21\u8C03\u7528 read_current_page \u4E14\u4E0D\u8981\u4F20 checkTexts\u3002\n\n" + vis;
   }
   const chunks = Array.isArray(o.chunks) ? o.chunks : [];
-  const text2 = String(o.text || "");
-  let out = head + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text2);
+  const text3 = String(o.text || "");
+  let out = head + "\u5F53\u524D\u9875\u9762\u6B63\u6587\uFF1A\n" + (chunks.length > 1 ? chunks.join("\n\n") : text3);
   if (vis) out += "\n\n" + vis;
   if (o.visibleOnly === true) {
     out += "\n\n\uFF08\u672C\u6B21\u4EC5\u8FD4\u56DE\u6309\u53EF\u89C1\u6027\u8FC7\u6EE4\u540E\u7684\u6587\u672C\uFF1B\u5982\u9700\u5305\u542B\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u53BB\u6389 visibleOnly\u3002\uFF09";
@@ -310,14 +369,14 @@ function projectSnapshotElementForModel(element) {
 }
 function projectSnapshotForModel(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return snapshot;
-  const { text: text2, elements, runtime, ...rest } = snapshot;
+  const { text: text3, elements, runtime, ...rest } = snapshot;
   const projected = {};
   if (Array.isArray(elements)) {
     projected.elements = elements.map(projectSnapshotElementForModel);
   }
   if (runtime !== void 0) projected.runtime = runtime;
   Object.assign(projected, rest);
-  if (typeof text2 === "string") projected.text = text2;
+  if (typeof text3 === "string") projected.text = text3;
   return projected;
 }
 function trimElementsToBudget(described, textLength, budget = SNAPSHOT_CHAR_BUDGET) {
@@ -484,9 +543,9 @@ function cleanTitle(title) {
   ).trim();
   return t;
 }
-function markdownExcerpt(text2, maxChars = 160) {
+function markdownExcerpt(text3, maxChars = 160) {
   const limit = Math.max(20, Number(maxChars) || 160);
-  let s = String(text2 || "");
+  let s = String(text3 || "");
   s = s.replace(/```[\s\S]*?```/g, " [\u4EE3\u7801\u5757] ");
   s = s.replace(/`([^`]+)`/g, "$1");
   s = s.replace(/!\[([^\]]*)\]\([^)]+\)/g, (match, alt) => alt || "[\u56FE\u7247]");
@@ -883,10 +942,10 @@ function parseUserscriptMetadata(code) {
   return Object.assign(meta, { valid: Boolean(meta.name) });
 }
 function hashId(...parts) {
-  const text2 = parts.join("|");
+  const text3 = parts.join("|");
   let hash = 5381;
-  for (let i = 0; i < text2.length; i += 1) {
-    hash = (hash << 5) + hash + text2.charCodeAt(i) >>> 0;
+  for (let i = 0; i < text3.length; i += 1) {
+    hash = (hash << 5) + hash + text3.charCodeAt(i) >>> 0;
   }
   return hash.toString(36);
 }
@@ -948,10 +1007,10 @@ async function searchGreasyFork(q) {
   const keyword = String(q || "").trim();
   if (!keyword) return [];
   const url = SEARCH_ENDPOINT + "?q=" + encodeURIComponent(keyword);
-  const text2 = await fetchText(url);
+  const text3 = await fetchText(url);
   let list = [];
   try {
-    list = JSON.parse(text2);
+    list = JSON.parse(text3);
   } catch (e) {
     throw new Error("GreasyFork \u8FD4\u56DE\u7684\u4E0D\u662F\u6709\u6548 JSON");
   }
@@ -1906,8 +1965,8 @@ function parseScalar(raw) {
   if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
   return s;
 }
-function parseSkillMd(text2) {
-  const str = String(text2 || "");
+function parseSkillMd(text3) {
+  const str = String(text3 || "");
   const m = str.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/);
   if (!m) {
     return { data: {}, body: str.trim() };
@@ -1932,8 +1991,8 @@ function parseSkillMd(text2) {
   }
   return { data, body };
 }
-function mdToSkill(text2) {
-  const { data, body } = parseSkillMd(text2);
+function mdToSkill(text3) {
+  const { data, body } = parseSkillMd(text3);
   const x = {
     intents: Array.isArray(data["x-recallflow-intents"]) ? data["x-recallflow-intents"] : [],
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
@@ -2244,8 +2303,8 @@ async function drag(tabId, x1, y1, x2, y2) {
   await command(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", x: Math.round(x2), y: Math.round(y2), button: "left", buttons: 0, clickCount: 1 });
   return { ok: true };
 }
-async function insertText(tabId, text2) {
-  await command(tabId, "Input.insertText", { text: String(text2 == null ? "" : text2) });
+async function insertText(tabId, text3) {
+  await command(tabId, "Input.insertText", { text: String(text3 == null ? "" : text3) });
   return { ok: true };
 }
 async function pressKey(tabId, key, modifiers) {
@@ -2600,6 +2659,130 @@ async function recallTrace(url, opts = {}) {
   if (ageMs >= maxAgeMs) return null;
   return { steps: rec.steps, updatedAt: Number(rec.updatedAt) || 0, ageMs, dropped: Number(rec.dropped) || 0 };
 }
+
+// lib/application/agent/macros.ts
+var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "type_text",
+  "press_key",
+  "select_option",
+  "check_box",
+  "scroll_page",
+  "wait_for_element",
+  "open_tab"
+]);
+async function macroSave(deps, args) {
+  const name = String(args && args.name || "").trim();
+  if (!name) return { ok: false, result: 'macro(op="save") \u9700\u8981 name\u3002' };
+  let trace = Array.isArray(deps.trace) ? deps.trace : [];
+  let fromPreviousRun = false;
+  let previousAgeMs = 0;
+  let previousDropped = 0;
+  if (!trace.length && typeof deps.recallTrace === "function") {
+    const last = await Promise.resolve().then(() => deps.recallTrace(deps.pageUrl)).catch(() => null);
+    if (last && Array.isArray(last.steps) && last.steps.length) {
+      trace = last.steps;
+      fromPreviousRun = true;
+      previousAgeMs = Number(last.ageMs) || 0;
+      previousDropped = Number(last.dropped) || 0;
+    }
+  }
+  const beforeFilter = trace.length;
+  trace = trace.filter((s) => s && typeof s.tool === "string" && s.args && typeof s.args === "object" && REPLAYABLE_TOOLS.has(s.tool));
+  const skipped = beforeFilter - trace.length;
+  if (!trace.length) {
+    return {
+      ok: false,
+      result: (skipped > 0 ? "\u8FD9\u4E00\u6279\u8F68\u8FF9\u91CC\u6709 " + skipped + " \u6B65\u90FD\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF08\u5DF2\u5254\u9664\uFF09\uFF0C\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u6B65\u9AA4\u3002\n" : "\u672C\u8F6E\u4EFB\u52A1\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u53EF\u91CD\u653E\u52A8\u4F5C\uFF0C\u672C\u7AD9\u70B9\u4E5F\u6CA1\u6709\u6700\u8FD1\u53EF\u6C89\u6DC0\u7684\u8F68\u8FF9\u3002\n") + "\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u4F1A\u88AB\u8BB0\u5F55\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + '\uFF08\u4E14\u9700\u8981\u62FF\u5230\u7A33\u5B9A\u7684 selector\uFF09\uFF1B`click_at`\uFF08\u5750\u6807\u70B9\u51FB\uFF09\u4E0E `run_javascript` **\u4E0D\u8FDB\u5B8F**\u3002\n\u8981\u6C89\u6DC0\u6210\u5B8F\uFF1A\u8BF7\u7528\u4E0A\u9762\u8FD9\u4E9B\u5DE5\u5177\u628A\u6D41\u7A0B\u5B8C\u6574\u505A\u4E00\u904D\uFF0C**\u505A\u5B8C\u7ACB\u523B** macro({op:"save", name:"\u2026"})\u3002'
+    };
+  }
+  const saved = await deps.saveMacro(deps.pageUrl, { name, description: args && args.description, steps: trace });
+  if (!saved) return { ok: false, result: "\u4FDD\u5B58\u5B8F\u5931\u8D25\uFF08\u7F3A\u5C11\u540D\u79F0\u6216\u6B65\u9AA4\uFF09\u3002" };
+  const source = fromPreviousRun ? "\u26A0 \u8FD9 " + saved.steps.length + " \u6B65\u6765\u81EA**\u4E0A\u4E00\u8F6E\u4EFB\u52A1**\u5728\u672C\u7AD9\u70B9\u7684\u8F68\u8FF9\uFF08\u7EA6 " + Math.max(1, Math.round(previousAgeMs / 6e4)) + " \u5206\u949F\u524D\uFF09\uFF0C\u4E0D\u662F\u672C\u8F6E\u3002" + (previousDropped > 0 ? "\u53E6\u6709 " + previousDropped + " \u6B65\u56E0\u8D85\u957F\u672A\u7EB3\u5165\u3002" : "") + '\u56DE\u653E\u524D\u8BF7\u5148\u6838\u5BF9\u6B65\u9AA4\u662F\u5426\u7B26\u5408\u9884\u671F\uFF08macro({op:"list"})\uFF0C\u6216\u5148\u8BD5\u8DD1\u4E00\u6B21\uFF09\u3002' : "";
+  const droppedNote = skipped > 0 ? "\uFF08\u53E6\u6709 " + skipped + " \u6B65\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF0C\u5DF2\u5254\u9664\uFF09" : "";
+  return {
+    ok: true,
+    result: "\u5DF2\u4FDD\u5B58\u5B8F\u300C" + saved.name + "\u300D\uFF08" + saved.steps.length + " \u6B65\uFF09\u3002" + droppedNote + source + '\u4EE5\u540E\u53EF\u7528 macro({op:"run", name:"' + saved.name + '"}) \u56DE\u653E\u3002'
+  };
+}
+async function macroList(deps) {
+  const macros = await deps.listMacros(deps.pageUrl);
+  if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
+  const text3 = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
+  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text3 };
+}
+async function macroRun(deps, args) {
+  const name = String(args && args.name || "").trim();
+  if (!name) return { ok: false, result: 'macro(op="run") \u9700\u8981 name\u3002' };
+  const macro = await deps.getMacro(deps.pageUrl, name);
+  if (!macro) {
+    let names = [];
+    try {
+      names = (await deps.listMacros(deps.pageUrl)).map((m) => m.name);
+    } catch (e) {
+    }
+    return {
+      ok: false,
+      result: "\u672A\u627E\u5230\u5B8F\u300C" + name + "\u300D\u3002" + (names.length ? "\u672C\u7AD9\u53EF\u7528\u7684\u5B8F\u540D\u5982\u4E0B\uFF0C\u8BF7\u7167\u6284 name \u7684\u503C\uFF08\u4E0D\u662F\u63CF\u8FF0\uFF09\uFF1A\n" + names.map((n) => "  - " + n).join("\n") : "\u672C\u7AD9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002")
+    };
+  }
+  const steps = Array.isArray(macro.steps) ? macro.steps : [];
+  if (!steps.length) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u6CA1\u6709\u6B65\u9AA4\u3002" };
+  const ctx = deps.ctx;
+  const log = [];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (!REPLAYABLE_TOOLS.has(s && s.tool)) {
+      const toolName = String(s && s.tool || "");
+      return {
+        ok: false,
+        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u8C03\u7528\u4E86\u4E0D\u5141\u8BB8\u56DE\u653E\u7684\u5DE5\u5177\u300C" + toolName + "\u300D\uFF0C\u5DF2\u505C\u6B62\u3002\n\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u53EF\u4EE5\u88AB\u5B8F\u56DE\u653E\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + "\u3002\n\u82E5\u786E\u5B9E\u9700\u8981\u8BE5\u64CD\u4F5C\uFF0C\u8BF7\u6539\u7528\u5BF9\u5E94\u7684\u5185\u7F6E\u5DE5\u5177\u5355\u72EC\u6267\u884C\uFF08\u9AD8\u98CE\u9669\u5DE5\u5177\u4ECD\u9700\u9010\u6B21\u5BA1\u6279\uFF09\u3002"
+      };
+    }
+    const stepValidation = deps.validateToolCall(s.tool, s.args || {});
+    if (!stepValidation.ok) {
+      return {
+        ok: false,
+        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u53C2\u6570\u975E\u6CD5\uFF1A" + stepValidation.error
+      };
+    }
+    let r;
+    try {
+      r = await deps.executeTool(s.tool, s.args, ctx);
+    } catch (e) {
+      r = { ok: false, result: e && e.message ? e.message : String(e) };
+    }
+    const failed = r && r.ok === false;
+    log.push("[" + (i + 1) + "/" + steps.length + "] " + s.tool + (failed ? " \u2717 " + String(r.result || "").slice(0, 120) : " \u2713"));
+    if (r && Number.isInteger(Number(r.targetTabId))) {
+      ctx.tabId = Number(r.targetTabId);
+      if (r.targetTab) {
+        ctx.pageUrl = r.targetTab.url || ctx.pageUrl;
+        ctx.pageTitle = r.targetTab.title || ctx.pageTitle;
+      }
+    }
+    if (failed) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u5728\u7B2C " + (i + 1) + " \u6B65\u5931\u8D25\uFF0C\u5DF2\u505C\u6B62\uFF1A\n" + log.join("\n") };
+  }
+  await deps.bumpMacroHits(deps.pageUrl, name).catch(() => {
+  });
+  return { ok: true, result: "\u5DF2\u56DE\u653E\u5B8F\u300C" + name + "\u300D\uFF08" + steps.length + " \u6B65\uFF09\uFF1A\n" + log.join("\n") };
+}
+var MACRO_OPS = ["save", "list", "run"];
+async function macroTool(deps, args) {
+  const op = String(args && args.op || "").trim();
+  if (!op) return { ok: false, result: "macro \u9700\u8981 op \u53C2\u6570\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+  if (op === "save") return await macroSave(deps, args);
+  if (op === "list") return await macroList(deps);
+  if (op === "run") return await macroRun(deps, args);
+  return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+}
+
+// lib/application/agent/trace-graph-types.ts
+var TRACE_GRAPH_KEY = "recallflow.tracegraph.v2";
+var TRACE_GRAPH_TTL_MS = 30 * 60 * 1e3;
+
+// lib/application/agent/tracegraph-store.ts
+var writeQueue = Promise.resolve();
 
 // lib/application/agent/target-manager.ts
 var state = /* @__PURE__ */ new Map();
@@ -3960,10 +4143,10 @@ async function searchWeb(query, maxResults = 6) {
 
 // lib/application/agent/page-action-verify.ts
 function buildActionVerification(observed, reason) {
-  const text2 = String(reason || "");
-  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text2 };
-  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text2 };
-  return { executed: true, verified: false, changed: false, reason: text2 };
+  const text3 = String(reason || "");
+  if (observed === "changed") return { executed: true, verified: true, changed: true, reason: text3 };
+  if (observed === "unchanged") return { executed: true, verified: true, changed: false, reason: text3 };
+  return { executed: true, verified: false, changed: false, reason: text3 };
 }
 function observedChange(before, after) {
   if (!after || typeof after.fingerprint !== "string") return "unobservable";
@@ -4064,7 +4247,7 @@ function compactSnapshotSummary(snapshot) {
     const label = e.label || e.placeholder || "";
     return e.ref + (label ? "\uFF1A" + sliceSafe(String(label), 0, 24) : "");
   }).join("\uFF1B") : "";
-  const text2 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
+  const text3 = sliceSafe(String(snapshot.text || "").replace(/\s+/g, " ").trim(), 0, 300);
   const runtime = snapshot.runtime && typeof snapshot.runtime === "object" ? snapshot.runtime : null;
   const media = runtime && Array.isArray(runtime.media) ? runtime.media.slice(0, 3).map((item) => {
     const state2 = item.paused === false ? "playing" : item.paused === true ? "paused" : "unknown";
@@ -4073,7 +4256,7 @@ function compactSnapshotSummary(snapshot) {
     return item.kind + " " + state2 + " " + progress + "/" + duration + "s" + (item.readyState == null ? "" : " ready=" + item.readyState) + (item.networkState == null ? "" : " net=" + item.networkState);
   }).join("\uFF1B") : "";
   const runtimeText = runtime ? [media ? "\u5A92\u4F53\u72B6\u6001\uFF1A" + media : "", runtime.ariaBusy ? "\u9875\u9762\u4ECD\u5728 aria-busy" : ""].filter(Boolean).join("\uFF1B") : "";
-  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", runtimeText ? "\u8FD0\u884C\u6001\uFF1A" + runtimeText : "", text2 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text2 : ""].filter(Boolean).join("\n");
+  return ["\u9875\u9762\u6807\u9898\uFF1A" + title, "\u9875\u9762URL\uFF1A" + url, elements ? "\u5173\u952E\u5143\u7D20\uFF1A" + elements : "", runtimeText ? "\u8FD0\u884C\u6001\uFF1A" + runtimeText : "", text3 ? "\u6B63\u6587\u6458\u8981\uFF08\u6309 textContent \u62BD\u53D6\uFF0C\u542B\u5DF2\u9690\u85CF\u8282\u70B9\u6587\u5B57\uFF0C\u4E0D\u80FD\u7528\u4E8E\u5224\u65AD\u53EF\u89C1\u6027\uFF09\uFF1A" + text3 : ""].filter(Boolean).join("\n");
 }
 
 // lib/application/agent/diagnostics.ts
@@ -4086,8 +4269,8 @@ async function readConsole(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0 console \u8BB0\u5F55\u3002" };
-    const text2 = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
-    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
+    const text3 = entries.map((e) => "[" + e.level + "] " + e.text + (e.stack ? "\n" + e.stack : "")).join("\n");
+    return { ok: true, result: "\u6700\u8FD1 console \u8BB0\u5F55\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text3 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6 console \u5931\u8D25\uFF1A" + e.message };
   }
@@ -4104,12 +4287,12 @@ async function readNetwork(sendTabMessage2, tabId, args) {
     const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
     entries = entries.slice(-limit);
     if (!entries.length) return { ok: true, result: "\u6682\u65E0\u7F51\u7EDC\u8BF7\u6C42\u8BB0\u5F55\u3002" };
-    const text2 = entries.map((e) => {
+    const text3 = entries.map((e) => {
       const head = (e.method || "GET") + " " + (e.error ? "ERR" : e.status || "") + " " + e.url + (e.ms != null ? " (" + e.ms + "ms)" : "") + (e.error ? " \u2014 " + e.error : "");
       const init = e.initiator ? e.initiator.split("\n").slice(0, 2).join(" ") : "";
       return head + (init ? "\n  \u53D1\u8D77\u4E8E: " + init : "");
     }).join("\n");
-    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text2 };
+    return { ok: true, result: "\u6700\u8FD1\u7F51\u7EDC\u8BF7\u6C42\uFF08" + entries.length + " \u6761\uFF09\uFF1A\n" + text3 };
   } catch (e) {
     return { ok: false, result: "\u8BFB\u53D6\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25\uFF1A" + e.message };
   }
@@ -4150,121 +4333,69 @@ async function readDiagnostics(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 kind\u300C" + kind + "\u300D\uFF0C\u53D6\u503C\uFF1A" + DIAGNOSTIC_KINDS.join(" / ") + "\u3002" };
 }
 
-// lib/application/agent/macros.ts
-var REPLAYABLE_TOOLS = /* @__PURE__ */ new Set([
-  "click_element",
-  "type_text",
-  "press_key",
-  "select_option",
-  "check_box",
-  "scroll_page",
-  "wait_for_element",
-  "open_tab"
+// lib/application/agent/plan-contract.ts
+var PLAN_FAST_OPERATIONS = Object.freeze([
+  "CLICK",
+  "TYPE_TEXT",
+  "READ_PAGE",
+  "READ_TABLE",
+  "ACCESSIBILITY",
+  "DIAGNOSTICS",
+  "SCROLL_UP",
+  "SCROLL_DOWN",
+  "WAIT"
 ]);
-async function macroSave(deps, args) {
-  const name = String(args && args.name || "").trim();
-  if (!name) return { ok: false, result: 'macro(op="save") \u9700\u8981 name\u3002' };
-  let trace = Array.isArray(deps.trace) ? deps.trace : [];
-  let fromPreviousRun = false;
-  let previousAgeMs = 0;
-  let previousDropped = 0;
-  if (!trace.length && typeof deps.recallTrace === "function") {
-    const last = await Promise.resolve().then(() => deps.recallTrace(deps.pageUrl)).catch(() => null);
-    if (last && Array.isArray(last.steps) && last.steps.length) {
-      trace = last.steps;
-      fromPreviousRun = true;
-      previousAgeMs = Number(last.ageMs) || 0;
-      previousDropped = Number(last.dropped) || 0;
-    }
+var PLAN_MAX_LEASE_ACTIONS = 50;
+var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
+function cleanText(value, maxChars) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+function cleanStepId(value, index) {
+  const candidate = String(value || "").trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
+}
+function normalizePlanOperations(value) {
+  if (!Array.isArray(value)) return void 0;
+  const operations = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of value) {
+    const operation = String(raw || "").trim().toUpperCase();
+    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
+    seen.add(operation);
+    operations.push(operation);
   }
-  const beforeFilter = trace.length;
-  trace = trace.filter((s) => s && typeof s.tool === "string" && s.args && typeof s.args === "object" && REPLAYABLE_TOOLS.has(s.tool));
-  const skipped = beforeFilter - trace.length;
-  if (!trace.length) {
-    return {
-      ok: false,
-      result: (skipped > 0 ? "\u8FD9\u4E00\u6279\u8F68\u8FF9\u91CC\u6709 " + skipped + " \u6B65\u90FD\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF08\u5DF2\u5254\u9664\uFF09\uFF0C\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u6B65\u9AA4\u3002\n" : "\u672C\u8F6E\u4EFB\u52A1\u6CA1\u6709\u53EF\u4FDD\u5B58\u7684\u53EF\u91CD\u653E\u52A8\u4F5C\uFF0C\u672C\u7AD9\u70B9\u4E5F\u6CA1\u6709\u6700\u8FD1\u53EF\u6C89\u6DC0\u7684\u8F68\u8FF9\u3002\n") + "\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u4F1A\u88AB\u8BB0\u5F55\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + '\uFF08\u4E14\u9700\u8981\u62FF\u5230\u7A33\u5B9A\u7684 selector\uFF09\uFF1B`click_at`\uFF08\u5750\u6807\u70B9\u51FB\uFF09\u4E0E `run_javascript` **\u4E0D\u8FDB\u5B8F**\u3002\n\u8981\u6C89\u6DC0\u6210\u5B8F\uFF1A\u8BF7\u7528\u4E0A\u9762\u8FD9\u4E9B\u5DE5\u5177\u628A\u6D41\u7A0B\u5B8C\u6574\u505A\u4E00\u904D\uFF0C**\u505A\u5B8C\u7ACB\u523B** macro({op:"save", name:"\u2026"})\u3002'
-    };
-  }
-  const saved = await deps.saveMacro(deps.pageUrl, { name, description: args && args.description, steps: trace });
-  if (!saved) return { ok: false, result: "\u4FDD\u5B58\u5B8F\u5931\u8D25\uFF08\u7F3A\u5C11\u540D\u79F0\u6216\u6B65\u9AA4\uFF09\u3002" };
-  const source = fromPreviousRun ? "\u26A0 \u8FD9 " + saved.steps.length + " \u6B65\u6765\u81EA**\u4E0A\u4E00\u8F6E\u4EFB\u52A1**\u5728\u672C\u7AD9\u70B9\u7684\u8F68\u8FF9\uFF08\u7EA6 " + Math.max(1, Math.round(previousAgeMs / 6e4)) + " \u5206\u949F\u524D\uFF09\uFF0C\u4E0D\u662F\u672C\u8F6E\u3002" + (previousDropped > 0 ? "\u53E6\u6709 " + previousDropped + " \u6B65\u56E0\u8D85\u957F\u672A\u7EB3\u5165\u3002" : "") + '\u56DE\u653E\u524D\u8BF7\u5148\u6838\u5BF9\u6B65\u9AA4\u662F\u5426\u7B26\u5408\u9884\u671F\uFF08macro({op:"list"})\uFF0C\u6216\u5148\u8BD5\u8DD1\u4E00\u6B21\uFF09\u3002' : "";
-  const droppedNote = skipped > 0 ? "\uFF08\u53E6\u6709 " + skipped + " \u6B65\u4E0D\u5728\u53EF\u56DE\u653E\u767D\u540D\u5355\u5185\uFF0C\u5DF2\u5254\u9664\uFF09" : "";
-  return {
-    ok: true,
-    result: "\u5DF2\u4FDD\u5B58\u5B8F\u300C" + saved.name + "\u300D\uFF08" + saved.steps.length + " \u6B65\uFF09\u3002" + droppedNote + source + '\u4EE5\u540E\u53EF\u7528 macro({op:"run", name:"' + saved.name + '"}) \u56DE\u653E\u3002'
+  return operations;
+}
+function normalizePlanLease(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 1) return void 0;
+  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
+}
+function normalizePlanStep(value, index) {
+  const step = {
+    id: cleanStepId(value.id, index),
+    text: cleanText(value.text, 120),
+    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
   };
-}
-async function macroList(deps) {
-  const macros = await deps.listMacros(deps.pageUrl);
-  if (!macros.length) return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002" };
-  const text2 = macros.map((m, i) => "[" + (i + 1) + '] name="' + m.name + '"' + (m.description ? " \u2014 " + m.description : "") + "\uFF08" + m.steps.length + " \u6B65\uFF09").join("\n");
-  return { ok: true, result: "\u5F53\u524D\u7AD9\u70B9\u5DF2\u4FDD\u5B58\u7684\u5B8F\uFF08\u56DE\u653E\u65F6\u8BF7\u7167\u6284 name \u7684\u503C\uFF09\uFF1A\n" + text2 };
-}
-async function macroRun(deps, args) {
-  const name = String(args && args.name || "").trim();
-  if (!name) return { ok: false, result: 'macro(op="run") \u9700\u8981 name\u3002' };
-  const macro = await deps.getMacro(deps.pageUrl, name);
-  if (!macro) {
-    let names = [];
-    try {
-      names = (await deps.listMacros(deps.pageUrl)).map((m) => m.name);
-    } catch (e) {
-    }
-    return {
-      ok: false,
-      result: "\u672A\u627E\u5230\u5B8F\u300C" + name + "\u300D\u3002" + (names.length ? "\u672C\u7AD9\u53EF\u7528\u7684\u5B8F\u540D\u5982\u4E0B\uFF0C\u8BF7\u7167\u6284 name \u7684\u503C\uFF08\u4E0D\u662F\u63CF\u8FF0\uFF09\uFF1A\n" + names.map((n) => "  - " + n).join("\n") : "\u672C\u7AD9\u8FD8\u6CA1\u6709\u4FDD\u5B58\u7684\u5B8F\u3002")
-    };
+  const successPredicate = cleanText(value.successPredicate, 240);
+  if (successPredicate) step.successPredicate = successPredicate;
+  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
+    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
   }
-  const steps = Array.isArray(macro.steps) ? macro.steps : [];
-  if (!steps.length) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u6CA1\u6709\u6B65\u9AA4\u3002" };
-  const ctx = deps.ctx;
-  const log = [];
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    if (!REPLAYABLE_TOOLS.has(s && s.tool)) {
-      const toolName = String(s && s.tool || "");
-      return {
-        ok: false,
-        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u8C03\u7528\u4E86\u4E0D\u5141\u8BB8\u56DE\u653E\u7684\u5DE5\u5177\u300C" + toolName + "\u300D\uFF0C\u5DF2\u505C\u6B62\u3002\n\u53EA\u6709\u8FD9\u4E9B\u5DE5\u5177\u53EF\u4EE5\u88AB\u5B8F\u56DE\u653E\uFF1A" + Array.from(REPLAYABLE_TOOLS).join("\u3001") + "\u3002\n\u82E5\u786E\u5B9E\u9700\u8981\u8BE5\u64CD\u4F5C\uFF0C\u8BF7\u6539\u7528\u5BF9\u5E94\u7684\u5185\u7F6E\u5DE5\u5177\u5355\u72EC\u6267\u884C\uFF08\u9AD8\u98CE\u9669\u5DE5\u5177\u4ECD\u9700\u9010\u6B21\u5BA1\u6279\uFF09\u3002"
-      };
-    }
-    const stepValidation = deps.validateToolCall(s.tool, s.args || {});
-    if (!stepValidation.ok) {
-      return {
-        ok: false,
-        result: "\u5B8F\u300C" + name + "\u300D\u7684\u7B2C " + (i + 1) + " \u6B65\u53C2\u6570\u975E\u6CD5\uFF1A" + stepValidation.error
-      };
-    }
-    let r;
-    try {
-      r = await deps.executeTool(s.tool, s.args, ctx);
-    } catch (e) {
-      r = { ok: false, result: e && e.message ? e.message : String(e) };
-    }
-    const failed = r && r.ok === false;
-    log.push("[" + (i + 1) + "/" + steps.length + "] " + s.tool + (failed ? " \u2717 " + String(r.result || "").slice(0, 120) : " \u2713"));
-    if (r && Number.isInteger(Number(r.targetTabId))) {
-      ctx.tabId = Number(r.targetTabId);
-      if (r.targetTab) {
-        ctx.pageUrl = r.targetTab.url || ctx.pageUrl;
-        ctx.pageTitle = r.targetTab.title || ctx.pageTitle;
-      }
-    }
-    if (failed) return { ok: false, result: "\u5B8F\u300C" + name + "\u300D\u5728\u7B2C " + (i + 1) + " \u6B65\u5931\u8D25\uFF0C\u5DF2\u505C\u6B62\uFF1A\n" + log.join("\n") };
-  }
-  await deps.bumpMacroHits(deps.pageUrl, name).catch(() => {
-  });
-  return { ok: true, result: "\u5DF2\u56DE\u653E\u5B8F\u300C" + name + "\u300D\uFF08" + steps.length + " \u6B65\uFF09\uFF1A\n" + log.join("\n") };
+  const leaseActions = normalizePlanLease(value.leaseActions);
+  if (leaseActions != null) step.leaseActions = leaseActions;
+  return step;
 }
-var MACRO_OPS = ["save", "list", "run"];
-async function macroTool(deps, args) {
-  const op = String(args && args.op || "").trim();
-  if (!op) return { ok: false, result: "macro \u9700\u8981 op \u53C2\u6570\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
-  if (op === "save") return await macroSave(deps, args);
-  if (op === "list") return await macroList(deps);
-  if (op === "run") return await macroRun(deps, args);
-  return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
+function describePlanStep(step) {
+  const parts = [step.text];
+  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
+  if (step.allowedOperations) {
+    parts.push(
+      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+    );
+  }
+  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
+  return parts.join("\uFF1B");
 }
 
 // lib/application/agent/knowledge.ts
@@ -4284,10 +4415,10 @@ function knowledgeSearch(deps, args) {
   const relevant = deps.buildRagContext(deps.book, args.query || "", limit);
   if (!relevant.length) return { result: "\u672A\u68C0\u7D22\u5230\u76F8\u5173\u77E5\u8BC6\u5E93\u6761\u76EE\u3002" };
   const citations = deps.buildCitations(relevant, false);
-  const text2 = relevant.map(
+  const text3 = relevant.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.note ? "\uFF5C\u5185\u5BB9\uFF1A" + it.note : ""}${it.url ? "\uFF5C\u94FE\u63A5\uFF1A" + it.url : ""}`
   ).join("\n");
-  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text2, citations };
+  return { result: "\u68C0\u7D22\u5230\u7684\u77E5\u8BC6\u5E93\u6761\u76EE\uFF1A\n" + text3, citations };
 }
 function knowledgeList(deps, args) {
   let items = Object.values(deps.book);
@@ -4295,12 +4426,12 @@ function knowledgeList(deps, args) {
   items.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const limit = Number(args.limit) || 20;
   const shown = items.slice(0, limit);
-  const text2 = shown.map(
+  const text3 = shown.map(
     (it, i) => `[${i + 1}] id="${it.id}" \u6807\u9898\uFF1A${it.title}\uFF5C\u7C7B\u578B\uFF1A${deps.typeInfo(it.type).name}${it.tags && it.tags.length ? "\uFF5C\u6807\u7B7E\uFF1A" + it.tags.join("\u3001") : ""}`
   ).join("\n");
   return {
     result: `\u77E5\u8BC6\u5E93\u5171 ${items.length} \u6761\uFF0C\u4EE5\u4E0B\u5217\u51FA ${shown.length} \u6761\uFF1A
-` + (text2 || "\uFF08\u7A7A\uFF09"),
+` + (text3 || "\uFF08\u7A7A\uFF09"),
     citations: deps.buildCitations(shown, true)
   };
 }
@@ -4343,8 +4474,8 @@ async function listTabs(deps) {
       url: t.url || "",
       active: Boolean(t.active)
     }));
-    const text2 = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
-    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text2 || "\uFF08\u65E0\uFF09") };
+    const text3 = visibleTabs.filter((t) => t.url).map((t, i) => `[${i + 1}] tabId=${t.id} ${t.active ? "\uFF08\u5F53\u524D\uFF09" : ""} ${t.title || ""}\uFF5C${t.url}`).join("\n");
+    return { ok: true, tabs: tabInfo, result: "\u5F53\u524D\u7A97\u53E3\u6807\u7B7E\u9875\uFF1A\n" + (text3 || "\uFF08\u65E0\uFF09") };
   } catch (e) {
     return { ok: false, result: "\u5217\u51FA\u6807\u7B7E\u9875\u5931\u8D25\uFF1A" + e.message };
   }
@@ -4508,6 +4639,13 @@ function summarizeRunTrace(entries) {
   const jevLive = jev.filter((e) => e.mode === "live");
   const jevCompares = list.filter((e) => e && e.phase === "jev-shadow-compare");
   const jevHandoffs = list.filter((e) => e && e.phase === "jev-handoff");
+  const traceHandoffs = list.filter((e) => e && e.phase === "tracegraph-handoff");
+  const r3 = list.filter((e) => e && e.phase === "tracegraph-r3");
+  const handoffReasons = {};
+  for (const entry of [...jevHandoffs, ...traceHandoffs]) {
+    const reason = String(entry.reason || "unknown");
+    handoffReasons[reason] = (handoffReasons[reason] || 0) + 1;
+  }
   const complete = list.find((e) => e && e.phase === "complete") || {};
   const byTool = {};
   for (const t of tools) byTool[t.name] = (byTool[t.name] || 0) + 1;
@@ -4542,7 +4680,16 @@ function summarizeRunTrace(entries) {
     jevOutputTokens: jev.reduce((n, e) => n + num(e.outputTokens), 0),
     jevShadowCompared: jevCompares.length,
     jevShadowAgreed: jevCompares.filter((e) => e.agreed === true).length,
-    jevHandoffs: jevHandoffs.length
+    jevHandoffs: jevHandoffs.length,
+    wrongWrites: list.filter((e) => e && e.phase === "tracegraph-wrong-write").length,
+    slowTurns: list.filter((e) => e && e.phase === "tracegraph-slow-turn").length,
+    handoffReasons,
+    edgeReuse: r3.filter((e) => e.decision === "REUSE").length,
+    edgeRewrite: r3.filter((e) => e.decision === "REWRITE").length,
+    edgeReject: r3.filter((e) => e.decision === "REJECT").length,
+    phiPlusFailures: list.filter((e) => e && e.phase === "tracegraph-phi-plus-fail").length,
+    candidateCount: list.filter((e) => e && e.phase === "tracegraph-candidates").reduce((n, e) => n + num(e.count), 0),
+    blockedEdgeHits: list.filter((e) => e && e.phase === "tracegraph-blocked-edge-hit").length
   };
 }
 function formatRunMetrics(m) {
@@ -4564,72 +4711,14 @@ function formatRunMetrics(m) {
       lines.push("JEV \u5F71\u5B50\u4E00\u81F4 " + m.jevShadowAgreed + "/" + m.jevShadowCompared);
     }
   }
-  return lines.join("\n");
-}
-
-// lib/application/agent/plan-contract.ts
-var PLAN_FAST_OPERATIONS = Object.freeze([
-  "CLICK",
-  "TYPE_TEXT",
-  "READ_PAGE",
-  "READ_TABLE",
-  "ACCESSIBILITY",
-  "DIAGNOSTICS",
-  "SCROLL_UP",
-  "SCROLL_DOWN",
-  "WAIT"
-]);
-var PLAN_MAX_LEASE_ACTIONS = 50;
-var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
-function cleanText(value, maxChars) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
-}
-function cleanStepId(value, index) {
-  const candidate = String(value || "").trim();
-  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(candidate) ? candidate : "plan-" + (index + 1);
-}
-function normalizePlanOperations(value) {
-  if (!Array.isArray(value)) return void 0;
-  const operations = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const raw of value) {
-    const operation = String(raw || "").trim().toUpperCase();
-    if (!PLAN_FAST_OPERATION_SET.has(operation) || seen.has(operation)) continue;
-    seen.add(operation);
-    operations.push(operation);
-  }
-  return operations;
-}
-function normalizePlanLease(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 1) return void 0;
-  return Math.min(PLAN_MAX_LEASE_ACTIONS, Math.max(1, Math.floor(number)));
-}
-function normalizePlanStep(value, index) {
-  const step = {
-    id: cleanStepId(value.id, index),
-    text: cleanText(value.text, 120),
-    status: ["pending", "in_progress", "done"].includes(String(value.status)) ? String(value.status) : "pending"
-  };
-  const successPredicate = cleanText(value.successPredicate, 240);
-  if (successPredicate) step.successPredicate = successPredicate;
-  if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
-    step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
-  }
-  const leaseActions = normalizePlanLease(value.leaseActions);
-  if (leaseActions != null) step.leaseActions = leaseActions;
-  return step;
-}
-function describePlanStep(step) {
-  const parts = [step.text];
-  if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
-  if (step.allowedOperations) {
-    parts.push(
-      "\u5FEB\u8DEF\u52A8\u4F5C\uFF1A" + (step.allowedOperations.length ? step.allowedOperations.join("/") : "\u65E0\uFF08\u4EC5\u53EF\u7ED3\u675F\u6216\u79FB\u4EA4\uFF09")
+  if (m.candidateCount || m.blockedEdgeHits || m.slowTurns) {
+    const reasons = Object.entries(m.handoffReasons || {}).sort((a, b) => b[1] - a[1]).map(([reason, count2]) => reason + "\xD7" + count2).join("\u3001");
+    lines.push(
+      "TraceGraph \u5019\u9009 " + m.candidateCount + " / \u5DE5\u5177\u5931\u8D25\u5C01\u8FB9 " + m.blockedEdgeHits + " / \u6162\u601D\u8003 " + m.slowTurns
     );
+    if (reasons) lines.push("\u79FB\u4EA4\u539F\u56E0\uFF1A" + reasons);
   }
-  if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
-  return parts.join("\uFF1B");
+  return lines.join("\n");
 }
 
 // lib/application/agent/run-state-tools.ts
@@ -4638,16 +4727,16 @@ function updatePlan(ctx, args) {
   const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it, index) => normalizePlanStep(it, index));
   ctx.plan = plan;
   ctx.planVersion = Math.max(0, Number(ctx.planVersion) || 0) + 1;
-  const text2 = plan.map(
+  const text3 = plan.map(
     (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
   ).join("\n");
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text3 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();
   const store = ctx && ctx.resultStore;
-  const text2 = store && typeof store.get === "function" ? store.get(id) : null;
-  if (!text2) {
+  const text3 = store && typeof store.get === "function" ? store.get(id) : null;
+  if (!text3) {
     const known = ctx && ctx.resultIds && typeof ctx.resultIds.has === "function" && ctx.resultIds.has(id);
     return {
       ok: false,
@@ -4656,7 +4745,7 @@ function expandResult(ctx, args) {
   }
   const offset = Math.max(0, Number(args.offset) || 0);
   const limit = Math.min(4e3, Math.max(200, Number(args.limit) || 2e3));
-  const piece = rangeSafe(text2, offset, offset + limit);
+  const piece = rangeSafe(text3, offset, offset + limit);
   const nextOffset = piece.end < piece.length ? piece.end : null;
   return {
     ok: true,
@@ -4773,7 +4862,7 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       const cur = await area2.get([SHOT_KEY, SHOT_INDEX_KEY]);
       const archive = Array.isArray(cur && cur[SHOT_KEY]) ? cur[SHOT_KEY] : [];
       const index = isRecord(cur && cur[SHOT_INDEX_KEY]) ? Object.assign({}, cur[SHOT_INDEX_KEY]) : {};
-      const record2 = Object.assign({}, shot, {
+      const record3 = Object.assign({}, shot, {
         id,
         sessionId: String(sessionId || shot && shot.sessionId || ""),
         createdAt: Number(shot && shot.createdAt) || Date.now(),
@@ -4781,16 +4870,16 @@ function saveScreenshot(chromeApi, shot, sessionId = "") {
       });
       index[id] = {
         id,
-        sessionId: record2.sessionId,
-        createdAt: record2.createdAt,
-        bytes: record2.bytes
+        sessionId: record3.sessionId,
+        createdAt: record3.createdAt,
+        bytes: record3.bytes
       };
       pruneIndex2(index);
-      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record2]).slice(-MAX_SHOTS);
+      const nextArchive = archive.filter((entry) => entry && entry.id !== id).concat([record3]).slice(-MAX_SHOTS);
       await area2.set({
         [SHOT_KEY]: nextArchive,
         [SHOT_INDEX_KEY]: index,
-        [shotStorageKey(id)]: record2
+        [shotStorageKey(id)]: record3
       });
       const stale = Object.keys(cur && cur[SHOT_INDEX_KEY] || {}).filter((oldId) => !index[oldId]).map(shotStorageKey);
       if (stale.length && typeof area2.remove === "function") {
@@ -4929,8 +5018,8 @@ function readContentEditableText(root) {
   const walk = (node) => {
     for (const child of Array.from(node.childNodes || [])) {
       if (child.nodeType === 3) {
-        const text3 = String(child.nodeValue || "");
-        if (text3) tokens.push(text3);
+        const text4 = String(child.nodeValue || "");
+        if (text4) tokens.push(text4);
         continue;
       }
       if (child.nodeType !== 1) continue;
@@ -4946,19 +5035,19 @@ function readContentEditableText(root) {
     }
   };
   walk(root);
-  let text2 = "";
+  let text3 = "";
   let boundaries = 0;
   for (const token of tokens) {
     if (token === null) {
-      if (text2) boundaries += 1;
+      if (text3) boundaries += 1;
       continue;
     }
     if (!token) continue;
-    if (boundaries && text2 && !text2.endsWith("\n")) text2 += "\n".repeat(boundaries);
+    if (boundaries && text3 && !text3.endsWith("\n")) text3 += "\n".repeat(boundaries);
     boundaries = 0;
-    text2 += token;
+    text3 += token;
   }
-  return text2.replace(/\n+$/g, "");
+  return text3.replace(/\n+$/g, "");
 }
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
@@ -4989,8 +5078,8 @@ function editableTextSummary(expected, actual) {
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-function splitTrustedText(text2, maxChars = 1200) {
-  let remaining = String(text2 == null ? "" : text2);
+function splitTrustedText(text3, maxChars = 1200) {
+  let remaining = String(text3 == null ? "" : text3);
   const chunks = [];
   const limit = Math.max(64, Math.floor(maxChars));
   while (remaining.length > limit) {
@@ -5038,8 +5127,8 @@ async function typeText(deps, args) {
       typeFrame
     ) : null;
     const baseline = primaryBefore === null ? String(fallbackValue == null ? "" : fallbackValue) : primaryBefore;
-    const text2 = String(args.value == null ? "" : args.value);
-    const expected = args.clearFirst === true ? text2 : baseline + text2;
+    const text3 = String(args.value == null ? "" : args.value);
+    const expected = args.clearFirst === true ? text3 : baseline + text3;
     const focusExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return false; el.focus(); if (el.isContentEditable) { const r = document.createRange(); r.selectNodeContents(el); const s = window.getSelection(); if (s) { s.removeAllRanges(); s.addRange(r); } } else if (typeof el.select === "function") el.select(); else if (typeof el.setSelectionRange === "function" && typeof el.value === "string") el.setSelectionRange(0, el.value.length); return true; })()';
     if (isSubframe) await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, focusExpr);
     else await deps.cdp.evaluate(deps.ctx.tabId, focusExpr);
@@ -5367,7 +5456,7 @@ async function fetchWebpage(deps, args) {
       return { ok: false, result: "\u8BE5\u9875\u9762\u6B63\u6587\u4E3A\u7A7A\uFF08" + u + "\uFF09\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BFB\u53D6\u6E32\u67D3\u540E\u5185\u5BB9\uFF0C\u6216\u6362\u7528\u5176\u5B83\u6765\u6E90\u3002" };
     }
     const likelySpa = trimmedText.length < 150 && /<script[\s>]/i.test(raw);
-    const text2 = fullText.slice(0, 8e3);
+    const text3 = fullText.slice(0, 8e3);
     const finalUrl = resp.url || u;
     const auth = detectAuthChallenge({
       beforeUrl: u,
@@ -5392,8 +5481,8 @@ async function fetchWebpage(deps, args) {
     }
     const usable = !likelySpa && trimmedText.length >= 200;
     return {
-      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text2 + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
-      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text2.slice(0, 180) }] } : {}
+      result: "\u7F51\u9875\u6B63\u6587\uFF08" + finalUrl + "\uFF09\uFF1A\n" + text3 + (truncated ? "\n\uFF08\u5185\u5BB9\u8FC7\u5927\u5DF2\u622A\u65AD\uFF09" : "") + (likelySpa ? "\n\n\u26A0 \u9875\u9762\u6B63\u6587\u63D0\u53D6\u8FC7\u5C11\uFF0C\u7591\u4F3C\u524D\u7AEF JS \u6E32\u67D3\uFF08SPA\uFF09\u9875\u9762\uFF0C\u6E90\u7801\u91CC\u53EA\u6709\u811A\u672C\u58F3\u3002\u8BF7\u6539\u7528 open_tab \u6253\u5F00\u8BE5\u9875\uFF0C\u518D\u7528 get_page_snapshot / read_current_page \u8BFB\u53D6\u6E32\u67D3\u540E\u7684\u771F\u5B9E\u5185\u5BB9\uFF1B\u7981\u6B62\u7EE7\u7EED\u7528 fetch_webpage \u731C\u6D4B\u5176\u5B83 URL\u3002\u82E5\u65E0\u6CD5\u6253\u5F00\uFF0C\u8BF7\u76F4\u63A5\u57FA\u4E8E\u5DF2\u6709\u4FE1\u606F\u603B\u7ED3\u5E76\u7ED3\u675F\u3002" : "") + (!usable ? "\n\uFF08\u8BE5\u6B21\u6293\u53D6\u5185\u5BB9\u4E0D\u8DB3\u4EE5\u4F5C\u4E3A\u53C2\u8003\u6765\u6E90\uFF0C\u4E0D\u4F5C\u4E3A\u6765\u6E90\u7F16\u53F7\u767B\u8BB0\u3002\uFF09" : ""),
+      ...usable ? { citations: [{ index: 1, source: "web", title: deps.extractHtmlTitle(raw) || finalUrl, url: finalUrl, snippet: text3.slice(0, 180) }] } : {}
     };
   } catch (e) {
     if (!deps.isAbortLikeError(e)) ctx.failedUrls.push(norm);
@@ -5586,18 +5675,18 @@ function mergeFrameCapabilities(top, perFrame) {
   const out = {};
   for (const kind of ["customElements", "shadowHosts", "editables", "scrollContainers"]) {
     const topBucket = top && top[kind];
-    let count = topBucket ? Number(topBucket.count) || 0 : 0;
+    let count2 = topBucket ? Number(topBucket.count) || 0 : 0;
     const topSamples = topBucket && Array.isArray(topBucket.samples) ? topBucket.samples.slice(0, 2) : [];
     const childSamples = [];
     for (const frame of Array.isArray(perFrame) ? perFrame : []) {
       const bucket2 = frame && frame.capabilities && frame.capabilities[kind];
       if (!bucket2) continue;
-      count += Number(bucket2.count) || 0;
+      count2 += Number(bucket2.count) || 0;
       if (!Array.isArray(bucket2.samples) || !bucket2.samples.length) continue;
       childSamples.push(Object.assign({}, bucket2.samples[0], { frameId: frame.frameId }));
     }
     const samples = topSamples.length ? topSamples.concat(childSamples).slice(0, CAPABILITY_SAMPLE_LIMIT) : childSamples.slice(0, CAPABILITY_SAMPLE_LIMIT);
-    if (count > 0) out[kind] = { count, samples };
+    if (count2 > 0) out[kind] = { count: count2, samples };
   }
   return Object.keys(out).length ? out : void 0;
 }
@@ -5667,22 +5756,22 @@ async function readCurrentPage(deps, args) {
       }
     });
     const pr = pageResponse || {};
-    const text2 = pr.text ? pr.text : "";
+    const text3 = pr.text ? pr.text : "";
     const visReport = deps.formatVisibilityReport(pr.visibility);
     const checkTexts = Array.isArray(args.checkTexts) ? args.checkTexts : [];
     if (checkTexts.filter((t) => String(t == null ? "" : t).trim()).length && visReport) {
       return {
         ok: true,
-        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text2.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
+        result: deps.formatCurrentPageResult({ title: pr.title, url: pr.url || ctx.pageUrl, textLength: text3.length, visReport, checkTexts, visibleOnly: args.visibleOnly === true })
       };
     }
-    if (!text2) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
-    const chunks = deps.splitIntoChunks(text2, 1200, 8);
+    if (!text3) return { result: "\u672A\u80FD\u8BFB\u53D6\u9875\u9762\u6B63\u6587\uFF08\u5185\u5BB9\u811A\u672C\u672A\u6CE8\u5165\u6216\u9875\u9762\u4E0D\u652F\u6301\uFF09\u3002" };
+    const chunks = deps.splitIntoChunks(text3, 1200, 8);
     const result = deps.formatCurrentPageResult({
       title: pr.title,
       url: pr.url || ctx.pageUrl,
-      text: text2,
-      textLength: text2.length,
+      text: text3,
+      textLength: text3.length,
       chunks,
       visReport,
       visibleOnly: args.visibleOnly === true
@@ -5836,11 +5925,11 @@ async function listFrames(deps) {
   if (!tabId) return { ok: false, result: "\u65E0\u6CD5\u5B9A\u4F4D\u5F53\u524D\u6807\u7B7E\u9875\uFF08\u53EF\u80FD\u4E0D\u5728\u524D\u53F0\u9875\u9762\uFF09\u3002" };
   const frames = await listFramesRaw(deps, tabId);
   if (!frames.length) return { ok: false, result: "\u672A\u83B7\u53D6\u5230\u9875\u9762\u6846\u67B6\u4FE1\u606F\uFF08\u53EF\u80FD\u65E0\u5185\u5BB9\u811A\u672C\u6743\u9650\uFF09\u3002" };
-  const text2 = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
+  const text3 = frames.map((f) => (f.isTop ? "[\u9876\u5C42 frameId=0] " : "[frameId=" + f.frameId + "] ") + (f.title || "") + "\uFF5C" + f.href).join("\n");
   return {
     ok: true,
     frames,
-    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text2 + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
+    result: "\u9875\u9762\u6846\u67B6\uFF08\u542B\u8DE8\u57DF iframe\uFF0C\u5171 " + frames.length + " \u4E2A\uFF09\uFF1A\n" + text3 + "\n\u7528\u6CD5\uFF1A\u7528 get_page_snapshot \u7684 frameId \u53C2\u6570\u8BFB\u53D6\u67D0\u6846\u67B6\uFF1B\u6216\u5728 get_page_snapshot \u91CC\u4F20 includeFrames:true \u4E00\u6B21\u6027\u5408\u5E76\u6240\u6709\u6846\u67B6\u7684\u5143\u7D20\uFF08ref \u4F1A\u81EA\u52A8\u5E26 f<frameId>: \u524D\u7F00\uFF09\u3002"
   };
 }
 async function handlePageReadTool(name, args, deps) {
@@ -5853,13 +5942,13 @@ async function handlePageReadTool(name, args, deps) {
 // lib/application/agent/userscript-tools.ts
 async function listUserscriptsTool(deps) {
   const scripts = await deps.listUserscripts();
-  const text2 = scripts.length ? scripts.map(
+  const text3 = scripts.length ? scripts.map(
     (s, i) => `[${i + 1}] ${s.name} v${s.version}${s.enabled ? "" : "\uFF08\u5DF2\u505C\u7528\uFF09"}
 id\uFF1A${s.id}
 \u5339\u914D\uFF1A${(s.matches || []).join("\u3001")}
 \u63CF\u8FF0\uFF1A${s.description || "\u65E0"}`
   ).join("\n\n") : "\u5C1A\u672A\u5B89\u88C5\u4EFB\u4F55\u7528\u6237\u811A\u672C\u3002";
-  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text2 };
+  return { ok: true, result: "\u5DF2\u5B89\u88C5\u7684\u7528\u6237\u811A\u672C\uFF1A\n" + text3 };
 }
 async function searchUserscripts(deps, args) {
   const list = await deps.searchScripts(args.query);
@@ -7028,8 +7117,8 @@ function decodeNumericEntity(code) {
     return "\uFFFD";
   }
 }
-function splitIntoChunks(text2, size, max) {
-  const s = String(text2 || "").trim();
+function splitIntoChunks(text3, size, max) {
+  const s = String(text3 || "").trim();
   if (!s) return [];
   const paras = s.split(/\n+/).map((p) => p.trim()).filter(Boolean);
   if (!paras.length) return [sliceSafe(s, 0, size)];
@@ -7175,8 +7264,8 @@ var McpClient = class {
     return r.content.map((c) => c.type === "text" ? c.text : JSON.stringify(c)).join("\n");
   }
 };
-function parseSseResult(text2) {
-  const lines = String(text2).split("\n");
+function parseSseResult(text3) {
+  const lines = String(text3).split("\n");
   let last = null;
   for (const line of lines) {
     const t = line.trim();
@@ -7234,16 +7323,141 @@ function text(value, path) {
   }
   return value;
 }
+function count(value, path, fallback) {
+  if (value === void 0 || value === null) {
+    if (fallback !== void 0) return fallback;
+  } else if (typeof value === "number" || typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= 0) return parsed;
+  }
+  throw new JevProtocolError("\u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570", path);
+}
+function probability(value, path) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F 0 \u5230 1 \u4E4B\u95F4\u7684\u6570\u5B57", path);
+  }
+  return n;
+}
+function numericMap(value, path) {
+  const source = record(value, path);
+  const result = {};
+  for (const [key, item] of Object.entries(source)) {
+    result[key] = probability(item, path + "." + key);
+  }
+  return result;
+}
+function protocolText(value, path) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value;
+  return record(value, path);
+}
+function parseLegend(value, path) {
+  const source = record(value, path);
+  const result = {};
+  for (const [key, item] of Object.entries(source)) {
+    result[key] = protocolText(item, path + "." + key);
+  }
+  return result;
+}
+function parseJevAnswer(value, path = "answer") {
+  const source = record(value, path);
+  const type = text(source.type, path + ".type");
+  if (type === "noul") {
+    return { type, noul: probability(source.noul, path + ".noul") };
+  }
+  if (type === "choice") {
+    return {
+      type,
+      choice: text(source.choice, path + ".choice"),
+      confidence: probability(source.confidence, path + ".confidence")
+    };
+  }
+  if (type === "score") {
+    const score = Number(source.score);
+    if (!Number.isFinite(score)) {
+      throw new JevProtocolError("\u5FC5\u987B\u662F\u6709\u9650\u6570\u5B57", path + ".score");
+    }
+    return {
+      type,
+      score,
+      confidence: probability(source.confidence, path + ".confidence"),
+      legend: parseLegend(source.legend, path + ".legend"),
+      probabilities: numericMap(source.probabilities, path + ".probabilities")
+    };
+  }
+  if (type === "box") {
+    const box = record(source.box, path + ".box");
+    const confidence = source.confidence === null ? null : probability(source.confidence, path + ".confidence");
+    return {
+      type,
+      box: {
+        top: probability(box.top, path + ".box.top"),
+        bottom: probability(box.bottom, path + ".box.bottom"),
+        left: probability(box.left, path + ".box.left"),
+        right: probability(box.right, path + ".box.right")
+      },
+      confidence
+    };
+  }
+  throw new JevProtocolError("\u672A\u77E5\u7B54\u6848\u7C7B\u578B\uFF1A" + type, path + ".type");
+}
+function expectedAnswerType(question) {
+  return question.type;
+}
+function parseJevSystemOneResponse(value, questions) {
+  const source = record(value, "response");
+  const answerSource = record(source.answers, "response.answers");
+  const answers = {};
+  for (const [name, answerValue] of Object.entries(answerSource)) {
+    const answer = parseJevAnswer(answerValue, "response.answers." + name);
+    const question = questions && questions[name];
+    if (question && answer.type !== expectedAnswerType(question)) {
+      throw new JevProtocolError(
+        "\u7B54\u6848\u7C7B\u578B " + answer.type + " \u4E0E\u95EE\u9898\u7C7B\u578B " + question.type + " \u4E0D\u5339\u914D",
+        "response.answers." + name
+      );
+    }
+    answers[name] = answer;
+  }
+  if (questions) {
+    const missing = Object.keys(questions).filter((name) => !answers[name]);
+    if (missing.length) {
+      throw new JevProtocolError(
+        "\u7F3A\u5C11\u95EE\u9898\u7B54\u6848\uFF1A" + missing.join("\u3001"),
+        "response.answers"
+      );
+    }
+  }
+  const usage = source.usage === void 0 || source.usage === null ? {} : record(source.usage, "response.usage");
+  return {
+    model: text(source.model, "response.model"),
+    answers,
+    usage: {
+      input_tokens: count(
+        usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens,
+        "response.usage.input_tokens",
+        0
+      ),
+      output_tokens: count(
+        usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens,
+        "response.usage.output_tokens",
+        0
+      )
+    }
+  };
+}
 function parseJevModelList(value) {
   const source = record(value, "response");
-  if (!Array.isArray(source.models)) {
-    throw new JevProtocolError("\u5FC5\u987B\u662F\u6570\u7EC4", "response.models");
+  const models = Array.isArray(source.models) ? source.models : Array.isArray(source.data) ? source.data : null;
+  if (!models) {
+    throw new JevProtocolError("\u5FC5\u987B\u662F models/data \u6570\u7EC4", "response.models");
   }
   return {
-    models: source.models.map((item, index) => {
+    models: models.map((item, index) => {
       const model = record(item, "response.models." + index);
       return {
-        name: text(model.name, "response.models." + index + ".name"),
+        name: text(model.name ?? model.id, "response.models." + index + ".name"),
         description: String(model.description || ""),
         release_date: String(model.release_date || "")
       };
@@ -7264,26 +7478,47 @@ var JevClientError = class extends Error {
 };
 function jevBaseUrl(settings) {
   const raw = String(settings.baseUrl || "").trim();
-  if (!raw) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API \u5730\u5740");
+  if (!raw) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E JEV API \u5730\u5740");
   let url;
   try {
     url = new URL(raw);
   } catch {
-    throw new JevClientError("CONFIG", "TypeSafe API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+    throw new JevClientError("CONFIG", "JEV API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
   }
+  url.search = "";
+  url.hash = "";
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) {
-    throw new JevClientError("CONFIG", "TypeSafe API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF08\u672C\u673A\u5F00\u53D1\u9664\u5916\uFF09");
+    throw new JevClientError("CONFIG", "JEV API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF08\u672C\u673A\u5F00\u53D1\u9664\u5916\uFF09");
   }
   return url.toString().replace(/\/+$/, "");
 }
+function jevSystemOneUrl(settings) {
+  const base = jevBaseUrl(settings);
+  const path = new URL(base).pathname.replace(/\/+$/, "");
+  if (/\/systemone$/i.test(path)) return base;
+  if (/\/v1$/i.test(path)) return base + "/systemone";
+  if (/\/compatible-mode$/i.test(path)) return base + "/v1/systemone";
+  return base + "/v1/systemone";
+}
 function jevModelsUrl(settings) {
-  return jevBaseUrl(settings) + "/v1/models";
+  return jevSystemOneUrl(settings).replace(/\/systemone\/?$/i, "/models");
 }
 function apiKey(settings) {
   const value = String(settings.apiKey || "").trim();
-  if (!value) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E TypeSafe API Key");
+  if (!value) throw new JevClientError("CONFIG", "\u672A\u914D\u7F6E JEV API Key");
   return value;
+}
+function jevAuthorizationHeader(settings, targetUrl = jevSystemOneUrl(settings)) {
+  const key = apiKey(settings);
+  if (/^Bearer\s+/i.test(key)) return key;
+  let url = null;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+  }
+  const rawScheme = Boolean(url && /(?:^|\.)aliyuncs\.com$/i.test(url.hostname)) || /\/compatible-mode(?:\/|$)/i.test(url?.pathname || "");
+  return rawScheme ? key : "Bearer " + key;
 }
 function retryableStatus(status) {
   return status === 429 || status >= 500;
@@ -7334,13 +7569,13 @@ async function requestJson(settings, url, init, options = {}) {
     } catch (error) {
       if (external && external.aborted) throw makeAbortError();
       if (timedOut) {
-        throw new JevClientError("TIMEOUT", "TypeSafe \u8BF7\u6C42\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09");
+        throw new JevClientError("TIMEOUT", "JEV \u8BF7\u6C42\u8D85\u65F6\uFF08" + timeoutMs + "ms\uFF09");
       }
       if (attempt < retries) {
         await sleep(500 * Math.pow(2, attempt));
         continue;
       }
-      throw new JevClientError("NETWORK", "TypeSafe \u8FDE\u63A5\u5931\u8D25\uFF1A" + errorMessage(error));
+      throw new JevClientError("NETWORK", "JEV \u8FDE\u63A5\u5931\u8D25\uFF1A" + errorMessage(error));
     } finally {
       clearTimeout(timer);
       if (external) external.removeEventListener("abort", onAbort);
@@ -7349,7 +7584,7 @@ async function requestJson(settings, url, init, options = {}) {
       try {
         return await resp.json();
       } catch {
-        throw new JevClientError("PROTOCOL", "TypeSafe \u8FD4\u56DE\u4E86\u65E0\u6548 JSON", resp.status);
+        throw new JevClientError("PROTOCOL", "JEV \u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548 JSON", resp.status);
       }
     }
     const detail = await readErrorDetail(resp);
@@ -7360,13 +7595,13 @@ async function requestJson(settings, url, init, options = {}) {
     if (resp.status === 451) {
       throw new JevClientError(
         "REGION_BLOCKED",
-        "TypeSafe \u5F53\u524D\u7F51\u7EDC\u533A\u57DF\u4E0D\u53EF\u7528\uFF08HTTP 451\uFF09" + (detail ? "\uFF1A" + detail : "") + "\u3002\u8BF7\u5207\u6362\u53EF\u7528\u7684\u7F51\u7EDC\u51FA\u53E3\u540E\u91CD\u8BD5\u3002",
+        "JEV \u5F53\u524D\u7F51\u7EDC\u533A\u57DF\u4E0D\u53EF\u7528\uFF08HTTP 451\uFF09" + (detail ? "\uFF1A" + detail : "") + "\u3002\u8BF7\u5207\u6362\u53EF\u7528\u7684\u7F51\u7EDC\u51FA\u53E3\u540E\u91CD\u8BD5\u3002",
         resp.status
       );
     }
     throw new JevClientError(
       "HTTP",
-      "TypeSafe \u8BF7\u6C42\u5931\u8D25 (" + resp.status + ")" + (detail ? "\uFF1A" + detail : ""),
+      "JEV \u8BF7\u6C42\u5931\u8D25 (" + resp.status + ")" + (detail ? "\uFF1A" + detail : ""),
       resp.status
     );
   }
@@ -7378,11 +7613,49 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 async function listJevModels(settings, options = {}) {
-  const raw = await requestJson(settings, jevModelsUrl(settings), {
+  const endpoint = jevModelsUrl(settings);
+  const raw = await requestJson(settings, endpoint, {
     method: "GET",
-    headers: { Authorization: "Bearer " + apiKey(settings) }
+    headers: { Authorization: jevAuthorizationHeader(settings, endpoint) }
   }, options);
   return parseJevModelList(raw);
+}
+async function callJevSystemOne(settings, request, options = {}) {
+  if (!request.model) {
+    throw new JevClientError("CONFIG", "\u8BF7\u6C42\u7F3A\u5C11 JEV \u6A21\u578B\u540D");
+  }
+  const body = sanitizeLoneSurrogates(JSON.stringify(request));
+  const endpoint = jevSystemOneUrl(settings);
+  const raw = await requestJson(settings, endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: jevAuthorizationHeader(settings, endpoint),
+      "Content-Type": "application/json"
+    },
+    body
+  }, options);
+  return parseJevSystemOneResponse(raw, request.questions);
+}
+async function probeJevConnection(settings, options = {}) {
+  const models = await listJevModels(settings, options);
+  const modelListed = models.models.some((item) => item.name === settings.model);
+  if (modelListed) {
+    return { models, modelListed: true, systemOneVerified: false };
+  }
+  await callJevSystemOne(settings, {
+    model: settings.model,
+    state: {
+      purpose: "recallflow_connection_probe",
+      ts: Date.now()
+    },
+    questions: {
+      reachable: {
+        type: "noul",
+        instructions: "Is this endpoint responding to a structured System One request?"
+      }
+    }
+  }, options);
+  return { models, modelListed: false, systemOneVerified: true };
 }
 
 // lib/application/agent/jev-diagnostics.ts
@@ -7407,12 +7680,876 @@ async function readJevDiagnostic(storage2 = defaultStorage()) {
   }
 }
 
+// lib/ui/options/tracegraph-view.ts
+var NODE_WIDTH = 184;
+var NODE_HEIGHT = 58;
+var COLUMN_GAP = 92;
+var ROW_GAP = 32;
+var PADDING = 34;
+var PARALLEL_LANE_GAP = 18;
+function record2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function text2(value, max = 300) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+function finite(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+function compactJson(value) {
+  try {
+    const result = JSON.stringify(value ?? {});
+    return result.length > 420 ? result.slice(0, 420) + "\u2026" : result;
+  } catch {
+    return "{}";
+  }
+}
+function parseTraceGraphView(value, now = Date.now()) {
+  const graph = record2(value);
+  if (!graph || graph.version !== 2) return null;
+  const siteKey = text2(graph.siteKey, 500);
+  const l0 = record2(graph.l0);
+  const l1 = record2(graph.l1);
+  if (!siteKey || !l0 || !l1 || !Array.isArray(l0.states) || !Array.isArray(l1.edges)) {
+    return null;
+  }
+  const states = /* @__PURE__ */ new Map();
+  for (const item of l0.states.slice(0, 120)) {
+    const state2 = record2(item);
+    const name = text2(state2?.name, 100);
+    if (!name) continue;
+    states.set(name, {
+      name,
+      urlPattern: text2(state2?.urlPattern, 240),
+      staticAtoms: Array.isArray(state2?.staticAtoms) ? state2.staticAtoms.length : 0,
+      dynamicAtoms: Array.isArray(state2?.dynamicAtoms) ? state2.dynamicAtoms.length : 0
+    });
+  }
+  const edges = [];
+  for (const item of l1.edges.slice(0, 80)) {
+    const edge = record2(item);
+    const action = record2(edge?.action);
+    const semanticAnchor = record2(record2(edge?.s)?.semanticAnchor);
+    const provenance = record2(edge?.provenance);
+    const from = text2(edge?.from, 100);
+    const to = text2(edge?.to, 100);
+    const id = text2(edge?.id, 100);
+    if (!edge || !from || !to || !id) continue;
+    if (!states.has(from)) {
+      states.set(from, { name: from, urlPattern: "", staticAtoms: 0, dynamicAtoms: 0 });
+    }
+    if (!states.has(to)) {
+      states.set(to, { name: to, urlPattern: "", staticAtoms: 0, dynamicAtoms: 0 });
+    }
+    const slotNames = Array.isArray(edge.slots) ? edge.slots.slice(0, 12).map((slot) => text2(record2(slot)?.name, 60)).filter(Boolean) : [];
+    const recordIds = Array.isArray(provenance?.recordIds) ? provenance.recordIds : [];
+    edges.push({
+      id,
+      from,
+      to,
+      goal: text2(edge.g, 300),
+      targetLabel: text2(
+        semanticAnchor?.name || semanticAnchor?.text || semanticAnchor?.urlPattern || semanticAnchor?.role,
+        160
+      ),
+      tool: text2(action?.tool || "unknown", 80),
+      risk: text2(action?.risk || edge.r || "low", 20),
+      status: text2(edge.status || "unknown", 20),
+      slots: slotNames,
+      argsTemplate: compactJson(action?.argsTemplate),
+      recordCount: recordIds.length,
+      verifiedAt: finite(provenance?.verifiedAt)
+    });
+  }
+  const updatedAt = finite(graph.updatedAt);
+  const ageMs = Math.max(0, now - updatedAt);
+  return {
+    siteKey,
+    updatedAt,
+    ageMs,
+    recordCount: Array.isArray(graph.records) ? graph.records.length : 0,
+    states: [...states.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    edges
+  };
+}
+function curvePath(curve) {
+  return "M " + curve.x1 + " " + curve.y1 + " C " + curve.c1x + " " + curve.c1y + ", " + curve.c2x + " " + curve.c2y + ", " + curve.x2 + " " + curve.y2;
+}
+function edgeGeometry(edge, from, to) {
+  const anchorOffset = Math.max(-18, Math.min(18, edge.laneOffset * 0.35));
+  let y1 = from.y + from.height / 2 + anchorOffset;
+  let y2 = to.y + to.height / 2 + anchorOffset;
+  let x1 = from.x + from.width;
+  let x2 = to.x;
+  let c1x;
+  let c1y;
+  let c2x;
+  let c2y;
+  let labelX = (x1 + x2) / 2;
+  let labelY = (y1 + y2) / 2 - 6;
+  if (to.level > from.level) {
+    const bend = Math.max(30, (x2 - x1) * 0.45);
+    const curveOffset = edge.laneOffset * 1.45;
+    c1x = x1 + bend;
+    c1y = y1 + curveOffset;
+    c2x = x2 - bend;
+    c2y = y2 + curveOffset;
+    labelY = (y1 + y2) / 2 + curveOffset * 0.72 - 5;
+  } else if (from.name === to.name) {
+    const loopHeight = 48 + Math.abs(edge.laneOffset) * 0.8;
+    x1 = from.x + from.width * 0.32;
+    x2 = from.x + from.width * 0.68;
+    y1 = from.y;
+    y2 = from.y;
+    c1x = x1 - 28;
+    c1y = from.y - loopHeight;
+    c2x = x2 + 28;
+    c2y = from.y - loopHeight;
+    labelX = from.x + from.width / 2 + edge.laneOffset * 0.35;
+    labelY = from.y - loopHeight + 14;
+  } else {
+    x1 = from.x + from.width / 2;
+    x2 = to.x + to.width / 2;
+    const lower = edge.laneOffset >= 0;
+    const detour = Math.abs(edge.laneOffset) + 34;
+    const curveY = lower ? Math.max(from.y + from.height, to.y + to.height) + detour : Math.min(from.y, to.y) - detour;
+    y1 = from.y;
+    y2 = to.y;
+    c1x = x1;
+    c1y = curveY;
+    c2x = x2;
+    c2y = curveY;
+    labelY = curveY + (lower ? 14 : -5);
+  }
+  const curve = { x1, y1, c1x, c1y, c2x, c2y, x2, y2 };
+  return {
+    x1,
+    y1,
+    x2,
+    y2,
+    labelX,
+    labelY,
+    path: curvePath(curve),
+    curve
+  };
+}
+function stateLevels(view) {
+  const names = [.../* @__PURE__ */ new Set([
+    ...view.states.map((state2) => state2.name),
+    ...view.edges.flatMap((edge) => [edge.from, edge.to])
+  ])].sort();
+  const outgoing = /* @__PURE__ */ new Map();
+  const indegree = /* @__PURE__ */ new Map();
+  for (const name of names) {
+    outgoing.set(name, []);
+    indegree.set(name, 0);
+  }
+  for (const edge of view.edges) {
+    const list = outgoing.get(edge.from);
+    if (!list) continue;
+    list.push(edge.to);
+    indegree.set(edge.to, (indegree.get(edge.to) || 0) + 1);
+  }
+  const pending = names.filter((name) => (indegree.get(name) || 0) === 0);
+  const levels = /* @__PURE__ */ new Map();
+  for (const name of pending) levels.set(name, 0);
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const name = pending[cursor];
+    const level = levels.get(name) || 0;
+    for (const target of outgoing.get(name) || []) {
+      levels.set(target, Math.max(levels.get(target) || 0, level + 1));
+      const next = (indegree.get(target) || 0) - 1;
+      indegree.set(target, next);
+      if (next === 0) pending.push(target);
+    }
+  }
+  let fallbackLevel = Math.max(0, ...levels.values()) + 1;
+  for (const name of names) {
+    if (!levels.has(name)) levels.set(name, fallbackLevel++);
+  }
+  return levels;
+}
+function buildTraceGraphLayout(view) {
+  const levels = stateLevels(view);
+  const columns = /* @__PURE__ */ new Map();
+  for (const state2 of view.states) {
+    const level = levels.get(state2.name) || 0;
+    const list = columns.get(level) || [];
+    list.push(state2.name);
+    columns.set(level, list);
+  }
+  for (const list of columns.values()) list.sort();
+  const levelCount = Math.max(1, ...[...columns.keys()].map((level) => level + 1));
+  const maxRows = Math.max(
+    1,
+    ...[...columns.values()].map((list) => list.length)
+  );
+  const width = Math.max(
+    620,
+    PADDING * 2 + levelCount * NODE_WIDTH + Math.max(0, levelCount - 1) * COLUMN_GAP
+  );
+  const height = Math.max(
+    280,
+    PADDING * 2 + maxRows * NODE_HEIGHT + Math.max(0, maxRows - 1) * ROW_GAP
+  );
+  const stateMap = new Map(view.states.map((state2) => [state2.name, state2]));
+  const incoming = /* @__PURE__ */ new Map();
+  const outgoing = /* @__PURE__ */ new Map();
+  for (const edge of view.edges) {
+    outgoing.set(edge.from, (outgoing.get(edge.from) || 0) + 1);
+    incoming.set(edge.to, (incoming.get(edge.to) || 0) + 1);
+  }
+  const nodes = [];
+  for (const [level, names] of [...columns.entries()].sort((a, b) => a[0] - b[0])) {
+    names.forEach((name, index) => {
+      const state2 = stateMap.get(name) || {
+        name,
+        urlPattern: "",
+        staticAtoms: 0,
+        dynamicAtoms: 0
+      };
+      nodes.push({
+        ...state2,
+        x: PADDING + level * (NODE_WIDTH + COLUMN_GAP),
+        y: PADDING + index * (NODE_HEIGHT + ROW_GAP),
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+        level,
+        incoming: incoming.get(name) || 0,
+        outgoing: outgoing.get(name) || 0
+      });
+    });
+  }
+  const nodeMap = new Map(nodes.map((node) => [node.name, node]));
+  const pairGroups = /* @__PURE__ */ new Map();
+  for (const edge of view.edges) {
+    const key = edge.from <= edge.to ? edge.from + "\0" + edge.to : edge.to + "\0" + edge.from;
+    const group = pairGroups.get(key) || [];
+    group.push(edge);
+    pairGroups.set(key, group);
+  }
+  const lanes = /* @__PURE__ */ new Map();
+  for (const group of pairGroups.values()) {
+    group.sort(
+      (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to) || a.id.localeCompare(b.id)
+    );
+    const gap = group.length > 7 ? 9 : group.length > 4 ? 12 : PARALLEL_LANE_GAP;
+    const center = (group.length - 1) / 2;
+    group.forEach((edge, index) => {
+      lanes.set(edge, {
+        index,
+        count: group.length,
+        offset: (index - center) * gap
+      });
+    });
+  }
+  const edges = [];
+  for (const edge of view.edges) {
+    const from = nodeMap.get(edge.from);
+    const to = nodeMap.get(edge.to);
+    if (!from || !to) continue;
+    const lane = lanes.get(edge) || { index: 0, count: 1, offset: 0 };
+    edges.push({
+      ...edge,
+      parallelIndex: lane.index,
+      parallelCount: lane.count,
+      laneOffset: lane.offset,
+      ...edgeGeometry({ ...edge, laneOffset: lane.offset }, from, to)
+    });
+  }
+  let minX = 0;
+  let minY = 0;
+  let maxX = width;
+  let maxY = height;
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x);
+    minY = Math.min(minY, node.y);
+    maxX = Math.max(maxX, node.x + node.width);
+    maxY = Math.max(maxY, node.y + node.height);
+  }
+  for (const edge of edges) {
+    const coordinates = (edge.path.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
+    for (let index = 0; index + 1 < coordinates.length; index += 2) {
+      minX = Math.min(minX, coordinates[index]);
+      minY = Math.min(minY, coordinates[index + 1]);
+      maxX = Math.max(maxX, coordinates[index]);
+      maxY = Math.max(maxY, coordinates[index + 1]);
+    }
+    const labelHalfWidth = Math.max(32, (edge.tool.length + edge.targetLabel.length + 8) * 3.2);
+    minX = Math.min(minX, edge.labelX - labelHalfWidth);
+    maxX = Math.max(maxX, edge.labelX + labelHalfWidth);
+    minY = Math.min(minY, edge.labelY - 12);
+    maxY = Math.max(maxY, edge.labelY + 12);
+  }
+  const margin = 24;
+  const bounds = {
+    x: minX - margin,
+    y: minY - margin,
+    width: Math.max(1, maxX - minX + margin * 2),
+    height: Math.max(1, maxY - minY + margin * 2)
+  };
+  return {
+    width: bounds.width,
+    height: bounds.height,
+    viewBox: bounds,
+    levels: levelCount,
+    nodes,
+    edges
+  };
+}
+function withTraceGraphGeometry(layout, nodes, edges) {
+  let minX = Math.min(0, ...nodes.map((node) => node.x));
+  let minY = Math.min(0, ...nodes.map((node) => node.y));
+  let maxX = Math.max(620, ...nodes.map((node) => node.x + node.width));
+  let maxY = Math.max(280, ...nodes.map((node) => node.y + node.height));
+  for (const edge of edges) {
+    const { curve } = edge;
+    minX = Math.min(minX, curve.x1, curve.c1x, curve.c2x, curve.x2, edge.labelX - 42);
+    minY = Math.min(minY, curve.y1, curve.c1y, curve.c2y, curve.y2, edge.labelY - 14);
+    maxX = Math.max(maxX, curve.x1, curve.c1x, curve.c2x, curve.x2, edge.labelX + 42);
+    maxY = Math.max(maxY, curve.y1, curve.c1y, curve.c2y, curve.y2, edge.labelY + 14);
+  }
+  const margin = 24;
+  const viewBox = {
+    x: minX - margin,
+    y: minY - margin,
+    width: Math.max(1, maxX - minX + margin * 2),
+    height: Math.max(1, maxY - minY + margin * 2)
+  };
+  return {
+    ...layout,
+    width: viewBox.width,
+    height: viewBox.height,
+    viewBox,
+    nodes,
+    edges
+  };
+}
+function moveTraceGraphNode(layout, name, x, y) {
+  const nodes = layout.nodes.map(
+    (node) => node.name === name ? { ...node, x, y } : node
+  );
+  const nodeMap = new Map(nodes.map((node) => [node.name, node]));
+  const edges = layout.edges.map((edge) => {
+    const from = nodeMap.get(edge.from);
+    const to = nodeMap.get(edge.to);
+    return from && to ? { ...edge, ...edgeGeometry(edge, from, to) } : edge;
+  });
+  return withTraceGraphGeometry(layout, nodes, edges);
+}
+function moveTraceGraphEdge(layout, edgeId, laneOffset) {
+  const nodeMap = new Map(layout.nodes.map((node) => [node.name, node]));
+  const edges = layout.edges.map((edge) => {
+    if (edge.id !== edgeId) return edge;
+    const from = nodeMap.get(edge.from);
+    const to = nodeMap.get(edge.to);
+    const next = { ...edge, laneOffset };
+    return from && to ? { ...next, ...edgeGeometry(next, from, to) } : next;
+  });
+  return withTraceGraphGeometry(layout, layout.nodes, edges);
+}
+function traceGraphCurvePoint(curve, t) {
+  const value = Math.max(0, Math.min(1, t));
+  const inverse = 1 - value;
+  return {
+    x: inverse ** 3 * curve.x1 + 3 * inverse ** 2 * value * curve.c1x + 3 * inverse * value ** 2 * curve.c2x + value ** 3 * curve.x2,
+    y: inverse ** 3 * curve.y1 + 3 * inverse ** 2 * value * curve.c1y + 3 * inverse * value ** 2 * curve.c2y + value ** 3 * curve.y2
+  };
+}
+function distanceToTraceGraphEdge(edge, point) {
+  let best = Number.POSITIVE_INFINITY;
+  for (let index = 0; index <= 36; index += 1) {
+    const current = traceGraphCurvePoint(edge.curve, index / 36);
+    best = Math.min(best, Math.hypot(current.x - point.x, current.y - point.y));
+  }
+  return best;
+}
+function formatTraceGraphAge(ageMs) {
+  const seconds = Math.max(0, Math.floor(ageMs / 1e3));
+  if (seconds < 60) return seconds + " \u79D2\u524D";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + " \u5206\u949F\u524D";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + " \u5C0F\u65F6\u524D";
+  return Math.floor(hours / 24) + " \u5929\u524D";
+}
+
+// lib/ui/options/tracegraph-canvas.ts
+var MIN_SCALE = 0.28;
+var MAX_SCALE = 3.2;
+function color(style, key, fallback) {
+  return style.getPropertyValue(key).trim() || fallback;
+}
+function themeFor(host) {
+  const style = getComputedStyle(host);
+  return {
+    background: color(style, "--bg", "#fff"),
+    card: color(style, "--card", "#fff"),
+    border: color(style, "--border", "#d8dde6"),
+    primary: color(style, "--primary", "#4a90d9"),
+    primarySoft: color(style, "--primary-soft", "rgba(74,144,217,.12)"),
+    text: color(style, "--text", "#1f2937"),
+    textSub: color(style, "--text-sub", "#4b5563"),
+    textFaint: color(style, "--text-faint", "#6b7280"),
+    danger: color(style, "--danger", "#e74c3c")
+  };
+}
+function truncate(value, max) {
+  return value.length > max ? value.slice(0, max - 1) + "\u2026" : value;
+}
+function roundedRect(context, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.lineTo(x + width - r, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + r);
+  context.lineTo(x + width, y + height - r);
+  context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  context.lineTo(x + r, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - r);
+  context.lineTo(x, y + r);
+  context.quadraticCurveTo(x, y, x + r, y);
+  context.closePath();
+}
+function edgeColor(edge, theme) {
+  if (edge.risk === "high") return theme.danger;
+  if (edge.risk === "medium") return "#d97706";
+  return theme.primary;
+}
+function curvePoint(curve, t) {
+  const inverse = 1 - t;
+  return {
+    x: inverse ** 3 * curve.x1 + 3 * inverse ** 2 * t * curve.c1x + 3 * inverse * t ** 2 * curve.c2x + t ** 3 * curve.x2,
+    y: inverse ** 3 * curve.y1 + 3 * inverse ** 2 * t * curve.c1y + 3 * inverse * t ** 2 * curve.c2y + t ** 3 * curve.y2
+  };
+}
+function drawArrow(context, edge, colorValue) {
+  const before = curvePoint(edge.curve, 0.985);
+  const tip = curvePoint(edge.curve, 1);
+  const angle = Math.atan2(tip.y - before.y, tip.x - before.x);
+  const size = 8;
+  context.beginPath();
+  context.moveTo(tip.x, tip.y);
+  context.lineTo(
+    tip.x - Math.cos(angle - 0.48) * size,
+    tip.y - Math.sin(angle - 0.48) * size
+  );
+  context.lineTo(
+    tip.x - Math.cos(angle + 0.48) * size,
+    tip.y - Math.sin(angle + 0.48) * size
+  );
+  context.closePath();
+  context.fillStyle = colorValue;
+  context.fill();
+}
+function createTraceGraphCanvas(host, callbacks) {
+  let canvas = null;
+  let resizeObserver = null;
+  let resizeFrame = 0;
+  let bound = false;
+  const scene = {
+    view: null,
+    layout: null,
+    x: 0,
+    y: 0,
+    scale: 1,
+    selectedNode: null,
+    selectedEdgeId: null,
+    drag: null
+  };
+  function ensureCanvas() {
+    if (canvas) return canvas;
+    canvas = document.createElement("canvas");
+    canvas.className = "tracegraph-interactive-canvas";
+    canvas.tabIndex = 0;
+    canvas.setAttribute("role", "application");
+    canvas.setAttribute(
+      "aria-label",
+      "\u53EF\u4EA4\u4E92 TraceGraph\u3002\u62D6\u52A8\u80CC\u666F\u5E73\u79FB\uFF0C\u6EDA\u8F6E\u7F29\u653E\uFF0C\u62D6\u52A8\u8282\u70B9\u8C03\u6574\u5E03\u5C40\uFF0C\u70B9\u51FB\u8FB9\u67E5\u770B\u8BE6\u60C5\u3002"
+    );
+    host.replaceChildren(canvas);
+    bindInteractions();
+    return canvas;
+  }
+  function screenPoint(event) {
+    const rect = host.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  }
+  function worldPoint(event) {
+    const point = screenPoint(event);
+    const viewBox = scene.layout?.viewBox || { x: 0, y: 0 };
+    return {
+      x: (point.x - scene.x) / scene.scale + viewBox.x,
+      y: (point.y - scene.y) / scene.scale + viewBox.y
+    };
+  }
+  function nodeAt(point) {
+    const nodes = scene.layout?.nodes || [];
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index];
+      if (point.x >= node.x && point.x <= node.x + node.width && point.y >= node.y && point.y <= node.y + node.height) {
+        return node;
+      }
+    }
+    return null;
+  }
+  function edgeAt(point) {
+    const edges = scene.layout?.edges || [];
+    const threshold = 11 / Math.max(0.5, scene.scale);
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (const edge of edges) {
+      const distance = distanceToTraceGraphEdge(edge, point);
+      if (distance <= threshold && distance < nearestDistance) {
+        nearest = edge;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
+  }
+  function resizeBitmap() {
+    const current = ensureCanvas();
+    const width = Math.max(1, Math.floor(host.clientWidth));
+    const height = Math.max(1, Math.floor(host.clientHeight));
+    const ratio = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    current.width = Math.floor(width * ratio);
+    current.height = Math.floor(height * ratio);
+    current.style.width = width + "px";
+    current.style.height = height + "px";
+  }
+  function draw() {
+    if (!scene.layout) return;
+    const current = ensureCanvas();
+    resizeBitmap();
+    const context = current.getContext("2d");
+    if (!context) return;
+    const ratio = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    const theme = themeFor(host);
+    host.dataset.canvasX = String(scene.x);
+    host.dataset.canvasY = String(scene.y);
+    host.dataset.zoom = String(scene.scale);
+    host.dataset.viewBoxX = String(scene.layout.viewBox.x);
+    host.dataset.viewBoxY = String(scene.layout.viewBox.y);
+    host.dataset.viewBoxWidth = String(scene.layout.viewBox.width);
+    host.dataset.viewBoxHeight = String(scene.layout.viewBox.height);
+    host.dataset.nodeCount = String(scene.layout.nodes.length);
+    host.dataset.edgeCount = String(scene.layout.edges.length);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, host.clientWidth, host.clientHeight);
+    context.save();
+    context.translate(scene.x, scene.y);
+    context.scale(scene.scale, scene.scale);
+    context.translate(-scene.layout.viewBox.x, -scene.layout.viewBox.y);
+    const selectedNode = scene.layout.nodes.find(
+      (node) => node.name === scene.selectedNode
+    ) || null;
+    const relatedNodes = /* @__PURE__ */ new Set();
+    const relatedEdges = /* @__PURE__ */ new Set();
+    if (selectedNode) {
+      relatedNodes.add(selectedNode.name);
+      for (const edge of scene.layout.edges) {
+        if (edge.from === selectedNode.name || edge.to === selectedNode.name) {
+          relatedNodes.add(edge.from);
+          relatedNodes.add(edge.to);
+          relatedEdges.add(edge.id);
+        }
+      }
+    }
+    const selectedEdge = scene.layout.edges.find(
+      (edge) => edge.id === scene.selectedEdgeId
+    ) || null;
+    if (selectedEdge) {
+      relatedNodes.add(selectedEdge.from);
+      relatedNodes.add(selectedEdge.to);
+    }
+    const hasSelection = Boolean(selectedNode || selectedEdge);
+    for (const edge of scene.layout.edges) {
+      const related = selectedEdge ? edge.id === selectedEdge.id : !selectedNode || relatedEdges.has(edge.id);
+      context.globalAlpha = hasSelection && !related ? 0.16 : 1;
+      const stroke = edgeColor(edge, theme);
+      context.beginPath();
+      context.moveTo(edge.curve.x1, edge.curve.y1);
+      context.bezierCurveTo(
+        edge.curve.c1x,
+        edge.curve.c1y,
+        edge.curve.c2x,
+        edge.curve.c2y,
+        edge.curve.x2,
+        edge.curve.y2
+      );
+      context.strokeStyle = edge.status === "verified" ? stroke : theme.textFaint;
+      context.lineWidth = selectedEdge?.id === edge.id ? 3.4 : related && hasSelection ? 2.5 : 1.7;
+      context.setLineDash(edge.status === "verified" ? [] : [6, 5]);
+      context.stroke();
+      context.setLineDash([]);
+      drawArrow(context, edge, edge.status === "verified" ? stroke : theme.textFaint);
+      const target = edge.targetLabel ? " \xB7 " + truncate(edge.targetLabel, 20) : "";
+      const lane = edge.parallelCount > 1 ? " " + (edge.parallelIndex + 1) + "/" + edge.parallelCount : "";
+      const label = truncate(edge.tool + target + lane, 38);
+      context.font = '10px "Segoe UI", "Microsoft YaHei", sans-serif';
+      const metrics = context.measureText(label);
+      const paddingX = 4;
+      const labelX = edge.labelX - metrics.width / 2 - paddingX;
+      const labelY = edge.labelY - 10;
+      context.globalAlpha = hasSelection && !related ? 0.12 : 0.94;
+      context.fillStyle = theme.background;
+      context.fillRect(labelX, labelY, metrics.width + paddingX * 2, 14);
+      context.fillStyle = theme.textSub;
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(label, labelX + paddingX, edge.labelY - 3);
+    }
+    for (const node of scene.layout.nodes) {
+      const selected = node.name === scene.selectedNode;
+      const related = !hasSelection || relatedNodes.has(node.name);
+      context.globalAlpha = hasSelection && !related ? 0.2 : 1;
+      context.save();
+      context.shadowColor = "rgba(15, 23, 42, .12)";
+      context.shadowBlur = selected ? 12 : 6;
+      context.shadowOffsetY = 3;
+      roundedRect(context, node.x, node.y, node.width, node.height, 12);
+      context.fillStyle = selected ? theme.primarySoft : theme.card;
+      context.fill();
+      context.restore();
+      roundedRect(context, node.x, node.y, node.width, node.height, 12);
+      context.strokeStyle = selected ? theme.primary : theme.border;
+      context.lineWidth = selected ? 2.4 : 1.2;
+      context.stroke();
+      context.fillStyle = theme.text;
+      context.font = '650 12px "Segoe UI", "Microsoft YaHei", sans-serif';
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(truncate(node.name, 23), node.x + 13, node.y + 22, node.width - 26);
+      context.fillStyle = theme.textFaint;
+      context.font = '10px "Segoe UI", "Microsoft YaHei", sans-serif';
+      context.fillText(
+        "\u5165 " + node.incoming + " \xB7 \u51FA " + node.outgoing,
+        node.x + 13,
+        node.y + 42,
+        node.width - 26
+      );
+    }
+    context.restore();
+  }
+  function fit(resetScale = false) {
+    if (!scene.layout) return;
+    const width = Math.max(1, host.clientWidth);
+    const height = Math.max(1, host.clientHeight);
+    const viewBox = scene.layout.viewBox;
+    const fitScale = Math.min(
+      1,
+      Math.max(0.2, (width - 42) / viewBox.width),
+      Math.max(0.2, (height - 42) / viewBox.height)
+    );
+    if (resetScale || !Number.isFinite(scene.scale) || scene.scale < MIN_SCALE || scene.scale > MAX_SCALE) {
+      scene.scale = Math.max(MIN_SCALE, fitScale);
+    }
+    scene.x = (width - viewBox.width * scene.scale) / 2 - viewBox.x * scene.scale;
+    scene.y = (height - viewBox.height * scene.scale) / 2 - viewBox.y * scene.scale;
+    host.dataset.zoom = String(scene.scale);
+    const level = document.getElementById("tracegraph-zoom-level");
+    if (host.id === "tracegraph-dialog-canvas" && level) {
+      level.textContent = Math.round(scene.scale * 100) + "%";
+    }
+    draw();
+  }
+  function zoom(factor, anchorX = host.clientWidth / 2, anchorY = host.clientHeight / 2) {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scene.scale * factor));
+    if (Math.abs(next - scene.scale) < 1e-3) return;
+    const worldX = (anchorX - scene.x) / scene.scale;
+    const worldY = (anchorY - scene.y) / scene.scale;
+    scene.scale = next;
+    scene.x = anchorX - worldX * next;
+    scene.y = anchorY - worldY * next;
+    const level = document.getElementById("tracegraph-zoom-level");
+    if (host.id === "tracegraph-dialog-canvas" && level) {
+      level.textContent = Math.round(scene.scale * 100) + "%";
+    }
+    host.dataset.zoom = String(scene.scale);
+    draw();
+  }
+  function selectNode(nodeName) {
+    if (!scene.layout) return false;
+    const node = scene.layout.nodes.find((item) => item.name === nodeName);
+    if (!node) return false;
+    scene.selectedNode = node.name;
+    scene.selectedEdgeId = null;
+    draw();
+    callbacks.onSelectNode(node, scene.layout);
+    return true;
+  }
+  function selectEdge(edgeId) {
+    if (!scene.layout) return false;
+    const edge = scene.layout.edges.find((item) => item.id === edgeId);
+    if (!edge) return false;
+    scene.selectedNode = null;
+    scene.selectedEdgeId = edge.id;
+    draw();
+    callbacks.onSelectEdge(edge, scene.layout);
+    return true;
+  }
+  function clearSelection() {
+    scene.selectedNode = null;
+    scene.selectedEdgeId = null;
+    draw();
+    callbacks.onClearSelection();
+  }
+  function bindInteractions() {
+    if (bound) return;
+    bound = true;
+    host.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !canvas) return;
+      const point = worldPoint(event);
+      const node = nodeAt(point);
+      const edge = node ? null : edgeAt(point);
+      scene.drag = {
+        mode: node ? "node" : edge ? "edge" : "pan",
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        moved: false,
+        ...node ? { nodeName: node.name, nodeStartX: node.x, nodeStartY: node.y } : edge ? { edgeId: edge.id, edgeStartOffset: edge.laneOffset } : {}
+      };
+      host.classList.toggle("is-panning", scene.drag.mode === "pan");
+      host.classList.toggle("is-node-dragging", scene.drag.mode === "node");
+      canvas.setPointerCapture?.(event.pointerId);
+      canvas.focus();
+      event.preventDefault();
+    });
+    host.addEventListener("pointermove", (event) => {
+      if (!scene.drag) {
+        const node = nodeAt(worldPoint(event));
+        const edge = node ? null : edgeAt(worldPoint(event));
+        host.classList.toggle("has-interactive-target", Boolean(node || edge));
+        return;
+      }
+      const drag2 = scene.drag;
+      const dx = event.clientX - drag2.lastX;
+      const dy = event.clientY - drag2.lastY;
+      if (Math.abs(event.clientX - drag2.startX) + Math.abs(event.clientY - drag2.startY) > 3) {
+        drag2.moved = true;
+      }
+      if (drag2.mode === "pan") {
+        scene.x += dx;
+        scene.y += dy;
+        draw();
+      } else if (drag2.mode === "node" && drag2.nodeName && scene.layout) {
+        const worldDX = (event.clientX - drag2.startX) / scene.scale;
+        const worldDY = (event.clientY - drag2.startY) / scene.scale;
+        scene.layout = moveTraceGraphNode(
+          scene.layout,
+          drag2.nodeName,
+          Number(drag2.nodeStartX || 0) + worldDX,
+          Number(drag2.nodeStartY || 0) + worldDY
+        );
+        draw();
+      } else if (drag2.mode === "edge" && drag2.edgeId && scene.layout) {
+        const worldDY = (event.clientY - drag2.startY) / scene.scale;
+        scene.layout = moveTraceGraphEdge(
+          scene.layout,
+          drag2.edgeId,
+          Number(drag2.edgeStartOffset || 0) + worldDY
+        );
+        draw();
+      }
+      drag2.lastX = event.clientX;
+      drag2.lastY = event.clientY;
+    });
+    const finish = (event) => {
+      const drag2 = scene.drag;
+      if (!drag2) return;
+      scene.drag = null;
+      host.classList.remove("is-panning", "is-node-dragging");
+      canvas?.releasePointerCapture?.(event.pointerId);
+      if (drag2.mode === "node" && drag2.nodeName) {
+        selectNode(drag2.nodeName);
+      } else if (drag2.mode === "edge" && drag2.edgeId) {
+        selectEdge(drag2.edgeId);
+      } else if (drag2.mode === "pan" && !drag2.moved) {
+        clearSelection();
+      }
+    };
+    host.addEventListener("pointerup", finish);
+    host.addEventListener("pointercancel", (event) => {
+      scene.drag = null;
+      host.classList.remove("is-panning", "is-node-dragging");
+      canvas?.releasePointerCapture?.(event.pointerId);
+    });
+    host.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const point = screenPoint(event);
+      zoom(Math.exp(-event.deltaY * 14e-4), point.x, point.y);
+    }, { passive: false });
+    host.addEventListener("dblclick", (event) => {
+      const point = worldPoint(event);
+      if (nodeAt(point) || edgeAt(point)) return;
+      fit(true);
+    });
+    host.addEventListener("keydown", (event) => {
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        zoom(1.2);
+      } else if (event.key === "-") {
+        event.preventDefault();
+        zoom(1 / 1.2);
+      } else if (event.key === "0") {
+        event.preventDefault();
+        fit(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        clearSelection();
+      }
+    });
+  }
+  function render(view) {
+    scene.view = view;
+    scene.layout = buildTraceGraphLayout(view);
+    scene.selectedNode = null;
+    scene.selectedEdgeId = null;
+    ensureCanvas();
+    if (!resizeObserver && typeof ResizeObserver === "function") {
+      resizeObserver = new ResizeObserver(() => {
+        cancelAnimationFrame(resizeFrame);
+        resizeFrame = requestAnimationFrame(() => draw());
+      });
+      resizeObserver.observe(host);
+    }
+    requestAnimationFrame(() => fit(true));
+  }
+  function clear() {
+    if (canvas) canvas.remove();
+    canvas = null;
+    scene.view = null;
+    scene.layout = null;
+    scene.selectedNode = null;
+    scene.selectedEdgeId = null;
+  }
+  return {
+    render,
+    clear,
+    fit,
+    zoom,
+    selectEdge,
+    selectNode,
+    clearSelection,
+    getLayout: () => scene.layout
+  };
+}
+
 // entries/options.ts
 var $ = (id) => document.getElementById(id);
 var $q = (root, selector) => root.querySelector(selector);
 var settingsDirty = false;
 var settingsLoading = true;
 var jevLastDiagnostic = null;
+var traceGraphViews = [];
+var traceGraphCanvasControllers = /* @__PURE__ */ new WeakMap();
 async function load() {
   const s = await getAISettings();
   $("api-key").value = s.apiKey;
@@ -7429,14 +8566,15 @@ async function load() {
   $("jev-max-actions").value = String(s.jev.maxConsecutiveActions);
   $("jev-max-repeated").value = String(s.jev.maxRepeatedActionsWithoutProgress);
   $("jev-max-candidates").value = String(s.jev.maxElementCandidates);
-  $("jev-min-read").value = String(s.jev.minReadConfidence);
-  $("jev-min-action").value = String(s.jev.minActionConfidence);
-  $("jev-min-click").value = String(s.jev.minClickConfidence);
-  $("jev-min-wait").value = String(s.jev.minWaitConfidence);
-  $("jev-min-target-operation").value = String(s.jev.minTargetOperationConfidence);
+  $("jev-min-edge-confidence").value = String(s.jev.minEdgeConfidence);
   $("jev-schema-version").value = s.jev.schemaVersion;
+  $("tracegraph-enabled").checked = s.traceGraph?.enabled === true;
+  $("tracegraph-mode").value = s.traceGraph?.mode === "live" ? "live" : "record";
+  $("tracegraph-shadow-mode").checked = s.traceGraph?.shadowMode !== false;
   jevLastDiagnostic = await readJevDiagnostic();
   renderJevRuntimeStatus();
+  await migrateTraceGraphEdges();
+  await refreshTraceGraphExplorer();
   $("rag-enabled").checked = !!s.ragEnabled;
   $("target-lang").value = s.targetLang;
   $("page-context").checked = s.pageContext !== false;
@@ -7506,6 +8644,403 @@ function renderJevRuntimeStatus() {
   }
   el.className = className;
   el.textContent = current + " \u6700\u8FD1\u8FD0\u884C" + (when ? "\uFF08" + when + "\uFF09" : "\uFF1A") + attempts + " \xB7 " + latest + "\u3002";
+}
+function formatTraceGraphTime(value) {
+  if (!Number.isFinite(value) || value <= 0) return "\u672A\u77E5\u65F6\u95F4";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+function traceGraphTargets(expanded = false) {
+  return expanded ? {
+    canvas: $("tracegraph-dialog-canvas"),
+    detail: $("tracegraph-dialog-detail")
+  } : {
+    canvas: $("tracegraph-canvas"),
+    detail: $("tracegraph-detail")
+  };
+}
+function selectedTraceGraphView() {
+  const select = $("tracegraph-site-select");
+  if (!select) return null;
+  return traceGraphViews.find((item) => item.siteKey === select.value) || null;
+}
+function traceGraphCanvasController(canvas) {
+  const existing = traceGraphCanvasControllers.get(canvas);
+  if (existing) return existing;
+  const controller = createTraceGraphCanvas(canvas, {
+    onSelectNode(node, layout) {
+      renderTraceGraphNodeDetail(canvas, node, layout);
+    },
+    onSelectEdge(edge) {
+      renderTraceGraphEdgeDetail(canvas, edge);
+    },
+    onClearSelection() {
+      renderTraceGraphCanvasHint(canvas);
+    }
+  });
+  traceGraphCanvasControllers.set(canvas, controller);
+  return controller;
+}
+async function refreshTraceGraphExplorer() {
+  const canvas = $("tracegraph-canvas");
+  const summary = $("tracegraph-view-summary");
+  const select = $("tracegraph-site-select");
+  if (!canvas || !summary || !select) return;
+  summary.className = "tracegraph-summary";
+  summary.textContent = "\u6B63\u5728\u8BFB\u53D6\u672C\u5730 TraceGraph\u2026";
+  try {
+    const stored = await chrome.storage.local.get(TRACE_GRAPH_KEY);
+    const all = stored?.[TRACE_GRAPH_KEY];
+    const records = all && typeof all === "object" && !Array.isArray(all) ? Object.values(all) : [];
+    traceGraphViews = records.map((item) => parseTraceGraphView(item)).filter((item) => Boolean(item)).sort((a, b) => b.updatedAt - a.updatedAt);
+    const previous = select.value;
+    select.replaceChildren();
+    if (!traceGraphViews.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "\u6682\u65E0\u56FE";
+      select.appendChild(option);
+      select.disabled = true;
+      const expand = $("tracegraph-expand");
+      if (expand) expand.disabled = true;
+      const remove = $("tracegraph-delete-site");
+      if (remove) remove.disabled = true;
+      $("tracegraph-dialog")?.close();
+      summary.className = "tracegraph-summary empty";
+      summary.textContent = "\u672C\u5730\u8FD8\u6CA1\u6709\u53EF\u5C55\u793A\u7684 TraceGraph\u3002\u5F00\u542F\u5F55\u5236\u5E76\u5B8C\u6210\u4E00\u6B21\u4EA7\u751F\u53EF\u9A8C\u8BC1\u53D8\u5316\u7684\u9875\u9762\u52A8\u4F5C\u540E\uFF0C\u8FD9\u91CC\u4F1A\u663E\u793A\u72B6\u6001\u548C\u8FB9\u3002";
+      renderTraceGraphEmpty("\u6682\u65E0\u8F68\u8FF9\u56FE", "\u56FE\u6570\u636E\u53EA\u4FDD\u5B58\u5728\u672C\u5730\u6D4F\u89C8\u5668\uFF0C\u4E0D\u4F1A\u4E0A\u4F20\u3002");
+      return;
+    }
+    for (const view of traceGraphViews) {
+      const option = document.createElement("option");
+      option.value = view.siteKey;
+      option.textContent = view.siteKey;
+      select.appendChild(option);
+    }
+    select.disabled = false;
+    select.value = traceGraphViews.some((view) => view.siteKey === previous) ? previous : traceGraphViews[0].siteKey;
+    renderSelectedTraceGraph();
+  } catch (error) {
+    summary.className = "tracegraph-summary error";
+    summary.textContent = "\u8BFB\u53D6 TraceGraph \u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error));
+    renderTraceGraphEmpty("\u65E0\u6CD5\u8BFB\u53D6\u56FE\u6570\u636E", "\u8BF7\u5237\u65B0\u8BBE\u7F6E\u9875\u540E\u91CD\u8BD5\u3002");
+  }
+}
+async function migrateTraceGraphEdges() {
+  try {
+    await chrome.runtime.sendMessage({ type: "tracegraph:rebuild" });
+  } catch {
+  }
+}
+function renderTraceGraphEmpty(title, detail = "") {
+  renderTraceGraphEmptyIn($("tracegraph-canvas"), $("tracegraph-detail"), title, detail);
+}
+function renderTraceGraphEmptyIn(canvas, detailEl, title, detail = "") {
+  if (!canvas) return;
+  const box = document.createElement("div");
+  box.className = "tracegraph-empty";
+  const strong = document.createElement("strong");
+  strong.textContent = title;
+  box.appendChild(strong);
+  if (detail) {
+    const span = document.createElement("span");
+    span.textContent = detail;
+    box.appendChild(span);
+  }
+  canvas.replaceChildren(box);
+  traceGraphCanvasControllers.get(canvas)?.clear();
+  if (detailEl) {
+    const empty = document.createElement("div");
+    empty.className = "tracegraph-detail-empty";
+    empty.textContent = detail || "\u6682\u65E0\u53EF\u67E5\u770B\u7684\u72B6\u6001\u3002";
+    detailEl.replaceChildren(empty);
+  }
+}
+function renderSelectedTraceGraph() {
+  const view = selectedTraceGraphView();
+  const expand = $("tracegraph-expand");
+  const remove = $("tracegraph-delete-site");
+  if (!view) {
+    if (expand) expand.disabled = true;
+    if (remove) remove.disabled = true;
+    $("tracegraph-dialog")?.close();
+    renderTraceGraphEmpty("\u6682\u65E0\u53EF\u5C55\u793A\u7684\u56FE");
+    return;
+  }
+  if (expand) expand.disabled = !view.states.length || !view.edges.length;
+  if (remove) remove.disabled = false;
+  const summary = $("tracegraph-view-summary");
+  if (summary) {
+    summary.className = "tracegraph-summary active";
+    summary.textContent = [
+      "\u672C\u5730\u8F68\u8FF9\u56FE",
+      view.states.length + " \u4E2A\u72B6\u6001",
+      view.edges.length + " \u6761\u8FB9",
+      view.recordCount + " \u6761\u539F\u59CB\u8BB0\u5F55",
+      "\u66F4\u65B0\u4E8E " + formatTraceGraphTime(view.updatedAt),
+      formatTraceGraphAge(view.ageMs)
+    ].join(" \xB7 ");
+  }
+  renderTraceGraph(view);
+  const dialog = $("tracegraph-dialog");
+  if (dialog?.open) renderTraceGraph(view, true);
+}
+function renderTraceGraph(view, expanded = false) {
+  const { canvas, detail } = traceGraphTargets(expanded);
+  if (!canvas) return;
+  if (!view.states.length || !view.edges.length) {
+    const title = view.states.length ? "\u5DF2\u6709\u72B6\u6001\uFF0C\u4F46\u8FD8\u6CA1\u6709\u53EF\u6267\u884C\u8FB9" : "\u56FE\u91CC\u8FD8\u6CA1\u6709\u72B6\u6001";
+    const hint = view.states.length ? "\u53EA\u6709\u6210\u529F\u4E14\u4EA7\u751F\u53EF\u9A8C\u8BC1\u53D8\u5316\u3001\u540C\u65F6\u5C5E\u4E8E\u53EF\u91CD\u653E\u5DE5\u5177\u7684\u52A8\u4F5C\uFF0C\u624D\u4F1A\u751F\u6210\u8FB9\u3002" : "\u7EE7\u7EED\u6267\u884C\u9875\u9762\u52A8\u4F5C\u540E\u5237\u65B0\uFF1B\u767B\u5F55\u3001\u652F\u4ED8\u548C\u5185\u7F51\u9875\u4E0D\u4F1A\u6784\u56FE\u3002";
+    renderTraceGraphEmptyIn(canvas, detail, title, hint);
+    return;
+  }
+  traceGraphCanvasController(canvas).render(view);
+  renderTraceGraphCanvasHint(canvas);
+}
+function traceGraphDetailFor(canvas) {
+  return canvas.id === "tracegraph-dialog-canvas" ? $("tracegraph-dialog-detail") : $("tracegraph-detail");
+}
+function renderTraceGraphCanvasHint(canvas) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const layout = traceGraphCanvasControllers.get(canvas)?.getLayout();
+  const empty = document.createElement("div");
+  empty.className = "tracegraph-detail-empty";
+  empty.textContent = layout ? "\u753B\u5E03\u5DF2\u5C45\u4E2D\u3002\u62D6\u52A8\u753B\u5E03\u5E73\u79FB\uFF0C\u6EDA\u8F6E\u7F29\u653E\uFF1B\u62D6\u52A8\u8282\u70B9\u8C03\u6574\u5E03\u5C40\uFF0C\u62D6\u52A8\u8FB9\u8C03\u6574\u5F2F\u66F2\u5EA6\uFF0C\u70B9\u51FB\u8282\u70B9\u6216\u8FB9\u67E5\u770B\u8BE6\u60C5\u3002" : "\u62D6\u52A8\u753B\u5E03\u5E73\u79FB\uFF0C\u6EDA\u8F6E\u7F29\u653E\uFF1B\u70B9\u51FB\u8282\u70B9\u6216\u8FB9\u67E5\u770B\u8BE6\u60C5\u3002";
+  detail.replaceChildren(empty);
+  if (!layout?.nodes.length) return;
+  const quick = document.createElement("div");
+  quick.className = "tracegraph-quick-select";
+  const label = document.createElement("div");
+  label.className = "tracegraph-detail-section";
+  label.textContent = "\u72B6\u6001";
+  quick.appendChild(label);
+  for (const node of layout.nodes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tracegraph-quick-node";
+    button.textContent = node.name;
+    button.addEventListener("click", () => {
+      traceGraphCanvasControllers.get(canvas)?.selectNode(node.name);
+    });
+    quick.appendChild(button);
+  }
+  detail.appendChild(quick);
+}
+function traceGraphEdgeRow(canvas, edge) {
+  const row = document.createElement("div");
+  row.className = "tracegraph-detail-edge";
+  const head = document.createElement("div");
+  head.className = "tracegraph-detail-edge-row";
+  const title = document.createElement("button");
+  title.type = "button";
+  title.className = "tracegraph-detail-edge-title tracegraph-edge-select";
+  title.textContent = edge.from + " \u2192 " + edge.to;
+  title.addEventListener("click", () => {
+    traceGraphCanvasControllers.get(canvas)?.selectEdge(edge.id);
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "tracegraph-inline-delete";
+  remove.textContent = "\u5220\u9664\u8FB9";
+  remove.addEventListener("click", () => {
+    deleteTraceGraphSelection(
+      { edgeIds: [edge.id] },
+      "\u5220\u9664\u8FD9\u6761\u8F68\u8FF9\u8FB9\uFF1F\u5176\u5BF9\u5E94\u5F55\u5236\u8BC1\u636E\u4E5F\u4F1A\u4E00\u5E76\u79FB\u9664\u3002",
+      remove
+    ).catch(() => {
+    });
+  });
+  head.append(title, remove);
+  row.appendChild(head);
+  const meta = document.createElement("div");
+  meta.className = "tracegraph-detail-edge-meta";
+  meta.textContent = [
+    edge.tool,
+    edge.targetLabel ? "\u76EE\u6807\uFF1A" + edge.targetLabel : "",
+    edge.risk,
+    edge.status,
+    edge.slots.length ? "@" + edge.slots.join(", @") : "\u65E0 slot",
+    edge.recordCount + " \u6761\u8BB0\u5F55",
+    edge.verifiedAt ? "\u9A8C\u8BC1\u4E8E " + formatTraceGraphTime(edge.verifiedAt) : ""
+  ].filter(Boolean).join(" \xB7 ");
+  row.appendChild(meta);
+  if (edge.goal) {
+    const goal = document.createElement("div");
+    goal.className = "tracegraph-detail-edge-goal";
+    goal.textContent = edge.goal;
+    row.appendChild(goal);
+  }
+  const args = document.createElement("code");
+  args.className = "tracegraph-detail-edge-args";
+  args.textContent = "args " + edge.argsTemplate;
+  row.appendChild(args);
+  return row;
+}
+function renderTraceGraphNodeDetail(canvas, node, layout) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const incident = layout.edges.filter((edge) => edge.from === node.name || edge.to === node.name);
+  const head = document.createElement("div");
+  head.className = "tracegraph-detail-head";
+  const name = document.createElement("strong");
+  name.textContent = node.name;
+  const badge = document.createElement("span");
+  badge.className = "tracegraph-detail-badge";
+  badge.textContent = "\u5165 " + node.incoming + " \xB7 \u51FA " + node.outgoing;
+  head.append(name, badge);
+  detail.replaceChildren(head);
+  const actions = document.createElement("div");
+  actions.className = "tracegraph-detail-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "tracegraph-inline-delete";
+  remove.textContent = "\u5220\u9664\u6B64\u8282\u70B9";
+  remove.disabled = incident.length === 0;
+  remove.title = incident.length ? "\u5220\u9664\u8282\u70B9\u53CA\u5176\u5168\u90E8\u5165\u8FB9\u3001\u51FA\u8FB9\u548C\u5BF9\u5E94\u5F55\u5236\u8BC1\u636E" : "\u5B64\u7ACB\u8282\u70B9\u53EF\u76F4\u63A5\u5220\u9664";
+  remove.addEventListener("click", () => {
+    deleteTraceGraphSelection(
+      { stateNames: [node.name] },
+      "\u5220\u9664\u8282\u70B9\u201C" + node.name + "\u201D\u53CA\u5176\u5168\u90E8\u5173\u8054\u8FB9\uFF1F\u5BF9\u5E94\u5F55\u5236\u8BC1\u636E\u4E5F\u4F1A\u4E00\u5E76\u79FB\u9664\u3002",
+      remove
+    ).catch(() => {
+    });
+  });
+  actions.appendChild(remove);
+  detail.appendChild(actions);
+  const facts = document.createElement("div");
+  facts.className = "tracegraph-detail-facts";
+  for (const line of [
+    node.urlPattern ? "URL\uFF1A" + node.urlPattern : "URL\uFF1A\u672A\u8BB0\u5F55",
+    "\u9759\u6001 atom\uFF1A" + node.staticAtoms + " \xB7 \u52A8\u6001 atom\uFF1A" + node.dynamicAtoms
+  ]) {
+    const item = document.createElement("div");
+    item.textContent = line;
+    facts.appendChild(item);
+  }
+  detail.appendChild(facts);
+  const edgeTitle = document.createElement("div");
+  edgeTitle.className = "tracegraph-detail-section";
+  edgeTitle.textContent = incident.length ? "\u76F8\u5173\u8FB9\uFF08" + incident.length + "\uFF09" : "\u76F8\u5173\u8FB9";
+  detail.appendChild(edgeTitle);
+  if (!incident.length) {
+    const empty = document.createElement("div");
+    empty.className = "tracegraph-detail-empty";
+    empty.textContent = "\u8FD9\u4E2A\u72B6\u6001\u76EE\u524D\u6CA1\u6709\u5DF2\u9A8C\u8BC1\u7684\u5165\u8FB9\u6216\u51FA\u8FB9\u3002";
+    detail.appendChild(empty);
+  }
+  for (const edge of incident.slice(0, 12)) {
+    detail.appendChild(traceGraphEdgeRow(canvas, edge));
+  }
+  if (incident.length > 12) {
+    const more = document.createElement("div");
+    more.className = "tracegraph-detail-empty";
+    more.textContent = "\u53E6\u6709 " + (incident.length - 12) + " \u6761\u8FB9\u672A\u5C55\u5F00\u3002";
+    detail.appendChild(more);
+  }
+}
+function renderTraceGraphEdgeDetail(canvas, edge) {
+  const detail = traceGraphDetailFor(canvas);
+  if (!detail) return;
+  const head = document.createElement("div");
+  head.className = "tracegraph-detail-head";
+  const title = document.createElement("strong");
+  title.textContent = edge.from + " \u2192 " + edge.to;
+  const badge = document.createElement("span");
+  badge.className = "tracegraph-detail-badge";
+  badge.textContent = edge.tool;
+  head.append(title, badge);
+  detail.replaceChildren(head);
+  const actions = document.createElement("div");
+  actions.className = "tracegraph-detail-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "tracegraph-inline-delete";
+  remove.textContent = "\u5220\u9664\u8FD9\u6761\u8FB9";
+  remove.addEventListener("click", () => {
+    deleteTraceGraphSelection(
+      { edgeIds: [edge.id] },
+      "\u5220\u9664\u8FD9\u6761\u8F68\u8FF9\u8FB9\uFF1F\u5176\u5BF9\u5E94\u5F55\u5236\u8BC1\u636E\u4E5F\u4F1A\u4E00\u5E76\u79FB\u9664\u3002",
+      remove
+    ).catch(() => {
+    });
+  });
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "tracegraph-inline-secondary";
+  back.textContent = "\u53D6\u6D88\u9009\u62E9";
+  back.addEventListener("click", () => {
+    traceGraphCanvasControllers.get(canvas)?.clearSelection();
+  });
+  actions.append(remove, back);
+  detail.appendChild(actions);
+  const facts = document.createElement("div");
+  facts.className = "tracegraph-detail-facts";
+  for (const line of [
+    "edge\uFF1A" + edge.id,
+    "\u52A8\u4F5C\uFF1A" + edge.tool + " \xB7 \u98CE\u9669\uFF1A" + edge.risk,
+    edge.targetLabel ? "\u8BED\u4E49\u76EE\u6807\uFF1A" + edge.targetLabel : "\u8BED\u4E49\u76EE\u6807\uFF1A\u672A\u8BB0\u5F55",
+    "slots\uFF1A" + (edge.slots.length ? "@" + edge.slots.join(", @") : "\u65E0"),
+    "\u8BC1\u636E\uFF1A" + edge.recordCount + " \u6761 \xB7 " + edge.status
+  ]) {
+    const item = document.createElement("div");
+    item.textContent = line;
+    facts.appendChild(item);
+  }
+  detail.appendChild(facts);
+  if (edge.goal) {
+    const goal = document.createElement("div");
+    goal.className = "tracegraph-detail-edge-goal";
+    goal.textContent = edge.goal;
+    detail.appendChild(goal);
+  }
+  const args = document.createElement("code");
+  args.className = "tracegraph-detail-edge-args";
+  args.textContent = "args " + edge.argsTemplate;
+  detail.appendChild(args);
+}
+async function deleteTraceGraphSelection(selection, confirmation, trigger) {
+  const view = selectedTraceGraphView();
+  if (!view || !window.confirm(confirmation)) return;
+  if (trigger) trigger.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "tracegraph:delete-selection",
+      siteKey: view.siteKey,
+      selection
+    });
+    if (!response?.ok) throw new Error(response?.error || "\u5220\u9664\u5931\u8D25");
+    await refreshTraceGraphExplorer();
+  } catch (error) {
+    if (trigger) trigger.disabled = false;
+    const summary = $("tracegraph-view-summary");
+    if (summary) {
+      summary.className = "tracegraph-summary error";
+      summary.textContent = "\u5220\u9664\u8F68\u8FF9\u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error));
+    }
+    throw error;
+  }
+}
+async function deleteSelectedTraceGraph(trigger) {
+  const view = selectedTraceGraphView();
+  if (!view || !window.confirm("\u5220\u9664 " + view.siteKey + " \u7684\u6574\u5F20\u8F68\u8FF9\u56FE\uFF1F\u539F\u59CB\u5F55\u5236\u8BC1\u636E\u4E5F\u4F1A\u4E00\u5E76\u79FB\u9664\u3002")) {
+    return;
+  }
+  if (trigger) trigger.disabled = true;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "tracegraph:delete-site",
+      siteKey: view.siteKey
+    });
+    if (!response?.ok) throw new Error(response?.error || "\u5220\u9664\u5931\u8D25");
+    await refreshTraceGraphExplorer();
+  } catch (error) {
+    if (trigger) trigger.disabled = false;
+    const summary = $("tracegraph-view-summary");
+    if (summary) {
+      summary.className = "tracegraph-summary error";
+      summary.textContent = "\u5220\u9664\u8F68\u8FF9\u56FE\u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 async function renderUserscriptSummary() {
   const meta = $("us-summary-meta");
@@ -7633,12 +9168,13 @@ function collectSettings() {
       maxConsecutiveActions: $("jev-max-actions").value,
       maxRepeatedActionsWithoutProgress: $("jev-max-repeated").value,
       maxElementCandidates: $("jev-max-candidates").value,
-      minReadConfidence: $("jev-min-read").value,
-      minActionConfidence: $("jev-min-action").value,
-      minClickConfidence: $("jev-min-click").value,
-      minWaitConfidence: $("jev-min-wait").value,
-      minTargetOperationConfidence: $("jev-min-target-operation").value,
+      minEdgeConfidence: $("jev-min-edge-confidence").value,
       schemaVersion: $("jev-schema-version").value || JEV_SETTINGS_DEFAULTS.schemaVersion
+    }),
+    traceGraph: mergeTraceGraphSettings({
+      enabled: $("tracegraph-enabled").checked,
+      mode: $("tracegraph-mode").value,
+      shadowMode: $("tracegraph-shadow-mode").checked
     }),
     ragEnabled: $("rag-enabled").checked,
     targetLang: $("target-lang").value.trim() || AI_SETTINGS_DEFAULTS.targetLang,
@@ -7673,8 +9209,13 @@ async function saveSettings() {
 $("save-btn").addEventListener("click", () => {
   saveSettings().catch((err) => toast("\u4FDD\u5B58\u5931\u8D25\uFF1A" + (err && err.message ? err.message : "\u672A\u77E5\u9519\u8BEF")));
 });
-document.querySelector(".settings-content").addEventListener("input", markDirty);
-document.querySelector(".settings-content").addEventListener("change", markDirty);
+function markSettingsDirty(event) {
+  const target = event.target;
+  if (target?.closest?.("[data-settings-ui]")) return;
+  markDirty();
+}
+document.querySelector(".settings-content").addEventListener("input", markSettingsDirty);
+document.querySelector(".settings-content").addEventListener("change", markSettingsDirty);
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
@@ -7703,6 +9244,71 @@ $("toggle-jev-key").addEventListener("click", () => {
 ["jev-enabled", "jev-shadow-mode"].forEach((id) => {
   $(id).addEventListener("change", renderJevRuntimeStatus);
 });
+$("tracegraph-site-select").addEventListener("change", renderSelectedTraceGraph);
+$("tracegraph-refresh").addEventListener("click", () => {
+  refreshTraceGraphExplorer().catch((error) => {
+    const summary = $("tracegraph-view-summary");
+    if (summary) {
+      summary.className = "tracegraph-summary error";
+      summary.textContent = "\u5237\u65B0 TraceGraph \u5931\u8D25\uFF1A" + (error instanceof Error ? error.message : String(error));
+    }
+  });
+});
+$("tracegraph-delete-site").addEventListener("click", () => {
+  deleteSelectedTraceGraph($("tracegraph-delete-site")).catch(() => {
+  });
+});
+$("tracegraph-expand").addEventListener("click", () => {
+  const dialog = $("tracegraph-dialog");
+  const view = selectedTraceGraphView();
+  if (!dialog || !view || typeof dialog.showModal !== "function") return;
+  if (!dialog.open) dialog.showModal();
+  $("tracegraph-expand").setAttribute("aria-pressed", "true");
+  const title = $("tracegraph-dialog-title");
+  const summary = $("tracegraph-dialog-summary");
+  if (title) title.textContent = "TraceGraph \xB7 " + view.siteKey;
+  if (summary) {
+    summary.className = "tracegraph-summary active";
+    summary.textContent = [
+      "\u672C\u5730\u8F68\u8FF9\u56FE",
+      view.states.length + " \u4E2A\u72B6\u6001",
+      view.edges.length + " \u6761\u8FB9",
+      view.recordCount + " \u6761\u539F\u59CB\u8BB0\u5F55"
+    ].join(" \xB7 ");
+  }
+  renderTraceGraph(view, true);
+});
+$("tracegraph-dialog-close").addEventListener("click", () => {
+  $("tracegraph-dialog")?.close();
+});
+$("tracegraph-zoom-in").addEventListener("click", () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.zoom(1.2);
+});
+$("tracegraph-zoom-out").addEventListener("click", () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.zoom(1 / 1.2);
+});
+$("tracegraph-zoom-reset").addEventListener("click", () => {
+  const canvas = traceGraphTargets(true).canvas;
+  if (canvas) traceGraphCanvasControllers.get(canvas)?.fit(true);
+});
+var traceGraphDialog = $("tracegraph-dialog");
+if (traceGraphDialog) {
+  traceGraphDialog.addEventListener("click", (event) => {
+    if (event.target === traceGraphDialog) traceGraphDialog.close();
+  });
+  traceGraphDialog.addEventListener("close", () => {
+    $("tracegraph-expand").setAttribute("aria-pressed", "false");
+  });
+}
+if (chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[TRACE_GRAPH_KEY]) return;
+    refreshTraceGraphExplorer().catch(() => {
+    });
+  });
+}
 $("test-jev").addEventListener("click", async () => {
   const status = $("jev-status");
   status.className = "connection-status";
@@ -7716,11 +9322,7 @@ $("test-jev").addEventListener("click", async () => {
     maxConsecutiveActions: $("jev-max-actions").value,
     maxRepeatedActionsWithoutProgress: $("jev-max-repeated").value,
     maxElementCandidates: $("jev-max-candidates").value,
-    minReadConfidence: $("jev-min-read").value,
-    minActionConfidence: $("jev-min-action").value,
-    minClickConfidence: $("jev-min-click").value,
-    minWaitConfidence: $("jev-min-wait").value,
-    minTargetOperationConfidence: $("jev-min-target-operation").value,
+    minEdgeConfidence: $("jev-min-edge-confidence").value,
     schemaVersion: $("jev-schema-version").value
   });
   if (!settings.apiKey) {
@@ -7731,13 +9333,15 @@ $("test-jev").addEventListener("click", async () => {
   }
   status.textContent = "\u6B63\u5728\u6D4B\u8BD5\u2026";
   try {
-    const result = await listJevModels(settings);
-    const found = result.models.some((item) => item.name === settings.model);
-    if (found) {
+    const probe = await probeJevConnection(settings);
+    if (probe.modelListed) {
       status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0C\u6A21\u578B\u53EF\u7528";
       status.classList.add("ok");
+    } else if (probe.systemOneVerified) {
+      status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0CSystem One \u63A2\u6D4B\u901A\u8FC7\uFF08\u5F53\u524D\u4E13\u7528\u6A21\u578B\u672A\u51FA\u73B0\u5728\u901A\u7528\u76EE\u5F55\u4E2D\uFF09";
+      status.classList.add("ok");
     } else {
-      status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u6A21\u578B\u4E0D\u5728\u53EF\u7528\u5217\u8868\u4E2D\uFF1A" + result.models.map((item) => item.name).join("\u3001");
+      status.textContent = "\u8FDE\u63A5\u6210\u529F\uFF0C\u4F46\u5F53\u524D\u6A21\u578B\u65E2\u4E0D\u5728\u76EE\u5F55\u4E2D\uFF0CSystem One \u4E5F\u672A\u5B8C\u6210\u9A8C\u8BC1\u3002";
       status.classList.add("error");
     }
   } catch (error) {
