@@ -3771,7 +3771,7 @@ async function macroTool(deps, args) {
 }
 
 // lib/application/agent/trace-graph.ts
-var EDGE_IDENTITY_VERSION = 3;
+var EDGE_IDENTITY_VERSION = 4;
 var MAX_EDGE_CANDIDATES = 3;
 var PHI_KINDS = /* @__PURE__ */ new Set([
   "url_pattern",
@@ -4068,19 +4068,14 @@ function edgeForRecord(record2, siteKey, ttlMs) {
     urlPattern: target.urlPattern || ""
   } : {
     role: target.role || "",
-    selector: target.selector || ""
+    selector: target.selector || (typeof record2.argsRedacted.selector === "string" ? record2.argsRedacted.selector : "")
   };
   const id = "e." + stableHash({
     identityVersion: EDGE_IDENTITY_VERSION,
     from,
     to,
     tool: actionTool,
-    template: args.template,
-    target: targetIdentity,
-    phiPlus: {
-      kind: phiPlus.kind,
-      expr: phiPlus.expr
-    }
+    target: targetIdentity
   });
   return {
     id,

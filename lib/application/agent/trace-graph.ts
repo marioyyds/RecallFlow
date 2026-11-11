@@ -21,7 +21,7 @@ import type {
 } from './trace-graph-types.ts';
 
 export const TRACE_GRAPH_VERSION = 2;
-export const EDGE_IDENTITY_VERSION = 3;
+export const EDGE_IDENTITY_VERSION = 4;
 export const MAX_EDGE_CANDIDATES = 3;
 
 export const PHI_KINDS: ReadonlySet<PhiKind> = new Set([
@@ -400,19 +400,18 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
       }
     : {
         role: target.role || '',
-        selector: target.selector || '',
+        selector:
+          target.selector ||
+          (typeof record.argsRedacted.selector === 'string'
+            ? record.argsRedacted.selector
+            : ''),
       };
   const id = 'e.' + stableHash({
     identityVersion: EDGE_IDENTITY_VERSION,
     from,
     to,
     tool: actionTool,
-    template: args.template,
     target: targetIdentity,
-    phiPlus: {
-      kind: phiPlus.kind,
-      expr: phiPlus.expr,
-    },
   });
   return {
     id,

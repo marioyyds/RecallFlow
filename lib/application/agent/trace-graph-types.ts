@@ -74,8 +74,8 @@ export interface EdgeAction {
 
 export interface Edge {
   id: string;
-  /** Version 3 uses semantic target identity; selectors are resolution hints. */
-  identityVersion?: 3;
+  /** Version 4 merges repeated outcomes of the same state/tool/target action. */
+  identityVersion?: 4;
   from: string;
   to: string;
   g: string;

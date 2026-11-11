@@ -226,7 +226,7 @@ MVP 实测：60 个页面实例 + 3 次 selector 改版 → L0 状态数恒为 *
 ```ts
 interface Edge {
   id: string;                   // 稳定 hash，包含真实目标，不含 PlanCard 文案
-  identityVersion?: 2;          // 旧身份迁移标记
+  identityVersion?: 4;          // 状态 + 工具 + 语义目标作为动作身份
   from: string; to: string;     // StateTemplate.name | "done"
   g: string;                    // 工具 + 真实目标摘要；不包含 planStep.text
   planVersion?: number;
@@ -359,8 +359,9 @@ export function atomSignature(state: Pick<StateTemplate,'name'|'staticAtoms'|'dy
 export function mergeEdges(records: TraceRecord[], prev?: TraceGraphV2): {
   l0: TraceGraphV2['l0']; l1: TraceGraphV2['l1'];
 };
-// 纪律：planStep 不进入边身份；selector/target 区分不同动作；
-// 同一目标重复执行合并 provenance；旧身份边从 records 重建。
+// 纪律：planStep、后置条件和本次参数值不进入边身份；
+// 同起止状态、同工具、同语义目标视为同一动作并合并 provenance；
+// 不同目标仍保留为不同边；旧身份边从 records 重建。
 
 // 提名（确定性，无 embedding）
 export function nominate(graph: TraceGraphV2, ctx: {

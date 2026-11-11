@@ -86,7 +86,7 @@
       "description": "禁止出现 recordedValue / defaultValue / 历史偏好默认值；任务值只能来自当前指令",
       "properties": {
         "id": { "type": "string", "minLength": 1 },
-        "identityVersion": { "const": 3 },
+        "identityVersion": { "const": 4 },
         "from": { "type": "string" },
         "to": { "type": "string" },
         "g": { "type": "string", "description": "稳定动作意图与目标摘要，不包含 PlanCard 文案" },

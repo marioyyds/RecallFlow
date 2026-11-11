@@ -219,12 +219,38 @@ test('edge 身份忽略 PlanCard 文案，并记录真实动作目标', () => {
     risk: 'low',
     now: NOW + 2,
   });
+  const beforeWithCounter = snapshot({
+    url: 'https://video.example/results',
+    title: 'Results',
+    counters: { resultCount: 2 },
+    elements: [
+      { ref: 'r1', tag: 'a', role: 'link', label: 'Video A', selector: '#video-a' },
+    ],
+  });
+  const afterWithCounter = snapshot({
+    url: 'https://video.example/watch',
+    title: 'Watch',
+    fingerprint: 'fp-watch-counter',
+    counters: { resultCount: 1 },
+  });
+  const sameActionDifferentOutcome = traceRecordFromTransition({
+    id: 'record-a3',
+    seq: 4,
+    tool: 'click_element',
+    args: { selector: '#video-a' },
+    beforeSnapshot: beforeWithCounter,
+    afterSnapshot: afterWithCounter,
+    result: { ok: true, summary: 'opened A with another counter' },
+    verification: 'counter changed',
+    risk: 'low',
+    now: NOW + 3,
+  });
 
   assert.equal(first.target?.name, 'Video A');
   assert.equal(first.target?.selector, '#video-a');
   const same = mergeEdges([first, repeated]);
   assert.equal(same.l1.edges.length, 1);
-  assert.equal(same.l1.edges[0].identityVersion, 3);
+  assert.equal(same.l1.edges[0].identityVersion, 4);
   assert.equal(same.l1.edges[0].s.semanticAnchor.name, 'Video A');
   assert.equal(same.l1.edges[0].provenance.recordIds.length, 2);
   assert.doesNotMatch(same.l1.edges[0].g, /先打开|换一种计划/);
@@ -235,6 +261,11 @@ test('edge 身份忽略 PlanCard 文案，并记录真实动作目标', () => {
     distinct.l1.edges.map((item) => item.s.semanticAnchor.name).sort(),
     ['Video A', 'Video B']
   );
+
+  const outcomeIndependent = mergeEdges([first, sameActionDifferentOutcome]);
+  assert.equal(outcomeIndependent.l1.edges.length, 1);
+  assert.equal(outcomeIndependent.l1.edges[0].s.semanticAnchor.name, 'Video A');
+  assert.equal(outcomeIndependent.l1.edges[0].provenance.recordIds.length, 2);
 });
 
 test('edge grounding 使用当前快照 ref，不复用历史 selector', () => {
@@ -313,7 +344,7 @@ test('TraceGraph 存储读取会把旧 edge 身份从保留 records 重新构建
   const rebuilt = await rebuildStoredTraceGraphs();
   assert.deepEqual(rebuilt, { sites: 1, edges: 1, records: 1 });
   assert.equal(store[TRACE_GRAPH_KEY][origin].l1.edges.length, 1);
-  assert.equal(store[TRACE_GRAPH_KEY][origin].l1.edges[0].identityVersion, 3);
+  assert.equal(store[TRACE_GRAPH_KEY][origin].l1.edges[0].identityVersion, 4);
   assert.doesNotMatch(store[TRACE_GRAPH_KEY][origin].l1.edges[0].g, /旧的计划文案/);
 });
 
