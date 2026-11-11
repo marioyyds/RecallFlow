@@ -103,7 +103,16 @@ export const ENTRIES = [
   // Target-aware edge identity migration measured 1090064 bytes; raise
   // explicitly to 1066KB. Semantic-target grounding measured 1095478 bytes;
   // raise explicitly to 1072KB, no new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1072 * 1024 },
+  // 2026-11-11: fast lane stopped offering TYPE_TEXT, so jev-text-helper.ts and
+  // jev-write-ledger.ts are gone; measured 1080217 bytes (1055KB). Tighten to
+  // 1070KB — the ratchet must stay within 16KB of the actual payload.
+  // 2026-11-12: edge-head candidate matching adds recorded signatures, purpose
+  // and per-edge precondition/effect evidence to the choice question. Measured
+  // 1096332 bytes (1070.6KB). Raise explicitly to 1072KB; no new dependency.
+  // Same day: handoff notice rewritten to "not a page fault" with per-reason
+  // explanations, so the slow model stops re-snapshotting. Measured 1099425
+  // bytes (1073.7KB). Raise to 1075KB; no new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1075 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -134,7 +143,10 @@ export const ENTRIES = [
   // to 610KB, no new dependency.
   // Canvas node/edge dragging and in-place graph deletion measured 638577 bytes.
   // Raise explicitly to 628KB; this is the in-repo renderer, no dependency added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 628 * 1024 },
+  // 2026-11-11: type_text gained the paste rewriter + whitespace-mismatch
+  // classification (shared editable-text helper), measured 643504 bytes.
+  // Raise explicitly to 630KB; no dependency added.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 630 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -152,7 +164,17 @@ export const ENTRIES = [
   // Query-aware snapshot text and structured-first output measured 556407 bytes.
   // Raise explicitly to 545KB; no dependency was added.
   // Same shared settings delta as options; measured 558352 bytes.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 547 * 1024 },
+  // 2026-11-11: type_text gained a self-contained paste rewriter for long
+  // contenteditable bodies (shared with the tool registry the skills page
+  // renders); measured 560464 bytes. Raise explicitly to 548KB, no new
+  // dependency — the payload grows because the skills page bundles tool code.
+  // Same day: SemanticAnchor gained an anchor-source kind (attribute / content /
+  // selector) so write targets stop being anchored on their own text;
+  // measured 561362 bytes. Raise to 549KB.
+  // 2026-11-11 (later): type_text paste rewriter + whitespace classification
+  // landed in the shared editable-text helper; measured 562426 bytes.
+  // Raise explicitly to 551KB; no dependency added.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 551 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

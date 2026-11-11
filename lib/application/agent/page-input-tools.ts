@@ -12,7 +12,11 @@
 //      **升级条件是"合成失败"，不是"没有观测到效果"** —— 后者会对真实页面重复输入。
 //   2. `hadEffect` / `verification` 由 `observedChange` + `buildActionVerification`
 //      按**观测**算出，不写死 true（此处曾是 7 处硬编码谎报之一）。
-import { editableTextSummary, readContentEditableText } from '../../shared/editable-text.ts';
+import {
+  editableTextOnlyWhitespaceDiffers,
+  editableTextSummary,
+  readContentEditableText,
+} from '../../shared/editable-text.ts';
 import type { Caught } from './errors.ts';
 import type { PageInputDeps } from './tool-deps.ts';
 
@@ -68,6 +72,59 @@ async function readEditableValue(
       : await deps.cdp.evaluate(tabId, expr);
   } catch (e) {
     return null;
+  }
+}
+
+/**
+ * 在 contenteditable 上派发一次真实的 paste 事件，让编辑器自己解析段落结构。
+ *
+ * 为什么需要：`Input.insertText` 把整块文本塞进 pre[contenteditable] 这类编辑器时，
+ * 段落换行会被它的段落模型归一化掉（CSDN/CodeMirror 实测 3055 → 2974，首差正好落在
+ * 段落边界）。真实 paste 走编辑器自己的 input rule，段落才重建得起来。
+ *
+ * 函数必须保持自包含：CDP 兜底会把它的源码注入页面执行（同 readContentEditableText）。
+ */
+function dispatchEditablePaste(el: any, text: string): string {
+  try {
+    const doc = el.ownerDocument;
+    const view: any = (doc && doc.defaultView) || (globalThis as any);
+    const ClipboardEvt = view.ClipboardEvent;
+    const Transfer = view.DataTransfer;
+    if (!ClipboardEvt) return 'unsupported';
+    let data: any = null;
+    if (Transfer) {
+      data = new Transfer();
+      data.setData('text/plain', text);
+    }
+    let evt: any = null;
+    if (data) {
+      try {
+        evt = new ClipboardEvt('paste', { clipboardData: data, bubbles: true, cancelable: true });
+      } catch (e) {
+        evt = null;
+      }
+      if (evt && !evt.clipboardData) {
+        Object.defineProperty(evt, 'clipboardData', { value: data });
+      }
+    }
+    if (!evt) {
+      evt = new ClipboardEvt('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(evt, 'clipboardData', {
+        value: { getData: () => text, types: ['text/plain'] },
+      });
+    }
+    el.focus();
+    const selection = typeof view.getSelection === 'function' ? view.getSelection() : null;
+    if (selection && typeof doc.createRange === 'function') {
+      const range = doc.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    el.dispatchEvent(evt);
+    return 'dispatched';
+  } catch (e) {
+    return 'error';
   }
 }
 
@@ -137,10 +194,46 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
       strategy = 'cdp-clear-only';
     }
     await delay(60);
-    const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
-    const summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
-    const verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
+    let actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
+    let summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
+    let verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
+    // 段落结构建不起来（编辑器把换行归一化掉）时，用一次真实 paste 让编辑器按自己的
+    // input rule 重建段落，再回读确认。
+    // ⚠ 必须先清空再 paste：编辑器的 paste 处理会追加到光标处（CSDN 实测 2993 → 5992，
+    // 正文直接变成两倍）。只在回读比期望短时才试，避免在重复内容上再叠一层。
+    const readLength = String(actualValue == null ? '' : actualValue).length;
+    if (
+      !verified &&
+      target.contentEditable &&
+      expected &&
+      expected.indexOf('\n') >= 0 &&
+      readLength < summary.expectedLength
+    ) {
+      // 清空：焦点 + 全选已在上面做过，这里用空串替换选区，得到干净的基线。
+      await deps.cdp.insertText(deps.ctx.tabId, '');
+      await delay(40);
+      const pasteExpr =
+        '(() => { const el = document.querySelector(' + sel + '); if (!el) return "no-element";' +
+        ' if (!el.isContentEditable) return "not-editable";' +
+        ' return (' + dispatchEditablePaste.toString() + ')(el, ' + JSON.stringify(expected) + '); })()';
+      const status = isSubframe
+        ? await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame as number, pasteExpr)
+        : await deps.cdp.evaluate(deps.ctx.tabId, pasteExpr);
+      if (status === 'dispatched') {
+        strategy = strategy + '+paste';
+        await delay(80);
+        actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
+        summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
+        verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
+      }
+    }
     if (verified) deps.rememberTarget(deps.ctx, target);
+    // 差异定性：只差空白/换行 ≠ 内容丢失。Markdown 里换行就是结构（标题、代码块、
+    // 表格），所以**不能**把它判成成功，但必须把原因说清楚，否则模型会一直重写。
+    const whitespaceOnly =
+      !verified &&
+      actualValue != null &&
+      editableTextOnlyWhitespaceDiffers(expected, actualValue);
     const before = deps.ctx.lastSnapshot || null;
     const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1000, frameId: isSubframe ? (typeFrame as number) : undefined }).catch(() => null);
     const result = {
@@ -150,13 +243,18 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
       cdp: true,
       strategy,
       matchesIntent: verified,
+      whitespaceOnly,
       expectedLength: summary.expectedLength,
       actualLength: summary.actualLength,
       firstDifference: summary.firstDifference,
       pageSnapshot: after,
       verification: deps.buildActionVerification(
         deps.observedChange(before, after),
-        verified ? '已用 CDP 可信输入，并回读确认' : 'CDP 已输入，但回读值与预期不一致'
+        verified
+          ? '已用 CDP 可信输入，并回读确认'
+          : whitespaceOnly
+            ? 'CDP 已输入，回读只差换行/空白（编辑器归一化了段落结构）'
+            : 'CDP 已输入，但回读值与预期不一致'
       ),
       result: verified
         ? '已用 CDP 事务式输入 ' +
@@ -172,9 +270,12 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
           ' 字符，实际 ' +
           (actualValue == null ? '无法回读' : summary.actualLength + ' 字符') +
           (summary.firstDifference.index >= 0 ? '，首个差异在 ' + summary.firstDifference.index : '') +
-          '。实际值：' +
+          (whitespaceOnly
+            ? '。差异只在换行/空白：非空白字符完全一致，是编辑器把段落结构归一化了 —— Markdown 的标题、代码块、表格都靠换行，所以这**不算**写对'
+            : '。') +
+          '实际值：' +
           JSON.stringify(String(actualValue == null ? '' : actualValue).slice(0, 120)) +
-          '。工具已先恢复到内容脚本失败前的基线，再用一次整体写入替换；仍不一致时不要原样重试同一路径，请检查编辑器是否改写了段落或改用该站点专用写入方式。' +
+          '。工具已先恢复到内容脚本失败前的基线，再用一次整体写入替换；不要原样重试同一路径 —— 换行被吃掉时要改用该站点的写入方式（如真实 paste / 编辑器 API），而不是继续 insertText。' +
           (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
     };
     if (result.verification) {
@@ -194,7 +295,28 @@ export async function pressKey(deps: PageInputDeps, args: Record<string, unknown
   } catch (e) {
     res = { ok: false, result: '派发键盘事件失败：' + (e as Caught).message };
   }
-  if (res && res.ok !== false) return res;
+  // 合成成功也不算"已生效"：按键是**事件**，不是结果。没有可观测变化时必须如实
+  // 说出来（此前这里把「已向目标元素派发按键」当成功证据，实测出现过编辑器根本
+  // 没聚焦却报 ✓ 的情况）。
+  if (res && res.ok !== false) {
+    const before = deps.ctx.lastSnapshot || null;
+    const after = await deps
+      .getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1000 })
+      .catch(() => null);
+    const change = deps.observedChange(before, after);
+    if (change === 'changed') return res;
+    return {
+      ...res,
+      hadEffect: false,
+      ...(after ? { pageSnapshot: after } : {}),
+      verification: deps.buildActionVerification(change, '按键已派发，但没有可观测变化'),
+      result:
+        '已派发按键：' +
+        String(args.key || '') +
+        '，但没有观测到页面/字段变化 —— 若目标需要焦点，先点击它或确认编辑器已聚焦，再重按。' +
+        (after ? '\n' + deps.compactSnapshotSummary(after) : ''),
+    };
+  }
   if (!deps.cdpAllowed(deps.ctx)) return res;
   try {
     await deps.cdp.pressKey(deps.ctx.tabId, String(args.key || ''), args.modifiers as string[] | undefined);

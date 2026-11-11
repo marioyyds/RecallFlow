@@ -11,7 +11,6 @@
 import type { KnowledgeBook, CitationMeta } from '../../domain/knowledge/model.ts';
 import type { JevSettings, TraceGraphSettings } from '../../shared/settings.ts';
 import type { PublicationEvidenceState } from './publication-policy.ts';
-import type { CompletedTypeTarget } from './jev-write-ledger.ts';
 
 /** Agent 预算（`settings.agentBudget` 与 `createBudget` 的产物）。 */
 export interface AgentBudget {
@@ -478,7 +477,6 @@ export interface RunCtx {
   lastEvidence: string;
   lastReadFullText: string;
   publicationEvidence?: PublicationEvidenceState;
-  completedTypeTargets?: CompletedTypeTarget[];
   /** 当前指令中显式给出的 typed slots；只供 tracegraph 绑定，不接受历史默认值。 */
   traceGraphSlots?: Record<string, unknown>;
   verificationState?: 'verified' | 'unverified' | 'rejected' | 'not-run';

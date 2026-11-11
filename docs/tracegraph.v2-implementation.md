@@ -53,6 +53,62 @@ node scripts/eval-jev-real.mjs --head=edge --grid
 controller。第三条需要 `TYPESAFE_API_KEY`，没有真实请求时不得把网格推荐值
 写成实测结论。
 
+## 2026-11-12 候选分层与逐边证据
+
+live edge 的置信度实测落在 0.3–0.5，且候选数 >5。归因不是门限，而是题面：
+候选按 URL 名混桶，边只带「工具 + 按钮文字」，而规则要求「前置条件可观察」，
+请求里却没有逐边前置条件。本轮的改动只影响提名与题面，不动 `minEdgeConfidence`：
+
+- `Edge.fromSignatures`（≤8，非身份）与 `Edge.purpose`（≤3，非身份）随录制写入；
+  `mergeEdges` 合并同身份边时取并集，最新计划步在前。
+- `matchCandidate()` 产出 `full / static / name` 三层，并且只做结构判断。
+  `name` 档永远回退到旧行为（只有状态名一致）。
+- `runTraceGraphOnce` 按 `full → static → name`、再按 `verifiedAt` 排序，
+  仍**不截断**；层级与计数进 `tracegraph-candidates` 的 `levels`。
+- `buildJevEdgeRequest` 的 criteria 新增四项：结构匹配、用途（录制时的计划步）、
+  前置（逐条 φ⁻ 在当前 observation 上求值，只给 ✓/✗/待定）、效果（φ⁺ 的脱敏摘要）。
+  这些是证据，不是执行门；φ⁻ 仍不参与许可。
+- ABSTAIN 的规则改为「全部停在 name 档或某条边前置被明确否定」，删除
+  「前置不可观察就弃权」这句自相矛盾的规则。
+- `selectCandidatesByTier()`：只有存在 `full` 匹配时才只发 `full`，否则保留全部候选。
+  依据真实图（editor.csdn.net，80 条记录）：`MdPage` 名下 10 条边来自 16 个不同签名，
+  按签名回放 12/16 有 `full`（11 个恰好 1 条，1 个有 3 条并行动作），4 个没有 `full`
+  （多为加载中 / 未就绪的观测）。裁剪后中位候选数从 10 降到 1，结构没见过的页面
+  仍保留全部候选（不会凭空制造 no-candidates）。
+
+实测里还有一条负面信号：那 80 条记录 **planStep 全为空**（慢模型没有调用
+`update_plan`），所以 `purpose` 在这份数据上不起作用——它需要有计划纪律才有信号。
+同一份数据里真正存在的判别信息是语义锚点、前置与效果。
+
+- handoff 文案：写给慢模型的 system 消息改为「内部提示 · 非页面故障」，并按 reason
+  给一句解释；emit 仍保留 `reason` id 供排障。起因是 RF-XKJ4M7：模型把
+  「【JEV 快路径已停止】…没有可用的已验证证据边」读成「页面刚打开可能还在加载」，
+  于是多拍一次快照、多写了 108–282 字推理。让位原因绝大多数与页面无关。
+- 状态名归一：末段为纯数字 / 长 hex / UUID 时剥掉，退回稳定的父级模板（保留两级）。
+  `/article/details/170567085` 从 `170567085Page` 变成 `ArticleDetailsPage`，帖子与
+  商品页可跨实例复用；稳定末段（`/editor`、`/foo/bar`）行为不变。
+
+- 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
+  解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），
+  计入 `filteredTargetMissing`，handoff 记为 `edge-target-missing`，一次 systemone 都不花。
+  同一份图里 `MdPage` 的 10 条边，唯一目标可定位的候选数中位数为 2（最大 7）；
+  4 个未就绪签名在这一步清空。
+- 反向实验（**没有采用**）：忽略 `capability:scrollContainers` 这类瞬态原子做去抖，
+  16 个签名收敛到 14、平均 full 从 0.88 涨到 1.25，但**没有多覆盖任何签名**
+  （zero 仍是 4），只是给已有签名增加平行候选。那 4 个 zero 是「从未在该结构下
+  录过动作」，不是签名分裂；去抖只放大歧义，所以没有落。
+
+验证入口：
+
+```bash
+node --test tests/tracegraph/*.test.mjs
+node scripts/tracegraph-bucket-report.mjs --graph <导出的图 JSON>
+```
+
+前者覆盖 `matchCandidate` 三档、证据渲染不泄露录制值、以及 `purpose` 不进身份。
+后者按状态名统计「不同 fromSignatures 数」与同态两两 Jaccard，用来判定低置信
+来自混桶还是同态多动作。
+
 ## P4 状态
 
 Patcher 白名单已实现。`macro(op=run)` 尚未切换到 edge 引擎：规格要求先完成
@@ -81,3 +137,18 @@ live A/B 并满足 go/no-go（尤其错写为 0、慢思考下降 ≥50%）。�
   门限。
 - 以上改动在 r3-v3 中将候选推进到 67 次可绑定状态，但 JEV 仍全部弃权，故 live
   go/no-go 仍为 no-go。
+
+## 2026-11-11 去掉 nominate 打分与 ≤3 上限
+
+- `trace-graph.ts` 的 `nominate()`（词项重合打分 + 排序 + `slice(0,3)`）连同它专用的
+  `terms()`、`MAX_EDGE_CANDIDATES` 一起删除，替换为 `candidateEdges()`：只按 siteKey、
+  状态模板名、`status === 'verified'` 与本次运行的 `blockedEdgeIds / executedEdges` 过滤，
+  不排序、不截断、不做意图匹配。
+- `jev-controller.ts` 的候选构造改为调用 `candidateEdges()`，并保留「JEV 请求前剔除
+  槽位不可绑定的边」这一步；`tracegraph-candidates`/`tracegraph-metrics` 事件的
+  `nominated` 字段含义随之变为「该状态全部已验证边数」。
+- `jev-action-space.ts` 的 `buildJevEdgeRequest` 不再 `slice(0, 3)`，choice 题的
+  `criteria` 会对全部候选边各出一条。
+- 代价：候选数不再受控，上下文与歧义随图规模上升。`docs/tracegraph.v2.md` §1.4 记录的
+  「放开候选上限 handoff 7→26、复用边 82→26」现在就是默认档位 —— 收益与
+  `minEdgeConfidence` 都必须按新基线重扫，未重扫前不得引用旧的 104→52→36 三档结论。

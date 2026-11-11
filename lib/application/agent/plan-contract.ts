@@ -7,7 +7,6 @@ import type { PlanStep } from './types.ts';
  */
 export const PLAN_FAST_OPERATIONS = Object.freeze([
   'CLICK',
-  'TYPE_TEXT',
   'READ_PAGE',
   'READ_TABLE',
   'ACCESSIBILITY',

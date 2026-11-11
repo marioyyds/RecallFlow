@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import {
   atomSignature,
   bindSlots,
+  candidateEdges,
   decideR3,
   edgeAlreadySatisfied,
   evaluatePhiMinus,
@@ -12,8 +13,8 @@ import {
   extractExplicitSlots,
   extractAtoms,
   groundEdgeAction,
+  matchCandidate,
   mergeEdges,
-  nominate,
   patchGuard,
   resolveEdgeTarget,
   traceGraphStateName,
@@ -31,6 +32,7 @@ import {
   loadTraceGraph,
   rebuildStoredTraceGraphs,
   traceRecordFromTransition,
+  traceTargetFromTransition,
 } from '../../lib/application/agent/tracegraph-store.ts';
 import { buildJevEdgeRequest, interpretJevEdgeDecision } from '../../lib/application/agent/jev-action-space.ts';
 import { validateJsonSchema } from './schema-validator.mjs';
@@ -533,7 +535,78 @@ test('13 个真实派生样例全部通过确定性守卫', async (t) => {
   }
 });
 
-test('nominate 硬上限为 3，且排除 blocked / executed 边', () => {
+test('matchCandidate 只做结构分层：full / static / name，旧图不伪造层级', () => {
+  const signature = 'PRFormPage#button:button+input:text#';
+  const recorded = edge({ fromSignatures: [signature] });
+  assert.equal(matchCandidate(recorded, { atomSignature: signature }).level, 'full');
+  // 动态原子多出来（例如勾选状态变化）仍是同一个结构模板。
+  assert.equal(
+    matchCandidate(recorded, { atomSignature: signature + 'checkbox:checked' }).level,
+    'static'
+  );
+  // 静态结构不同：只剩状态名相同。
+  assert.equal(
+    matchCandidate(recorded, { atomSignature: 'PRFormPage#button:button#' }).level,
+    'name'
+  );
+  // 旧图没有签名时按 name 档，不能假装 full。
+  assert.equal(matchCandidate(edge({}), { atomSignature: signature }).level, 'name');
+  assert.equal(matchCandidate(null, { atomSignature: signature }).level, 'name');
+  assert.equal(matchCandidate(recorded, null).level, 'name');
+});
+
+test('证据边携带录制签名与计划步，选择期把它们当作可比对证据而不是身份', () => {
+  const record = {
+    id: 'seq14',
+    seq: 14,
+    tool: 'type_text',
+    argsRedacted: { selector: 'div.editor', value: '@description' },
+    before: evidence(),
+    after: evidence({ counters: { description: 1200 }, fingerprint: 'fp-after' }),
+    result: { ok: true, summary: '已写入' },
+    planStep: '填写 PR 描述',
+    planVersion: 1,
+    successPredicate: '描述字符数等于输入值',
+    verification: '计数器回读一致',
+    risk: 'medium',
+    ts: NOW,
+  };
+  const merged = mergeEdges([record]);
+  const mergedEdge = merged.l1.edges[0];
+  assert.deepEqual(mergedEdge.fromSignatures, [evidence().atomSignature]);
+  assert.deepEqual(mergedEdge.purpose, ['填写 PR 描述']);
+
+  // 身份不含这两项：同一动作换个计划措辞仍然合并。
+  const renamed = mergeEdges([
+    { ...record, id: 'seq15', ts: NOW + 1, planStep: '写正文' },
+  ], { ...emptyTraceGraph('https://gitcode.com'), l0: merged.l0, l1: merged.l1 }).l1.edges;
+  assert.equal(renamed.length, 1);
+  assert.deepEqual(renamed[0].purpose, ['写正文', '填写 PR 描述']);
+
+  const bundle = buildJevEdgeRequest(
+    { model: 'jev-latest' },
+    {
+      intent: 'browser_task',
+      goal: '创建一个 PR 并填写描述',
+      phase: 'editor',
+      candidates: [mergedEdge],
+      observation: evidence({ counters: { description: 0 } }),
+      slots: { value: '正文内容' },
+      candidateMatches: {
+        [mergedEdge.id]: { level: 'full', staticOverlap: 1, dynamicOverlap: 1 },
+      },
+    }
+  );
+  const text = bundle.request.questions.edge.criteria[mergedEdge.id];
+  assert.match(text, /结构匹配：full/);
+  assert.match(text, /用途：填写 PR 描述/);
+  assert.match(text, /前置：/);
+  assert.match(text, /✓|✗/);
+  assert.match(text, /效果：/);
+  assert.doesNotMatch(text, /2078/, '效果摘要与前置证据都不得泄露录制值');
+});
+
+test('candidateEdges 返回当前状态的全部已验证边，不截断，仍排除 blocked / executed', () => {
   const records = Array.from({ length: 6 }, (_, index) => ({
     id: 'r' + index,
     seq: index,
@@ -553,23 +626,112 @@ test('nominate 硬上限为 3，且排除 blocked / executed 边', () => {
     ...merged,
     records,
   };
-  const all = nominate(graph, {
+  const all = candidateEdges(graph, {
     siteKey: 'https://gitcode.com',
     atomSignature: evidence().atomSignature,
-    intent: '创建成本域 PR',
     blockedEdgeIds: new Set(),
     executedEdges: new Set(),
   });
-  assert.equal(all.length, 3);
-  const blocked = nominate(graph, {
+  assert.equal(all.length, 6);
+  const blocked = candidateEdges(graph, {
     siteKey: 'https://gitcode.com',
     atomSignature: evidence().atomSignature,
-    intent: '创建成本域 PR',
     blockedEdgeIds: new Set([all[0].id]),
     executedEdges: new Set([all[1].id]),
   });
+  assert.equal(blocked.length, 4);
   assert.equal(blocked.some((item) => item.id === all[0].id), false);
   assert.equal(blocked.some((item) => item.id === all[1].id), false);
+  assert.equal(
+    candidateEdges(graph, {
+      siteKey: 'https://example.com',
+      atomSignature: evidence().atomSignature,
+      blockedEdgeIds: new Set(),
+      executedEdges: new Set(),
+    }).length,
+    0
+  );
+});
+
+test('写入目标的锚点不取控件内容：type_text 只用稳定属性，否则退回 selector', () => {
+  const snapshot = {
+    url: 'https://editor.csdn.net/md?articleId=1',
+    title: '写文章',
+    elements: [
+      {
+        ref: 'rf-1',
+        tag: 'pre',
+        role: '',
+        label: '@[TOC] 一篇讲清 GraphRAG 的长正文，写得越长这里就越不一样',
+        selector: 'pre.editor__inner',
+        inViewport: true,
+      },
+    ],
+  };
+  const target = traceTargetFromTransition(
+    { selector: 'pre.editor__inner', value: 'x' },
+    snapshot,
+    { tool: 'type_text' }
+  );
+  assert.equal(target.selector, 'pre.editor__inner');
+  assert.equal(target.name, undefined, '正文内容绝不能进锚点');
+  assert.equal(target.kind, 'selector');
+
+  const withPlaceholder = traceTargetFromTransition(
+    { selector: '#title', value: 't' },
+    {
+      ...snapshot,
+      elements: [
+        {
+          ref: 'rf-2',
+          tag: 'input',
+          type: 'text',
+          role: 'textbox',
+          label: '旧标题内容',
+          placeholder: '请输入文章标题',
+          selector: '#title',
+        },
+      ],
+    },
+    { tool: 'type_text' }
+  );
+  assert.equal(withPlaceholder.name, '请输入文章标题', '稳定属性可以当锚点');
+  assert.equal(withPlaceholder.kind, 'attribute');
+});
+
+test('点击目标的锚点仍记录为可见文字：kind=content，不被写入规则误伤', () => {
+  const target = traceTargetFromTransition(
+    { selector: 'button.publish' },
+    {
+      url: 'https://x.test/',
+      title: 'x',
+      elements: [{ ref: 'rf-1', tag: 'button', role: 'button', label: '发布文章', selector: 'button.publish' }],
+    },
+    { tool: 'click_element' }
+  );
+  assert.equal(target.name, '发布文章');
+  assert.equal(target.kind, 'content');
+});
+
+test('内容型锚点不按名字匹配：按 selector 唯一重定位，selector 也没了就交回', () => {
+  const observation = evidence({
+    controls: [
+      { role: 'button', name: '发布文章', selector: '#publish', visible: true },
+      { role: '', name: '正文', selector: 'pre.editor__inner', visible: true },
+    ],
+  });
+  const longName =
+    '@[TOC] 面向想快速搞懂 GraphRAG 的同学：一篇讲清它是什么 为什么需要 怎么跑 什么时候别用 并附微软官方实现的关键概念与图纸索引 这一整段都是编辑器的正文内容';
+  const withSelector = edge({
+    s: { selector: 'pre.editor__inner', semanticAnchor: { role: '', name: longName } },
+  });
+  const resolved = resolveEdgeTarget(withSelector, observation);
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.target.basis, 'selector-hint');
+
+  const withoutSelector = edge({ s: { semanticAnchor: { role: '', name: longName } } });
+  const unresolved = resolveEdgeTarget(withoutSelector, observation);
+  assert.equal(unresolved.ok, false, 'selector 缺失时不得按一段已经变了的内容去猜目标');
 });
 
 test('edge question 只返回 edgeId 或 ABSTAIN，低置信/弃权都不产生动作', () => {
@@ -686,6 +848,34 @@ test('页面状态按应用模板抽象，不按具体商品 slug 或帖子 slug
   );
 });
 
+test('数字 / UUID 末段不分裂状态名，退回稳定的父级模板', () => {
+  assert.equal(
+    traceGraphStateName('https://blog.csdn.net/weixin_44128977/article/details/170567085'),
+    'ArticleDetailsPage',
+    '帖子 id 不能进状态名，否则每篇文章都是一个新状态'
+  );
+  assert.equal(
+    traceGraphStateName('https://shop.example.com/product/12345'),
+    'ProductPage'
+  );
+  assert.equal(
+    traceGraphStateName('https://shop.example.com/product/550e8400-e29b-41d4-a716-446655440000'),
+    'ProductPage'
+  );
+  assert.equal(
+    traceGraphStateName('https://x.test/posts/64b7f0c2a1b2c3d4e5f60718'),
+    'PostsPage'
+  );
+  // 整条路径都是 id 时只能退到 DetailPage；不要拿页面标题当名字（标题会随帖子变）。
+  assert.equal(traceGraphStateName('https://x.test/12345'), 'DetailPage');
+  // 稳定末段保持原行为：这次改动不碰它们。
+  assert.equal(
+    traceGraphStateName('https://mp.csdn.net/mp_blog/creation/editor'),
+    'EditorPage'
+  );
+  assert.equal(traceGraphStateName('https://example.com/foo/bar'), 'BarPage');
+});
+
 test('typed slots 只从当前指令显式块或 @slot 行读取', () => {
   assert.deepEqual(
     extractExplicitSlots('任务\n@title="新版标题"\n@value=保留正文'),
@@ -734,20 +924,19 @@ test('generic ProductPage 可通过模板提名，并排除当前指令未绑定
       ],
     },
   };
-  const nominated = nominate(graph, {
+  const stateEdges = candidateEdges(graph, {
     siteKey: 'http://localhost:7770',
     atomSignature: atomSignature({
       name: 'ProductPage',
       staticAtoms: ['button:button', 'textbox:textbox'],
       dynamicAtoms: [],
     }),
-    intent: '读取这个商品的最新评论',
     blockedEdgeIds: new Set(),
     executedEdges: new Set(),
   });
-  assert.equal(nominated.some((item) => item.id === 'static'), true);
-  assert.equal(nominated.some((item) => item.id === 'url-edge'), true);
-  assert.equal(bindSlots(nominated.find((item) => item.id === 'url-edge'), { slots: {} }).ok, false);
+  assert.equal(stateEdges.some((item) => item.id === 'static'), true);
+  assert.equal(stateEdges.some((item) => item.id === 'url-edge'), true);
+  assert.equal(bindSlots(stateEdges.find((item) => item.id === 'url-edge'), { slots: {} }).ok, false);
 });
 
 test('edge question 携带实时观测和语义目标，但不注入 φ 门禁', () => {

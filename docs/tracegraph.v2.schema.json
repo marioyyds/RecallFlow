@@ -68,7 +68,11 @@
         "role": { "type": "string" },
         "name": { "type": "string" },
         "text": { "type": "string" },
-        "urlPattern": { "type": "string" }
+        "urlPattern": { "type": "string" },
+        "kind": {
+          "description": "锚点来源：attribute=稳定属性(aria-label/placeholder)，content=控件可见文字（可复用语义，如按钮文字），selector=无可用语义名，只能按 selector 唯一重定位。写入型目标的 name 永远不取 content。",
+          "enum": ["attribute", "content", "selector"]
+        }
       }
     },
     "L1": {
@@ -90,6 +94,18 @@
         "from": { "type": "string" },
         "to": { "type": "string" },
         "g": { "type": "string", "description": "稳定动作意图与目标摘要，不包含 PlanCard 文案" },
+        "fromSignatures": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string" },
+          "description": "录制时的 atomSignature；非身份字段，仅用于选择期的结构匹配分层"
+        },
+        "purpose": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "type": "string" },
+          "description": "录制时的计划步（最新在前）；非身份字段，仅在选择期作为证据展示"
+        },
         "planVersion": { "type": "integer" },
         "successPredicate": { "type": "string" },
         "action": {

@@ -239,7 +239,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       query 同时驱动元素排序与相关正文窗口；新增 spillExempt 元数据，
   //                       让快照使用自身 8K 字段感知预算，而不再被通用 6K/3K 截断。
   //                       工具数量与权限类别不变。
-  const EXPECTED = '1846301b4d846749';
+  //   b278dae892c1ea81 — **有意改动**：`update_plan.allowedOperations` 的枚举去掉了 TYPE_TEXT。
+  //                       快路径不再执行任何输入写入（值由慢思考回合产生），若保留这个枚举值，
+  //                       计划就会授权一个永远不会执行的操作。工具数量、权限、风险全部不变，
+  //                       变的只有那一个 schema enum 项。
+  const EXPECTED = 'b278dae892c1ea81';
   assert.equal(
     fp,
     EXPECTED,

@@ -14,10 +14,11 @@ import {
 } from './jev-action-space.ts';
 import {
   bindSlots,
+  candidateEdges,
   evidenceFromSnapshot,
   extractExplicitSlots,
   groundEdgeAction,
-  nominate,
+  matchCandidate,
 } from './trace-graph.ts';
 import { loadTraceGraph } from './tracegraph-store.ts';
 import { REPLAYABLE_TOOLS } from './macros.ts';
@@ -29,11 +30,6 @@ import {
   writeJevDiagnostic,
   type JevDiagnosticRecord,
 } from './jev-diagnostics.ts';
-import {
-  generateJevFieldText,
-  type JevTextFieldContext,
-  type JevTextResult,
-} from './jev-text-helper.ts';
 import { modelRequiresReasoningReplay } from './provider-history.ts';
 
 export type JevFastRunResult =
@@ -47,14 +43,27 @@ export type JevFastRunResult =
     }
   | { kind: 'cancelled'; reason: string };
 
-type TextHelper = (
-  settings: AgentRunState['settings'],
-  context: JevTextFieldContext,
-  signal: AbortSignal
-) => Promise<JevTextResult>;
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 结构匹配层级的稳定排序：full 优先，其次 static，最后 name。
+// 这只是把「结构离当前更近的边」排在前面，不做语义打分，也不截断。
+const MATCH_LEVEL_RANK: Record<string, number> = { full: 0, static: 1, name: 2 };
+
+/**
+ * 结构分层裁剪：只有当存在 full 匹配时才只发 full。
+ *
+ * 依据 2026-11-12 的真实图（editor.csdn.net）：MdPage 名下 10 条边来自 16 个不同
+ * 录制签名；按每个签名回放，12/16 恰好有 1 条 full，1 个有 3 条（同一结构下的
+ * 并行动作），3 个 0 条。也就是说「有 full 就收起 name 档」把候选压到 1–3，而
+ * 结构没见过的页面仍保留全部候选，不会凭空制造 no-candidates。
+ *
+ * 这是结构证据，不是语义匹配，也不构成执行授权：选哪条、是否执行仍由 JEV 决定。
+ */
+export function selectCandidatesByTier<T extends { match: { level: string } }>(items: T[]): T[] {
+  const hasFull = items.some((item) => item.match.level === 'full');
+  return hasFull ? items.filter((item) => item.match.level === 'full') : items;
 }
 
 export class JevFastController {
@@ -63,7 +72,6 @@ export class JevFastController {
   private readonly signal: AbortSignal;
   private readonly callSystemOne: typeof callJevSystemOne;
   private readonly writeDiagnostic: typeof writeJevDiagnostic;
-  private readonly textHelper: TextHelper;
   private readonly loadGraph: typeof loadTraceGraph;
   private lastBlockedRoute = '';
   private toolSequence = 0;
@@ -74,7 +82,6 @@ export class JevFastController {
     signal: AbortSignal,
     callSystemOne: typeof callJevSystemOne = callJevSystemOne,
     writeDiagnostic: typeof writeJevDiagnostic = writeJevDiagnostic,
-    textHelper: TextHelper = generateJevFieldText,
     loadGraph: typeof loadTraceGraph = loadTraceGraph
   ) {
     this.state = state;
@@ -82,7 +89,6 @@ export class JevFastController {
     this.signal = signal;
     this.callSystemOne = callSystemOne;
     this.writeDiagnostic = writeDiagnostic;
-    this.textHelper = textHelper;
     this.loadGraph = loadGraph;
   }
 
@@ -226,11 +232,6 @@ export class JevFastController {
       plan: this.state.ctx.plan,
       planVersion: this.state.ctx.planVersion,
       leaseRemaining: this.planLeaseRemaining(),
-      completedTypeTargets: (this.state.ctx.completedTypeTargets || [])
-        .filter((entry: any) => entry && entry.url === this.state.ctx.pageUrl)
-        .flatMap((entry: any) => [entry.ref, entry.selector])
-        .map((value: unknown) => String(value || ''))
-        .filter(Boolean),
     });
     this.recordDiagnostic({
       state: 'deciding',
@@ -348,30 +349,9 @@ export class JevFastController {
       return { kind: 'skipped', reason: decision.reason, latencyMs };
     }
 
-    let action = decision;
-    if (action.operation === 'TYPE_TEXT') {
-      try {
-        const generated = await this.textHelper(
-          this.state.settings,
-          this.textContext(action),
-          this.signal
-        );
-        action = { ...action, args: { ...action.args, value: generated.text } };
-        this.state.trace({
-          phase: 'jev-text',
-          iter,
-          model: generated.model,
-          latencyMs: generated.latencyMs,
-          chars: generated.text.length,
-          target: action.target?.label || '',
-        });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.appendBlocked(iter, 'text-helper-failed', reason);
-        await persist({ phase: 'jev_decision' }).catch(() => {});
-        return { kind: 'skipped', reason: 'text-helper-failed', latencyMs };
-      }
-    }
+    // 输入值不再由快路径生成：TYPE_TEXT 已不在 operation 空间里，模型若仍返回它，
+    // 上面的 blocked 分支会以 invalid-answer 交回慢思考，不执行任何写入。
+    const action = decision;
 
     const signature = action.operation + ':' + JSON.stringify(action.args);
     const routeKey = this.currentRouteKey();
@@ -562,38 +542,102 @@ export class JevFastController {
         edgeId: item.id,
       });
     }
-    const nominated = graph
-      ? nominate(graph, {
+    const stateEdges = graph
+      ? candidateEdges(graph, {
           siteKey: graph.siteKey,
           atomSignature: before.atomSignature,
-          intent: this.state.detected.sourceText || this.state.instruction,
           blockedEdgeIds: new Set(this.state.jevLoop.blockedEdgeIds),
           executedEdges: new Set(this.state.jevLoop.executedEdges),
-          controlNames: before.controls.map((control) => control.name),
         })
       : [];
-    const candidates = nominated.filter(
-      (item) => bindSlots(item, { slots: graphSlots }).ok
+    const ranked = stateEdges
+      .map((edge) => ({ edge, match: matchCandidate(edge, before) }))
+      .sort(
+        (a, b) =>
+          MATCH_LEVEL_RANK[a.match.level] - MATCH_LEVEL_RANK[b.match.level] ||
+          b.edge.provenance.verifiedAt - a.edge.provenance.verifiedAt
+      );
+    const bindable = ranked
+      .map((item) => ({
+        ...item,
+        binding: bindSlots(item.edge, { slots: graphSlots }),
+      }))
+      .filter((item) => item.binding.ok);
+    const tiered = selectCandidatesByTier(bindable);
+    // Grounding 提前：目标在当前快照里定位不到时，这条边本来也会在 JEV 选定后
+    // 立刻失败并封边。提前做只省掉一次 systemone 和一次 handoff 的理由，
+    // 不改变判定权（是否执行仍由 JEV 决定），也不把置信度当授权。
+    // 依据 2026-11-12 真实图：MdPage 的 10 条边按签名回放后，唯一目标可定位的
+    // 候选数中位数是 2（最大 7），且 4 个未就绪签名的候选会被这一步清空。
+    const groundedItems: Array<{
+      edge: (typeof bindable)[number]['edge'];
+      match: (typeof bindable)[number]['match'];
+      binding: (typeof bindable)[number]['binding'];
+      grounded: ReturnType<typeof groundEdgeAction>;
+    }> = [];
+    let filteredTargetMissing = 0;
+    for (const item of tiered) {
+      const grounded = groundEdgeAction(item.edge, before, item.binding.bound);
+      if (grounded.ok && grounded.args) {
+        groundedItems.push({ ...item, grounded });
+        continue;
+      }
+      filteredTargetMissing += 1;
+      this.state.trace({
+        phase: 'tracegraph-grounding',
+        iter,
+        edgeId: item.edge.id,
+        decision: 'REJECT',
+        reason: grounded.reason || 'target-missing',
+        candidates: grounded.candidates,
+        prefilter: true,
+      });
+      // 刻意**不封边**：目标缺失可能是瞬时的（菜单收起、面板未展开），封边会让
+      // 这条边在本 run 内永久失效。预过滤不花 systemone，下一 cycle 再挑一次即可。
+    }
+    const candidates = groundedItems.map((item) => item.edge);
+    const candidateMatches = Object.fromEntries(
+      groundedItems.map((item) => [item.edge.id, item.match])
+    );
+    const levelCounts = groundedItems.reduce(
+      (acc, item) => {
+        acc[item.match.level] = (acc[item.match.level] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
     );
     this.state.trace({
       phase: 'tracegraph-candidates',
       iter,
       count: candidates.length,
-      nominated: nominated.length,
-      filteredUnbound: nominated.length - candidates.length,
+      nominated: stateEdges.length,
+      filteredUnbound: stateEdges.length - bindable.length,
+      prunedByFull: bindable.length - tiered.length,
+      filteredTargetMissing,
+      levels: levelCounts,
       state: stateName || '',
     });
     this.state.emit({
       type: 'tracegraph-metrics',
       phase: 'candidates',
       count: candidates.length,
-      nominated: nominated.length,
-      filteredUnbound: nominated.length - candidates.length,
+      nominated: stateEdges.length,
+      filteredUnbound: stateEdges.length - bindable.length,
+      prunedByFull: bindable.length - tiered.length,
+      filteredTargetMissing,
+      levels: levelCounts,
     });
     if (!candidates.length) {
-      this.traceEdgeHandoff(iter, 'edge-no-candidates', '当前状态没有可用的已验证证据边');
+      const reason = tiered.length ? 'edge-target-missing' : 'edge-no-candidates';
+      this.traceEdgeHandoff(
+        iter,
+        reason,
+        tiered.length
+          ? '候选边的目标在当前快照里都无法唯一定位'
+          : '当前状态没有可用的已验证证据边'
+      );
       await persist({ phase: 'tracegraph_decision' }).catch(() => {});
-      return { kind: 'skipped', reason: 'edge-no-candidates' };
+      return { kind: 'skipped', reason };
     }
 
     const bundle = buildJevEdgeRequest(settings.jev, {
@@ -603,6 +647,7 @@ export class JevFastController {
       pageUrl: this.state.ctx.pageUrl,
       pageTitle: this.state.ctx.pageTitle,
       candidates,
+      candidateMatches,
       observation: before,
       slots: graphSlots,
       planStep: planStep?.text,
@@ -663,7 +708,7 @@ export class JevFastController {
       return { kind: 'skipped', reason: 'edge-' + decision.reason, latencyMs };
     }
 
-    const edge = candidates.find((item) => item.id === decision.edgeId);
+    const chosen = groundedItems.find((item) => item.edge.id === decision.edgeId);
     this.state.emit({
       type: 'tracegraph-metrics',
       phase: 'edge-decision',
@@ -671,10 +716,11 @@ export class JevFastController {
       edgeId: decision.edgeId,
       confidence: decision.confidence,
     });
-    if (!edge) {
+    if (!chosen) {
       this.traceEdgeHandoff(iter, 'edge-unknown', decision.edgeId);
       return { kind: 'skipped', reason: 'edge-unknown', latencyMs };
     }
+    const edge = chosen.edge;
     if (!REPLAYABLE_TOOLS.has(edge.action.tool)) {
       this.state.trace({
         phase: 'tracegraph-edge',
@@ -687,50 +733,15 @@ export class JevFastController {
       return { kind: 'skipped', reason: 'edge-tool-rejected', latencyMs };
     }
 
-    const binding = bindSlots(edge, {
-      slots: graphSlots,
-    });
-    if (!binding.ok) {
-      this.state.trace({
-        phase: 'tracegraph-grounding',
-        iter,
-        edgeId: edge.id,
-        decision: 'REJECT',
-        reason: 'unbound-slots',
-        missing: binding.missing,
-      });
-      this.traceEdgeHandoff(
-        iter,
-        'edge-unbound-slots',
-        binding.missing.map((slot) => '@' + slot).join('、')
-      );
-      return { kind: 'skipped', reason: 'edge-unbound-slots', latencyMs };
-    }
-    const grounded = groundEdgeAction(edge, before, binding.bound);
-    if (!grounded.ok || !grounded.args) {
-      const reason = grounded.reason || 'target-missing';
-      this.state.trace({
-        phase: 'tracegraph-grounding',
-        iter,
-        edgeId: edge.id,
-        decision: 'REJECT',
-        reason,
-        candidates: grounded.candidates,
-      });
-      this.traceEdgeHandoff(
-        iter,
-        'edge-' + reason,
-        'candidates=' + grounded.candidates
-      );
-      return { kind: 'skipped', reason: 'edge-' + reason, latencyMs };
-    }
+    // 目标与槽位在 prefilter 阶段已按当前快照解析；这里直接用同一份结果，
+    // 避免在请求与执行之间再解析一次（页面在等待响应期间可能已经变化）。
     this.state.trace({
       phase: 'tracegraph-grounding',
       iter,
       edgeId: edge.id,
       decision: 'GROUNDED',
-      basis: grounded.target?.basis || '',
-      target: grounded.target?.name || grounded.target?.role || '',
+      basis: chosen.grounded.target?.basis || '',
+      target: chosen.grounded.target?.name || chosen.grounded.target?.role || '',
     });
     const action: JevFastAction = {
       kind: 'act',
@@ -742,7 +753,7 @@ export class JevFastController {
             : 'READ_PAGE',
       actionKey: edge.id,
       toolName: edge.action.tool as JevFastAction['toolName'],
-      args: grounded.args,
+      args: chosen.grounded.args || {},
       description: edge.g,
       confidence: decision.confidence,
       operationConfidence: decision.confidence,
@@ -798,27 +809,6 @@ export class JevFastController {
     this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
     this.state.jevLoop.consecutiveFailures = 0;
     this.state.jevLoop.lastOutcome = 'act';
-  }
-
-  private textContext(action: JevFastAction): JevTextFieldContext {
-    return {
-      goal: this.state.detected.sourceText || this.state.instruction,
-      field: {
-        label: action.target?.label || '',
-        role: action.target?.role || '',
-        valuePresent: false,
-      },
-      page: {
-        title: this.state.ctx.pageTitle,
-        text: String(
-          this.state.ctx.lastReadFullText ||
-          this.state.ctx.lastEvidence ||
-          this.state.ctx.page ||
-          ''
-        ).slice(0, 6000),
-      },
-      recentActions: this.state.ranToolNames.slice(-6),
-    };
   }
 
   private async processTool(
@@ -902,7 +892,36 @@ export class JevFastController {
     this.state.jevLoop.lastOutcome = 'slow-handoff';
   }
 
-  private appendBlocked(
+  /**
+ * 快路径让位给慢思考时，写给慢模型的解释。
+ *
+ * 为什么必须显式说明「不是页面故障」：2026-11-12 的真实会话 RF-XKJ4M7 里，
+ * 模型把「【JEV 快路径已停止】…当前状态没有可用的已验证证据边」读成了
+ * 「页面刚打开可能还在加载」，于是多拍一次快照、多写了 108–282 字推理。
+ * 让位的原因绝大多数与页面无关（没录过、目标暂时收起、置信不足），
+ * 用故障口吻描述会稳定地诱发一次无用观察。
+ */
+private handoffExplanation(reason: string): string {
+  if (reason === 'edge-no-candidates') {
+    return '本页 / 当前结构还没有可复用的历史动作（首次操作时属正常）';
+  }
+  if (reason === 'edge-target-missing') {
+    return '候选动作的目标此刻不在页面上（可能收起了菜单或面板，属正常）';
+  }
+  if (reason === 'edge-abstain') return '快路径对候选动作没有把握，主动让位';
+  if (reason === 'edge-low-confidence') return '候选动作的置信度不足，快路径主动让位';
+  if (reason === 'edge-invalid-answer') return '决策服务返回了无效选项，快路径不冒险';
+  if (reason === 'edge-unbound-slots') return '当前指令缺少该动作需要的显式参数值';
+  if (reason === 'edge-tool-rejected') return '该动作不在可回放白名单内，快路径不执行';
+  if (reason === 'edge-tool-failed') return '快路径执行的动作失败了';
+  if (reason === 'edge-unknown') return '决策服务选中了未提名的动作';
+  if (reason === 'request-failed') return '快路径的决策服务本次不可用';
+  if (reason === 'observation-failed') return '未能取得执行前的页面快照';
+  if (reason === 'model-blocked') return '快路径判断当前没有可安全推进的动作';
+  return '快路径让位（' + reason + '）';
+}
+
+private appendBlocked(
     iter: number,
     reason: string,
     detail = ''
@@ -916,11 +935,15 @@ export class JevFastController {
       reason,
       detail,
     });
+    const explanation = this.handoffExplanation(reason);
     this.state.emit({
       type: 'jev-handoff',
       reason,
       detail,
-      message: '↪ 慢思考接管：' + reason + (detail ? '（' + detail + '）' : ''),
+      message:
+        '↪ 慢思考接管：' + reason +
+        (detail ? '（' + detail + '）' : '') +
+        ' — ' + explanation,
     });
     this.recordDiagnostic({
       state: 'handoff',
@@ -936,10 +959,10 @@ export class JevFastController {
     this.state.messages.push({
       role: 'system',
       content: [
-        '【JEV 快路径已停止】',
-        '原因：' + reason,
+        '【内部提示 · 非页面故障】快路径让位给慢思考：' + explanation + '。',
         detail ? '详情：' + detail : '',
-        '请基于最近一次真实页面快照和工具结果继续规划；不要假设未执行的动作已经发生。',
+        '请按当前计划与最近一次真实工具结果继续操作。',
+        '不要因为这条提示而等待、重复读取页面或更换方案；也不要假设任何未执行的动作已经发生。',
       ].filter(Boolean).join('\n'),
     });
   }

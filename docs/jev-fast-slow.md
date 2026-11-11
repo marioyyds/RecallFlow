@@ -6,7 +6,7 @@ RecallFlow 使用远程 JEV 的 `/systemone` 协议作为浏览器内循环控�
 
 - `POST <systemone endpoint>`：一次请求评估当前页面的 operation 和所有 operation-specific target head。
 - `GET <models endpoint>`：列出当前凭据可用的模型；设置页连接测试使用该路径。
-- JEV 不生成聊天回复，也不生成字段文本。
+- JEV 不生成聊天回复，也不生成字段文本（输入由慢思考回合负责，见「快慢分工」）。
 - 研究、规划、正文生成和最终验证由慢思考负责。
 
 设置里的 API 地址可以填基础 origin、以 `/v1` 或 `/compatible-mode/v1` 结尾的
@@ -37,15 +37,14 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
   -> JEV BLOCKED：慢思考重新规划
 ```
 
-慢思考不再承担每一个可以直接执行的浏览器动作。JEV 每次只执行一个操作；需要内容输入时，慢模型只作为字段文本助手，为已选中的 TYPE_TEXT target 生成一个 JSON `{text}` 值。
+慢思考不再承担每一个可以直接执行的浏览器动作。JEV 每次最多执行一个操作，且只在 CLICK / 读取 / 滚动 / WAIT / DONE / BLOCKED 里选。**输入（TYPE_TEXT）不在它的动作空间里**：字段值一律由慢思考回合产生——要么写进指令 / PlanCard 的显式槽位（`@slot=value`），要么在其回合里直接调 `type_text` 工具。快路径不再有“生成一个值”的旁路。
 
 ## 决策协议
 
 一次 System One 请求包含：
 
-- `operation`：当前可执行的 CLICK、TYPE_TEXT、读取、滚动、WAIT、DONE 或 BLOCKED；
+- `operation`：当前可执行的 CLICK、读取、滚动、WAIT、DONE 或 BLOCKED（不含 TYPE_TEXT）；
 - `click_target`：仅在 CLICK 可用时提供，候选只能来自当前可见、未禁用的安全点击元素；
-- `type_text_target`：仅在 TYPE_TEXT 可用时提供，候选只能来自可编辑字段。
 - `plan`：当前 `in_progress` 子目标、完成条件、允许操作和剩余动作租约。
 - `observation.runtime`：结构化媒体状态（`paused`、`currentTime`、`readyState` 等）与 `aria-busy`，用于避免被“正在缓冲”等可能滞后的可见文案误导。
 
@@ -77,17 +76,19 @@ get_page_snapshot
   -> repeat
 ```
 
-`TYPE_TEXT` 的字段值由聊天模型生成并校验为唯一 `text` 字段；校验失败时不会输入。JEV 生成的是完整字段值，因此执行参数固定带 `clearFirst:true`，不会在旧标题后追加第二遍。已经有值的输入框、以及本任务中快路径或慢路径已经成功写过的目标，都不会再进入 JEV 的 `TYPE_TEXT` target head。`WAIT` 只等待并重新观察，不执行页面写入。
+快路径不再写入输入框：`TYPE_TEXT` 不在 operation 空间里；edge 路径只有当前指令 / PlanCard 显式给出槽位值时才执行那条写边，参数固定带 `clearFirst:true`，写入完整字段值而不是追加。槽位绑不上就交回慢思考。`WAIT` 只等待并重新观察，不执行页面写入。
 
 单次快路径片段默认最多连续执行 12 个动作，每个 run 默认最多 36 次 JEV 尝试；如果当前 PlanCard 声明了更小的 `leaseActions`，以租约先耗尽为准。慢思考更新计划或推进到新步骤后，计划版本变化，快路会获得新的子目标租约。连续动作数、尝试数、候选元素数、读取/输入/点击/等待阈值、目标动作分支下限和“同一动作无进展”连续执行上限仍可在设置页调整。恢复态仍受 200 次尝试、50 个连续动作的持久化硬上限保护。同一页面阻塞后，在 `phase + URL + snapshot fingerprint` 不变时不会重复请求 JEV；页面变化或慢思考写入新计划版本后才允许重新尝试。
 
 `WAIT` 另有一条不受页面指纹影响的连续等待计数。动态广告、计时器或加载组件造成的 DOM 指纹变化不能把连续等待刷成“有进展”；达到 `maxRepeatedActionsWithoutProgress` 后直接交给慢思考。
 
-`CLICK` / `TYPE_TEXT` 同时产生 operation 与目标 head。operation 是多分类判断；target 是条件判断，即使 operation 分支错误也可能给出 100%。因此目标动作须同时满足：匹配 target 达到该操作门槛，且 operation 达到独立的分支下限。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。真实校准结果见 [JEV 阈值校准记录](./jev-threshold-calibration.md)。
+`CLICK` 同时产生 operation 与目标 head。operation 是多分类判断；target 是条件判断，即使 operation 分支错误也可能给出 100%。因此目标动作须同时满足：匹配 target 达到该操作门槛，且 operation 达到独立的分支下限。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。真实校准结果见 [JEV 阈值校准记录](./jev-threshold-calibration.md)。
 
 重复动作保护绑定到 `action + args + phase + URL + fingerprint`。页面发生变化会立即清零无进展连击；只有同一动作在当前页面状态下连续达到配置次数，才移交慢思考。
 
 `type_text` 在内容脚本失败后采用事务式 CDP 降级：使用内容脚本返回的 `valueBefore` 恢复原始基线，先全选，再按段落块写入完整的“原值 + 新值”。长正文只在段落附近分块，块内保留真实换行，不再为了每一行派发 Enter 导致富文本编辑器重复插入。
+
+换行敏感的比较一旦失败（编辑器把整块 `insertText` 的段落换行归一化掉，CSDN/CodeMirror 实测 3055 → 2974、首差正好落在段落边界），再用**一次真实 paste 事件**（自包含派发器 + `DataTransfer`/`ClipboardEvent`，先全选再派发）让编辑器按自己的 input rule 重建段落，随后回读确认。`strategy` 会标成 `cdp-transactional+paste`；paste 后仍不一致才判失败并保留原有回滚与报错语义。单行值不触发这一步。
 
 ## 升级到慢思考
 
@@ -95,9 +96,10 @@ get_page_snapshot
 
 - `BLOCKED`；
 - 无 target head 时 operation 置信度不足，或有 target head 时匹配 target 置信度不足；
+- edge 路径的槽位绑不上，或在当前快照里找不到唯一目标（封边后再移交，不在同一 run 里重复付 systemone）；
 - 连续 `WAIT` 达到无进展阈值；
 - 不支持的操作、目标或页面结构；
-- TYPE_TEXT 文本助手失败；
+- 模型返回 operation 空间外的操作（例如 `TYPE_TEXT`）→ 判 `invalid-answer`，交回慢思考，不写任何输入框；
 - 动作后无法重新观察；
 - 连续两次工具失败；
 - JEV 选择 `DONE`，必须由慢思考独立验证后才能完成任务。

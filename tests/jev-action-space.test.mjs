@@ -8,7 +8,6 @@ import {
   JEV_MIN_READ_CONFIDENCE,
   JEV_MIN_WAIT_CONFIDENCE,
   JEV_OPERATION_QUESTION,
-  JEV_TYPE_TEXT_TARGET_QUESTION,
   buildJevFastRequest,
   compareJevShadowAction,
   formatJevDecisionSummary,
@@ -79,11 +78,12 @@ function responseFor(bundle, operation, operationConfidence = 0.95) {
       operationConfidence
     ),
   };
-  for (const [operationName, targets] of Object.entries(bundle.targets)) {
-    const question = operationName === 'CLICK'
-      ? JEV_CLICK_TARGET_QUESTION
-      : JEV_TYPE_TEXT_TARGET_QUESTION;
-    answers[question] = choice(Object.keys(targets), Object.keys(targets)[0]);
+  // 快路径只剩 CLICK 一个 target head；输入能力已经交给慢思考回合。
+  for (const targets of Object.values(bundle.targets)) {
+    answers[JEV_CLICK_TARGET_QUESTION] = choice(
+      Object.keys(targets),
+      Object.keys(targets)[0]
+    );
   }
   return {
     model: 'jev-1.14.0',
@@ -102,15 +102,11 @@ function bundleFromRequest(request) {
       Object.keys(request.questions[JEV_CLICK_TARGET_QUESTION].criteria).map((key) => [key, {}])
     );
   }
-  if (request.questions[JEV_TYPE_TEXT_TARGET_QUESTION]) {
-    targets.TYPE_TEXT = Object.fromEntries(
-      Object.keys(request.questions[JEV_TYPE_TEXT_TARGET_QUESTION].criteria).map((key) => [key, {}])
-    );
-  }
+  
   return { operations, targets };
 }
 
-test('JEV 使用 operation 与操作专属 target head，不再询问 handoff 概率', () => {
+test('JEV 使用 operation 与 CLICK target head，不再询问 handoff 概率或输入能力', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
@@ -122,27 +118,24 @@ test('JEV 使用 operation 与操作专属 target head，不再询问 handoff �
   });
   assert.deepEqual(
     Object.keys(bundle.request.questions).sort(),
-    [JEV_CLICK_TARGET_QUESTION, JEV_OPERATION_QUESTION, JEV_TYPE_TEXT_TARGET_QUESTION].sort()
+    [JEV_CLICK_TARGET_QUESTION, JEV_OPERATION_QUESTION].sort()
   );
+  assert.equal('type_text_target' in bundle.request.questions, false);
   assert.equal('handoff_now' in bundle.request.questions, false);
   assert.equal('expected_progress' in bundle.request.questions, false);
   assert.equal('page_ready' in bundle.request.questions, false);
   assert.ok(bundle.operations.CLICK);
-  assert.ok(bundle.operations.TYPE_TEXT);
+  assert.equal(bundle.operations.TYPE_TEXT, undefined, '快路径不再提供输入 operation');
   assert.ok(bundle.targets.CLICK);
-  assert.ok(bundle.targets.TYPE_TEXT);
+  assert.equal(bundle.targets.TYPE_TEXT, undefined, '快路径不再有 type_text target head');
   assert.equal(
     Object.values(bundle.targets.CLICK).some((target) => target.ref === 'rf-2'),
     false,
-    '文本输入框只应进入 TYPE_TEXT target head，不能以 CLICK 分支抢占'
-  );
-  assert.equal(
-    Object.values(bundle.targets.TYPE_TEXT).some((target) => target.ref === 'rf-2'),
-    true
+    '文本输入框既不能进入 CLICK target head，也不再有自己的 target head'
   );
 });
 
-test('target 候选按操作隔离，高风险发布按钮不会成为 CLICK 候选', () => {
+test('高风险发布按钮不会成为 CLICK 候选，输入框也不进入任何 target head', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
@@ -151,13 +144,17 @@ test('target 候选按操作隔离，高风险发布按钮不会成为 CLICK 候
     snapshot: pageSnapshot(),
   });
   const clickTargets = Object.values(bundle.targets.CLICK);
-  const typeTargets = Object.values(bundle.targets.TYPE_TEXT);
   assert.equal(clickTargets.some((target) => target.label === '上传图文'), true);
   assert.equal(clickTargets.some((target) => target.label === '发布'), false);
-  assert.equal(typeTargets.some((target) => target.label === '填写标题'), true);
+  assert.equal(
+    clickTargets.some((target) => target.label === '填写标题'),
+    false,
+    '输入框既不是 CLICK 候选，也没有自己的 target head'
+  );
+  assert.equal(bundle.targets.TYPE_TEXT, undefined);
 });
 
-test('高置信 CLICK 只消费 click_target，不依赖 TYPE_TEXT target', () => {
+test('高置信 CLICK 只消费 click_target', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
@@ -166,10 +163,6 @@ test('高置信 CLICK 只消费 click_target，不依赖 TYPE_TEXT target', () =
     snapshot: pageSnapshot(),
   });
   const response = responseFor(bundle, 'CLICK', 0.97);
-  response.answers[JEV_TYPE_TEXT_TARGET_QUESTION] = {
-    choice: 'invented',
-    confidence: 0.1,
-  };
   const decision = interpretJevFastDecision(response, bundle);
   assert.equal(decision.kind, 'act');
   assert.equal(decision.operation, 'CLICK');
@@ -177,21 +170,21 @@ test('高置信 CLICK 只消费 click_target，不依赖 TYPE_TEXT target', () =
   assert.equal(decision.target.label, '上传图文');
 });
 
-test('operation 与所有 target head 能通过 TypeSafe 响应校验', () => {
+test('operation 与 CLICK target head 能通过 TypeSafe 响应校验', () => {
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
-    instruction: '填写标题',
+    instruction: '点击上传图文',
     snapshot: pageSnapshot(),
   });
   const parsed = parseJevSystemOneResponse(
-    responseFor(bundle, 'TYPE_TEXT'),
+    responseFor(bundle, 'CLICK'),
     bundle.request.questions
   );
   const decision = interpretJevFastDecision(parsed, bundle);
   assert.equal(decision.kind, 'act');
-  assert.equal(decision.operation, 'TYPE_TEXT');
-  assert.equal(decision.target.label, '填写标题');
+  assert.equal(decision.operation, 'CLICK');
+  assert.equal(decision.target.label, '上传图文');
 });
 
 test('目标动作使用独立的 operation 分支下限，而非完整动作阈值', () => {
@@ -270,7 +263,7 @@ test('候选数和各动作置信度使用设置覆盖值', () => {
   assert.equal(custom.operations.READ_PAGE.minConfidence, 0.61);
   assert.equal(custom.operations.WAIT.minConfidence, 0.41);
   assert.equal(custom.operations.CLICK.minBranchConfidence, 0.55);
-  const typeBundle = buildJevFastRequest(
+  const noInput = buildJevFastRequest(
     {
       model: 'jev-latest',
       minActionConfidence: 0.63,
@@ -282,16 +275,12 @@ test('候选数和各动作置信度使用设置覆盖值', () => {
       snapshot: pageSnapshot(),
     }
   );
-  assert.equal(typeBundle.operations.TYPE_TEXT.minConfidence, 0.63);
-  assert.equal(typeBundle.targets.TYPE_TEXT['2'].minConfidence, 0.63);
-  assert.equal(
-    typeBundle.targets.TYPE_TEXT['2'].args.clearFirst,
-    true,
-    'JEV 生成完整字段值，因此必须替换而不是追加'
-  );
+  assert.equal(noInput.operations.TYPE_TEXT, undefined);
+  assert.equal(noInput.targets.TYPE_TEXT, undefined);
+  assert.equal('type_text_target' in noInput.request.questions, false);
 });
 
-test('TYPE_TEXT 排除已填写标题，并用可编辑能力样本识别正文编辑器', () => {
+test('可编辑输入框既不出现在 elements 表，也不进入 CLICK target head', () => {
   const snapshot = pageSnapshot({
     elements: [
       {
@@ -300,64 +289,22 @@ test('TYPE_TEXT 排除已填写标题，并用可编辑能力样本识别正文�
         role: 'textbox',
         type: 'text',
         label: '文章标题',
-        valuePresent: true,
-        inViewport: true,
-      },
-      {
-        ref: 'rf-body',
-        tag: 'pre',
-        role: '',
-        type: '',
-        label: '',
-        selector: 'pre.editor__inner:nth-of-type(1)',
-        valuePresent: undefined,
-        inViewport: true,
-      },
-    ],
-    capabilities: {
-      editables: {
-        count: 1,
-        samples: [
-          {
-            selector: 'pre.editor__inner:nth-of-type(1)',
-            kind: 'contenteditable',
-          },
-        ],
-      },
-    },
-  });
-  const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
-    intent: 'browser_task',
-    phase: 'editor',
-    instruction: '正文还没有填，继续撰写',
-    snapshot,
-  });
-  const targets = Object.values(bundle.targets.TYPE_TEXT || {});
-  assert.equal(targets.some((target) => target.ref === 'rf-title'), false);
-  const body = targets.find((target) => target.ref === 'rf-body');
-  assert.ok(body);
-  assert.equal(body.label, '正文编辑区');
-});
-
-test('慢思考已成功写入的目标不再进入下一轮快思考 TYPE_TEXT', () => {
-  const titleSelector = 'input.article-bar__title:nth-of-type(1)';
-  const snapshot = pageSnapshot({
-    elements: [
-      {
-        ref: 'rf-title-new',
-        tag: 'input',
-        role: 'textbox',
-        type: 'text',
-        label: '文章标题',
-        selector: titleSelector,
         valuePresent: false,
         inViewport: true,
       },
       {
         ref: 'rf-body',
-        tag: 'textarea',
+        tag: 'div',
         role: 'textbox',
         label: '正文',
+        selector: 'div.editor__inner:nth-of-type(1)',
+        inViewport: true,
+      },
+      {
+        ref: 'rf-upload',
+        tag: 'button',
+        role: 'button',
+        label: '上传图文',
         inViewport: true,
       },
     ],
@@ -365,13 +312,29 @@ test('慢思考已成功写入的目标不再进入下一轮快思考 TYPE_TEXT'
   const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
     intent: 'browser_task',
     phase: 'editor',
-    instruction: '标题已经写好，继续填写正文',
+    instruction: '先上传图文，再填写标题',
     snapshot,
-    completedTypeTargets: [titleSelector],
   });
-  const targets = Object.values(bundle.targets.TYPE_TEXT || {});
-  assert.equal(targets.some((target) => target.selector === titleSelector), false);
-  assert.equal(targets.some((target) => target.ref === 'rf-body'), true);
+  assert.deepEqual(
+    bundle.elements.map((row) => row.ref),
+    ['rf-upload'],
+    '输入框（含 contenteditable）不再是候选元素，只有可点击元素进表'
+  );
+  assert.deepEqual(
+    bundle.elements[0].operations,
+    ['CLICK'],
+    '元素行不再提供 TYPE_TEXT'
+  );
+  const clickTargets = Object.values(bundle.targets.CLICK);
+  assert.equal(clickTargets.length, 1);
+  assert.equal(clickTargets[0].ref, 'rf-upload');
+  assert.equal(
+    clickTargets.some(
+      (target) => target.ref === 'rf-title' || target.ref === 'rf-body'
+    ),
+    false
+  );
+  assert.equal(bundle.targets.TYPE_TEXT, undefined);
 });
 
 test('WAIT 使用独立低风险阈值，不再与读取共用同一门槛', () => {
@@ -659,37 +622,98 @@ test('同一动作无进展的重试次数来自设置', async () => {
   assert.equal(state.jevLoop.lastOutcome, 'repeated-action');
 });
 
-test('TYPE_TEXT 由文本助手生成值，JEV 只负责 operation 和 target', async () => {
+test('JEV 返回未被提供的 TYPE_TEXT 时移交慢思考，不执行任何写入', async () => {
   const state = makeState(false);
   const calls = [];
-  let turn = 0;
   const controller = new JevFastController(
     state,
     fakePipeline(state, (call) => calls.push(call)),
     new AbortController().signal,
     async (_settings, request) => {
-      turn += 1;
       const bundle = bundleFromRequest(request);
-      if (turn === 1) return responseFor(bundle, 'TYPE_TEXT');
-      return responseFor(bundle, 'BLOCKED');
-    },
-    async () => true,
-    async () => ({ text: '图像编辑论文合集', model: 'helper', latencyMs: 7 })
+      // bundle.operations 里没有 TYPE_TEXT —— 正好构成「模型返回了未被提供的 operation」。
+      return responseFor(bundle, 'TYPE_TEXT');
+    }
   );
   const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'invalid-answer');
   assert.equal(
-    outcome.kind,
-    'act',
-    'TYPE_TEXT 决策应进入执行模式：' +
-      JSON.stringify(outcome) +
-      ' / ' +
-      String(state.messages.at(-1)?.content || '')
+    calls.some((call) => call.name === 'type_text'),
+    false,
+    '快路径不再执行任何输入：' + calls.map((call) => call.name).join(',')
   );
-  const typeCall = calls.find((call) => call.name === 'type_text');
-  assert.ok(typeCall, '应执行 JEV 选中的 TYPE_TEXT；实际工具：' + calls.map((call) => call.name).join(','));
-  assert.equal(typeCall.args.ref, 'rf-2');
-  assert.equal(typeCall.args.value, '图像编辑论文合集');
-  assert.equal(typeCall.args.clearFirst, true);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ['get_page_snapshot'],
+    '只允许动作前的原子观察'
+  );
+  assert.equal(state.ranToolNames.includes('type_text'), false);
+  assert.ok(
+    (state.jevLoop.handoffReasons['invalid-answer'] || 0) >= 1,
+    '移交原因必须记账：' + JSON.stringify(state.jevLoop.handoffReasons)
+  );
+});
+
+test('edge grounding 找不到目标时在请求前跳过：不付 systemone、也不封边', async () => {
+  const state = makeState(false);
+  state.settings.traceGraph = { enabled: true, mode: 'live', shadowMode: false };
+  state.ctx.lastSnapshot = pageSnapshot({ fingerprint: 'fp-1' });
+  // 锚点取自一个当前快照里不存在的控件（真实场景：写入型目标的 label 就是正文，
+  // 写完就变，下次按 name 精确比对必然 0 命中）。
+  const edge = {
+    id: 'e.missing-target',
+    identityVersion: 4,
+    from: 'EditorPage',
+    to: 'EditorPage',
+    g: 'click_element「不存在的按钮」',
+    action: { tool: 'click_element', argsTemplate: { selector: '#gone' }, risk: 'low' },
+    slots: [],
+    s: { semanticAnchor: { role: 'button', name: '不存在的按钮' } },
+    r: 'low',
+    phiMinus: [],
+    phiPlus: { kind: 'url_pattern', expr: '/editor', source: 'structured' },
+    provenance: { recordIds: ['r1'], verifiedAt: Date.now(), siteKey: 'example.com', ttlMs: 0 },
+    status: 'verified',
+  };
+  const graph = {
+    version: 2,
+    siteKey: 'example.com',
+    updatedAt: Date.now(),
+    ttlMs: 0,
+    l0: { states: [], operations: [] },
+    l1: { edges: [edge] },
+    records: [],
+    patchLog: [],
+  };
+  const calls = [];
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    fakePipeline(state, (call) => calls.push(call.name)),
+    new AbortController().signal,
+    async () => {
+      jevCalls += 1;
+      return {
+        model: 'jev-latest',
+        usage: { input_tokens: 1, output_tokens: 1 },
+        answers: { edge: { type: 'choice', choice: edge.id, confidence: 0.95 } },
+      };
+    },
+    () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'edge-target-missing');
+  // 目标缺失可能只是瞬时收起（菜单/面板），所以**不封边**：本 run 内下一 cycle
+  // 目标出现时还能再挑到它。
+  assert.deepEqual(state.jevLoop.blockedEdgeIds, [], '预过滤失败不封边');
+  assert.equal(state.jevLoop.handoffReasons['edge-target-missing'], 1);
+  assert.ok(!calls.includes('click_element'), 'grounding 失败不得执行任何动作：' + calls.join(','));
+  // 2026-11-12：grounding 提前到请求之前。目标在当前快照里定位不到时直接封边，
+  // 一次 systemone 都不花 —— 旧行为是先问 JEV、选中后才失败（jevCalls === 1）。
+  assert.equal(jevCalls, 0);
 });
 
 test('子目标动作租约限制连续快动作，计划版本更新后重新开租约', async () => {

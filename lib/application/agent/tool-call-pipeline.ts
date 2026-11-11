@@ -47,7 +47,6 @@ import {
   captureXhsPublicationEvidence,
   evaluateXhsPublicationGate,
 } from './publication-policy.ts';
-import { recordCompletedTypeTarget } from './jev-write-ledger.ts';
 
 const RESEARCH_TRIGGER_TOOLS = new Set([
   'fetch_webpage',
@@ -440,13 +439,6 @@ export class ToolCallPipeline {
       this.emitScreenshot(result);
       if (result.pageSnapshot) state.ctx.lastSnapshot = result.pageSnapshot;
       else if (result.snapshot) state.ctx.lastSnapshot = result.snapshot;
-      recordCompletedTypeTarget(
-        state.ctx,
-        toolCall.name,
-        toolCall.args || {},
-        result,
-        state.ctx.pageUrl
-      );
       state.ctx.lastEvidence = evidenceAfter(
         state.ctx.lastEvidence,
         toolCall,

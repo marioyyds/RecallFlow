@@ -152,6 +152,8 @@ function sanitizeArgs(value: unknown): Record<string, unknown> {
   return out;
 }
 
+const ANCHOR_KINDS = new Set(['attribute', 'content', 'selector']);
+
 export function sanitizeTraceTarget(value: unknown): TraceRecord['target'] | undefined {
   if (!isRecord(value)) return undefined;
   const role = String(value.role || '').replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -159,19 +161,39 @@ export function sanitizeTraceTarget(value: unknown): TraceRecord['target'] | und
   const text = String(value.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   const selector = String(value.selector || '').trim().slice(0, 500);
   const urlPattern = String(value.urlPattern || '').trim().slice(0, 200);
+  const kind = ANCHOR_KINDS.has(String(value.kind || ''))
+    ? (String(value.kind) as 'attribute' | 'content' | 'selector')
+    : undefined;
   const target: NonNullable<TraceRecord['target']> = {
     ...(role ? { role } : {}),
     ...(name ? { name } : {}),
     ...(text ? { text } : {}),
     ...(selector ? { selector } : {}),
     ...(urlPattern ? { urlPattern } : {}),
+    ...(kind ? { kind } : {}),
   };
   return Object.keys(target).length ? target : undefined;
 }
 
+/** 写入型工具：它们的目标正文就是控件内容，写完即变，不能当锚点。 */
+const WRITE_TOOLS = new Set(['type_text', 'select_option', 'check_box', 'press_key']);
+
+/** 文本宿主：内容编辑区 / 预格式化块 / 文本输入框。 */
+function isTextHost(element: Record<string, unknown> | null | undefined): boolean {
+  if (!element) return false;
+  const tag = String(element.tag || '').toLowerCase();
+  const role = String(element.role || '').toLowerCase();
+  const type = String(element.type || '').toLowerCase();
+  if (tag === 'textarea' || tag === 'pre') return true;
+  if (tag === 'input' && /^(|text|search|email|url|tel|number)$/.test(type)) return true;
+  if (role === 'textbox' || role === 'searchbox') return true;
+  return element.contentEditable === true || element.isContentEditable === true;
+}
+
 export function traceTargetFromTransition(
   args: Record<string, unknown>,
-  beforeSnapshot: Parameters<typeof extractAtoms>[0]
+  beforeSnapshot: Parameters<typeof extractAtoms>[0],
+  options: { tool?: string } = {}
 ): TraceRecord['target'] | undefined {
   const selector = String(args.selector || '').trim();
   const ref = String(args.ref || '').trim();
@@ -193,14 +215,23 @@ export function traceTargetFromTransition(
         )
       : null);
   const role = String(element?.role || element?.tag || '').replace(/\s+/g, ' ').trim();
-  const name = String(
-    element?.label ||
-    element?.name ||
-    element?.placeholder ||
-    (element as Record<string, unknown> | null)?.text ||
-    hint ||
-    ''
-  ).replace(/\s+/g, ' ').trim();
+  // 锚点来源决定它会不会漂移：
+  //   · 写目标的 name 只能来自稳定属性（name / placeholder / aria-label）——CSDN 编辑器的
+  //     label 就是正文，写完下一次必然 0 命中；
+  //   · 普通点击目标的 label 通常是按钮文字，属于可复用语义，仍按 content 记录。
+  const writeTarget = WRITE_TOOLS.has(String(options.tool || '')) || isTextHost(element);
+  const attributeName = String(element?.name || element?.placeholder || '').trim();
+  const contentName = String(
+    element?.label || (element as Record<string, unknown> | null)?.text || hint || ''
+  ).trim();
+  const name = String(writeTarget ? attributeName : contentName || attributeName)
+    .replace(/\s+/g, ' ')
+    .trim();
+  const kind: 'attribute' | 'content' | 'selector' = name
+    ? writeTarget
+      ? 'attribute'
+      : 'content'
+    : 'selector';
   const targetSelector = String(element?.selector || selector || '').trim();
   const urlPattern = typeof args.url === 'string' ? urlPatternOf(args.url) : '';
   return sanitizeTraceTarget({
@@ -208,6 +239,7 @@ export function traceTargetFromTransition(
     ...(name ? { name } : {}),
     ...(targetSelector ? { selector: targetSelector } : {}),
     ...(urlPattern ? { urlPattern } : {}),
+    kind,
   });
 }
 
@@ -547,7 +579,7 @@ export function traceRecordFromTransition(input: {
 }): TraceRecord {
   const beforeAtoms = extractAtoms(input.beforeSnapshot);
   const afterAtoms = extractAtoms(input.afterSnapshot);
-  const target = traceTargetFromTransition(input.args, input.beforeSnapshot);
+  const target = traceTargetFromTransition(input.args, input.beforeSnapshot, { tool: input.tool });
   const before: Evidence = {
     url: String(input.beforeSnapshot?.url || ''),
     urlPattern: beforeAtoms.urlPattern,

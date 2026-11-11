@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { JEV_EDGE_QUESTION } from '../../lib/application/agent/jev-action-space.ts';
-import { JevFastController } from '../../lib/application/agent/jev-controller.ts';
+import { JevFastController, selectCandidatesByTier } from '../../lib/application/agent/jev-controller.ts';
 import { restoreJevLoopState } from '../../lib/application/agent/jev-loop-state.ts';
 import { emptyTraceGraph } from '../../lib/application/agent/tracegraph-store.ts';
 
@@ -182,7 +182,6 @@ test('live TraceGraph：JEV 选边并 Grounding 后直接执行一个动作', as
     new AbortController().signal,
     async () => edgeResponse('e.create'),
     async () => {},
-    undefined,
     async () => graph
   );
   const outcome = await controller.runAvailable(0, async () => {});
@@ -211,7 +210,6 @@ test('TraceGraph shadow 只计数，不产生 GUI 动作', async () => {
     new AbortController().signal,
     async () => edgeResponse('e.create'),
     async () => {},
-    undefined,
     async () => graph
   );
   const outcome = await controller.runAvailable(0, async () => {});
@@ -230,7 +228,6 @@ test('edge 执行后不再用 φ⁺ 反向否决已经完成的动作', async ()
     new AbortController().signal,
     async () => edgeResponse('e.create'),
     async () => {},
-    undefined,
     async () => graph
   );
   const first = await controller.runAvailable(0, async () => {});
@@ -239,4 +236,104 @@ test('edge 执行后不再用 φ⁺ 反向否决已经完成的动作', async ()
   assert.deepEqual(state.jevLoop.blockedEdgeIds, []);
   const clickCount = state.ranToolNames.filter((name) => name === 'click_element').length;
   assert.equal(clickCount, 1);
+});
+
+test('selectCandidatesByTier 只在有 full 时收起 name 档；没有 full 时一个都不剪', () => {
+  const full = { match: { level: 'full' } };
+  const stat = { match: { level: 'static' } };
+  const name = { match: { level: 'name' } };
+  assert.deepEqual(selectCandidatesByTier([full, stat, name]), [full]);
+  assert.deepEqual(selectCandidatesByTier([stat, name]), [stat, name]);
+  assert.deepEqual(selectCandidatesByTier([]), []);
+});
+
+test('存在 full 匹配时只把 full 档发给 JEV（name 档被收起）', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({ fromSignatures: ['PRFormPage#button:button#'] });
+  const base = graph.l1.edges[0];
+  graph.l1.edges.push({
+    ...base,
+    id: 'e.other',
+    action: { tool: 'click_element', argsTemplate: { selector: '#other' }, risk: 'low' },
+    s: { semanticAnchor: { role: 'button', name: 'Other' } },
+    provenance: { ...base.provenance, recordIds: ['r2'] },
+    fromSignatures: ['PRFormPage#button:button+input:text#'],
+  });
+  let request = null;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async (_settings, payload) => {
+      if (!request) request = payload;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const criteria = request.questions[JEV_EDGE_QUESTION].criteria;
+  assert.deepEqual(Object.keys(criteria), ['e.create', 'ABSTAIN']);
+});
+
+test('目标在当前快照里不存在时，候选边在请求前就被过滤掉', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge();
+  const base = graph.l1.edges[0];
+  graph.l1.edges.push({
+    ...base,
+    id: 'e.gone',
+    action: { tool: 'click_element', argsTemplate: { selector: '#gone' }, risk: 'low' },
+    s: { semanticAnchor: { role: 'button', name: 'MissingButton' } },
+    provenance: { ...base.provenance, recordIds: ['r3'] },
+  });
+  let request = null;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async (_settings, payload) => {
+      if (!request) request = payload;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const criteria = request.questions[JEV_EDGE_QUESTION].criteria;
+  assert.deepEqual(Object.keys(criteria), ['e.create', 'ABSTAIN']);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.filteredTargetMissing, 1);
+});
+
+test('全部候选目标都定位不到时不调用 JEV，交回慢思考', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({
+    s: { semanticAnchor: { role: 'button', name: 'MissingButton' } },
+  });
+  let calls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => {
+      calls += 1;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(calls, 0);
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'edge-target-missing');
+  assert.equal(state.ranToolNames.includes('click_element'), false);
+  // 让位提示不能写成“页面故障”，否则慢模型会把它读成“还没加载完”并重拍快照
+  // （RF-XKJ4M7 实测）。它必须明确：非页面故障 + 不要等待/重读。
+  const note = state.messages.filter((message) => message.role === 'system').at(-1);
+  assert.match(note.content, /非页面故障/);
+  assert.match(note.content, /不要因为这条提示而等待/);
+  assert.doesNotMatch(note.content, /快路径已停止/);
 });

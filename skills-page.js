@@ -2940,7 +2940,6 @@ var TOOL_SCHEMAS = [
                     type: "string",
                     enum: [
                       "CLICK",
-                      "TYPE_TEXT",
                       "READ_PAGE",
                       "READ_TABLE",
                       "ACCESSIBILITY",
@@ -4158,7 +4157,6 @@ async function readDiagnostics(deps, args) {
 // lib/application/agent/plan-contract.ts
 var PLAN_FAST_OPERATIONS = Object.freeze([
   "CLICK",
-  "TYPE_TEXT",
   "READ_PAGE",
   "READ_TABLE",
   "ACCESSIBILITY",
@@ -4874,6 +4872,11 @@ function readContentEditableText(root) {
 function normalizeEditableText(value) {
   return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
 }
+function editableTextOnlyWhitespaceDiffers(expected, actual) {
+  const a = normalizeEditableText(expected).replace(/\s+/g, "");
+  const b = normalizeEditableText(actual).replace(/\s+/g, "");
+  return a === b;
+}
 function firstEditableDifference(expected, actual) {
   const a = normalizeEditableText(expected);
   const b = normalizeEditableText(actual);
@@ -4925,6 +4928,49 @@ async function readEditableValue(deps, tabId, selector, isSubframe, frameId) {
     return null;
   }
 }
+function dispatchEditablePaste(el, text) {
+  try {
+    const doc = el.ownerDocument;
+    const view = doc && doc.defaultView || globalThis;
+    const ClipboardEvt = view.ClipboardEvent;
+    const Transfer = view.DataTransfer;
+    if (!ClipboardEvt) return "unsupported";
+    let data = null;
+    if (Transfer) {
+      data = new Transfer();
+      data.setData("text/plain", text);
+    }
+    let evt = null;
+    if (data) {
+      try {
+        evt = new ClipboardEvt("paste", { clipboardData: data, bubbles: true, cancelable: true });
+      } catch (e) {
+        evt = null;
+      }
+      if (evt && !evt.clipboardData) {
+        Object.defineProperty(evt, "clipboardData", { value: data });
+      }
+    }
+    if (!evt) {
+      evt = new ClipboardEvt("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(evt, "clipboardData", {
+        value: { getData: () => text, types: ["text/plain"] }
+      });
+    }
+    el.focus();
+    const selection = typeof view.getSelection === "function" ? view.getSelection() : null;
+    if (selection && typeof doc.createRange === "function") {
+      const range = doc.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    el.dispatchEvent(evt);
+    return "dispatched";
+  } catch (e) {
+    return "error";
+  }
+}
 async function typeText(deps, args) {
   let res;
   try {
@@ -4967,10 +5013,25 @@ async function typeText(deps, args) {
       strategy = "cdp-clear-only";
     }
     await delay(60);
-    const actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
-    const summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
-    const verified = actualValue !== null && actualValue !== void 0 && summary.matchesIntent;
+    let actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
+    let summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
+    let verified = actualValue !== null && actualValue !== void 0 && summary.matchesIntent;
+    const readLength = String(actualValue == null ? "" : actualValue).length;
+    if (!verified && target.contentEditable && expected && expected.indexOf("\n") >= 0 && readLength < summary.expectedLength) {
+      await deps.cdp.insertText(deps.ctx.tabId, "");
+      await delay(40);
+      const pasteExpr = "(() => { const el = document.querySelector(" + sel + '); if (!el) return "no-element"; if (!el.isContentEditable) return "not-editable"; return (' + dispatchEditablePaste.toString() + ")(el, " + JSON.stringify(expected) + "); })()";
+      const status = isSubframe ? await deps.cdp.evaluateInFrame(deps.ctx.tabId, typeFrame, pasteExpr) : await deps.cdp.evaluate(deps.ctx.tabId, pasteExpr);
+      if (status === "dispatched") {
+        strategy = strategy + "+paste";
+        await delay(80);
+        actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame);
+        summary = editableTextSummary(expected, actualValue == null ? "" : actualValue);
+        verified = actualValue !== null && actualValue !== void 0 && summary.matchesIntent;
+      }
+    }
     if (verified) deps.rememberTarget(deps.ctx, target);
+    const whitespaceOnly = !verified && actualValue != null && editableTextOnlyWhitespaceDiffers(expected, actualValue);
     const before = deps.ctx.lastSnapshot || null;
     const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1e3, frameId: isSubframe ? typeFrame : void 0 }).catch(() => null);
     const result = {
@@ -4980,15 +5041,16 @@ async function typeText(deps, args) {
       cdp: true,
       strategy,
       matchesIntent: verified,
+      whitespaceOnly,
       expectedLength: summary.expectedLength,
       actualLength: summary.actualLength,
       firstDifference: summary.firstDifference,
       pageSnapshot: after,
       verification: deps.buildActionVerification(
         deps.observedChange(before, after),
-        verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
+        verified ? "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : whitespaceOnly ? "CDP \u5DF2\u8F93\u5165\uFF0C\u56DE\u8BFB\u53EA\u5DEE\u6362\u884C/\u7A7A\u767D\uFF08\u7F16\u8F91\u5668\u5F52\u4E00\u5316\u4E86\u6BB5\u843D\u7ED3\u6784\uFF09" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u4E8B\u52A1\u5F0F\u8F93\u5165 " + expected.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u4E8B\u52A1\u5F0F\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u5DE5\u5177\u5DF2\u5148\u6062\u590D\u5230\u5185\u5BB9\u811A\u672C\u5931\u8D25\u524D\u7684\u57FA\u7EBF\uFF0C\u518D\u7528\u4E00\u6B21\u6574\u4F53\u5199\u5165\u66FF\u6362\uFF1B\u4ECD\u4E0D\u4E00\u81F4\u65F6\u4E0D\u8981\u539F\u6837\u91CD\u8BD5\u540C\u4E00\u8DEF\u5F84\uFF0C\u8BF7\u68C0\u67E5\u7F16\u8F91\u5668\u662F\u5426\u6539\u5199\u4E86\u6BB5\u843D\u6216\u6539\u7528\u8BE5\u7AD9\u70B9\u4E13\u7528\u5199\u5165\u65B9\u5F0F\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u4E8B\u52A1\u5F0F\u8F93\u5165 " + expected.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u4E8B\u52A1\u5F0F\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + (whitespaceOnly ? "\u3002\u5DEE\u5F02\u53EA\u5728\u6362\u884C/\u7A7A\u767D\uFF1A\u975E\u7A7A\u767D\u5B57\u7B26\u5B8C\u5168\u4E00\u81F4\uFF0C\u662F\u7F16\u8F91\u5668\u628A\u6BB5\u843D\u7ED3\u6784\u5F52\u4E00\u5316\u4E86 \u2014\u2014 Markdown \u7684\u6807\u9898\u3001\u4EE3\u7801\u5757\u3001\u8868\u683C\u90FD\u9760\u6362\u884C\uFF0C\u6240\u4EE5\u8FD9**\u4E0D\u7B97**\u5199\u5BF9" : "\u3002") + "\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u5DE5\u5177\u5DF2\u5148\u6062\u590D\u5230\u5185\u5BB9\u811A\u672C\u5931\u8D25\u524D\u7684\u57FA\u7EBF\uFF0C\u518D\u7528\u4E00\u6B21\u6574\u4F53\u5199\u5165\u66FF\u6362\uFF1B\u4E0D\u8981\u539F\u6837\u91CD\u8BD5\u540C\u4E00\u8DEF\u5F84 \u2014\u2014 \u6362\u884C\u88AB\u5403\u6389\u65F6\u8981\u6539\u7528\u8BE5\u7AD9\u70B9\u7684\u5199\u5165\u65B9\u5F0F\uFF08\u5982\u771F\u5B9E paste / \u7F16\u8F91\u5668 API\uFF09\uFF0C\u800C\u4E0D\u662F\u7EE7\u7EED insertText\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;
@@ -5005,7 +5067,19 @@ async function pressKey2(deps, args) {
   } catch (e) {
     res = { ok: false, result: "\u6D3E\u53D1\u952E\u76D8\u4E8B\u4EF6\u5931\u8D25\uFF1A" + e.message };
   }
-  if (res && res.ok !== false) return res;
+  if (res && res.ok !== false) {
+    const before = deps.ctx.lastSnapshot || null;
+    const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1e3 }).catch(() => null);
+    const change = deps.observedChange(before, after);
+    if (change === "changed") return res;
+    return {
+      ...res,
+      hadEffect: false,
+      ...after ? { pageSnapshot: after } : {},
+      verification: deps.buildActionVerification(change, "\u6309\u952E\u5DF2\u6D3E\u53D1\uFF0C\u4F46\u6CA1\u6709\u53EF\u89C2\u6D4B\u53D8\u5316"),
+      result: "\u5DF2\u6D3E\u53D1\u6309\u952E\uFF1A" + String(args.key || "") + "\uFF0C\u4F46\u6CA1\u6709\u89C2\u6D4B\u5230\u9875\u9762/\u5B57\u6BB5\u53D8\u5316 \u2014\u2014 \u82E5\u76EE\u6807\u9700\u8981\u7126\u70B9\uFF0C\u5148\u70B9\u51FB\u5B83\u6216\u786E\u8BA4\u7F16\u8F91\u5668\u5DF2\u805A\u7126\uFF0C\u518D\u91CD\u6309\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+    };
+  }
   if (!deps.cdpAllowed(deps.ctx)) return res;
   try {
     await deps.cdp.pressKey(deps.ctx.tabId, String(args.key || ""), args.modifiers);

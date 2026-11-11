@@ -96,6 +96,19 @@ export function editableTextMatches(expected: unknown, actual: unknown): boolean
   return normalizeEditableText(expected) === normalizeEditableText(actual);
 }
 
+/**
+ * 只差空白：非空白字符序列完全一致。
+ *
+ * 为什么需要这一档：富文本编辑器会自己决定段落结构（CSDN 实测把 `\n` 归并成块、
+ * 把三个空行并成两个）。这种差异是**排版**差异，不是内容丢失 —— 按逐字符比对
+ * 判失败会让模型对着一个已经写对的编辑器反复重写。
+ */
+export function editableTextOnlyWhitespaceDiffers(expected: unknown, actual: unknown): boolean {
+  const a = normalizeEditableText(expected).replace(/\s+/g, '');
+  const b = normalizeEditableText(actual).replace(/\s+/g, '');
+  return a === b;
+}
+
 /** 返回第一个差异的位置与两个片段；完全一致时 index=-1。 */
 export function firstEditableDifference(expected: unknown, actual: unknown) {
   const a = normalizeEditableText(expected);

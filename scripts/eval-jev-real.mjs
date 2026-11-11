@@ -186,11 +186,7 @@ function selectedTarget(bundle, response, operation) {
   const op = bundle.operations[operation];
   const question =
     op?.targetQuestion ||
-    (operation === 'CLICK'
-      ? JEV_CLICK_TARGET_QUESTION
-      : operation === 'TYPE_TEXT'
-        ? JEV_TYPE_TEXT_TARGET_QUESTION
-        : '');
+    (operation === 'CLICK' ? JEV_CLICK_TARGET_QUESTION : '');
   if (!question) return null;
   const answer = response.answers[question];
   if (!answer || answer.type !== 'choice') return null;
@@ -214,7 +210,10 @@ function sampleOutcome(scenario, bundle, response, latencyMs) {
     operationConfidence: Number(operation?.confidence) || 0,
     target,
     latencyMs,
-    correctOperation: actualOperation === expected.operation,
+    // expect.operation 为 null 的场景不打分（纯输入页已无快路径操作可评）。
+    correctOperation: expected.operation
+      ? actualOperation === expected.operation
+      : null,
     correctTarget: expected.targetLabel ? target?.label === expected.targetLabel : true,
     accepted: interpretJevFastDecision(response, bundle).kind === 'act',
   };
@@ -306,6 +305,7 @@ function thresholdScore(samples, thresholds) {
   for (const sample of samples) {
     const scenario = JEV_CALIBRATION_SCENARIOS.find((item) => item.id === sample.scenario);
     const expected = scenario.expect;
+    if (!expected.operation) continue; // 不打分的场景不进阈值网格
     const threshold =
       sample.actualOperation === 'CLICK'
         ? thresholds.minClickConfidence

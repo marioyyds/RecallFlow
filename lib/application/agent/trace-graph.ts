@@ -3,11 +3,13 @@
 // 纪律：
 //   - 状态键只含语义模板和 atom 类型；控件值、实例数、selector、ref、瞬时弹窗
 //     与整页 fingerprint 都不参与 atomSignature。
-//   - 图只提名，置信度永不授权执行。
+//   - 图只列候选，不做意图匹配也不替 JEV 排序；置信度永不授权执行。
 //   - 未显式绑定的槽位 fail-closed；禁止回填历史值或默认偏好。
 
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
 import type {
+  CandidateMatch,
+  CandidateMatchLevel,
   ControlEvidence,
   Edge,
   Evidence,
@@ -22,7 +24,6 @@ import type {
 
 export const TRACE_GRAPH_VERSION = 2;
 export const EDGE_IDENTITY_VERSION = 4;
-export const MAX_EDGE_CANDIDATES = 3;
 
 export const PHI_KINDS: ReadonlySet<PhiKind> = new Set([
   'url_pattern',
@@ -38,6 +39,13 @@ export const PHI_KINDS: ReadonlySet<PhiKind> = new Set([
 
 const COUNTER_PATTERN = /(?:^|[\s(（])([^\s:：/]{1,40})\s*[:：]?\s*(\d+)\s*\/\s*(\d+)/g;
 const DYNAMIC_NAME = /(?:value|length|count|commit|list|items?|diff|result|preview)/i;
+
+/**
+ * 易变的路径段：纯数字 id、长 hex（16+ 位）、UUID。
+ * 它们标识「一条记录」而非「一类页面」，不能成为状态名的一部分。
+ */
+const VOLATILE_PATH_SEGMENT =
+  /^(?:\d+|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 function stableHash(value: unknown): string {
   const text = JSON.stringify(value);
@@ -116,8 +124,18 @@ export function traceGraphStateName(url: string, pageTitle = ''): string {
   if (/^\/sales\/order(?:\/|$)/.test(path)) return 'OrdersPage';
   if (/\.html\/?$/i.test(path)) return 'ProductPage';
   if (path === '/' || path === '') return 'HomePage';
-  const segment = path.split('/').filter(Boolean).at(-1);
-  const base = segment || pageTitle || 'Page';
+  const segments = path.split('/').filter(Boolean);
+  // 末段是「某一条记录」而不是「模板」时不能进状态名：/article/details/170567085
+  // 若按末段命名会得到 170567085Page，于是每篇新文章都是一个新状态，历史边永远
+  // 无法跨实例复用。这里剥掉易变段，退回稳定的父级模板（保留两级，避免
+  // /a/details/123 与 /x/details/123 撞名）。
+  let stable = segments;
+  while (stable.length && VOLATILE_PATH_SEGMENT.test(stable[stable.length - 1])) {
+    stable = stable.slice(0, -1);
+  }
+  const trimmed = stable.length !== segments.length;
+  const tail = trimmed ? stable.slice(-2) : stable.slice(-1);
+  const base = tail.join(' ') || (trimmed ? 'Detail' : pageTitle || 'Page');
   const name = base
     .replace(/\.[a-z0-9]+$/i, '')
     .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, ' ')
@@ -260,6 +278,83 @@ export function atomSignature(
   ].join('#');
 }
 
+interface SignatureParts {
+  name: string;
+  staticAtoms: string[];
+  dynamicAtoms: string[];
+}
+
+/** `name#static+dynamic` → 三段；形状不对返回 null（旧图/脏数据按 name 档处理）。 */
+export function splitAtomSignature(signature: unknown): SignatureParts | null {
+  const parts = String(signature || '').split('#');
+  if (parts.length !== 3 || !parts[0]) return null;
+  const list = (value: string) => (value ? value.split('+').filter(Boolean) : []);
+  return { name: parts[0], staticAtoms: list(parts[1]), dynamicAtoms: list(parts[2]) };
+}
+
+function signatureSet(signature: string): string {
+  return [...new Set(signature.split('+').filter(Boolean))].sort().join('+');
+}
+
+function overlapRatio(a: string[], b: string[]): number {
+  const left = new Set(a);
+  const right = new Set(b);
+  if (!left.size && !right.size) return 1;
+  let shared = 0;
+  for (const item of left) if (right.has(item)) shared += 1;
+  return shared / (left.size + right.size - shared);
+}
+
+/**
+ * 候选边与「当前观察」的结构匹配层级。纯结构判断：不含语义相似度、不含置信度，
+ * 也不能单独授权执行 —— 它只把「同一 URL 名下混着的不同子状态」分开。
+ *
+ * 为什么需要它：`candidateEdges` 只能按状态名（URL 规则）过滤，同名的弹窗开/关、
+ * 已填/未填会混成一个候选桶。分层之后，选择期至少能看出「这条边录制时的结构
+ * 与现在是否一致」，而不是让模型对着 N 条只差一个按钮文字的边猜。
+ */
+export function matchCandidate(
+  edge: Pick<Edge, 'fromSignatures'> | null | undefined,
+  observation: { atomSignature?: string } | null | undefined
+): CandidateMatch {
+  const current = splitAtomSignature(observation?.atomSignature);
+  if (!current) return { level: 'name', staticOverlap: 0, dynamicOverlap: 0 };
+  const recorded = (Array.isArray(edge?.fromSignatures) ? edge!.fromSignatures : [])
+    .map((signature) => splitAtomSignature(signature))
+    .filter((item): item is SignatureParts => Boolean(item));
+  if (!recorded.length) return { level: 'name', staticOverlap: 0, dynamicOverlap: 0 };
+  const currentStatic = signatureSet(current.staticAtoms.join('+'));
+  const currentDynamic = signatureSet(current.dynamicAtoms.join('+'));
+  let level: CandidateMatchLevel = 'name';
+  let staticOverlap = 0;
+  let dynamicOverlap = 0;
+  for (const item of recorded) {
+    const staticSame = signatureSet(item.staticAtoms.join('+')) === currentStatic;
+    const dynamicSame = signatureSet(item.dynamicAtoms.join('+')) === currentDynamic;
+    const itemStatic = overlapRatio(item.staticAtoms, current.staticAtoms);
+    const itemDynamic = overlapRatio(item.dynamicAtoms, current.dynamicAtoms);
+    if (staticSame && dynamicSame) {
+      return { level: 'full', staticOverlap: 1, dynamicOverlap: 1 };
+    }
+    // 动态原子是「checkbox:checked」这类存在标记；现在多出来只说明值变了，
+    // 结构没变，仍是同一个子状态模板。
+    const dynamicSuperset = item.dynamicAtoms.every((atom) => currentDynamic.includes(atom));
+    const candidateLevel: CandidateMatchLevel = staticSame && dynamicSuperset ? 'static' : 'name';
+    const better =
+      (candidateLevel === 'static' && level !== 'static') ||
+      (candidateLevel === 'static' && level === 'static' && itemStatic + itemDynamic > staticOverlap + dynamicOverlap);
+    if (better) {
+      level = candidateLevel;
+      staticOverlap = itemStatic;
+      dynamicOverlap = itemDynamic;
+    } else if (level === 'name' && itemStatic > staticOverlap) {
+      staticOverlap = itemStatic;
+      dynamicOverlap = itemDynamic;
+    }
+  }
+  return { level, staticOverlap, dynamicOverlap };
+}
+
 export function evidenceFromSnapshot(
   snapshot: PageSnapshotLike | null | undefined
 ): Evidence {
@@ -377,6 +472,7 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     ...(target.name ? { name: target.name } : {}),
     ...(target.text ? { text: target.text } : {}),
     ...(target.urlPattern ? { urlPattern: target.urlPattern } : {}),
+    ...(target.kind ? { kind: target.kind } : {}),
   };
   const targetLabel =
     semanticAnchor.name ||
@@ -391,6 +487,10 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
   // PlanCard wording is execution context, not action identity.
   const g = actionGoal;
   const phiPlus = structuredPhiFromTransition(record.before, record.after, actionTool);
+  const fromSignatures = [String(record.before.atomSignature || '')].filter(Boolean);
+  const purpose = [
+    String(record.planStep || '').replace(/\s+/g, ' ').trim().slice(0, 200),
+  ].filter(Boolean);
   const targetIdentity = target.name || target.text || target.urlPattern
     ? {
         role: target.role || '',
@@ -419,6 +519,8 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     from,
     to,
     g,
+    ...(fromSignatures.length ? { fromSignatures } : {}),
+    ...(purpose.length ? { purpose } : {}),
     ...(record.planVersion !== undefined ? { planVersion: record.planVersion } : {}),
     ...(record.successPredicate ? { successPredicate: record.successPredicate } : {}),
     action: { tool: actionTool, argsTemplate: args.template, risk },
@@ -543,6 +645,15 @@ export function mergeEdges(
         ...edge.s.semanticAnchor,
         ...prevEdge.s.semanticAnchor,
       };
+      // 同一动作可能在不同子状态下被重复验证（弹窗开 / 关）。这些签名合在一起
+      // 才能让 matchCandidate 在两种结构下都认得出这条边。
+      edge.fromSignatures = [
+        ...new Set([...(edge.fromSignatures || []), ...(prevEdge.fromSignatures || [])]),
+      ].slice(-8);
+      // 最新的计划步排前面：选择期读的是「最近一次为什么这么做」。
+      edge.purpose = [
+        ...new Set([...(edge.purpose || []), ...(prevEdge.purpose || [])]),
+      ].slice(0, 3);
     }
     edges.set(edge.id, edge);
   }
@@ -612,70 +723,28 @@ export function extractExplicitSlots(instruction: unknown): Record<string, unkno
   return out;
 }
 
-function terms(value: unknown): string[] {
-  const text = String(value || '').toLowerCase();
-  const out = new Set(
-    text
-      .split(/[^\p{L}\p{N}_-]+/u)
-      .filter((term) => term.length > 1)
-  );
-  for (const run of text.matchAll(/[\u3400-\u9fff]+/gu)) {
-    const chars = Array.from(run[0]);
-    for (let index = 0; index < chars.length - 1; index += 1) {
-      out.add(chars[index] + chars[index + 1]);
-    }
-  }
-  return [...out];
-}
-
-export function nominate(
+/**
+ * 当前状态的候选边：只按站点、状态模板、已验证状态与本次运行的封边/已执行集合过滤。
+ * 不排序、不截断，也不做意图匹配 —— 选边还是弃权始终由 JEV 决定。
+ */
+export function candidateEdges(
   graph: TraceGraphV2,
   ctx: {
     siteKey: string;
     atomSignature: string;
-    intent: string;
     blockedEdgeIds: Set<string>;
     executedEdges: Set<string>;
-    controlNames?: string[];
   }
 ): Edge[] {
   if (!graph || graph.siteKey !== ctx.siteKey) return [];
   const stateName = String(ctx.atomSignature || '').split('#')[0];
-  const intentTerms = new Set(terms(ctx.intent));
-  const controlTerms = new Set(
-    (ctx.controlNames || []).flatMap((name) => terms(name))
-  );
-  return graph.l1.edges
-    .filter((edge) =>
+  return graph.l1.edges.filter(
+    (edge) =>
       edge.status === 'verified' &&
       edge.from === stateName &&
       !ctx.blockedEdgeIds.has(edge.id) &&
       !ctx.executedEdges.has(edge.id)
-    )
-    .map((edge) => {
-      const gTerms = terms(
-        [
-          edge.g,
-          edge.successPredicate,
-          edge.s.semanticAnchor.name,
-          edge.s.semanticAnchor.text,
-          edge.s.semanticAnchor.urlPattern,
-          edge.action.tool,
-        ].filter(Boolean).join(' ')
-      );
-      const overlap = gTerms.filter((term) => intentTerms.has(term)).length;
-      const controlOverlap = gTerms.filter((term) => controlTerms.has(term)).length;
-      return {
-        edge,
-        score:
-          overlap * 100 +
-          controlOverlap * 25 +
-          (edge.from === stateName ? 10 : 0),
-      };
-    })
-    .sort((a, b) => b.score - a.score || a.edge.id.localeCompare(b.edge.id))
-    .slice(0, MAX_EDGE_CANDIDATES)
-    .map((entry) => entry.edge);
+  );
 }
 
 type ExprValue = string | number | boolean | null | undefined;
@@ -932,8 +1001,19 @@ export function resolveEdgeTarget(
   }
   const normalize = (value: unknown) =>
     String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-  const anchorName = normalize(anchor.name || anchor.text);
-  const anchorRole = normalize(anchor.role);
+  // 内容型锚点会随写入/翻页漂移（写入目标的 label 就是它的正文）。它不参与名字比对，
+  // 只能按 selector 唯一重定位；旧图没有 kind 字段时用长度/换行做保守推断，
+  // 宁可 target-missing 交给慢思考，也不按一段已经变了的内容去猜目标。
+  const anchorNameRaw = String(anchor.name || anchor.text || '');
+  const contentLikeName =
+    anchorNameRaw.length > 48 || anchorNameRaw.indexOf('\n') >= 0;
+  const selectorOnly =
+    anchor.kind === 'selector' ||
+    (!anchor.kind && contentLikeName) ||
+    (anchor.kind === 'content' && contentLikeName) ||
+    (!anchorNameRaw && !anchor.role && !anchor.urlPattern);
+  const anchorName = selectorOnly ? '' : normalize(anchorNameRaw);
+  const anchorRole = selectorOnly ? '' : normalize(anchor.role);
   const controls = Array.isArray(observation?.controls) ? observation.controls : [];
   let candidates = controls.filter((control) => {
     if (anchorRole && normalize(control.role) !== anchorRole) return false;
@@ -942,9 +1022,9 @@ export function resolveEdgeTarget(
     return true;
   });
 
-  // Legacy edges without semantic fields may only re-resolve by a unique
-  // current selector. The hint never overrides a semantic mismatch.
-  if (!anchorName && !anchorRole && !anchor.urlPattern && edge?.s?.selector) {
+  // Legacy edges without semantic fields —— 以及锚点只剩 selector 的写入目标 ——
+  // 只能按当前唯一 selector 重定位。selector 漂移时如实报 target-missing。
+  if (selectorOnly && edge?.s?.selector) {
     candidates = controls.filter(
       (control) => control.selector === edge.s.selector
     );

@@ -210,7 +210,6 @@ export const TOOL_SCHEMAS = [
                     type: 'string',
                     enum: [
                       'CLICK',
-                      'TYPE_TEXT',
                       'READ_PAGE',
                       'READ_TABLE',
                       'ACCESSIBILITY',

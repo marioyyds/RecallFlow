@@ -28,7 +28,7 @@
 ### 0.2 目标
 
 ```
-图存证据、只提名；JEV 逐步选边/弃权；当前快照 Grounding 后直接执行；
+图存证据、只给候选；JEV 逐步选边/弃权；当前快照 Grounding 后直接执行；
 慢模型接住 JEV 弃权、参数缺失或目标无法重定位的情况
 ```
 
@@ -66,10 +66,10 @@ flowchart TB
     RT --> ST --> MG
   end
 
-  subgraph MEM["图 · 只提名，无判定权"]
+  subgraph MEM["图 · 只列候选，无判定权"]
     L0["L0 StateTemplate + Operation<br/>atomSignature / @slots / 语义锚点"]
     L1["L1 Edge<br/>g,k,s,r,provenance"]
-    NOM["nominate()<br/>siteKey → atom → intent → ≤3 候选<br/>确定性剪枝，无 embedding"]
+    NOM["candidateEdges()<br/>siteKey + 状态模板 + 已验证<br/>全部候选，不排序不截断"]
     L0 --> L1 --> NOM
   end
 
@@ -116,7 +116,7 @@ flowchart TB
 当前指令 + observePage
       │
       ▼
-[L0 atom + L1 证据边] → nominate() → ≤3 候选边（只提名）
+[L0 atom + L1 证据边] → candidateEdges() → 当前状态全部已验证边
       │
       ▼
 [JEV] edgeId | ABSTAIN（选定执行边或弃权）
@@ -137,7 +137,7 @@ flowchart TB
 
 ```
 1. observePage → atomSignature(state) + 结构化证据（URL / 计数 / 控件值 / dialog）
-2. nominate() → 2~3 条候选边；criteria = g + slot 摘要 + risk + 当前目标可见性
+2. candidateEdges() → 当前状态全部可绑定的已验证边；criteria = g + slot 摘要 + risk + 当前目标可见性
 3. JEV 一次请求 → edgeId 或 ABSTAIN（confidence 过门限）
 4. bindSlots()：payload 只来自当前指令
 5. resolveEdgeTarget()：在当前快照按 role/name/text 重新定位，并使用当前 ref
@@ -157,7 +157,7 @@ flowchart TB
 | **JEV ABSTAIN / 低置信** | JEV 显式选择 `ABSTAIN`，或所选 edge 的 `confidence` 未过门限 | 交回慢模型，**不产生动作** |
 | **执行准备失败** | 槽位未绑定 / 目标缺失、歧义或语义不符 / 工具失败 | `appendBlocked` push system → 慢模型**重新 prefill** + `noteSlowTurn()` 清零 + cooldown |
 
-**压低弃权率两手**：图先确定性剪到 ≤3，降低歧义与上下文噪声（压第一种）；证据契约质量够高（压第二种）。真实轨迹 MVP 中「放开候选上限」handoff 7→26、复用边 82→26。
+**弃权率的两手**：2026-11-11 起候选改为「当前状态全部已验证边」，不再有意图打分、排序或 ≤3 上限 —— 也就是先前实测里更贵的那个档位（放开候选上限时 handoff 7→26、复用边 82→26），因此收益必须按新基线重新量；证据契约质量够高则压低第二种。
 
 ---
 
@@ -229,6 +229,8 @@ interface Edge {
   identityVersion?: 4;          // 状态 + 工具 + 语义目标作为动作身份
   from: string; to: string;     // StateTemplate.name | "done"
   g: string;                    // 工具 + 真实目标摘要；不包含 planStep.text
+  fromSignatures?: string[];    // 录制时的 atomSignature，≤8；非身份字段，只用于选择期结构匹配
+  purpose?: string[];           // 录制时的 planStep，≤3，最新在前；非身份字段，只作证据展示
   planVersion?: number;
   successPredicate?: string;
   action: {
@@ -237,7 +239,7 @@ interface Edge {
     risk: 'low' | 'medium' | 'high';
   };
   slots: SlotSpec[];
-  s: { selector?: string; semanticAnchor: Operation['semanticAnchor'] & { urlPattern?: string } };
+  s: { selector?: string; semanticAnchor: Operation['semanticAnchor'] & { urlPattern?: string; kind?: 'attribute' | 'content' | 'selector' } };
   r: 'low' | 'medium' | 'high';
   phiMinus: PhiRule[];          // 历史证据；live 不读取
   phiPlus: PhiRule;             // 历史证据；live 不读取
@@ -267,6 +269,15 @@ interface PhiRule {
   source: 'structured';
 }
 ```
+
+**`s.semanticAnchor.kind`（2026-11-11 起）**：写入型目标（`type_text` / `select_option` /
+`check_box` / `press_key`，以及任何文本宿主）的 `name` **只能**来自稳定属性
+（`placeholder` / `aria-label` / `name`）；拿不到就只留 `selector` 并记 `kind: "selector"`。
+理由是一条真实轨迹：CSDN 编辑器的 `pre.editor__inner` 的 label 就是正文本身，把它当锚点，
+写完下一次按名字精确比对必然 0 命中——这正是 `edge-target-missing (candidates=0)` 反复出现的根因。
+点击目标的按钮文字仍按 `kind: "content"` 记录（那是可复用的语义）。
+旧图没有 `kind` 时按「名字长度 > 48 或含换行」保守判定为内容型，改为按 selector 唯一重定位；
+selector 也漂移就如实 `target-missing`，不按一段已经变了的内容去猜。
 
 **`e5.write-desc` 实例**（来自真实轨迹）：
 
@@ -363,11 +374,17 @@ export function mergeEdges(records: TraceRecord[], prev?: TraceGraphV2): {
 // 同起止状态、同工具、同语义目标视为同一动作并合并 provenance；
 // 不同目标仍保留为不同边；旧身份边从 records 重建。
 
-// 提名（确定性，无 embedding）
-export function nominate(graph: TraceGraphV2, ctx: {
-  siteKey: string; atomSignature: string; intent: string;
+// 候选边（确定性，无排序、无截断、无意图匹配）
+export function candidateEdges(graph: TraceGraphV2, ctx: {
+  siteKey: string; atomSignature: string;
   blockedEdgeIds: Set<string>; executedEdges: Set<string>;
-}): Edge[];   // 硬上限 3
+}): Edge[];   // 当前状态全部已验证边
+
+// 结构匹配层级（选择期用；不是语义相似度，也不授权执行）
+export function matchCandidate(
+  edge: Pick<Edge, 'fromSignatures'>,
+  observation: { atomSignature?: string }
+): { level: 'full' | 'static' | 'name'; staticOverlap: number; dynamicOverlap: number };
 
 // live 执行准备
 export function groundEdgeAction(
@@ -396,7 +413,7 @@ export function patchGuard(patch: Record<string, unknown>): {
 };  // 白名单：locator(role/name), waitMs, behaviorNotes；拒绝任务值/槽位默认值/复合操作
 ```
 
-**live 只有一条控制链**：`nominate → JEV → bindSlots → groundEdgeAction → 执行 →
+**live 只有一条控制链**：`candidateEdges → JEV → bindSlots → groundEdgeAction → 执行 →
 observePage`。`decideR3`、`evaluatePhiMinus`、`verifyEdgePostcondition` 是离线函数，
 用于历史回放和回归诊断，不进入 live edge 路径。
 
@@ -429,7 +446,7 @@ observePage`。`decideR3`、`evaluatePhiMinus`、`verifyEdgePostcondition` 是�
   TraceGraph 的兼容 operation 路径。
 - ⚠️ **置信度只决定 edge 选择或弃权**。执行前仍必须通过当前 slot 绑定、目标
   Grounding 和工具白名单；置信度高不能跳过目标重定位。
-- ⚠️ choice 直接返回选中项与自身 `confidence`，不再返回概率分布，也不再依赖“最大概率项”或“概率和为 1”。候选仍硬上限为 3，用于控制歧义、上下文成本与延迟；`minEdgeConfidence` 应继续按 edge head 的 live 样本校准。
+- ⚠️ choice 直接返回选中项与自身 `confidence`，不再返回概率分布，也不再依赖“最大概率项”或“概率和为 1”。候选不再设上限（2026-11-11 去掉了意图打分与 ≤3 截断），歧义与上下文成本改由 `minEdgeConfidence`、证据边界与 live A/B 重扫样本量控制；`minEdgeConfidence` 必须按 edge head 的新 live 样本重新校准。
 
 ---
 
@@ -443,7 +460,7 @@ observePage`。`decideR3`、`evaluatePhiMinus`、`verifyEdgePostcondition` 是�
 | 4 | **新增** `tracegraph-store.ts` | `chrome.storage.local` 读写、siteKey 分槽、容量上限、删除、脱敏、schema 校验 | P0 | 否 |
 | 5 | `lib/application/agent/jev-action-space.ts` | 新增 `edge` choice question；`buildJevFastRequest` 塞候选边摘要；operation head 保持原有，**不要加 R3 标签** | P2 | 是（最小） |
 | 6 | `lib/application/agent/jev-contract.ts` / 决策解析 | choice → `edgeId`；`ABSTAIN` 路径 | P2 | 是 |
-| 7 | `lib/application/agent/jev-controller.ts` | 新增 `blockedEdgeIds`（跨 cycle）、`executedEdges`、`slowTurns / handoffReasons`；接入 `nominate → JEV → bindSlots → Grounding → 执行 → 重新观察`；终局验证步不得被 cooldown 吞掉 | P3 | 是 |
+| 7 | `lib/application/agent/jev-controller.ts` | 新增 `blockedEdgeIds`（跨 cycle）、`executedEdges`、`slowTurns / handoffReasons`；接入 `candidateEdges → JEV → bindSlots → Grounding → 执行 → 重新观察`；终局验证步不得被 cooldown 吞掉 | P3 | 是 |
 | 8 | `lib/application/agent/page-action-verify.ts` | `verifyEdgePostcondition()` 仅保留为离线回放 / 诊断出口，不再进入 live edge | P3 | 否 |
 | 9 | `lib/application/agent/run-metrics.ts` + `types.ts` | 新增 `slowTurns / handoffReasons / candidateCount / jevCalls / blockedEdgeHits`；历史 R3/φ 指标仅兼容离线报告 | P3 | 否 |
 | 10 | `lib/application/agent/agent-loop.ts` | DONE 独立校验失败时不得 `complete_task`；`appendBlocked` 的重新 prefill 计入成本 | P3 | 是 |
@@ -498,7 +515,7 @@ observePage`。`decideR3`、`evaluatePhiMinus`、`verifyEdgePostcondition` 是�
 | 允许静默填历史值 | 错写 0→1（样例⑪） |
 | selector 进 atomSignature | handoff 上升、复用边下降（样例⑧） |
 | `blockedEdgeIds` 不持久化 | 错写 0→1（样例⑨错误传播） |
-| 放开候选上限 | handoff 7→26、复用边 82→26（全部样例） |
+| ~~放开候选上限~~（2026-11-11 起为默认） | 该缺陷行作废：候选已不截断，需用 live A/B 重扫样本量 |
 
 ### 8.3 三档对照基线（离线 MVP 已跑，仅作机制参照，**不是实测收益**）
 

@@ -76,7 +76,10 @@ export const JEV_CALIBRATION_SCENARIOS = Object.freeze([
         },
       ],
     }),
-    expect: { operation: 'TYPE_TEXT', targetLabel: '文章标题' },
+    // 快路径不再提供输入能力：TYPE_TEXT 已移出 operation 空间，字段值由慢思考回合
+    // 写入。这两条场景不再给 operation 打分（expect.operation = null）——它们现在
+    // 只用来证明「纯输入页仍然构造出请求、且 offered 里没有 TYPE_TEXT」。
+    expect: { operation: null },
   },
   {
     id: 'type-body-title-filled',
@@ -112,7 +115,8 @@ export const JEV_CALIBRATION_SCENARIOS = Object.freeze([
         },
       },
     }),
-    expect: { operation: 'TYPE_TEXT', targetLabel: '正文编辑区' },
+    // 同上：contenteditable 也不再是快路径目标，正文由慢思考回合写入，不打分。
+    expect: { operation: null },
   },
   {
     id: 'wait-loading',

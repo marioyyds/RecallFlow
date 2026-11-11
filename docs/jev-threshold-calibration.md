@@ -1,5 +1,9 @@
 # JEV 真实环境校准记录
 
+> ⚠️ 2026-11-11 起快路径不再提供 `TYPE_TEXT`（输入由慢思考回合完成），所以下面与
+> `type_text_target` 相关的阈值、场景与错误分叉只作为历史记录；`minActionConfidence`
+> 仅对尚未启用 TraceGraph 的兼容 operation 路径仍有意义。
+
 日期：2026-11-01  
 模型：`jev-latest`（服务返回 `jev-1.14.0`）
 
