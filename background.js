@@ -3784,6 +3784,21 @@ var PHI_KINDS = /* @__PURE__ */ new Set([
   "diff_exists"
 ]);
 var COUNTER_PATTERN = /(?:^|[\s(（])([^\s:：/]{1,40})\s*[:：]?\s*(\d+)\s*\/\s*(\d+)/g;
+var STABLE_SELECTOR_HINT = /\[(?:data-[a-z0-9-]+|name|aria-label|title)\s*=\s*["']([^"']{1,80})["']\]/i;
+function selectorHintLabel(selector) {
+  const text2 = String(selector || "").trim();
+  if (!text2) return "";
+  if (/:(?:nth-of-type|nth-child|first-child|last-child)\b/i.test(text2)) return "";
+  const attr = STABLE_SELECTOR_HINT.exec(text2);
+  if (attr) return "selector:" + attr[1].trim();
+  const segments = text2.split(">").map((part) => part.trim()).filter(Boolean);
+  const last = segments[segments.length - 1] || text2;
+  const id = /#([A-Za-z][\w-]{0,60})/.exec(last);
+  if (id) return "selector:" + id[1];
+  const cls = /\.([A-Za-z_][\w-]{0,60})/.exec(last);
+  if (cls) return "selector:" + cls[1];
+  return "";
+}
 var VOLATILE_PATH_SEGMENT = /^(?:\d+|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 function stableHash(value) {
   const text2 = JSON.stringify(value);
@@ -3856,7 +3871,7 @@ function traceGraphStateName(url, pageTitle = "") {
   }
   const trimmed = stable.length !== segments.length;
   const tail2 = trimmed ? stable.slice(-2) : stable.slice(-1);
-  const base = tail2.join(" ") || (trimmed ? "Detail" : pageTitle || "Page");
+  const base = (tail2.join(" ") || (trimmed ? "Detail" : pageTitle || "Page")).toLowerCase();
   const name = base.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()).replace(/\s+/g, "");
   return (name || "Page").slice(0, 48) + "Page";
 }
@@ -4111,8 +4126,11 @@ function edgeForRecord(record2, siteKey, ttlMs) {
     ...target.kind ? { kind: target.kind } : {}
   };
   const targetLabel2 = semanticAnchor.name || semanticAnchor.text || semanticAnchor.urlPattern || semanticAnchor.role || "";
+  const selector = target.selector || (typeof record2.argsRedacted.selector === "string" ? record2.argsRedacted.selector : "");
+  const label = targetLabel2 || selectorHintLabel(selector);
+  if (!label) return null;
   const actionGoal = clip(
-    [actionTool, targetLabel2 ? "\u300C" + targetLabel2 + "\u300D" : ""].filter(Boolean).join(" "),
+    [actionTool, "\u300C" + label + "\u300D"].filter(Boolean).join(" "),
     160
   );
   const g = actionGoal;
@@ -4175,9 +4193,9 @@ function edgeForRecord(record2, siteKey, ttlMs) {
 function mergeEdges(records, prev) {
   const states = /* @__PURE__ */ new Map();
   const edges = /* @__PURE__ */ new Map();
-  for (const state2 of prev?.l0?.states || []) states.set(state2.name, state2);
+  const prevById = /* @__PURE__ */ new Map();
   for (const edge of prev?.l1?.edges || []) {
-    if (edge.identityVersion === EDGE_IDENTITY_VERSION) edges.set(edge.id, edge);
+    if (edge.identityVersion === EDGE_IDENTITY_VERSION) prevById.set(edge.id, edge);
   }
   for (const record2 of records) {
     const beforeAtoms = extractAtoms({
@@ -4248,7 +4266,7 @@ function mergeEdges(records, prev) {
     }
     const edge = edgeForRecord(record2, recordSiteKey, 30 * 60 * 1e3);
     if (!edge) continue;
-    const prevEdge = edges.get(edge.id);
+    const prevEdge = edges.get(edge.id) || prevById.get(edge.id);
     if (prevEdge) {
       edge.provenance.recordIds = [
         .../* @__PURE__ */ new Set([...prevEdge.provenance.recordIds, ...edge.provenance.recordIds])
@@ -4947,14 +4965,15 @@ async function saveTraceGraph(graph) {
   return true;
 }
 async function appendTraceRecordNow(url, record2, options = {}) {
-  if (traceGraphExcluded(url) || !record2.result.ok) return null;
+  const siteUrl = String(record2.before?.url || url || "");
+  if (traceGraphExcluded(siteUrl) || traceGraphExcluded(url) || !record2.result.ok) return null;
   const clean = sanitizeTraceRecord(record2);
   if (!clean || !clean.id || !clean.tool) return null;
-  const siteKey = siteKeyOf(url);
+  const siteKey = siteKeyOf(siteUrl) || siteKeyOf(url);
   if (!siteKey) return null;
   const recordedAt = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
   const recordedTtlMs = Number.isFinite(Number(options.ttlMs)) && Number(options.ttlMs) > 0 ? Math.floor(Number(options.ttlMs)) : TRACE_GRAPH_TTL_MS;
-  const loaded = await loadTraceGraph(url, { now: recordedAt });
+  const loaded = await loadTraceGraph(siteUrl, { now: recordedAt });
   const graph = loaded || emptyTraceGraph(siteKey, recordedAt, recordedTtlMs);
   graph.ttlMs = recordedTtlMs;
   graph.records = [

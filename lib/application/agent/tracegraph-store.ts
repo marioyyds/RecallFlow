@@ -515,17 +515,21 @@ async function appendTraceRecordNow(
   record: TraceRecord,
   options: { now?: number; ttlMs?: number } = {}
 ): Promise<TraceGraphV2 | null> {
-  if (traceGraphExcluded(url) || !record.result.ok) return null;
+  // 按**动作发生前**的页面归桶：跨站跳转（mp 成功页 → blog 文章页）时，
+  // ctx.pageUrl 可能已经切到新站，用它会把这条件记进错误的站点槽位，
+  // 边也会落在别的站的候选查询里查不到或查错。
+  const siteUrl = String(record.before?.url || url || '');
+  if (traceGraphExcluded(siteUrl) || traceGraphExcluded(url) || !record.result.ok) return null;
   const clean = sanitizeTraceRecord(record);
   if (!clean || !clean.id || !clean.tool) return null;
-  const siteKey = siteKeyOf(url);
+  const siteKey = siteKeyOf(siteUrl) || siteKeyOf(url);
   if (!siteKey) return null;
   const recordedAt = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
   const recordedTtlMs =
     Number.isFinite(Number(options.ttlMs)) && Number(options.ttlMs) > 0
       ? Math.floor(Number(options.ttlMs))
       : TRACE_GRAPH_TTL_MS;
-  const loaded = await loadTraceGraph(url, { now: recordedAt });
+  const loaded = await loadTraceGraph(siteUrl, { now: recordedAt });
   const graph = loaded || emptyTraceGraph(siteKey, recordedAt, recordedTtlMs);
   graph.ttlMs = recordedTtlMs;
   graph.records = [

@@ -112,7 +112,10 @@ export const ENTRIES = [
   // Same day: handoff notice rewritten to "not a page fault" with per-reason
   // explanations, so the slow model stops re-snapshotting. Measured 1099425
   // bytes (1073.7KB). Raise to 1075KB; no new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1075 * 1024 },
+  // 2026-11-12: rebuild-only merge (orphan edges pruned), case-folded state
+  // names, before-url bucketing and the selector-hint policy measured 1100875
+  // bytes (1075.1KB). Raise to 1076KB; no new dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1076 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

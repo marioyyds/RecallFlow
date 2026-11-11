@@ -87,6 +87,16 @@ live edge 的置信度实测落在 0.3–0.5，且候选数 >5。归因不是门
 - 状态名归一：末段为纯数字 / 长 hex / UUID 时剥掉，退回稳定的父级模板（保留两级）。
   `/article/details/170567085` 从 `170567085Page` 变成 `ArticleDetailsPage`，帖子与
   商品页可跨实例复用；稳定末段（`/editor`、`/foo/bar`）行为不变。
+- `mergeEdges` 改为**只从当前记录重建**，prev 仅按同一 id 继承元数据：记录被 80 条
+  上限挤掉、或状态名改版后不再由任何记录推导的边，一律回收。此前是「prev 打底 + 只加
+  不删」，实测 slug 改名后同一记录长出旧名与新名两条边。
+- 状态名大小写归一：`/chinaflights/ShowFareFirst` 与 `/chinaflights/showfarefirst`
+  不再拆成两个状态。
+- 录制归桶按 `record.before.url` 的 origin：跨站跳转（mp 成功页 → blog 文章页）不再
+  因为 `ctx.pageUrl` 已切到新站而记进错误的站点槽位。
+- 无名字目标：带位置伪类（`nth-of-type` 等）的 selector 不立边；其余 selector 只在能
+  读出稳定属性（data-* / #id / .class）时立边，并把 `selector:<hint>` 作为 `g`。
+  记录保留，审计可见。
 
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），

@@ -606,6 +606,77 @@ test('证据边携带录制签名与计划步，选择期把它们当作可比�
   assert.doesNotMatch(text, /2078/, '效果摘要与前置证据都不得泄露录制值');
 });
 
+test('mergeEdges 只从当前记录重建：孤儿边与改名后的旧边都不保留', () => {
+  const record = {
+    id: 'r-rename',
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector: '#go' },
+    target: { role: 'link', name: '查看文章', selector: '#go' },
+    before: evidence({
+      url: 'https://blog.csdn.net/u/article/details/170567085',
+      urlPattern: '/u/article/details/<n>',
+      title: '文章',
+    }),
+    after: evidence({
+      url: 'https://blog.csdn.net/u/article/details/170567085',
+      urlPattern: '/u/article/details/<n>',
+      title: '文章',
+      fingerprint: 'fp-next',
+    }),
+    result: { ok: true, summary: 'ok' },
+    verification: '动作已执行',
+    ts: NOW,
+  };
+  const prev = {
+    ...emptyTraceGraph('https://blog.csdn.net', NOW),
+    l0: {
+      states: [{ id: 's.old', name: 'OldPage', urlPattern: '/old', staticAtoms: [], dynamicAtoms: [] }],
+      operations: [],
+    },
+    l1: { edges: [edge({ id: 'e.stale', from: 'OldPage', to: 'OldPage' })] },
+    records: [record],
+  };
+  const merged = mergeEdges([record], prev);
+  assert.equal(merged.l1.edges.length, 1, '没有记录支撑的旧边必须被回收');
+  assert.notEqual(merged.l1.edges[0].id, 'e.stale');
+  assert.equal(merged.l1.edges[0].from, 'ArticleDetailsPage');
+  assert.equal(merged.l0.states.some((state) => state.name === 'OldPage'), false);
+});
+
+test('状态名大小写归一：ShowFareFirst 与 showfarefirst 是同一页', () => {
+  assert.equal(
+    traceGraphStateName('https://www.trip.com/chinaflights/ShowFareFirst'),
+    'ShowfarefirstPage'
+  );
+  assert.equal(
+    traceGraphStateName('https://www.trip.com/chinaflights/ShowFareFirst'),
+    traceGraphStateName('https://www.trip.com/chinaflights/showfarefirst')
+  );
+});
+
+test('无名字目标：位置 selector 不立边，稳定属性 selector 用 selector:hint 当标签', () => {
+  const bare = (selector) => ({
+    id: 'w-' + selector,
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector },
+    before: evidence(),
+    after: evidence({ fingerprint: 'fp-w' }),
+    result: { ok: true, summary: 'ok' },
+    verification: 'ok',
+    ts: NOW,
+  });
+  assert.equal(
+    mergeEdges([bare('li.active:nth-of-type(8) > div.t-flex:nth-of-type(1)')]).l1.edges.length,
+    0,
+    '位置选择器会随列表顺序漂移，不能立边'
+  );
+  const kept = mergeEdges([bare('*[data-testid="search_date_depart0"]')]).l1.edges;
+  assert.equal(kept.length, 1);
+  assert.match(kept[0].g, /selector:search_date_depart0/);
+});
+
 test('candidateEdges 返回当前状态的全部已验证边，不截断，仍排除 blocked / executed', () => {
   const records = Array.from({ length: 6 }, (_, index) => ({
     id: 'r' + index,
@@ -1027,6 +1098,39 @@ test('tracegraph store 按站点增量合并、脱敏并排除敏感页面', asy
   assert.equal(login, null);
   const payment = await appendTraceRecord('https://example.com/checkout/payment', record);
   assert.equal(payment, null);
+});
+
+test('appendTraceRecord 按动作发生前的页面归桶（跨站跳转不记错站点）', async () => {
+  const store = installStorage();
+  const before = evidence({
+    url: 'https://mp.csdn.net/mp_blog/creation/success/170567085',
+    urlPattern: '/mp_blog/creation/success/<n>',
+    atomSignature: 'CreationSuccessPage#a#',
+  });
+  const after = evidence({
+    url: 'https://blog.csdn.net/u/article/details/170567085',
+    urlPattern: '/u/article/details/<n>',
+    atomSignature: 'ArticleDetailsPage#a#',
+  });
+  const record = {
+    id: 'cross-site-1',
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector: '#view' },
+    target: { role: 'link', name: '查看文章', selector: '#view' },
+    before,
+    after,
+    result: { ok: true, summary: 'ok' },
+    verification: '动作已执行',
+    ts: Date.now(),
+  };
+  // 传入的是「录制时当前页」（已经切到 blog），但动作发生在 mp 的成功页。
+  const graph = await appendTraceRecord(after.url, record);
+  assert.ok(graph);
+  assert.equal(graph.siteKey, 'https://mp.csdn.net');
+  assert.ok(store[TRACE_GRAPH_KEY]['https://mp.csdn.net']);
+  assert.equal(store[TRACE_GRAPH_KEY]['https://blog.csdn.net'], undefined);
+  assert.equal(graph.l1.edges[0].from, 'CreationSuccessPage');
 });
 
 test('tracegraph 不再因 TTL 拒绝读取图或旧记录', async () => {

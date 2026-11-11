@@ -40,6 +40,30 @@ export const PHI_KINDS: ReadonlySet<PhiKind> = new Set([
 const COUNTER_PATTERN = /(?:^|[\s(（])([^\s:：/]{1,40})\s*[:：]?\s*(\d+)\s*\/\s*(\d+)/g;
 const DYNAMIC_NAME = /(?:value|length|count|commit|list|items?|diff|result|preview)/i;
 
+/** 能从 selector 里读出的稳定属性值（data-* / name / aria-label / title / #id / .class）。 */
+const STABLE_SELECTOR_HINT =
+  /\[(?:data-[a-z0-9-]+|name|aria-label|title)\s*=\s*["']([^"']{1,80})["']\]/i;
+
+/**
+ * 无名字目标的兜底标签：返回可读的 selector 提示，形如 `selector:editor`。
+ * **位置选择器**（nth-of-type / nth-child）会随列表顺序漂移，直接判为不可用；
+ * 带了位置伪类的动作不立边（2026-11-12：trip.com 16 条边里 10 条正是这种）。
+ */
+function selectorHintLabel(selector: unknown): string {
+  const text = String(selector || '').trim();
+  if (!text) return '';
+  if (/:(?:nth-of-type|nth-child|first-child|last-child)\b/i.test(text)) return '';
+  const attr = STABLE_SELECTOR_HINT.exec(text);
+  if (attr) return 'selector:' + attr[1].trim();
+  const segments = text.split('>').map((part) => part.trim()).filter(Boolean);
+  const last = segments[segments.length - 1] || text;
+  const id = /#([A-Za-z][\w-]{0,60})/.exec(last);
+  if (id) return 'selector:' + id[1];
+  const cls = /\.([A-Za-z_][\w-]{0,60})/.exec(last);
+  if (cls) return 'selector:' + cls[1];
+  return '';
+}
+
 /**
  * 易变的路径段：纯数字 id、长 hex（16+ 位）、UUID。
  * 它们标识「一条记录」而非「一类页面」，不能成为状态名的一部分。
@@ -135,7 +159,9 @@ export function traceGraphStateName(url: string, pageTitle = ''): string {
   }
   const trimmed = stable.length !== segments.length;
   const tail = trimmed ? stable.slice(-2) : stable.slice(-1);
-  const base = tail.join(' ') || (trimmed ? 'Detail' : pageTitle || 'Page');
+  // 大小写归一：/chinaflights/ShowFareFirst 与 /chinaflights/showfarefirst 是同一页，
+  // 不归一会把同一个飞行页拆成两个状态。
+  const base = (tail.join(' ') || (trimmed ? 'Detail' : pageTitle || 'Page')).toLowerCase();
   const name = base
     .replace(/\.[a-z0-9]+$/i, '')
     .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, ' ')
@@ -480,8 +506,15 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     semanticAnchor.urlPattern ||
     semanticAnchor.role ||
     '';
+  // 没有任何语义句柄时，从 selector 里找稳定属性（data-testid / #id / name…）当标签；
+  // 连这个都没有（纯位置 selector）就不立边：题面里只有「click_element」四个字，
+  // 选中后也最容易 target-missing。记录仍保留，审计可见。
+  const selector = target.selector ||
+    (typeof record.argsRedacted.selector === 'string' ? record.argsRedacted.selector : '');
+  const label = targetLabel || selectorHintLabel(selector);
+  if (!label) return null;
   const actionGoal = clip(
-    [actionTool, targetLabel ? '「' + targetLabel + '」' : ''].filter(Boolean).join(' '),
+    [actionTool, '「' + label + '」'].filter(Boolean).join(' '),
     160
   );
   // PlanCard wording is execution context, not action identity.
@@ -557,11 +590,13 @@ export function mergeEdges(
 ): { l0: TraceGraphV2['l0']; l1: TraceGraphV2['l1'] } {
   const states = new Map<string, StateTemplate>();
   const edges = new Map<string, Edge>();
-  for (const state of prev?.l0?.states || []) states.set(state.name, state);
-  // Legacy identities mixed plan prose and page-wide anchors into the edge ID.
-  // Retain only v2 identities; older edges are re-derived from retained records.
+  // 只继承**同一 id** 的元数据，不再拿 prev 的边打底。
+  // 打底会保留两类孤儿边：记录已被 80 条上限挤掉的，以及状态名改版后不再由任何
+  // 记录推导出来的。它们会一直参与提名（2026-11-12 实测：slug 改名后同一记录
+  // 同时长出旧名与新名两条边）。状态模板同理，只从当前记录重建。
+  const prevById = new Map<string, Edge>();
   for (const edge of prev?.l1?.edges || []) {
-    if (edge.identityVersion === EDGE_IDENTITY_VERSION) edges.set(edge.id, edge);
+    if (edge.identityVersion === EDGE_IDENTITY_VERSION) prevById.set(edge.id, edge);
   }
 
   for (const record of records) {
@@ -632,7 +667,9 @@ export function mergeEdges(
     } catch {}
     const edge = edgeForRecord(record, recordSiteKey, 30 * 60 * 1000);
     if (!edge) continue;
-    const prevEdge = edges.get(edge.id);
+    // 同一次 merge 里多个记录命中同一身份时合并元数据（edges），
+    // 跨次 merge 的元数据则按 id 从 prevById 继承。两者都不引入孤儿。
+    const prevEdge = edges.get(edge.id) || prevById.get(edge.id);
     if (prevEdge) {
       edge.provenance.recordIds = [
         ...new Set([...prevEdge.provenance.recordIds, ...edge.provenance.recordIds]),
