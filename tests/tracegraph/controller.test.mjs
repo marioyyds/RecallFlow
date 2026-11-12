@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { JEV_EDGE_QUESTION } from '../../lib/application/agent/jev-action-space.ts';
 import { JevFastController, selectCandidatesByTier } from '../../lib/application/agent/jev-controller.ts';
+import { normalizePlanNextAction } from '../../lib/application/agent/plan-contract.ts';
 import { restoreJevLoopState } from '../../lib/application/agent/jev-loop-state.ts';
 import { emptyTraceGraph } from '../../lib/application/agent/tracegraph-store.ts';
 
@@ -168,6 +169,119 @@ function abstainResponse(confidence = 0.9) {
     usage: { input_tokens: 1, output_tokens: 1 },
   };
 }
+
+test('委托动作：慢模型写计划的那一轮就完成一次点击，不调 JEV', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '点创建按钮',
+    status: 'in_progress',
+    nextAction: { tool: 'click_element', name: 'CreateButton', note: '推进表单' },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => {
+      jevCalls += 1;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(jevCalls, 0, '委托动作不该再付一次 systemone');
+  const click = calls.find((call) => call.name === 'click_element');
+  assert.ok(click, '必须真的执行了点击');
+  assert.deepEqual(click.args, { ref: 'rf-create' });
+  assert.equal(state.ctx.plan[0].nextAction, undefined, '委托动作只消费一次');
+  assert.ok(
+    state.traces.some((entry) => entry.phase === 'delegate-action' && entry.decision === 'EXECUTE')
+  );
+});
+
+test('委托动作目标不唯一时不动手，清空后交回慢思考', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '点一个不存在的按钮',
+    status: 'in_progress',
+    nextAction: { tool: 'click_element', name: '不存在的按钮' },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => edgeResponse('e.create'),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'edge-no-candidates');
+  assert.equal(calls.includes('click_element'), false);
+  assert.equal(state.ctx.plan[0].nextAction, undefined);
+  assert.ok(
+    state.traces.some((entry) => entry.phase === 'delegate-action' && entry.decision === 'REJECT')
+  );
+});
+
+test('计划显式禁止快动作时，委托不执行但保留 nextAction', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '只读，不许点击',
+    status: 'in_progress',
+    allowedOperations: [],
+    nextAction: { tool: 'click_element', name: 'CreateButton' },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => edgeResponse('e.create'),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(calls.includes('click_element'), false);
+  assert.ok(state.ctx.plan[0].nextAction, '未获授权时不消费委托');
+  assert.ok(
+    state.traces.some((entry) => entry.phase === 'delegate-action' && entry.reason === 'not-authorized')
+  );
+});
+
+test('委托动作归一化：白名单、必需的锚点与按键', () => {
+  assert.equal(normalizePlanNextAction({ tool: 'type_text', value: 'x' }), undefined);
+  assert.equal(normalizePlanNextAction({ tool: 'click_element' }), undefined);
+  assert.deepEqual(
+    normalizePlanNextAction({ tool: 'click_element', name: '下一步', role: 'button' }),
+    { tool: 'click_element', name: '下一步', role: 'button' }
+  );
+  assert.equal(normalizePlanNextAction({ tool: 'press_key', name: '标题' }), undefined, '缺 key');
+  assert.deepEqual(
+    normalizePlanNextAction({ tool: 'press_key', name: '标题', key: 'Enter' }),
+    { tool: 'press_key', name: '标题', key: 'Enter' }
+  );
+  assert.equal(normalizePlanNextAction({ tool: 'open_tab' }), undefined, '缺 url');
+});
 
 test('no-candidates 不触发路由冷却：慢思考动过一步后快路会再试', async () => {
   const state = stateFor(false);

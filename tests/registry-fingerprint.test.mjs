@@ -243,7 +243,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       快路径不再执行任何输入写入（值由慢思考回合产生），若保留这个枚举值，
   //                       计划就会授权一个永远不会执行的操作。工具数量、权限、风险全部不变，
   //                       变的只有那一个 schema enum 项。
-  const EXPECTED = 'b278dae892c1ea81';
+  //   8745371533e81d95 — **有意改动**：`update_plan` 的每个 step 新增可选 `nextAction`
+  //                       对象（tool/role/name/text/selector/url/key/note），用于把一次机械
+  //                       点击/按键委托给快路。工具数量、权限、风险均不变，只多了一个
+  //                       可选 schema 字段。
+  const EXPECTED = '8745371533e81d95';
   assert.equal(
     fp,
     EXPECTED,

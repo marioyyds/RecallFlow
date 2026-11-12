@@ -19,9 +19,12 @@ import {
   extractExplicitSlots,
   groundEdgeAction,
   matchCandidate,
+  resolveEdgeTarget,
 } from './trace-graph.ts';
 import { loadTraceGraph } from './tracegraph-store.ts';
 import { REPLAYABLE_TOOLS } from './macros.ts';
+import type { Evidence } from './trace-graph-types.ts';
+import type { PlanStep } from './types.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
@@ -668,6 +671,10 @@ export class JevFastController {
       levels: levelCounts,
     });
     if (!candidates.length) {
+      // 没有可复用证据时，先看慢模型是否在当前步骤里委托了一个机械动作：
+      // 「慢决定做什么，快决定在哪做」——省掉一次完整慢模型往返。
+      const delegated = await this.tryDelegatedAction(iter, persist, planStep, before);
+      if (delegated) return delegated;
       const reason = tiered.length ? 'edge-target-missing' : 'edge-no-candidates';
       this.traceEdgeHandoff(
         iter,
@@ -958,7 +965,121 @@ private handoffExplanation(reason: string): string {
   if (reason === 'request-failed') return '快路径的决策服务本次不可用';
   if (reason === 'observation-failed') return '未能取得执行前的页面快照';
   if (reason === 'model-blocked') return '快路径判断当前没有可安全推进的动作';
+  if (reason === 'delegate-tool-failed') return '委托给快路的那个动作执行失败了';
   return '快路径让位（' + reason + '）';
+}
+
+/**
+ * 执行慢模型在当前计划步骤里委托的一次机械动作。
+ *
+ * 分工：慢模型只写「做什么」（工具 + 语义锚点），快路负责「在哪做」——
+ * 在当前快照里唯一解析目标、过一次普通审批、执行一次、重新观察。
+ * 这样慢模型可以在写计划的那一轮就完成一次点击，而不是再开一轮 prefill 去发同一个工具调用。
+ *
+ * 安全边界：
+ *   - 工具受 `DELEGATED_ACTION_TOOLS` 白名单约束（不含需要内容值的 type_text）；
+ *   - 目标必须唯一解析，否则不动手、直接交回；
+ *   - **不跳过审批**（与证据边不同：这是慢模型刚写的动作，还没有被复用过）；
+ *   - 无论成功失败，`nextAction` 都只消费一次。
+ */
+private async tryDelegatedAction(
+  iter: number,
+  persist: (extra: Record<string, unknown>) => Promise<unknown>,
+  planStep: PlanStep | null,
+  observation: Evidence
+): Promise<JevFastRunResult | null> {
+  const next = planStep?.nextAction;
+  if (!next) return null;
+  const allowed = Array.isArray(planStep?.allowedOperations) ? planStep.allowedOperations : null;
+  if (allowed && !allowed.includes('CLICK')) {
+    this.state.trace({
+      phase: 'delegate-action',
+      iter,
+      decision: 'SKIP',
+      reason: 'not-authorized',
+      tool: next.tool,
+    });
+    return null;
+  }
+
+  let args: Record<string, unknown> | null = null;
+  let basis = '';
+  if (next.tool === 'open_tab') {
+    if (!next.url) return null;
+    args = { url: next.url };
+    basis = 'url';
+  } else {
+    const semanticAnchor = {
+      ...(next.name ? { name: next.name } : {}),
+      ...(next.text ? { text: next.text } : {}),
+      ...(next.role ? { role: next.role } : {}),
+      kind: next.selector && !next.name && !next.text ? 'selector' : 'content',
+    } as const;
+    const resolved = resolveEdgeTarget(
+      {
+        action: { tool: next.tool },
+        s: {
+          ...(next.selector ? { selector: next.selector } : {}),
+          semanticAnchor,
+        },
+      } as unknown as Parameters<typeof resolveEdgeTarget>[0],
+      observation
+    );
+    if (!resolved.ok || !resolved.target) {
+      delete planStep.nextAction;
+      this.state.trace({
+        phase: 'delegate-action',
+        iter,
+        decision: 'REJECT',
+        reason: resolved.reason || 'target-missing',
+        tool: next.tool,
+        candidates: resolved.candidates,
+      });
+      return null;
+    }
+    basis = resolved.target.basis;
+    args = resolved.target.ref
+      ? { ref: resolved.target.ref }
+      : { selector: resolved.target.selector };
+    if (next.tool === 'press_key') args.key = next.key;
+  }
+
+  // 委托只消费一次：成功、失败、目标缺失都一样清掉，避免同一动作被反复重试。
+  delete planStep.nextAction;
+  const action: JevFastAction = {
+    kind: 'act',
+    operation: next.tool === 'click_element' ? 'CLICK' : 'READ_PAGE',
+    actionKey: 'delegate:' + next.tool + ':' + (next.name || next.text || next.selector || next.url || ''),
+    toolName: next.tool as JevFastAction['toolName'],
+    args,
+    description: '委托动作：' + next.tool + (next.note ? '（' + next.note + '）' : ''),
+    confidence: 1,
+    operationConfidence: 1,
+    targetConfidence: null,
+  };
+  this.state.trace({
+    phase: 'delegate-action',
+    iter,
+    decision: 'EXECUTE',
+    tool: next.tool,
+    basis,
+    args,
+  });
+  const failuresBefore = this.state.failedToolNames.length;
+  const outcome = await this.processTool(iter, persist, action);
+  if (outcome.kind === 'cancelled') return outcome;
+  if (outcome.kind === 'complete') return { kind: 'skipped', reason: 'complete-tool' };
+  if (this.state.failedToolNames.length > failuresBefore) {
+    this.traceEdgeHandoff(iter, 'delegate-tool-failed', next.tool);
+    return { kind: 'skipped', reason: 'delegate-tool-failed' };
+  }
+  const observed = await this.observePage(iter, persist);
+  if (observed.kind === 'cancelled') return observed;
+  this.state.jevLoop.fastActions += 1;
+  this.state.jevLoop.consecutiveFastActions += 1;
+  this.state.jevLoop.planActions += 1;
+  this.state.jevLoop.lastOutcome = 'delegate-act';
+  return { kind: 'act', decisions: [action], latencyMs: 0, toolOutcomes: [outcome, observed] };
 }
 
 private appendBlocked(

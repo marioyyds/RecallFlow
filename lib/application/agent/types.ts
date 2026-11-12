@@ -70,6 +70,22 @@ export interface AgentSettings {
   ts?: number;
 }
 
+/**
+ * 一次性委托动作：慢模型只决定「做什么」（工具 + 语义锚点），
+ * 快路负责在当前快照里唯一解析目标并执行一次，不再来回慢模型。
+ * 只放机械动作，不放内容值。
+ */
+export interface PlanDelegatedAction {
+  tool: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  selector?: string;
+  url?: string;
+  key?: string;
+  note?: string;
+}
+
 /** 计划条（`update_plan` 维护，也是 JEV 快执行器的子目标租约）。 */
 export interface PlanStep {
   id?: string;
@@ -78,6 +94,8 @@ export interface PlanStep {
   successPredicate?: string;
   allowedOperations?: string[];
   leaseActions?: number;
+  /** 快路在本步骤执行一次的委托动作；执行后由快路清空。 */
+  nextAction?: PlanDelegatedAction;
 }
 
 /** 可重放的一步（本任务轨迹 / 宏步骤）。 */

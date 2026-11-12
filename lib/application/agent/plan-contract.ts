@@ -1,4 +1,4 @@
-import type { PlanStep } from './types.ts';
+import type { PlanDelegatedAction, PlanStep } from './types.ts';
 
 /**
  * Fast-lane operations that a slow plan may explicitly authorize.
@@ -19,6 +19,52 @@ export const PLAN_FAST_OPERATIONS = Object.freeze([
 export type PlanFastOperation = (typeof PLAN_FAST_OPERATIONS)[number];
 
 export const PLAN_MAX_LEASE_ACTIONS = 50;
+
+/**
+ * 可被委托给快路的工具。刻意不含 type_text / select_option：它们需要内容值，
+ * 而值只能来自当前指令的显式槽位，不能由计划顺手带进来。
+ */
+export const DELEGATED_ACTION_TOOLS = Object.freeze([
+  'click_element',
+  'press_key',
+  'open_tab',
+] as const);
+
+export type DelegatedActionTool = (typeof DELEGATED_ACTION_TOOLS)[number];
+
+function cleanAnchorField(value: unknown, maxChars: number): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
+/**
+ * 委托动作的 fail-closed 归一化：工具不在白名单、或没有可解析的目标句柄时，
+ * 整个 nextAction 被丢弃 —— 快路不应该拿到一个只能靠猜的目标。
+ */
+export function normalizePlanNextAction(value: unknown): PlanDelegatedAction | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const tool = String(source.tool || '').trim();
+  if (!(DELEGATED_ACTION_TOOLS as readonly string[]).includes(tool)) return undefined;
+  const action: PlanDelegatedAction = { tool };
+  const role = cleanAnchorField(source.role, 40);
+  const name = cleanAnchorField(source.name, 100);
+  const text = cleanAnchorField(source.text, 100);
+  const selector = cleanAnchorField(source.selector, 300);
+  const url = cleanAnchorField(source.url, 1000);
+  const key = cleanAnchorField(source.key, 40);
+  const note = cleanAnchorField(source.note, 120);
+  if (role) action.role = role;
+  if (name) action.name = name;
+  if (text) action.text = text;
+  if (selector) action.selector = selector;
+  if (url) action.url = url;
+  if (key) action.key = key;
+  if (note) action.note = note;
+  if (tool === 'open_tab' && !action.url) return undefined;
+  if (tool === 'press_key' && !action.key) return undefined;
+  if (tool !== 'open_tab' && !action.name && !action.text && !action.selector) return undefined;
+  return action;
+}
 
 const PLAN_FAST_OPERATION_SET = new Set<string>(PLAN_FAST_OPERATIONS);
 
@@ -76,6 +122,8 @@ export function normalizePlanStep(
   }
   const leaseActions = normalizePlanLease(value.leaseActions);
   if (leaseActions != null) step.leaseActions = leaseActions;
+  const nextAction = normalizePlanNextAction(value.nextAction);
+  if (nextAction) step.nextAction = nextAction;
   return step;
 }
 
@@ -108,5 +156,14 @@ export function describePlanStep(step: PlanStep): string {
     );
   }
   if (step.leaseActions) parts.push('动作租约：' + step.leaseActions);
+  if (step.nextAction) {
+    const target =
+      step.nextAction.name ||
+      step.nextAction.text ||
+      step.nextAction.selector ||
+      step.nextAction.url ||
+      '';
+    parts.push('待执行委托：' + step.nextAction.tool + (target ? ' → ' + target : ''));
+  }
   return parts.join('；');
 }

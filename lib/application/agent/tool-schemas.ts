@@ -226,6 +226,28 @@ export const TOOL_SCHEMAS = [
                   maximum: 50,
                   description: '本步骤最多快动作数；省略=全局上限',
                 },
+                nextAction: {
+                  type: 'object',
+                  description:
+                    '一次性委托：把本步骤的下一个机械动作交给快路，在当前页唯一解析目标后直接执行一次，' +
+                    '省掉一次慢模型往返。只放点击/按键/开页，不放内容值；执行后自动清空。' +
+                    '目标是按钮/链接/输入框时，name 必须与页面上可见文本完全一致；找不到唯一目标时快路会交回。',
+                  properties: {
+                    tool: {
+                      type: 'string',
+                      enum: ['click_element', 'press_key', 'open_tab'],
+                      description: '委托的工具',
+                    },
+                    role: { type: 'string', description: '目标 role（可选，用于唯一化）' },
+                    name: { type: 'string', description: '目标可读名字 / 按钮文字' },
+                    text: { type: 'string', description: '目标可见文本（name 缺失时用）' },
+                    selector: { type: 'string', description: '最后手段：稳定 CSS selector，不要用 nth-of-type' },
+                    url: { type: 'string', description: 'open_tab 的目标 URL' },
+                    key: { type: 'string', description: 'press_key 的按键，如 Enter' },
+                    note: { type: 'string', description: '一句话说明这次动作的目的' },
+                  },
+                  required: ['tool'],
+                },
               },
               required: ['text'],
             },

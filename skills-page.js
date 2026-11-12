@@ -2955,6 +2955,25 @@ var TOOL_SCHEMAS = [
                   minimum: 1,
                   maximum: 50,
                   description: "\u672C\u6B65\u9AA4\u6700\u591A\u5FEB\u52A8\u4F5C\u6570\uFF1B\u7701\u7565=\u5168\u5C40\u4E0A\u9650"
+                },
+                nextAction: {
+                  type: "object",
+                  description: "\u4E00\u6B21\u6027\u59D4\u6258\uFF1A\u628A\u672C\u6B65\u9AA4\u7684\u4E0B\u4E00\u4E2A\u673A\u68B0\u52A8\u4F5C\u4EA4\u7ED9\u5FEB\u8DEF\uFF0C\u5728\u5F53\u524D\u9875\u552F\u4E00\u89E3\u6790\u76EE\u6807\u540E\u76F4\u63A5\u6267\u884C\u4E00\u6B21\uFF0C\u7701\u6389\u4E00\u6B21\u6162\u6A21\u578B\u5F80\u8FD4\u3002\u53EA\u653E\u70B9\u51FB/\u6309\u952E/\u5F00\u9875\uFF0C\u4E0D\u653E\u5185\u5BB9\u503C\uFF1B\u6267\u884C\u540E\u81EA\u52A8\u6E05\u7A7A\u3002\u76EE\u6807\u662F\u6309\u94AE/\u94FE\u63A5/\u8F93\u5165\u6846\u65F6\uFF0Cname \u5FC5\u987B\u4E0E\u9875\u9762\u4E0A\u53EF\u89C1\u6587\u672C\u5B8C\u5168\u4E00\u81F4\uFF1B\u627E\u4E0D\u5230\u552F\u4E00\u76EE\u6807\u65F6\u5FEB\u8DEF\u4F1A\u4EA4\u56DE\u3002",
+                  properties: {
+                    tool: {
+                      type: "string",
+                      enum: ["click_element", "press_key", "open_tab"],
+                      description: "\u59D4\u6258\u7684\u5DE5\u5177"
+                    },
+                    role: { type: "string", description: "\u76EE\u6807 role\uFF08\u53EF\u9009\uFF0C\u7528\u4E8E\u552F\u4E00\u5316\uFF09" },
+                    name: { type: "string", description: "\u76EE\u6807\u53EF\u8BFB\u540D\u5B57 / \u6309\u94AE\u6587\u5B57" },
+                    text: { type: "string", description: "\u76EE\u6807\u53EF\u89C1\u6587\u672C\uFF08name \u7F3A\u5931\u65F6\u7528\uFF09" },
+                    selector: { type: "string", description: "\u6700\u540E\u624B\u6BB5\uFF1A\u7A33\u5B9A CSS selector\uFF0C\u4E0D\u8981\u7528 nth-of-type" },
+                    url: { type: "string", description: "open_tab \u7684\u76EE\u6807 URL" },
+                    key: { type: "string", description: "press_key \u7684\u6309\u952E\uFF0C\u5982 Enter" },
+                    note: { type: "string", description: "\u4E00\u53E5\u8BDD\u8BF4\u660E\u8FD9\u6B21\u52A8\u4F5C\u7684\u76EE\u7684" }
+                  },
+                  required: ["tool"]
                 }
               },
               required: ["text"]
@@ -4166,6 +4185,39 @@ var PLAN_FAST_OPERATIONS = Object.freeze([
   "WAIT"
 ]);
 var PLAN_MAX_LEASE_ACTIONS = 50;
+var DELEGATED_ACTION_TOOLS = Object.freeze([
+  "click_element",
+  "press_key",
+  "open_tab"
+]);
+function cleanAnchorField(value, maxChars) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
+}
+function normalizePlanNextAction(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const source = value;
+  const tool = String(source.tool || "").trim();
+  if (!DELEGATED_ACTION_TOOLS.includes(tool)) return void 0;
+  const action = { tool };
+  const role = cleanAnchorField(source.role, 40);
+  const name = cleanAnchorField(source.name, 100);
+  const text = cleanAnchorField(source.text, 100);
+  const selector = cleanAnchorField(source.selector, 300);
+  const url = cleanAnchorField(source.url, 1e3);
+  const key = cleanAnchorField(source.key, 40);
+  const note = cleanAnchorField(source.note, 120);
+  if (role) action.role = role;
+  if (name) action.name = name;
+  if (text) action.text = text;
+  if (selector) action.selector = selector;
+  if (url) action.url = url;
+  if (key) action.key = key;
+  if (note) action.note = note;
+  if (tool === "open_tab" && !action.url) return void 0;
+  if (tool === "press_key" && !action.key) return void 0;
+  if (tool !== "open_tab" && !action.name && !action.text && !action.selector) return void 0;
+  return action;
+}
 var PLAN_FAST_OPERATION_SET = new Set(PLAN_FAST_OPERATIONS);
 function cleanText(value, maxChars) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxChars);
@@ -4204,6 +4256,8 @@ function normalizePlanStep(value, index) {
   }
   const leaseActions = normalizePlanLease(value.leaseActions);
   if (leaseActions != null) step.leaseActions = leaseActions;
+  const nextAction = normalizePlanNextAction(value.nextAction);
+  if (nextAction) step.nextAction = nextAction;
   return step;
 }
 function describePlanStep(step) {
@@ -4215,6 +4269,10 @@ function describePlanStep(step) {
     );
   }
   if (step.leaseActions) parts.push("\u52A8\u4F5C\u79DF\u7EA6\uFF1A" + step.leaseActions);
+  if (step.nextAction) {
+    const target = step.nextAction.name || step.nextAction.text || step.nextAction.selector || step.nextAction.url || "";
+    parts.push("\u5F85\u6267\u884C\u59D4\u6258\uFF1A" + step.nextAction.tool + (target ? " \u2192 " + target : ""));
+  }
   return parts.join("\uFF1B");
 }
 

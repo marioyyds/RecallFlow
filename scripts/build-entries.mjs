@@ -117,7 +117,9 @@ export const ENTRIES = [
   // bytes (1075.1KB). Raise to 1076KB; no new dependency.
   // Same day: reason-tiered route cooldowns, teach-then-retry and notice
   // dedupe measured 1102534 bytes (1076.7KB). Raise to 1078KB; no dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1078 * 1024 },
+  // Same day: delegated one-shot actions (PlanStep.nextAction) measured
+  // 1111163 bytes (1085.1KB). Raise to 1086KB; no dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1086 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -151,7 +153,9 @@ export const ENTRIES = [
   // 2026-11-11: type_text gained the paste rewriter + whitespace-mismatch
   // classification (shared editable-text helper), measured 643504 bytes.
   // Raise explicitly to 630KB; no dependency added.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 630 * 1024 },
+  // 2026-11-12: update_plan schema gained the optional nextAction object (shared
+  // tool surface reaches options.js); measured 647244 bytes. Raise to 633KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 633 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -179,7 +183,10 @@ export const ENTRIES = [
   // 2026-11-11 (later): type_text paste rewriter + whitespace classification
   // landed in the shared editable-text helper; measured 562426 bytes.
   // Raise explicitly to 551KB; no dependency added.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 551 * 1024 },
+  // 2026-11-12: update_plan schema gained the optional nextAction object (shared
+  // tool surface reaches the skills page too); measured 566163 bytes.
+  // Raise to 554KB; no dependency added.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 554 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。
