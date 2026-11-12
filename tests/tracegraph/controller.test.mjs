@@ -482,7 +482,7 @@ test('无候选边时回退到 operation：CLICK 直接执行，不交回慢思�
   );
 });
 
-test('operation 判 BLOCKED 时做路由冷却，页面指纹变化后解除', async () => {
+test('operation 判 BLOCKED 时做路由冷却；只读回合不唤醒，动作后解除', async () => {
   const state = stateFor(false);
   const graph = emptyTraceGraph('https://gitcode.com');
   let jevCalls = 0;
@@ -505,13 +505,61 @@ test('operation 判 BLOCKED 时做路由冷却，页面指纹变化后解除', a
   assert.equal(cooled.reason, 'route-cooldown');
   assert.equal(jevCalls, 1);
 
+  // 指纹变了但慢思考只做了只读：不唤醒快路（否则每次读页面都白付一次 systemone）。
   state.ctx.lastSnapshot = snapshot('fp-2');
-  const changed = await controller.runAvailable(2, async () => {});
+  state.toolCallCount += 1;
+  state.ranToolNames.push('read_current_page');
+  const readOnly = await controller.runAvailable(2, async () => {});
+  assert.equal(readOnly.reason, 'no-page-change');
+  assert.equal(jevCalls, 1);
+
+  // 真正改变页面的动作之后才解除。
+  state.toolCallCount += 1;
+  state.ranToolNames.push('click_element');
+  const changed = await controller.runAvailable(3, async () => {});
   assert.equal(changed.reason, 'model-blocked');
-  assert.equal(jevCalls, 2, '指纹一变就必须解除冷却');
+  assert.equal(jevCalls, 2, '慢思考动过页面才允许再试');
 });
 
-test('选不出时做路由冷却，页面指纹变化后自动解除', async () => {
+test('只读回合后若有委托，闸门放行并执行委托', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => operationBlockedResponse(),
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'model-blocked');
+
+  // 慢思考只做了一次读，但同一轮写下了委托：闸门必须放行。
+  state.toolCallCount += 1;
+  state.ranToolNames.push('read_current_page');
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '点创建按钮',
+    status: 'in_progress',
+    nextAction: { tool: 'click_element', name: 'CreateButton' },
+  }];
+  state.ctx.planVersion = 1;
+  const outcome = await controller.runAvailable(1, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const click = calls.find((call) => call.name === 'click_element');
+  assert.ok(click, '委托必须被执行');
+  assert.deepEqual(click.args, { ref: 'rf-create' });
+});
+
+test('选不出时做路由冷却；指纹变化但只读时不唤醒，动作后解除', async () => {
   const state = stateFor(false);
   const { graph } = graphWithEdge();
   let jevCalls = 0;
@@ -536,9 +584,17 @@ test('选不出时做路由冷却，页面指纹变化后自动解除', async ()
   assert.equal(jevCalls, 1, '同一视图不该重复付 systemone');
 
   state.ctx.lastSnapshot = snapshot('fp-2');
-  const changed = await controller.runAvailable(2, async () => {});
+  state.toolCallCount += 1;
+  state.ranToolNames.push('read_current_page');
+  const readOnly = await controller.runAvailable(2, async () => {});
+  assert.equal(readOnly.reason, 'no-page-change');
+  assert.equal(jevCalls, 1);
+
+  state.toolCallCount += 1;
+  state.ranToolNames.push('click_element');
+  const changed = await controller.runAvailable(3, async () => {});
   assert.equal(changed.reason, 'edge-abstain');
-  assert.equal(jevCalls, 2, '指纹一变就必须解除冷却');
+  assert.equal(jevCalls, 2, '慢思考真正动了页面才允许再试');
 });
 
 test('同一视图同一原因的让位提示不重复塞进模型上下文', async () => {
@@ -554,14 +610,20 @@ test('同一视图同一原因的让位提示不重复塞进模型上下文', as
   );
   await controller.runAvailable(0, async () => {});
   state.toolCallCount += 1;
+  state.ctx.lastSnapshot = snapshot('fp-2');
+  state.ranToolNames.push('read_current_page');
   await controller.runAvailable(1, async () => {});
   const notes = state.messages.filter(
     (message) => message.role === 'system' && /非页面故障/.test(String(message.content || ''))
   );
-  assert.equal(notes.length, 1, '第二次同路由同原因只记 trace，不再 push 提示');
+  assert.equal(notes.length, 1, '只读回合被闸门挡住，不再重复塞提示');
   const handoffs = state.traces.filter((entry) => entry.phase === 'jev-handoff');
-  assert.equal(handoffs.length, 2);
-  assert.equal(handoffs[1].repeatedNotice, true);
+  assert.equal(handoffs.length, 1);
+  assert.equal(
+    state.traces.some((entry) => entry.phase === 'jev-skip' && entry.reason === 'no-page-change'),
+    true,
+    '闸门必须留下 trace'
+  );
 });
 
 test('live TraceGraph：JEV 选边并 Grounding 后直接执行一个动作', async () => {

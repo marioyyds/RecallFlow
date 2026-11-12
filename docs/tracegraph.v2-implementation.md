@@ -158,6 +158,22 @@ CSDN 发布轨迹暴露了一个必须修的事故面：`click_element 「发布
   提示与示例；系统提示中的 nextAction 示例改为具体控件名，并明确只放
   click_element / press_key。
 
+## 2026-11-12 尝试闸门：只读回合不唤醒快路
+
+CSDN 发布跑了 31 次快路尝试，实际改变页面的慢动作只有 12 次（6 点击 + 3 输入 +
+3 按键）；机票调研那次 17 次尝试对应 0 个动作。原因是每次慢回合都会触发一次
+「拍快照 → 回退 → JEV」，而慢回合里大量是读页面。
+
+`JevFastController.attemptGateReason()` 在冷却检查之后、拍照之前判定：
+
+- 上一次让位之后，慢思考**只做了只读工具**（观察、读取、检索、截图）→ 直接
+  `skipped: no-page-change`，不拍快照、不调 systemone；trace 记 `jev-skip`。
+- 放行条件：计划里出现了 `nextAction`（委托本身就是执行信号）、URL 变化、
+  或让位之后跑过任一非只读工具（点击/输入/按键/滚动/切页/JS…）。
+- 注意：**不用 fingerprint 变化当放行条件**——读页面本身就会让指纹变（工具栏、
+  时间戳），那正是 CSDN 里冷却反复失效的原因。
+- 重新规划（`planVersion` 变化）会清空闸门状态，避免新计划被旧证据挡住。
+
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），
   计入 `filteredTargetMissing`，handoff 记为 `edge-target-missing`，一次 systemone 都不花。

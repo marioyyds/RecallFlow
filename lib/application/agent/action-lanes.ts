@@ -49,6 +49,20 @@ export function isObservationTool(name: unknown): boolean {
   return OBSERVATION_TOOLS.has(String(name || ''));
 }
 
+// 只读工具：观察 + 读取/检索类。它们不会改变页面状态，因此不应该单独
+// “唤醒”下一次快路尝试（2026-11-12 CSDN：31 次尝试里大半是读完页面又试一次）。
+const READ_ONLY_EXTRA: ReadonlySet<string> = new Set([
+  'fetch_webpage',
+  'knowledge_read',
+  'web_search',
+  'take_screenshot',
+]);
+
+export function isReadOnlyTool(name: unknown): boolean {
+  const text = String(name || '');
+  return OBSERVATION_TOOLS.has(text) || READ_ONLY_EXTRA.has(text);
+}
+
 export function isSlowOnlyTool(name: unknown): boolean {
   return SLOW_ONLY_TOOLS.has(String(name || ''));
 }

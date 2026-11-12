@@ -28,7 +28,7 @@ import type { Evidence } from './trace-graph-types.ts';
 import type { PlanStep } from './types.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
-import { FAST_EDGE_TOOLS } from './action-lanes.ts';
+import { FAST_EDGE_TOOLS, isReadOnlyTool } from './action-lanes.ts';
 import { isRiskyTargetLabel } from './action-risk.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
 import { activePlanStep, planStepKey } from './plan-contract.ts';
@@ -100,6 +100,9 @@ export class JevFastController {
   private readonly loadGraph: typeof loadTraceGraph;
   private blockedRoute: { key: string; reason: string; toolCalls: number; at: number } | null = null;
   private lastHandoffNotice: { key: string; reason: string; toolCalls: number } | null = null;
+  // 上一次让位时的「只读证据」。下一次快路尝试只有在慢思考做了**会改变页面**的动作
+  // （或新写了委托）时才值得再拍快照 + 调 JEV；纯读回合不唤醒快路。
+  private lastAttempt: { key: string; url: string; toolCalls: number; ranCount: number } | null = null;
   private toolSequence = 0;
 
   constructor(
@@ -130,6 +133,7 @@ export class JevFastController {
       // A slow replan is a new execution attempt even when the same page stayed blocked.
       this.blockedRoute = null;
       this.lastHandoffNotice = null;
+      this.lastAttempt = null;
       this.state.trace({
         phase: 'jev-plan',
         planVersion: version,
@@ -178,6 +182,32 @@ export class JevFastController {
    * - 服务/观察失败可以按时间恢复；
    * - 「没证据」不设冷却，慢思考做一步后下一轮就能再试（teach-then-retry 的入口）。
    */
+  /**
+   * 证据变化闸门：上一次让位之后，慢思考如果只做了**读页面/检索**，再拍一次快照
+   * 只会得到同一张画面和同一个拒绝（2026-11-12 CSDN：31 次尝试里只有 6 次点击 +
+   * 3 次输入 + 3 次按键算真正改变了页面）。
+   *
+   * 放行条件（任一）：
+   * - 计划里出现了委托（慢思考明确说“下一步执行这个”，不需要等页面变化）；
+   * - URL 变了（用户或慢思考导航）；
+   * - 让位之后跑过任一非只读工具（点击/输入/按键/滚动/切页/JS…）。
+   */
+  private attemptGateReason(): string | null {
+    const last = this.lastAttempt;
+    if (!last) return null;
+    if (this.hasDelegatedNextAction()) return null;
+    if (String(this.state.ctx.pageUrl || '') !== last.url) return null;
+    const ranSince = this.state.ranToolNames.slice(last.ranCount);
+    if (ranSince.some((name) => !isReadOnlyTool(name))) return null;
+    return 'no-page-change';
+  }
+
+  private hasDelegatedNextAction(): boolean {
+    const plan: PlanStep[] = Array.isArray(this.state.ctx.plan) ? this.state.ctx.plan : [];
+    const step = plan.find((item) => item && item.status === 'in_progress') || plan[0];
+    return Boolean(step && step.nextAction);
+  }
+
   private routeCooldownActive(): boolean {
     const blocked = this.blockedRoute;
     if (!blocked) return false;
@@ -209,6 +239,16 @@ export class JevFastController {
     if (!this.canAttempt()) return { kind: 'skipped', reason: 'not-due' };
     // 冷却期连快照都不必拍：同一视图、同一原因重试只会白付一次 observe。
     if (this.routeCooldownActive()) return { kind: 'skipped', reason: 'route-cooldown' };
+    const gate = this.attemptGateReason();
+    if (gate) {
+      this.state.trace({
+        phase: 'jev-skip',
+        iter,
+        reason: gate,
+        ranSince: this.state.ranToolNames.slice(this.lastAttempt?.ranCount ?? 0).slice(-8),
+      });
+      return { kind: 'skipped', reason: gate };
+    }
     const failuresBeforeObservation = this.state.failedToolNames.length;
     const initial = await this.observePage(iter, persist);
     if (initial.kind === 'cancelled') return initial;
@@ -1188,6 +1228,12 @@ private appendBlocked(
     detail = ''
   ): void {
     const key = this.currentRouteKey();
+    this.lastAttempt = {
+      key,
+      url: String(this.state.ctx.pageUrl || ''),
+      toolCalls: this.state.toolCallCount,
+      ranCount: this.state.ranToolNames.length,
+    };
     // 只有「有证据却选不出」才做路由级冷却；没证据/目标缺失只影响对应边，
     // 否则首访页面第一次 no-candidates 之后整轮都唤不回快路。
     this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason)

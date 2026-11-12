@@ -125,7 +125,9 @@ export const ENTRIES = [
   // contract measured 1115007 bytes (1088.9KB). Raise to 1090KB.
   // Same day: semantic risk, high-risk edge filtering and the update_plan
   // delegation hint measured 1117509 bytes (1091.3KB). Raise to 1092KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1092 * 1024 },
+  // Same day: attempt gate (read-only turns do not wake the fast path)
+  // measured 1119963 bytes (1093.7KB). Raise to 1094KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1094 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

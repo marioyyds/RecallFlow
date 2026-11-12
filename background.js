@@ -14924,6 +14924,26 @@ var FAST_EDGE_TOOLS = /* @__PURE__ */ new Set([
   "scroll_page",
   "wait_for_element"
 ]);
+var OBSERVATION_TOOLS2 = /* @__PURE__ */ new Set([
+  "get_page_snapshot",
+  "read_current_page",
+  "read_table",
+  "get_ax_snapshot",
+  "inspect_element",
+  "read_diagnostics",
+  "list_frames",
+  "list_tabs"
+]);
+var READ_ONLY_EXTRA = /* @__PURE__ */ new Set([
+  "fetch_webpage",
+  "knowledge_read",
+  "web_search",
+  "take_screenshot"
+]);
+function isReadOnlyTool(name) {
+  const text2 = String(name || "");
+  return OBSERVATION_TOOLS2.has(text2) || READ_ONLY_EXTRA.has(text2);
+}
 
 // lib/application/agent/jev-diagnostics.ts
 var JEV_DIAGNOSTICS_KEY = "jevDiagnostics.v1";
@@ -14979,6 +14999,9 @@ var JevFastController = class {
   loadGraph;
   blockedRoute = null;
   lastHandoffNotice = null;
+  // 上一次让位时的「只读证据」。下一次快路尝试只有在慢思考做了**会改变页面**的动作
+  // （或新写了委托）时才值得再拍快照 + 调 JEV；纯读回合不唤醒快路。
+  lastAttempt = null;
   toolSequence = 0;
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic, loadGraph = loadTraceGraph) {
     this.state = state2;
@@ -14999,6 +15022,7 @@ var JevFastController = class {
       loop.planActions = 0;
       this.blockedRoute = null;
       this.lastHandoffNotice = null;
+      this.lastAttempt = null;
       this.state.trace({
         phase: "jev-plan",
         planVersion: version,
@@ -15038,6 +15062,30 @@ var JevFastController = class {
    * - 服务/观察失败可以按时间恢复；
    * - 「没证据」不设冷却，慢思考做一步后下一轮就能再试（teach-then-retry 的入口）。
    */
+  /**
+   * 证据变化闸门：上一次让位之后，慢思考如果只做了**读页面/检索**，再拍一次快照
+   * 只会得到同一张画面和同一个拒绝（2026-11-12 CSDN：31 次尝试里只有 6 次点击 +
+   * 3 次输入 + 3 次按键算真正改变了页面）。
+   *
+   * 放行条件（任一）：
+   * - 计划里出现了委托（慢思考明确说“下一步执行这个”，不需要等页面变化）；
+   * - URL 变了（用户或慢思考导航）；
+   * - 让位之后跑过任一非只读工具（点击/输入/按键/滚动/切页/JS…）。
+   */
+  attemptGateReason() {
+    const last = this.lastAttempt;
+    if (!last) return null;
+    if (this.hasDelegatedNextAction()) return null;
+    if (String(this.state.ctx.pageUrl || "") !== last.url) return null;
+    const ranSince = this.state.ranToolNames.slice(last.ranCount);
+    if (ranSince.some((name) => !isReadOnlyTool(name))) return null;
+    return "no-page-change";
+  }
+  hasDelegatedNextAction() {
+    const plan = Array.isArray(this.state.ctx.plan) ? this.state.ctx.plan : [];
+    const step = plan.find((item) => item && item.status === "in_progress") || plan[0];
+    return Boolean(step && step.nextAction);
+  }
   routeCooldownActive() {
     const blocked = this.blockedRoute;
     if (!blocked) return false;
@@ -15063,6 +15111,16 @@ var JevFastController = class {
   async runAvailable(iter, persist) {
     if (!this.canAttempt()) return { kind: "skipped", reason: "not-due" };
     if (this.routeCooldownActive()) return { kind: "skipped", reason: "route-cooldown" };
+    const gate = this.attemptGateReason();
+    if (gate) {
+      this.state.trace({
+        phase: "jev-skip",
+        iter,
+        reason: gate,
+        ranSince: this.state.ranToolNames.slice(this.lastAttempt?.ranCount ?? 0).slice(-8)
+      });
+      return { kind: "skipped", reason: gate };
+    }
     const failuresBeforeObservation = this.state.failedToolNames.length;
     const initial = await this.observePage(iter, persist);
     if (initial.kind === "cancelled") return initial;
@@ -15866,6 +15924,12 @@ var JevFastController = class {
   }
   appendBlocked(iter, reason, detail = "") {
     const key = this.currentRouteKey();
+    this.lastAttempt = {
+      key,
+      url: String(this.state.ctx.pageUrl || ""),
+      toolCalls: this.state.toolCallCount,
+      ranCount: this.state.ranToolNames.length
+    };
     this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason) ? { key, reason, toolCalls: this.state.toolCallCount, at: Date.now() } : null;
     const previous = this.lastHandoffNotice;
     const repeatedNotice = Boolean(
