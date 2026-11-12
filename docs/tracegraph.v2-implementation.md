@@ -202,6 +202,20 @@ CSDN 发布按钮被禁用时，快照里的元素名是「填写标题才可自
   弹层开关让每次指纹都变，看起来“每次都有进展”。2026-11-12 HuggingFace：
   搜索框与「Full-text search」开关互点 6 次即此模式。
 
+## 2026-11-12 JEV 动作历史
+
+此前 JEV 只拿得到“当前计划步骤 + 工具名列表”（operation 请求）或干脆没有动作
+上下文（edge 请求）。循环只能靠控制器事后拦截。现在两路请求都带一份紧凑的
+**动作历史**（`state.actionHistory` / `historyNote`）：
+
+- 来源：工具管线在每次页面动作后写入 `jevLoop.actionMemory`（fast 与 slow 都记），
+  只存 `op / target / changed / route / lane`，不记输入值；环形上限 6 条。
+- 渲染：最近 5 条 + 提示行；`describeActionHistory()` 识别最近 A→B→A 或连续两次
+  `no-change`，分别提示“不要重复”与“换目标或换动作”。
+- edge 请求的 ABSTAIN 规则同步增加一条：若历史显示唯一契合的目标刚试过且无进展，
+  可以 abstain。
+- 恢复运行状态时 `restoreJevLoopState` 也会保留/裁剪这段历史（最多 6 条）。
+
 ## 2026-11-12 edge abstain 回退 operation
 
 连续几轮轨迹里，`nextAction` 几乎没有被写过（模型倾向于在同一轮里自己动手），

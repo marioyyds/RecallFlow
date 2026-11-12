@@ -3,6 +3,16 @@
 // state from resurrecting an unbounded loop.
 export const JEV_HARD_MAX_ATTEMPTS_PER_RUN = 200;
 export const JEV_HARD_MAX_CONSECUTIVE_ACTIONS = 50;
+export const ACTION_MEMORY_LIMIT = 6;
+
+/** 一次页面动作的紧凑记录；只写标签与结果，不写输入值。 */
+export interface JevActionMemoryEntry {
+  op: string;
+  target: string;
+  changed: boolean;
+  route: string;
+  lane: 'fast' | 'slow';
+}
 
 export interface JevLoopState {
   attempts: number;
@@ -25,6 +35,28 @@ export interface JevLoopState {
   wrongWrites: number;
   slowTurns: number;
   handoffReasons: Record<string, number>;
+  actionMemory: JevActionMemoryEntry[];
+}
+
+/** 目标标签：可见文字优先；不读取 type_text 的 value。 */
+export function actionMemoryTarget(args: Record<string, unknown> | undefined | null): string {
+  const label = String(
+    (args && (args.name || args.text || args.label || args.selector)) || ''
+  ).trim();
+  return label.slice(0, 60);
+}
+
+export function pushActionMemory(state: JevLoopState, entry: JevActionMemoryEntry): void {
+  if (!state || !Array.isArray(state.actionMemory)) return;
+  const clean: JevActionMemoryEntry = {
+    op: String(entry.op || '').slice(0, 40),
+    target: String(entry.target || '').slice(0, 60),
+    changed: entry.changed === true,
+    route: String(entry.route || '').slice(0, 80),
+    lane: entry.lane === 'fast' ? 'fast' : 'slow',
+  };
+  if (!clean.op) return;
+  state.actionMemory = [...state.actionMemory, clean].slice(-ACTION_MEMORY_LIMIT);
 }
 
 function nonNegativeInteger(value: unknown): number {
@@ -78,5 +110,18 @@ export function restoreJevLoopState(value: unknown): JevLoopState {
               .filter(([, count]) => Number(count) > 0)
           )
         : {},
+    actionMemory: Array.isArray(source.actionMemory)
+      ? (source.actionMemory as unknown[])
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          .map((item) => ({
+            op: String(item.op || '').slice(0, 40),
+            target: String(item.target || '').slice(0, 60),
+            changed: item.changed === true,
+            route: String(item.route || '').slice(0, 80),
+            lane: item.lane === 'fast' ? 'fast' as const : 'slow' as const,
+          }))
+          .filter((item) => Boolean(item.op))
+          .slice(-ACTION_MEMORY_LIMIT)
+      : [],
   };
 }

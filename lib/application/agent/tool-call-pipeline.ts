@@ -22,6 +22,8 @@ import { EVIDENCE_READ_TOOLS, evidenceAfter } from './verification-policy.ts';
 import { visionMessagesFor } from './vision.ts';
 import { imageCapNote, shouldSendImage } from './vision.ts';
 import { sanitizeLoneSurrogates, sliceSafe } from '../../shared/surrogates.ts';
+import { isPageActionTool } from './action-lanes.ts';
+import { actionMemoryTarget, pushActionMemory } from './jev-loop-state.ts';
 import {
   appendMissingToolResults,
   describeToolFailure,
@@ -487,6 +489,21 @@ export class ToolCallPipeline {
           afterSnapshot: traceAfterSnapshot,
           lane,
         });
+        // JEV 的“最近动作”记忆：两个 lane 都记，只存标签与结果，不存输入值。
+        if (isPageActionTool(toolCall.name)) {
+          pushActionMemory(state.jevLoop, {
+            op: toolCall.name,
+            target: actionMemoryTarget(toolCall.args as Record<string, unknown>),
+            changed: Boolean(
+              traceBeforeSnapshot &&
+                state.ctx.lastSnapshot &&
+                String(traceBeforeSnapshot.fingerprint || '') !==
+                  String(state.ctx.lastSnapshot.fingerprint || '')
+            ),
+            route: String((traceBeforeSnapshot as any)?.atomSignature || '').split('#')[0] || '',
+            lane,
+          });
+        }
       } catch {}
       state.messages.push({
         role: 'tool',

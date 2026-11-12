@@ -11,6 +11,7 @@ import type { PlanStep } from './types.ts';
 import { isRiskyTargetLabel, isHintTargetLabel } from './action-risk.ts';
 import type { CandidateMatch, CandidateMatchLevel, Edge, Evidence } from './trace-graph-types.ts';
 import { bindSlots, evaluatePhiMinus } from './trace-graph.ts';
+import type { JevActionMemoryEntry } from './jev-loop-state.ts';
 
 export const JEV_OPERATION_QUESTION = 'operation';
 export const JEV_CLICK_TARGET_QUESTION = 'click_target';
@@ -144,6 +145,8 @@ export interface JevFastContext {
   plan?: PlanStep[];
   planVersion?: number;
   leaseRemaining?: number | null;
+  /** 本次运行的动作历史（fast + slow，最多 6 条）。 */
+  actionMemory?: JevActionMemoryEntry[];
 }
 
 export interface JevEdgeQuestionBundle {
@@ -350,6 +353,29 @@ function addChoice(
   };
 }
 
+export function describeActionHistory(
+  memory: JevActionMemoryEntry[] | undefined
+): { entries: Array<{ action: string; result: string; lane: string }>; note: string } {
+  const list = Array.isArray(memory) ? memory.slice(-5) : [];
+  const entries = list.map((item) => ({
+    action: String(item.op || '') + (item.target ? '「' + item.target + '」' : ''),
+    result: item.changed ? 'changed' : 'no-change',
+    lane: item.lane,
+  }));
+  const keys = list.map((item) => String(item.op || '') + '|' + String(item.target || ''));
+  let note = '';
+  if (
+    keys.length >= 3 &&
+    keys[keys.length - 1] === keys[keys.length - 3] &&
+    keys[keys.length - 2] !== keys[keys.length - 1]
+  ) {
+    note = '最近三个动作是 A→B→A：不要重复 A 或 B，除非页面出现了新证据';
+  } else if (list.length >= 2 && list.slice(-2).every((item) => !item.changed)) {
+    note = '最近两个动作都没有改变页面：换目标或换动作，不要原样重试';
+  }
+  return { entries, note };
+}
+
 export function buildJevFastRequest(
   settings: JevPolicySettings,
   context: JevFastContext
@@ -511,6 +537,7 @@ export function buildJevFastRequest(
     };
   }
   const elements = elementSpace.elements;
+  const actionHistory = describeActionHistory(context.actionMemory);
   const request: JevSystemOneRequest = {
     model: settings.model,
     state: {
@@ -547,6 +574,8 @@ export function buildJevFastRequest(
       } : null,
       elements,
       recentActions: (context.recentTools || []).slice(-10),
+      actionHistory: actionHistory.entries,
+      historyNote: actionHistory.note,
     },
     questions,
   };
@@ -631,6 +660,8 @@ export function buildJevEdgeRequest(
     successPredicate?: string;
     /** 由调用方算好的结构匹配层级；缺省按 name 档渲染，不伪造更高层级。 */
     candidateMatches?: Record<string, CandidateMatch>;
+    /** 本次运行的动作历史（fast + slow）。 */
+    actionMemory?: JevActionMemoryEntry[];
   }
 ): JevEdgeQuestionBundle {
   const candidates = Array.isArray(context.candidates) ? context.candidates : [];
@@ -678,7 +709,8 @@ export function buildJevEdgeRequest(
     ].filter(Boolean).join('；');
   }
   criteria[JEV_EDGE_ABSTAIN] =
-    '没有一条候选边符合当前子目标：全部停在 name 匹配层，或某条边的录制前置条件被当前观察明确否定；交给慢思考，不产生任何动作。';
+    '没有一条候选边符合当前子目标：全部停在 name 匹配层，或某条边的录制前置条件被当前观察明确否定，或最近动作已证明唯一契合的目标刚试过且无进展；交给慢思考，不产生任何动作。';
+  const actionHistory = describeActionHistory(context.actionMemory);
   const request: JevSystemOneRequest = {
     model: settings.model,
     state: {
@@ -725,6 +757,8 @@ export function buildJevEdgeRequest(
             dialog: context.observation.dialog,
           }
         : null,
+      actionHistory: actionHistory.entries,
+      historyNote: actionHistory.note,
     },
     questions: {
       [JEV_EDGE_QUESTION]: {
@@ -741,7 +775,7 @@ export function buildJevEdgeRequest(
               : '',
             'A recorded edge is evidence, not authorization. If a slot is unresolved, choose ABSTAIN.',
             'Do not infer task values, historical defaults, selectors, or user preferences.',
-            'ABSTAIN only when no candidate fits: every candidate is stuck at match=name, or a candidate\'s recorded precondition is marked ✗ by the observation.',
+            'ABSTAIN only when no candidate fits: every candidate is stuck at match=name, a candidate\'s recorded precondition is marked ✗ by the observation, or the recent action history shows the only fitting candidate was just tried without progress.',
             'When a candidate fits the current subgoal, choose it and report confidence honestly; do not abstain merely because a precondition is not restated in prose.',
           ].filter(Boolean),
         },

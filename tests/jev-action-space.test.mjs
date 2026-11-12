@@ -10,6 +10,7 @@ import {
   JEV_OPERATION_QUESTION,
   buildJevFastRequest,
   compareJevShadowAction,
+  describeActionHistory,
   formatJevDecisionSummary,
   interpretJevFastDecision,
 } from '../lib/application/agent/jev-action-space.ts';
@@ -853,4 +854,55 @@ test('同一 blocked 路由冷却，页面变化后允许重新尝试', async ()
   state.toolCallCount += 1;
   await controller.runAvailable(2, async () => {});
   assert.equal(calls, 2);
+});
+
+test('动作历史渲染成紧凑表，并识别 A→B→A', () => {
+  const memory = [
+    { op: 'click_element', target: '搜索', changed: true, route: 'PageA', lane: 'fast' },
+    { op: 'click_element', target: 'Full-text search', changed: true, route: 'PageA', lane: 'fast' },
+    { op: 'click_element', target: '搜索', changed: false, route: 'PageA', lane: 'fast' },
+  ];
+  const { entries, note } = describeActionHistory(memory);
+  assert.equal(entries.length, 3);
+  assert.equal(entries[0].action, 'click_element「搜索」');
+  assert.equal(entries[0].result, 'changed');
+  assert.equal(entries[2].result, 'no-change');
+  assert.match(note, /A→B→A/);
+});
+
+test('连续两次无变化时历史提示换目标', () => {
+  const { note } = describeActionHistory([
+    { op: 'click_element', target: 'A', changed: false, route: 'PageA', lane: 'fast' },
+    { op: 'click_element', target: 'B', changed: false, route: 'PageA', lane: 'fast' },
+  ]);
+  assert.match(note, /没有改变页面/);
+});
+
+test('JEV 请求携带 actionHistory，恢复运行状态时限长保留', () => {
+  const bundle = buildJevFastRequest({ model: 'jev-latest' }, {
+    intent: 'browser_task',
+    phase: 'editor',
+    instruction: '搜索',
+    pageUrl: 'https://example.com/editor',
+    pageTitle: 'Editor',
+    pageText: '搜索',
+    snapshot: pageSnapshot(),
+    actionMemory: [
+      { op: 'click_element', target: '搜索', changed: false, route: 'Editor', lane: 'fast' },
+    ],
+  });
+  assert.equal(bundle.request.state.actionHistory.length, 1);
+  assert.equal(bundle.request.state.actionHistory[0].action, 'click_element「搜索」');
+
+  const restored = restoreJevLoopState({
+    actionMemory: Array.from({ length: 10 }, (_, index) => ({
+      op: 'click_element',
+      target: 'T' + index,
+      changed: index % 2 === 0,
+      route: 'Editor',
+      lane: 'fast',
+    })),
+  });
+  assert.equal(restored.actionMemory.length, 6, '恢复时也只保留最近 6 条');
+  assert.equal(restored.actionMemory.at(-1).target, 'T9');
 });

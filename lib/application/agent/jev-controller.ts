@@ -412,6 +412,7 @@ export class JevFastController {
       plan: this.state.ctx.plan,
       planVersion: this.state.ctx.planVersion,
       leaseRemaining: this.planLeaseRemaining(),
+      actionMemory: this.state.jevLoop.actionMemory,
     });
     this.recordDiagnostic({
       state: 'deciding',
@@ -906,6 +907,7 @@ export class JevFastController {
       slots: graphSlots,
       planStep: planStep?.text,
       successPredicate: planStep?.successPredicate,
+      actionMemory: this.state.jevLoop.actionMemory,
     });
     const startedAt = Date.now();
     let response: JevSystemOneResponse;

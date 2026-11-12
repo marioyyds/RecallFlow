@@ -63,6 +63,26 @@ export function isReadOnlyTool(name: unknown): boolean {
   return OBSERVATION_TOOLS.has(text) || READ_ONLY_EXTRA.has(text);
 }
 
+/** 会改变页面/浏览器状态的动作（进入 JEV 的动作历史）。 */
+export const PAGE_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  'click_element',
+  'click_at',
+  'type_text',
+  'press_key',
+  'select_option',
+  'check_box',
+  'scroll_page',
+  'hover_element',
+  'open_tab',
+  'switch_tab',
+  'run_javascript',
+  'upload_file',
+]);
+
+export function isPageActionTool(name: unknown): boolean {
+  return PAGE_ACTION_TOOLS.has(String(name || ''));
+}
+
 export function isSlowOnlyTool(name: unknown): boolean {
   return SLOW_ONLY_TOOLS.has(String(name || ''));
 }

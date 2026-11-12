@@ -11641,6 +11641,25 @@ function buildInitialMessagesPure(input = {}) {
 // lib/application/agent/jev-loop-state.ts
 var JEV_HARD_MAX_ATTEMPTS_PER_RUN = 200;
 var JEV_HARD_MAX_CONSECUTIVE_ACTIONS = 50;
+var ACTION_MEMORY_LIMIT = 6;
+function actionMemoryTarget(args) {
+  const label = String(
+    args && (args.name || args.text || args.label || args.selector) || ""
+  ).trim();
+  return label.slice(0, 60);
+}
+function pushActionMemory(state2, entry) {
+  if (!state2 || !Array.isArray(state2.actionMemory)) return;
+  const clean = {
+    op: String(entry.op || "").slice(0, 40),
+    target: String(entry.target || "").slice(0, 60),
+    changed: entry.changed === true,
+    route: String(entry.route || "").slice(0, 80),
+    lane: entry.lane === "fast" ? "fast" : "slow"
+  };
+  if (!clean.op) return;
+  state2.actionMemory = [...state2.actionMemory, clean].slice(-ACTION_MEMORY_LIMIT);
+}
 function nonNegativeInteger(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
@@ -11678,7 +11697,14 @@ function restoreJevLoopState(value) {
     slowTurns: nonNegativeInteger(source.slowTurns),
     handoffReasons: source.handoffReasons && typeof source.handoffReasons === "object" && !Array.isArray(source.handoffReasons) ? Object.fromEntries(
       Object.entries(source.handoffReasons).map(([key, count2]) => [key.slice(0, 80), nonNegativeInteger(count2)]).filter(([, count2]) => Number(count2) > 0)
-    ) : {}
+    ) : {},
+    actionMemory: Array.isArray(source.actionMemory) ? source.actionMemory.filter((item) => Boolean(item) && typeof item === "object").map((item) => ({
+      op: String(item.op || "").slice(0, 40),
+      target: String(item.target || "").slice(0, 60),
+      changed: item.changed === true,
+      route: String(item.route || "").slice(0, 80),
+      lane: item.lane === "fast" ? "fast" : "slow"
+    })).filter((item) => Boolean(item.op)).slice(-ACTION_MEMORY_LIMIT) : []
   };
 }
 
@@ -13157,6 +13183,50 @@ function visionMessagesFor(screenshots, options = {}) {
   return msg ? [msg] : [];
 }
 
+// lib/application/agent/action-lanes.ts
+var FAST_EDGE_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "scroll_page",
+  "wait_for_element"
+]);
+var OBSERVATION_TOOLS = /* @__PURE__ */ new Set([
+  "get_page_snapshot",
+  "read_current_page",
+  "read_table",
+  "get_ax_snapshot",
+  "inspect_element",
+  "read_diagnostics",
+  "list_frames",
+  "list_tabs"
+]);
+var READ_ONLY_EXTRA = /* @__PURE__ */ new Set([
+  "fetch_webpage",
+  "knowledge_read",
+  "web_search",
+  "take_screenshot"
+]);
+function isReadOnlyTool(name) {
+  const text2 = String(name || "");
+  return OBSERVATION_TOOLS.has(text2) || READ_ONLY_EXTRA.has(text2);
+}
+var PAGE_ACTION_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "click_at",
+  "type_text",
+  "press_key",
+  "select_option",
+  "check_box",
+  "scroll_page",
+  "hover_element",
+  "open_tab",
+  "switch_tab",
+  "run_javascript",
+  "upload_file"
+]);
+function isPageActionTool(name) {
+  return PAGE_ACTION_TOOLS.has(String(name || ""));
+}
+
 // lib/application/agent/agent-messages.ts
 function describeToolFailure(e, toolName) {
   const name = String(toolName || "");
@@ -13235,7 +13305,7 @@ var MUTATING_PAGE_TOOLS = /* @__PURE__ */ new Set([
   "macro",
   "undo_last_action"
 ]);
-var OBSERVATION_TOOLS = /* @__PURE__ */ new Set([
+var OBSERVATION_TOOLS2 = /* @__PURE__ */ new Set([
   "read_current_page",
   "get_page_snapshot",
   "inspect_element",
@@ -13349,7 +13419,7 @@ function captureXhsPublicationEvidence(ctx, toolName, beforeUrl, result) {
     delete state2.character;
   }
   const historyUrl = isNoteManager(afterUrl) ? afterUrl : isNoteManager(String(beforeUrl || "")) ? String(beforeUrl || "") : "";
-  if (historyUrl && OBSERVATION_TOOLS.has(toolName) && result?.ok !== false) {
+  if (historyUrl && OBSERVATION_TOOLS2.has(toolName) && result?.ok !== false) {
     const text2 = [resultText(result), ctxText(ctx)].filter(Boolean).join("\n");
     if (hasHistoryEvidence(text2)) {
       state2.history = {
@@ -13770,6 +13840,17 @@ var ToolCallPipeline = class {
           afterSnapshot: traceAfterSnapshot,
           lane
         });
+        if (isPageActionTool(toolCall.name)) {
+          pushActionMemory(state2.jevLoop, {
+            op: toolCall.name,
+            target: actionMemoryTarget(toolCall.args),
+            changed: Boolean(
+              traceBeforeSnapshot && state2.ctx.lastSnapshot && String(traceBeforeSnapshot.fingerprint || "") !== String(state2.ctx.lastSnapshot.fingerprint || "")
+            ),
+            route: String(traceBeforeSnapshot?.atomSignature || "").split("#")[0] || "",
+            lane
+          });
+        }
       } catch {
       }
       state2.messages.push({
@@ -14458,6 +14539,22 @@ function addChoice(operations, operation, description, options = {}) {
     minBranchConfidence: options.minBranchConfidence ?? 0
   };
 }
+function describeActionHistory(memory) {
+  const list = Array.isArray(memory) ? memory.slice(-5) : [];
+  const entries = list.map((item) => ({
+    action: String(item.op || "") + (item.target ? "\u300C" + item.target + "\u300D" : ""),
+    result: item.changed ? "changed" : "no-change",
+    lane: item.lane
+  }));
+  const keys = list.map((item) => String(item.op || "") + "|" + String(item.target || ""));
+  let note = "";
+  if (keys.length >= 3 && keys[keys.length - 1] === keys[keys.length - 3] && keys[keys.length - 2] !== keys[keys.length - 1]) {
+    note = "\u6700\u8FD1\u4E09\u4E2A\u52A8\u4F5C\u662F A\u2192B\u2192A\uFF1A\u4E0D\u8981\u91CD\u590D A \u6216 B\uFF0C\u9664\u975E\u9875\u9762\u51FA\u73B0\u4E86\u65B0\u8BC1\u636E";
+  } else if (list.length >= 2 && list.slice(-2).every((item) => !item.changed)) {
+    note = "\u6700\u8FD1\u4E24\u4E2A\u52A8\u4F5C\u90FD\u6CA1\u6709\u6539\u53D8\u9875\u9762\uFF1A\u6362\u76EE\u6807\u6216\u6362\u52A8\u4F5C\uFF0C\u4E0D\u8981\u539F\u6837\u91CD\u8BD5";
+  }
+  return { entries, note };
+}
 function buildJevFastRequest(settings, context) {
   const planStep = activePlanStep(context.plan);
   const hasOperationContract = Boolean(planStep) && Object.prototype.hasOwnProperty.call(planStep, "allowedOperations");
@@ -14582,6 +14679,7 @@ function buildJevFastRequest(settings, context) {
     };
   }
   const elements = elementSpace.elements;
+  const actionHistory = describeActionHistory(context.actionMemory);
   const request = {
     model: settings.model,
     state: {
@@ -14611,7 +14709,9 @@ function buildJevFastRequest(settings, context) {
         runtime: context.snapshot.runtime || null
       } : null,
       elements,
-      recentActions: (context.recentTools || []).slice(-10)
+      recentActions: (context.recentTools || []).slice(-10),
+      actionHistory: actionHistory.entries,
+      historyNote: actionHistory.note
     },
     questions
   };
@@ -14680,7 +14780,8 @@ function buildJevEdgeRequest(settings, context) {
       edgeEffectEvidence(edge)
     ].filter(Boolean).join("\uFF1B");
   }
-  criteria[JEV_EDGE_ABSTAIN] = "\u6CA1\u6709\u4E00\u6761\u5019\u9009\u8FB9\u7B26\u5408\u5F53\u524D\u5B50\u76EE\u6807\uFF1A\u5168\u90E8\u505C\u5728 name \u5339\u914D\u5C42\uFF0C\u6216\u67D0\u6761\u8FB9\u7684\u5F55\u5236\u524D\u7F6E\u6761\u4EF6\u88AB\u5F53\u524D\u89C2\u5BDF\u660E\u786E\u5426\u5B9A\uFF1B\u4EA4\u7ED9\u6162\u601D\u8003\uFF0C\u4E0D\u4EA7\u751F\u4EFB\u4F55\u52A8\u4F5C\u3002";
+  criteria[JEV_EDGE_ABSTAIN] = "\u6CA1\u6709\u4E00\u6761\u5019\u9009\u8FB9\u7B26\u5408\u5F53\u524D\u5B50\u76EE\u6807\uFF1A\u5168\u90E8\u505C\u5728 name \u5339\u914D\u5C42\uFF0C\u6216\u67D0\u6761\u8FB9\u7684\u5F55\u5236\u524D\u7F6E\u6761\u4EF6\u88AB\u5F53\u524D\u89C2\u5BDF\u660E\u786E\u5426\u5B9A\uFF0C\u6216\u6700\u8FD1\u52A8\u4F5C\u5DF2\u8BC1\u660E\u552F\u4E00\u5951\u5408\u7684\u76EE\u6807\u521A\u8BD5\u8FC7\u4E14\u65E0\u8FDB\u5C55\uFF1B\u4EA4\u7ED9\u6162\u601D\u8003\uFF0C\u4E0D\u4EA7\u751F\u4EFB\u4F55\u52A8\u4F5C\u3002";
+  const actionHistory = describeActionHistory(context.actionMemory);
   const request = {
     model: settings.model,
     state: {
@@ -14724,7 +14825,9 @@ function buildJevEdgeRequest(settings, context) {
         counters: context.observation.counters,
         controls: context.observation.controls.slice(0, 80),
         dialog: context.observation.dialog
-      } : null
+      } : null,
+      actionHistory: actionHistory.entries,
+      historyNote: actionHistory.note
     },
     questions: {
       [JEV_EDGE_QUESTION]: {
@@ -14737,7 +14840,7 @@ function buildJevEdgeRequest(settings, context) {
             context.successPredicate ? "The current step completes only when: " + clip2(context.successPredicate, 500) : "",
             "A recorded edge is evidence, not authorization. If a slot is unresolved, choose ABSTAIN.",
             "Do not infer task values, historical defaults, selectors, or user preferences.",
-            "ABSTAIN only when no candidate fits: every candidate is stuck at match=name, or a candidate's recorded precondition is marked \u2717 by the observation.",
+            "ABSTAIN only when no candidate fits: every candidate is stuck at match=name, a candidate's recorded precondition is marked \u2717 by the observation, or the recent action history shows the only fitting candidate was just tried without progress.",
             "When a candidate fits the current subgoal, choose it and report confidence honestly; do not abstain merely because a precondition is not restated in prose."
           ].filter(Boolean)
         },
@@ -14961,33 +15064,6 @@ function formatJevDecisionSummary(shadow, decision, latencyMs) {
   }
   const fallback = /确定性回退/.test(decision.description) ? "\uFF08\u53EA\u8BFB\u56DE\u9000\uFF09" : "";
   return prefix + "\uFF1A" + decision.operation + (decision.target ? " \u2192 " + decision.target.label : "") + fallback + "\uFF08" + Math.round(decision.confidence * 100) + "%\uFF0C" + Math.round(latencyMs) + "ms\uFF09";
-}
-
-// lib/application/agent/action-lanes.ts
-var FAST_EDGE_TOOLS = /* @__PURE__ */ new Set([
-  "click_element",
-  "scroll_page",
-  "wait_for_element"
-]);
-var OBSERVATION_TOOLS2 = /* @__PURE__ */ new Set([
-  "get_page_snapshot",
-  "read_current_page",
-  "read_table",
-  "get_ax_snapshot",
-  "inspect_element",
-  "read_diagnostics",
-  "list_frames",
-  "list_tabs"
-]);
-var READ_ONLY_EXTRA = /* @__PURE__ */ new Set([
-  "fetch_webpage",
-  "knowledge_read",
-  "web_search",
-  "take_screenshot"
-]);
-function isReadOnlyTool(name) {
-  const text2 = String(name || "");
-  return OBSERVATION_TOOLS2.has(text2) || READ_ONLY_EXTRA.has(text2);
 }
 
 // lib/application/agent/jev-diagnostics.ts
@@ -15294,7 +15370,8 @@ var JevFastController = class {
       recentTools: this.state.ranToolNames,
       plan: this.state.ctx.plan,
       planVersion: this.state.ctx.planVersion,
-      leaseRemaining: this.planLeaseRemaining()
+      leaseRemaining: this.planLeaseRemaining(),
+      actionMemory: this.state.jevLoop.actionMemory
     });
     this.recordDiagnostic({
       state: "deciding",
@@ -15687,7 +15764,8 @@ var JevFastController = class {
       observation: before,
       slots: graphSlots,
       planStep: planStep?.text,
-      successPredicate: planStep?.successPredicate
+      successPredicate: planStep?.successPredicate,
+      actionMemory: this.state.jevLoop.actionMemory
     });
     const startedAt = Date.now();
     let response;
