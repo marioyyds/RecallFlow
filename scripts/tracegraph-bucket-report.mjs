@@ -18,6 +18,7 @@
 //
 // 这是只读脚本：不读 chrome.storage，不改任何文件。没有真实导出时它只会空跑。
 import fs from 'node:fs';
+import { FAST_EDGE_TOOLS, OBSERVATION_TOOLS } from '../lib/application/agent/action-lanes.ts';
 
 function parseArgs(argv) {
   const args = { graph: '', storage: '', top: 20, json: false };
@@ -129,11 +130,14 @@ function report(graphs) {
     const siteKey = String(graph.siteKey || 'unknown');
     const edges = Array.isArray(graph.l1 && graph.l1.edges) ? graph.l1.edges : [];
     const records = Array.isArray(graph.records) ? graph.records : [];
-    const lanes = { fast: 0, slow: 0, unknown: 0 };
+    const lanes = { actFast: 0, actSlow: 0, obsFast: 0, obsSlow: 0, otherFast: 0, otherSlow: 0 };
     for (const record of records) {
-      if (record && record.lane === 'fast') lanes.fast += 1;
-      else if (record && record.lane === 'slow') lanes.slow += 1;
-      else lanes.unknown += 1;
+      if (!record) continue;
+      const lane = record.lane === 'fast' ? 'Fast' : 'Slow';
+      const tool = String(record.tool || '');
+      if (FAST_EDGE_TOOLS.has(tool)) lanes['act' + lane] += 1;
+      else if (OBSERVATION_TOOLS.has(tool)) lanes['obs' + lane] += 1;
+      else lanes['other' + lane] += 1;
     }
     laneStats.set(siteKey, lanes);
     const byState = new Map();
@@ -218,7 +222,9 @@ console.log('');
 for (const lane of result.lanes) {
   console.log(
     'lanes ' + lane.site +
-    ': fast=' + lane.fast + ' slow=' + lane.slow + ' unknown=' + lane.unknown
+    ': act fast=' + lane.actFast + ' slow=' + lane.actSlow +
+    ' | observe fast=' + lane.obsFast + ' slow=' + lane.obsSlow +
+    ' | other fast=' + lane.otherFast + ' slow=' + lane.otherSlow
   );
 }
 console.log('');

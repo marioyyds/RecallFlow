@@ -366,6 +366,9 @@ export const SKILL_REGISTRY = Object.freeze([
       intents: ['browser_task'],
       keywords: ['站内搜|站内检索|搜一下|搜索|检索', '结果|列表|条目|前几条'],
       tools: ['get_page_snapshot', 'type_text', 'click_element', 'wait_for_element', 'inspect_element', 'complete_task'],
+      // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
+      fastActions: ['CLICK', 'SCROLL_DOWN', 'WAIT'],
+      slowActions: ['type_text'],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: 'site-search',
     },
@@ -407,6 +410,9 @@ export const SKILL_REGISTRY = Object.freeze([
       intents: ['browser_task'],
       keywords: ['下单|购买|买|预约|报名|结账|结算', '表单|填写|提交|收货'],
       tools: ['get_page_snapshot', 'select_option', 'type_text', 'check_box', 'click_element', 'inspect_element', 'complete_task'],
+      // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
+      fastActions: ['SCROLL_DOWN', 'WAIT'],
+      slowActions: ['type_text', 'select_option', 'check_box', 'click_element'],
       playbook: 'checkout-form',
     },
   },

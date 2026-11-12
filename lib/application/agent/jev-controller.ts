@@ -28,6 +28,7 @@ import type { Evidence } from './trace-graph-types.ts';
 import type { PlanStep } from './types.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
+import { FAST_EDGE_TOOLS } from './action-lanes.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
 import { activePlanStep, planStepKey } from './plan-contract.ts';
 import {
@@ -251,7 +252,6 @@ export class JevFastController {
     iter: number,
     persist: (extra: Record<string, unknown>) => Promise<unknown>
   ): Promise<JevFastRunResult & { latencyMs?: number }> {
-    const settings = this.state.settings.jev;
     this.state.jevLoop.attempts += 1;
     this.state.jevLoop.lastAttemptAt = Date.now();
     this.state.jevLoop.lastToolCallCount = this.state.toolCallCount;
@@ -263,6 +263,23 @@ export class JevFastController {
     if (this.traceGraphActive()) {
       return this.runTraceGraphOnce(iter, persist, phase);
     }
+    return this.runOperationOnce(iter, persist, phase);
+  }
+
+  /**
+   * JEV operation 路径：CLICK / SCROLL_* / READ_* / WAIT。
+   * 当 traceGraph 开启但没有任何候选边时，它也作为快路回退被调用 ——
+   * 「页内机械动作交给快思考」靠的是这条路径，而不是“必须先有历史边”。
+   */
+  private async runOperationOnce(
+    iter: number,
+    persist: (extra: Record<string, unknown>) => Promise<unknown>,
+    phase: string,
+    options: { shadowMode?: boolean; fallback?: boolean } = {}
+  ): Promise<JevFastRunResult & { latencyMs?: number }> {
+    const settings = this.state.settings.jev;
+    const shadowMode = options.shadowMode ?? settings.shadowMode;
+    const fallback = options.fallback === true;
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -279,7 +296,7 @@ export class JevFastController {
     });
     this.recordDiagnostic({
       state: 'deciding',
-      mode: settings.shadowMode ? 'shadow' : 'live',
+      mode: shadowMode ? 'shadow' : 'live',
       outcome: 'awaiting-operation',
       phase,
     });
@@ -332,35 +349,37 @@ export class JevFastController {
     this.state.trace({
       phase: 'jev',
       iter,
-      mode: settings.shadowMode ? 'shadow' : 'live',
+      mode: shadowMode ? 'shadow' : 'live',
       phaseName: phase,
       model: response.model,
       decision,
       readFallback,
+      fallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
     this.state.emit({
       type: 'jev-decision',
-      mode: settings.shadowMode ? 'shadow' : 'live',
+      mode: shadowMode ? 'shadow' : 'live',
       phaseName: phase,
       decision,
       readFallback,
+      fallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
-      message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs),
+      message: formatJevDecisionSummary(shadowMode, decision, latencyMs),
     });
     this.recordDiagnostic({
-      state: settings.shadowMode
+      state: shadowMode
         ? 'shadow'
         : decision.kind === 'act'
           ? 'act'
           : decision.kind === 'done'
             ? 'handoff'
             : 'handoff',
-      mode: settings.shadowMode ? 'shadow' : 'live',
+      mode: shadowMode ? 'shadow' : 'live',
       outcome: decision.kind === 'act' ? decision.operation : decision.kind,
       reason: readFallback
         ? 'low-confidence-read-fallback'
@@ -374,7 +393,7 @@ export class JevFastController {
       latencyMs,
     });
 
-    if (settings.shadowMode) {
+    if (shadowMode) {
       this.state.jevLoop.consecutiveFastActions = 0;
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'shadow', decision, latencyMs };
@@ -586,7 +605,7 @@ export class JevFastController {
         edgeId: item.id,
       });
     }
-    const stateEdges = graph
+    const nominatedEdges = graph
       ? candidateEdges(graph, {
           siteKey: graph.siteKey,
           atomSignature: before.atomSignature,
@@ -594,6 +613,10 @@ export class JevFastController {
           executedEdges: new Set(this.state.jevLoop.executedEdges),
         })
       : [];
+    // 快路只处理页内机械动作（点击 / 滚动 / 等待）。文本输入、下拉、勾选需要值，
+    // 导航（open_tab）是跨页战略 —— 它们即使有边也不进快路候选。
+    const stateEdges = nominatedEdges.filter((edge) => FAST_EDGE_TOOLS.has(edge.action.tool));
+    const filteredSlowTools = nominatedEdges.length - stateEdges.length;
     const ranked = stateEdges
       .map((edge) => ({ edge, match: matchCandidate(edge, before) }))
       .sort(
@@ -678,6 +701,7 @@ export class JevFastController {
       iter,
       count: candidates.length,
       nominated: stateEdges.length,
+      filteredSlowTools,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -691,6 +715,7 @@ export class JevFastController {
       phase: 'candidates',
       count: candidates.length,
       nominated: stateEdges.length,
+      filteredSlowTools,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -703,16 +728,13 @@ export class JevFastController {
       // 「慢决定做什么，快决定在哪做」——省掉一次完整慢模型往返。
       const delegated = await this.tryDelegatedAction(iter, persist, planStep, before);
       if (delegated) return delegated;
-      const reason = tiered.length ? 'edge-target-missing' : 'edge-no-candidates';
-      this.traceEdgeHandoff(
-        iter,
-        reason,
-        tiered.length
-          ? '候选边的目标在当前快照里都无法唯一定位'
-          : '当前状态没有可用的已验证证据边'
-      );
-      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
-      return { kind: 'skipped', reason };
+      // 委托也没有：回退到 JEV operation 路径（CLICK / SCROLL / READ / WAIT）。
+      // 点击与滚动本来就是页内战术动作，不该因为「这个站点还没有历史边」而整轮交给慢模型。
+      const fallback = await this.runOperationOnce(iter, persist, phase, {
+        shadowMode: graphSettings.shadowMode,
+        fallback: true,
+      });
+      return fallback;
     }
 
     const bundle = buildJevEdgeRequest(settings.jev, {

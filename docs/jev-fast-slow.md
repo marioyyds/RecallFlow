@@ -39,6 +39,18 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 
 慢思考不再承担每一个可以直接执行的浏览器动作。JEV 每次最多执行一个操作，且只在 CLICK / 读取 / 滚动 / WAIT / DONE / BLOCKED 里选。**输入（TYPE_TEXT）不在它的动作空间里**：字段值一律由慢思考回合产生——要么写进指令 / PlanCard 的显式槽位（`@slot=value`），要么在其回合里直接调 `type_text` 工具。快路径不再有“生成一个值”的旁路。
 
+2026-11-12 起快路分成**两层**，按动作类别而不是“有没有历史边”决定：
+
+- **edge 层**：站点已有已验证证据时免 JEV 直接执行；候选只保留页内机械动作
+  （`click_element` / `scroll_page` / `wait_for_element`）。
+- **operation 回退层**：没有候选边（首访页面）时回退到 JEV operation 路径，
+  只执行 CLICK / SCROLL_* / READ_* / WAIT —— 每个动作一次 systemone，但省掉一轮慢模型 prefill。
+- **慢路**：文本输入（值只能来自当前指令）、导航（open_tab / switch_tab）、
+  `run_javascript` / `click_at` 等不可锚定动作，以及完成校验。
+
+技能可以在 SKILL.md 里声明分工（`x-recallflow-fast-actions` / `x-recallflow-slow-actions`），
+`load_skill` 会把它们写回给模型，并提示写入 `update_plan` 的 `allowedOperations`。
+
 ## 决策协议
 
 一次 System One 请求包含：

@@ -58,6 +58,17 @@ export async function loadSkill(deps: SkillDeps, args: Record<string, unknown>) 
   if (skill.description) parts.push('用途：' + skill.description);
   if (Array.isArray(skill.tags) && skill.tags.length) parts.push('标签：' + skill.tags.join('、'));
   if (skill.content) parts.push(skill.content);
+  const fastActions = Array.isArray((skill as any).fastActions) ? (skill as any).fastActions : [];
+  const slowActions = Array.isArray((skill as any).slowActions) ? (skill as any).slowActions : [];
+  if (fastActions.length || slowActions.length) {
+    parts.push(
+      '快慢分工（本技能）：快路只执行 ' + (fastActions.join(' / ') || '无') + '。' +
+        (slowActions.length
+          ? slowActions.join(' / ') + ' 必须由你（慢思考）亲自调用。'
+          : '') +
+        '用 update_plan 时把快路枚举写进当前步骤的 allowedOperations；值类动作不要交给快路。'
+    );
+  }
   // ⛔ **不要**把通用纪律底座拼进技能返回里 —— 实测它会造成退化（第 26 轮）。
   //
   // 实验（同一个场景、同一个模型、真模型 eval，见 docs/regression-red-flag.md）：

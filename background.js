@@ -2274,6 +2274,9 @@ var SKILL_REGISTRY = Object.freeze([
       intents: ["browser_task"],
       keywords: ["\u7AD9\u5185\u641C|\u7AD9\u5185\u68C0\u7D22|\u641C\u4E00\u4E0B|\u641C\u7D22|\u68C0\u7D22", "\u7ED3\u679C|\u5217\u8868|\u6761\u76EE|\u524D\u51E0\u6761"],
       tools: ["get_page_snapshot", "type_text", "click_element", "wait_for_element", "inspect_element", "complete_task"],
+      // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
+      fastActions: ["CLICK", "SCROLL_DOWN", "WAIT"],
+      slowActions: ["type_text"],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: "site-search"
     }
@@ -2293,6 +2296,9 @@ var SKILL_REGISTRY = Object.freeze([
       intents: ["browser_task"],
       keywords: ["\u4E0B\u5355|\u8D2D\u4E70|\u4E70|\u9884\u7EA6|\u62A5\u540D|\u7ED3\u8D26|\u7ED3\u7B97", "\u8868\u5355|\u586B\u5199|\u63D0\u4EA4|\u6536\u8D27"],
       tools: ["get_page_snapshot", "select_option", "type_text", "check_box", "click_element", "inspect_element", "complete_task"],
+      // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
+      fastActions: ["SCROLL_DOWN", "WAIT"],
+      slowActions: ["type_text", "select_option", "check_box", "click_element"],
       playbook: "checkout-form"
     }
   },
@@ -2948,7 +2954,9 @@ function mdToSkill(text2) {
   const x = {
     intents: Array.isArray(data["x-recallflow-intents"]) ? data["x-recallflow-intents"] : [],
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
-    tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : []
+    tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : [],
+    fastActions: Array.isArray(data["x-recallflow-fast-actions"]) ? data["x-recallflow-fast-actions"].map(String) : [],
+    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : []
   };
   return {
     name: typeof (data.name || data.slug) === "string" ? String(data.name || data.slug) : "",
@@ -2981,6 +2989,8 @@ function toRuntimeSkill(skill, builtin = false) {
       keywordStrings
     },
     tools: Array.isArray(x.tools) ? x.tools : [],
+    fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
+    slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
     builtin: !!builtin
   };
 }
@@ -8630,6 +8640,13 @@ async function loadSkill(deps, args) {
   if (skill.description) parts.push("\u7528\u9014\uFF1A" + skill.description);
   if (Array.isArray(skill.tags) && skill.tags.length) parts.push("\u6807\u7B7E\uFF1A" + skill.tags.join("\u3001"));
   if (skill.content) parts.push(skill.content);
+  const fastActions = Array.isArray(skill.fastActions) ? skill.fastActions : [];
+  const slowActions = Array.isArray(skill.slowActions) ? skill.slowActions : [];
+  if (fastActions.length || slowActions.length) {
+    parts.push(
+      "\u5FEB\u6162\u5206\u5DE5\uFF08\u672C\u6280\u80FD\uFF09\uFF1A\u5FEB\u8DEF\u53EA\u6267\u884C " + (fastActions.join(" / ") || "\u65E0") + "\u3002" + (slowActions.length ? slowActions.join(" / ") + " \u5FC5\u987B\u7531\u4F60\uFF08\u6162\u601D\u8003\uFF09\u4EB2\u81EA\u8C03\u7528\u3002" : "") + "\u7528 update_plan \u65F6\u628A\u5FEB\u8DEF\u679A\u4E3E\u5199\u8FDB\u5F53\u524D\u6B65\u9AA4\u7684 allowedOperations\uFF1B\u503C\u7C7B\u52A8\u4F5C\u4E0D\u8981\u4EA4\u7ED9\u5FEB\u8DEF\u3002"
+    );
+  }
   const toolWarnings = deps.validateSkillTools(skill);
   if (toolWarnings.length) {
     parts.push(
@@ -14885,6 +14902,13 @@ function formatJevDecisionSummary(shadow, decision, latencyMs) {
   return prefix + "\uFF1A" + decision.operation + (decision.target ? " \u2192 " + decision.target.label : "") + fallback + "\uFF08" + Math.round(decision.confidence * 100) + "%\uFF0C" + Math.round(latencyMs) + "ms\uFF09";
 }
 
+// lib/application/agent/action-lanes.ts
+var FAST_EDGE_TOOLS = /* @__PURE__ */ new Set([
+  "click_element",
+  "scroll_page",
+  "wait_for_element"
+]);
+
 // lib/application/agent/jev-diagnostics.ts
 var JEV_DIAGNOSTICS_KEY = "jevDiagnostics.v1";
 function defaultStorage() {
@@ -15053,7 +15077,6 @@ var JevFastController = class {
     return decisions.length ? { kind: "act", decisions, latencyMs, toolOutcomes } : { kind: "skipped", reason: skippedReason };
   }
   async runOnce(iter, persist) {
-    const settings = this.state.settings.jev;
     this.state.jevLoop.attempts += 1;
     this.state.jevLoop.lastAttemptAt = Date.now();
     this.state.jevLoop.lastToolCallCount = this.state.toolCallCount;
@@ -15065,6 +15088,17 @@ var JevFastController = class {
     if (this.traceGraphActive()) {
       return this.runTraceGraphOnce(iter, persist, phase);
     }
+    return this.runOperationOnce(iter, persist, phase);
+  }
+  /**
+   * JEV operation 路径：CLICK / SCROLL_* / READ_* / WAIT。
+   * 当 traceGraph 开启但没有任何候选边时，它也作为快路回退被调用 ——
+   * 「页内机械动作交给快思考」靠的是这条路径，而不是“必须先有历史边”。
+   */
+  async runOperationOnce(iter, persist, phase, options = {}) {
+    const settings = this.state.settings.jev;
+    const shadowMode = options.shadowMode ?? settings.shadowMode;
+    const fallback = options.fallback === true;
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -15081,7 +15115,7 @@ var JevFastController = class {
     });
     this.recordDiagnostic({
       state: "deciding",
-      mode: settings.shadowMode ? "shadow" : "live",
+      mode: shadowMode ? "shadow" : "live",
       outcome: "awaiting-operation",
       phase
     });
@@ -15124,36 +15158,38 @@ var JevFastController = class {
     this.state.trace({
       phase: "jev",
       iter,
-      mode: settings.shadowMode ? "shadow" : "live",
+      mode: shadowMode ? "shadow" : "live",
       phaseName: phase,
       model: response.model,
       decision,
       readFallback,
+      fallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens
     });
     this.state.emit({
       type: "jev-decision",
-      mode: settings.shadowMode ? "shadow" : "live",
+      mode: shadowMode ? "shadow" : "live",
       phaseName: phase,
       decision,
       readFallback,
+      fallback,
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
-      message: formatJevDecisionSummary(settings.shadowMode, decision, latencyMs)
+      message: formatJevDecisionSummary(shadowMode, decision, latencyMs)
     });
     this.recordDiagnostic({
-      state: settings.shadowMode ? "shadow" : decision.kind === "act" ? "act" : decision.kind === "done" ? "handoff" : "handoff",
-      mode: settings.shadowMode ? "shadow" : "live",
+      state: shadowMode ? "shadow" : decision.kind === "act" ? "act" : decision.kind === "done" ? "handoff" : "handoff",
+      mode: shadowMode ? "shadow" : "live",
       outcome: decision.kind === "act" ? decision.operation : decision.kind,
       reason: readFallback ? "low-confidence-read-fallback" : decision.kind === "blocked" ? decision.reason : decision.kind === "done" ? "done-claim" : void 0,
       phase,
       tool: decision.kind === "act" ? decision.toolName : void 0,
       latencyMs
     });
-    if (settings.shadowMode) {
+    if (shadowMode) {
       this.state.jevLoop.consecutiveFastActions = 0;
       await persist({ phase: "jev_decision" }).catch(() => {
       });
@@ -15322,12 +15358,14 @@ var JevFastController = class {
         edgeId: item.id
       });
     }
-    const stateEdges = graph ? candidateEdges(graph, {
+    const nominatedEdges = graph ? candidateEdges(graph, {
       siteKey: graph.siteKey,
       atomSignature: before.atomSignature,
       blockedEdgeIds: new Set(this.state.jevLoop.blockedEdgeIds),
       executedEdges: new Set(this.state.jevLoop.executedEdges)
     }) : [];
+    const stateEdges = nominatedEdges.filter((edge2) => FAST_EDGE_TOOLS.has(edge2.action.tool));
+    const filteredSlowTools = nominatedEdges.length - stateEdges.length;
     const ranked = stateEdges.map((edge2) => ({ edge: edge2, match: matchCandidate(edge2, before) })).sort(
       (a, b) => MATCH_LEVEL_RANK[a.match.level] - MATCH_LEVEL_RANK[b.match.level] || b.edge.provenance.verifiedAt - a.edge.provenance.verifiedAt
     );
@@ -15389,6 +15427,7 @@ var JevFastController = class {
       iter,
       count: candidates.length,
       nominated: stateEdges.length,
+      filteredSlowTools,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15402,6 +15441,7 @@ var JevFastController = class {
       phase: "candidates",
       count: candidates.length,
       nominated: stateEdges.length,
+      filteredSlowTools,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15412,15 +15452,11 @@ var JevFastController = class {
     if (!candidates.length) {
       const delegated = await this.tryDelegatedAction(iter, persist, planStep, before);
       if (delegated) return delegated;
-      const reason = tiered.length ? "edge-target-missing" : "edge-no-candidates";
-      this.traceEdgeHandoff(
-        iter,
-        reason,
-        tiered.length ? "\u5019\u9009\u8FB9\u7684\u76EE\u6807\u5728\u5F53\u524D\u5FEB\u7167\u91CC\u90FD\u65E0\u6CD5\u552F\u4E00\u5B9A\u4F4D" : "\u5F53\u524D\u72B6\u6001\u6CA1\u6709\u53EF\u7528\u7684\u5DF2\u9A8C\u8BC1\u8BC1\u636E\u8FB9"
-      );
-      await persist({ phase: "tracegraph_decision" }).catch(() => {
+      const fallback = await this.runOperationOnce(iter, persist, phase, {
+        shadowMode: graphSettings.shadowMode,
+        fallback: true
       });
-      return { kind: "skipped", reason };
+      return fallback;
     }
     const bundle = buildJevEdgeRequest(settings.jev, {
       intent: this.state.intent,

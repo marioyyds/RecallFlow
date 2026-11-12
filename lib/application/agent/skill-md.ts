@@ -89,6 +89,8 @@ export function serializeSkillMd(skill: SkillLike) {
   if (x.intents && x.intents.length) add('x-recallflow-intents', x.intents);
   if (x.keywords && x.keywords.length) add('x-recallflow-keywords', x.keywords);
   if (x.tools && x.tools.length) add('x-recallflow-tools', x.tools);
+  if (x.fastActions && x.fastActions.length) add('x-recallflow-fast-actions', x.fastActions);
+  if (x.slowActions && x.slowActions.length) add('x-recallflow-slow-actions', x.slowActions);
   lines.push('---', '', skill.content || '');
   return lines.join('\n');
 }
@@ -100,6 +102,12 @@ export function mdToSkill(text: string) {
     intents: Array.isArray(data['x-recallflow-intents']) ? data['x-recallflow-intents'] : [],
     keywords: Array.isArray(data['x-recallflow-keywords']) ? data['x-recallflow-keywords'] : [],
     tools: Array.isArray(data['x-recallflow-tools']) ? data['x-recallflow-tools'] : [],
+    fastActions: Array.isArray(data['x-recallflow-fast-actions'])
+      ? data['x-recallflow-fast-actions'].map(String)
+      : [],
+    slowActions: Array.isArray(data['x-recallflow-slow-actions'])
+      ? data['x-recallflow-slow-actions'].map(String)
+      : [],
   };
   return {
     name: typeof (data.name || data.slug) === 'string' ? String(data.name || data.slug) : '',
@@ -134,6 +142,8 @@ export function toRuntimeSkill(skill: SkillLike, builtin = false) {
       keywordStrings,
     },
     tools: Array.isArray(x.tools) ? x.tools : [],
+    fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
+    slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
     builtin: !!builtin,
   };
 }

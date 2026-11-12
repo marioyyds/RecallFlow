@@ -236,7 +236,11 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 // 每轮请求都携带同一份完整定义，不能再按意图持有四份体积预算。
 // 同日新增快照 query / cursor / region 参数（分页读取，避免首轮塞满 DOM），
 // 稳定工具面增加约 542 字符，因此显式上调到 42000。
-const SCHEMA_BYTES_BUDGET = 42000;
+// 2026-11-12：`update_plan` 每个 step 新增可选 `nextAction` 对象（tool/role/name/
+// text/selector/url/key/note）。它不是装饰字段：模型必须知道「name 要与页面
+// 可见文本完全一致、值类动作不许委托」，否则会写出无法 ground 的委托。
+// 实测 43046，显式上调到 43500；这是有意契约变化，不是无声膨胀。
+const SCHEMA_BYTES_BUDGET = 43500;
 
 test('工具定义体积不得超出预算（防 prompt 无声膨胀）', () => {
   const bytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');

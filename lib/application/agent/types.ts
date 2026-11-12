@@ -413,7 +413,15 @@ export interface SkillLike {
   version?: string;
   category?: string;
   skill_type?: string;
-  x?: { tools?: unknown[]; intents?: string[]; keywords?: string[] };
+  x?: {
+    tools?: unknown[];
+    intents?: string[];
+    keywords?: string[];
+    /** 技能声明的快路动作（PLAN_FAST_OPERATIONS 枚举）；不填表示沿用全局默认。 */
+    fastActions?: string[];
+    /** 技能要求留给慢思考的工具名（如 type_text / open_tab）。 */
+    slowActions?: string[];
+  };
   [key: string]: unknown;
 }
 

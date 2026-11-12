@@ -195,6 +195,9 @@ var SKILL_REGISTRY = Object.freeze([
       intents: ["browser_task"],
       keywords: ["\u7AD9\u5185\u641C|\u7AD9\u5185\u68C0\u7D22|\u641C\u4E00\u4E0B|\u641C\u7D22|\u68C0\u7D22", "\u7ED3\u679C|\u5217\u8868|\u6761\u76EE|\u524D\u51E0\u6761"],
       tools: ["get_page_snapshot", "type_text", "click_element", "wait_for_element", "inspect_element", "complete_task"],
+      // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
+      fastActions: ["CLICK", "SCROLL_DOWN", "WAIT"],
+      slowActions: ["type_text"],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: "site-search"
     }
@@ -214,6 +217,9 @@ var SKILL_REGISTRY = Object.freeze([
       intents: ["browser_task"],
       keywords: ["\u4E0B\u5355|\u8D2D\u4E70|\u4E70|\u9884\u7EA6|\u62A5\u540D|\u7ED3\u8D26|\u7ED3\u7B97", "\u8868\u5355|\u586B\u5199|\u63D0\u4EA4|\u6536\u8D27"],
       tools: ["get_page_snapshot", "select_option", "type_text", "check_box", "click_element", "inspect_element", "complete_task"],
+      // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
+      fastActions: ["SCROLL_DOWN", "WAIT"],
+      slowActions: ["type_text", "select_option", "check_box", "click_element"],
       playbook: "checkout-form"
     }
   },
@@ -888,6 +894,8 @@ function serializeSkillMd(skill) {
   if (x.intents && x.intents.length) add("x-recallflow-intents", x.intents);
   if (x.keywords && x.keywords.length) add("x-recallflow-keywords", x.keywords);
   if (x.tools && x.tools.length) add("x-recallflow-tools", x.tools);
+  if (x.fastActions && x.fastActions.length) add("x-recallflow-fast-actions", x.fastActions);
+  if (x.slowActions && x.slowActions.length) add("x-recallflow-slow-actions", x.slowActions);
   lines.push("---", "", skill.content || "");
   return lines.join("\n");
 }
@@ -896,7 +904,9 @@ function mdToSkill(text) {
   const x = {
     intents: Array.isArray(data["x-recallflow-intents"]) ? data["x-recallflow-intents"] : [],
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
-    tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : []
+    tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : [],
+    fastActions: Array.isArray(data["x-recallflow-fast-actions"]) ? data["x-recallflow-fast-actions"].map(String) : [],
+    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : []
   };
   return {
     name: typeof (data.name || data.slug) === "string" ? String(data.name || data.slug) : "",
@@ -929,6 +939,8 @@ function toRuntimeSkill(skill, builtin = false) {
       keywordStrings
     },
     tools: Array.isArray(x.tools) ? x.tools : [],
+    fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
+    slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
     builtin: !!builtin
   };
 }
@@ -5960,6 +5972,13 @@ async function loadSkill(deps, args) {
   if (skill.description) parts.push("\u7528\u9014\uFF1A" + skill.description);
   if (Array.isArray(skill.tags) && skill.tags.length) parts.push("\u6807\u7B7E\uFF1A" + skill.tags.join("\u3001"));
   if (skill.content) parts.push(skill.content);
+  const fastActions = Array.isArray(skill.fastActions) ? skill.fastActions : [];
+  const slowActions = Array.isArray(skill.slowActions) ? skill.slowActions : [];
+  if (fastActions.length || slowActions.length) {
+    parts.push(
+      "\u5FEB\u6162\u5206\u5DE5\uFF08\u672C\u6280\u80FD\uFF09\uFF1A\u5FEB\u8DEF\u53EA\u6267\u884C " + (fastActions.join(" / ") || "\u65E0") + "\u3002" + (slowActions.length ? slowActions.join(" / ") + " \u5FC5\u987B\u7531\u4F60\uFF08\u6162\u601D\u8003\uFF09\u4EB2\u81EA\u8C03\u7528\u3002" : "") + "\u7528 update_plan \u65F6\u628A\u5FEB\u8DEF\u679A\u4E3E\u5199\u8FDB\u5F53\u524D\u6B65\u9AA4\u7684 allowedOperations\uFF1B\u503C\u7C7B\u52A8\u4F5C\u4E0D\u8981\u4EA4\u7ED9\u5FEB\u8DEF\u3002"
+    );
+  }
   const toolWarnings = deps.validateSkillTools(skill);
   if (toolWarnings.length) {
     parts.push(

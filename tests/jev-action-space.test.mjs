@@ -655,7 +655,7 @@ test('JEV 返回未被提供的 TYPE_TEXT 时移交慢思考，不执行任何�
   );
 });
 
-test('edge grounding 找不到目标时在请求前跳过：不付 systemone、也不封边', async () => {
+test('edge 目标缺失时不执行动作；回退 operation 再决定', async () => {
   const state = makeState(false);
   state.settings.traceGraph = { enabled: true, mode: 'live', shadowMode: false };
   state.ctx.lastSnapshot = pageSnapshot({ fingerprint: 'fp-1' });
@@ -697,7 +697,7 @@ test('edge grounding 找不到目标时在请求前跳过：不付 systemone、�
       return {
         model: 'jev-latest',
         usage: { input_tokens: 1, output_tokens: 1 },
-        answers: { edge: { type: 'choice', choice: edge.id, confidence: 0.95 } },
+        answers: { operation: { type: 'choice', choice: 'BLOCKED', confidence: 0.9 } },
       };
     },
     () => {},
@@ -705,15 +705,15 @@ test('edge grounding 找不到目标时在请求前跳过：不付 systemone、�
   );
   const outcome = await controller.runAvailable(0, async () => {});
   assert.equal(outcome.kind, 'skipped');
-  assert.equal(outcome.reason, 'edge-target-missing');
+  // 边候选被目标预过滤清空后，回退 operation 判断 BLOCKED，才交回慢思考。
+  assert.equal(outcome.reason, 'model-blocked');
   // 目标缺失可能只是瞬时收起（菜单/面板），所以**不封边**：本 run 内下一 cycle
   // 目标出现时还能再挑到它。
   assert.deepEqual(state.jevLoop.blockedEdgeIds, [], '预过滤失败不封边');
-  assert.equal(state.jevLoop.handoffReasons['edge-target-missing'], 1);
+  assert.equal(state.jevLoop.handoffReasons['model-blocked'], 1);
   assert.ok(!calls.includes('click_element'), 'grounding 失败不得执行任何动作：' + calls.join(','));
-  // 2026-11-12：grounding 提前到请求之前。目标在当前快照里定位不到时直接封边，
-  // 一次 systemone 都不花 —— 旧行为是先问 JEV、选中后才失败（jevCalls === 1）。
-  assert.equal(jevCalls, 0);
+  // 回到回退路径后仍会问一次 operation；这不掩盖“边候选 0 也能有快路”的事实。
+  assert.equal(jevCalls, 1);
 });
 
 test('子目标动作租约限制连续快动作，计划版本更新后重新开租约', async () => {

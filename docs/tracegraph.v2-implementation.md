@@ -118,6 +118,29 @@ live edge 的置信度实测落在 0.3–0.5，且候选数 >5。归因不是门
   元素，补拍一次（300ms，仅一次，`tracegraph-settle`），避免把导航后的未挂载误判成
   「没有可复用证据」。
 
+## 2026-11-12 快慢分工：按动作类别，而不是按“有没有边”
+
+真实轨迹（7 个站点、194 条记录）里 fast 沉的 83 条记录只有 1 条是动作，其余全是
+`get_page_snapshot`：快路在无候选边时直接 handoff，而真正能执行页内点击的 JEV
+operation 路径被 edge 分支整个跳过了。据此改成两层快路 + 一条慢路：
+
+- **快路 A（edge）**：有已验证边时免 JEV 直接执行。候选只保留 `FAST_EDGE_TOOLS`
+  （click_element / scroll_page / wait_for_element）；`type_text`、`select_option`、
+  `check_box`、`press_key`、`open_tab` 即使有边也不进快路候选（计数 `filteredSlowTools`）。
+- **快路 B（operation 回退）**：无候选边且无委托时调用 `runOperationOnce`（就是原来的
+  JEV operation 路径：CLICK / SCROLL_* / READ_* / WAIT），每个动作一次 systemone，
+  但省掉一轮慢模型 prefill。trace 标 `fallback: true`。
+- **慢路**：文本输入（值只能来自当前指令）、导航（open_tab / switch_tab）、
+  `run_javascript` / `click_at` 等不可锚定动作。
+- **shadow 统一**：traceGraph 开启时，edge 与 operation 回退都按 `traceGraph.shadowMode`
+  执行；`jev.shadowMode` 只对 traceGraph 未开启的旧 operation-only 模式生效，避免
+  「traceGraph live 但回退只做影子」的静默不一致。
+- **skill 契约**：SKILL.md 可声明 `x-recallflow-fast-actions`（PLAN_FAST_OPERATIONS
+  枚举）与 `x-recallflow-slow-actions`（工具名）；`load_skill` 会把分工写回给模型，
+  提示它在 `update_plan` 里写进 `allowedOperations`。
+- **度量**：`tracegraph-bucket-report` 按动作类别拆成 `act fast/slow`、
+  `observe fast/slow`、`other fast/slow`，不再把观察记录和动作记录混成一个数。
+
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），
   计入 `filteredTargetMissing`，handoff 记为 `edge-target-missing`，一次 systemone 都不花。

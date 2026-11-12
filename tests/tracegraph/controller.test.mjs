@@ -170,8 +170,30 @@ function abstainResponse(confidence = 0.9) {
   };
 }
 
+function operationBlockedResponse(confidence = 0.9) {
+  return {
+    model: 'jev',
+    answers: { operation: { type: 'choice', choice: 'BLOCKED', confidence } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
+function operationClickResponse(request) {
+  const targets = request && request.questions && request.questions.click_target;
+  const key = targets ? Object.keys(targets.criteria)[0] : '1';
+  return {
+    model: 'jev',
+    answers: {
+      operation: { type: 'choice', choice: 'CLICK', confidence: 0.99 },
+      click_target: { type: 'choice', choice: key, confidence: 0.99 },
+    },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
 test('委托动作：慢模型写计划的那一轮就完成一次点击，不调 JEV', async () => {
   const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1; // 只跑这一步，避免后续回退再调 JEV
   state.ctx.plan = [{
     id: 'p1',
     text: '点创建按钮',
@@ -220,19 +242,19 @@ test('委托动作目标不唯一时不动手，清空后交回慢思考', async
   }];
   state.ctx.planVersion = 1;
   const graph = emptyTraceGraph('https://gitcode.com');
-  const calls = [];
   const controller = new JevFastController(
     state,
     pipelineFor(state),
     new AbortController().signal,
-    async () => edgeResponse('e.create'),
+    async () => operationBlockedResponse(),
     async () => {},
     async () => graph
   );
   const outcome = await controller.runAvailable(0, async () => {});
   assert.equal(outcome.kind, 'skipped');
-  assert.equal(outcome.reason, 'edge-no-candidates');
-  assert.equal(calls.includes('click_element'), false);
+  // 委托被拒后回退到 operation；operation 判断 BLOCKED，才交回慢思考。
+  assert.equal(outcome.reason, 'model-blocked');
+  assert.equal(state.ranToolNames.includes('click_element'), false);
   assert.equal(state.ctx.plan[0].nextAction, undefined);
   assert.ok(
     state.traces.some((entry) => entry.phase === 'delegate-action' && entry.decision === 'REJECT')
@@ -310,7 +332,8 @@ test('open_tab 指向当前 URL 时不执行（no-op 导航）', async () => {
   assert.equal(outcome.kind, 'skipped');
   assert.equal(calls.some((call) => call.name === 'open_tab'), false);
   const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
-  assert.equal(trace.filteredNoopNavigation, 1);
+  // open_tab 已经不进快路候选（导航是慢路）；它被算在 filteredSlowTools 里。
+  assert.equal(trace.filteredSlowTools, 1);
 });
 
 test('同一状态有 full 页内动作时，open_tab 候选让位', async () => {
@@ -344,18 +367,20 @@ test('同一状态有 full 页内动作时，open_tab 候选让位', async () =>
   const criteria = request.questions[JEV_EDGE_QUESTION].criteria;
   assert.deepEqual(Object.keys(criteria), ['e.create', 'ABSTAIN']);
   const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
-  assert.equal(trace.prunedNavigation, 1);
+  assert.equal(trace.filteredSlowTools, 1);
 });
 
 test('open_tab 后页面未挂载时补一次观察（settle）', async () => {
   const state = stateFor(false);
-  const { graph } = graphWithEdge({
-    id: 'e.open',
-    g: 'open_tab 「/elsewhere」',
-    action: { tool: 'open_tab', argsTemplate: { url: 'https://gitcode.com/elsewhere' }, risk: 'low' },
-    slots: [],
-    s: { semanticAnchor: { kind: 'selector', urlPattern: '/elsewhere' } },
-  });
+  state.settings.jev.maxConsecutiveActions = 1;
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '打开新页',
+    status: 'in_progress',
+    nextAction: { tool: 'open_tab', url: 'https://gitcode.com/elsewhere' },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
   let opened = false;
   let observesAfterOpen = 0;
   const controller = new JevFastController(
@@ -380,7 +405,9 @@ test('open_tab 后页面未挂载时补一次观察（settle）', async () => {
       },
     },
     new AbortController().signal,
-    async () => edgeResponse('e.open'),
+    async () => {
+      throw new Error('委托 open_tab 不该调用 JEV');
+    },
     async () => {},
     async () => graph
   );
@@ -390,7 +417,41 @@ test('open_tab 后页面未挂载时补一次观察（settle）', async () => {
   assert.ok(state.traces.some((entry) => entry.phase === 'tracegraph-settle'));
 });
 
-test('no-candidates 不触发路由冷却：慢思考动过一步后快路会再试', async () => {
+test('无候选边时回退到 operation：CLICK 直接执行，不交回慢思考', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async (_settings, request) => {
+      jevCalls += 1;
+      return operationClickResponse(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(jevCalls, 1, '回退路径仍要一次 systemone');
+  const click = calls.find((call) => call.name === 'click_element');
+  assert.ok(click, '点击必须真的执行');
+  assert.equal(state.ranToolNames.includes('click_element'), true);
+  assert.ok(
+    state.traces.some((entry) => entry.phase === 'jev' && entry.fallback === true),
+    'trace 必须标明这是 operation 回退'
+  );
+});
+
+test('operation 判 BLOCKED 时做路由冷却，页面指纹变化后解除', async () => {
   const state = stateFor(false);
   const graph = emptyTraceGraph('https://gitcode.com');
   let jevCalls = 0;
@@ -400,19 +461,23 @@ test('no-candidates 不触发路由冷却：慢思考动过一步后快路会再
     new AbortController().signal,
     async () => {
       jevCalls += 1;
-      return edgeResponse('e.create');
+      return operationBlockedResponse();
     },
     async () => {},
     async () => graph
   );
   const first = await controller.runAvailable(0, async () => {});
-  assert.equal(first.reason, 'edge-no-candidates');
-  // 模拟慢思考执行了一个工具（页面结构未变，路由键相同）。
+  assert.equal(first.reason, 'model-blocked');
+
   state.toolCallCount += 1;
-  const second = await controller.runAvailable(1, async () => {});
-  assert.notEqual(second.reason, 'route-cooldown', '没证据不是路由级失败，必须允许再试');
-  assert.equal(second.reason, 'edge-no-candidates');
-  assert.equal(jevCalls, 0);
+  const cooled = await controller.runAvailable(1, async () => {});
+  assert.equal(cooled.reason, 'route-cooldown');
+  assert.equal(jevCalls, 1);
+
+  state.ctx.lastSnapshot = snapshot('fp-2');
+  const changed = await controller.runAvailable(2, async () => {});
+  assert.equal(changed.reason, 'model-blocked');
+  assert.equal(jevCalls, 2, '指纹一变就必须解除冷却');
 });
 
 test('选不出时做路由冷却，页面指纹变化后自动解除', async () => {
@@ -617,7 +682,7 @@ test('目标在当前快照里不存在时，候选边在请求前就被过滤�
   assert.equal(trace.filteredTargetMissing, 1);
 });
 
-test('全部候选目标都定位不到时不调用 JEV，交回慢思考', async () => {
+test('页内候选目标都定位不到时不执行边动作；回退 operation 也交回', async () => {
   const state = stateFor(false);
   const { graph } = graphWithEdge({
     s: { semanticAnchor: { role: 'button', name: 'MissingButton' } },
@@ -629,16 +694,18 @@ test('全部候选目标都定位不到时不调用 JEV，交回慢思考', asyn
     new AbortController().signal,
     async () => {
       calls += 1;
-      return edgeResponse('e.create');
+      return operationBlockedResponse();
     },
     async () => {},
     async () => graph
   );
   const outcome = await controller.runAvailable(0, async () => {});
-  assert.equal(calls, 0);
+  assert.equal(calls, 1, '预过滤清空边候选后，回退 operation 仍会问一次 JEV');
   assert.equal(outcome.kind, 'skipped');
-  assert.equal(outcome.reason, 'edge-target-missing');
+  assert.equal(outcome.reason, 'model-blocked');
   assert.equal(state.ranToolNames.includes('click_element'), false);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.filteredTargetMissing, 1);
   // 让位提示不能写成“页面故障”，否则慢模型会把它读成“还没加载完”并重拍快照
   // （RF-XKJ4M7 实测）。它必须明确：非页面故障 + 不要等待/重读。
   const note = state.messages.filter((message) => message.role === 'system').at(-1);
