@@ -115,6 +115,7 @@ export class JevFastController {
   private lastAttempt: { key: string; url: string; toolCalls: number; ranCount: number } | null = null;
   private lastHintLabel = '';
   private lastNoProgress: { signature: string; count: number } | null = null;
+  private lastEdgeFallbackRoute = '';
   private toolSequence = 0;
 
   constructor(
@@ -146,6 +147,7 @@ export class JevFastController {
       this.blockedRoute = null;
       this.lastHandoffNotice = null;
       this.lastAttempt = null;
+      this.lastEdgeFallbackRoute = '';
       this.state.trace({
         phase: 'jev-plan',
         planVersion: version,
@@ -939,6 +941,32 @@ export class JevFastController {
         reason: decision.reason,
         confidence: decision.confidence || 0,
       });
+      // 有候选但“拿不准”不等于没有可执行动作。计划步骤授权了 ≥1 个快路操作、
+      // 且同一路由还没补过时，回退到 operation 路径再决策一次（一次 systemone），
+      // 而不是把整轮交给慢模型。2026-11-12 站内搜索：abstain 把可复用的
+      // 「搜索」点击丢给了慢路。
+      const planAllowsFast = !(
+        Array.isArray(planStep?.allowedOperations) && planStep.allowedOperations.length === 0
+      );
+      const canFallback =
+        (decision.reason === 'abstain' || decision.reason === 'low-confidence') &&
+        planAllowsFast &&
+        this.lastEdgeFallbackRoute !== this.currentRouteKey();
+      if (canFallback) {
+        this.lastEdgeFallbackRoute = this.currentRouteKey();
+        this.state.trace({
+          phase: 'edge-fallback',
+          iter,
+          reason: decision.reason,
+          state: stateName || '',
+          planStep: planStep?.id || '',
+        });
+        const fallback = await this.runOperationOnce(iter, persist, phase, {
+          shadowMode: graphSettings.shadowMode,
+          fallback: true,
+        });
+        return fallback;
+      }
       this.traceEdgeHandoff(
         iter,
         'edge-' + decision.reason,

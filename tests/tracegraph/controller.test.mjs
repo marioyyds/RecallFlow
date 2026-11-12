@@ -697,6 +697,86 @@ test('选不出时做路由冷却；指纹变化但只读时不唤醒，动作�
     state,
     pipelineFor(state),
     new AbortController().signal,
+    async (_settings, request) => {
+      jevCalls += 1;
+      if (request.questions && request.questions[JEV_EDGE_QUESTION]) return abstainResponse();
+      return operationBlockedResponse();
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'model-blocked', 'edge abstain 后回退 operation，也被拦');
+  assert.equal(jevCalls, 2, '一次边决策 + 一次回退决策');
+
+  state.toolCallCount += 1;
+  const cooled = await controller.runAvailable(1, async () => {});
+  assert.equal(cooled.reason, 'route-cooldown');
+  assert.equal(jevCalls, 2, '同一视图不该重复付 systemone');
+
+  state.ctx.lastSnapshot = snapshot('fp-2');
+  state.toolCallCount += 1;
+  state.ranToolNames.push('read_current_page');
+  const readOnly = await controller.runAvailable(2, async () => {});
+  assert.equal(readOnly.reason, 'no-page-change');
+  assert.equal(jevCalls, 2);
+
+  state.toolCallCount += 1;
+  state.ranToolNames.push('click_element');
+  const changed = await controller.runAvailable(3, async () => {});
+  assert.equal(changed.reason, 'model-blocked');
+  assert.equal(jevCalls, 4, '慢思考真正动了页面才允许再试，且每条路由各补一次');
+});
+
+test('edge abstain 时回退 operation 再决策一次（同一路由只补一次）', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const { graph } = graphWithEdge();
+  const calls = [];
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async (_settings, request) => {
+      jevCalls += 1;
+      if (request.questions && request.questions[JEV_EDGE_QUESTION]) {
+        return abstainResponse();
+      }
+      return operationClickResponse(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(jevCalls, 2, '先问边、再问 operation');
+  const click = calls.find((call) => call.name === 'click_element');
+  assert.ok(click, 'abstain 不该把可执行动作整轮丢给慢思考');
+  assert.equal(click.args.ref, 'rf-create');
+  assert.ok(state.traces.some((entry) => entry.phase === 'edge-fallback'));
+});
+
+test('计划步骤明确禁止快动作时，edge abstain 不回退 operation', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '只读，不许操作页面',
+    status: 'in_progress',
+    allowedOperations: [],
+  }];
+  state.ctx.planVersion = 1;
+  const { graph } = graphWithEdge();
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
     async () => {
       jevCalls += 1;
       return abstainResponse();
@@ -704,27 +784,10 @@ test('选不出时做路由冷却；指纹变化但只读时不唤醒，动作�
     async () => {},
     async () => graph
   );
-  const first = await controller.runAvailable(0, async () => {});
-  assert.equal(first.reason, 'edge-abstain');
-  assert.equal(jevCalls, 1);
-
-  state.toolCallCount += 1;
-  const cooled = await controller.runAvailable(1, async () => {});
-  assert.equal(cooled.reason, 'route-cooldown');
-  assert.equal(jevCalls, 1, '同一视图不该重复付 systemone');
-
-  state.ctx.lastSnapshot = snapshot('fp-2');
-  state.toolCallCount += 1;
-  state.ranToolNames.push('read_current_page');
-  const readOnly = await controller.runAvailable(2, async () => {});
-  assert.equal(readOnly.reason, 'no-page-change');
-  assert.equal(jevCalls, 1);
-
-  state.toolCallCount += 1;
-  state.ranToolNames.push('click_element');
-  const changed = await controller.runAvailable(3, async () => {});
-  assert.equal(changed.reason, 'edge-abstain');
-  assert.equal(jevCalls, 2, '慢思考真正动了页面才允许再试');
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'edge-abstain');
+  assert.equal(jevCalls, 1, '计划禁止快动作时不再多问一次');
 });
 
 test('同一视图同一原因的让位提示不重复塞进模型上下文', async () => {

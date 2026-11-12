@@ -198,6 +198,21 @@ CSDN 发布按钮被禁用时，快照里的元素名是「填写标题才可自
 - **委托名称容错**：`nextAction.name` 允许唯一前缀匹配控件可见文字
   （「请输入文章标题」↔「请输入文章标题（5~100个字）」），歧义时仍拒绝。
 
+## 2026-11-12 edge abstain 回退 operation
+
+连续几轮轨迹里，`nextAction` 几乎没有被写过（模型倾向于在同一轮里自己动手），
+但 `edge-abstain` / `edge-low-confidence` 频繁出现：候选边存在、JEV 没把握，
+于是整轮交给慢思考——站内搜索的「搜索」点击就是这样丢掉的。
+
+- 决策被 `abstain` 或 `low-confidence` 拦下时，如果当前计划步骤没有显式禁止快动作
+  （`allowedOperations` 不是空数组），且**同一路由还没补过**，就回退到 operation
+  路径再决策一次（`edge-fallback` trace，一次 systemone），而不是直接 handoff。
+- 用 `lastEdgeFallbackRoute` 限定每路由一次；重新规划会清空。
+- 计划 `allowedOperations: []` 的步骤不触发回退——技能/计划说“本步只读”时，
+  快路不得再自行找动作。
+- 这样“快路授权”来自计划的 `allowedOperations`，不再依赖模型写 `nextAction`；
+  委托保留为可选能力（被写了就用，唯一前缀容错）。
+
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），
   计入 `filteredTargetMissing`，handoff 记为 `edge-target-missing`，一次 systemone 都不花。

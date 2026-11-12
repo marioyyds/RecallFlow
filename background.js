@@ -15056,6 +15056,7 @@ var JevFastController = class {
   lastAttempt = null;
   lastHintLabel = "";
   lastNoProgress = null;
+  lastEdgeFallbackRoute = "";
   toolSequence = 0;
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic, loadGraph = loadTraceGraph) {
     this.state = state2;
@@ -15077,6 +15078,7 @@ var JevFastController = class {
       this.blockedRoute = null;
       this.lastHandoffNotice = null;
       this.lastAttempt = null;
+      this.lastEdgeFallbackRoute = "";
       this.state.trace({
         phase: "jev-plan",
         planVersion: version,
@@ -15722,6 +15724,23 @@ var JevFastController = class {
         reason: decision.reason,
         confidence: decision.confidence || 0
       });
+      const planAllowsFast = !(Array.isArray(planStep?.allowedOperations) && planStep.allowedOperations.length === 0);
+      const canFallback = (decision.reason === "abstain" || decision.reason === "low-confidence") && planAllowsFast && this.lastEdgeFallbackRoute !== this.currentRouteKey();
+      if (canFallback) {
+        this.lastEdgeFallbackRoute = this.currentRouteKey();
+        this.state.trace({
+          phase: "edge-fallback",
+          iter,
+          reason: decision.reason,
+          state: stateName || "",
+          planStep: planStep?.id || ""
+        });
+        const fallback = await this.runOperationOnce(iter, persist, phase, {
+          shadowMode: graphSettings.shadowMode,
+          fallback: true
+        });
+        return fallback;
+      }
       this.traceEdgeHandoff(
         iter,
         "edge-" + decision.reason,
