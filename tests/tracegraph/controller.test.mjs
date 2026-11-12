@@ -790,6 +790,65 @@ test('计划步骤明确禁止快动作时，edge abstain 不回退 operation', 
   assert.equal(jevCalls, 1, '计划禁止快动作时不再多问一次');
 });
 
+test('两个动作来回切换时停止（action-loop）', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 6;
+  state.settings.jev.maxRepeatedActionsWithoutProgress = 5;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  state.ctx.lastSnapshot.elements.push({
+    tag: 'button',
+    role: 'button',
+    label: 'ToggleB',
+    ref: 'rf-b',
+    selector: '#b',
+    inViewport: true,
+  });
+  let jevCalls = 0;
+  let fingerprint = 'fp-1';
+  const clicks = [];
+  const pipeline = {
+    async process(step) {
+      for (const call of step.toolCalls) {
+        state.toolCallCount += 1;
+        state.ranToolNames.push(call.name);
+        if (call.name === 'click_element') {
+          clicks.push(String(call.args.ref || call.args.selector || ''));
+          // 每次点击都“有变化”（弹层开/关），所以无进展护栏不触发。
+          fingerprint = fingerprint === 'fp-1' ? 'fp-2' : 'fp-1';
+          state.ctx.lastSnapshot = { ...state.ctx.lastSnapshot, fingerprint };
+        }
+      }
+      return { kind: 'continue', toolMs: 1 };
+    },
+  };
+  const controller = new JevFastController(
+    state,
+    pipeline,
+    new AbortController().signal,
+    async (_settings, request) => {
+      jevCalls += 1;
+      const keys = Object.keys(request.questions.click_target.criteria);
+      const key = keys[jevCalls % 2] || keys[0];
+      return {
+        model: 'jev',
+        answers: {
+          operation: { type: 'choice', choice: 'CLICK', confidence: 0.99 },
+          click_target: { type: 'choice', choice: key, confidence: 0.99 },
+        },
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(outcome.decisions.length, 3, '第四次会形成 A→B→A→B，必须停');
+  assert.equal(clicks.length, 3);
+  assert.equal(state.jevLoop.handoffReasons['action-loop'], 1);
+  assert.equal(state.jevLoop.lastOutcome, 'action-loop');
+});
+
 test('同一视图同一原因的让位提示不重复塞进模型上下文', async () => {
   const state = stateFor(false);
   const graph = emptyTraceGraph('https://gitcode.com');

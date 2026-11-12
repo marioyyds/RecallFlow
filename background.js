@@ -15057,6 +15057,8 @@ var JevFastController = class {
   lastHintLabel = "";
   lastNoProgress = null;
   lastEdgeFallbackRoute = "";
+  // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
+  recentActions = [];
   toolSequence = 0;
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic, loadGraph = loadTraceGraph) {
     this.state = state2;
@@ -15415,6 +15417,16 @@ var JevFastController = class {
       });
       return { kind: "skipped", reason: "repeated-action", latencyMs };
     }
+    const cycleKey = this.actionKeyForOperation(action);
+    if (this.wouldCycle(cycleKey)) {
+      loop.consecutiveFastActions = 0;
+      loop.sameActionStreak = 0;
+      loop.lastOutcome = "action-loop";
+      this.appendBlocked(iter, "action-loop", "\u4E24\u4E2A\u52A8\u4F5C\u5728\u6765\u56DE\u5207\u6362\uFF0C\u6CA1\u6709\u63A8\u8FDB\u76EE\u6807");
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "action-loop", latencyMs };
+    }
     if (action.operation === "WAIT") {
       await sleep2(100);
       const failuresBeforeWaitObservation = this.state.failedToolNames.length;
@@ -15489,6 +15501,7 @@ var JevFastController = class {
       });
       return { kind: "skipped", reason: "tool-failure-limit", latencyMs };
     }
+    this.noteActionKey(cycleKey);
     return {
       kind: "act",
       decisions: [decision],
@@ -15817,6 +15830,21 @@ var JevFastController = class {
       operationConfidence: decision.confidence,
       targetConfidence: null
     };
+    const edgeActionKey = "edge:" + edge.id;
+    if (this.wouldCycle(edgeActionKey)) {
+      const partner = this.recentActions[this.recentActions.length - 2];
+      this.addBlockedEdge(edge.id);
+      if (partner && partner.startsWith("edge:")) this.addBlockedEdge(partner.slice(5));
+      this.state.trace({
+        phase: "tracegraph-edge",
+        iter,
+        edgeId: edge.id,
+        decision: "BLOCK",
+        reason: "action-loop"
+      });
+      this.traceEdgeHandoff(iter, "edge-action-loop", edge.g);
+      return { kind: "skipped", reason: "edge-action-loop", latencyMs };
+    }
     const failuresBefore = this.state.failedToolNames.length;
     const outcome = await this.processTool(iter, persist, action, {
       skipApproval: true
@@ -15846,6 +15874,7 @@ var JevFastController = class {
       this.traceEdgeHandoff(iter, "edge-no-progress", edge.g);
       return { kind: "skipped", reason: "edge-no-progress", latencyMs };
     }
+    this.noteActionKey(edgeActionKey);
     this.state.jevLoop.executedEdges = [
       .../* @__PURE__ */ new Set([...this.state.jevLoop.executedEdges, edge.id])
     ].slice(-64);
@@ -15980,6 +16009,9 @@ var JevFastController = class {
       return "\u8FDE\u7EED\u6267\u884C\u540C\u4E00\u52A8\u4F5C\u540E\u9875\u9762\u6CA1\u6709\u53D8\u5316\uFF0C\u7EE7\u7EED\u70B9\u6CA1\u6709\u610F\u4E49";
     }
     if (reason === "edge-high-risk") return "\u8BE5\u52A8\u4F5C\u5C5E\u4E8E\u53D1\u5E03/\u5220\u9664/\u652F\u4ED8\u7C7B\u9AD8\u98CE\u9669\u64CD\u4F5C\uFF0C\u5FC5\u987B\u7531\u6162\u601D\u8003\u786E\u8BA4";
+    if (reason === "edge-action-loop" || reason === "action-loop") {
+      return "\u4E24\u4E2A\u52A8\u4F5C\u5728\u6765\u56DE\u5207\u6362\uFF08A\u2192B\u2192A\u2192B\uFF09\uFF0C\u7EE7\u7EED\u6267\u884C\u4E0D\u4F1A\u63A8\u8FDB\u76EE\u6807";
+    }
     if (reason === "edge-low-confidence") return "\u5019\u9009\u52A8\u4F5C\u7684\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF0C\u5FEB\u8DEF\u5F84\u4E3B\u52A8\u8BA9\u4F4D";
     if (reason === "edge-invalid-answer") return "\u51B3\u7B56\u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548\u9009\u9879\uFF0C\u5FEB\u8DEF\u5F84\u4E0D\u5192\u9669";
     if (reason === "edge-unbound-slots") return "\u5F53\u524D\u6307\u4EE4\u7F3A\u5C11\u8BE5\u52A8\u4F5C\u9700\u8981\u7684\u663E\u5F0F\u53C2\u6570\u503C";
@@ -16107,6 +16139,24 @@ var JevFastController = class {
     this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastOutcome = "delegate-act";
     return { kind: "act", decisions: [action], latencyMs: 0, toolOutcomes: [outcome, observed] };
+  }
+  /**
+     * 来回切换检测：最近三次是 A、B、A，而本次又要执行 B —— 这会形成 A→B→A→B。
+     * 2026-11-12 HuggingFace：搜索框与「Full-text search」开关互相点击 6 次，
+     * 每次指纹都变（弹层开关），无进展护栏抓不住，只能靠这个模式识别。
+     */
+  wouldCycle(key) {
+    const recent = this.recentActions.slice(-3);
+    return recent.length === 3 && recent[0] === recent[2] && key === recent[1];
+  }
+  noteActionKey(key) {
+    this.recentActions = [...this.recentActions, key].slice(-10);
+  }
+  actionKeyForOperation(action) {
+    const label = String(action.description || "").trim();
+    if (label) return "op:" + label;
+    const args = action.args || {};
+    return "op:" + action.operation + ":" + String(args.selector || args.ref || "");
   }
   appendBlocked(iter, reason, detail = "") {
     const key = this.currentRouteKey();

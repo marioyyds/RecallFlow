@@ -116,6 +116,8 @@ export class JevFastController {
   private lastHintLabel = '';
   private lastNoProgress: { signature: string; count: number } | null = null;
   private lastEdgeFallbackRoute = '';
+  // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
+  private recentActions: string[] = [];
   private toolSequence = 0;
 
   constructor(
@@ -569,6 +571,15 @@ export class JevFastController {
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'repeated-action', latencyMs };
     }
+    const cycleKey = this.actionKeyForOperation(action);
+    if (this.wouldCycle(cycleKey)) {
+      loop.consecutiveFastActions = 0;
+      loop.sameActionStreak = 0;
+      loop.lastOutcome = 'action-loop';
+      this.appendBlocked(iter, 'action-loop', '两个动作在来回切换，没有推进目标');
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'action-loop', latencyMs };
+    }
 
     if (action.operation === 'WAIT') {
       await sleep(100);
@@ -658,6 +669,7 @@ export class JevFastController {
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'tool-failure-limit', latencyMs };
     }
+    this.noteActionKey(cycleKey);
     return {
       kind: 'act',
       decisions: [decision],
@@ -1054,6 +1066,21 @@ export class JevFastController {
       operationConfidence: decision.confidence,
       targetConfidence: null,
     };
+    const edgeActionKey = 'edge:' + edge.id;
+    if (this.wouldCycle(edgeActionKey)) {
+      const partner = this.recentActions[this.recentActions.length - 2];
+      this.addBlockedEdge(edge.id);
+      if (partner && partner.startsWith('edge:')) this.addBlockedEdge(partner.slice(5));
+      this.state.trace({
+        phase: 'tracegraph-edge',
+        iter,
+        edgeId: edge.id,
+        decision: 'BLOCK',
+        reason: 'action-loop',
+      });
+      this.traceEdgeHandoff(iter, 'edge-action-loop', edge.g);
+      return { kind: 'skipped', reason: 'edge-action-loop', latencyMs };
+    }
     const failuresBefore = this.state.failedToolNames.length;
     const outcome = await this.processTool(iter, persist, action, {
       skipApproval: true,
@@ -1085,6 +1112,7 @@ export class JevFastController {
       this.traceEdgeHandoff(iter, 'edge-no-progress', edge.g);
       return { kind: 'skipped', reason: 'edge-no-progress', latencyMs };
     }
+    this.noteActionKey(edgeActionKey);
 
     this.state.jevLoop.executedEdges = [
       ...new Set([...this.state.jevLoop.executedEdges, edge.id]),
@@ -1251,6 +1279,9 @@ private handoffExplanation(reason: string): string {
     return '连续执行同一动作后页面没有变化，继续点没有意义';
   }
   if (reason === 'edge-high-risk') return '该动作属于发布/删除/支付类高风险操作，必须由慢思考确认';
+  if (reason === 'edge-action-loop' || reason === 'action-loop') {
+    return '两个动作在来回切换（A→B→A→B），继续执行不会推进目标';
+  }
   if (reason === 'edge-low-confidence') return '候选动作的置信度不足，快路径主动让位';
   if (reason === 'edge-invalid-answer') return '决策服务返回了无效选项，快路径不冒险';
   if (reason === 'edge-unbound-slots') return '当前指令缺少该动作需要的显式参数值';
@@ -1391,7 +1422,28 @@ private async tryDelegatedAction(
   return { kind: 'act', decisions: [action], latencyMs: 0, toolOutcomes: [outcome, observed] };
 }
 
-private appendBlocked(
+/**
+   * 来回切换检测：最近三次是 A、B、A，而本次又要执行 B —— 这会形成 A→B→A→B。
+   * 2026-11-12 HuggingFace：搜索框与「Full-text search」开关互相点击 6 次，
+   * 每次指纹都变（弹层开关），无进展护栏抓不住，只能靠这个模式识别。
+   */
+  private wouldCycle(key: string): boolean {
+    const recent = this.recentActions.slice(-3);
+    return recent.length === 3 && recent[0] === recent[2] && key === recent[1];
+  }
+
+  private noteActionKey(key: string): void {
+    this.recentActions = [...this.recentActions, key].slice(-10);
+  }
+
+  private actionKeyForOperation(action: JevFastAction): string {
+    const label = String(action.description || '').trim();
+    if (label) return 'op:' + label;
+    const args = action.args || {};
+    return 'op:' + action.operation + ':' + String(args.selector || args.ref || '');
+  }
+
+  private appendBlocked(
     iter: number,
     reason: string,
     detail = ''

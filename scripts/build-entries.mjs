@@ -131,7 +131,9 @@ export const ENTRIES = [
   // measured 1126253 bytes (1099.9KB). Raise to 1100KB.
   // Same day: skill plan templates + planning rule measured 1129490 bytes
   // (1103.0KB). Raise to 1104KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1104 * 1024 },
+  // Same day: abstain fallback + action-loop guard measured 1132706 bytes
+  // (1106.2KB). Raise to 1108KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1108 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
