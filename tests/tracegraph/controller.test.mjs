@@ -159,6 +159,94 @@ function edgeResponse(edgeId, abstainProbability = 0.02) {
   };
 }
 
+function abstainResponse(confidence = 0.9) {
+  return {
+    model: 'jev',
+    answers: {
+      [JEV_EDGE_QUESTION]: { type: 'choice', choice: 'ABSTAIN', confidence },
+    },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
+test('no-candidates 不触发路由冷却：慢思考动过一步后快路会再试', async () => {
+  const state = stateFor(false);
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => {
+      jevCalls += 1;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'edge-no-candidates');
+  // 模拟慢思考执行了一个工具（页面结构未变，路由键相同）。
+  state.toolCallCount += 1;
+  const second = await controller.runAvailable(1, async () => {});
+  assert.notEqual(second.reason, 'route-cooldown', '没证据不是路由级失败，必须允许再试');
+  assert.equal(second.reason, 'edge-no-candidates');
+  assert.equal(jevCalls, 0);
+});
+
+test('选不出时做路由冷却，页面指纹变化后自动解除', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge();
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => {
+      jevCalls += 1;
+      return abstainResponse();
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'edge-abstain');
+  assert.equal(jevCalls, 1);
+
+  state.toolCallCount += 1;
+  const cooled = await controller.runAvailable(1, async () => {});
+  assert.equal(cooled.reason, 'route-cooldown');
+  assert.equal(jevCalls, 1, '同一视图不该重复付 systemone');
+
+  state.ctx.lastSnapshot = snapshot('fp-2');
+  const changed = await controller.runAvailable(2, async () => {});
+  assert.equal(changed.reason, 'edge-abstain');
+  assert.equal(jevCalls, 2, '指纹一变就必须解除冷却');
+});
+
+test('同一视图同一原因的让位提示不重复塞进模型上下文', async () => {
+  const state = stateFor(false);
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => edgeResponse('e.create'),
+    async () => {},
+    async () => graph
+  );
+  await controller.runAvailable(0, async () => {});
+  state.toolCallCount += 1;
+  await controller.runAvailable(1, async () => {});
+  const notes = state.messages.filter(
+    (message) => message.role === 'system' && /非页面故障/.test(String(message.content || ''))
+  );
+  assert.equal(notes.length, 1, '第二次同路由同原因只记 trace，不再 push 提示');
+  const handoffs = state.traces.filter((entry) => entry.phase === 'jev-handoff');
+  assert.equal(handoffs.length, 2);
+  assert.equal(handoffs[1].repeatedNotice, true);
+});
+
 test('live TraceGraph：JEV 选边并 Grounding 后直接执行一个动作', async () => {
   const state = stateFor(false);
   const calls = [];

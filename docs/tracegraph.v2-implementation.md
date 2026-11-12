@@ -97,6 +97,13 @@ live edge 的置信度实测落在 0.3–0.5，且候选数 >5。归因不是门
 - 无名字目标：带位置伪类（`nth-of-type` 等）的 selector 不立边；其余 selector 只在能
   读出稳定属性（data-* / #id / .class）时立边，并把 `selector:<hint>` 作为 `g`。
   记录保留，审计可见。
+- 让位分级（2026-11-12 快慢配合）：只有 `edge-abstain` / `edge-low-confidence` /
+  `edge-invalid-answer` / `model-blocked` 做**路由级**冷却（等 fingerprint 或计划变化）；
+  `request-failed` / `observation-failed` 按 30 秒恢复；`edge-no-candidates` /
+  `edge-target-missing` 不做路由冷却 —— 慢思考动过一步后快路可以再试，这就是
+  teach-then-retry 的入口。冷却期内连快照都不拍。
+- 同一路由、同一原因、慢思考还没动过两步时，让位提示不再重复 push 进模型上下文
+  （trace 记 `repeatedNotice`，UI 与计数照常），避免上下文被重复提示挤占。
 
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），

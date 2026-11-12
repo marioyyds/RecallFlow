@@ -51,6 +51,25 @@ function sleep(ms: number): Promise<void> {
 // 这只是把「结构离当前更近的边」排在前面，不做语义打分，也不截断。
 const MATCH_LEVEL_RANK: Record<string, number> = { full: 0, static: 1, name: 2 };
 
+// 会触发**路由级**冷却的让位原因。区分原则：
+//   - 「没证据」（no-candidates）与「目标此刻不在」（target-missing）不是路由级失败：
+//     慢思考做一步之后应该允许快路再试一次，否则首访页面会整轮全慢。
+//   - 「有证据但选不出/服务失败」重试同一视图只会重复付 systemone，必须等页面
+//     或计划真正变化（routeKey 含 fingerprint，变化即自动解除）。
+const ROUTE_COOLDOWN_REASONS: ReadonlySet<string> = new Set([
+  'edge-abstain',
+  'edge-low-confidence',
+  'edge-invalid-answer',
+  'model-blocked',
+]);
+
+// 服务/观察失败允许按时间恢复，不必等页面变化。
+const TRANSIENT_FAILURE_REASONS: ReadonlySet<string> = new Set([
+  'request-failed',
+  'observation-failed',
+]);
+const TRANSIENT_FAILURE_COOLDOWN_MS = 30_000;
+
 /**
  * 结构分层裁剪：只有当存在 full 匹配时才只发 full。
  *
@@ -73,7 +92,8 @@ export class JevFastController {
   private readonly callSystemOne: typeof callJevSystemOne;
   private readonly writeDiagnostic: typeof writeJevDiagnostic;
   private readonly loadGraph: typeof loadTraceGraph;
-  private lastBlockedRoute = '';
+  private blockedRoute: { key: string; reason: string; toolCalls: number; at: number } | null = null;
+  private lastHandoffNotice: { key: string; reason: string; toolCalls: number } | null = null;
   private toolSequence = 0;
 
   constructor(
@@ -102,7 +122,8 @@ export class JevFastController {
       loop.planVersion = version;
       loop.planActions = 0;
       // A slow replan is a new execution attempt even when the same page stayed blocked.
-      this.lastBlockedRoute = '';
+      this.blockedRoute = null;
+      this.lastHandoffNotice = null;
       this.state.trace({
         phase: 'jev-plan',
         planVersion: version,
@@ -141,7 +162,24 @@ export class JevFastController {
     if (loop.consecutiveFastActions >= maxActions) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
-    if (this.lastBlockedRoute && this.currentRouteKey() === this.lastBlockedRoute) return false;
+    return true;
+  }
+
+  /**
+   * 路由级冷却是否仍然有效。
+   * - 路由键含 fingerprint：页面一变就自动解除；
+   * - 「选不出/选错了」必须等页面或计划变化，否则会对着同一视图重复付 systemone；
+   * - 服务/观察失败可以按时间恢复；
+   * - 「没证据」不设冷却，慢思考做一步后下一轮就能再试（teach-then-retry 的入口）。
+   */
+  private routeCooldownActive(): boolean {
+    const blocked = this.blockedRoute;
+    if (!blocked) return false;
+    if (blocked.key !== this.currentRouteKey()) return false;
+    if (TRANSIENT_FAILURE_REASONS.has(blocked.reason)) {
+      return Date.now() - blocked.at < TRANSIENT_FAILURE_COOLDOWN_MS;
+    }
+    if (!ROUTE_COOLDOWN_REASONS.has(blocked.reason)) return false;
     return true;
   }
 
@@ -163,6 +201,8 @@ export class JevFastController {
     persist: (extra: Record<string, unknown>) => Promise<unknown>
   ): Promise<JevFastRunResult> {
     if (!this.canAttempt()) return { kind: 'skipped', reason: 'not-due' };
+    // 冷却期连快照都不必拍：同一视图、同一原因重试只会白付一次 observe。
+    if (this.routeCooldownActive()) return { kind: 'skipped', reason: 'route-cooldown' };
     const failuresBeforeObservation = this.state.failedToolNames.length;
     const initial = await this.observePage(iter, persist);
     if (initial.kind === 'cancelled') return initial;
@@ -926,7 +966,22 @@ private appendBlocked(
     reason: string,
     detail = ''
   ): void {
-    this.lastBlockedRoute = this.currentRouteKey();
+    const key = this.currentRouteKey();
+    // 只有「有证据却选不出」才做路由级冷却；没证据/目标缺失只影响对应边，
+    // 否则首访页面第一次 no-candidates 之后整轮都唤不回快路。
+    this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason)
+      ? { key, reason, toolCalls: this.state.toolCallCount, at: Date.now() }
+      : null;
+    const previous = this.lastHandoffNotice;
+    // 同一视图、同一原因、慢思考还没动过两步时，不重复把提示塞进模型上下文；
+    // UI/trace 仍然记录每一次让位。
+    const repeatedNotice = Boolean(
+      previous &&
+      previous.key === key &&
+      previous.reason === reason &&
+      this.state.toolCallCount - previous.toolCalls <= 2
+    );
+    this.lastHandoffNotice = { key, reason, toolCalls: this.state.toolCallCount };
     this.state.jevLoop.handoffReasons[reason] =
       (this.state.jevLoop.handoffReasons[reason] || 0) + 1;
     this.state.trace({
@@ -934,6 +989,7 @@ private appendBlocked(
       iter,
       reason,
       detail,
+      repeatedNotice,
     });
     const explanation = this.handoffExplanation(reason);
     this.state.emit({
@@ -956,15 +1012,17 @@ private appendBlocked(
         this.state.ctx.lastSnapshot
       ),
     });
-    this.state.messages.push({
-      role: 'system',
-      content: [
-        '【内部提示 · 非页面故障】快路径让位给慢思考：' + explanation + '。',
-        detail ? '详情：' + detail : '',
-        '请按当前计划与最近一次真实工具结果继续操作。',
-        '不要因为这条提示而等待、重复读取页面或更换方案；也不要假设任何未执行的动作已经发生。',
-      ].filter(Boolean).join('\n'),
-    });
+    if (!repeatedNotice) {
+      this.state.messages.push({
+        role: 'system',
+        content: [
+          '【内部提示 · 非页面故障】快路径让位给慢思考：' + explanation + '。',
+          detail ? '详情：' + detail : '',
+          '请按当前计划与最近一次真实工具结果继续操作。',
+          '不要因为这条提示而等待、重复读取页面或更换方案；也不要假设任何未执行的动作已经发生。',
+        ].filter(Boolean).join('\n'),
+      });
+    }
   }
 
   private recordDiagnostic(

@@ -115,7 +115,9 @@ export const ENTRIES = [
   // 2026-11-12: rebuild-only merge (orphan edges pruned), case-folded state
   // names, before-url bucketing and the selector-hint policy measured 1100875
   // bytes (1075.1KB). Raise to 1076KB; no new dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1076 * 1024 },
+  // Same day: reason-tiered route cooldowns, teach-then-retry and notice
+  // dedupe measured 1102534 bytes (1076.7KB). Raise to 1078KB; no dependency.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1078 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

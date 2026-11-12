@@ -14847,6 +14847,17 @@ function sleep2(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 var MATCH_LEVEL_RANK = { full: 0, static: 1, name: 2 };
+var ROUTE_COOLDOWN_REASONS = /* @__PURE__ */ new Set([
+  "edge-abstain",
+  "edge-low-confidence",
+  "edge-invalid-answer",
+  "model-blocked"
+]);
+var TRANSIENT_FAILURE_REASONS = /* @__PURE__ */ new Set([
+  "request-failed",
+  "observation-failed"
+]);
+var TRANSIENT_FAILURE_COOLDOWN_MS = 3e4;
 function selectCandidatesByTier(items) {
   const hasFull = items.some((item) => item.match.level === "full");
   return hasFull ? items.filter((item) => item.match.level === "full") : items;
@@ -14858,7 +14869,8 @@ var JevFastController = class {
   callSystemOne;
   writeDiagnostic;
   loadGraph;
-  lastBlockedRoute = "";
+  blockedRoute = null;
+  lastHandoffNotice = null;
   toolSequence = 0;
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic, loadGraph = loadTraceGraph) {
     this.state = state2;
@@ -14877,7 +14889,8 @@ var JevFastController = class {
       loop.planKey = key;
       loop.planVersion = version;
       loop.planActions = 0;
-      this.lastBlockedRoute = "";
+      this.blockedRoute = null;
+      this.lastHandoffNotice = null;
       this.state.trace({
         phase: "jev-plan",
         planVersion: version,
@@ -14908,7 +14921,23 @@ var JevFastController = class {
     if (loop.consecutiveFastActions >= maxActions) return false;
     if (loop.consecutiveFailures >= 2) return false;
     if (loop.attempts > 0 && this.state.toolCallCount <= loop.lastToolCallCount) return false;
-    if (this.lastBlockedRoute && this.currentRouteKey() === this.lastBlockedRoute) return false;
+    return true;
+  }
+  /**
+   * 路由级冷却是否仍然有效。
+   * - 路由键含 fingerprint：页面一变就自动解除；
+   * - 「选不出/选错了」必须等页面或计划变化，否则会对着同一视图重复付 systemone；
+   * - 服务/观察失败可以按时间恢复；
+   * - 「没证据」不设冷却，慢思考做一步后下一轮就能再试（teach-then-retry 的入口）。
+   */
+  routeCooldownActive() {
+    const blocked = this.blockedRoute;
+    if (!blocked) return false;
+    if (blocked.key !== this.currentRouteKey()) return false;
+    if (TRANSIENT_FAILURE_REASONS.has(blocked.reason)) {
+      return Date.now() - blocked.at < TRANSIENT_FAILURE_COOLDOWN_MS;
+    }
+    if (!ROUTE_COOLDOWN_REASONS.has(blocked.reason)) return false;
     return true;
   }
   currentRouteKey() {
@@ -14925,6 +14954,7 @@ var JevFastController = class {
   }
   async runAvailable(iter, persist) {
     if (!this.canAttempt()) return { kind: "skipped", reason: "not-due" };
+    if (this.routeCooldownActive()) return { kind: "skipped", reason: "route-cooldown" };
     const failuresBeforeObservation = this.state.failedToolNames.length;
     const initial = await this.observePage(iter, persist);
     if (initial.kind === "cancelled") return initial;
@@ -15550,13 +15580,20 @@ var JevFastController = class {
     return "\u5FEB\u8DEF\u5F84\u8BA9\u4F4D\uFF08" + reason + "\uFF09";
   }
   appendBlocked(iter, reason, detail = "") {
-    this.lastBlockedRoute = this.currentRouteKey();
+    const key = this.currentRouteKey();
+    this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason) ? { key, reason, toolCalls: this.state.toolCallCount, at: Date.now() } : null;
+    const previous = this.lastHandoffNotice;
+    const repeatedNotice = Boolean(
+      previous && previous.key === key && previous.reason === reason && this.state.toolCallCount - previous.toolCalls <= 2
+    );
+    this.lastHandoffNotice = { key, reason, toolCalls: this.state.toolCallCount };
     this.state.jevLoop.handoffReasons[reason] = (this.state.jevLoop.handoffReasons[reason] || 0) + 1;
     this.state.trace({
       phase: "jev-handoff",
       iter,
       reason,
-      detail
+      detail,
+      repeatedNotice
     });
     const explanation = this.handoffExplanation(reason);
     this.state.emit({
@@ -15576,15 +15613,17 @@ var JevFastController = class {
         this.state.ctx.lastSnapshot
       )
     });
-    this.state.messages.push({
-      role: "system",
-      content: [
-        "\u3010\u5185\u90E8\u63D0\u793A \xB7 \u975E\u9875\u9762\u6545\u969C\u3011\u5FEB\u8DEF\u5F84\u8BA9\u4F4D\u7ED9\u6162\u601D\u8003\uFF1A" + explanation + "\u3002",
-        detail ? "\u8BE6\u60C5\uFF1A" + detail : "",
-        "\u8BF7\u6309\u5F53\u524D\u8BA1\u5212\u4E0E\u6700\u8FD1\u4E00\u6B21\u771F\u5B9E\u5DE5\u5177\u7ED3\u679C\u7EE7\u7EED\u64CD\u4F5C\u3002",
-        "\u4E0D\u8981\u56E0\u4E3A\u8FD9\u6761\u63D0\u793A\u800C\u7B49\u5F85\u3001\u91CD\u590D\u8BFB\u53D6\u9875\u9762\u6216\u66F4\u6362\u65B9\u6848\uFF1B\u4E5F\u4E0D\u8981\u5047\u8BBE\u4EFB\u4F55\u672A\u6267\u884C\u7684\u52A8\u4F5C\u5DF2\u7ECF\u53D1\u751F\u3002"
-      ].filter(Boolean).join("\n")
-    });
+    if (!repeatedNotice) {
+      this.state.messages.push({
+        role: "system",
+        content: [
+          "\u3010\u5185\u90E8\u63D0\u793A \xB7 \u975E\u9875\u9762\u6545\u969C\u3011\u5FEB\u8DEF\u5F84\u8BA9\u4F4D\u7ED9\u6162\u601D\u8003\uFF1A" + explanation + "\u3002",
+          detail ? "\u8BE6\u60C5\uFF1A" + detail : "",
+          "\u8BF7\u6309\u5F53\u524D\u8BA1\u5212\u4E0E\u6700\u8FD1\u4E00\u6B21\u771F\u5B9E\u5DE5\u5177\u7ED3\u679C\u7EE7\u7EED\u64CD\u4F5C\u3002",
+          "\u4E0D\u8981\u56E0\u4E3A\u8FD9\u6761\u63D0\u793A\u800C\u7B49\u5F85\u3001\u91CD\u590D\u8BFB\u53D6\u9875\u9762\u6216\u66F4\u6362\u65B9\u6848\uFF1B\u4E5F\u4E0D\u8981\u5047\u8BBE\u4EFB\u4F55\u672A\u6267\u884C\u7684\u52A8\u4F5C\u5DF2\u7ECF\u53D1\u751F\u3002"
+        ].filter(Boolean).join("\n")
+      });
+    }
   }
   recordDiagnostic(entry) {
     Promise.resolve(this.writeDiagnostic({
