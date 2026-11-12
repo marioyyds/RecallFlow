@@ -127,7 +127,9 @@ export const ENTRIES = [
   // delegation hint measured 1117509 bytes (1091.3KB). Raise to 1092KB.
   // Same day: attempt gate (read-only turns do not wake the fast path)
   // measured 1119963 bytes (1093.7KB). Raise to 1094KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1094 * 1024 },
+  // Same day: hint-label filtering, no-progress guard and delegation name-prefix
+  // measured 1126253 bytes (1099.9KB). Raise to 1100KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1100 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

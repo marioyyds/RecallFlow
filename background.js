@@ -3786,6 +3786,11 @@ function isRiskyTargetLabel(label) {
   const text2 = String(label || "").trim();
   return Boolean(text2) && RISKY_TARGET_LABEL.test(text2);
 }
+var HINT_TARGET_LABEL = /(才可|请先|请填写|需先|需要先|自动保存|保存中|已保存|保存成功|草稿已保存|正在保存|已复制|复制成功|已上传|上传成功|加载中|请稍候|点击重试)/i;
+function isHintTargetLabel(label) {
+  const text2 = String(label || "").trim();
+  return Boolean(text2) && HINT_TARGET_LABEL.test(text2);
+}
 function semanticEdgeRisk(tool, label, toolRisk) {
   const name = String(tool || "");
   const recorded = String(toolRisk || "");
@@ -4153,6 +4158,7 @@ function edgeForRecord(record2, siteKey, ttlMs) {
   const selector = target.selector || (typeof record2.argsRedacted.selector === "string" ? record2.argsRedacted.selector : "");
   const label = targetLabel2 || selectorHintLabel(selector);
   if (!label) return null;
+  if (actionTool === "click_element" && isHintTargetLabel(label)) return null;
   const edgeRisk = semanticEdgeRisk(actionTool, label, risk);
   const actionGoal = clip(
     [actionTool, "\u300C" + label + "\u300D"].filter(Boolean).join(" "),
@@ -14343,7 +14349,7 @@ function isVisible(element) {
 function isClickable(element) {
   if (!isVisible(element)) return false;
   const label = elementLabel(element);
-  if (!label || isRiskyTargetLabel(label)) return false;
+  if (!label || isRiskyTargetLabel(label) || isHintTargetLabel(label)) return false;
   const tag = String(element.tag || "").toLowerCase();
   const role = String(element.role || "").toLowerCase();
   const type = String(element.type || "").toLowerCase();
@@ -14986,6 +14992,13 @@ var TRANSIENT_FAILURE_REASONS = /* @__PURE__ */ new Set([
   "observation-failed"
 ]);
 var TRANSIENT_FAILURE_COOLDOWN_MS = 3e4;
+var HINT_AWARE_REASONS = /* @__PURE__ */ new Set([
+  "edge-hint-label",
+  "edge-no-progress",
+  "no-progress",
+  "model-blocked",
+  "edge-low-confidence"
+]);
 function selectCandidatesByTier(items) {
   const hasFull = items.some((item) => item.match.level === "full");
   return hasFull ? items.filter((item) => item.match.level === "full") : items;
@@ -15002,6 +15015,8 @@ var JevFastController = class {
   // 上一次让位时的「只读证据」。下一次快路尝试只有在慢思考做了**会改变页面**的动作
   // （或新写了委托）时才值得再拍快照 + 调 JEV；纯读回合不唤醒快路。
   lastAttempt = null;
+  lastHintLabel = "";
+  lastNoProgress = null;
   toolSequence = 0;
   constructor(state2, pipeline, signal, callSystemOne = callJevSystemOne, writeDiagnostic = writeJevDiagnostic, loadGraph = loadTraceGraph) {
     this.state = state2;
@@ -15080,6 +15095,56 @@ var JevFastController = class {
     const ranSince = this.state.ranToolNames.slice(last.ranCount);
     if (ranSince.some((name) => !isReadOnlyTool(name))) return null;
     return "no-page-change";
+  }
+  /**
+   * 无进展计数：同一动作签名连续执行、页面指纹却没变，就允许调用方封掉它。
+   * 2026-11-12 CSDN：同一条「填写标题才可自动保存」边被连点 8 次，因为指纹在
+   * 两个状态间来回跳，`sameActionStreak` 每次都被路由变化清零。
+   */
+  noteActionProgress(signature, progressed) {
+    const last = this.lastNoProgress;
+    const count2 = progressed ? 0 : last && last.signature === signature ? last.count + 1 : 1;
+    this.lastNoProgress = { signature, count: count2 };
+    return count2 >= 2;
+  }
+  /**
+   * 委托名称容错：慢模型常写短名（「请输入文章标题」），而控件的可见文字带括号说明
+   *（「请输入文章标题（5~100个字）」）。只在**唯一前缀匹配**时采用，避免模糊匹配乱点。
+   */
+  resolveDelegatedByPrefix(next, observation) {
+    const norm = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const name = norm(next.name);
+    if (!name || name.length < 3) return null;
+    const role = norm(next.role);
+    const controls = Array.isArray(observation?.controls) ? observation.controls : [];
+    const matches = controls.filter((control) => {
+      if (control.disabled || control.visible === false) return false;
+      if (role && norm(control.role) !== role) return false;
+      const label = norm(control.name);
+      return Boolean(label) && (label.startsWith(name) || name.startsWith(label));
+    });
+    if (matches.length !== 1) return null;
+    const target = matches[0];
+    return {
+      ...target.ref ? { ref: target.ref } : {},
+      ...target.selector ? { selector: target.selector } : {},
+      role: target.role,
+      name: target.name,
+      visible: true,
+      basis: "semantic"
+    };
+  }
+  /** 当前快照里的第一条“提示/禁用原因”文案，用于让位时告诉慢思考前置条件。 */
+  firstHintLabel() {
+    const snapshot = this.state.ctx.lastSnapshot;
+    const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
+    for (const element of elements) {
+      const label = String(
+        element && (element.name || element.label || element.text) || ""
+      ).trim();
+      if (isHintTargetLabel(label)) return label;
+    }
+    return this.lastHintLabel;
   }
   hasDelegatedNextAction() {
     const plan = Array.isArray(this.state.ctx.plan) ? this.state.ctx.plan : [];
@@ -15173,6 +15238,7 @@ var JevFastController = class {
     const settings = this.state.settings.jev;
     const shadowMode = options.shadowMode ?? settings.shadowMode;
     const fallback = options.fallback === true;
+    const beforeFingerprint = String(this.state.ctx.lastSnapshot?.fingerprint || "");
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -15366,6 +15432,16 @@ var JevFastController = class {
       this.state.jevLoop.sameActionStreak = 0;
     }
     this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
+    if (action.operation === "CLICK") {
+      const progressed = String(this.state.ctx.lastSnapshot?.fingerprint || "") !== beforeFingerprint;
+      const blocked = this.noteActionProgress("op:" + signature, progressed);
+      if (blocked && this.state.jevLoop.sameActionStreak < repeatLimit) {
+        this.appendBlocked(iter, "no-progress", "\u8FDE\u7EED\u70B9\u51FB\u540C\u4E00\u76EE\u6807\u540E\u9875\u9762\u6CA1\u6709\u53D8\u5316");
+        await persist({ phase: "jev_decision" }).catch(() => {
+        });
+        return { kind: "skipped", reason: "no-progress", latencyMs };
+      }
+    }
     if (this.state.jevLoop.consecutiveFailures >= 2) {
       this.appendBlocked(iter, "tool-failure-limit", "\u5FEB\u8DEF\u5F84\u8FDE\u7EED\u4E24\u6B21\u5DE5\u5177\u5931\u8D25");
       await persist({ phase: "jev_decision" }).catch(() => {
@@ -15439,11 +15515,17 @@ var JevFastController = class {
       executedEdges: new Set(this.state.jevLoop.executedEdges)
     }) : [];
     const fastToolEdges = nominatedEdges.filter((edge2) => FAST_EDGE_TOOLS.has(edge2.action.tool));
-    const stateEdges = fastToolEdges.filter(
+    const eligibleEdges = fastToolEdges.filter(
       (edge2) => edge2.r !== "high" && !isRiskyTargetLabel(edge2.g)
     );
+    const stateEdges = eligibleEdges.filter((edge2) => !isHintTargetLabel(edge2.g));
     const filteredSlowTools = nominatedEdges.length - fastToolEdges.length;
-    const filteredRiskyEdges = fastToolEdges.length - stateEdges.length;
+    const filteredRiskyEdges = fastToolEdges.length - eligibleEdges.length;
+    const filteredHintEdges = eligibleEdges.length - stateEdges.length;
+    if (filteredHintEdges > 0) {
+      const hint = eligibleEdges.find((edge2) => isHintTargetLabel(edge2.g));
+      if (hint) this.lastHintLabel = hint.g.replace(/^\w+\s*「|」$/g, "");
+    }
     const ranked = stateEdges.map((edge2) => ({ edge: edge2, match: matchCandidate(edge2, before) })).sort(
       (a, b) => MATCH_LEVEL_RANK[a.match.level] - MATCH_LEVEL_RANK[b.match.level] || b.edge.provenance.verifiedAt - a.edge.provenance.verifiedAt
     );
@@ -15507,6 +15589,7 @@ var JevFastController = class {
       nominated: stateEdges.length,
       filteredSlowTools,
       filteredRiskyEdges,
+      filteredHintEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15522,6 +15605,7 @@ var JevFastController = class {
       nominated: stateEdges.length,
       filteredSlowTools,
       filteredRiskyEdges,
+      filteredHintEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15644,6 +15728,18 @@ var JevFastController = class {
       this.traceEdgeHandoff(iter, "edge-high-risk", edge.g);
       return { kind: "skipped", reason: "edge-high-risk", latencyMs };
     }
+    if (isHintTargetLabel(edge.g)) {
+      this.state.trace({
+        phase: "tracegraph-edge",
+        iter,
+        edgeId: edge.id,
+        decision: "REJECT",
+        reason: "hint-label",
+        g: edge.g
+      });
+      this.traceEdgeHandoff(iter, "edge-hint-label", edge.g);
+      return { kind: "skipped", reason: "edge-hint-label", latencyMs };
+    }
     this.state.trace({
       phase: "tracegraph-grounding",
       iter,
@@ -15679,6 +15775,19 @@ var JevFastController = class {
     }
     const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === "cancelled") return observed;
+    const progressed = String(this.state.ctx.lastSnapshot?.fingerprint || "") !== String(before.fingerprint || "");
+    if (this.noteActionProgress("edge:" + edge.id, progressed)) {
+      this.addBlockedEdge(edge.id);
+      this.state.trace({
+        phase: "tracegraph-edge",
+        iter,
+        edgeId: edge.id,
+        decision: "BLOCK",
+        reason: "no-progress"
+      });
+      this.traceEdgeHandoff(iter, "edge-no-progress", edge.g);
+      return { kind: "skipped", reason: "edge-no-progress", latencyMs };
+    }
     this.state.jevLoop.executedEdges = [
       .../* @__PURE__ */ new Set([...this.state.jevLoop.executedEdges, edge.id])
     ].slice(-64);
@@ -15808,6 +15917,11 @@ var JevFastController = class {
       return "\u5019\u9009\u52A8\u4F5C\u7684\u76EE\u6807\u6B64\u523B\u4E0D\u5728\u9875\u9762\u4E0A\uFF08\u53EF\u80FD\u6536\u8D77\u4E86\u83DC\u5355\u6216\u9762\u677F\uFF0C\u5C5E\u6B63\u5E38\uFF09";
     }
     if (reason === "edge-abstain") return "\u5FEB\u8DEF\u5F84\u5BF9\u5019\u9009\u52A8\u4F5C\u6CA1\u6709\u628A\u63E1\uFF0C\u4E3B\u52A8\u8BA9\u4F4D";
+    if (reason === "edge-hint-label") return "\u76EE\u6807\u53EA\u662F\u4E00\u6761\u63D0\u793A/\u524D\u7F6E\u6761\u4EF6\u6587\u6848\uFF0C\u4E0D\u662F\u53EF\u70B9\u51FB\u6309\u94AE";
+    if (reason === "edge-no-progress" || reason === "no-progress") {
+      return "\u8FDE\u7EED\u6267\u884C\u540C\u4E00\u52A8\u4F5C\u540E\u9875\u9762\u6CA1\u6709\u53D8\u5316\uFF0C\u7EE7\u7EED\u70B9\u6CA1\u6709\u610F\u4E49";
+    }
+    if (reason === "edge-high-risk") return "\u8BE5\u52A8\u4F5C\u5C5E\u4E8E\u53D1\u5E03/\u5220\u9664/\u652F\u4ED8\u7C7B\u9AD8\u98CE\u9669\u64CD\u4F5C\uFF0C\u5FC5\u987B\u7531\u6162\u601D\u8003\u786E\u8BA4";
     if (reason === "edge-low-confidence") return "\u5019\u9009\u52A8\u4F5C\u7684\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF0C\u5FEB\u8DEF\u5F84\u4E3B\u52A8\u8BA9\u4F4D";
     if (reason === "edge-invalid-answer") return "\u51B3\u7B56\u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548\u9009\u9879\uFF0C\u5FEB\u8DEF\u5F84\u4E0D\u5192\u9669";
     if (reason === "edge-unbound-slots") return "\u5F53\u524D\u6307\u4EE4\u7F3A\u5C11\u8BE5\u52A8\u4F5C\u9700\u8981\u7684\u663E\u5F0F\u53C2\u6570\u503C";
@@ -15860,7 +15974,7 @@ var JevFastController = class {
         ...next.role ? { role: next.role } : {},
         kind: next.selector && !next.name && !next.text ? "selector" : "content"
       };
-      const resolved = resolveEdgeTarget(
+      let resolved = resolveEdgeTarget(
         {
           action: { tool: next.tool },
           s: {
@@ -15870,6 +15984,20 @@ var JevFastController = class {
         },
         observation
       );
+      if (!resolved.ok || !resolved.target) {
+        const prefix = this.resolveDelegatedByPrefix(next, observation);
+        if (prefix) {
+          resolved = { ok: true, target: prefix, candidates: 1 };
+          this.state.trace({
+            phase: "delegate-action",
+            iter,
+            decision: "GROUNDED",
+            reason: "name-prefix",
+            tool: next.tool,
+            target: prefix.name
+          });
+        }
+      }
       if (!resolved.ok || !resolved.target) {
         delete planStep.nextAction;
         this.state.trace({
@@ -15924,6 +16052,11 @@ var JevFastController = class {
   }
   appendBlocked(iter, reason, detail = "") {
     const key = this.currentRouteKey();
+    const hint = HINT_AWARE_REASONS.has(reason) ? this.firstHintLabel() : "";
+    const fullDetail = [
+      detail,
+      hint ? "\u9875\u9762\u63D0\u793A\u300C" + hint + "\u300D\u662F\u524D\u7F6E\u6761\u4EF6\uFF0C\u4E0D\u662F\u53EF\u70B9\u51FB\u6309\u94AE" : ""
+    ].filter(Boolean).join("\uFF1B");
     this.lastAttempt = {
       key,
       url: String(this.state.ctx.pageUrl || ""),
@@ -15941,15 +16074,15 @@ var JevFastController = class {
       phase: "jev-handoff",
       iter,
       reason,
-      detail,
+      detail: fullDetail,
       repeatedNotice
     });
     const explanation = this.handoffExplanation(reason);
     this.state.emit({
       type: "jev-handoff",
       reason,
-      detail,
-      message: "\u21AA \u6162\u601D\u8003\u63A5\u7BA1\uFF1A" + reason + (detail ? "\uFF08" + detail + "\uFF09" : "") + " \u2014 " + explanation
+      detail: fullDetail,
+      message: "\u21AA \u6162\u601D\u8003\u63A5\u7BA1\uFF1A" + reason + (fullDetail ? "\uFF08" + fullDetail + "\uFF09" : "") + " \u2014 " + explanation
     });
     this.recordDiagnostic({
       state: "handoff",
@@ -15967,7 +16100,7 @@ var JevFastController = class {
         role: "system",
         content: [
           "\u3010\u5185\u90E8\u63D0\u793A \xB7 \u975E\u9875\u9762\u6545\u969C\u3011\u5FEB\u8DEF\u5F84\u8BA9\u4F4D\u7ED9\u6162\u601D\u8003\uFF1A" + explanation + "\u3002",
-          detail ? "\u8BE6\u60C5\uFF1A" + detail : "",
+          fullDetail ? "\u8BE6\u60C5\uFF1A" + fullDetail : "",
           "\u8BF7\u6309\u5F53\u524D\u8BA1\u5212\u4E0E\u6700\u8FD1\u4E00\u6B21\u771F\u5B9E\u5DE5\u5177\u7ED3\u679C\u7EE7\u7EED\u64CD\u4F5C\u3002",
           "\u4E0D\u8981\u56E0\u4E3A\u8FD9\u6761\u63D0\u793A\u800C\u7B49\u5F85\u3001\u91CD\u590D\u8BFB\u53D6\u9875\u9762\u6216\u66F4\u6362\u65B9\u6848\uFF1B\u4E5F\u4E0D\u8981\u5047\u8BBE\u4EFB\u4F55\u672A\u6267\u884C\u7684\u52A8\u4F5C\u5DF2\u7ECF\u53D1\u751F\u3002"
         ].filter(Boolean).join("\n")

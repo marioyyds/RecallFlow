@@ -321,6 +321,26 @@ test('edge grounding 使用当前快照 ref，不复用历史 selector', () => {
   assert.equal(changedMeaning.reason, 'target-missing');
 });
 
+test('提示/前置条件文案不立边（它不是控件）', async () => {
+  installStorage();
+  const base = evidence();
+  const graph = await appendTraceRecord(base.url, {
+    id: 'hint-record',
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector: '#hint' },
+    target: { role: 'button', name: '填写标题才可自动保存', selector: '#hint' },
+    before: base,
+    after: evidence({ fingerprint: 'after-hint' }),
+    result: { ok: true, summary: 'ok' },
+    verification: 'changed',
+    risk: 'low',
+    ts: NOW,
+  });
+  assert.ok(graph, '记录仍然保留，供审计');
+  assert.equal(graph.l1.edges.length, 0, '提示文案不该被录成可回放的边');
+});
+
 test('发布/删除类点击按目标语义升为高风险边，不靠工具元数据', async () => {
   installStorage();
   const base = evidence();

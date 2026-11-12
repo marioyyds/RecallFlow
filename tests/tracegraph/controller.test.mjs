@@ -336,6 +336,136 @@ test('open_tab 指向当前 URL 时不执行（no-op 导航）', async () => {
   assert.equal(trace.filteredSlowTools, 1);
 });
 
+test('提示/前置条件文案的边不进快路候选', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({
+    id: 'e.hint',
+    g: 'click_element 「填写标题才可自动保存」',
+    s: { semanticAnchor: { role: 'button', name: '填写标题才可自动保存' } },
+  });
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => operationBlockedResponse(),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(calls.some((call) => call.name === 'click_element'), false);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.filteredHintEdges, 1);
+});
+
+test('同一动作连续两次无页面变化后停止（no-progress）', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state, { clickChangesPage: false }),
+    new AbortController().signal,
+    async (_settings, request) => {
+      jevCalls += 1;
+      return operationClickResponse(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.kind, 'act');
+  assert.equal(jevCalls, 1);
+
+  // 不改变 fingerprint（pipelineFor 只推进计数），同一点击再来一次。
+  state.settings.jev.maxConsecutiveActions = 5;
+  state.toolCallCount = state.jevLoop.lastToolCallCount + 1;
+  const second = await controller.runAvailable(1, async () => {});
+  assert.equal(second.kind, 'skipped');
+  assert.equal(second.reason, 'no-progress');
+  assert.equal(jevCalls, 2);
+});
+
+test('委托名称是控件可见文字的前缀时仍能唯一定位', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  state.ctx.lastSnapshot.elements.push({
+    tag: 'input',
+    role: 'textbox',
+    label: '请输入文章标题（5~100个字）',
+    ref: 'rf-title',
+    selector: '#title',
+    inViewport: true,
+  });
+  state.ctx.plan = [{
+    id: 'p1',
+    text: '激活标题输入框',
+    status: 'in_progress',
+    nextAction: { tool: 'click_element', name: '请输入文章标题', note: '激活标题' },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => {
+      throw new Error('委托成功后不该再调 JEV');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const click = calls.find((call) => call.name === 'click_element');
+  assert.ok(click);
+  assert.deepEqual(click.args, { ref: 'rf-title' });
+  assert.ok(
+    state.traces.some(
+      (entry) => entry.phase === 'delegate-action' && entry.reason === 'name-prefix'
+    )
+  );
+});
+
+test('让位时把页面提示转告慢思考，而不是当成按钮', async () => {
+  const state = stateFor(false);
+  state.ctx.lastSnapshot.elements.push({
+    tag: 'button',
+    role: 'button',
+    label: '填写标题才可自动保存',
+    ref: 'rf-hint',
+    selector: '#hint',
+    inViewport: true,
+  });
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => operationBlockedResponse(),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  const note = state.messages.filter((message) => message.role === 'system').at(-1);
+  assert.match(note.content, /页面提示「填写标题才可自动保存」/);
+  assert.match(note.content, /前置条件/);
+});
+
 test('高风险语义边（发布/删除/支付）不进快路候选', async () => {
   const state = stateFor(false);
   const { graph } = graphWithEdge({

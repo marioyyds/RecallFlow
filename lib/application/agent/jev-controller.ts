@@ -29,7 +29,7 @@ import type { PlanStep } from './types.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import { FAST_EDGE_TOOLS, isReadOnlyTool } from './action-lanes.ts';
-import { isRiskyTargetLabel } from './action-risk.ts';
+import { isRiskyTargetLabel, isHintTargetLabel } from './action-risk.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
 import { activePlanStep, planStepKey } from './plan-contract.ts';
 import {
@@ -76,6 +76,16 @@ const TRANSIENT_FAILURE_REASONS: ReadonlySet<string> = new Set([
 ]);
 const TRANSIENT_FAILURE_COOLDOWN_MS = 30_000;
 
+// 这些让位原因下，如果页面里有“提示/前置条件”文案（如「填写标题才可自动保存」），
+// 把它一并告诉慢思考：它是要求先补条件，不是按钮。
+const HINT_AWARE_REASONS: ReadonlySet<string> = new Set([
+  'edge-hint-label',
+  'edge-no-progress',
+  'no-progress',
+  'model-blocked',
+  'edge-low-confidence',
+]);
+
 /**
  * 结构分层裁剪：只有当存在 full 匹配时才只发 full。
  *
@@ -103,6 +113,8 @@ export class JevFastController {
   // 上一次让位时的「只读证据」。下一次快路尝试只有在慢思考做了**会改变页面**的动作
   // （或新写了委托）时才值得再拍快照 + 调 JEV；纯读回合不唤醒快路。
   private lastAttempt: { key: string; url: string; toolCalls: number; ranCount: number } | null = null;
+  private lastHintLabel = '';
+  private lastNoProgress: { signature: string; count: number } | null = null;
   private toolSequence = 0;
 
   constructor(
@@ -200,6 +212,67 @@ export class JevFastController {
     const ranSince = this.state.ranToolNames.slice(last.ranCount);
     if (ranSince.some((name) => !isReadOnlyTool(name))) return null;
     return 'no-page-change';
+  }
+
+  /**
+   * 无进展计数：同一动作签名连续执行、页面指纹却没变，就允许调用方封掉它。
+   * 2026-11-12 CSDN：同一条「填写标题才可自动保存」边被连点 8 次，因为指纹在
+   * 两个状态间来回跳，`sameActionStreak` 每次都被路由变化清零。
+   */
+  private noteActionProgress(signature: string, progressed: boolean): boolean {
+    const last = this.lastNoProgress;
+    const count = progressed
+      ? 0
+      : last && last.signature === signature
+        ? last.count + 1
+        : 1;
+    this.lastNoProgress = { signature, count };
+    return count >= 2;
+  }
+
+  /**
+   * 委托名称容错：慢模型常写短名（「请输入文章标题」），而控件的可见文字带括号说明
+   *（「请输入文章标题（5~100个字）」）。只在**唯一前缀匹配**时采用，避免模糊匹配乱点。
+   */
+  private resolveDelegatedByPrefix(
+    next: { name?: string; role?: string },
+    observation: Evidence
+  ): ReturnType<typeof resolveEdgeTarget>['target'] | null {
+    const norm = (value: unknown) =>
+      String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const name = norm(next.name);
+    if (!name || name.length < 3) return null;
+    const role = norm(next.role);
+    const controls = Array.isArray(observation?.controls) ? observation.controls : [];
+    const matches = controls.filter((control) => {
+      if (control.disabled || control.visible === false) return false;
+      if (role && norm(control.role) !== role) return false;
+      const label = norm(control.name);
+      return Boolean(label) && (label.startsWith(name) || name.startsWith(label));
+    });
+    if (matches.length !== 1) return null;
+    const target = matches[0];
+    return {
+      ...(target.ref ? { ref: target.ref } : {}),
+      ...(target.selector ? { selector: target.selector } : {}),
+      role: target.role,
+      name: target.name,
+      visible: true,
+      basis: 'semantic',
+    };
+  }
+
+  /** 当前快照里的第一条“提示/禁用原因”文案，用于让位时告诉慢思考前置条件。 */
+  private firstHintLabel(): string {
+    const snapshot = this.state.ctx.lastSnapshot;
+    const elements = Array.isArray(snapshot?.elements) ? snapshot.elements : [];
+    for (const element of elements) {
+      const label = String(
+        (element && (element.name || element.label || element.text)) || ''
+      ).trim();
+      if (isHintTargetLabel(label)) return label;
+    }
+    return this.lastHintLabel;
   }
 
   private hasDelegatedNextAction(): boolean {
@@ -321,6 +394,7 @@ export class JevFastController {
     const settings = this.state.settings.jev;
     const shadowMode = options.shadowMode ?? settings.shadowMode;
     const fallback = options.fallback === true;
+    const beforeFingerprint = String(this.state.ctx.lastSnapshot?.fingerprint || '');
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -565,6 +639,18 @@ export class JevFastController {
       this.state.jevLoop.sameActionStreak = 0;
     }
     this.state.jevLoop.lastActionRouteKey = postActionRouteKey;
+    if (action.operation === 'CLICK') {
+      const progressed =
+        String(this.state.ctx.lastSnapshot?.fingerprint || '') !== beforeFingerprint;
+      const blocked = this.noteActionProgress('op:' + signature, progressed);
+      // 只有“路由反复变化把手动连击计数清零”的场景才由这里接管；
+      // 路由稳定的连击继续交给 maxRepeatedActionsWithoutProgress（保留设置语义）。
+      if (blocked && this.state.jevLoop.sameActionStreak < repeatLimit) {
+        this.appendBlocked(iter, 'no-progress', '连续点击同一目标后页面没有变化');
+        await persist({ phase: 'jev_decision' }).catch(() => {});
+        return { kind: 'skipped', reason: 'no-progress', latencyMs };
+      }
+    }
     if (this.state.jevLoop.consecutiveFailures >= 2) {
       this.appendBlocked(iter, 'tool-failure-limit', '快路径连续两次工具失败');
       await persist({ phase: 'jev_decision' }).catch(() => {});
@@ -659,11 +745,17 @@ export class JevFastController {
     // 再排除高风险语义（发布/删除/支付）：这类边由慢思考 + 审批执行，
     // 绝不能被 skipApproval 的快路直接点掉（2026-11-12 CSDN 发布边 r=low 的事故面）。
     const fastToolEdges = nominatedEdges.filter((edge) => FAST_EDGE_TOOLS.has(edge.action.tool));
-    const stateEdges = fastToolEdges.filter(
+    const eligibleEdges = fastToolEdges.filter(
       (edge) => edge.r !== 'high' && !isRiskyTargetLabel(edge.g)
     );
+    const stateEdges = eligibleEdges.filter((edge) => !isHintTargetLabel(edge.g));
     const filteredSlowTools = nominatedEdges.length - fastToolEdges.length;
-    const filteredRiskyEdges = fastToolEdges.length - stateEdges.length;
+    const filteredRiskyEdges = fastToolEdges.length - eligibleEdges.length;
+    const filteredHintEdges = eligibleEdges.length - stateEdges.length;
+    if (filteredHintEdges > 0) {
+      const hint = eligibleEdges.find((edge) => isHintTargetLabel(edge.g));
+      if (hint) this.lastHintLabel = hint.g.replace(/^\w+\s*「|」$/g, '');
+    }
     const ranked = stateEdges
       .map((edge) => ({ edge, match: matchCandidate(edge, before) }))
       .sort(
@@ -750,6 +842,7 @@ export class JevFastController {
       nominated: stateEdges.length,
       filteredSlowTools,
       filteredRiskyEdges,
+      filteredHintEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -765,6 +858,7 @@ export class JevFastController {
       nominated: stateEdges.length,
       filteredSlowTools,
       filteredRiskyEdges,
+      filteredHintEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -892,6 +986,19 @@ export class JevFastController {
       this.traceEdgeHandoff(iter, 'edge-high-risk', edge.g);
       return { kind: 'skipped', reason: 'edge-high-risk', latencyMs };
     }
+    // 提示/前置条件文案同样不能点（旧图里可能还有这种边）。
+    if (isHintTargetLabel(edge.g)) {
+      this.state.trace({
+        phase: 'tracegraph-edge',
+        iter,
+        edgeId: edge.id,
+        decision: 'REJECT',
+        reason: 'hint-label',
+        g: edge.g,
+      });
+      this.traceEdgeHandoff(iter, 'edge-hint-label', edge.g);
+      return { kind: 'skipped', reason: 'edge-hint-label', latencyMs };
+    }
 
     // 目标与槽位在 prefilter 阶段已按当前快照解析；这里直接用同一份结果，
     // 避免在请求与执行之间再解析一次（页面在等待响应期间可能已经变化）。
@@ -935,6 +1042,21 @@ export class JevFastController {
     }
     const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === 'cancelled') return observed;
+    // 同一动作执行后页面毫无变化，最多容忍一次；第二次直接封边交回慢思考。
+    const progressed =
+      String(this.state.ctx.lastSnapshot?.fingerprint || '') !== String(before.fingerprint || '');
+    if (this.noteActionProgress('edge:' + edge.id, progressed)) {
+      this.addBlockedEdge(edge.id);
+      this.state.trace({
+        phase: 'tracegraph-edge',
+        iter,
+        edgeId: edge.id,
+        decision: 'BLOCK',
+        reason: 'no-progress',
+      });
+      this.traceEdgeHandoff(iter, 'edge-no-progress', edge.g);
+      return { kind: 'skipped', reason: 'edge-no-progress', latencyMs };
+    }
 
     this.state.jevLoop.executedEdges = [
       ...new Set([...this.state.jevLoop.executedEdges, edge.id]),
@@ -1096,6 +1218,11 @@ private handoffExplanation(reason: string): string {
     return '候选动作的目标此刻不在页面上（可能收起了菜单或面板，属正常）';
   }
   if (reason === 'edge-abstain') return '快路径对候选动作没有把握，主动让位';
+  if (reason === 'edge-hint-label') return '目标只是一条提示/前置条件文案，不是可点击按钮';
+  if (reason === 'edge-no-progress' || reason === 'no-progress') {
+    return '连续执行同一动作后页面没有变化，继续点没有意义';
+  }
+  if (reason === 'edge-high-risk') return '该动作属于发布/删除/支付类高风险操作，必须由慢思考确认';
   if (reason === 'edge-low-confidence') return '候选动作的置信度不足，快路径主动让位';
   if (reason === 'edge-invalid-answer') return '决策服务返回了无效选项，快路径不冒险';
   if (reason === 'edge-unbound-slots') return '当前指令缺少该动作需要的显式参数值';
@@ -1155,7 +1282,7 @@ private async tryDelegatedAction(
       ...(next.role ? { role: next.role } : {}),
       kind: next.selector && !next.name && !next.text ? 'selector' : 'content',
     } as const;
-    const resolved = resolveEdgeTarget(
+    let resolved = resolveEdgeTarget(
       {
         action: { tool: next.tool },
         s: {
@@ -1165,6 +1292,20 @@ private async tryDelegatedAction(
       } as unknown as Parameters<typeof resolveEdgeTarget>[0],
       observation
     );
+    if (!resolved.ok || !resolved.target) {
+      const prefix = this.resolveDelegatedByPrefix(next, observation);
+      if (prefix) {
+        resolved = { ok: true, target: prefix, candidates: 1 };
+        this.state.trace({
+          phase: 'delegate-action',
+          iter,
+          decision: 'GROUNDED',
+          reason: 'name-prefix',
+          tool: next.tool,
+          target: prefix.name,
+        });
+      }
+    }
     if (!resolved.ok || !resolved.target) {
       delete planStep.nextAction;
       this.state.trace({
@@ -1228,6 +1369,11 @@ private appendBlocked(
     detail = ''
   ): void {
     const key = this.currentRouteKey();
+    const hint = HINT_AWARE_REASONS.has(reason) ? this.firstHintLabel() : '';
+    const fullDetail = [
+      detail,
+      hint ? '页面提示「' + hint + '」是前置条件，不是可点击按钮' : '',
+    ].filter(Boolean).join('；');
     this.lastAttempt = {
       key,
       url: String(this.state.ctx.pageUrl || ''),
@@ -1255,17 +1401,17 @@ private appendBlocked(
       phase: 'jev-handoff',
       iter,
       reason,
-      detail,
+      detail: fullDetail,
       repeatedNotice,
     });
     const explanation = this.handoffExplanation(reason);
     this.state.emit({
       type: 'jev-handoff',
       reason,
-      detail,
+      detail: fullDetail,
       message:
         '↪ 慢思考接管：' + reason +
-        (detail ? '（' + detail + '）' : '') +
+        (fullDetail ? '（' + fullDetail + '）' : '') +
         ' — ' + explanation,
     });
     this.recordDiagnostic({
@@ -1284,7 +1430,7 @@ private appendBlocked(
         role: 'system',
         content: [
           '【内部提示 · 非页面故障】快路径让位给慢思考：' + explanation + '。',
-          detail ? '详情：' + detail : '',
+          fullDetail ? '详情：' + fullDetail : '',
           '请按当前计划与最近一次真实工具结果继续操作。',
           '不要因为这条提示而等待、重复读取页面或更换方案；也不要假设任何未执行的动作已经发生。',
         ].filter(Boolean).join('\n'),

@@ -8,7 +8,7 @@ import {
 import { activePlanStep, normalizePlanOperations } from './plan-contract.ts';
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
 import type { PlanStep } from './types.ts';
-import { isRiskyTargetLabel } from './action-risk.ts';
+import { isRiskyTargetLabel, isHintTargetLabel } from './action-risk.ts';
 import type { CandidateMatch, CandidateMatchLevel, Edge, Evidence } from './trace-graph-types.ts';
 import { bindSlots, evaluatePhiMinus } from './trace-graph.ts';
 
@@ -245,7 +245,7 @@ function isVisible(element: SnapshotElementLike): boolean {
 function isClickable(element: SnapshotElementLike): boolean {
   if (!isVisible(element)) return false;
   const label = elementLabel(element);
-  if (!label || isRiskyTargetLabel(label)) return false;
+  if (!label || isRiskyTargetLabel(label) || isHintTargetLabel(label)) return false;
   const tag = String(element.tag || '').toLowerCase();
   const role = String(element.role || '').toLowerCase();
   const type = String(element.type || '').toLowerCase();

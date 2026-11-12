@@ -7,7 +7,7 @@
 //   - 未显式绑定的槽位 fail-closed；禁止回填历史值或默认偏好。
 
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
-import { semanticEdgeRisk } from './action-risk.ts';
+import { semanticEdgeRisk, isHintTargetLabel } from './action-risk.ts';
 import type {
   CandidateMatch,
   CandidateMatchLevel,
@@ -515,6 +515,8 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     (typeof record.argsRedacted.selector === 'string' ? record.argsRedacted.selector : '');
   const label = targetLabel || selectorHintLabel(selector);
   if (!label) return null;
+  // 提示/前置条件文案不是控件：录成边只会在下次被当成按钮回放。
+  if (actionTool === 'click_element' && isHintTargetLabel(label)) return null;
   const edgeRisk = semanticEdgeRisk(actionTool, label, risk);
   const actionGoal = clip(
     [actionTool, '「' + label + '」'].filter(Boolean).join(' '),
