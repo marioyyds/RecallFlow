@@ -135,7 +135,9 @@ export const ENTRIES = [
   // (1106.2KB). Raise to 1108KB.
   // Same day: JEV action memory plumbing measured 1136386 bytes (1109.8KB).
   // Raise to 1110KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1110 * 1024 },
+  // Same day: edge confidence threshold in instructions + decision event
+  // measured 1138514 bytes (1111.8KB). Raise to 1112KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1112 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

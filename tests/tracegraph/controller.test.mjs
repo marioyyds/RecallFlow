@@ -878,6 +878,30 @@ test('同一视图同一原因的让位提示不重复塞进模型上下文', as
   );
 });
 
+test('edge 决策事件把自报置信度与阈值带到面板', async () => {
+  const state = stateFor(false);
+  state.settings.jev.minEdgeConfidence = 0.65;
+  const events = [];
+  state.emit = (event) => events.push(event);
+  const { graph } = graphWithEdge();
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => edgeResponse('e.create', 0.02),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const event = events.find((item) => item.type === 'jev-decision' && item.head === 'edge');
+  assert.ok(event, 'edge 决策必须带 jev-decision 事件');
+  assert.equal(event.threshold, 0.65);
+  assert.equal(event.decision.confidence, 0.98);
+  assert.match(event.message, /confidence 0\.98/);
+  assert.match(event.message, /阈值 0\.65/);
+});
+
 test('live TraceGraph：JEV 选边并 Grounding 后直接执行一个动作', async () => {
   const state = stateFor(false);
   const calls = [];

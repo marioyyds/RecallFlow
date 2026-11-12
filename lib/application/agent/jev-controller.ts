@@ -7,6 +7,7 @@ import {
   compareJevShadowAction,
   deriveJevPhase,
   formatJevDecisionSummary,
+  formatJevEdgeDecisionSummary,
   interpretJevEdgeDecision,
   interpretJevFastDecision,
   type JevFastAction,
@@ -942,6 +943,30 @@ export class JevFastController {
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+    });
+    // 面板可观测性：edge 决策的自报置信度与阈值必须能看见，否则用户只能猜
+    // “为什么没走快路”——阈值本身不改变模型的自报值（模型并不知道这个数，
+    // 现在 instructions 里也会告诉它），这里把比较结果如实展示。
+    const edgeGoal = decision.kind === 'edge'
+      ? String((groundedItems.find((item) => item.edge.id === decision.edgeId)?.edge.g) || '')
+      : '';
+    this.state.emit({
+      type: 'jev-decision',
+      head: 'edge',
+      mode: graphSettings.shadowMode ? 'shadow' : 'live',
+      phaseName: phase,
+      decision,
+      threshold: bundle.thresholds.minEdgeConfidence,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      message: formatJevEdgeDecisionSummary(
+        graphSettings.shadowMode,
+        decision,
+        latencyMs,
+        bundle.thresholds.minEdgeConfidence,
+        edgeGoal
+      ),
     });
     if (graphSettings.shadowMode) {
       await persist({ phase: 'tracegraph_decision' }).catch(() => {});

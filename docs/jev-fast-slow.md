@@ -72,6 +72,13 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 - operation 和匹配 target 均需达到动作类型对应的置信度；
 - target 只能映射到已观察的 ref，不接受模型生成的 selector、坐标或 JavaScript。
 
+**Edge Confidence 阈值的边界**：这个设置只做“选定后的本地比较”——JEV 返回的
+`confidence` 低于阈值时把选择改判为 `low-confidence` 并交回慢思考；它**不会**
+改变模型愿不愿意选（`ABSTAIN` 与它无关）。为了让它至少是个校准信号，edge 请求的
+instructions 现在会明确写出当前阈值（“低于 X 的选择会被系统当作弃权”），
+面板的事件里也会显示本次 `confidence` 与阈值（`⚡ 快边：… confidence 0.72 ≥ 阈值 0.65`）。
+需要“让快路多做一点”时应调 ABSTAIN 规则或候选过滤，而不是只降这个数。
+
 ## 执行循环
 
 每个 cycle 的顺序是：

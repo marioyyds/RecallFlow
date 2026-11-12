@@ -777,6 +777,9 @@ export function buildJevEdgeRequest(
             'Do not infer task values, historical defaults, selectors, or user preferences.',
             'ABSTAIN only when no candidate fits: every candidate is stuck at match=name, a candidate\'s recorded precondition is marked ✗ by the observation, or the recent action history shows the only fitting candidate was just tried without progress.',
             'When a candidate fits the current subgoal, choose it and report confidence honestly; do not abstain merely because a precondition is not restated in prose.',
+            'Report confidence as a real number in [0,1]. A selection below ' +
+              minEdgeConfidence.toFixed(2) +
+              ' is treated as ABSTAIN by the system; do not inflate confidence when the match is only name-level or the target is ambiguous.',
           ].filter(Boolean),
         },
         criteria,
@@ -1034,6 +1037,41 @@ export function compareJevShadowAction(
     expected: [decision.toolName],
     actual: slowToolNames,
   };
+}
+
+export function formatJevEdgeDecisionSummary(
+  shadow: boolean,
+  decision: JevEdgeDecision,
+  latencyMs: number,
+  threshold: number,
+  goal?: string
+): string {
+  const prefix = shadow ? '⚡ 快边（影子）' : '⚡ 快边';
+  const ms = Math.round(latencyMs);
+  const limit = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(2) : '—';
+  if (decision.kind === 'edge') {
+    return (
+      prefix + '：' + (goal ? clip(goal, 40) + ' ' : '') +
+      'confidence ' + Number(decision.confidence).toFixed(2) +
+      ' ≥ 阈值 ' + limit + '（' + ms + 'ms）'
+    );
+  }
+  const confidence = Number((decision as any).confidence);
+  if (decision.kind === 'blocked' && decision.reason === 'low-confidence') {
+    return (
+      prefix + '：置信度 ' +
+      (Number.isFinite(confidence) ? confidence.toFixed(2) : '—') +
+      ' 低于阈值 ' + limit + '，交给慢思考（' + ms + 'ms）'
+    );
+  }
+  if (decision.kind === 'blocked' && decision.reason === 'abstain') {
+    return (
+      prefix + '：弃权' +
+      (Number.isFinite(confidence) ? '（confidence ' + confidence.toFixed(2) + '）' : '') +
+      '，交给慢思考（' + ms + 'ms）'
+    );
+  }
+  return prefix + '：' + decision.description + '（' + ms + 'ms）';
 }
 
 export function formatJevDecisionSummary(

@@ -14841,7 +14841,8 @@ function buildJevEdgeRequest(settings, context) {
             "A recorded edge is evidence, not authorization. If a slot is unresolved, choose ABSTAIN.",
             "Do not infer task values, historical defaults, selectors, or user preferences.",
             "ABSTAIN only when no candidate fits: every candidate is stuck at match=name, a candidate's recorded precondition is marked \u2717 by the observation, or the recent action history shows the only fitting candidate was just tried without progress.",
-            "When a candidate fits the current subgoal, choose it and report confidence honestly; do not abstain merely because a precondition is not restated in prose."
+            "When a candidate fits the current subgoal, choose it and report confidence honestly; do not abstain merely because a precondition is not restated in prose.",
+            "Report confidence as a real number in [0,1]. A selection below " + minEdgeConfidence.toFixed(2) + " is treated as ABSTAIN by the system; do not inflate confidence when the match is only name-level or the target is ambiguous."
           ].filter(Boolean)
         },
         criteria
@@ -15053,6 +15054,22 @@ function compareJevShadowAction(decision, slowToolNames, finalText = "") {
     expected: [decision.toolName],
     actual: slowToolNames
   };
+}
+function formatJevEdgeDecisionSummary(shadow, decision, latencyMs, threshold, goal) {
+  const prefix = shadow ? "\u26A1 \u5FEB\u8FB9\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u8FB9";
+  const ms = Math.round(latencyMs);
+  const limit = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(2) : "\u2014";
+  if (decision.kind === "edge") {
+    return prefix + "\uFF1A" + (goal ? clip2(goal, 40) + " " : "") + "confidence " + Number(decision.confidence).toFixed(2) + " \u2265 \u9608\u503C " + limit + "\uFF08" + ms + "ms\uFF09";
+  }
+  const confidence = Number(decision.confidence);
+  if (decision.kind === "blocked" && decision.reason === "low-confidence") {
+    return prefix + "\uFF1A\u7F6E\u4FE1\u5EA6 " + (Number.isFinite(confidence) ? confidence.toFixed(2) : "\u2014") + " \u4F4E\u4E8E\u9608\u503C " + limit + "\uFF0C\u4EA4\u7ED9\u6162\u601D\u8003\uFF08" + ms + "ms\uFF09";
+  }
+  if (decision.kind === "blocked" && decision.reason === "abstain") {
+    return prefix + "\uFF1A\u5F03\u6743" + (Number.isFinite(confidence) ? "\uFF08confidence " + confidence.toFixed(2) + "\uFF09" : "") + "\uFF0C\u4EA4\u7ED9\u6162\u601D\u8003\uFF08" + ms + "ms\uFF09";
+  }
+  return prefix + "\uFF1A" + decision.description + "\uFF08" + ms + "ms\uFF09";
 }
 function formatJevDecisionSummary(shadow, decision, latencyMs) {
   const prefix = shadow ? "\u26A1 \u5FEB\u601D\u8003\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u601D\u8003";
@@ -15801,6 +15818,25 @@ var JevFastController = class {
       latencyMs,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens
+    });
+    const edgeGoal = decision.kind === "edge" ? String(groundedItems.find((item) => item.edge.id === decision.edgeId)?.edge.g || "") : "";
+    this.state.emit({
+      type: "jev-decision",
+      head: "edge",
+      mode: graphSettings.shadowMode ? "shadow" : "live",
+      phaseName: phase,
+      decision,
+      threshold: bundle.thresholds.minEdgeConfidence,
+      latencyMs,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      message: formatJevEdgeDecisionSummary(
+        graphSettings.shadowMode,
+        decision,
+        latencyMs,
+        bundle.thresholds.minEdgeConfidence,
+        edgeGoal
+      )
     });
     if (graphSettings.shadowMode) {
       await persist({ phase: "tracegraph_decision" }).catch(() => {

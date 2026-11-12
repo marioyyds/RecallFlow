@@ -12,6 +12,7 @@ import {
   compareJevShadowAction,
   describeActionHistory,
   formatJevDecisionSummary,
+  formatJevEdgeDecisionSummary,
   interpretJevFastDecision,
 } from '../lib/application/agent/jev-action-space.ts';
 import { JevFastController } from '../lib/application/agent/jev-controller.ts';
@@ -905,4 +906,25 @@ test('JEV 请求携带 actionHistory，恢复运行状态时限长保留', () =>
   });
   assert.equal(restored.actionMemory.length, 6, '恢复时也只保留最近 6 条');
   assert.equal(restored.actionMemory.at(-1).target, 'T9');
+});
+
+test('edge 决策摘要带上置信度与阈值', () => {
+  const chosen = formatJevEdgeDecisionSummary(
+    false,
+    { kind: 'edge', edgeId: 'e.x', confidence: 0.9, description: 'ok' },
+    120,
+    0.65,
+    'click_element「搜索」'
+  );
+  assert.match(chosen, /confidence 0\.90/);
+  assert.match(chosen, /阈值 0\.65/);
+
+  const low = formatJevEdgeDecisionSummary(
+    false,
+    { kind: 'blocked', reason: 'low-confidence', confidence: 0.5, description: 'low' },
+    90,
+    0.65
+  );
+  assert.match(low, /置信度 0\.50/);
+  assert.match(low, /低于阈值 0\.65/);
 });
