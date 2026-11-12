@@ -31,6 +31,7 @@ import {
   deleteStoredTraceGraphSelection,
   loadTraceGraph,
   rebuildStoredTraceGraphs,
+  sanitizeTraceRecord,
   traceRecordFromTransition,
   traceTargetFromTransition,
 } from '../../lib/application/agent/tracegraph-store.ts';
@@ -1098,6 +1099,27 @@ test('tracegraph store 按站点增量合并、脱敏并排除敏感页面', asy
   assert.equal(login, null);
   const payment = await appendTraceRecord('https://example.com/checkout/payment', record);
   assert.equal(payment, null);
+});
+
+test('录制记录携带执行通道 lane，非法值被丢弃', async () => {
+  installStorage();
+  const base = evidence();
+  const graph = await appendTraceRecord(base.url, {
+    id: 'lane-fast',
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector: '#go' },
+    target: { role: 'button', name: 'Go', selector: '#go' },
+    before: base,
+    after: evidence({ fingerprint: 'fp-lane' }),
+    result: { ok: true, summary: 'ok' },
+    verification: 'ok',
+    lane: 'fast',
+    ts: Date.now(),
+  });
+  assert.ok(graph);
+  assert.equal(graph.records[0].lane, 'fast');
+  assert.equal(sanitizeTraceRecord({ ...graph.records[0], lane: 'weird' }).lane, undefined);
 });
 
 test('appendTraceRecord 按动作发生前的页面归桶（跨站跳转不记错站点）', async () => {

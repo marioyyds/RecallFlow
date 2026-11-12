@@ -865,6 +865,20 @@ function urlMatches(pattern: unknown, url: unknown): boolean {
   }
 }
 
+/**
+ * open_tab 边是否指向**当前** URL：这种导航是 no-op，快路不该为它开新标签页。
+ * 只看锚点的 urlPattern（argsTemplate 里的 url 已被脱敏成 @url）。
+ */
+export function opensCurrentUrl(
+  edge: Pick<Edge, 'action' | 's'> | null | undefined,
+  observation: Evidence | null | undefined
+): boolean {
+  if (edge?.action?.tool !== 'open_tab') return false;
+  const pattern = edge?.s?.semanticAnchor?.urlPattern || '';
+  if (!pattern) return false;
+  return urlMatches(pattern, observation?.url);
+}
+
 function evaluateRule(
   rule: PhiRule,
   obs: Evidence,

@@ -4416,6 +4416,12 @@ function urlMatches(pattern, url) {
     return urlText.includes(patternText);
   }
 }
+function opensCurrentUrl(edge, observation) {
+  if (edge?.action?.tool !== "open_tab") return false;
+  const pattern = edge?.s?.semanticAnchor?.urlPattern || "";
+  if (!pattern) return false;
+  return urlMatches(pattern, observation?.url);
+}
 function evaluateRule(rule, obs, bound, before) {
   if (!rule || !PHI_KINDS.has(rule.kind) || rule.source !== "structured") return false;
   switch (rule.kind) {
@@ -4787,6 +4793,7 @@ function sanitizeTraceRecord(value) {
     ...value.successPredicate ? { successPredicate: String(value.successPredicate).slice(0, 500) } : {},
     ...value.verification ? { verification: String(value.verification).slice(0, 500) } : {},
     ...value.risk ? { risk: String(value.risk).slice(0, 40) } : {},
+    ...value.lane === "fast" || value.lane === "slow" ? { lane: value.lane } : {},
     ts: Math.max(0, Math.floor(Number(value.ts) || 0))
   };
 }
@@ -5034,6 +5041,7 @@ function traceRecordFromTransition(input) {
     ...input.successPredicate ? { successPredicate: input.successPredicate } : {},
     ...input.verification ? { verification: input.verification } : {},
     ...input.risk ? { risk: input.risk } : {},
+    ...input.lane === "fast" || input.lane === "slow" ? { lane: input.lane } : {},
     ts: Number(input.now) || Date.now()
   };
 }
@@ -9432,7 +9440,8 @@ function recordTraceStep(ctx, name, args, res, observed) {
       verification: graphVerified ? String(
         res.verification?.verified === true ? res.verification.reason || "\u7ED3\u6784\u5316\u52A8\u4F5C\u9A8C\u8BC1\u901A\u8FC7" : "\u7ED3\u6784\u5316\u524D\u540E\u5FEB\u7167\u53D1\u751F\u53D8\u5316"
       ) : "",
-      risk: String(graphVerified ? getToolMetadata(name).risk : "")
+      risk: String(graphVerified ? getToolMetadata(name).risk : ""),
+      lane: observed?.lane === "fast" ? "fast" : "slow"
     });
     appendTraceRecord(ctx.pageUrl, record2, { ttlMs: graphSettings.ttlMs }).catch(() => {
     });
@@ -13679,7 +13688,8 @@ var ToolCallPipeline = class {
         }
         recordTraceStep(state2.ctx, toolCall.name, toolCall.args, result, {
           beforeSnapshot: traceBeforeSnapshot,
-          afterSnapshot: traceAfterSnapshot
+          afterSnapshot: traceAfterSnapshot,
+          lane
         });
       } catch {
       }
@@ -15328,7 +15338,20 @@ var JevFastController = class {
     const tiered = selectCandidatesByTier(bindable);
     const groundedItems = [];
     let filteredTargetMissing = 0;
+    let filteredNoopNavigation = 0;
     for (const item of tiered) {
+      if (opensCurrentUrl(item.edge, before)) {
+        filteredNoopNavigation += 1;
+        this.state.trace({
+          phase: "tracegraph-grounding",
+          iter,
+          edgeId: item.edge.id,
+          decision: "SKIP",
+          reason: "noop-navigation",
+          prefilter: true
+        });
+        continue;
+      }
       const grounded = groundEdgeAction(item.edge, before, item.binding.bound);
       if (grounded.ok && grounded.args) {
         groundedItems.push({ ...item, grounded });
@@ -15345,11 +15368,16 @@ var JevFastController = class {
         prefilter: true
       });
     }
-    const candidates = groundedItems.map((item) => item.edge);
-    const candidateMatches = Object.fromEntries(
-      groundedItems.map((item) => [item.edge.id, item.match])
+    const hasFullInPage = groundedItems.some(
+      (item) => item.match.level === "full" && item.edge.action.tool !== "open_tab"
     );
-    const levelCounts = groundedItems.reduce(
+    const preferred = hasFullInPage ? groundedItems.filter((item) => item.edge.action.tool !== "open_tab") : groundedItems;
+    const prunedNavigation = groundedItems.length - preferred.length;
+    const candidates = preferred.map((item) => item.edge);
+    const candidateMatches = Object.fromEntries(
+      preferred.map((item) => [item.edge.id, item.match])
+    );
+    const levelCounts = preferred.reduce(
       (acc, item) => {
         acc[item.match.level] = (acc[item.match.level] || 0) + 1;
         return acc;
@@ -15364,6 +15392,8 @@ var JevFastController = class {
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
+      filteredNoopNavigation,
+      prunedNavigation,
       levels: levelCounts,
       state: stateName || ""
     });
@@ -15375,6 +15405,8 @@ var JevFastController = class {
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
+      filteredNoopNavigation,
+      prunedNavigation,
       levels: levelCounts
     });
     if (!candidates.length) {
@@ -15517,7 +15549,7 @@ var JevFastController = class {
       this.traceEdgeHandoff(iter, "edge-tool-failed", edge.action.tool);
       return { kind: "skipped", reason: "edge-tool-failed", latencyMs };
     }
-    const observed = await this.observePage(iter, persist);
+    const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === "cancelled") return observed;
     this.state.jevLoop.executedEdges = [
       .../* @__PURE__ */ new Set([...this.state.jevLoop.executedEdges, edge.id])
@@ -15601,6 +15633,26 @@ var JevFastController = class {
       toolCalls: [toolCall],
       lane: "fast"
     }, iter, persist);
+  }
+  /**
+   * 动作后的观察。open_tab 之后页面可能还没挂载完：此时快照元素为空，
+   * 直接交给下一步只会看到「0 条边 → handoff」。给一次有界的 settle
+   * （300ms + 重拍一次），避免把导航本身误判成「没有可复用证据」。
+   */
+  async observeAfterAction(iter, persist, toolName) {
+    const first = await this.observePage(iter, persist);
+    if (first.kind === "cancelled") return first;
+    if (toolName !== "open_tab") return first;
+    const elements = Array.isArray(this.state.ctx.lastSnapshot?.elements) ? this.state.ctx.lastSnapshot.elements.length : 0;
+    if (elements > 0) return first;
+    this.state.trace({
+      phase: "tracegraph-settle",
+      iter,
+      tool: toolName,
+      reason: "empty-snapshot"
+    });
+    await sleep2(300);
+    return this.observePage(iter, persist);
   }
   noteSlowTurn() {
     this.state.jevLoop.consecutiveFastActions = 0;
@@ -15734,7 +15786,7 @@ var JevFastController = class {
       this.traceEdgeHandoff(iter, "delegate-tool-failed", next.tool);
       return { kind: "skipped", reason: "delegate-tool-failed" };
     }
-    const observed = await this.observePage(iter, persist);
+    const observed = await this.observeAfterAction(iter, persist, next.tool);
     if (observed.kind === "cancelled") return observed;
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;

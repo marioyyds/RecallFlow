@@ -124,9 +124,18 @@ function median(values) {
 
 function report(graphs) {
   const rows = [];
+  const laneStats = new Map();
   for (const graph of graphs) {
     const siteKey = String(graph.siteKey || 'unknown');
     const edges = Array.isArray(graph.l1 && graph.l1.edges) ? graph.l1.edges : [];
+    const records = Array.isArray(graph.records) ? graph.records : [];
+    const lanes = { fast: 0, slow: 0, unknown: 0 };
+    for (const record of records) {
+      if (record && record.lane === 'fast') lanes.fast += 1;
+      else if (record && record.lane === 'slow') lanes.slow += 1;
+      else lanes.unknown += 1;
+    }
+    laneStats.set(siteKey, lanes);
     const byState = new Map();
     const recordIndex = recordIndexOf(graph);
     for (const edge of edges) {
@@ -158,6 +167,7 @@ function report(graphs) {
     : 'same-state-many-actions（候选都来自同一状态：先补 purpose / 前置 / 效果证据）';
   return {
     rows,
+    lanes: [...laneStats.entries()].map(([site, lanes]) => ({ site, ...lanes })),
     summary: {
       sites: new Set(rows.map((row) => row.siteKey)).size,
       states: rows.length,
@@ -203,6 +213,13 @@ for (const row of result.rows.slice(0, args.top)) {
     row.similarity.toFixed(2),
     row.legacy,
   ].join('\t'));
+}
+console.log('');
+for (const lane of result.lanes) {
+  console.log(
+    'lanes ' + lane.site +
+    ': fast=' + lane.fast + ' slow=' + lane.slow + ' unknown=' + lane.unknown
+  );
 }
 console.log('');
 console.log('states=' + result.summary.states +

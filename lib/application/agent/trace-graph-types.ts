@@ -180,6 +180,8 @@ export interface TraceRecord {
   argsRedacted: Record<string, unknown>;
   before: Evidence;
   after: Evidence;
+  /** 执行通道：慢模型回合还是快路（边缘/委托）。用于统计快慢比例。 */
+  lane?: 'fast' | 'slow';
   target?: {
     role?: string;
     name?: string;

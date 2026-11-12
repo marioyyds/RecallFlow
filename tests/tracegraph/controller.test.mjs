@@ -283,6 +283,113 @@ test('委托动作归一化：白名单、必需的锚点与按键', () => {
   assert.equal(normalizePlanNextAction({ tool: 'open_tab' }), undefined, '缺 url');
 });
 
+test('open_tab 指向当前 URL 时不执行（no-op 导航）', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({
+    id: 'e.same-url',
+    g: 'open_tab 「/pull/compare」',
+    action: { tool: 'open_tab', argsTemplate: {}, risk: 'low' },
+    slots: [],
+    s: { semanticAnchor: { kind: 'selector', urlPattern: '/pull/compare' } },
+  });
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => edgeResponse('e.same-url'),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(calls.some((call) => call.name === 'open_tab'), false);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.filteredNoopNavigation, 1);
+});
+
+test('同一状态有 full 页内动作时，open_tab 候选让位', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({ fromSignatures: ['PRFormPage#button:button#'] });
+  const base = graph.l1.edges[0];
+  graph.l1.edges.push({
+    ...base,
+    id: 'e.nav',
+    g: 'open_tab 「/elsewhere」',
+    action: { tool: 'open_tab', argsTemplate: { url: 'https://gitcode.com/elsewhere' }, risk: 'low' },
+    slots: [],
+    s: { semanticAnchor: { kind: 'selector', urlPattern: '/elsewhere' } },
+    provenance: { ...base.provenance, recordIds: ['r-nav'] },
+    fromSignatures: ['PRFormPage#button:button#'],
+  });
+  let request = null;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async (_settings, payload) => {
+      if (!request) request = payload;
+      return edgeResponse('e.create');
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  const criteria = request.questions[JEV_EDGE_QUESTION].criteria;
+  assert.deepEqual(Object.keys(criteria), ['e.create', 'ABSTAIN']);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.prunedNavigation, 1);
+});
+
+test('open_tab 后页面未挂载时补一次观察（settle）', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({
+    id: 'e.open',
+    g: 'open_tab 「/elsewhere」',
+    action: { tool: 'open_tab', argsTemplate: { url: 'https://gitcode.com/elsewhere' }, risk: 'low' },
+    slots: [],
+    s: { semanticAnchor: { kind: 'selector', urlPattern: '/elsewhere' } },
+  });
+  let opened = false;
+  let observesAfterOpen = 0;
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        for (const call of step.toolCalls) {
+          state.toolCallCount += 1;
+          state.ranToolNames.push(call.name);
+          if (call.name === 'open_tab') {
+            opened = true;
+            // 新标签页还没挂载：快照为空。
+            state.ctx.lastSnapshot = { ...snapshot(), elements: [], fingerprint: 'fp-blank' };
+          } else if (call.name === 'get_page_snapshot' && opened) {
+            observesAfterOpen += 1;
+            if (observesAfterOpen >= 2) {
+              state.ctx.lastSnapshot = snapshot('fp-loaded');
+            }
+          }
+        }
+        return { kind: 'continue', toolMs: 1 };
+      },
+    },
+    new AbortController().signal,
+    async () => edgeResponse('e.open'),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'act');
+  assert.equal(observesAfterOpen, 2, '空快照后必须补拍一次');
+  assert.ok(state.traces.some((entry) => entry.phase === 'tracegraph-settle'));
+});
+
 test('no-candidates 不触发路由冷却：慢思考动过一步后快路会再试', async () => {
   const state = stateFor(false);
   const graph = emptyTraceGraph('https://gitcode.com');

@@ -273,6 +273,7 @@ export function sanitizeTraceRecord(value: unknown): TraceRecord | null {
       ? { verification: String(value.verification).slice(0, 500) }
       : {}),
     ...(value.risk ? { risk: String(value.risk).slice(0, 40) } : {}),
+    ...(value.lane === 'fast' || value.lane === 'slow' ? { lane: value.lane } : {}),
     ts: Math.max(0, Math.floor(Number(value.ts) || 0)),
   };
 }
@@ -579,6 +580,7 @@ export function traceRecordFromTransition(input: {
   successPredicate?: string;
   verification?: string;
   risk?: string;
+  lane?: 'fast' | 'slow';
   now?: number;
 }): TraceRecord {
   const beforeAtoms = extractAtoms(input.beforeSnapshot);
@@ -622,6 +624,7 @@ export function traceRecordFromTransition(input: {
     ...(input.successPredicate ? { successPredicate: input.successPredicate } : {}),
     ...(input.verification ? { verification: input.verification } : {}),
     ...(input.risk ? { risk: input.risk } : {}),
+    ...(input.lane === 'fast' || input.lane === 'slow' ? { lane: input.lane } : {}),
     ts: Number(input.now) || Date.now(),
   };
 }

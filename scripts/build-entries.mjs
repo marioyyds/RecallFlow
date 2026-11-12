@@ -119,7 +119,9 @@ export const ENTRIES = [
   // dedupe measured 1102534 bytes (1076.7KB). Raise to 1078KB; no dependency.
   // Same day: delegated one-shot actions (PlanStep.nextAction) measured
   // 1111163 bytes (1085.1KB). Raise to 1086KB; no dependency.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1086 * 1024 },
+  // Same day: lane accounting, no-op open_tab guard, in-page preference and
+  // navigation settle measured 1113349 bytes (1087.1KB). Raise to 1088KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1088 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

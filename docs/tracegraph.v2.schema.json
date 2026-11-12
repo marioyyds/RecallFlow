@@ -221,6 +221,7 @@
         "successPredicate": { "type": "string" },
         "verification": { "type": "string" },
         "risk": { "type": "string" },
+        "lane": { "enum": ["fast", "slow"] },
         "ts": { "type": "integer", "minimum": 0 }
       }
     },

@@ -110,6 +110,13 @@ live edge 的置信度实测落在 0.3–0.5，且候选数 >5。归因不是门
   → 普通审批（**不** skip）→ 执行一次 → 重新观察，全程不调 JEV。执行一次即清空；
   `allowedOperations` 不含 CLICK 时不消费。白名单刻意不含 `type_text`/`select_option`：
   内容值只能来自当前指令的显式槽位。
+- lane 记账：`TraceRecord.lane`（fast / slow）由工具管线写入，导出与
+  `tracegraph-bucket-report.mjs` 会按站点输出 fast / slow / unknown —— 有了它才能量化
+  「快慢比例」与委托动作省下的慢回合。
+- open_tab 收敛：`opensCurrentUrl()` 跳过指向当前 URL 的 no-op 导航；同一状态已有
+  `full` 页内动作时 open_tab 候选让位（`prunedNavigation`）；open_tab 执行后若快照为空
+  元素，补拍一次（300ms，仅一次，`tracegraph-settle`），避免把导航后的未挂载误判成
+  「没有可复用证据」。
 
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），

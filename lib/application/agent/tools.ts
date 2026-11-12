@@ -421,6 +421,7 @@ export function recordTraceStep(
   observed?: {
     beforeSnapshot?: PageSnapshotLike | null;
     afterSnapshot?: PageSnapshotLike | null;
+    lane?: 'fast' | 'slow';
   }
 ) {
   if (!ctx || !Array.isArray(ctx.trace)) return;
@@ -512,6 +513,7 @@ export function recordTraceStep(
             )
           : '',
       risk: String(graphVerified ? getToolMetadata(name).risk : ''),
+      lane: observed?.lane === 'fast' ? 'fast' : 'slow',
     });
     appendTraceRecord(ctx.pageUrl, record, { ttlMs: graphSettings.ttlMs }).catch(() => {});
   }

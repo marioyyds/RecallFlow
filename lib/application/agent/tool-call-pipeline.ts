@@ -485,6 +485,7 @@ export class ToolCallPipeline {
         recordTraceStep(state.ctx, toolCall.name, toolCall.args, result, {
           beforeSnapshot: traceBeforeSnapshot,
           afterSnapshot: traceAfterSnapshot,
+          lane,
         });
       } catch {}
       state.messages.push({

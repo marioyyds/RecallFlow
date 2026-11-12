@@ -19,6 +19,7 @@ import {
   extractExplicitSlots,
   groundEdgeAction,
   matchCandidate,
+  opensCurrentUrl,
   resolveEdgeTarget,
 } from './trace-graph.ts';
 import { loadTraceGraph } from './tracegraph-store.ts';
@@ -619,7 +620,21 @@ export class JevFastController {
       grounded: ReturnType<typeof groundEdgeAction>;
     }> = [];
     let filteredTargetMissing = 0;
+    let filteredNoopNavigation = 0;
     for (const item of tiered) {
+      // 目标是当前 URL 的 open_tab 是 no-op：不要为了它开标签页。
+      if (opensCurrentUrl(item.edge, before)) {
+        filteredNoopNavigation += 1;
+        this.state.trace({
+          phase: 'tracegraph-grounding',
+          iter,
+          edgeId: item.edge.id,
+          decision: 'SKIP',
+          reason: 'noop-navigation',
+          prefilter: true,
+        });
+        continue;
+      }
       const grounded = groundEdgeAction(item.edge, before, item.binding.bound);
       if (grounded.ok && grounded.args) {
         groundedItems.push({ ...item, grounded });
@@ -638,11 +653,20 @@ export class JevFastController {
       // 刻意**不封边**：目标缺失可能是瞬时的（菜单收起、面板未展开），封边会让
       // 这条边在本 run 内永久失效。预过滤不花 systemone，下一 cycle 再挑一次即可。
     }
-    const candidates = groundedItems.map((item) => item.edge);
-    const candidateMatches = Object.fromEntries(
-      groundedItems.map((item) => [item.edge.id, item.match])
+    // 同一状态里已有 full 匹配的页内动作时，open_tab 一律让位：
+// 能点就不开新页（跨 origin 的情况仍需 open_tab，但那种边不会是同一状态的 full）。
+    const hasFullInPage = groundedItems.some(
+      (item) => item.match.level === 'full' && item.edge.action.tool !== 'open_tab'
     );
-    const levelCounts = groundedItems.reduce(
+    const preferred = hasFullInPage
+      ? groundedItems.filter((item) => item.edge.action.tool !== 'open_tab')
+      : groundedItems;
+    const prunedNavigation = groundedItems.length - preferred.length;
+    const candidates = preferred.map((item) => item.edge);
+    const candidateMatches = Object.fromEntries(
+      preferred.map((item) => [item.edge.id, item.match])
+    );
+    const levelCounts = preferred.reduce(
       (acc, item) => {
         acc[item.match.level] = (acc[item.match.level] || 0) + 1;
         return acc;
@@ -657,6 +681,8 @@ export class JevFastController {
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
+      filteredNoopNavigation,
+      prunedNavigation,
       levels: levelCounts,
       state: stateName || '',
     });
@@ -668,6 +694,8 @@ export class JevFastController {
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
+      filteredNoopNavigation,
+      prunedNavigation,
       levels: levelCounts,
     });
     if (!candidates.length) {
@@ -820,7 +848,7 @@ export class JevFastController {
       this.traceEdgeHandoff(iter, 'edge-tool-failed', edge.action.tool);
       return { kind: 'skipped', reason: 'edge-tool-failed', latencyMs };
     }
-    const observed = await this.observePage(iter, persist);
+    const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === 'cancelled') return observed;
 
     this.state.jevLoop.executedEdges = [
@@ -927,6 +955,33 @@ export class JevFastController {
       toolCalls: [toolCall],
       lane: 'fast',
     }, iter, persist);
+  }
+
+  /**
+   * 动作后的观察。open_tab 之后页面可能还没挂载完：此时快照元素为空，
+   * 直接交给下一步只会看到「0 条边 → handoff」。给一次有界的 settle
+   * （300ms + 重拍一次），避免把导航本身误判成「没有可复用证据」。
+   */
+  private async observeAfterAction(
+    iter: number,
+    persist: (extra: Record<string, unknown>) => Promise<unknown>,
+    toolName: string
+  ): Promise<ToolBatchOutcome> {
+    const first = await this.observePage(iter, persist);
+    if (first.kind === 'cancelled') return first;
+    if (toolName !== 'open_tab') return first;
+    const elements = Array.isArray(this.state.ctx.lastSnapshot?.elements)
+      ? this.state.ctx.lastSnapshot.elements.length
+      : 0;
+    if (elements > 0) return first;
+    this.state.trace({
+      phase: 'tracegraph-settle',
+      iter,
+      tool: toolName,
+      reason: 'empty-snapshot',
+    });
+    await sleep(300);
+    return this.observePage(iter, persist);
   }
 
   noteSlowTurn(): void {
@@ -1073,7 +1128,7 @@ private async tryDelegatedAction(
     this.traceEdgeHandoff(iter, 'delegate-tool-failed', next.tool);
     return { kind: 'skipped', reason: 'delegate-tool-failed' };
   }
-  const observed = await this.observePage(iter, persist);
+  const observed = await this.observeAfterAction(iter, persist, next.tool);
   if (observed.kind === 'cancelled') return observed;
   this.state.jevLoop.fastActions += 1;
   this.state.jevLoop.consecutiveFastActions += 1;
