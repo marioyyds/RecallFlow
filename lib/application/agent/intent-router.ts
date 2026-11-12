@@ -527,6 +527,7 @@ export function buildStableSystemPrompt(toolNames: any[] = [], skills: any[] = [
     '13. 要把某处内容带入视口时用 scroll_page（支持按 text 定位），**不要用 click_element 代替滚动**——点击是对用户页面的真实副作用，看起来是纯文本的段落也可能绑定了事件。若 scroll_page 报「滚动已派发但位置未变化」，说明滚动发生在**内部容器**：用 scroll_page({selector:"<该容器>", y:600}) 直接滚它（结果会回报实际 scrollTop），不要靠点击去「顶动」页面，也不要为此调用 run_javascript。',
     '14. 标签页要克制：优先在当前绑定页完成操作；只有确实缺数据时才 switch_tab / open_tab。禁止为了“验证一下”“对比一下”反复 A→B→A 切换。同一 tab 的 switch_tab 是 no-op；达到本任务切换上限后会拒绝继续切换，此时应留在当前页、复用已有快照/结果或改用 fetch_webpage。',
     '15. 如果工具结果提示“操作被登录拦截 / 权限限制”：立即停止继续点击、猜 URL 或切换标签页，把结果里的真实登录入口告诉用户，等待用户完成登录后再继续。',
+    '16. **多步任务先计划，再动手**：正式开始点击/输入前，先用 update_plan 写 3–6 步并把当前步骤标 in_progress；若下一步是当前页上的机械点击/按键，就在该步骤写 nextAction（name 用页面可见文字）。页面状态变了就更新计划，不要一条计划用到底。',
   ].filter(Boolean);
   // 全部技能以「目录」形式列出（name + 用途），供模型判断是否需 load_skill 加载完整说明。
   const skillCatalog = Array.isArray(skills) && skills.length ? buildSkillCatalog(skills) : '';

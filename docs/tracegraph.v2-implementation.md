@@ -138,6 +138,11 @@ operation 路径被 edge 分支整个跳过了。据此改成两层快路 + 一�
 - **skill 契约**：SKILL.md 可声明 `x-recallflow-fast-actions`（PLAN_FAST_OPERATIONS
   枚举）与 `x-recallflow-slow-actions`（工具名）；`load_skill` 会把分工写回给模型，
   提示它在 `update_plan` 里写进 `allowedOperations`。
+- **计划模板**：SKILL.md 还可写 `x-recallflow-plan`，每行 `步骤文字 | CLICK,SCROLL_DOWN`
+  （操作可省略）。`load_skill` 直接给出可提交的 `update_plan` items（首步 in_progress，
+  含 `allowedOperations`），并提示“当前步骤若是机械点击就补 nextAction”。
+  `search-within-site` 与 `checkout-form` 已内置模板。系统提示同步加了一条硬规则：
+  多步任务先 `update_plan` 再动手，页面变化就更新计划。
 - **度量**：`tracegraph-bucket-report` 按动作类别拆成 `act fast/slow`、
   `observe fast/slow`、`other fast/slow`，不再把观察记录和动作记录混成一个数。
 

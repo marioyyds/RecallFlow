@@ -1325,6 +1325,13 @@ var SKILL_REGISTRY = Object.freeze([
       // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
       fastActions: ["CLICK", "SCROLL_DOWN", "WAIT"],
       slowActions: ["type_text"],
+      // 首轮计划模板：load_skill 会把它变成 update_plan 的初始 items，
+      // 让“计划 → nextAction → 委托”这条链路有燃料，而不是靠模型即兴。
+      planSteps: [
+        { text: "\u6253\u5F00\u68C0\u7D22\u9875\u5E76\u5B9A\u4F4D\u641C\u7D22\u6846", allowedOperations: ["CLICK"] },
+        { text: "\u8F93\u5165\u67E5\u8BE2\u8BCD\u5E76\u63D0\u4EA4" },
+        { text: "\u7B49\u5F85\u7ED3\u679C\u5E76\u7ED3\u6784\u5316\u8BFB\u53D6" }
+      ],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: "site-search"
     }
@@ -1347,6 +1354,12 @@ var SKILL_REGISTRY = Object.freeze([
       // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
       fastActions: ["SCROLL_DOWN", "WAIT"],
       slowActions: ["type_text", "select_option", "check_box", "click_element"],
+      planSteps: [
+        { text: "\u6253\u5F00\u8868\u5355\u5E76\u9009\u62E9\u5546\u54C1/\u89C4\u683C", allowedOperations: ["CLICK"] },
+        { text: "\u586B\u5199\u5168\u90E8\u5FC5\u586B\u9879" },
+        { text: "\u52FE\u9009\u786E\u8BA4\u5E76\u63D0\u4EA4" },
+        { text: "\u8BFB\u56DE\u7ED3\u679C\u786E\u8BA4\u6210\u529F" }
+      ],
       playbook: "checkout-form"
     }
   },
@@ -1997,6 +2010,14 @@ function parseSkillMd(text3) {
   }
   return { data, body };
 }
+function parsePlanStepLine(line) {
+  const raw = String(line || "");
+  const [textPart, opsPart] = raw.split("|");
+  const text3 = String(textPart || "").trim();
+  if (!text3) return null;
+  const allowed = String(opsPart || "").split(/[,\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean);
+  return allowed.length ? { text: text3, allowedOperations: [...new Set(allowed)] } : { text: text3 };
+}
 function mdToSkill(text3) {
   const { data, body } = parseSkillMd(text3);
   const x = {
@@ -2004,7 +2025,8 @@ function mdToSkill(text3) {
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
     tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : [],
     fastActions: Array.isArray(data["x-recallflow-fast-actions"]) ? data["x-recallflow-fast-actions"].map(String) : [],
-    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : []
+    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : [],
+    planSteps: (Array.isArray(data["x-recallflow-plan"]) ? data["x-recallflow-plan"] : []).map(parsePlanStepLine).filter((step) => Boolean(step))
   };
   return {
     name: typeof (data.name || data.slug) === "string" ? String(data.name || data.slug) : "",
@@ -2039,6 +2061,10 @@ function toRuntimeSkill(skill, builtin = false) {
     tools: Array.isArray(x.tools) ? x.tools : [],
     fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
     slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
+    planSteps: Array.isArray(x.planSteps) ? x.planSteps.map((step) => ({
+      text: String(step?.text || "").trim(),
+      ...Array.isArray(step?.allowedOperations) && step.allowedOperations.length ? { allowedOperations: step.allowedOperations.map(String) } : {}
+    })).filter((step) => Boolean(step.text)) : [],
     builtin: !!builtin
   };
 }
@@ -6155,6 +6181,18 @@ async function loadSkill(deps, args) {
   if (fastActions.length || slowActions.length) {
     parts.push(
       "\u5FEB\u6162\u5206\u5DE5\uFF08\u672C\u6280\u80FD\uFF09\uFF1A\u5FEB\u8DEF\u53EA\u6267\u884C " + (fastActions.join(" / ") || "\u65E0") + "\u3002" + (slowActions.length ? slowActions.join(" / ") + " \u5FC5\u987B\u7531\u4F60\uFF08\u6162\u601D\u8003\uFF09\u4EB2\u81EA\u8C03\u7528\u3002" : "") + "\u7528 update_plan \u65F6\u628A\u5FEB\u8DEF\u679A\u4E3E\u5199\u8FDB\u5F53\u524D\u6B65\u9AA4\u7684 allowedOperations\uFF1B\u503C\u7C7B\u52A8\u4F5C\u4E0D\u8981\u4EA4\u7ED9\u5FEB\u8DEF\u3002"
+    );
+  }
+  const planSteps = Array.isArray(skill.planSteps) ? skill.planSteps : [];
+  if (planSteps.length) {
+    const template = planSteps.map((step, index) => ({
+      id: String(index + 1),
+      text: String(step && step.text || ""),
+      status: index === 0 ? "in_progress" : "pending",
+      ...Array.isArray(step && step.allowedOperations) && step.allowedOperations.length ? { allowedOperations: step.allowedOperations } : {}
+    }));
+    parts.push(
+      "\u8BA1\u5212\u6A21\u677F\uFF08\u9996\u8F6E\u76F4\u63A5\u4F5C\u4E3A update_plan \u7684 items \u63D0\u4EA4\uFF0C\u518D\u5F00\u59CB\u64CD\u4F5C\uFF09\uFF1A\n" + JSON.stringify(template) + "\n\u5F53\u524D\u6B65\u9AA4\u82E5\u662F\u672C\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB\uFF0C\u518D\u8865 nextAction\uFF1B\u586B\u503C\u4E0E\u5BFC\u822A\u4E0D\u8981\u5199\u8FDB nextAction\u3002"
     );
   }
   const toolWarnings = deps.validateSkillTools(skill);

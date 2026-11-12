@@ -91,8 +91,33 @@ export function serializeSkillMd(skill: SkillLike) {
   if (x.tools && x.tools.length) add('x-recallflow-tools', x.tools);
   if (x.fastActions && x.fastActions.length) add('x-recallflow-fast-actions', x.fastActions);
   if (x.slowActions && x.slowActions.length) add('x-recallflow-slow-actions', x.slowActions);
+  if (x.planSteps && x.planSteps.length) {
+    add(
+      'x-recallflow-plan',
+      x.planSteps.map(
+        (step) =>
+          step.text +
+          (step.allowedOperations && step.allowedOperations.length
+            ? ' | ' + step.allowedOperations.join(',')
+            : '')
+      )
+    );
+  }
   lines.push('---', '', skill.content || '');
   return lines.join('\n');
+}
+
+/** `x-recallflow-plan` 的一行：`步骤文字 | CLICK,SCROLL_DOWN`（操作可省略）。 */
+export function parsePlanStepLine(line: unknown): { text: string; allowedOperations?: string[] } | null {
+  const raw = String(line || '');
+  const [textPart, opsPart] = raw.split('|');
+  const text = String(textPart || '').trim();
+  if (!text) return null;
+  const allowed = String(opsPart || '')
+    .split(/[,\s]+/)
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean);
+  return allowed.length ? { text, allowedOperations: [...new Set(allowed)] } : { text };
 }
 
 // 把 SKILL.md 解析结果（data + body）转为 RecallFlow 内部标准技能对象
@@ -108,6 +133,9 @@ export function mdToSkill(text: string) {
     slowActions: Array.isArray(data['x-recallflow-slow-actions'])
       ? data['x-recallflow-slow-actions'].map(String)
       : [],
+    planSteps: (Array.isArray(data['x-recallflow-plan']) ? data['x-recallflow-plan'] : [])
+      .map(parsePlanStepLine)
+      .filter((step): step is NonNullable<typeof step> => Boolean(step)),
   };
   return {
     name: typeof (data.name || data.slug) === 'string' ? String(data.name || data.slug) : '',
@@ -144,6 +172,16 @@ export function toRuntimeSkill(skill: SkillLike, builtin = false) {
     tools: Array.isArray(x.tools) ? x.tools : [],
     fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
     slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
+    planSteps: Array.isArray(x.planSteps)
+      ? x.planSteps
+          .map((step) => ({
+            text: String(step?.text || '').trim(),
+            ...(Array.isArray(step?.allowedOperations) && step.allowedOperations.length
+              ? { allowedOperations: step.allowedOperations.map(String) }
+              : {}),
+          }))
+          .filter((step) => Boolean(step.text))
+      : [],
     builtin: !!builtin,
   };
 }

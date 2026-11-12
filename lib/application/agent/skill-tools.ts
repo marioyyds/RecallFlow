@@ -69,6 +69,22 @@ export async function loadSkill(deps: SkillDeps, args: Record<string, unknown>) 
         '用 update_plan 时把快路枚举写进当前步骤的 allowedOperations；值类动作不要交给快路。'
     );
   }
+  const planSteps = Array.isArray((skill as any).planSteps) ? (skill as any).planSteps : [];
+  if (planSteps.length) {
+    const template = planSteps.map((step: any, index: number) => ({
+      id: String(index + 1),
+      text: String((step && step.text) || ''),
+      status: index === 0 ? 'in_progress' : 'pending',
+      ...(Array.isArray(step && step.allowedOperations) && step.allowedOperations.length
+        ? { allowedOperations: step.allowedOperations }
+        : {}),
+    }));
+    parts.push(
+      '计划模板（首轮直接作为 update_plan 的 items 提交，再开始操作）：\n' +
+        JSON.stringify(template) +
+        '\n当前步骤若是本页上的机械点击，再补 nextAction；填值与导航不要写进 nextAction。'
+    );
+  }
   // ⛔ **不要**把通用纪律底座拼进技能返回里 —— 实测它会造成退化（第 26 轮）。
   //
   // 实验（同一个场景、同一个模型、真模型 eval，见 docs/regression-red-flag.md）：

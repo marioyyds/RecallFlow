@@ -369,6 +369,13 @@ export const SKILL_REGISTRY = Object.freeze([
       // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
       fastActions: ['CLICK', 'SCROLL_DOWN', 'WAIT'],
       slowActions: ['type_text'],
+      // 首轮计划模板：load_skill 会把它变成 update_plan 的初始 items，
+      // 让“计划 → nextAction → 委托”这条链路有燃料，而不是靠模型即兴。
+      planSteps: [
+        { text: '打开检索页并定位搜索框', allowedOperations: ['CLICK'] },
+        { text: '输入查询词并提交' },
+        { text: '等待结果并结构化读取' },
+      ],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: 'site-search',
     },
@@ -413,6 +420,12 @@ export const SKILL_REGISTRY = Object.freeze([
       // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
       fastActions: ['SCROLL_DOWN', 'WAIT'],
       slowActions: ['type_text', 'select_option', 'check_box', 'click_element'],
+      planSteps: [
+        { text: '打开表单并选择商品/规格', allowedOperations: ['CLICK'] },
+        { text: '填写全部必填项' },
+        { text: '勾选确认并提交' },
+        { text: '读回结果确认成功' },
+      ],
       playbook: 'checkout-form',
     },
   },

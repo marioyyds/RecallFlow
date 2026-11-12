@@ -55,3 +55,41 @@ test('load_skill 把快慢分工明确告诉慢模型', async () => {
   assert.match(out.result, /CLICK/);
   assert.match(out.result, /type_text 必须由你/);
 });
+
+const PLAN_MD = [
+  '---',
+  'name: publish-blog',
+  'description: 发布博客',
+  'x-recallflow-plan:',
+  '  - 打开编辑页 | CLICK',
+  '  - 填写标题与正文',
+  '  - 添加标签 | CLICK',
+  '---',
+  '',
+  '正文',
+].join('\n');
+
+test('x-recallflow-plan 能往返，并在 load_skill 里给出 update_plan 模板', async () => {
+  const skill = mdToSkill(PLAN_MD);
+  assert.deepEqual(skill.x.planSteps, [
+    { text: '打开编辑页', allowedOperations: ['CLICK'] },
+    { text: '填写标题与正文' },
+    { text: '添加标签', allowedOperations: ['CLICK'] },
+  ]);
+
+  const round = mdToSkill(serializeSkillMd(skill));
+  assert.deepEqual(round.x.planSteps, skill.x.planSteps);
+
+  const deps = {
+    async getMergedSkills() {
+      return [toRuntimeSkill(skill)];
+    },
+    validateSkillTools() {
+      return [];
+    },
+  };
+  const out = await loadSkill(deps, { name: 'publish-blog' });
+  assert.match(out.result, /计划模板/);
+  assert.match(out.result, /"id":"1","text":"打开编辑页","status":"in_progress","allowedOperations":\["CLICK"\]/);
+  assert.match(out.result, /"status":"pending"/);
+});

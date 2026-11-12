@@ -2277,6 +2277,13 @@ var SKILL_REGISTRY = Object.freeze([
       // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
       fastActions: ["CLICK", "SCROLL_DOWN", "WAIT"],
       slowActions: ["type_text"],
+      // 首轮计划模板：load_skill 会把它变成 update_plan 的初始 items，
+      // 让“计划 → nextAction → 委托”这条链路有燃料，而不是靠模型即兴。
+      planSteps: [
+        { text: "\u6253\u5F00\u68C0\u7D22\u9875\u5E76\u5B9A\u4F4D\u641C\u7D22\u6846", allowedOperations: ["CLICK"] },
+        { text: "\u8F93\u5165\u67E5\u8BE2\u8BCD\u5E76\u63D0\u4EA4" },
+        { text: "\u7B49\u5F85\u7ED3\u679C\u5E76\u7ED3\u6784\u5316\u8BFB\u53D6" }
+      ],
       // 与能力剧本的对应关系（契约门禁据此核对 x.tools 是否覆盖剧本实际用到的工具）
       playbook: "site-search"
     }
@@ -2299,6 +2306,12 @@ var SKILL_REGISTRY = Object.freeze([
       // 下单/提交类点击属于高风险，快路只保留滚动与等待；填写与提交都由慢思考逐次确认。
       fastActions: ["SCROLL_DOWN", "WAIT"],
       slowActions: ["type_text", "select_option", "check_box", "click_element"],
+      planSteps: [
+        { text: "\u6253\u5F00\u8868\u5355\u5E76\u9009\u62E9\u5546\u54C1/\u89C4\u683C", allowedOperations: ["CLICK"] },
+        { text: "\u586B\u5199\u5168\u90E8\u5FC5\u586B\u9879" },
+        { text: "\u52FE\u9009\u786E\u8BA4\u5E76\u63D0\u4EA4" },
+        { text: "\u8BFB\u56DE\u7ED3\u679C\u786E\u8BA4\u6210\u529F" }
+      ],
       playbook: "checkout-form"
     }
   },
@@ -2949,6 +2962,14 @@ function parseSkillMd(text2) {
   }
   return { data, body };
 }
+function parsePlanStepLine(line) {
+  const raw = String(line || "");
+  const [textPart, opsPart] = raw.split("|");
+  const text2 = String(textPart || "").trim();
+  if (!text2) return null;
+  const allowed = String(opsPart || "").split(/[,\s]+/).map((item) => item.trim().toUpperCase()).filter(Boolean);
+  return allowed.length ? { text: text2, allowedOperations: [...new Set(allowed)] } : { text: text2 };
+}
 function mdToSkill(text2) {
   const { data, body } = parseSkillMd(text2);
   const x = {
@@ -2956,7 +2977,8 @@ function mdToSkill(text2) {
     keywords: Array.isArray(data["x-recallflow-keywords"]) ? data["x-recallflow-keywords"] : [],
     tools: Array.isArray(data["x-recallflow-tools"]) ? data["x-recallflow-tools"] : [],
     fastActions: Array.isArray(data["x-recallflow-fast-actions"]) ? data["x-recallflow-fast-actions"].map(String) : [],
-    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : []
+    slowActions: Array.isArray(data["x-recallflow-slow-actions"]) ? data["x-recallflow-slow-actions"].map(String) : [],
+    planSteps: (Array.isArray(data["x-recallflow-plan"]) ? data["x-recallflow-plan"] : []).map(parsePlanStepLine).filter((step) => Boolean(step))
   };
   return {
     name: typeof (data.name || data.slug) === "string" ? String(data.name || data.slug) : "",
@@ -2991,6 +3013,10 @@ function toRuntimeSkill(skill, builtin = false) {
     tools: Array.isArray(x.tools) ? x.tools : [],
     fastActions: Array.isArray(x.fastActions) ? x.fastActions.map(String) : [],
     slowActions: Array.isArray(x.slowActions) ? x.slowActions.map(String) : [],
+    planSteps: Array.isArray(x.planSteps) ? x.planSteps.map((step) => ({
+      text: String(step?.text || "").trim(),
+      ...Array.isArray(step?.allowedOperations) && step.allowedOperations.length ? { allowedOperations: step.allowedOperations.map(String) } : {}
+    })).filter((step) => Boolean(step.text)) : [],
     builtin: !!builtin
   };
 }
@@ -8670,6 +8696,18 @@ async function loadSkill(deps, args) {
       "\u5FEB\u6162\u5206\u5DE5\uFF08\u672C\u6280\u80FD\uFF09\uFF1A\u5FEB\u8DEF\u53EA\u6267\u884C " + (fastActions.join(" / ") || "\u65E0") + "\u3002" + (slowActions.length ? slowActions.join(" / ") + " \u5FC5\u987B\u7531\u4F60\uFF08\u6162\u601D\u8003\uFF09\u4EB2\u81EA\u8C03\u7528\u3002" : "") + "\u7528 update_plan \u65F6\u628A\u5FEB\u8DEF\u679A\u4E3E\u5199\u8FDB\u5F53\u524D\u6B65\u9AA4\u7684 allowedOperations\uFF1B\u503C\u7C7B\u52A8\u4F5C\u4E0D\u8981\u4EA4\u7ED9\u5FEB\u8DEF\u3002"
     );
   }
+  const planSteps = Array.isArray(skill.planSteps) ? skill.planSteps : [];
+  if (planSteps.length) {
+    const template = planSteps.map((step, index) => ({
+      id: String(index + 1),
+      text: String(step && step.text || ""),
+      status: index === 0 ? "in_progress" : "pending",
+      ...Array.isArray(step && step.allowedOperations) && step.allowedOperations.length ? { allowedOperations: step.allowedOperations } : {}
+    }));
+    parts.push(
+      "\u8BA1\u5212\u6A21\u677F\uFF08\u9996\u8F6E\u76F4\u63A5\u4F5C\u4E3A update_plan \u7684 items \u63D0\u4EA4\uFF0C\u518D\u5F00\u59CB\u64CD\u4F5C\uFF09\uFF1A\n" + JSON.stringify(template) + "\n\u5F53\u524D\u6B65\u9AA4\u82E5\u662F\u672C\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB\uFF0C\u518D\u8865 nextAction\uFF1B\u586B\u503C\u4E0E\u5BFC\u822A\u4E0D\u8981\u5199\u8FDB nextAction\u3002"
+    );
+  }
   const toolWarnings = deps.validateSkillTools(skill);
   if (toolWarnings.length) {
     parts.push(
@@ -10417,7 +10455,8 @@ function buildStableSystemPrompt(toolNames = [], skills = []) {
     '12. \u4E00\u8F6E\u53EF\u4EE5\u53D1\u51FA**\u591A\u4E2A**\u5DE5\u5177\u8C03\u7528\uFF1A\u5F53\u82E5\u5E72\u64CD\u4F5C\u4E92\u4E0D\u4F9D\u8D56\u65F6\uFF08\u4F8B\u5982\u540C\u65F6\u8BFB\u53D6\u4E24\u4E2A\u533A\u5757\u3001\u540C\u65F6\u7ED9\u4E24\u5904\u5143\u7D20\u8BBE\u6837\u5F0F\u3001\u540C\u65F6\u53D6\u5FEB\u7167\u4E0E\u9875\u9762\u6587\u672C\uFF09\uFF0C\u8BF7\u5728**\u540C\u4E00\u8F6E**\u91CC\u4E00\u5E76\u53D1\u51FA\uFF0C\u4E0D\u8981\u4E00\u6B21\u4E00\u4E2A\u5730\u4E32\u884C\u8C03\u7528\u2014\u2014\u4E32\u884C\u4F1A\u6210\u500D\u62C9\u957F\u8017\u65F6\u3002\u53EA\u6709\u540E\u4E00\u6B65\u9700\u8981\u524D\u4E00\u6B65\u7ED3\u679C\u65F6\u624D\u5206\u8F6E\u3002\u9690\u85CF\u591A\u4E2A\u5143\u7D20\u8BF7\u4F18\u5148\u7528 annotate({op:"style", selectors:[\u2026]}) \u4E00\u6B21\u5B8C\u6210\u3002',
     '13. \u8981\u628A\u67D0\u5904\u5185\u5BB9\u5E26\u5165\u89C6\u53E3\u65F6\u7528 scroll_page\uFF08\u652F\u6301\u6309 text \u5B9A\u4F4D\uFF09\uFF0C**\u4E0D\u8981\u7528 click_element \u4EE3\u66FF\u6EDA\u52A8**\u2014\u2014\u70B9\u51FB\u662F\u5BF9\u7528\u6237\u9875\u9762\u7684\u771F\u5B9E\u526F\u4F5C\u7528\uFF0C\u770B\u8D77\u6765\u662F\u7EAF\u6587\u672C\u7684\u6BB5\u843D\u4E5F\u53EF\u80FD\u7ED1\u5B9A\u4E86\u4E8B\u4EF6\u3002\u82E5 scroll_page \u62A5\u300C\u6EDA\u52A8\u5DF2\u6D3E\u53D1\u4F46\u4F4D\u7F6E\u672A\u53D8\u5316\u300D\uFF0C\u8BF4\u660E\u6EDA\u52A8\u53D1\u751F\u5728**\u5185\u90E8\u5BB9\u5668**\uFF1A\u7528 scroll_page({selector:"<\u8BE5\u5BB9\u5668>", y:600}) \u76F4\u63A5\u6EDA\u5B83\uFF08\u7ED3\u679C\u4F1A\u56DE\u62A5\u5B9E\u9645 scrollTop\uFF09\uFF0C\u4E0D\u8981\u9760\u70B9\u51FB\u53BB\u300C\u9876\u52A8\u300D\u9875\u9762\uFF0C\u4E5F\u4E0D\u8981\u4E3A\u6B64\u8C03\u7528 run_javascript\u3002',
     "14. \u6807\u7B7E\u9875\u8981\u514B\u5236\uFF1A\u4F18\u5148\u5728\u5F53\u524D\u7ED1\u5B9A\u9875\u5B8C\u6210\u64CD\u4F5C\uFF1B\u53EA\u6709\u786E\u5B9E\u7F3A\u6570\u636E\u65F6\u624D switch_tab / open_tab\u3002\u7981\u6B62\u4E3A\u4E86\u201C\u9A8C\u8BC1\u4E00\u4E0B\u201D\u201C\u5BF9\u6BD4\u4E00\u4E0B\u201D\u53CD\u590D A\u2192B\u2192A \u5207\u6362\u3002\u540C\u4E00 tab \u7684 switch_tab \u662F no-op\uFF1B\u8FBE\u5230\u672C\u4EFB\u52A1\u5207\u6362\u4E0A\u9650\u540E\u4F1A\u62D2\u7EDD\u7EE7\u7EED\u5207\u6362\uFF0C\u6B64\u65F6\u5E94\u7559\u5728\u5F53\u524D\u9875\u3001\u590D\u7528\u5DF2\u6709\u5FEB\u7167/\u7ED3\u679C\u6216\u6539\u7528 fetch_webpage\u3002",
-    "15. \u5982\u679C\u5DE5\u5177\u7ED3\u679C\u63D0\u793A\u201C\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A / \u6743\u9650\u9650\u5236\u201D\uFF1A\u7ACB\u5373\u505C\u6B62\u7EE7\u7EED\u70B9\u51FB\u3001\u731C URL \u6216\u5207\u6362\u6807\u7B7E\u9875\uFF0C\u628A\u7ED3\u679C\u91CC\u7684\u771F\u5B9E\u767B\u5F55\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u540E\u518D\u7EE7\u7EED\u3002"
+    "15. \u5982\u679C\u5DE5\u5177\u7ED3\u679C\u63D0\u793A\u201C\u64CD\u4F5C\u88AB\u767B\u5F55\u62E6\u622A / \u6743\u9650\u9650\u5236\u201D\uFF1A\u7ACB\u5373\u505C\u6B62\u7EE7\u7EED\u70B9\u51FB\u3001\u731C URL \u6216\u5207\u6362\u6807\u7B7E\u9875\uFF0C\u628A\u7ED3\u679C\u91CC\u7684\u771F\u5B9E\u767B\u5F55\u5165\u53E3\u544A\u8BC9\u7528\u6237\uFF0C\u7B49\u5F85\u7528\u6237\u5B8C\u6210\u767B\u5F55\u540E\u518D\u7EE7\u7EED\u3002",
+    "16. **\u591A\u6B65\u4EFB\u52A1\u5148\u8BA1\u5212\uFF0C\u518D\u52A8\u624B**\uFF1A\u6B63\u5F0F\u5F00\u59CB\u70B9\u51FB/\u8F93\u5165\u524D\uFF0C\u5148\u7528 update_plan \u5199 3\u20136 \u6B65\u5E76\u628A\u5F53\u524D\u6B65\u9AA4\u6807 in_progress\uFF1B\u82E5\u4E0B\u4E00\u6B65\u662F\u5F53\u524D\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB/\u6309\u952E\uFF0C\u5C31\u5728\u8BE5\u6B65\u9AA4\u5199 nextAction\uFF08name \u7528\u9875\u9762\u53EF\u89C1\u6587\u5B57\uFF09\u3002\u9875\u9762\u72B6\u6001\u53D8\u4E86\u5C31\u66F4\u65B0\u8BA1\u5212\uFF0C\u4E0D\u8981\u4E00\u6761\u8BA1\u5212\u7528\u5230\u5E95\u3002"
   ].filter(Boolean);
   const skillCatalog = Array.isArray(skills) && skills.length ? buildSkillCatalog(skills) : "";
   return [lines.join("\n"), skillCatalog].filter(Boolean).join("\n\n");

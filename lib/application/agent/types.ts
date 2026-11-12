@@ -401,6 +401,12 @@ export interface PrefixDiff {
   detail: string;
 }
 
+/** 技能声明的一条计划步骤（load_skill 会把它变成 update_plan 模板）。 */
+export interface SkillPlanStep {
+  text: string;
+  allowedOperations?: string[];
+}
+
 /** 一个技能（内置/用户/远程安装的形状，字段全部来自用户或存储）。 */
 export interface SkillLike {
   id?: string;
@@ -421,6 +427,8 @@ export interface SkillLike {
     fastActions?: string[];
     /** 技能要求留给慢思考的工具名（如 type_text / open_tab）。 */
     slowActions?: string[];
+    /** 计划的初始步骤；load_skill 会据此生成 update_plan 模板。 */
+    planSteps?: SkillPlanStep[];
   };
   [key: string]: unknown;
 }
