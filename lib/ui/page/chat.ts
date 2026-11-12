@@ -1843,6 +1843,33 @@ function renderConversation() {
   }
 }
 
+let panelHealthTimer: any = null;
+
+/**
+ * 面板正文自检：部分渲染路径会先 innerHTML='' 再重建（重连快照、跟随页切换），
+ * 一旦重建中途抛错，正文就停在“空白”上。这里每 1.5 秒检查一次可见文本，
+ * 发现空白就用当前会话/流式状态重绘，并留下诊断信息（不掩盖根因）。
+ */
+function ensurePanelHealthWatch() {
+  if (panelHealthTimer) return;
+  panelHealthTimer = setInterval(() => {
+    try {
+      if (!panel || !panel.isConnected || !panelBody) return;
+      if (String(panelBody.textContent || '').trim().length > 0) return;
+      console.warn('[RecallFlow] 面板正文为空，尝试重绘', {
+        conversation: panelSessionState.conversation.length,
+        running: runSession.isRunning,
+        followed: Boolean(followedRun.followedRunState),
+        parts: streamState.parts.length,
+        sessionId: panelSessionState.panelSessionId,
+      });
+      if (runSession.isRunning) restoreStreamingUI();
+      else if (panelSessionState.conversation.length) renderConversation();
+      if (String(panelBody.textContent || '').trim().length === 0) renderConversation();
+    } catch (e) {}
+  }, 1500);
+}
+
 function rebuildFollowedMessages() {
   followedRun.followedMessages = [];
   if (!followedRun.followedRunState) return;
@@ -3058,6 +3085,7 @@ function openPanel(x: any, y: any, docked?: any, restore?: any): void | Promise<
     return;
   }
   removeBubble();
+  ensurePanelHealthWatch();
   removePanel({ publish: false, invalidateOpen: false });
   const openGeneration = ++panelOpenGeneration;
   if (fab) fab.classList.add('hidden');
@@ -4291,7 +4319,15 @@ function createPanelWithLayout(
       if (streamView.usageEl) streamView.usageEl.textContent = snapshot.tokens ? 'tokens ' + snapshot.tokens : '';
       // 先清掉默认的 typing 占位，再按原顺序重建已固化的段落。
       streamView.flowEl.innerHTML = '';
-      renderCommittedParts(streamView.flowEl);
+      try {
+        renderCommittedParts(streamView.flowEl);
+      } catch (error: any) {
+        // 重建失败不能把正文留空：至少给出显式诊断，随后增量仍会继续渲染。
+        const fallback = document.createElement('div');
+        fallback.className = 'agent-content';
+        fallback.textContent = '恢复输出时渲染失败：' + String((error && error.message) || error);
+        streamView.flowEl.appendChild(fallback);
+      }
       resetReasoning();
       if (snapshot.reasoning) {
         streamView.thinkSeg = {

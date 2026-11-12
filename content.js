@@ -8943,6 +8943,27 @@
       aiIdx++;
     }
   }
+  var panelHealthTimer = null;
+  function ensurePanelHealthWatch() {
+    if (panelHealthTimer) return;
+    panelHealthTimer = setInterval(() => {
+      try {
+        if (!panel || !panel.isConnected || !panelBody) return;
+        if (String(panelBody.textContent || "").trim().length > 0) return;
+        console.warn("[RecallFlow] \u9762\u677F\u6B63\u6587\u4E3A\u7A7A\uFF0C\u5C1D\u8BD5\u91CD\u7ED8", {
+          conversation: panelSessionState.conversation.length,
+          running: runSession.isRunning,
+          followed: Boolean(followedRun.followedRunState),
+          parts: streamState.parts.length,
+          sessionId: panelSessionState.panelSessionId
+        });
+        if (runSession.isRunning) restoreStreamingUI();
+        else if (panelSessionState.conversation.length) renderConversation();
+        if (String(panelBody.textContent || "").trim().length === 0) renderConversation();
+      } catch (e) {
+      }
+    }, 1500);
+  }
   function rebuildFollowedMessages() {
     followedRun.followedMessages = [];
     if (!followedRun.followedRunState) return;
@@ -10013,6 +10034,7 @@
       return;
     }
     removeBubble();
+    ensurePanelHealthWatch();
     removePanel({ publish: false, invalidateOpen: false });
     const openGeneration = ++panelOpenGeneration;
     if (fab) fab.classList.add("hidden");
@@ -11005,7 +11027,14 @@
         streamView.lastPlan = plan;
         if (streamView.usageEl) streamView.usageEl.textContent = snapshot.tokens ? "tokens " + snapshot.tokens : "";
         streamView.flowEl.innerHTML = "";
-        renderCommittedParts(streamView.flowEl);
+        try {
+          renderCommittedParts(streamView.flowEl);
+        } catch (error) {
+          const fallback = document.createElement("div");
+          fallback.className = "agent-content";
+          fallback.textContent = "\u6062\u590D\u8F93\u51FA\u65F6\u6E32\u67D3\u5931\u8D25\uFF1A" + String(error && error.message || error);
+          streamView.flowEl.appendChild(fallback);
+        }
         resetReasoning();
         if (snapshot.reasoning) {
           streamView.thinkSeg = {
