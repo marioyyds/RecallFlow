@@ -30,6 +30,7 @@ test('JEV 循环状态缺失或损坏时安全恢复', () => {
     wrongWrites: 0,
     slowTurns: 0,
     handoffReasons: {},
+    actionMemory: [],
   });
   const restored = restoreJevLoopState({
     attempts: 999,

@@ -5417,6 +5417,8 @@
     followedRunState = null;
     followedRunId = "";
     followedCursor = 0;
+    /** 连续多少次轮询没有新 cursor：用来发现“run 已死但状态仍标 running”。 */
+    followedIdleTicks = 0;
     followedMessages = [];
     followedLiveReady = false;
     followedDom = null;
@@ -5427,6 +5429,7 @@
       this.followedRunState = null;
       this.followedRunId = "";
       this.followedCursor = 0;
+      this.followedIdleTicks = 0;
       this.followedMessages = [];
       this.followedLiveReady = false;
       this.followedDom = null;
@@ -9134,11 +9137,18 @@
       const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
       if (sessionId !== panelSessionState.panelSessionId) return;
       if (res && res.ok && res.snapshot && res.snapshot.status === "running") {
+        const cursor = Number(res.snapshot.cursor) || 0;
+        const stalled = String(res.snapshot.runId || "") === String(followedRun.followedRunId || "") && cursor === followedRun.followedCursor;
+        followedRun.followedIdleTicks = stalled ? followedRun.followedIdleTicks + 1 : 0;
         followedRun.followedRunState = res.snapshot;
         followedRun.followedRunId = res.snapshot.runId;
-        followedRun.followedCursor = Number(res.snapshot.cursor) || 0;
+        followedRun.followedCursor = cursor;
         rebuildFollowedMessages();
         renderFollowedRun();
+        if (followedRun.followedIdleTicks >= 8) {
+          followedRun.followedIdleTicks = 0;
+          scheduleFollowedRunRefresh();
+        }
         return;
       }
       scheduleFollowedRunRefresh();
@@ -9157,6 +9167,7 @@
     followedRun.followedRunState = null;
     followedRun.followedRunId = "";
     followedRun.followedCursor = 0;
+    followedRun.followedIdleTicks = 0;
     followedRun.followedMessages = [];
     followedRun.followedLiveReady = false;
     followedRun.followedDom = null;
@@ -9189,8 +9200,15 @@
     const sessionId = panelSessionState.panelSessionId;
     const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
     if (sessionId !== panelSessionState.panelSessionId) return;
-    if (!res || !res.ok || res.selfOwned) {
+    if (!res || !res.ok) {
       resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
+      return;
+    }
+    const locallyRunning = Boolean(
+      runSession.isRunning && res.snapshot && String(res.snapshot.runId || "") === String(runSession.runId || "")
+    );
+    if (locallyRunning) {
+      resetFollowedRun({ render: false });
       return;
     }
     if (res.snapshot && res.snapshot.status === "running") applyFollowedSnapshot(res.snapshot);
@@ -9516,15 +9534,32 @@
   }
   async function loadConversation() {
     try {
-      const state = await sendPanelMessage("panel:state");
+      let state = await sendPanelMessage("panel:state");
+      for (let attempt = 0; (!state || !state.ok) && attempt < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        state = await sendPanelMessage("panel:state");
+      }
       if (state && state.ok) applyPanelSessionSummaries(state);
-      const target = state && state.activeId || panelSessionState.panelSessionList[0] && panelSessionState.panelSessionList[0].id || "";
-      if (target) {
-        const got = await sendPanelMessage("panel:get", { id: target });
+      const candidates = [];
+      if (state && state.activeId) candidates.push(String(state.activeId));
+      for (const item of panelSessionState.panelSessionList) {
+        const id = String(item && item.id || "");
+        if (id && !candidates.includes(id)) candidates.push(id);
+      }
+      for (const target of candidates) {
+        let got = await sendPanelMessage("panel:get", { id: target });
+        for (let attempt = 0; (!got || !got.ok || !got.session) && attempt < 2; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          got = await sendPanelMessage("panel:get", { id: target });
+        }
         if (got && got.ok && got.session) {
           adoptPanelSession(got.session, { activeId: got.activeId || target });
           return;
         }
+      }
+      if (candidates.length) {
+        showCitationHint("\u4F1A\u8BDD\u5185\u5BB9\u6682\u65F6\u8BFB\u53D6\u5931\u8D25\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u6216\u7A0D\u540E\u91CD\u8BD5\u3002");
+        return;
       }
       const created = await sendPanelMessage("panel:create", { handoffId: newHandoffId() });
       if (created && created.ok && created.session) {

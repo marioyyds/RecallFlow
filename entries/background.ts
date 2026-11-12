@@ -583,10 +583,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const snapshot = runHub.findBySession(sessionId);
     runSubscriptions.set(tabId, sessionId);
     const selfOwned = Boolean(snapshot && Number(snapshot.ownerTabId) === Number(tabId));
+    // 即便“同一标签页”，也不代表同一页面实例：整页跳转后新页面拿到了同一个 tabId，
+    // 但它没有在跑这个 run。把 snapshot 一并返回，由面板判断自己是否真的在运行。
     sendResponse({
       ok: true,
       selfOwned,
-      snapshot: selfOwned ? null : snapshot,
+      snapshot,
     });
     return false;
   }

@@ -2057,11 +2057,22 @@ function ensureFollowedRunWatch() {
     const res = await sendPanelMessage('panel:run:subscribe', { sessionId });
     if (sessionId !== panelSessionState.panelSessionId) return;
     if (res && res.ok && res.snapshot && res.snapshot.status === 'running') {
+      const cursor = Number(res.snapshot.cursor) || 0;
+      const stalled =
+        String(res.snapshot.runId || '') === String(followedRun.followedRunId || '') &&
+        cursor === followedRun.followedCursor;
+      followedRun.followedIdleTicks = stalled ? followedRun.followedIdleTicks + 1 : 0;
       followedRun.followedRunState = res.snapshot;
       followedRun.followedRunId = res.snapshot.runId;
-      followedRun.followedCursor = Number(res.snapshot.cursor) || 0;
+      followedRun.followedCursor = cursor;
       rebuildFollowedMessages();
       renderFollowedRun();
+      // 页面跳转会杀掉发起页的 agent 循环，但 SW 里的 run 可能仍标 running。
+      // 连续约 10 秒没有新 delta 就当作“跟随失败”，回到落盘会话。
+      if (followedRun.followedIdleTicks >= 8) {
+        followedRun.followedIdleTicks = 0;
+        scheduleFollowedRunRefresh();
+      }
       return;
     }
     // run 已结束，或 SW 已没有这个 run。结束广播可能在页面重载窗口里丢失，
@@ -2083,6 +2094,7 @@ function resetFollowedRun(options?: any) {
   followedRun.followedRunState = null;
   followedRun.followedRunId = '';
   followedRun.followedCursor = 0;
+  followedRun.followedIdleTicks = 0;
   followedRun.followedMessages = [];
   followedRun.followedLiveReady = false;
   followedRun.followedDom = null;
@@ -2117,8 +2129,19 @@ async function subscribePanelRun() {
   const sessionId = panelSessionState.panelSessionId;
   const res = await sendPanelMessage('panel:run:subscribe', { sessionId });
   if (sessionId !== panelSessionState.panelSessionId) return;
-  if (!res || !res.ok || res.selfOwned) {
+  if (!res || !res.ok) {
     resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
+    return;
+  }
+  // selfOwned 只说明“同一个 tabId”，而整页跳转后新页面会复用同一个 tabId。
+  // 只有本页确实在跑这个 runId 时，才不再跟随。
+  const locallyRunning = Boolean(
+    runSession.isRunning &&
+      res.snapshot &&
+      String(res.snapshot.runId || '') === String(runSession.runId || '')
+  );
+  if (locallyRunning) {
+    resetFollowedRun({ render: false });
     return;
   }
   if (res.snapshot && res.snapshot.status === 'running') applyFollowedSnapshot(res.snapshot);
@@ -2519,17 +2542,36 @@ function saveConversation(options?: any) {
 
 async function loadConversation() {
   try {
-    const state = await sendPanelMessage('panel:state');
+    // 页面跳转/扩展重载后，SW 可能正在启动：一次失败就新建空会话，会把
+    // “读不到”伪装成“新会话”，用户看到的就是白屏（会话数还会不断增长）。
+    let state = await sendPanelMessage('panel:state');
+    for (let attempt = 0; (!state || !state.ok) && attempt < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      state = await sendPanelMessage('panel:state');
+    }
     if (state && state.ok) applyPanelSessionSummaries(state);
-    const target = (state && state.activeId) || (panelSessionState.panelSessionList[0] && panelSessionState.panelSessionList[0].id) || '';
-    if (target) {
-      const got = await sendPanelMessage('panel:get', { id: target });
+    const candidates: string[] = [];
+    if (state && state.activeId) candidates.push(String(state.activeId));
+    for (const item of panelSessionState.panelSessionList) {
+      const id = String((item && item.id) || '');
+      if (id && !candidates.includes(id)) candidates.push(id);
+    }
+    for (const target of candidates) {
+      let got = await sendPanelMessage('panel:get', { id: target });
+      for (let attempt = 0; (!got || !got.ok || !got.session) && attempt < 2; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        got = await sendPanelMessage('panel:get', { id: target });
+      }
       if (got && got.ok && got.session) {
         adoptPanelSession(got.session, { activeId: got.activeId || target });
         return;
       }
     }
-    // 索引存在但正文缺失，或首次启动时后台不可用：再尝试建一个本地空会话。
+    if (candidates.length) {
+      showCitationHint('会话内容暂时读取失败，请刷新页面或稍后重试。');
+      return;
+    }
+    // 真正首次启动：再尝试建一个本地空会话。
     const created = await sendPanelMessage('panel:create', { handoffId: newHandoffId() });
     if (created && created.ok && created.session) {
       adoptPanelSession(created.session, { activeId: created.activeId });

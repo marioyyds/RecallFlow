@@ -20582,7 +20582,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({
       ok: true,
       selfOwned,
-      snapshot: selfOwned ? null : snapshot
+      snapshot
     });
     return false;
   }

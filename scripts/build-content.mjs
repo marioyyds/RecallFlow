@@ -94,7 +94,9 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // Query-aware snapshot text windows and compact execution metadata projection
 // measured 524861 bytes. Raise explicitly to 515KB; both are in-repo snapshot
 // behavior, and no third-party dependency or duplicate module was introduced.
-export const SIZE_BUDGET_BYTES = 515 * 1024;
+// Navigation-safe panel restore (session retries, same-tab follow, idle
+// fallback) measured 528949 bytes. Raise explicitly to 517KB; in-repo only.
+export const SIZE_BUDGET_BYTES = 517 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；
