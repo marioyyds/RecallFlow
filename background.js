@@ -3780,6 +3780,20 @@ async function macroTool(deps, args) {
   return { ok: false, result: "\u672A\u77E5\u7684 op\u300C" + op + "\u300D\uFF0C\u53D6\u503C\uFF1A" + MACRO_OPS.join(" / ") + "\u3002" };
 }
 
+// lib/application/agent/action-risk.ts
+var RISKY_TARGET_LABEL = /(删除|移除|清空|退出|注销|取消|支付|购买|提交|发布|发送|关闭|卸载|重置)/i;
+function isRiskyTargetLabel(label) {
+  const text2 = String(label || "").trim();
+  return Boolean(text2) && RISKY_TARGET_LABEL.test(text2);
+}
+function semanticEdgeRisk(tool, label, toolRisk) {
+  const name = String(tool || "");
+  const recorded = String(toolRisk || "");
+  if (name === "click_element" && isRiskyTargetLabel(label)) return "high";
+  if (recorded === "high" || recorded === "medium") return recorded;
+  return "low";
+}
+
 // lib/application/agent/trace-graph.ts
 var EDGE_IDENTITY_VERSION = 4;
 var PHI_KINDS = /* @__PURE__ */ new Set([
@@ -4139,6 +4153,7 @@ function edgeForRecord(record2, siteKey, ttlMs) {
   const selector = target.selector || (typeof record2.argsRedacted.selector === "string" ? record2.argsRedacted.selector : "");
   const label = targetLabel2 || selectorHintLabel(selector);
   if (!label) return null;
+  const edgeRisk = semanticEdgeRisk(actionTool, label, risk);
   const actionGoal = clip(
     [actionTool, "\u300C" + label + "\u300D"].filter(Boolean).join(" "),
     160
@@ -4175,13 +4190,13 @@ function edgeForRecord(record2, siteKey, ttlMs) {
     ...purpose.length ? { purpose } : {},
     ...record2.planVersion !== void 0 ? { planVersion: record2.planVersion } : {},
     ...record2.successPredicate ? { successPredicate: record2.successPredicate } : {},
-    action: { tool: actionTool, argsTemplate: args.template, risk },
+    action: { tool: actionTool, argsTemplate: args.template, risk: edgeRisk },
     slots: args.slots,
     s: {
       ...target.selector || typeof record2.argsRedacted.selector === "string" ? { selector: target.selector || String(record2.argsRedacted.selector) } : {},
       semanticAnchor
     },
-    r: risk,
+    r: edgeRisk,
     phiMinus: [
       {
         kind: "url_pattern",
@@ -7268,7 +7283,9 @@ function updatePlan(ctx, args) {
   const text2 = plan.map(
     (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
   ).join("\n");
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
+  const pending = plan.find((p) => p.status === "in_progress");
+  const hint = pending && !pending.nextAction ? '\n\n\u63D0\u793A\uFF1A\u5F53\u524D\u6B65\u9AA4\u6CA1\u6709 nextAction\u3002\u5982\u679C\u4E0B\u4E00\u6B65\u662F**\u5F53\u524D\u9875\u9762\u5185\u7684\u673A\u68B0\u70B9\u51FB/\u6309\u952E**\uFF08\u4E0D\u5199\u503C\u3001\u4E0D\u8DF3\u7AD9\uFF09\uFF0C\u8BF7\u8865\u4E0A\u5B83\uFF0C\u4F8B\u5982 {"tool":"click_element","name":"\u6DFB\u52A0\u6587\u7AE0\u6807\u7B7E"}\uFF1B\u5FEB\u8DEF\u4F1A\u5728\u4F60\u8FD9\u4E00\u8F6E\u4E4B\u540E\u76F4\u63A5\u6267\u884C\uFF0C\u7701\u4E00\u6B21\u5F80\u8FD4\u3002\u586B\u503C\uFF08type_text/select_option\uFF09\u4E0E\u5BFC\u822A\uFF08open_tab\uFF09\u4E0D\u8981\u5199\u8FDB nextAction\u3002' : "";
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text2 || "\uFF08\u7A7A\u8BA1\u5212\uFF09") + hint };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();
@@ -10388,7 +10405,7 @@ function buildStableSystemPrompt(toolNames = [], skills = []) {
     "6. \u82E5\u5408\u6210\u70B9\u51FB/\u8F93\u5165\u65E0\u6548\uFF08\u8FD4\u56DE\u201C\u4E0D\u53EF\u64CD\u4F5C\u201D\u6216\u9875\u9762\u65E0\u53D8\u5316\uFF09\uFF0C\u53EF\u6539\u7528 CDP \u5DE5\u5177\uFF1A\u5148\u7528 get_ax_snapshot \u53D6\u4EA4\u4E92\u8282\u70B9\u7684\u89C6\u53E3\u5750\u6807\uFF0C\u518D\u7528 click_at / hover_element \u6309\u5750\u6807\u64CD\u4F5C\uFF1Bcanvas/\u865A\u62DF\u5217\u8868\u7B49\u65E0 DOM \u573A\u666F\u540C\u6837\u5982\u6B64\u3002",
     "7. \u64CD\u4F5C\u8DE8\u57DF iframe\uFF08\u5982\u5D4C\u5165\u7684\u7F16\u8F91\u5668\u3001\u767B\u5F55\u6846\u3001\u652F\u4ED8\u8868\u5355\uFF09\uFF1A\u5148\u7528 list_frames \u627E\u5230 frameId\uFF0C\u7528 get_page_snapshot({frameId}) \u8BFB\u53D6\u8BE5\u6846\u67B6\uFF1B\u60F3\u4E00\u6B21\u770B\u5168\u53EF\u7528 get_page_snapshot({includeFrames:true})\uFF0C\u6B64\u65F6\u5B50\u6846\u67B6\u5143\u7D20 ref \u5F62\u5982 f3:rf-2\uFF0C\u539F\u6837\u4F20\u56DE click_element/type_text \u5373\u53EF\u81EA\u52A8\u8DEF\u7531\u5230\u5BF9\u5E94\u6846\u67B6\u3002",
     '8. \u6D41\u7A0B\u590D\u7528\u4E0E\u64A4\u9500\uFF1A\u7528\u6237\u8BF4\u300C\u8BB0\u4F4F\u8FD9\u4E2A\u6D41\u7A0B / \u4EE5\u540E\u90FD\u8FD9\u4E48\u505A\u300D\u65F6\uFF0C\u5B8C\u6210\u4E00\u6B21\u540E\u8C03\u7528 macro({op:"save", name:"\u2026"}) \u4FDD\u5B58\uFF1B\u7528\u6237\u8981\u6C42\u6267\u884C\u67D0\u4E2A\u5DF2\u4FDD\u5B58\u6D41\u7A0B\u65F6\uFF0C\u4F18\u5148 macro({op:"run", name:"\u2026"}) \u4E00\u952E\u56DE\u653E\uFF08\u7CFB\u7EDF\u63D0\u793A\u91CC\u4F1A\u5217\u51FA\u672C\u7AD9\u70B9\u5DF2\u6709\u7684\u5B8F\uFF1Bname \u5FC5\u987B\u7167\u6284\uFF0C\u4E0D\u8981\u7528\u63CF\u8FF0\uFF09\u3002\u7528\u6237\u8BF4\u300C\u64A4\u9500 / \u64A4\u56DE\u4E0A\u4E00\u6B65\u300D\u65F6\u8C03\u7528 undo_last_action\u3002\u7528\u6237\u8BF4\u300C\u4FE1\u4EFB\u8FD9\u4E2A\u7F51\u7AD9 / \u4EE5\u540E\u522B\u518D\u95EE\u6211\u300D\u65F6\u8C03\u7528 trust_site\u3002',
-    '9. \u5B9A\u4F4D\u5143\u7D20\u4F18\u5148\u7EA7\uFF1Aref\uFF08\u5F53\u524D\u5FEB\u7167\uFF09\u2192 role+name\uFF08\u5982 {role:"button",name:"\u767B\u5F55"}\uFF0C\u6700\u7A33\uFF09\u2192 testid \u2192 text \u2192 selector\u3002get_page_snapshot \u9ED8\u8BA4\u53EA\u7ED9\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u5143\u7D20\uFF1A\u770B\u5230 nextCursor / omittedByLimit \u65F6\u4E0D\u8981\u4EE5\u4E3A\u9875\u9762\u53EA\u6709\u8FD9\u4E9B\u5185\u5BB9\uFF1B\u5DF2\u77E5\u76EE\u6807\u3001\u627E custom element \u6216\u6DF1\u5165 Shadow DOM \u65F6\u7528 inspect_element({op:"query"})\uFF0C\u9700\u8981\u7EE7\u7EED\u6D4F\u89C8\u5219\u628A nextCursor \u539F\u6837\u56DE\u4F20\u3002query \u540C\u65F6\u63D0\u9AD8\u5143\u7D20\u6392\u5E8F\u5E76\u9ED8\u8BA4\u62BD\u53D6\u76F8\u5173\u6B63\u6587\u7A97\u53E3\u3002\u641C\u7D22/\u5217\u8868\u9875\u53EA\u9700\u770B\u63A7\u4EF6\u65F6\u4F20 maxText:0\uFF1B\u8D44\u8BAF/\u6587\u7AE0\u9875\u9700\u8981\u6B63\u6587\u65F6\u4F18\u5148 read_current_page\uFF0C\u6216 get_page_snapshot({query:"\u2026",textMode:"relevant"})\u3002**\u4E0D\u8981\u4E3A\u666E\u901A DOM \u67E5\u8BE2\u8C03\u7528 run_javascript**\u3002\u590D\u6742\u9875\u9762\u4E5F\u53EF\u7528 get_ax_snapshot \u62FF role/name\u3002\u5A92\u4F53\u9875\u4F18\u5148\u770B\u5FEB\u7167 runtime.media\uFF1B\u5B83\u6BD4\u201C\u6B63\u5728\u7F13\u51B2/00:00\u201D\u7B49\u53EF\u80FD\u6EDE\u540E\u7684\u53EF\u89C1\u6587\u6848\u53EF\u9760\u3002\u591A\u6B65\u4EFB\u52A1\u7528 update_plan \u7EF4\u62A4\u8FDB\u5EA6\uFF1B\u5E0C\u671B JEV \u6267\u884C\u67D0\u4E2A\u5B50\u76EE\u6807\u65F6\uFF0C\u4E3A\u5F53\u524D in_progress \u6B65\u9AA4\u586B\u5199 successPredicate\u3001allowedOperations \u548C leaseActions\uFF0C\u79DF\u7EA6\u8017\u5C3D\u6216\u5B50\u76EE\u6807\u53D8\u5316\u65F6\u518D\u6B21 update_plan\u3002expand_result \u53EA\u7528\u4E8E\u666E\u901A\u5927\u7ED3\u679C\u88AB\u622A\u65AD\u540E\u7684\u6062\u590D\uFF0C\u4E0D\u662F\u5E38\u89C4\u9875\u9762\u63A2\u7D22\u6B65\u9AA4\u3002\u4E0B\u4E00\u6B65\u53EA\u662F\u5F53\u524D\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB / \u6309\u952E\u65F6\uFF0C\u5728\u5F53\u524D in_progress \u6B65\u9AA4\u91CC\u5199 nextAction\uFF08\u5982 {tool:"click_element",name:"\u4E0B\u4E00\u6B65"}\uFF09\uFF0C\u5FEB\u8DEF\u4F1A\u76F4\u63A5\u5728\u5F53\u524D\u9875\u5B9A\u4F4D\u5E76\u6267\u884C\u4E00\u6B21\uFF0C\u7701\u6389\u4E00\u8F6E\u5F80\u8FD4\uFF1BnextAction \u53EA\u653E\u70B9\u51FB/\u6309\u952E/\u5F00\u9875\uFF0C\u4E0D\u653E\u5185\u5BB9\u503C\uFF0C\u6267\u884C\u540E\u81EA\u52A8\u6E05\u7A7A\u3002',
+    '9. \u5B9A\u4F4D\u5143\u7D20\u4F18\u5148\u7EA7\uFF1Aref\uFF08\u5F53\u524D\u5FEB\u7167\uFF09\u2192 role+name\uFF08\u5982 {role:"button",name:"\u767B\u5F55"}\uFF0C\u6700\u7A33\uFF09\u2192 testid \u2192 text \u2192 selector\u3002get_page_snapshot \u9ED8\u8BA4\u53EA\u7ED9\u9875\u9762\u533A\u57DF\u8F6E\u5ED3\u4E0E\u4EE3\u8868\u6027\u5143\u7D20\uFF1A\u770B\u5230 nextCursor / omittedByLimit \u65F6\u4E0D\u8981\u4EE5\u4E3A\u9875\u9762\u53EA\u6709\u8FD9\u4E9B\u5185\u5BB9\uFF1B\u5DF2\u77E5\u76EE\u6807\u3001\u627E custom element \u6216\u6DF1\u5165 Shadow DOM \u65F6\u7528 inspect_element({op:"query"})\uFF0C\u9700\u8981\u7EE7\u7EED\u6D4F\u89C8\u5219\u628A nextCursor \u539F\u6837\u56DE\u4F20\u3002query \u540C\u65F6\u63D0\u9AD8\u5143\u7D20\u6392\u5E8F\u5E76\u9ED8\u8BA4\u62BD\u53D6\u76F8\u5173\u6B63\u6587\u7A97\u53E3\u3002\u641C\u7D22/\u5217\u8868\u9875\u53EA\u9700\u770B\u63A7\u4EF6\u65F6\u4F20 maxText:0\uFF1B\u8D44\u8BAF/\u6587\u7AE0\u9875\u9700\u8981\u6B63\u6587\u65F6\u4F18\u5148 read_current_page\uFF0C\u6216 get_page_snapshot({query:"\u2026",textMode:"relevant"})\u3002**\u4E0D\u8981\u4E3A\u666E\u901A DOM \u67E5\u8BE2\u8C03\u7528 run_javascript**\u3002\u590D\u6742\u9875\u9762\u4E5F\u53EF\u7528 get_ax_snapshot \u62FF role/name\u3002\u5A92\u4F53\u9875\u4F18\u5148\u770B\u5FEB\u7167 runtime.media\uFF1B\u5B83\u6BD4\u201C\u6B63\u5728\u7F13\u51B2/00:00\u201D\u7B49\u53EF\u80FD\u6EDE\u540E\u7684\u53EF\u89C1\u6587\u6848\u53EF\u9760\u3002\u591A\u6B65\u4EFB\u52A1\u7528 update_plan \u7EF4\u62A4\u8FDB\u5EA6\uFF1B\u5E0C\u671B JEV \u6267\u884C\u67D0\u4E2A\u5B50\u76EE\u6807\u65F6\uFF0C\u4E3A\u5F53\u524D in_progress \u6B65\u9AA4\u586B\u5199 successPredicate\u3001allowedOperations \u548C leaseActions\uFF0C\u79DF\u7EA6\u8017\u5C3D\u6216\u5B50\u76EE\u6807\u53D8\u5316\u65F6\u518D\u6B21 update_plan\u3002expand_result \u53EA\u7528\u4E8E\u666E\u901A\u5927\u7ED3\u679C\u88AB\u622A\u65AD\u540E\u7684\u6062\u590D\uFF0C\u4E0D\u662F\u5E38\u89C4\u9875\u9762\u63A2\u7D22\u6B65\u9AA4\u3002\u4E0B\u4E00\u6B65\u53EA\u662F\u5F53\u524D\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB / \u6309\u952E\u65F6\uFF0C\u5728\u5F53\u524D in_progress \u6B65\u9AA4\u91CC\u5199 nextAction\uFF08\u5982 {tool:"click_element",name:"\u6DFB\u52A0\u6587\u7AE0\u6807\u7B7E"}\uFF0Cname \u5FC5\u987B\u4E0E\u9875\u9762\u53EF\u89C1\u6587\u5B57\u5B8C\u5168\u4E00\u81F4\uFF09\uFF0C\u5FEB\u8DEF\u4F1A\u76F4\u63A5\u5728\u5F53\u524D\u9875\u5B9A\u4F4D\u5E76\u6267\u884C\u4E00\u6B21\uFF0C\u7701\u6389\u4E00\u8F6E\u5F80\u8FD4\uFF1BnextAction \u53EA\u653E click_element / press_key\uFF0C\u4E0D\u653E\u5185\u5BB9\u503C\u3001\u4E0D\u653E open_tab\uFF0C\u6267\u884C\u540E\u81EA\u52A8\u6E05\u7A7A\u3002',
     "10. \u58F0\u79F0\u5B8C\u6210\uFF08complete_task\uFF09\u524D\u4F1A\u6709\u4E00\u6B21\u72EC\u7ACB\u6821\u9A8C\uFF1B\u82E5\u6536\u5230\u300C\u81EA\u6211\u6821\u9A8C\u672A\u901A\u8FC7\u300D\u7684\u53CD\u601D\uFF0C\u8BF4\u660E\u76EE\u6807\u53EF\u80FD\u5C1A\u672A\u8FBE\u6210\uFF0C\u8BF7\u636E\u5B9E\u6838\u5BF9\u9875\u9762\u72B6\u6001\u5E76\u6362\u4E00\u79CD\u505A\u6CD5\u7EE7\u7EED\uFF0C\u7EDD\u4E0D\u8C0E\u62A5\u5B8C\u6210\u3002",
     "11. \u53D9\u8FF0\u4E0E\u52A8\u4F5C\u4EA4\u66FF\uFF1A\u6BCF\u6B21\u8C03\u7528\u5DE5\u5177\u524D\uFF0C\u5148\u7528**\u4E00\u53E5\u8BDD\uFF08\u4E0D\u8D85\u8FC7 40 \u5B57\uFF09**\u8BF4\u660E\u4F60\u6B63\u8981\u505A\u4EC0\u4E48\u3001\u4E3A\u4EC0\u4E48\uFF0C\u4F8B\u5982\u300C\u5148\u626B\u63CF\u9875\u9762\u4E0A\u7684\u5E7F\u544A\u4F4D\u300D\u3002\u89C4\u5219 2 \u7981\u6B62\u7684\u662F\u300C\u58F0\u79F0\u7ED3\u679C\u5DF2\u7ECF\u8FBE\u6210\u300D\uFF0C\u4E0E\u300C\u8BF4\u660E\u610F\u56FE\u300D\u5E76\u4E0D\u51B2\u7A81\u2014\u2014\u4E24\u8005\u90FD\u8981\u505A\u5230\u3002**\u4E0D\u8981\u5728\u591A\u6B21\u5DE5\u5177\u8C03\u7528\u4E4B\u95F4\u5B8C\u5168\u4E0D\u8F93\u51FA\u6587\u5B57**\uFF0C\u5426\u5219\u7528\u6237\u8DDF\u4E0D\u4E0A\u8FDB\u5EA6\u3001\u4E5F\u65E0\u6CD5\u5224\u65AD\u4F60\u5728\u505A\u4EC0\u4E48\u3002",
     '12. \u4E00\u8F6E\u53EF\u4EE5\u53D1\u51FA**\u591A\u4E2A**\u5DE5\u5177\u8C03\u7528\uFF1A\u5F53\u82E5\u5E72\u64CD\u4F5C\u4E92\u4E0D\u4F9D\u8D56\u65F6\uFF08\u4F8B\u5982\u540C\u65F6\u8BFB\u53D6\u4E24\u4E2A\u533A\u5757\u3001\u540C\u65F6\u7ED9\u4E24\u5904\u5143\u7D20\u8BBE\u6837\u5F0F\u3001\u540C\u65F6\u53D6\u5FEB\u7167\u4E0E\u9875\u9762\u6587\u672C\uFF09\uFF0C\u8BF7\u5728**\u540C\u4E00\u8F6E**\u91CC\u4E00\u5E76\u53D1\u51FA\uFF0C\u4E0D\u8981\u4E00\u6B21\u4E00\u4E2A\u5730\u4E32\u884C\u8C03\u7528\u2014\u2014\u4E32\u884C\u4F1A\u6210\u500D\u62C9\u957F\u8017\u65F6\u3002\u53EA\u6709\u540E\u4E00\u6B65\u9700\u8981\u524D\u4E00\u6B65\u7ED3\u679C\u65F6\u624D\u5206\u8F6E\u3002\u9690\u85CF\u591A\u4E2A\u5143\u7D20\u8BF7\u4F18\u5148\u7528 annotate({op:"style", selectors:[\u2026]}) \u4E00\u6B21\u5B8C\u6210\u3002',
@@ -14299,7 +14316,6 @@ var CLICKABLE_ROLES = /* @__PURE__ */ new Set([
   "columnheader"
 ]);
 var TEXT_INPUT_TYPES = /* @__PURE__ */ new Set(["", "text", "search", "email", "url", "tel", "number"]);
-var RISKY_CLICK_LABEL = /(删除|移除|清空|退出|注销|取消|支付|购买|提交|发布|发送|关闭|卸载|重置)/i;
 function clip2(value, maxChars) {
   const text2 = String(value || "");
   return text2.length > maxChars ? text2.slice(0, maxChars) + "\n\u2026" : text2;
@@ -14327,7 +14343,7 @@ function isVisible(element) {
 function isClickable(element) {
   if (!isVisible(element)) return false;
   const label = elementLabel(element);
-  if (!label || RISKY_CLICK_LABEL.test(label)) return false;
+  if (!label || isRiskyTargetLabel(label)) return false;
   const tag = String(element.tag || "").toLowerCase();
   const role = String(element.role || "").toLowerCase();
   const type = String(element.type || "").toLowerCase();
@@ -15364,8 +15380,12 @@ var JevFastController = class {
       blockedEdgeIds: new Set(this.state.jevLoop.blockedEdgeIds),
       executedEdges: new Set(this.state.jevLoop.executedEdges)
     }) : [];
-    const stateEdges = nominatedEdges.filter((edge2) => FAST_EDGE_TOOLS.has(edge2.action.tool));
-    const filteredSlowTools = nominatedEdges.length - stateEdges.length;
+    const fastToolEdges = nominatedEdges.filter((edge2) => FAST_EDGE_TOOLS.has(edge2.action.tool));
+    const stateEdges = fastToolEdges.filter(
+      (edge2) => edge2.r !== "high" && !isRiskyTargetLabel(edge2.g)
+    );
+    const filteredSlowTools = nominatedEdges.length - fastToolEdges.length;
+    const filteredRiskyEdges = fastToolEdges.length - stateEdges.length;
     const ranked = stateEdges.map((edge2) => ({ edge: edge2, match: matchCandidate(edge2, before) })).sort(
       (a, b) => MATCH_LEVEL_RANK[a.match.level] - MATCH_LEVEL_RANK[b.match.level] || b.edge.provenance.verifiedAt - a.edge.provenance.verifiedAt
     );
@@ -15428,6 +15448,7 @@ var JevFastController = class {
       count: candidates.length,
       nominated: stateEdges.length,
       filteredSlowTools,
+      filteredRiskyEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15442,6 +15463,7 @@ var JevFastController = class {
       count: candidates.length,
       nominated: stateEdges.length,
       filteredSlowTools,
+      filteredRiskyEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -15551,6 +15573,18 @@ var JevFastController = class {
       });
       this.traceEdgeHandoff(iter, "edge-tool-rejected", edge.action.tool);
       return { kind: "skipped", reason: "edge-tool-rejected", latencyMs };
+    }
+    if (edge.r === "high" || isRiskyTargetLabel(edge.g)) {
+      this.state.trace({
+        phase: "tracegraph-edge",
+        iter,
+        edgeId: edge.id,
+        decision: "REJECT",
+        reason: "high-risk-edge",
+        g: edge.g
+      });
+      this.traceEdgeHandoff(iter, "edge-high-risk", edge.g);
+      return { kind: "skipped", reason: "edge-high-risk", latencyMs };
     }
     this.state.trace({
       phase: "tracegraph-grounding",

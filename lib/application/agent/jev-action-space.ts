@@ -8,6 +8,7 @@ import {
 import { activePlanStep, normalizePlanOperations } from './plan-contract.ts';
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
 import type { PlanStep } from './types.ts';
+import { isRiskyTargetLabel } from './action-risk.ts';
 import type { CandidateMatch, CandidateMatchLevel, Edge, Evidence } from './trace-graph-types.ts';
 import { bindSlots, evaluatePhiMinus } from './trace-graph.ts';
 
@@ -204,7 +205,6 @@ const CLICKABLE_ROLES = new Set([
   'columnheader',
 ]);
 const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'number']);
-const RISKY_CLICK_LABEL = /(删除|移除|清空|退出|注销|取消|支付|购买|提交|发布|发送|关闭|卸载|重置)/i;
 
 function clip(value: unknown, maxChars: number): string {
   const text = String(value || '');
@@ -245,7 +245,7 @@ function isVisible(element: SnapshotElementLike): boolean {
 function isClickable(element: SnapshotElementLike): boolean {
   if (!isVisible(element)) return false;
   const label = elementLabel(element);
-  if (!label || RISKY_CLICK_LABEL.test(label)) return false;
+  if (!label || isRiskyTargetLabel(label)) return false;
   const tag = String(element.tag || '').toLowerCase();
   const role = String(element.role || '').toLowerCase();
   const type = String(element.type || '').toLowerCase();

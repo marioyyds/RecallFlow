@@ -47,11 +47,11 @@ function graphWithEdge(edgeOverrides = {}) {
     action: {
       tool: 'click_element',
       argsTemplate: { selector: '#create' },
-      risk: 'high',
+      risk: 'low',
     },
     slots: [],
     s: { semanticAnchor: { role: 'button', name: 'CreateButton' } },
-    r: 'high',
+    r: 'low',
     phiMinus: [
       { kind: 'url_pattern', expr: '/pull/compare', source: 'structured' },
       { kind: 'no_dialog', expr: 'dialog == null', source: 'structured' },
@@ -334,6 +334,37 @@ test('open_tab 指向当前 URL 时不执行（no-op 导航）', async () => {
   const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
   // open_tab 已经不进快路候选（导航是慢路）；它被算在 filteredSlowTools 里。
   assert.equal(trace.filteredSlowTools, 1);
+});
+
+test('高风险语义边（发布/删除/支付）不进快路候选', async () => {
+  const state = stateFor(false);
+  const { graph } = graphWithEdge({
+    id: 'e.publish',
+    g: 'click_element 「发布文章」',
+    action: { tool: 'click_element', argsTemplate: { selector: '#publish' }, risk: 'high' },
+    slots: [],
+    s: { semanticAnchor: { role: 'button', name: '发布文章' } },
+    r: 'high',
+  });
+  const calls = [];
+  const controller = new JevFastController(
+    state,
+    {
+      async process(step) {
+        calls.push(...step.toolCalls);
+        return pipelineFor(state).process(step);
+      },
+    },
+    new AbortController().signal,
+    async () => operationBlockedResponse(),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(calls.some((call) => call.name === 'click_element'), false);
+  const trace = state.traces.find((entry) => entry.phase === 'tracegraph-candidates');
+  assert.equal(trace.filteredRiskyEdges, 1, '发布边必须在候选阶段被摘掉');
 });
 
 test('同一状态有 full 页内动作时，open_tab 候选让位', async () => {

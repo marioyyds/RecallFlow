@@ -29,6 +29,7 @@ import type { PlanStep } from './types.ts';
 import type { JevSystemOneResponse } from './jev-contract.ts';
 import { INTENTS } from './intent-router.ts';
 import { FAST_EDGE_TOOLS } from './action-lanes.ts';
+import { isRiskyTargetLabel } from './action-risk.ts';
 import { JEV_SETTINGS_DEFAULTS } from '../../shared/settings.ts';
 import { activePlanStep, planStepKey } from './plan-contract.ts';
 import {
@@ -615,8 +616,14 @@ export class JevFastController {
       : [];
     // 快路只处理页内机械动作（点击 / 滚动 / 等待）。文本输入、下拉、勾选需要值，
     // 导航（open_tab）是跨页战略 —— 它们即使有边也不进快路候选。
-    const stateEdges = nominatedEdges.filter((edge) => FAST_EDGE_TOOLS.has(edge.action.tool));
-    const filteredSlowTools = nominatedEdges.length - stateEdges.length;
+    // 再排除高风险语义（发布/删除/支付）：这类边由慢思考 + 审批执行，
+    // 绝不能被 skipApproval 的快路直接点掉（2026-11-12 CSDN 发布边 r=low 的事故面）。
+    const fastToolEdges = nominatedEdges.filter((edge) => FAST_EDGE_TOOLS.has(edge.action.tool));
+    const stateEdges = fastToolEdges.filter(
+      (edge) => edge.r !== 'high' && !isRiskyTargetLabel(edge.g)
+    );
+    const filteredSlowTools = nominatedEdges.length - fastToolEdges.length;
+    const filteredRiskyEdges = fastToolEdges.length - stateEdges.length;
     const ranked = stateEdges
       .map((edge) => ({ edge, match: matchCandidate(edge, before) }))
       .sort(
@@ -702,6 +709,7 @@ export class JevFastController {
       count: candidates.length,
       nominated: stateEdges.length,
       filteredSlowTools,
+      filteredRiskyEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -716,6 +724,7 @@ export class JevFastController {
       count: candidates.length,
       nominated: stateEdges.length,
       filteredSlowTools,
+      filteredRiskyEdges,
       filteredUnbound: stateEdges.length - bindable.length,
       prunedByFull: bindable.length - tiered.length,
       filteredTargetMissing,
@@ -828,6 +837,20 @@ export class JevFastController {
       });
       this.traceEdgeHandoff(iter, 'edge-tool-rejected', edge.action.tool);
       return { kind: 'skipped', reason: 'edge-tool-rejected', latencyMs };
+    }
+    // 兜底：即使候选过滤被绕过（旧图里发布边的 r 仍是 low），也绝不让
+    // skipApproval 的快路执行发布/删除/支付类动作。
+    if (edge.r === 'high' || isRiskyTargetLabel(edge.g)) {
+      this.state.trace({
+        phase: 'tracegraph-edge',
+        iter,
+        edgeId: edge.id,
+        decision: 'REJECT',
+        reason: 'high-risk-edge',
+        g: edge.g,
+      });
+      this.traceEdgeHandoff(iter, 'edge-high-risk', edge.g);
+      return { kind: 'skipped', reason: 'edge-high-risk', latencyMs };
     }
 
     // 目标与槽位在 prefilter 阶段已按当前快照解析；这里直接用同一份结果，

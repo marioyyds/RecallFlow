@@ -4620,7 +4620,9 @@ function updatePlan(ctx, args) {
   const text = plan.map(
     (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
   ).join("\n");
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") };
+  const pending = plan.find((p) => p.status === "in_progress");
+  const hint = pending && !pending.nextAction ? '\n\n\u63D0\u793A\uFF1A\u5F53\u524D\u6B65\u9AA4\u6CA1\u6709 nextAction\u3002\u5982\u679C\u4E0B\u4E00\u6B65\u662F**\u5F53\u524D\u9875\u9762\u5185\u7684\u673A\u68B0\u70B9\u51FB/\u6309\u952E**\uFF08\u4E0D\u5199\u503C\u3001\u4E0D\u8DF3\u7AD9\uFF09\uFF0C\u8BF7\u8865\u4E0A\u5B83\uFF0C\u4F8B\u5982 {"tool":"click_element","name":"\u6DFB\u52A0\u6587\u7AE0\u6807\u7B7E"}\uFF1B\u5FEB\u8DEF\u4F1A\u5728\u4F60\u8FD9\u4E00\u8F6E\u4E4B\u540E\u76F4\u63A5\u6267\u884C\uFF0C\u7701\u4E00\u6B21\u5F80\u8FD4\u3002\u586B\u503C\uFF08type_text/select_option\uFF09\u4E0E\u5BFC\u822A\uFF08open_tab\uFF09\u4E0D\u8981\u5199\u8FDB nextAction\u3002' : "";
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") + hint };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();

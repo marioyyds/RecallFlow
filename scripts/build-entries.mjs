@@ -123,7 +123,9 @@ export const ENTRIES = [
   // navigation settle measured 1113349 bytes (1087.1KB). Raise to 1088KB.
   // Same day: operation fallback, fast/slow tool partition and skill lane
   // contract measured 1115007 bytes (1088.9KB). Raise to 1090KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1090 * 1024 },
+  // Same day: semantic risk, high-risk edge filtering and the update_plan
+  // delegation hint measured 1117509 bytes (1091.3KB). Raise to 1092KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1092 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -160,7 +162,8 @@ export const ENTRIES = [
   // 2026-11-12: update_plan schema gained the optional nextAction object (shared
   // tool surface reaches options.js); measured 647244 bytes. Raise to 633KB.
   // Same day: skill fast/slow lane fields measured 648370 bytes. Raise to 634KB.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 634 * 1024 },
+  // Same day: semantic risk + delegation hint measured 649566 bytes. Raise to 635KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 635 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -192,7 +195,8 @@ export const ENTRIES = [
   // tool surface reaches the skills page too); measured 566163 bytes.
   // Raise to 554KB; no dependency added.
   // Same day: skill fast/slow lane fields measured 567477 bytes. Raise to 555KB.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 555 * 1024 },
+  // Same day: semantic risk + delegation hint measured 568673 bytes. Raise to 556KB.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 556 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

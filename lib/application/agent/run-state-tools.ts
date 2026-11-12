@@ -36,7 +36,18 @@ export function updatePlan(ctx: RunCtx, args: Record<string, unknown>) {
       describePlanStep(p)
     )
     .join('\n');
-  return { result: '计划已更新（' + plan.length + ' 步）：\n' + (text || '（空计划）') };
+  // 2026-11-12 的 CSDN 发布轨迹：模型用了 update_plan，但 59 条计划记录里
+  // 一条 nextAction 都没有，委托于是全程空转。字段存在不够，必须在这一步
+  // 就把「下一步可以委托」摆到它眼前。
+  const pending = plan.find((p) => p.status === 'in_progress');
+  const hint =
+    pending && !pending.nextAction
+      ? '\n\n提示：当前步骤没有 nextAction。如果下一步是**当前页面内的机械点击/按键**' +
+        '（不写值、不跳站），请补上它，例如 {"tool":"click_element","name":"添加文章标签"}；' +
+        '快路会在你这一轮之后直接执行，省一次往返。填值（type_text/select_option）' +
+        '与导航（open_tab）不要写进 nextAction。'
+      : '';
+  return { result: '计划已更新（' + plan.length + ' 步）：\n' + (text || '（空计划）') + hint };
 }
 
 /**

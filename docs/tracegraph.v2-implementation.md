@@ -141,6 +141,23 @@ operation 路径被 edge 分支整个跳过了。据此改成两层快路 + 一�
 - **度量**：`tracegraph-bucket-report` 按动作类别拆成 `act fast/slow`、
   `observe fast/slow`、`other fast/slow`，不再把观察记录和动作记录混成一个数。
 
+## 2026-11-12 快路安全：语义风险与审批
+
+CSDN 发布轨迹暴露了一个必须修的事故面：`click_element 「发布文章」` 被录成了
+`r = low`（风险取自工具元数据，而 `click_element` 恒为 low），而 edge 快路执行时
+`skipApproval: true` —— 只要 JEV 选中这条边，发布会绕过审批。修复：
+
+- `action-risk.ts` 统一语义风险词表（发布/删除/支付/提交/发送/关闭…），录制时
+  `semanticEdgeRisk(tool, label)` 把命中目标的 click 升为 `high`，`edge.r` 与
+  `edge.action.risk` 同时写入；operation 路径也复用同一词表。
+- 快路候选双重过滤：`FAST_EDGE_TOOLS`（工具类别）→ 再排除 `r === 'high'` 或
+  `g` 命中风险词的边，计数 `filteredRiskyEdges`。这类边只留给慢思考 + 审批。
+- 执行兜底：即使旧图里发布边仍是 low，选中后也会在 `processTool` 前以
+  `edge-high-risk` 交回慢思考，绝不 `skipApproval` 执行。
+- 委托可达性：`update_plan` 结果里，若 in_progress 步骤缺 `nextAction`，直接附一条
+  提示与示例；系统提示中的 nextAction 示例改为具体控件名，并明确只放
+  click_element / press_key。
+
 - 目标预过滤：绑定与分层之后，在发请求**之前**用 `groundEdgeAction` 在当前快照
   解析目标；定位不到的边本轮跳过（**不封边**：菜单/面板瞬时收起不该把边永久拉黑），
   计入 `filteredTargetMissing`，handoff 记为 `edge-target-missing`，一次 systemone 都不花。

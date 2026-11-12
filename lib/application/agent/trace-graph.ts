@@ -7,6 +7,7 @@
 //   - 未显式绑定的槽位 fail-closed；禁止回填历史值或默认偏好。
 
 import type { PageSnapshotLike, SnapshotElementLike } from './types.ts';
+import { semanticEdgeRisk } from './action-risk.ts';
 import type {
   CandidateMatch,
   CandidateMatchLevel,
@@ -490,6 +491,7 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
   const actionTool = String(record.tool || '');
   if (!actionTool) return null;
   const risk = record.risk === 'high' || record.risk === 'medium' ? record.risk : 'low';
+  // 工具风险只是底子；目标文字命中「发布/删除/支付」时会被升到 high（见 edgeRisk）。
   const from = traceGraphStateName(record.before.url, record.before.title);
   const to = traceGraphStateName(record.after.url, record.after.title);
   const target = record.target || {};
@@ -513,6 +515,7 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     (typeof record.argsRedacted.selector === 'string' ? record.argsRedacted.selector : '');
   const label = targetLabel || selectorHintLabel(selector);
   if (!label) return null;
+  const edgeRisk = semanticEdgeRisk(actionTool, label, risk);
   const actionGoal = clip(
     [actionTool, '「' + label + '」'].filter(Boolean).join(' '),
     160
@@ -556,7 +559,7 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
     ...(purpose.length ? { purpose } : {}),
     ...(record.planVersion !== undefined ? { planVersion: record.planVersion } : {}),
     ...(record.successPredicate ? { successPredicate: record.successPredicate } : {}),
-    action: { tool: actionTool, argsTemplate: args.template, risk },
+    action: { tool: actionTool, argsTemplate: args.template, risk: edgeRisk },
     slots: args.slots,
     s: {
       ...(target.selector || typeof record.argsRedacted.selector === 'string'
@@ -564,7 +567,7 @@ function edgeForRecord(record: TraceRecord, siteKey: string, ttlMs: number): Edg
         : {}),
       semanticAnchor,
     },
-    r: risk,
+    r: edgeRisk,
     phiMinus: [
       {
         kind: 'url_pattern',

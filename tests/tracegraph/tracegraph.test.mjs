@@ -321,6 +321,45 @@ test('edge grounding 使用当前快照 ref，不复用历史 selector', () => {
   assert.equal(changedMeaning.reason, 'target-missing');
 });
 
+test('发布/删除类点击按目标语义升为高风险边，不靠工具元数据', async () => {
+  installStorage();
+  const base = evidence();
+  const graph = await appendTraceRecord(base.url, {
+    id: 'publish-record',
+    seq: 1,
+    tool: 'click_element',
+    argsRedacted: { selector: '#publish' },
+    target: { role: 'button', name: '发布文章', selector: '#publish' },
+    before: base,
+    after: evidence({ fingerprint: 'after-publish' }),
+    result: { ok: true, summary: 'ok' },
+    verification: 'changed',
+    risk: 'low',
+    ts: NOW,
+  });
+  const edge = graph.l1.edges.find((item) => item.g.includes('发布文章'));
+  assert.ok(edge);
+  assert.equal(edge.r, 'high', '发布目标不能沿用 click_element 的 low');
+  assert.equal(edge.action.risk, 'high');
+
+  const safe = await appendTraceRecord(base.url, {
+    id: 'tag-record',
+    seq: 2,
+    tool: 'click_element',
+    argsRedacted: { selector: '#tag' },
+    target: { role: 'button', name: '添加文章标签', selector: '#tag' },
+    before: base,
+    after: evidence({ fingerprint: 'after-tag' }),
+    result: { ok: true, summary: 'ok' },
+    verification: 'changed',
+    risk: 'low',
+    ts: NOW + 1,
+  });
+  const tagEdge = safe.l1.edges.find((item) => item.g.includes('添加文章标签'));
+  assert.ok(tagEdge);
+  assert.equal(tagEdge.r, 'low');
+});
+
 test('TraceGraph 存储读取会把旧 edge 身份从保留 records 重新构建', async () => {
   const store = installStorage();
   const base = evidence();
