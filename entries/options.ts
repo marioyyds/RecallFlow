@@ -69,6 +69,8 @@ async function load() {
   $('jev-max-repeated').value = String(s.jev.maxRepeatedActionsWithoutProgress);
   $('jev-max-candidates').value = String(s.jev.maxElementCandidates);
   $('jev-min-edge-confidence').value = String(s.jev.minEdgeConfidence);
+  $('jev-min-target-operation-confidence').value = String(s.jev.minTargetOperationConfidence);
+  $('jev-min-click-confidence').value = String(s.jev.minClickConfidence);
   $('jev-schema-version').value = s.jev.schemaVersion;
   $('tracegraph-enabled').checked = s.traceGraph?.enabled === true;
   $('tracegraph-mode').value = s.traceGraph?.mode === 'live' ? 'live' : 'record';
@@ -768,6 +770,8 @@ function collectSettings() {
       maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
       maxElementCandidates: $('jev-max-candidates').value,
       minEdgeConfidence: $('jev-min-edge-confidence').value,
+      minTargetOperationConfidence: $('jev-min-target-operation-confidence').value,
+      minClickConfidence: $('jev-min-click-confidence').value,
       schemaVersion: $('jev-schema-version').value || JEV_SETTINGS_DEFAULTS.schemaVersion,
     }),
     traceGraph: mergeTraceGraphSettings({
@@ -940,6 +944,8 @@ $('test-jev').addEventListener('click', async () => {
     maxRepeatedActionsWithoutProgress: $('jev-max-repeated').value,
     maxElementCandidates: $('jev-max-candidates').value,
     minEdgeConfidence: $('jev-min-edge-confidence').value,
+    minTargetOperationConfidence: $('jev-min-target-operation-confidence').value,
+    minClickConfidence: $('jev-min-click-confidence').value,
     schemaVersion: $('jev-schema-version').value,
   });
   if (!settings.apiKey) {

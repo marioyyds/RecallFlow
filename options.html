@@ -143,7 +143,18 @@
       <label class="field">
         <span class="field-label">Confidence 阈值</span>
         <input id="jev-min-edge-confidence" type="number" min="0" max="1" step="0.01" placeholder="0.8">
-        <span class="hint">JEV 对所选 edge 返回的 confidence 低于该值时直接弃权并交给慢思考。置信度只决定选边或弃权，不替代当前目标 Grounding。</span>
+        <span class="hint">**只影响 edge 复用**：有历史边可选时，JEV 返回的 confidence 低于该值就直接弃权并交给慢思考。没有 edge 候选时走下面的 operation 回退阈值。</span>
+      </label>
+      <div class="settings-subsection-title">无历史边时的回退（operation）</div>
+      <label class="field">
+        <span class="field-label">CLICK 分支下限</span>
+        <input id="jev-min-target-operation-confidence" type="number" min="0" max="1" step="0.01" placeholder="0.75">
+        <span class="hint">JEV 认为“下一步该点某个元素”的概率低于该值时，CLICK 会被拒绝并交给慢思考；防止在多分类里压过更合适的 READ/WAIT。默认 0.75。</span>
+      </label>
+      <label class="field">
+        <span class="field-label">CLICK 目标置信度</span>
+        <input id="jev-min-click-confidence" type="number" min="0" max="1" step="0.01" placeholder="0.86">
+        <span class="hint">选中具体元素后的置信度下限；低于该值不点击。默认 0.86。</span>
       </label>
       <label class="field">
         <span class="field-label">请求协议版本</span>

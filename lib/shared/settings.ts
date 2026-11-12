@@ -44,8 +44,9 @@ export const JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
   minEdgeConfidence: 0.8,
-  // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
-  // these remain for the non-TraceGraph JEV fallback.
+  // Operation fallback thresholds. They only apply when there is no edge
+  // candidate (fresh site): the CLICK branch floor and the selected-target floor
+  // are exposed in settings under "无历史边时的回退".
   minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
@@ -72,11 +73,11 @@ export interface JevSettings {
   minReadConfidence: number;
   /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minActionConfidence: number;
-  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
+  /** operation 回退（无 edge 候选）时的目标置信度下限；设置页可调。 */
   minClickConfidence: number;
   /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
   minWaitConfidence: number;
-  /** @deprecated 非 TraceGraph 兼容 operation head 使用，设置页不展示。 */
+  /** operation 回退时 CLICK 分支（多分类）下限；设置页可调。 */
   minTargetOperationConfidence: number;
 }
 

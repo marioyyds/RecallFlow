@@ -883,7 +883,13 @@ export function interpretJevFastDecision(
       reason: 'low-confidence',
       operation: operation.operation,
       confidence: operationAnswer.confidence,
-      description: operation.operation + ' 置信度不足',
+      description:
+        operation.operation +
+        ' 置信度 ' +
+        Math.round(operationAnswer.confidence * 100) +
+        '% 低于下限 ' +
+        Math.round(operation.minConfidence * 100) +
+        '%（operation 回退阈值）',
     };
   }
   if (operation.operation === 'BLOCKED') {
@@ -968,11 +974,11 @@ export function interpretJevFastDecision(
       confidence: Math.min(operationConfidence, targetConfidence || 0),
       description:
         operation.operation +
-        ' 目标分支置信度不足（' +
+        ' 分支置信度 ' +
         Math.round(operationConfidence * 100) +
-        '% < ' +
+        '% 低于分支下限 ' +
         Math.round(operation.minBranchConfidence * 100) +
-        '%）',
+        '%（operation 回退阈值）',
     };
   }
   // 有 target head 时，target 是真正决定“点谁/填哪”的证据。operation 分支由
@@ -991,7 +997,13 @@ export function interpretJevFastDecision(
       reason: 'low-confidence',
       operation: operation.operation,
       confidence,
-      description: operation.operation + ' 置信度不足',
+      description:
+        operation.operation +
+        ' 目标置信度 ' +
+        Math.round(confidence * 100) +
+        '% 低于目标下限 ' +
+        Math.round((target ? target.minConfidence : operation.minConfidence) * 100) +
+        '%（operation 回退阈值）',
     };
   }
   return {

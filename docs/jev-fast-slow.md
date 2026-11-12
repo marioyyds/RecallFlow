@@ -77,7 +77,17 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 改变模型愿不愿意选（`ABSTAIN` 与它无关）。为了让它至少是个校准信号，edge 请求的
 instructions 现在会明确写出当前阈值（“低于 X 的选择会被系统当作弃权”），
 面板的事件里也会显示本次 `confidence` 与阈值（`⚡ 快边：… confidence 0.72 ≥ 阈值 0.65`）。
-需要“让快路多做一点”时应调 ABSTAIN 规则或候选过滤，而不是只降这个数。
+
+**无 edge 候选时走 operation 回退**，用的是另外两个阈值，现在都在设置页
+「无历史边时的回退（operation）」里可调：
+
+- `minTargetOperationConfidence`（默认 0.75）：CLICK 分支在多分类里的下限；
+  低于它说明模型更想 READ/WAIT，不点击；
+- `minClickConfidence`（默认 0.86）：选中具体元素后的置信度下限。
+
+面板文案会写成 `CLICK 分支置信度 20% 低于分支下限 75%（operation 回退阈值）`，
+把“哪个阈值、哪条路径”说清楚。需要“让快路多做一点”时应调 ABSTAIN 规则或候选过滤，
+而不是只降 Edge 阈值。
 
 ## 执行循环
 

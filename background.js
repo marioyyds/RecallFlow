@@ -617,8 +617,9 @@ var JEV_SETTINGS_DEFAULTS = Object.freeze({
   maxRepeatedActionsWithoutProgress: 3,
   maxElementCandidates: 40,
   minEdgeConfidence: 0.8,
-  // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
-  // these remain for the non-TraceGraph JEV fallback.
+  // Operation fallback thresholds. They only apply when there is no edge
+  // candidate (fresh site): the CLICK branch floor and the selected-target floor
+  // are exposed in settings under "无历史边时的回退".
   minReadConfidence: 0.6,
   minActionConfidence: 0.8,
   minClickConfidence: 0.86,
@@ -14927,7 +14928,7 @@ function interpretJevFastDecision(response, bundle) {
       reason: "low-confidence",
       operation: operation.operation,
       confidence: operationAnswer.confidence,
-      description: operation.operation + " \u7F6E\u4FE1\u5EA6\u4E0D\u8DB3"
+      description: operation.operation + " \u7F6E\u4FE1\u5EA6 " + Math.round(operationAnswer.confidence * 100) + "% \u4F4E\u4E8E\u4E0B\u9650 " + Math.round(operation.minConfidence * 100) + "%\uFF08operation \u56DE\u9000\u9608\u503C\uFF09"
     };
   }
   if (operation.operation === "BLOCKED") {
@@ -15005,7 +15006,7 @@ function interpretJevFastDecision(response, bundle) {
       reason: "low-confidence",
       operation: operation.operation,
       confidence: Math.min(operationConfidence, targetConfidence || 0),
-      description: operation.operation + " \u76EE\u6807\u5206\u652F\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF08" + Math.round(operationConfidence * 100) + "% < " + Math.round(operation.minBranchConfidence * 100) + "%\uFF09"
+      description: operation.operation + " \u5206\u652F\u7F6E\u4FE1\u5EA6 " + Math.round(operationConfidence * 100) + "% \u4F4E\u4E8E\u5206\u652F\u4E0B\u9650 " + Math.round(operation.minBranchConfidence * 100) + "%\uFF08operation \u56DE\u9000\u9608\u503C\uFF09"
     };
   }
   const confidence = targetConfidence === null ? operationConfidence : targetConfidence;
@@ -15015,7 +15016,7 @@ function interpretJevFastDecision(response, bundle) {
       reason: "low-confidence",
       operation: operation.operation,
       confidence,
-      description: operation.operation + " \u7F6E\u4FE1\u5EA6\u4E0D\u8DB3"
+      description: operation.operation + " \u76EE\u6807\u7F6E\u4FE1\u5EA6 " + Math.round(confidence * 100) + "% \u4F4E\u4E8E\u76EE\u6807\u4E0B\u9650 " + Math.round((target ? target.minConfidence : operation.minConfidence) * 100) + "%\uFF08operation \u56DE\u9000\u9608\u503C\uFF09"
     };
   }
   return {
