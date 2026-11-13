@@ -247,7 +247,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       对象（tool/role/name/text/selector/url/key/note），用于把一次机械
   //                       点击/按键委托给快路。工具数量、权限、风险均不变，只多了一个
   //                       可选 schema 字段。
-  const EXPECTED = '8745371533e81d95';
+  //   50506b58dff27d60 — **有意改动**：`update_plan` 的每个 step 新增可选 `verify`
+  //                       对象（urlChanged/fingerprintChanged/minElementDelta/
+  //                       textIncludes），给快路动作一个确定性校验契约。
+  //                       工具数量、权限、风险均不变。
+  const EXPECTED = '50506b58dff27d60';
   assert.equal(
     fp,
     EXPECTED,

@@ -208,7 +208,7 @@ export function applyRunEvent(state: RunState, event: any): RunState {
       state.lane = 'fast';
       state.parts.push({
         type: 'notice',
-        text: String(event.message || '⚡ 快思考完成一次决策'),
+        text: String(event.message || '⚡ 快执行完成一次决策'),
         color: '#7c3aed',
         lane: 'fast',
         jev: {

@@ -8,7 +8,7 @@ export function clipDetail(text: any, max: any): string {
 
 export function laneBadgeHtml(lane: unknown): string {
   const value = String(lane || '');
-  if (value === 'fast') return '<span class="agent-lane lane-fast">⚡ 快思考</span>';
+  if (value === 'fast') return '<span class="agent-lane lane-fast">⚡ 快执行</span>';
   if (value === 'slow') return '<span class="agent-lane lane-slow">🧠 慢思考</span>';
   return '';
 }

@@ -4570,7 +4570,7 @@ function createPanelWithLayout(
         if (Number.isFinite(max) && max > 0) progressController.max = max;
         progressController.render();
       } else if (resp.type === 'jev-decision') {
-        const message = resp.message || '⚡ 快思考完成一次决策';
+        const message = resp.message || '⚡ 快执行完成一次决策';
         appendNoticePart(message, '#7c3aed', 'lane-notice', 'fast', {
           type: 'decision',
           mode: resp.mode || 'live',

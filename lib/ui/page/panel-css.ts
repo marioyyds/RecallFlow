@@ -485,7 +485,7 @@ export const PANEL_CSS = `
       border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1.5;
     }
     .agent-content.lane-fast::before {
-      content: '⚡ 快思考'; color: #7c3aed; background: rgba(124,58,237,.10);
+      content: '⚡ 快执行'; color: #7c3aed; background: rgba(124,58,237,.10);
       border: 1px solid rgba(124,58,237,.28);
     }
     .agent-content.lane-slow::before {

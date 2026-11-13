@@ -27,5 +27,10 @@ export function decideAutoFast(input: AutoFastInput): AutoFastDecision {
   if (step && Array.isArray(step.allowedOperations) && step.allowedOperations.length === 0) {
     return { ok: false, reason: 'plan-slow-only' };
   }
+  // 动作契约：没有结构化 verify 条件，执行后无法判定对错。慢模型显式委托
+  // （nextAction）例外——那是它自己已经选好并愿意承担的动作。
+  if (step && !step.nextAction && !step.verify) {
+    return { ok: false, reason: 'plan-no-verify' };
+  }
   return input.eligibility();
 }

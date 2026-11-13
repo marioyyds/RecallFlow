@@ -87,11 +87,21 @@ export interface PlanDelegatedAction {
 }
 
 /** 计划条（`update_plan` 维护，也是 JEV 快执行器的子目标租约）。 */
+/** 快路动作的确定性校验条件（由慢模型在计划里写好，执行后逐条核对）。 */
+export interface PlanVerifyContract {
+  urlChanged?: boolean;
+  fingerprintChanged?: boolean;
+  minElementDelta?: number;
+  textIncludes?: string;
+}
+
 export interface PlanStep {
   id?: string;
   text: string;
   status: string;
   successPredicate?: string;
+  /** 结构化的“执行后如何判定成功”；没有它，快路动作只能算未验证。 */
+  verify?: PlanVerifyContract;
   allowedOperations?: string[];
   leaseActions?: number;
   /** 快路在本步骤执行一次的委托动作；执行后由快路清空。 */

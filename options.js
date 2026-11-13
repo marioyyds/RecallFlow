@@ -3148,6 +3148,22 @@ var TOOL_SCHEMAS = [
                   type: "string",
                   description: "\u53EF\u89C2\u5BDF\u7684\u5B8C\u6210\u6761\u4EF6"
                 },
+                verify: {
+                  type: "object",
+                  description: "\u52A8\u4F5C\u6267\u884C\u540E\u7684\u786E\u5B9A\u6027\u6821\u9A8C\u6761\u4EF6\u3002\u5FEB\u8DEF\u53EA\u5728\u8FD9\u4E2A\u5951\u7EA6\u5B58\u5728\u65F6\u81EA\u52A8\u6267\u884C\uFF1B\u5931\u8D25\u4F1A\u7ACB\u5373\u4EA4\u56DE\u6162\u601D\u8003\u3002\u81F3\u5C11\u7ED9\u4E00\u9879\uFF1AurlChanged / fingerprintChanged / minElementDelta / textIncludes\u3002",
+                  properties: {
+                    urlChanged: { type: "boolean", description: "\u8981\u6C42 URL \u53D1\u751F\u53D8\u5316" },
+                    fingerprintChanged: { type: "boolean", description: "\u8981\u6C42\u9875\u9762\u7ED3\u6784\u6307\u7EB9\u53D1\u751F\u53D8\u5316" },
+                    minElementDelta: {
+                      type: "integer",
+                      description: "\u8981\u6C42\u53EF\u4EA4\u4E92\u5143\u7D20\u6570\u91CF\u81F3\u5C11\u589E\u52A0\uFF08\u53EF\u4E3A\u8D1F\uFF09"
+                    },
+                    textIncludes: {
+                      type: "string",
+                      description: "\u8981\u6C42\u52A8\u4F5C\u540E\u9875\u9762\u6B63\u6587\u6216\u5143\u7D20\u6587\u6848\u51FA\u73B0\u8BE5\u6587\u672C"
+                    }
+                  }
+                },
                 allowedOperations: {
                   type: "array",
                   description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5168\u52A8\u4F5C\uFF0C[]=\u65E0\u5FEB\u52A8\u4F5C",
@@ -4453,6 +4469,20 @@ function normalizePlanOperations(value) {
   }
   return operations;
 }
+function normalizePlanVerify(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const raw = value;
+  const contract = {};
+  if (raw.urlChanged === true) contract.urlChanged = true;
+  if (raw.fingerprintChanged === true) contract.fingerprintChanged = true;
+  const delta = Number(raw.minElementDelta);
+  if (Number.isFinite(delta) && delta !== 0) {
+    contract.minElementDelta = Math.max(-500, Math.min(500, Math.trunc(delta)));
+  }
+  const text3 = cleanText(raw.textIncludes, 120);
+  if (text3) contract.textIncludes = text3;
+  return Object.keys(contract).length ? contract : void 0;
+}
 function normalizePlanLease(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 1) return void 0;
@@ -4466,6 +4496,8 @@ function normalizePlanStep(value, index) {
   };
   const successPredicate = cleanText(value.successPredicate, 240);
   if (successPredicate) step.successPredicate = successPredicate;
+  const verify = normalizePlanVerify(value.verify);
+  if (verify) step.verify = verify;
   if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
     step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
   }
@@ -8804,7 +8836,7 @@ function renderJevRuntimeStatus() {
   const shadow = $("jev-shadow-mode").checked;
   if (!enabled) {
     el.className = "connection-status error";
-    el.textContent = "JEV \u672A\u542F\u7528\uFF1A\u5FEB\u601D\u8003\u4E0D\u4F1A\u53D1\u8D77\u4EFB\u4F55\u8BF7\u6C42\u3002";
+    el.textContent = "JEV \u672A\u542F\u7528\uFF1A\u5FEB\u6267\u884C\u4E0D\u4F1A\u53D1\u8D77\u4EFB\u4F55\u8BF7\u6C42\u3002";
     return;
   }
   let current = shadow ? "\u5F53\u524D\u4E3A\u5F71\u5B50\u6A21\u5F0F\uFF1AJEV \u53EA\u7ED9\u51FA\u5EFA\u8BAE\uFF0C\u4E0D\u4F1A\u6267\u884C\u5DE5\u5177\u3002\u5173\u95ED\u5F71\u5B50\u6A21\u5F0F\u540E\u624D\u4F1A\u8FDB\u5165\u5B9E\u9645\u5FEB\u8DEF\u5F84\u3002" : "\u5F53\u524D\u4E3A\u5B9E\u9645\u6267\u884C\u6A21\u5F0F\u3002";

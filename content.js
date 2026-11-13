@@ -4643,12 +4643,12 @@
     return "- \uFF08\u622A\u56FE" + (bits.length ? "\uFF1A" + bits.join(" \xB7 ") : "") + "\uFF09" + laneSuffix(p.lane);
   }
   function laneSuffix(lane) {
-    if (lane === "fast") return " \xB7 \u26A1 \u5FEB\u601D\u8003";
+    if (lane === "fast") return " \xB7 \u26A1 \u5FEB\u6267\u884C";
     if (lane === "slow") return " \xB7 \u{1F9E0} \u6162\u601D\u8003";
     return "";
   }
   function lanePrefix(lane) {
-    if (lane === "fast") return "**[\u26A1 \u5FEB\u601D\u8003]** ";
+    if (lane === "fast") return "**[\u26A1 \u5FEB\u6267\u884C]** ";
     if (lane === "slow") return "**[\u{1F9E0} \u6162\u601D\u8003]** ";
     return "";
   }
@@ -6504,7 +6504,7 @@
       border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 1.5;
     }
     .agent-content.lane-fast::before {
-      content: '\u26A1 \u5FEB\u601D\u8003'; color: #7c3aed; background: rgba(124,58,237,.10);
+      content: '\u26A1 \u5FEB\u6267\u884C'; color: #7c3aed; background: rgba(124,58,237,.10);
       border: 1px solid rgba(124,58,237,.28);
     }
     .agent-content.lane-slow::before {
@@ -7000,7 +7000,7 @@
         state.lane = "fast";
         state.parts.push({
           type: "notice",
-          text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
+          text: String(event.message || "\u26A1 \u5FEB\u6267\u884C\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
           color: "#7c3aed",
           lane: "fast",
           jev: {
@@ -7764,7 +7764,7 @@
   }
   function laneBadgeHtml(lane) {
     const value = String(lane || "");
-    if (value === "fast") return '<span class="agent-lane lane-fast">\u26A1 \u5FEB\u601D\u8003</span>';
+    if (value === "fast") return '<span class="agent-lane lane-fast">\u26A1 \u5FEB\u6267\u884C</span>';
     if (value === "slow") return '<span class="agent-lane lane-slow">\u{1F9E0} \u6162\u601D\u8003</span>';
     return "";
   }
@@ -11237,7 +11237,7 @@
           if (Number.isFinite(max) && max > 0) progressController.max = max;
           progressController.render();
         } else if (resp.type === "jev-decision") {
-          const message = resp.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56";
+          const message = resp.message || "\u26A1 \u5FEB\u6267\u884C\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56";
           appendNoticePart(message, "#7c3aed", "lane-notice", "fast", {
             type: "decision",
             mode: resp.mode || "live",

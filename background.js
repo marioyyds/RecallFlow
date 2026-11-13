@@ -5636,6 +5636,22 @@ var TOOL_SCHEMAS = [
                   type: "string",
                   description: "\u53EF\u89C2\u5BDF\u7684\u5B8C\u6210\u6761\u4EF6"
                 },
+                verify: {
+                  type: "object",
+                  description: "\u52A8\u4F5C\u6267\u884C\u540E\u7684\u786E\u5B9A\u6027\u6821\u9A8C\u6761\u4EF6\u3002\u5FEB\u8DEF\u53EA\u5728\u8FD9\u4E2A\u5951\u7EA6\u5B58\u5728\u65F6\u81EA\u52A8\u6267\u884C\uFF1B\u5931\u8D25\u4F1A\u7ACB\u5373\u4EA4\u56DE\u6162\u601D\u8003\u3002\u81F3\u5C11\u7ED9\u4E00\u9879\uFF1AurlChanged / fingerprintChanged / minElementDelta / textIncludes\u3002",
+                  properties: {
+                    urlChanged: { type: "boolean", description: "\u8981\u6C42 URL \u53D1\u751F\u53D8\u5316" },
+                    fingerprintChanged: { type: "boolean", description: "\u8981\u6C42\u9875\u9762\u7ED3\u6784\u6307\u7EB9\u53D1\u751F\u53D8\u5316" },
+                    minElementDelta: {
+                      type: "integer",
+                      description: "\u8981\u6C42\u53EF\u4EA4\u4E92\u5143\u7D20\u6570\u91CF\u81F3\u5C11\u589E\u52A0\uFF08\u53EF\u4E3A\u8D1F\uFF09"
+                    },
+                    textIncludes: {
+                      type: "string",
+                      description: "\u8981\u6C42\u52A8\u4F5C\u540E\u9875\u9762\u6B63\u6587\u6216\u5143\u7D20\u6587\u6848\u51FA\u73B0\u8BE5\u6587\u672C"
+                    }
+                  }
+                },
                 allowedOperations: {
                   type: "array",
                   description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5168\u52A8\u4F5C\uFF0C[]=\u65E0\u5FEB\u52A8\u4F5C",
@@ -6934,6 +6950,20 @@ function normalizePlanOperations(value) {
   }
   return operations;
 }
+function normalizePlanVerify(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const raw = value;
+  const contract = {};
+  if (raw.urlChanged === true) contract.urlChanged = true;
+  if (raw.fingerprintChanged === true) contract.fingerprintChanged = true;
+  const delta = Number(raw.minElementDelta);
+  if (Number.isFinite(delta) && delta !== 0) {
+    contract.minElementDelta = Math.max(-500, Math.min(500, Math.trunc(delta)));
+  }
+  const text2 = cleanText(raw.textIncludes, 120);
+  if (text2) contract.textIncludes = text2;
+  return Object.keys(contract).length ? contract : void 0;
+}
 function normalizePlanLease(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 1) return void 0;
@@ -6947,6 +6977,8 @@ function normalizePlanStep(value, index) {
   };
   const successPredicate = cleanText(value.successPredicate, 240);
   if (successPredicate) step.successPredicate = successPredicate;
+  const verify = normalizePlanVerify(value.verify);
+  if (verify) step.verify = verify;
   if (Object.prototype.hasOwnProperty.call(value, "allowedOperations")) {
     step.allowedOperations = normalizePlanOperations(value.allowedOperations) || [];
   }
@@ -15063,7 +15095,7 @@ function compareJevShadowAction(decision, slowToolNames, finalText = "") {
   };
 }
 function formatJevEdgeDecisionSummary(shadow, decision, latencyMs, threshold, goal) {
-  const prefix = shadow ? "\u26A1 \u5FEB\u8FB9\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u8FB9";
+  const prefix = shadow ? "\u26A1 \u5FEB\u6267\u884C\uFF08\u8FB9\xB7\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u6267\u884C\uFF08\u8FB9\uFF09";
   const ms = Math.round(latencyMs);
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(2) : "\u2014";
   if (decision.kind === "edge") {
@@ -15079,7 +15111,7 @@ function formatJevEdgeDecisionSummary(shadow, decision, latencyMs, threshold, go
   return prefix + "\uFF1A" + decision.description + "\uFF08" + ms + "ms\uFF09";
 }
 function formatJevDecisionSummary(shadow, decision, latencyMs) {
-  const prefix = shadow ? "\u26A1 \u5FEB\u601D\u8003\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u601D\u8003";
+  const prefix = shadow ? "\u26A1 \u5FEB\u6267\u884C\uFF08\u5F71\u5B50\uFF09" : "\u26A1 \u5FEB\u6267\u884C";
   if (decision.kind === "done") {
     return prefix + "\uFF1A\u5224\u65AD\u5DF2\u5B8C\u6210\uFF0C\u4EA4\u7ED9\u72EC\u7ACB\u9A8C\u8BC1\uFF08" + Math.round(latencyMs) + "ms\uFF09";
   }
@@ -15088,6 +15120,61 @@ function formatJevDecisionSummary(shadow, decision, latencyMs) {
   }
   const fallback = /确定性回退/.test(decision.description) ? "\uFF08\u53EA\u8BFB\u56DE\u9000\uFF09" : "";
   return prefix + "\uFF1A" + decision.operation + (decision.target ? " \u2192 " + decision.target.label : "") + fallback + "\uFF08" + Math.round(decision.confidence * 100) + "%\uFF0C" + Math.round(latencyMs) + "ms\uFF09";
+}
+
+// lib/application/agent/action-verify.ts
+function elementLabels(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.elements)) return "";
+  return snapshot.elements.map(
+    (element) => String(element && (element.name || element.label || element.text) || "")
+  ).join(" ");
+}
+function verifyActionResult(before, after, contract) {
+  if (!contract || !Object.keys(contract).length) {
+    return {
+      verdict: "unknown",
+      checks: [],
+      failures: [],
+      evidence: "\u8BA1\u5212\u6CA1\u6709\u63D0\u4F9B\u7ED3\u6784\u5316 verify \u6761\u4EF6"
+    };
+  }
+  const checks = [];
+  const failures = [];
+  const urlBefore = String(before?.url || "");
+  const urlAfter = String(after?.url || "");
+  if (contract.urlChanged) {
+    checks.push("urlChanged");
+    if (urlAfter === urlBefore) failures.push("URL \u672A\u53D8\u5316");
+  }
+  if (contract.fingerprintChanged) {
+    checks.push("fingerprintChanged");
+    if (String(after?.fingerprint || "") === String(before?.fingerprint || "")) {
+      failures.push("\u9875\u9762\u6307\u7EB9\u672A\u53D8\u5316");
+    }
+  }
+  if (typeof contract.minElementDelta === "number") {
+    checks.push("minElementDelta");
+    const delta = (Array.isArray(after?.elements) ? after.elements.length : 0) - (Array.isArray(before?.elements) ? before.elements.length : 0);
+    if (delta < contract.minElementDelta) {
+      failures.push("\u5143\u7D20\u6570\u91CF\u53D8\u5316 " + delta + " < " + contract.minElementDelta);
+    }
+  }
+  if (contract.textIncludes) {
+    checks.push("textIncludes");
+    const needle = contract.textIncludes.toLowerCase();
+    const haystack = (String(after?.text || "") + " " + elementLabels(after)).toLowerCase();
+    if (!haystack.includes(needle)) failures.push("\u9875\u9762\u672A\u51FA\u73B0\u300C" + contract.textIncludes + "\u300D");
+  }
+  const verdict = failures.length ? "mismatch" : "verified";
+  return {
+    verdict,
+    checks,
+    failures,
+    evidence: failures.length ? failures.join("\uFF1B") : "\u6821\u9A8C\u901A\u8FC7\uFF1A" + checks.join("\u3001")
+  };
+}
+function verifyContractForStep(step) {
+  return step && step.verify ? step.verify : void 0;
 }
 
 // lib/application/agent/jev-diagnostics.ts
@@ -15415,6 +15502,7 @@ var JevFastController = class {
     const shadowMode = options.shadowMode ?? settings.shadowMode;
     const fallback = options.fallback === true;
     const beforeFingerprint = String(this.state.ctx.lastSnapshot?.fingerprint || "");
+    const beforeSnapshot = this.state.ctx.lastSnapshot;
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -15640,6 +15728,28 @@ var JevFastController = class {
       await persist({ phase: "jev_decision" }).catch(() => {
       });
       return { kind: "skipped", reason: "tool-failure-limit", latencyMs };
+    }
+    const verifyStep = activePlanStep(this.state.ctx.plan);
+    const verified = verifyActionResult(
+      beforeSnapshot,
+      this.state.ctx.lastSnapshot,
+      verifyContractForStep(verifyStep)
+    );
+    this.state.trace({
+      phase: "action-verify",
+      iter,
+      head: "operation",
+      operation: action.operation,
+      tool: action.toolName,
+      verdict: verified.verdict,
+      checks: verified.checks,
+      evidence: verified.evidence
+    });
+    if (verified.verdict === "mismatch") {
+      this.appendBlocked(iter, "action-mismatch", "\u52A8\u4F5C\u672A\u8FBE\u5230\u8BA1\u5212\u9884\u671F\uFF1A" + verified.evidence);
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "action-mismatch", latencyMs };
     }
     if (action.operation === "READ_PAGE") this.noteReadPage();
     this.noteActionKey(cycleKey);
@@ -16022,6 +16132,28 @@ var JevFastController = class {
     }
     const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === "cancelled") return observed;
+    const edgeVerified = verifyActionResult(
+      before,
+      this.state.ctx.lastSnapshot,
+      verifyContractForStep(planStep)
+    );
+    this.state.trace({
+      phase: "action-verify",
+      iter,
+      head: "edge",
+      edgeId: edge.id,
+      tool: edge.action.tool,
+      verdict: edgeVerified.verdict,
+      checks: edgeVerified.checks,
+      evidence: edgeVerified.evidence
+    });
+    if (edgeVerified.verdict === "mismatch") {
+      this.addBlockedEdge(edge.id);
+      this.traceEdgeHandoff(iter, "edge-action-mismatch", edgeVerified.evidence);
+      await persist({ phase: "tracegraph_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "edge-action-mismatch", latencyMs };
+    }
     const progressed = String(this.state.ctx.lastSnapshot?.fingerprint || "") !== String(before.fingerprint || "");
     if (this.noteActionProgress("edge:" + edge.id, progressed)) {
       this.addBlockedEdge(edge.id);
@@ -16175,6 +16307,9 @@ var JevFastController = class {
     }
     if (reason === "duplicate-read" || reason === "edge-duplicate-read") {
       return "\u540C\u4E00\u9875\u9762\u521A\u8BFB\u8FC7\uFF0C\u91CD\u590D\u8BFB\u53D6\u4E0D\u4F1A\u5E26\u6765\u65B0\u4FE1\u606F";
+    }
+    if (reason === "action-mismatch" || reason === "edge-action-mismatch") {
+      return "\u52A8\u4F5C\u6267\u884C\u4E86\uFF0C\u4F46\u6CA1\u6709\u8FBE\u5230\u8BA1\u5212\u91CC\u5199\u7684\u9884\u671F\u6548\u679C\uFF0C\u9700\u8981\u91CD\u65B0\u5224\u65AD";
     }
     if (reason === "edge-low-confidence") return "\u5019\u9009\u52A8\u4F5C\u7684\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF0C\u5FEB\u8DEF\u5F84\u4E3B\u52A8\u8BA9\u4F4D";
     if (reason === "edge-invalid-answer") return "\u51B3\u7B56\u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548\u9009\u9879\uFF0C\u5FEB\u8DEF\u5F84\u4E0D\u5192\u9669";
@@ -16409,6 +16544,9 @@ function decideAutoFast(input) {
   const step = activePlanStep(input.plan);
   if (step && Array.isArray(step.allowedOperations) && step.allowedOperations.length === 0) {
     return { ok: false, reason: "plan-slow-only" };
+  }
+  if (step && !step.nextAction && !step.verify) {
+    return { ok: false, reason: "plan-no-verify" };
   }
   return input.eligibility();
 }
@@ -19580,7 +19718,7 @@ function applyRunEvent(state2, event) {
       state2.lane = "fast";
       state2.parts.push({
         type: "notice",
-        text: String(event.message || "\u26A1 \u5FEB\u601D\u8003\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
+        text: String(event.message || "\u26A1 \u5FEB\u6267\u884C\u5B8C\u6210\u4E00\u6B21\u51B3\u7B56"),
         color: "#7c3aed",
         lane: "fast",
         jev: {

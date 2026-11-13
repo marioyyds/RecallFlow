@@ -203,6 +203,24 @@ export const TOOL_SCHEMAS = [
                   type: 'string',
                   description: '可观察的完成条件',
                 },
+                verify: {
+                  type: 'object',
+                  description:
+                    '动作执行后的确定性校验条件。快路只在这个契约存在时自动执行；失败会立即交回慢思考。' +
+                    '至少给一项：urlChanged / fingerprintChanged / minElementDelta / textIncludes。',
+                  properties: {
+                    urlChanged: { type: 'boolean', description: '要求 URL 发生变化' },
+                    fingerprintChanged: { type: 'boolean', description: '要求页面结构指纹发生变化' },
+                    minElementDelta: {
+                      type: 'integer',
+                      description: '要求可交互元素数量至少增加（可为负）',
+                    },
+                    textIncludes: {
+                      type: 'string',
+                      description: '要求动作后页面正文或元素文案出现该文本',
+                    },
+                  },
+                },
                 allowedOperations: {
                   type: 'array',
                   description: '允许的快路操作；省略=全动作，[]=无快动作',

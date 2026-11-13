@@ -119,7 +119,7 @@ function renderJevRuntimeStatus() {
   const shadow = $('jev-shadow-mode').checked;
   if (!enabled) {
     el.className = 'connection-status error';
-    el.textContent = 'JEV 未启用：快思考不会发起任何请求。';
+    el.textContent = 'JEV 未启用：快执行不会发起任何请求。';
     return;
   }
   let current =

@@ -1,4 +1,4 @@
-import type { PlanDelegatedAction, PlanStep } from './types.ts';
+import type { PlanDelegatedAction, PlanStep, PlanVerifyContract } from './types.ts';
 
 /**
  * Fast-lane operations that a slow plan may explicitly authorize.
@@ -96,6 +96,21 @@ export function normalizePlanOperations(value: unknown): PlanFastOperation[] | u
   return operations;
 }
 
+export function normalizePlanVerify(value: unknown): PlanVerifyContract | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const contract: PlanVerifyContract = {};
+  if (raw.urlChanged === true) contract.urlChanged = true;
+  if (raw.fingerprintChanged === true) contract.fingerprintChanged = true;
+  const delta = Number(raw.minElementDelta);
+  if (Number.isFinite(delta) && delta !== 0) {
+    contract.minElementDelta = Math.max(-500, Math.min(500, Math.trunc(delta)));
+  }
+  const text = cleanText(raw.textIncludes, 120);
+  if (text) contract.textIncludes = text;
+  return Object.keys(contract).length ? contract : undefined;
+}
+
 export function normalizePlanLease(value: unknown): number | undefined {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 1) return undefined;
@@ -115,6 +130,8 @@ export function normalizePlanStep(
   };
   const successPredicate = cleanText(value.successPredicate, 240);
   if (successPredicate) step.successPredicate = successPredicate;
+  const verify = normalizePlanVerify(value.verify);
+  if (verify) step.verify = verify;
   if (Object.prototype.hasOwnProperty.call(value, 'allowedOperations')) {
     // A malformed explicit contract must fail closed rather than silently
     // restoring the full operation space.

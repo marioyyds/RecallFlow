@@ -24,6 +24,7 @@ import {
   resolveEdgeTarget,
 } from './trace-graph.ts';
 import { loadTraceGraph } from './tracegraph-store.ts';
+import { verifyActionResult, verifyContractForStep } from './action-verify.ts';
 import { REPLAYABLE_TOOLS } from './macros.ts';
 import type { Evidence } from './trace-graph-types.ts';
 import type { PlanStep } from './types.ts';
@@ -436,6 +437,7 @@ export class JevFastController {
     const shadowMode = options.shadowMode ?? settings.shadowMode;
     const fallback = options.fallback === true;
     const beforeFingerprint = String(this.state.ctx.lastSnapshot?.fingerprint || '');
+    const beforeSnapshot = this.state.ctx.lastSnapshot as any;
     const bundle = buildJevFastRequest(settings, {
       intent: this.state.intent,
       phase,
@@ -712,6 +714,29 @@ export class JevFastController {
       this.appendBlocked(iter, 'tool-failure-limit', '快路径连续两次工具失败');
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'tool-failure-limit', latencyMs };
+    }
+    // 执行后的确定性校验：计划写了 verify 条件就逐条核对；没有契约则如实记 unknown，
+    // 不把“无法判断”当成“成功”（JEV 本身不承担理解与验证）。
+    const verifyStep = activePlanStep(this.state.ctx.plan);
+    const verified = verifyActionResult(
+      beforeSnapshot,
+      this.state.ctx.lastSnapshot as any,
+      verifyContractForStep(verifyStep)
+    );
+    this.state.trace({
+      phase: 'action-verify',
+      iter,
+      head: 'operation',
+      operation: action.operation,
+      tool: action.toolName,
+      verdict: verified.verdict,
+      checks: verified.checks,
+      evidence: verified.evidence,
+    });
+    if (verified.verdict === 'mismatch') {
+      this.appendBlocked(iter, 'action-mismatch', '动作未达到计划预期：' + verified.evidence);
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'action-mismatch', latencyMs };
     }
     if (action.operation === 'READ_PAGE') this.noteReadPage();
     this.noteActionKey(cycleKey);
@@ -1167,6 +1192,28 @@ export class JevFastController {
     }
     const observed = await this.observeAfterAction(iter, persist, edge.action.tool);
     if (observed.kind === 'cancelled') return observed;
+    // 边动作同样要有“做对了吗”的判定：计划契约核对失败就封边交回慢思考。
+    const edgeVerified = verifyActionResult(
+      before as any,
+      this.state.ctx.lastSnapshot as any,
+      verifyContractForStep(planStep)
+    );
+    this.state.trace({
+      phase: 'action-verify',
+      iter,
+      head: 'edge',
+      edgeId: edge.id,
+      tool: edge.action.tool,
+      verdict: edgeVerified.verdict,
+      checks: edgeVerified.checks,
+      evidence: edgeVerified.evidence,
+    });
+    if (edgeVerified.verdict === 'mismatch') {
+      this.addBlockedEdge(edge.id);
+      this.traceEdgeHandoff(iter, 'edge-action-mismatch', edgeVerified.evidence);
+      await persist({ phase: 'tracegraph_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'edge-action-mismatch', latencyMs };
+    }
     // 同一动作执行后页面毫无变化，最多容忍一次；第二次直接封边交回慢思考。
     const progressed =
       String(this.state.ctx.lastSnapshot?.fingerprint || '') !== String(before.fingerprint || '');
@@ -1354,6 +1401,9 @@ private handoffExplanation(reason: string): string {
   }
   if (reason === 'duplicate-read' || reason === 'edge-duplicate-read') {
     return '同一页面刚读过，重复读取不会带来新信息';
+  }
+  if (reason === 'action-mismatch' || reason === 'edge-action-mismatch') {
+    return '动作执行了，但没有达到计划里写的预期效果，需要重新判断';
   }
   if (reason === 'edge-low-confidence') return '候选动作的置信度不足，快路径主动让位';
   if (reason === 'edge-invalid-answer') return '决策服务返回了无效选项，快路径不冒险';

@@ -672,6 +672,35 @@ test('operation 判 BLOCKED 时做路由冷却；只读回合不唤醒，动作�
   assert.equal(jevCalls, 2, '慢思考动过页面才允许再试');
 });
 
+test('计划 verify 不满足时动作判 mismatch 并交回慢思考', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'v1',
+    text: '点开搜索结果',
+    status: 'in_progress',
+    allowedOperations: ['CLICK'],
+    verify: { urlChanged: true },
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state, { clickChangesPage: false }),
+    new AbortController().signal,
+    async (request) => {
+      jevCalls += 1;
+      return operationClickResponse(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'action-mismatch');
+  assert.equal(jevCalls, 1);
+});
+
 test('同一页面 15 秒内重复 READ_PAGE 会被跳过', async () => {
   const state = stateFor(false);
   state.settings.jev.maxConsecutiveActions = 1;

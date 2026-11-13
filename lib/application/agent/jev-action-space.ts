@@ -1058,7 +1058,7 @@ export function formatJevEdgeDecisionSummary(
   threshold: number,
   goal?: string
 ): string {
-  const prefix = shadow ? '⚡ 快边（影子）' : '⚡ 快边';
+  const prefix = shadow ? '⚡ 快执行（边·影子）' : '⚡ 快执行（边）';
   const ms = Math.round(latencyMs);
   const limit = Number.isFinite(Number(threshold)) ? Number(threshold).toFixed(2) : '—';
   if (decision.kind === 'edge') {
@@ -1091,7 +1091,7 @@ export function formatJevDecisionSummary(
   decision: JevFastDecision,
   latencyMs: number
 ): string {
-  const prefix = shadow ? '⚡ 快思考（影子）' : '⚡ 快思考';
+  const prefix = shadow ? '⚡ 快执行（影子）' : '⚡ 快执行';
   if (decision.kind === 'done') {
     return prefix + '：判断已完成，交给独立验证（' + Math.round(latencyMs) + 'ms）';
   }

@@ -604,13 +604,13 @@ function screenshotLine(p: TranscriptPart): string {
 }
 
 function laneSuffix(lane: unknown): string {
-  if (lane === 'fast') return ' · ⚡ 快思考';
+  if (lane === 'fast') return ' · ⚡ 快执行';
   if (lane === 'slow') return ' · 🧠 慢思考';
   return '';
 }
 
 function lanePrefix(lane: unknown): string {
-  if (lane === 'fast') return '**[⚡ 快思考]** ';
+  if (lane === 'fast') return '**[⚡ 快执行]** ';
   if (lane === 'slow') return '**[🧠 慢思考]** ';
   return '';
 }

@@ -72,6 +72,13 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 - operation 和匹配 target 均需达到动作类型对应的置信度；
 - target 只能映射到已观察的 ref，不接受模型生成的 selector、坐标或 JavaScript。
 
+**快执行（原“快思考”）与契约校验**：JEV 只负责在候选里选一个动作，它不理解页面语义，
+也无法判断动作是否推进了目标，因此面板统称“快执行”。自动快执行需要计划步骤携带
+结构化 `verify` 条件（`urlChanged` / `fingerprintChanged` / `minElementDelta` /
+`textIncludes`）；没有契约、或 `allowedOperations: []` 时直接交给慢思考。动作执行后由
+`action-verify.ts` 做确定性核对：`mismatch` 立即让位并（对边）封边，`unknown` 只记录不
+冒充成功。
+
 **Edge Confidence 阈值的边界**：这个设置只做“选定后的本地比较”——JEV 返回的
 `confidence` 低于阈值时把选择改判为 `low-confidence` 并交回慢思考；它**不会**
 改变模型愿不愿意选（`ABSTAIN` 与它无关）。为了让它至少是个校准信号，edge 请求的
