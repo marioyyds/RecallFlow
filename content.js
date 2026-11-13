@@ -5463,6 +5463,8 @@
     approvalSettingsEl = null;
     approvalPopoverEl = null;
     lastPlan = [];
+    /** 上一次真正画进计划条的指纹：没变就不再重建 DOM（见 chat.ts 的 renderPlan）。 */
+    lastPlanSig = "";
     planExpanded = null;
     planWasAllDone = false;
     usageEl = null;
@@ -8083,9 +8085,11 @@
     panelBody = null;
     panelCmdInput = null;
     resetPanelFitCache();
+    conversationRenderSig = "";
     panelTextEl = null;
     panelTitleEl = null;
     streamView.planBar = null;
+    streamView.lastPlanSig = "";
     stopBtn = null;
     sendBtn = null;
     bubble = null;
@@ -8181,7 +8185,7 @@
     } catch (e) {
     }
     if (opts.render !== false && panelBody && !runSession.isRunning && !panelSessionState.conversation.length && !followedRun.followedMessages.length) {
-      renderConversation();
+      renderConversation({ reason: "clear-selection" });
     }
     if (panel && opts.render !== false) fitPanelHeight();
   }
@@ -8212,9 +8216,11 @@
       panelBody = null;
       panelCmdInput = null;
       resetPanelFitCache();
+      conversationRenderSig = "";
       panelTextEl = null;
       panelTitleEl = null;
       streamView.planBar = null;
+      streamView.lastPlanSig = "";
       if (fab) fab.classList.remove("hidden");
       fabPeek.setPanelOpen(false);
     }
@@ -8373,7 +8379,7 @@
     canRepaint: () => !runSession.isRunning && Boolean(panelBody),
     onRepaint: () => {
       try {
-        renderConversation();
+        renderConversation({ reason: "screenshot-repaint", force: true });
         fitPanelHeight();
         pinToBottom();
       } catch {
@@ -8611,8 +8617,11 @@
   }
   function mountLiveStreamingBlock() {
     if (!panelBody) return;
-    const aiMsg = document.createElement("div");
-    aiMsg.className = "msg ai";
+    const existing = streamView.pendingAiMsg;
+    const reuse = Boolean(existing && existing.isConnected && existing.parentNode === panelBody);
+    const aiMsg = reuse ? existing : document.createElement("div");
+    if (!reuse) aiMsg.className = "msg ai";
+    if (reuse) aiMsg.innerHTML = "";
     const flow = document.createElement("div");
     flow.className = "agent-flow";
     streamView.flowEl = flow;
@@ -8627,12 +8636,18 @@
     const contentEl = document.createElement("div");
     contentEl.className = "agent-content lane-" + streamState.lane;
     contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, streamView.currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
+    if (streamView.thinkSeg && streamView.thinkSeg.text && !streamView.thinkSeg.done) {
+      streamView.thinkSeg.block = null;
+      streamView.thinkSeg.body = null;
+      mountThinkSegment(streamView.thinkSeg, streamView.thinkExpandedManual === true);
+    }
     flow.appendChild(contentEl);
     aiMsg.appendChild(flow);
-    panelBody.appendChild(aiMsg);
+    if (!reuse) panelBody.appendChild(aiMsg);
     streamView.pendingAiMsg = aiMsg;
     streamView.pendingContentEl = contentEl;
     streamView.typingEl = streamState.narration ? null : contentEl;
+    streamView.pendingAiMsg._raw = streamState.content;
     if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
     fitPanelHeight();
     pinToBottom();
@@ -8640,39 +8655,13 @@
   function restoreStreamingUI() {
     if (!panelBody || !runSession.isRunning) return;
     if (streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return;
-    const aiMsg = document.createElement("div");
-    aiMsg.className = "msg ai";
-    const flow = document.createElement("div");
-    flow.className = "agent-flow";
-    aiMsg.appendChild(flow);
-    renderCommittedParts(flow);
-    const contentEl = document.createElement("div");
-    contentEl.className = "agent-content lane-" + streamState.lane;
-    if (streamState.narration) {
-      contentEl.innerHTML = renderAnswer(streamState.narration, streamView.currentCitations, false);
-    } else {
-      contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
-    }
-    flow.appendChild(contentEl);
-    if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
-    panelBody.appendChild(aiMsg);
-    streamView.pendingAiMsg = aiMsg;
-    streamView.pendingContentEl = contentEl;
-    if (streamView.thinkSeg && streamView.thinkSeg.text) {
-      streamView.thinkSeg.block = null;
-      streamView.thinkSeg.body = null;
-      mountThinkSegment(streamView.thinkSeg, streamView.thinkExpandedManual === true);
-    }
-    streamView.typingEl = streamState.narration ? null : contentEl;
-    streamView.pendingAiMsg._raw = streamState.content;
+    mountLiveStreamingBlock();
     if (progressController.el) {
       if (!progressController.startedAt) progressController.startedAt = Date.now();
       progressController.el.classList.add("on");
       progressController.render();
       if (!progressController.timer) progressController.timer = setInterval(() => progressController.render(), 1e3);
     }
-    fitPanelHeight();
-    pinToBottom();
   }
   function showCitationHint(text) {
     if (!panelBody) return;
@@ -8951,17 +8940,97 @@
     const terminalHtml = terminalNotices.map((p) => '<div class="agent-step verify-final" style="color:' + escAttr(p.color || "#16a34a") + '">' + escHtml(p.text) + "</div>").join("");
     return '<div class="msg ai"' + failedStyle + '><div class="agent-flow">' + flowHtml + "</div>" + contentHtml + typingHtml + sourceHtml + terminalHtml + (m.content && !m.live ? msgActionsHtml(index === viewLength - 1, messageElapsedMs(m), sessionElapsedMs) : "") + "</div>";
   }
-  function renderConversation() {
+  function conversationRenderSignature(view, plan) {
+    const head = String(planSignature(plan));
+    return view.map((m) => {
+      const content = String(m && m.content || "");
+      const parts = Array.isArray(m && m.parts) ? m.parts : [];
+      const cites = Array.isArray(m && m.citations) ? m.citations : [];
+      return [
+        String(m && m.role || ""),
+        content.length,
+        content.slice(0, 40),
+        content.slice(-40),
+        parts.length,
+        parts.map((p) => String(p && p.text || p && p.result || "").length).join("."),
+        cites.length,
+        cites.map((c) => String(c && c.id || "")).join(","),
+        m && m.live ? 1 : 0,
+        m && m.failed ? 1 : 0,
+        m && m.interrupted ? 1 : 0,
+        m && m.plan ? 1 : 0
+      ].join("~");
+    }).join("|") + "#" + head;
+  }
+  var conversationRenderSig = "";
+  var conversationRenderLog = [];
+  function noteConversationRender(reason, rebuilt) {
+    const now = Date.now();
+    conversationRenderLog.push({ at: now, reason: String(reason || ""), rebuilt });
+    if (conversationRenderLog.length > 40) conversationRenderLog.shift();
+    if (!rebuilt) return;
+    const recent = conversationRenderLog.filter((e) => e.rebuilt && now - e.at < 2e3);
+    if (recent.length !== 5) return;
+    console.warn(
+      "[RecallFlow] \u5BF9\u8BDD\u533A 2 \u79D2\u5185\u88AB\u91CD\u5EFA\u4E86 5 \u6B21\uFF08\u4F1A\u8868\u73B0\u4E3A\u767D\u95EA\uFF09",
+      recent.map((e) => e.reason || "unknown")
+    );
+  }
+  function ensureLiveBlockAttached() {
+    if (!panelBody || !runSession.isRunning) return false;
+    const pending = streamView.pendingAiMsg;
+    const pendingAlive = Boolean(pending && pending.isConnected && pending.parentNode === panelBody);
+    if (pendingAlive && streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return false;
+    const hasSomethingToShow = streamState.parts.length > 0 || Boolean(streamState.narration) || Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
+    if (!hasSomethingToShow) return false;
+    mountLiveStreamingBlock();
+    return true;
+  }
+  function countConversationTurnNodes(body) {
+    if (!body) return 0;
+    let n = 0;
+    for (const el of Array.from(body.children)) {
+      if (!el || !el.classList) continue;
+      if (el.classList.contains("user-turn") || el.classList.contains("msg")) n += 1;
+    }
+    return n;
+  }
+  function renderConversation(options) {
+    const opts = options || {};
+    const force = opts.force === true;
     if (!panelBody) return;
-    followedRun.followedLiveReady = false;
-    followedRun.followedDom = null;
     const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
     if (!view.length) {
+      const sig2 = conversationRenderSignature([], []);
+      if (!force && sig2 === conversationRenderSig && countConversationTurnNodes(panelBody) === 1) {
+        noteConversationRender(opts.reason, false);
+        return;
+      }
+      conversationRenderSig = sig2;
+      noteConversationRender(opts.reason, true);
+      followedRun.followedLiveReady = false;
+      followedRun.followedDom = null;
       panelBody.className = "p-body";
-      panelBody.innerHTML = '<div class="msg ai">' + (lastText ? "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u57FA\u4E8E\u9009\u4E2D\u6587\u672C\u6267\u884C\u3002" : "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u76F4\u63A5\u6267\u884C\uFF08\u53EF\u57FA\u4E8E\u77E5\u8BC6\u5E93\uFF09\u3002") + "</div>";
+      panelBody.innerHTML = '<div class="msg ai">' + (lastText ? "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u57FA\u4E8E\u6240\u9009\u6587\u672C\u6267\u884C\u3002" : "\u8F93\u5165\u6307\u4EE4\uFF0CAI \u5C06\u76F4\u63A5\u6267\u884C\uFF08\u53EF\u57FA\u4E8E\u77E5\u8BC6\u5E93\uFF09\u3002") + "</div>";
       renderPlan([]);
       return;
     }
+    const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
+    const plan = withPlan ? withPlan.plan : [];
+    const sig = conversationRenderSignature(view, plan);
+    const liveDomPresent = Boolean(
+      streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected || followedRun.followedDom && followedRun.followedDom.aiEl && followedRun.followedDom.aiEl.isConnected
+    );
+    const domIntact = countConversationTurnNodes(panelBody) === view.length + (liveDomPresent ? 1 : 0);
+    if (!force && sig === conversationRenderSig && domIntact) {
+      noteConversationRender(opts.reason, false);
+      ensureLiveBlockAttached();
+      return;
+    }
+    noteConversationRender(opts.reason, true);
+    conversationRenderSig = sig;
+    followedRun.followedLiveReady = false;
+    followedRun.followedDom = null;
     panelBody.className = "p-body";
     panelBody.innerHTML = view.map((m, index) => {
       if (m.role === "user") {
@@ -8969,11 +9038,8 @@
       }
       return assistantMessageHtml(m, index, view.length, elapsedThroughMessage(view, index));
     }).join("");
-    const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
-    renderPlan(withPlan ? withPlan.plan : []);
-    if (runSession.isRunning && (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) && (streamState.parts.length > 0 || streamState.narration || streamView.thinkSeg && streamView.thinkSeg.text)) {
-      mountLiveStreamingBlock();
-    }
+    renderPlan(plan);
+    ensureLiveBlockAttached();
     const aiEls = panelBody.querySelectorAll(".msg.ai");
     let aiIdx = 0;
     for (const m of view) {
@@ -8983,6 +9049,9 @@
     }
   }
   var panelHealthTimer = null;
+  var LIVE_BLOCK_REPAIR_COOLDOWN_MS = 3e3;
+  var lastLiveBlockRepairAt = 0;
+  var liveBlockRepairCount = 0;
   function ensurePanelHealthWatch() {
     if (panelHealthTimer) return;
     panelHealthTimer = setInterval(() => {
@@ -8992,10 +9061,12 @@
         const pending = streamView.pendingAiMsg;
         const hasSomethingToShow = streamState.parts.length > 0 || Boolean(streamState.narration) || Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
         const flowAlive = Boolean(flow && flow.isConnected);
-        const flowVisible = flowAlive && (String(flow.textContent || "").trim().length > 0 || Boolean(flow.querySelector(".typing, .think, .agent-step")));
+        const flowVisible = flowAlive && (String(flow.textContent || "").trim().length > 0 || Boolean(flow.querySelector(".typing, .think-block, .agent-step")));
         const pendingAlive = Boolean(pending && pending.isConnected);
         if (runSession.isRunning && hasSomethingToShow && (!flowAlive || !flowVisible || !pendingAlive)) {
-          console.warn("[RecallFlow] \u6D41\u5F0F\u8F93\u51FA\u5757\u4E22\u5931\uFF0C\u91CD\u5EFA AI \u6D88\u606F", {
+          const now = Date.now();
+          const cooling = now - lastLiveBlockRepairAt < LIVE_BLOCK_REPAIR_COOLDOWN_MS;
+          console.warn("[RecallFlow] \u6D41\u5F0F\u8F93\u51FA\u5757\u4E22\u5931" + (cooling ? "\uFF08\u51B7\u5374\u4E2D\uFF0C\u5148\u89C2\u5BDF\uFF09" : "\uFF0C\u91CD\u5EFA AI \u6D88\u606F"), {
             conversation: panelSessionState.conversation.length,
             running: runSession.isRunning,
             followed: Boolean(followedRun.followedRunState),
@@ -9004,8 +9075,12 @@
             flowAlive,
             flowVisible,
             pendingAlive,
+            repairs: liveBlockRepairCount,
             bodyChars: String(panelBody.textContent || "").trim().length
           });
+          if (cooling) return;
+          lastLiveBlockRepairAt = now;
+          liveBlockRepairCount += 1;
           mountLiveStreamingBlock();
           return;
         }
@@ -9017,9 +9092,12 @@
           parts: streamState.parts.length,
           sessionId: panelSessionState.panelSessionId
         });
-        if (runSession.isRunning) restoreStreamingUI();
-        else if (panelSessionState.conversation.length) renderConversation();
-        if (String(panelBody.textContent || "").trim().length === 0) renderConversation();
+        if (runSession.isRunning) {
+          restoreStreamingUI();
+          if (String(panelBody.textContent || "").trim().length === 0) renderConversation({ reason: "health-body-empty" });
+        } else if (panelSessionState.conversation.length) {
+          renderConversation({ reason: "health-body-empty" });
+        }
       } catch (e) {
       }
     }, 1500);
@@ -9100,7 +9178,7 @@
     if (!panelBody || !followedRun.followedRunState) return;
     if (!followedRun.followedLiveReady) {
       followedRun.followedMessages = [];
-      renderConversation();
+      renderConversation({ reason: "follow-live" });
       followedRun.followedLiveReady = true;
       followedRun.followedDom = null;
     }
@@ -9257,7 +9335,7 @@
     }
     updateRunControlState();
     if (opts.render) {
-      renderConversation();
+      renderConversation({ reason: "follow-reset" });
       fitPanelHeight();
     }
   }
@@ -9354,15 +9432,29 @@
       scheduleFollowedRunRefresh();
     }
   }
-  function renderPlan(plan) {
-    streamView.lastPlan = Array.isArray(plan) ? plan : [];
-    if (!streamView.planBar) return;
-    if (!streamView.lastPlan.length) {
-      streamView.planBar.style.display = "none";
-      streamView.planBar.innerHTML = "";
-      streamView.planExpanded = null;
+  function planSignature(list) {
+    return (Array.isArray(list) ? list : []).map((p) => String(p && p.status || "") + "|" + String(p && p.text || "")).join("\n");
+  }
+  function renderPlan(plan, options) {
+    const force = Boolean(options && options.force);
+    const next = Array.isArray(plan) ? plan : [];
+    const sig = planSignature(next);
+    streamView.lastPlan = next;
+    if (!streamView.planBar) {
+      streamView.lastPlanSig = sig;
       return;
     }
+    if (!next.length) {
+      const had = streamView.lastPlanSig !== "" || streamView.planBar.style.display !== "none";
+      streamView.lastPlanSig = "";
+      streamView.planExpanded = null;
+      if (!had && !force) return;
+      streamView.planBar.style.display = "none";
+      streamView.planBar.innerHTML = "";
+      return;
+    }
+    if (!force && sig === streamView.lastPlanSig && streamView.planBar.style.display !== "none") return;
+    streamView.lastPlanSig = sig;
     const total = streamView.lastPlan.length;
     const doneCount = streamView.lastPlan.filter((p) => p && p.status === "done").length;
     const allDone = total > 0 && doneCount === total;
@@ -9566,7 +9658,7 @@
       else rebuildFollowedMessages();
     }
     if (panelBody && !runSession.isRunning) {
-      renderConversation();
+      renderConversation({ reason: "session-adopt" });
       renderHandoffChip();
       fitPanelHeight();
       pinToBottom();
@@ -9859,7 +9951,7 @@
     renderSessionMenu();
     closeSessionMenu();
     if (panelBody) {
-      renderConversation();
+      renderConversation({ reason: "session-new" });
       fitPanelHeight();
       pinToBottom();
     }
@@ -10290,7 +10382,7 @@
           const undone = panelSessionState.conversation[index];
           panelSessionState.conversation = panelSessionState.conversation.slice(0, index);
           saveConversation({ allowShrink: true });
-          renderConversation();
+          renderConversation({ reason: "user-rewind", force: true });
           fitPanelHeight();
           pinToBottom();
           if (undone && typeof undone.content === "string") {
@@ -10344,7 +10436,7 @@
         if (!instruction) return;
         panelSessionState.conversation = panelSessionState.conversation.slice(0, lastUser);
         saveConversation({ allowShrink: true });
-        renderConversation();
+        renderConversation({ reason: "user-regenerate", force: true });
         run(instruction);
         fitPanelHeight();
         return;
@@ -10459,9 +10551,9 @@
     streamView.planBar.addEventListener("click", (e) => {
       if (!e.target || !e.target.closest || !e.target.closest(".agent-plan-title")) return;
       streamView.planExpanded = streamView.planBar.classList.contains("collapsed");
-      renderPlan(streamView.lastPlan);
+      renderPlan(streamView.lastPlan, { force: true });
     });
-    renderConversation();
+    renderConversation({ reason: "open-panel" });
     restoreStreamingUI();
     renderDecisionButtonsIfPresent();
     const cmdArea = document.createElement("div");
@@ -11047,7 +11139,7 @@
         if (pruned.changed) {
           panelSessionState.conversation = pruned.messages;
           saveConversation();
-          if (panelBody) renderConversation();
+          if (panelBody) renderConversation({ reason: "resume-prune" });
         }
       }
       if (!skipUserTurn) {
@@ -11350,15 +11442,25 @@
           removeTypingEl();
           streamState.appendChunk(resp.text, resp.lane);
           finishReasoning();
-          if (!streamView.pendingContentEl) {
-            streamView.pendingContentEl = ensureTextEl(streamState.lane);
-            if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = "";
+          if (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) {
+            const flowRef = streamView.flowEl;
+            if (flowRef && flowRef.isConnected) {
+              streamView.pendingContentEl = ensureTextEl(streamState.lane);
+              if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = "";
+            } else {
+              ensureLiveBlockAttached();
+            }
           }
           streamRender.schedule("answer", () => {
             const paintPendingAnswer = () => {
               const startedAt = Date.now();
-              if (streamView.pendingContentEl) showStreamingAnswer(streamView.pendingContentEl, streamState.narration, streamView.currentCitations);
-              streamView.pendingAiMsg._raw = streamState.content;
+              const host2 = streamView.pendingContentEl;
+              if (!host2 || !host2.isConnected) {
+                ensureLiveBlockAttached();
+                return;
+              }
+              showStreamingAnswer(host2, streamState.narration, streamView.currentCitations);
+              if (streamView.pendingAiMsg) streamView.pendingAiMsg._raw = streamState.content;
               noteStreamPaint(startedAt);
             };
             if (throttleStreamPaint(paintPendingAnswer)) return;
@@ -11435,7 +11537,7 @@
           saveConversation();
           if (!streamView.pendingAiMsg || !streamView.pendingAiMsg.isConnected) {
             try {
-              renderConversation();
+              renderConversation({ reason: "run-end", force: true });
             } catch (e) {
             }
           } else {
@@ -11654,7 +11756,7 @@
     if (!runSession.isRunning) closePort();
     lastResponse = "";
     syncPanelSelectionPreview();
-    renderConversation();
+    renderConversation({ reason: "selection-refresh" });
     restoreStreamingUI();
   }
   function adoptFinishedRunSnapshot(snapshot) {
@@ -11679,7 +11781,7 @@
     panelSessionState.conversation.push(msg);
     saveConversation();
     if (panelBody && !runSession.isRunning) {
-      renderConversation();
+      renderConversation({ reason: "adopt-finished", force: true });
       fitPanelHeight();
       pinToBottom();
     }

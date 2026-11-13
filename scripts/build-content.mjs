@@ -101,7 +101,11 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // Streaming-flow repair (watchdog checks the live AI block, not body text;
 // older snapshots no longer wipe newer parts) measured 533563 bytes.
 // Raise explicitly to 523KB; in-repo only, no new dependency.
-export const SIZE_BUDGET_BYTES = 523 * 1024;
+// Panel anti-flicker pass (content signature short-circuit in renderConversation,
+// idempotent live-block mount shared by mount/restore, plan-bar repaint signature,
+// repair cooldown, and refusing to paint into detached content nodes)
+// measured 538935 bytes. Raise explicitly to 527KB; in-repo only, no new dependency.
+export const SIZE_BUDGET_BYTES = 527 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

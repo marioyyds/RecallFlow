@@ -88,7 +88,8 @@ test('计划条元素必须在构造期的 renderConversation() 之前创建（�
   const restore = indexOfLine('restoreStreamingUI();', open);
   let setupRender = -1;
   for (let i = restore; i > open; i--) {
-    if (lines[i].includes('renderConversation();')) {
+    // 允许带参数：构造期那次现在会传 { reason: 'open-panel' }（只用于诊断日志）。
+    if (/renderConversation\(/.test(lines[i])) {
       setupRender = i;
       break;
     }

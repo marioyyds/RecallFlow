@@ -490,9 +490,13 @@ function resetDetachedHostState() {
   panelBody = null;
   panelCmdInput = null;
   resetPanelFitCache();
+  // 新面板会是空 body：指纹必须作废，否则 renderConversation 会以为"内容没变"
+  // 而跳过重建，留下一块空白。（内容指纹只描述"上一次画的是什么"。）
+  conversationRenderSig = '';
   panelTextEl = null;
   panelTitleEl = null;
   streamView.planBar = null;
+  streamView.lastPlanSig = '';
   stopBtn = null;
   sendBtn = null;
   bubble = null;
@@ -623,7 +627,7 @@ function clearSelectedText(options?: any) {
     if (selection) selection.removeAllRanges();
   } catch (e: any) {}
   if (opts.render !== false && panelBody && !runSession.isRunning && !panelSessionState.conversation.length && !followedRun.followedMessages.length) {
-    renderConversation();
+    renderConversation({ reason: 'clear-selection' });
   }
   if (panel && opts.render !== false) fitPanelHeight();
 }
@@ -659,11 +663,14 @@ function removePanel(options?: any) {
     panelBody = null;
     panelCmdInput = null;
     resetPanelFitCache();
+    // 内容指纹只描述"上一次画的是什么"：面板 DOM 已经没了，必须作废。
+    conversationRenderSig = '';
     panelTextEl = null;
     panelTitleEl = null;
     // 计划条随面板一起被销毁：置空避免流式过程中（面板已隐藏但助手仍在跑）
     // renderPlan 往一个脱离文档的节点里写。重开面板时由 renderConversation 回填。
     streamView.planBar = null;
+    streamView.lastPlanSig = '';
     if (fab) fab.classList.remove('hidden');
     // 面板关了 ⇒ 回到收起态（鼠标还悬在上面时保持展开，见 resolveFabPeek）。
     fabPeek.setPanelOpen(false);
@@ -991,7 +998,9 @@ const screenshotView = new PanelScreenshotView({
   canRepaint: () => !runSession.isRunning && Boolean(panelBody),
   onRepaint: () => {
     try {
-      renderConversation();
+      // 截图刚落地，正文里多了一个 img 节点 —— 这种变化**不在**内容指纹里（它只数文本），
+      // 所以要显式 force，否则会被"内容没变就不重建"的短路吃掉，截图永远不显示。
+      renderConversation({ reason: 'screenshot-repaint', force: true });
       fitPanelHeight();
       pinToBottom();
     } catch {}
@@ -1341,8 +1350,15 @@ function renderCommittedParts(flow: any) {
  */
 function mountLiveStreamingBlock() {
   if (!panelBody) return;
-  const aiMsg = document.createElement('div');
-  aiMsg.className = 'msg ai';
+  // ⚠ **幂等**：已经有一个连着面板的流式块时，只在它内部重画，绝不 append 第二个。
+  //   以前每次都新建一条 `.msg.ai`：自检与跟随页刷新各来一次，用户就会看到
+  //   "回答闪一下/重复一遍"，而旧的残块永远留在正文里。
+  const existing: any = streamView.pendingAiMsg;
+  const reuse = Boolean(existing && existing.isConnected && existing.parentNode === panelBody);
+  const aiMsg = reuse ? existing : document.createElement('div');
+  if (!reuse) aiMsg.className = 'msg ai';
+  // 复用节点时把它清空重建（流式块的结构只有 flow + 正文两段，重建代价小于整段正文）。
+  if (reuse) aiMsg.innerHTML = '';
   const flow = document.createElement('div');
   flow.className = 'agent-flow';
   streamView.flowEl = flow;
@@ -1359,51 +1375,37 @@ function mountLiveStreamingBlock() {
   contentEl.innerHTML = streamState.narration
     ? renderAnswer(streamState.narration, streamView.currentCitations, false)
     : '<span class="typing"><span></span><span></span><span></span></span>';
+  // 进行中的那一段思考要跟着接回来（它不在 parts 里，是单独的 living 节点），
+  // 并且必须排在正文**之前** —— 与实时挂载时的顺序一致。
+  if (streamView.thinkSeg && streamView.thinkSeg.text && !streamView.thinkSeg.done) {
+    streamView.thinkSeg.block = null;
+    streamView.thinkSeg.body = null;
+    mountThinkSegment(streamView.thinkSeg, streamView.thinkExpandedManual === true);
+  }
   flow.appendChild(contentEl);
   aiMsg.appendChild(flow);
-  panelBody.appendChild(aiMsg);
+  if (!reuse) panelBody.appendChild(aiMsg);
   streamView.pendingAiMsg = aiMsg;
   streamView.pendingContentEl = contentEl;
   streamView.typingEl = streamState.narration ? null : contentEl;
+  streamView.pendingAiMsg._raw = streamState.content;
   if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
   fitPanelHeight();
   pinToBottom();
 }
 
+/**
+ * 让"正在输出的那条消息"重新出现在面板里（面板刚重开 / 正文被重建过）。
+ *
+ * 本体就是 `mountLiveStreamingBlock()` —— 它现在是**幂等**的：已有块就在块内重画，
+ * 没有才新建。两处各写一份"建块"逻辑曾经导致重开面板时出现第二条 AI 消息（闪一下）。
+ * 这里额外恢复的只有进度条（保留原计时，不重置已用时）。
+ */
 function restoreStreamingUI() {
   if (!panelBody || !runSession.isRunning) return;
   if (streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return; // 已恢复过
-  const aiMsg = document.createElement('div');
-  aiMsg.className = 'msg ai';
-  const flow = document.createElement('div');
-  flow.className = 'agent-flow';
-  aiMsg.appendChild(flow);
-  // 已固化的叙述段与工具步骤先渲染回 flow（顺序错误曾导致重开面板时思考块全部丢失）。
-  renderCommittedParts(flow);
-  const contentEl = document.createElement('div');
-  contentEl.className = 'agent-content lane-' + streamState.lane;
-  if (streamState.narration) {
-    contentEl.innerHTML = renderAnswer(streamState.narration, streamView.currentCitations, false);
-  } else {
-    contentEl.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
-  }
-  flow.appendChild(contentEl);
-  if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
-  panelBody.appendChild(aiMsg);
-  streamView.pendingAiMsg = aiMsg;
-  streamView.pendingContentEl = contentEl;
-  // 流式中关闭过面板再打开：**进行中**的那段思考也要恢复（它的位置在所有已固化步骤之后、
-  // 正文之前）。已定稿的段已由上面的 pendingParts 循环按原位置还原 ——
-  // 它们的展开态回到默认（折叠）；而**进行中这一段**要把用户刚才的手动选择带回来，
-  // 否则"重开面板"就等于替他改了一次选择。
-  if (streamView.thinkSeg && streamView.thinkSeg.text) {
-    streamView.thinkSeg.block = null;
-    streamView.thinkSeg.body = null;
-    mountThinkSegment(streamView.thinkSeg, streamView.thinkExpandedManual === true);
-  }
-  streamView.typingEl = streamState.narration ? null : contentEl;
-  streamView.pendingAiMsg._raw = streamState.content;
-  // 重开面板时把进度条也恢复上（保留原计时，不重置已用时）。
+  mountLiveStreamingBlock();
+  // 重开面板时把进度条也恢复上。
   if (progressController.el) {
     if (!progressController.startedAt) progressController.startedAt = Date.now();
     progressController.el.classList.add('on');
@@ -1414,8 +1416,6 @@ function restoreStreamingUI() {
   // 本函数跑在 openPanel 里**早于**那两个按钮的创建（见 openPanel 中创建它们的注释），
   // 在这儿碰到的只会是上一个面板遗留的、已脱离文档的按钮。它们的初值由创建处以
   // `streaming` 为准（这样流式中重开也能一次就对）。
-  fitPanelHeight();
-  pinToBottom();
 }
 
 // 面板内短暂提示（如引用定位失败）。
@@ -1848,17 +1848,145 @@ function assistantMessageHtml(m: any, index: any, viewLength: any, sessionElapse
   );
 }
 
-function renderConversation() {
+/**
+ * 整段对话的**内容指纹**。
+ *
+ * 只用来回答一个问题：「这次 renderConversation 会把 DOM 变成和现在不一样的东西吗？」
+ * 答案是否的话就什么都不做 —— 因为这些调用大多来自事件回调（重连快照、会话同步、
+ * 跟随页刷新、自检兜底），而每重建一次正文，用户就看见一次白闪；流式期间负责
+ * 输出正文的那个节点还会被一起换掉，这就是「面板一闪一闪、回答白屏」的来源。
+ *
+ * 取字段的原则：**凡是会影响渲染结果的事实都得进指纹**（角色、正文、分段、引用、
+ * 计划、失败/中断/流式标记）。取"长度 + 首尾片段"而不是全文，是为了让这个函数
+ * 在长回答上也不至于自己变成瓶颈。
+ */
+function conversationRenderSignature(view: any[], plan: any[]) {
+  const head = String(planSignature(plan));
+  return (
+    view
+      .map((m: any) => {
+        const content = String((m && m.content) || '');
+        const parts = Array.isArray(m && m.parts) ? m.parts : [];
+        const cites = Array.isArray(m && m.citations) ? m.citations : [];
+        return [
+          String((m && m.role) || ''),
+          content.length,
+          content.slice(0, 40),
+          content.slice(-40),
+          parts.length,
+          parts.map((p: any) => String((p && p.text) || (p && p.result) || '').length).join('.'),
+          cites.length,
+          cites.map((c: any) => String((c && c.id) || '')).join(','),
+          (m && m.live) ? 1 : 0,
+          (m && m.failed) ? 1 : 0,
+          (m && m.interrupted) ? 1 : 0,
+          (m && m.plan) ? 1 : 0,
+        ].join('~');
+      })
+      .join('|') +
+    '#' +
+    head
+  );
+}
+
+// 上一次真正画进 DOM 的指纹，以及"重建风暴"的诊断窗口。
+let conversationRenderSig = '';
+const conversationRenderLog: { at: number; reason: string; rebuilt: boolean }[] = [];
+
+/**
+ * 记录一次 renderConversation，并在「2 秒内重建 5 次」时告警一次。
+ *
+ * 这条日志是为了取证，不是为了兜底：白闪的根因永远是"有人在不该重建的时候重建"，
+ * 而调用点有十几个 —— 只有把原因和频率一起打出来，才定位得到是谁。
+ */
+function noteConversationRender(reason: any, rebuilt: boolean) {
+  const now = Date.now();
+  conversationRenderLog.push({ at: now, reason: String(reason || ''), rebuilt });
+  if (conversationRenderLog.length > 40) conversationRenderLog.shift();
+  if (!rebuilt) return;
+  const recent = conversationRenderLog.filter((e) => e.rebuilt && now - e.at < 2000);
+  if (recent.length !== 5) return;
+  console.warn(
+    '[RecallFlow] 对话区 2 秒内被重建了 5 次（会表现为白闪）',
+    recent.map((e) => e.reason || 'unknown')
+  );
+}
+
+/**
+ * 保证「正在输出的那条 AI 消息」在面板里（必要时重建它）。
+ *
+ * 调用方是"整段正文刚被重建过"的那几处：重建会把流式块一起换掉，而它不在
+ * conversation 里（收尾才落盘），不接回来就是白屏。
+ */
+function ensureLiveBlockAttached() {
+  if (!panelBody || !runSession.isRunning) return false;
+  const pending: any = streamView.pendingAiMsg;
+  const pendingAlive = Boolean(pending && pending.isConnected && pending.parentNode === panelBody);
+  if (pendingAlive && streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return false; // 已经在了
+  const hasSomethingToShow =
+    streamState.parts.length > 0 ||
+    Boolean(streamState.narration) ||
+    Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
+  if (!hasSomethingToShow) return false;
+  mountLiveStreamingBlock();
+  return true;
+}
+
+/** 正文里"一条消息"级的节点数（user-turn / msg），忽略提示条等临时插入物。 */
+function countConversationTurnNodes(body: any) {
+  if (!body) return 0;
+  let n = 0;
+  for (const el of Array.from(body.children) as any[]) {
+    if (!el || !el.classList) continue;
+    if (el.classList.contains('user-turn') || el.classList.contains('msg')) n += 1;
+  }
+  return n;
+}
+
+function renderConversation(options?: any) {
+  const opts = options || {};
+  const force = opts.force === true;
   if (!panelBody) return;
-  followedRun.followedLiveReady = false;
-  followedRun.followedDom = null;
   const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
   if (!view.length) {
+    const sig = conversationRenderSignature([], []);
+    if (!force && sig === conversationRenderSig && countConversationTurnNodes(panelBody) === 1) {
+      noteConversationRender(opts.reason, false);
+      return;
+    }
+    conversationRenderSig = sig;
+    noteConversationRender(opts.reason, true);
+    // 空对话不涉及流式块；但状态字段仍要复位（跟随页可能刚被撤掉）。
+    followedRun.followedLiveReady = false;
+    followedRun.followedDom = null;
     panelBody.className = 'p-body';
-    panelBody.innerHTML = '<div class="msg ai">' + (lastText ? '输入指令，AI 将基于选中文本执行。' : '输入指令，AI 将直接执行（可基于知识库）。') + '</div>';
+    panelBody.innerHTML = '<div class="msg ai">' + (lastText ? '输入指令，AI 将基于所选文本执行。' : '输入指令，AI 将直接执行（可基于知识库）。') + '</div>';
     renderPlan([]);
     return;
   }
+  // 执行计划不入消息正文，而是回填到输入框上方的计划条 —— 单一位置，避免
+  // 「消息里一份、计划条里一份」在重开面板时重复显示。取最近一条带计划的助手消息。
+  const withPlan = [...view].reverse().find((m) => m && m.role === 'assistant' && Array.isArray(m.plan) && m.plan.length);
+  const plan = withPlan ? withPlan.plan : [];
+  const sig = conversationRenderSignature(view, plan);
+  // 正文里另有**一条**"不在 conversation 里"的消息：本页正在流式输出的那条，
+  // 或跟随页自己挂的那条。它不该让 DOM 判定为"不完整"，否则流式期间每次调用都会
+  // 强制整块重建（那正是白闪）。
+  const liveDomPresent = Boolean(
+    (streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected) ||
+      (followedRun.followedDom && followedRun.followedDom.aiEl && followedRun.followedDom.aiEl.isConnected)
+  );
+  const domIntact = countConversationTurnNodes(panelBody) === view.length + (liveDomPresent ? 1 : 0);
+  if (!force && sig === conversationRenderSig && domIntact) {
+    noteConversationRender(opts.reason, false);
+    // 内容一模一样 ⇒ 不重建。但流式块仍可能在别处被摘掉过，这里只做"补挂"，不换 DOM。
+    ensureLiveBlockAttached();
+    return;
+  }
+  noteConversationRender(opts.reason, true);
+  conversationRenderSig = sig;
+  followedRun.followedLiveReady = false;
+  followedRun.followedDom = null;
   panelBody.className = 'p-body';
   panelBody.innerHTML = view
     .map((m: any, index: any) => {
@@ -1868,19 +1996,10 @@ function renderConversation() {
       return assistantMessageHtml(m, index, view.length, elapsedThroughMessage(view, index));
     })
     .join('');
-  // 执行计划不入消息正文，而是回填到输入框上方的计划条 —— 单一位置，避免
-  // 「消息里一份、计划条里一份」在重开面板时重复显示。取最近一条带计划的助手消息。
-  const withPlan = [...view].reverse().find((m) => m && m.role === 'assistant' && Array.isArray(m.plan) && m.plan.length);
-  renderPlan(withPlan ? withPlan.plan : []);
+  renderPlan(plan);
   // 重绘正文会把正在输出的 AI 消息一起换掉（它不在 conversation 里，直到收尾才落盘）。
   // 运行中且已有流式内容时，把实时块接回末尾；否则用户只看到用户消息 + 白屏。
-  if (
-    runSession.isRunning &&
-    (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) &&
-    (streamState.parts.length > 0 || streamState.narration || (streamView.thinkSeg && streamView.thinkSeg.text))
-  ) {
-    mountLiveStreamingBlock();
-  }
+  ensureLiveBlockAttached();
   // 关联原始文本，供操作栏复制使用
   const aiEls = panelBody.querySelectorAll('.msg.ai');
   let aiIdx = 0;
@@ -1897,7 +2016,16 @@ let panelHealthTimer: any = null;
  * 面板正文自检：部分渲染路径会先 innerHTML='' 再重建（重连快照、跟随页切换），
  * 一旦重建中途抛错，正文就停在“空白”上。这里每 1.5 秒检查一次可见文本，
  * 发现空白就用当前会话/流式状态重绘，并留下诊断信息（不掩盖根因）。
+ *
+ * ⚠ 重建有**冷却**：自检本身就是"一闪一闪"的一个来源 —— 一旦判断条件持续为真
+ * （例如正文只剩空白但流式块每帧都被别处换掉），它就会每 1.5 秒重建一次，
+ * 用户看到的是面板规律地闪、回答反复变白。冷却保证修复只发生一次，
+ * 之后要么好、要么等下一次真正丢失时才动手。
  */
+const LIVE_BLOCK_REPAIR_COOLDOWN_MS = 3000;
+let lastLiveBlockRepairAt = 0;
+let liveBlockRepairCount = 0;
+
 function ensurePanelHealthWatch() {
   if (panelHealthTimer) return;
   panelHealthTimer = setInterval(() => {
@@ -1913,10 +2041,12 @@ function ensurePanelHealthWatch() {
       const flowVisible =
         flowAlive &&
         (String(flow.textContent || '').trim().length > 0 ||
-          Boolean(flow.querySelector('.typing, .think, .agent-step')));
+          Boolean(flow.querySelector('.typing, .think-block, .agent-step')));
       const pendingAlive = Boolean(pending && pending.isConnected);
       if (runSession.isRunning && hasSomethingToShow && (!flowAlive || !flowVisible || !pendingAlive)) {
-        console.warn('[RecallFlow] 流式输出块丢失，重建 AI 消息', {
+        const now = Date.now();
+        const cooling = now - lastLiveBlockRepairAt < LIVE_BLOCK_REPAIR_COOLDOWN_MS;
+        console.warn('[RecallFlow] 流式输出块丢失' + (cooling ? '（冷却中，先观察）' : '，重建 AI 消息'), {
           conversation: panelSessionState.conversation.length,
           running: runSession.isRunning,
           followed: Boolean(followedRun.followedRunState),
@@ -1925,8 +2055,12 @@ function ensurePanelHealthWatch() {
           flowAlive,
           flowVisible,
           pendingAlive,
+          repairs: liveBlockRepairCount,
           bodyChars: String(panelBody.textContent || '').trim().length,
         });
+        if (cooling) return;
+        lastLiveBlockRepairAt = now;
+        liveBlockRepairCount += 1;
         mountLiveStreamingBlock();
         return;
       }
@@ -1939,9 +2073,13 @@ function ensurePanelHealthWatch() {
         parts: streamState.parts.length,
         sessionId: panelSessionState.panelSessionId,
       });
-      if (runSession.isRunning) restoreStreamingUI();
-      else if (panelSessionState.conversation.length) renderConversation();
-      if (String(panelBody.textContent || '').trim().length === 0) renderConversation();
+      if (runSession.isRunning) {
+        restoreStreamingUI();
+        // 流式中没恢复出来 ⇒ 用流式状态重建（renderConversation 会重建正文并补挂实时块）。
+        if (String(panelBody.textContent || '').trim().length === 0) renderConversation({ reason: 'health-body-empty' });
+      } else if (panelSessionState.conversation.length) {
+        renderConversation({ reason: 'health-body-empty' });
+      }
     } catch (e) {}
   }, 1500);
 }
@@ -2033,7 +2171,9 @@ function renderFollowedLive() {
   if (!panelBody || !followedRun.followedRunState) return;
   if (!followedRun.followedLiveReady) {
     followedRun.followedMessages = [];
-    renderConversation();
+    // 跟随页每次（重新）订阅都会走到这里。只有第一帧需要把历史铺开，之后
+    // 都靠下面的增量渲染 —— 短路由 renderConversation 的内容指纹负责。
+    renderConversation({ reason: 'follow-live' });
     followedRun.followedLiveReady = true;
     followedRun.followedDom = null;
   }
@@ -2206,7 +2346,7 @@ function resetFollowedRun(options?: any) {
   }
   updateRunControlState();
   if (opts.render) {
-    renderConversation();
+    renderConversation({ reason: 'follow-reset' });
     fitPanelHeight();
   }
 }
@@ -2310,15 +2450,42 @@ function handleRunDelta(msg: any) {
   }
 }
 
-function renderPlan(plan: any) {
-  streamView.lastPlan = Array.isArray(plan) ? plan : [];
-  if (!streamView.planBar) return;
-  if (!streamView.lastPlan.length) {
-    streamView.planBar.style.display = 'none';
-    streamView.planBar.innerHTML = '';
-    streamView.planExpanded = null;
+/** 计划条的内容指纹：只有它变了才值得重建 DOM（见 renderPlan 的短路）。 */
+function planSignature(list: any[]) {
+  return (Array.isArray(list) ? list : [])
+    .map((p: any) => String((p && p.status) || '') + '|' + String((p && p.text) || ''))
+    .join('\n');
+}
+
+/**
+ * 渲染执行计划条。
+ *
+ * ⚠ **内容没变就不碰 DOM**：本函数在跟随页的那条路径上**每帧**都会被调用
+ * （renderFollowedLive → renderPlan），而它末尾跟着 `fitPanelHeight()` ——
+ * 一次强制同步布局。逐帧重建同一个 DOM 不会改变外观，却会把计划条连同正文
+ * 高度反复重算：用户看到的就是"面板在闪"。计划变了、或用户手动开合（force）
+ * 才重画。
+ */
+function renderPlan(plan: any, options?: any) {
+  const force = Boolean(options && options.force);
+  const next = Array.isArray(plan) ? plan : [];
+  const sig = planSignature(next);
+  streamView.lastPlan = next;
+  if (!streamView.planBar) {
+    streamView.lastPlanSig = sig;
     return;
   }
+  if (!next.length) {
+    const had = streamView.lastPlanSig !== '' || streamView.planBar.style.display !== 'none';
+    streamView.lastPlanSig = '';
+    streamView.planExpanded = null;
+    if (!had && !force) return;
+    streamView.planBar.style.display = 'none';
+    streamView.planBar.innerHTML = '';
+    return;
+  }
+  if (!force && sig === streamView.lastPlanSig && streamView.planBar.style.display !== 'none') return;
+  streamView.lastPlanSig = sig;
   const total = streamView.lastPlan.length;
   const doneCount = streamView.lastPlan.filter((p: any) => p && p.status === 'done').length;
   const allDone = total > 0 && doneCount === total;
@@ -2589,7 +2756,7 @@ function adoptPanelSession(session: any, options: any) {
     else rebuildFollowedMessages();
   }
   if (panelBody && !runSession.isRunning) {
-    renderConversation();
+    renderConversation({ reason: 'session-adopt' });
     renderHandoffChip();
     fitPanelHeight();
     pinToBottom();
@@ -2892,7 +3059,7 @@ async function newPanelSession() {
   renderSessionMenu();
   closeSessionMenu();
   if (panelBody) {
-    renderConversation();
+    renderConversation({ reason: 'session-new' });
     fitPanelHeight();
     pinToBottom();
   }
@@ -3429,7 +3596,7 @@ function createPanelWithLayout(
           const undone = panelSessionState.conversation[index];
           panelSessionState.conversation = panelSessionState.conversation.slice(0, index);
           saveConversation({ allowShrink: true });
-          renderConversation();
+          renderConversation({ reason: 'user-rewind', force: true });
           fitPanelHeight();
           pinToBottom();
           // 撤销后将用户指令回填到输入框，方便修改后重发。
@@ -3486,7 +3653,7 @@ function createPanelWithLayout(
       if (!instruction) return;
       panelSessionState.conversation = panelSessionState.conversation.slice(0, lastUser);
       saveConversation({ allowShrink: true });
-      renderConversation();
+      renderConversation({ reason: 'user-regenerate', force: true });
       run(instruction);
       fitPanelHeight();
       return;
@@ -3607,11 +3774,12 @@ function createPanelWithLayout(
   streamView.planBar.addEventListener('click', (e: any) => {
     if (!e.target || !e.target.closest || !e.target.closest('.agent-plan-title')) return;
     // 当前是折叠态 → 用户要展开；当前是展开态 → 用户要折叠。
+    // force：内容指纹没变（用户开合不改变计划本身），必须绕过 renderPlan 的短路。
     streamView.planExpanded = streamView.planBar.classList.contains('collapsed');
-    renderPlan(streamView.lastPlan);
+    renderPlan(streamView.lastPlan, { force: true });
   });
 
-  renderConversation();
+  renderConversation({ reason: 'open-panel' });
   // 流式中关闭过面板再打开：恢复正在生成的回复 UI（助手在后台继续输出）。
   restoreStreamingUI();
   // ⚠ 这里**先不要** fitPanelHeight / 置底：此刻 `panelBody` 还没进文档
@@ -4338,7 +4506,7 @@ function createPanelWithLayout(
       if (pruned.changed) {
         panelSessionState.conversation = pruned.messages;
         saveConversation();
-        if (panelBody) renderConversation();
+        if (panelBody) renderConversation({ reason: 'resume-prune' });
       }
     }
     if (!skipUserTurn) {
@@ -4689,19 +4857,33 @@ function createPanelWithLayout(
         // 正文开始 → 思考记录定稿（它**本来就是折叠的**；用户手动展开过则保持展开，
         // 「定稿」不改变用户的选择）。
         finishReasoning();
-        if (!streamView.pendingContentEl) {
-          streamView.pendingContentEl = ensureTextEl(streamState.lane);
-          if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = '';
+        if (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) {
+          // ⚠ 只判 truthy 是不够的：正文块可能是**已脱离文档**的旧节点（面板被整块重建过）。
+          //   往那种节点里画，屏幕上什么都不会变 —— 用户看到的就是"回答白屏，但日志里
+          //   明明一直在输出"。这里先确认它还在文档里；不在就换成新块（或把整块接回来）。
+          const flowRef: any = streamView.flowEl;
+          if (flowRef && flowRef.isConnected) {
+            streamView.pendingContentEl = ensureTextEl(streamState.lane);
+            if (streamView.pendingContentEl) streamView.pendingContentEl.innerHTML = '';
+          } else {
+            ensureLiveBlockAttached();
+          }
         }
         // 只累积，不立刻重绘：本条 chunk 与同帧内的其它 chunk 会被合并成一次渲染。
         // 累积文本在 schedule 的回调里读取，因此拿到的总是最新的一份。
         streamRender.schedule('answer', () => {
           const paintPendingAnswer = () => {
             const startedAt = Date.now();
+            const host: any = streamView.pendingContentEl;
+            if (!host || !host.isConnected) {
+              // 排队期间正文块又被换掉了：宁可这次重绘让位，也不能画进脱离的节点。
+              ensureLiveBlockAttached();
+              return;
+            }
             // 流式过程中也统一重编号引用，保证正文始终从 [1] 连续
             //（生成结束后会再次校正，幂等）。
-            if (streamView.pendingContentEl) showStreamingAnswer(streamView.pendingContentEl, streamState.narration, streamView.currentCitations);
-            streamView.pendingAiMsg._raw = streamState.content;
+            showStreamingAnswer(host, streamState.narration, streamView.currentCitations);
+            if (streamView.pendingAiMsg) streamView.pendingAiMsg._raw = streamState.content;
             noteStreamPaint(startedAt);
           };
           // 上一次重绘很贵时让位一帧（说明见 throttleStreamPaint）—— 画得越贵，间隔越长，
@@ -4810,7 +4992,9 @@ function createPanelWithLayout(
         // 这时最终输出只存在于 conversation 里，必须**从对话重建一次** —— 否则回答写进已脱离的
         // 节点，用户看到的就是"跳转后模型输出没了、回退又出现"（实测反馈）。
         if (!streamView.pendingAiMsg || !streamView.pendingAiMsg.isConnected) {
-          try { renderConversation(); } catch (e: any) {}
+          // force：这一轮的正文刚刚才 push 进 conversation，而指纹只数"文本长度+首尾片段"，
+          // 收尾时可能碰巧被判定为没变化 —— 那样最终回答就永远画不出来了。
+          try { renderConversation({ reason: 'run-end', force: true }); } catch (e: any) {}
         } else {
           renderSuggestionButtons(streamView.pendingAiMsg, finalText, run);
         }
@@ -5080,7 +5264,9 @@ function refreshPanelForSelection() {
   if (!runSession.isRunning) closePort();
   lastResponse = '';
   syncPanelSelectionPreview();
-  renderConversation();
+  // 选文只在输入区预览里显示，不改对话内容 —— 内容指纹会判定"没变化"并跳过重建，
+  // 这正是想要的：每选一次文本就整段正文白闪一次，是用户反馈过的那种闪。
+  renderConversation({ reason: 'selection-refresh' });
   restoreStreamingUI();
 }
 
@@ -5112,7 +5298,7 @@ function adoptFinishedRunSnapshot(snapshot: any) {
   panelSessionState.conversation.push(msg);
   saveConversation();
   if (panelBody && !runSession.isRunning) {
-    renderConversation();
+    renderConversation({ reason: 'adopt-finished', force: true });
     fitPanelHeight();
     pinToBottom();
   }

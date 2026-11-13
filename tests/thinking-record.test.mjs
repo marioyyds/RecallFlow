@@ -89,7 +89,11 @@ test('chat.js：定稿的思考记录进入流式状态 parts（面板重建时�
   const restoreBody = restore.slice(0, 1800);
   assert.match(restoreBody, /p\.type === 'thinking'/, '重建循环应处理 thinking 部件');
   const streaming = chatSrc.slice(chatSrc.indexOf('function restoreStreamingUI('));
-  assert.match(streaming.slice(0, 800), /renderCommittedParts\(flow\)/, '流式重开必须复用同一个重建循环');
+  // 口径升级（防白闪那一轮）：建块只剩**一份**实现 —— restoreStreamingUI 委托给
+  // 幂等的 mountLiveStreamingBlock（两处各写一遍曾导致重开面板出现第二条 AI 消息）。
+  assert.match(streaming.slice(0, 800), /mountLiveStreamingBlock\(\)/, '流式重开必须复用同一个建块函数');
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountLiveStreamingBlock('));
+  assert.match(mount.slice(0, 2600), /renderCommittedParts\(flow\)/, '建块函数必须复用同一个重建循环');
 });
 
 test('chat.js：正文/结束/进入工具步骤时都要给思考记录定稿', () => {
@@ -231,9 +235,13 @@ test('chat.js：新一轮开始时清掉上一轮的思考记录指针', () => {
 test('chat.js：面板重开时思维链要恢复（否则记录凭空消失）', () => {
   const at = chatSrc.indexOf('function restoreStreamingUI');
   assert.ok(at >= 0);
-  const body = chatSrc.slice(at, at + 3600);
-  assert.match(body, /thinkSeg/, '恢复路径应处理"进行中的那一段"');
-  assert.match(body, /mountThinkSegment\(/, '恢复路径应重建思考记录块');
+  // 恢复路径把"怎么建块"交给同一个函数（见上一节的说明）：所以这里既要求委托，
+  // 也要求那个函数确实处理"进行中的那一段"。
+  assert.match(chatSrc.slice(at, at + 3600), /mountLiveStreamingBlock\(\)/, '恢复路径应委托给幂等的建块函数');
+  const mount = chatSrc.slice(chatSrc.indexOf('function mountLiveStreamingBlock('));
+  const mountBody = mount.slice(0, 2600);
+  assert.match(mountBody, /thinkSeg/, '恢复路径应处理"进行中的那一段"');
+  assert.match(mountBody, /mountThinkSegment\(/, '恢复路径应重建思考记录块');
 });
 
 test('chat.js：思维链**只用于展示** —— 绝不进入 conversation（不会写回请求）', () => {

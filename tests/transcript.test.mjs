@@ -254,8 +254,10 @@ test('导出保留快慢通道、JEV 决策和移交节点', () => {
     },
   ]);
 
+  // 通道标签在 1c4c7a2 里从「快思考」改名为「快执行」：工具行走的是 lane 徽标，
+  // 跟着一起改了；这里钉住的是**新名字**（旧名只允许出现在接管提示的正文里）。
   assert.ok(pos(text, '⚡ 快思考：读取当前页面') < pos(text, '`read_current_page`'));
-  assert.match(text, /`read_current_page` \{\} → ✓ 编辑器正文 · ⚡ 快思考/);
+  assert.match(text, /`read_current_page` \{\} → ✓ 编辑器正文 · ⚡ 快执行/);
   assert.match(text, /↪ 慢思考接管：low-expected-progress/);
   assert.match(text, /\*\*\[🧠 慢思考\]\*\* 慢思考重新规划。/);
 });

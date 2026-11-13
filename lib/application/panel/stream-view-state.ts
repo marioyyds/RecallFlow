@@ -12,6 +12,8 @@ export class StreamViewState {
   approvalSettingsEl: any = null;
   approvalPopoverEl: any = null;
   lastPlan: any[] = [];
+  /** 上一次真正画进计划条的指纹：没变就不再重建 DOM（见 chat.ts 的 renderPlan）。 */
+  lastPlanSig = '';
   planExpanded: any = null;
   planWasAllDone = false;
   usageEl: any = null;

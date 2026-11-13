@@ -124,10 +124,17 @@ test('思考记录的挂载函数必须在模块顶层（restoreStreamingUI 要�
     );
   }
   // restoreStreamingUI 里确实重新挂载了思考记录（否则恢复这条路径会丢记录）
+  //
+  // 1c4c7a2 之后"建块"只剩**一份**实现：restoreStreamingUI 委托给幂等的
+  // mountLiveStreamingBlock（两份实现导致重开面板时出现第二条 AI 消息）。所以这里钉的是
+  // 这条委托关系，以及 mountLiveStreamingBlock 里确实重新挂载了思考记录。
   const at = src.indexOf('function restoreStreamingUI(');
   assert.ok(at > 0, '应能找到 restoreStreamingUI');
   const body = src.slice(at, at + 3000);
-  assert.match(body, /mountThinkSegment\(/, '恢复路径应重新挂载思考记录');
+  assert.match(body, /mountLiveStreamingBlock\(/, '恢复路径应委托给幂等的实时块挂载');
+  const mountAt = src.indexOf('function mountLiveStreamingBlock(');
+  assert.ok(mountAt > 0, '应能找到 mountLiveStreamingBlock');
+  assert.match(src.slice(mountAt, mountAt + 2600), /mountThinkSegment\(/, '恢复路径应重新挂载思考记录');
 });
 
 // ---------------------------------------------------------------- 变量作用域（与函数作用域分开管）
