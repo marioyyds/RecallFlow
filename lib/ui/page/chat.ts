@@ -1331,6 +1331,45 @@ function renderCommittedParts(flow: any) {
   }
 }
 
+/**
+ * 用当前 streamState 重建“正在输出的那条 AI 消息”。
+ *
+ * 为什么不能只用 restoreStreamingUI：它看到 pendingContentEl 仍连着就提前返回，
+ * 但真正空掉的是 flowEl（例如重连快照先 innerHTML='' 再重建失败，或跟随页
+ * 的 renderConversation 把整棵 DOM 换掉）。白屏时用户消息还在，所以
+ * 旧自检（panelBody.textContent 为空）也永远不会触发。
+ */
+function mountLiveStreamingBlock() {
+  if (!panelBody) return;
+  const aiMsg = document.createElement('div');
+  aiMsg.className = 'msg ai';
+  const flow = document.createElement('div');
+  flow.className = 'agent-flow';
+  streamView.flowEl = flow;
+  try {
+    renderCommittedParts(flow);
+  } catch (error: any) {
+    const fallback = document.createElement('div');
+    fallback.className = 'agent-content';
+    fallback.textContent = '恢复输出时渲染失败：' + String((error && error.message) || error);
+    flow.appendChild(fallback);
+  }
+  const contentEl = document.createElement('div');
+  contentEl.className = 'agent-content lane-' + streamState.lane;
+  contentEl.innerHTML = streamState.narration
+    ? renderAnswer(streamState.narration, streamView.currentCitations, false)
+    : '<span class="typing"><span></span><span></span><span></span></span>';
+  flow.appendChild(contentEl);
+  aiMsg.appendChild(flow);
+  panelBody.appendChild(aiMsg);
+  streamView.pendingAiMsg = aiMsg;
+  streamView.pendingContentEl = contentEl;
+  streamView.typingEl = streamState.narration ? null : contentEl;
+  if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
+  fitPanelHeight();
+  pinToBottom();
+}
+
 function restoreStreamingUI() {
   if (!panelBody || !runSession.isRunning) return;
   if (streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return; // 已恢复过
@@ -1833,6 +1872,15 @@ function renderConversation() {
   // 「消息里一份、计划条里一份」在重开面板时重复显示。取最近一条带计划的助手消息。
   const withPlan = [...view].reverse().find((m) => m && m.role === 'assistant' && Array.isArray(m.plan) && m.plan.length);
   renderPlan(withPlan ? withPlan.plan : []);
+  // 重绘正文会把正在输出的 AI 消息一起换掉（它不在 conversation 里，直到收尾才落盘）。
+  // 运行中且已有流式内容时，把实时块接回末尾；否则用户只看到用户消息 + 白屏。
+  if (
+    runSession.isRunning &&
+    (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) &&
+    (streamState.parts.length > 0 || streamState.narration || (streamView.thinkSeg && streamView.thinkSeg.text))
+  ) {
+    mountLiveStreamingBlock();
+  }
   // 关联原始文本，供操作栏复制使用
   const aiEls = panelBody.querySelectorAll('.msg.ai');
   let aiIdx = 0;
@@ -1855,6 +1903,34 @@ function ensurePanelHealthWatch() {
   panelHealthTimer = setInterval(() => {
     try {
       if (!panel || !panel.isConnected || !panelBody) return;
+      const flow: any = streamView.flowEl;
+      const pending: any = streamView.pendingAiMsg;
+      const hasSomethingToShow =
+        streamState.parts.length > 0 ||
+        Boolean(streamState.narration) ||
+        Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
+      const flowAlive = Boolean(flow && flow.isConnected);
+      const flowVisible =
+        flowAlive &&
+        (String(flow.textContent || '').trim().length > 0 ||
+          Boolean(flow.querySelector('.typing, .think, .agent-step')));
+      const pendingAlive = Boolean(pending && pending.isConnected);
+      if (runSession.isRunning && hasSomethingToShow && (!flowAlive || !flowVisible || !pendingAlive)) {
+        console.warn('[RecallFlow] 流式输出块丢失，重建 AI 消息', {
+          conversation: panelSessionState.conversation.length,
+          running: runSession.isRunning,
+          followed: Boolean(followedRun.followedRunState),
+          parts: streamState.parts.length,
+          sessionId: panelSessionState.panelSessionId,
+          flowAlive,
+          flowVisible,
+          pendingAlive,
+          bodyChars: String(panelBody.textContent || '').trim().length,
+        });
+        mountLiveStreamingBlock();
+        return;
+      }
+      // 完全没有流式内容时，仍保留旧的“整块正文为空”兜底（例如历史渲染失败）。
       if (String(panelBody.textContent || '').trim().length > 0) return;
       console.warn('[RecallFlow] 面板正文为空，尝试重绘', {
         conversation: panelSessionState.conversation.length,
@@ -4311,8 +4387,16 @@ function createPanelWithLayout(
      */
     const applyResumeSnapshot = (snapshot: any, approvalConn?: any) => {
       if (!snapshot || typeof snapshot !== 'object') return;
-      streamState.restore(snapshot);
-      streamView.currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
+      // 快照可能比本地流式状态旧（重连时的补发有延迟）：用更“新”的一方，
+      // 否则会把已经输出的段落清空，正文停在空白。
+      const incomingParts = Array.isArray(snapshot.parts) ? snapshot.parts.length : 0;
+      const incomingContent = String(snapshot.content || '').length;
+      const localIsNewer =
+        streamState.parts.length > 0 &&
+        streamState.parts.length >= incomingParts &&
+        String(streamState.content || '').length >= incomingContent;
+      if (!localIsNewer) streamState.restore(snapshot);
+      streamView.currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : streamView.currentCitations;
       const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
       renderPlan(plan);
       streamView.lastPlan = plan;

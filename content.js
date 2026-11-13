@@ -4218,8 +4218,9 @@
     maxRepeatedActionsWithoutProgress: 3,
     maxElementCandidates: 40,
     minEdgeConfidence: 0.8,
-    // Legacy operation-head thresholds. The edge UI exposes minEdgeConfidence only;
-    // these remain for the non-TraceGraph JEV fallback.
+    // Operation fallback thresholds. They only apply when there is no edge
+    // candidate (fresh site): the CLICK branch floor and the selected-target floor
+    // are exposed in settings under "无历史边时的回退".
     minReadConfidence: 0.6,
     minActionConfidence: 0.8,
     minClickConfidence: 0.86,
@@ -8601,6 +8602,34 @@
       }
     }
   }
+  function mountLiveStreamingBlock() {
+    if (!panelBody) return;
+    const aiMsg = document.createElement("div");
+    aiMsg.className = "msg ai";
+    const flow = document.createElement("div");
+    flow.className = "agent-flow";
+    streamView.flowEl = flow;
+    try {
+      renderCommittedParts(flow);
+    } catch (error) {
+      const fallback = document.createElement("div");
+      fallback.className = "agent-content";
+      fallback.textContent = "\u6062\u590D\u8F93\u51FA\u65F6\u6E32\u67D3\u5931\u8D25\uFF1A" + String(error && error.message || error);
+      flow.appendChild(fallback);
+    }
+    const contentEl = document.createElement("div");
+    contentEl.className = "agent-content lane-" + streamState.lane;
+    contentEl.innerHTML = streamState.narration ? renderAnswer(streamState.narration, streamView.currentCitations, false) : '<span class="typing"><span></span><span></span><span></span></span>';
+    flow.appendChild(contentEl);
+    aiMsg.appendChild(flow);
+    panelBody.appendChild(aiMsg);
+    streamView.pendingAiMsg = aiMsg;
+    streamView.pendingContentEl = contentEl;
+    streamView.typingEl = streamState.narration ? null : contentEl;
+    if (streamState.narration) showStreamingAnswer(contentEl, streamState.narration, streamView.currentCitations);
+    fitPanelHeight();
+    pinToBottom();
+  }
   function restoreStreamingUI() {
     if (!panelBody || !runSession.isRunning) return;
     if (streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return;
@@ -8935,6 +8964,9 @@
     }).join("");
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     renderPlan(withPlan ? withPlan.plan : []);
+    if (runSession.isRunning && (!streamView.pendingContentEl || !streamView.pendingContentEl.isConnected) && (streamState.parts.length > 0 || streamState.narration || streamView.thinkSeg && streamView.thinkSeg.text)) {
+      mountLiveStreamingBlock();
+    }
     const aiEls = panelBody.querySelectorAll(".msg.ai");
     let aiIdx = 0;
     for (const m of view) {
@@ -8949,6 +8981,27 @@
     panelHealthTimer = setInterval(() => {
       try {
         if (!panel || !panel.isConnected || !panelBody) return;
+        const flow = streamView.flowEl;
+        const pending = streamView.pendingAiMsg;
+        const hasSomethingToShow = streamState.parts.length > 0 || Boolean(streamState.narration) || Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
+        const flowAlive = Boolean(flow && flow.isConnected);
+        const flowVisible = flowAlive && (String(flow.textContent || "").trim().length > 0 || Boolean(flow.querySelector(".typing, .think, .agent-step")));
+        const pendingAlive = Boolean(pending && pending.isConnected);
+        if (runSession.isRunning && hasSomethingToShow && (!flowAlive || !flowVisible || !pendingAlive)) {
+          console.warn("[RecallFlow] \u6D41\u5F0F\u8F93\u51FA\u5757\u4E22\u5931\uFF0C\u91CD\u5EFA AI \u6D88\u606F", {
+            conversation: panelSessionState.conversation.length,
+            running: runSession.isRunning,
+            followed: Boolean(followedRun.followedRunState),
+            parts: streamState.parts.length,
+            sessionId: panelSessionState.panelSessionId,
+            flowAlive,
+            flowVisible,
+            pendingAlive,
+            bodyChars: String(panelBody.textContent || "").trim().length
+          });
+          mountLiveStreamingBlock();
+          return;
+        }
         if (String(panelBody.textContent || "").trim().length > 0) return;
         console.warn("[RecallFlow] \u9762\u677F\u6B63\u6587\u4E3A\u7A7A\uFF0C\u5C1D\u8BD5\u91CD\u7ED8", {
           conversation: panelSessionState.conversation.length,
@@ -11020,8 +11073,11 @@
       const resumeSnapshot = runOptions.resumeSnapshot && typeof runOptions.resumeSnapshot === "object" ? runOptions.resumeSnapshot : null;
       const applyResumeSnapshot = (snapshot, approvalConn) => {
         if (!snapshot || typeof snapshot !== "object") return;
-        streamState.restore(snapshot);
-        streamView.currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : null;
+        const incomingParts = Array.isArray(snapshot.parts) ? snapshot.parts.length : 0;
+        const incomingContent = String(snapshot.content || "").length;
+        const localIsNewer = streamState.parts.length > 0 && streamState.parts.length >= incomingParts && String(streamState.content || "").length >= incomingContent;
+        if (!localIsNewer) streamState.restore(snapshot);
+        streamView.currentCitations = Array.isArray(snapshot.citations) ? snapshot.citations.slice() : streamView.currentCitations;
         const plan = Array.isArray(snapshot.plan) ? snapshot.plan.slice() : [];
         renderPlan(plan);
         streamView.lastPlan = plan;

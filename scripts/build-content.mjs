@@ -98,7 +98,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // fallback) measured 528949 bytes. Raise explicitly to 517KB; in-repo only.
 // Panel health watchdog and resume-render fallback measured 530273 bytes.
 // Raise explicitly to 519KB; in-repo only.
-export const SIZE_BUDGET_BYTES = 519 * 1024;
+// Streaming-flow repair (watchdog checks the live AI block, not body text;
+// older snapshots no longer wipe newer parts) measured 533563 bytes.
+// Raise explicitly to 523KB; in-repo only, no new dependency.
+export const SIZE_BUDGET_BYTES = 523 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；
