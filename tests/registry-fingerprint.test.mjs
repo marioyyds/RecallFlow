@@ -255,7 +255,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       “同一站点最多 2 个标签页；列表/筛选优先当前页查询参数
   //                       或 fetch_webpage”，抑制连开标签页的探索策略。
   //                       工具数量、权限、参数均不变。
-  const EXPECTED = '8d440b62229a36ad';
+  //   642921a280cd527d — **有意改动**：update_plan 的 verify / allowedOperations
+  //                       描述改为“声明 CLICK 必须给 verify，否则整条计划被拒绝；
+  //                       省略 allowedOperations = 快路不会启动”。这是契约语义的
+  //                       收紧，模型唯一的说明来源必须同步。工具数量、权限、参数不变。
+  const EXPECTED = '642921a280cd527d';
   assert.equal(
     fp,
     EXPECTED,

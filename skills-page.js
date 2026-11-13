@@ -2962,7 +2962,7 @@ var TOOL_SCHEMAS = [
     type: "function",
     function: {
       name: "update_plan",
-      description: "\u7EF4\u62A4\u6267\u884C\u8BA1\u5212\u3002\u5F53\u524D\u6B65\u9AA4\u53EF\u58F0\u660E\u5FEB\u8DEF\u52A8\u4F5C\u3001\u5B8C\u6210\u6761\u4EF6\u548C\u79DF\u7EA6\uFF1B\u6BCF\u6B21\u6574\u4F53\u66FF\u6362\u3002",
+      description: "\u7EF4\u62A4\u6267\u884C\u8BA1\u5212\u3002\u5F53\u524D\u6B65\u9AA4\u53EF\u58F0\u660E\u5FEB\u8DEF\u52A8\u4F5C\u3001\u5B8C\u6210\u6761\u4EF6\u548C\u79DF\u7EA6\uFF1B\u6BCF\u6B21\u6574\u4F53\u66FF\u6362\u3002\u5F53\u524D\u6B65\u9AA4\u58F0\u660E CLICK \u65F6\u5FC5\u987B\u540C\u65F6\u7ED9 verify\uFF0C\u7F3A\u5931\u4F1A\u88AB\u62D2\u7EDD\u4E14\u539F\u8BA1\u5212\u4E0D\u6539\u52A8\u3002",
       parameters: {
         type: "object",
         properties: {
@@ -2981,7 +2981,7 @@ var TOOL_SCHEMAS = [
                 },
                 verify: {
                   type: "object",
-                  description: "\u52A8\u4F5C\u6267\u884C\u540E\u7684\u786E\u5B9A\u6027\u6821\u9A8C\u6761\u4EF6\u3002\u5FEB\u8DEF\u53EA\u5728\u8FD9\u4E2A\u5951\u7EA6\u5B58\u5728\u65F6\u81EA\u52A8\u6267\u884C\uFF1B\u5931\u8D25\u4F1A\u7ACB\u5373\u4EA4\u56DE\u6162\u601D\u8003\u3002\u81F3\u5C11\u7ED9\u4E00\u9879\uFF1AurlChanged / fingerprintChanged / minElementDelta / textIncludes\u3002",
+                  description: "\u52A8\u4F5C\u6267\u884C\u540E\u7684\u786E\u5B9A\u6027\u6821\u9A8C\u6761\u4EF6\u3002\u58F0\u660E CLICK \u7684\u6B65\u9AA4**\u5FC5\u987B**\u7ED9\uFF08\u5426\u5219 update_plan \u88AB\u62D2\u7EDD\uFF09\uFF1B\u53EA\u8BFB/\u6EDA\u52A8/\u7B49\u5F85\u6B65\u9AA4\u53EF\u7701\u7565\u3002\u81F3\u5C11\u7ED9\u4E00\u9879\uFF1AurlChanged / fingerprintChanged / minElementDelta / textIncludes\u3002",
                   properties: {
                     urlChanged: { type: "boolean", description: "\u8981\u6C42 URL \u53D1\u751F\u53D8\u5316" },
                     fingerprintChanged: { type: "boolean", description: "\u8981\u6C42\u9875\u9762\u7ED3\u6784\u6307\u7EB9\u53D1\u751F\u53D8\u5316" },
@@ -2997,7 +2997,7 @@ var TOOL_SCHEMAS = [
                 },
                 allowedOperations: {
                   type: "array",
-                  description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5168\u52A8\u4F5C\uFF0C[]=\u65E0\u5FEB\u52A8\u4F5C",
+                  description: "\u5141\u8BB8\u7684\u5FEB\u8DEF\u64CD\u4F5C\uFF1B\u7701\u7565=\u5FEB\u8DEF\u4E0D\u4F1A\u542F\u52A8\uFF0C[]=\u672C\u6B65\u53EA\u7531\u6162\u601D\u8003\u505A\uFF1B\u542B CLICK \u65F6\u5FC5\u987B\u7ED9 verify",
                   items: {
                     type: "string",
                     enum: [
@@ -4338,6 +4338,35 @@ function normalizePlanStep(value, index) {
   if (nextAction) step.nextAction = nextAction;
   return step;
 }
+var MUTATING_FAST_OPERATIONS = /* @__PURE__ */ new Set(["CLICK"]);
+function planContractViolations(rawItems, plan) {
+  if (!Array.isArray(plan) || !plan.length) return [];
+  const raw = Array.isArray(rawItems) ? rawItems : [];
+  const inProgress = plan.map((step, index) => ({ step, index })).filter((item) => item.step.status === "in_progress");
+  const pendingIndex = plan.findIndex((step) => step.status === "pending");
+  const targets = inProgress.length ? inProgress : pendingIndex >= 0 ? [{ step: plan[pendingIndex], index: pendingIndex }] : [];
+  if (!targets.length) return [];
+  const issues = [];
+  for (const { step, index } of targets) {
+    const label = "\u7B2C " + (index + 1) + " \u6B65\u300C" + step.text + "\u300D";
+    const source = raw[index] && typeof raw[index] === "object" ? raw[index] : {};
+    const declaredVerify = Object.prototype.hasOwnProperty.call(source, "verify") && source.verify != null;
+    if (declaredVerify && !step.verify) {
+      issues.push(
+        label + '\u7684 verify \u65E0\u6CD5\u8BC6\u522B\uFF08\u5E94\u4E3A\u5BF9\u8C61\uFF0C\u5982 {"urlChanged":true} \u6216 {"fingerprintChanged":true}\uFF09\uFF0C\u5DF2\u4E22\u5F03\u3002'
+      );
+      continue;
+    }
+    const operations = Array.isArray(step.allowedOperations) ? step.allowedOperations : [];
+    const mutating = operations.some((operation) => MUTATING_FAST_OPERATIONS.has(operation));
+    if (!step.verify && mutating && !step.nextAction) {
+      issues.push(
+        label + "\u58F0\u660E\u4E86 CLICK\uFF08\u4F1A\u6539\u53D8\u9875\u9762\uFF09\uFF0C\u4F46\u6CA1\u6709 verify \u2014\u2014 \u5FEB\u8DEF\u70B9\u51FB\u540E\u65E0\u6CD5\u6838\u5BF9\u662F\u5426\u505A\u5BF9\u3002"
+      );
+    }
+  }
+  return issues;
+}
 function describePlanStep(step) {
   const parts = [step.text];
   if (step.successPredicate) parts.push("\u5B8C\u6210\u6761\u4EF6\uFF1A" + step.successPredicate);
@@ -4680,15 +4709,33 @@ function formatRunMetrics(m) {
 // lib/application/agent/run-state-tools.ts
 function updatePlan(ctx, args) {
   const raw = Array.isArray(args && args.items) ? args.items : [];
-  const plan = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20).map((it, index) => normalizePlanStep(it, index));
+  const kept = raw.filter((it) => it && typeof it.text === "string" && it.text.trim()).slice(0, 20);
+  const plan = kept.map((it, index) => normalizePlanStep(it, index));
+  const violations = planContractViolations(kept, plan);
+  if (violations.length) {
+    return {
+      ok: false,
+      result: "\u8BA1\u5212\u672A\u751F\u6548\uFF08\u539F\u8BA1\u5212\u4FDD\u6301\u4E0D\u53D8\uFF09\uFF1A\n- " + violations.join("\n- ") + '\n\n\u4FEE\u597D\u518D\u63D0\u4EA4\uFF1A\u58F0\u660E CLICK \u7684\u6B65\u9AA4\u8865\u4E00\u4E2A verify \u2014\u2014 \u6253\u5F00\u65B0\u9875\u7528 {"urlChanged":true}\uFF0C\u51FA\u73B0\u9884\u671F\u6587\u6848\u7528 {"textIncludes":"\u2026"}\uFF0C\u5217\u8868\u53D8\u957F\u7528 {"minElementDelta":1}\uFF1B\u82E5\u672C\u6B65\u4E0D\u9700\u8981\u5FEB\u8DEF\u70B9\u51FB\uFF0C\u628A allowedOperations \u6536\u7A84\u6210 ["READ_PAGE"]\uFF08\u53EA\u8BFB\u4EA4\u7ED9\u5FEB\u8DEF\uFF09\uFF0C\u6216\u5199 [] \u8868\u793A\u672C\u6B65\u5B8C\u5168\u7531\u4F60\u6765\u505A\u3002'
+    };
+  }
   ctx.plan = plan;
   ctx.planVersion = Math.max(0, Number(ctx.planVersion) || 0) + 1;
   const text = plan.map(
     (p, i) => (p.status === "done" ? "\u2713" : p.status === "in_progress" ? "\u25B6" : "\u25CB") + " " + (i + 1) + ". " + describePlanStep(p)
   ).join("\n");
   const pending = plan.find((p) => p.status === "in_progress");
-  const hint = pending && !pending.nextAction ? '\n\n\u63D0\u793A\uFF1A\u5F53\u524D\u6B65\u9AA4\u6CA1\u6709 nextAction\u3002\u5982\u679C\u4E0B\u4E00\u6B65\u662F**\u5F53\u524D\u9875\u9762\u5185\u7684\u673A\u68B0\u70B9\u51FB/\u6309\u952E**\uFF08\u4E0D\u5199\u503C\u3001\u4E0D\u8DF3\u7AD9\uFF09\uFF0C\u8BF7\u8865\u4E0A\u5B83\uFF0C\u4F8B\u5982 {"tool":"click_element","name":"\u6DFB\u52A0\u6587\u7AE0\u6807\u7B7E"}\uFF1B\u5FEB\u8DEF\u4F1A\u5728\u4F60\u8FD9\u4E00\u8F6E\u4E4B\u540E\u76F4\u63A5\u6267\u884C\uFF0C\u7701\u4E00\u6B21\u5F80\u8FD4\u3002\u586B\u503C\uFF08type_text/select_option\uFF09\u4E0E\u5BFC\u822A\uFF08open_tab\uFF09\u4E0D\u8981\u5199\u8FDB nextAction\u3002' : "";
-  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") + hint };
+  const hints = [];
+  if (pending && !pending.allowedOperations) {
+    hints.push(
+      '\u672C\u6B65\u9AA4\u6CA1\u6709 allowedOperations\uFF0C\u5FEB\u8DEF\u6574\u8F6E\u4E0D\u4F1A\u542F\u52A8\u3002\u82E5\u672C\u6B65\u6709\u9875\u5185\u673A\u68B0\u52A8\u4F5C\uFF0C\u5199\u6210 ["READ_PAGE","CLICK"] \u5E76\u914D verify\uFF1B\u53EA\u8981\u5FEB\u8DEF\u8BFB\u9875\u9762\u5219\u5199 ["READ_PAGE"]\u3002'
+    );
+  }
+  if (pending && !pending.nextAction) {
+    hints.push(
+      '\u5F53\u524D\u6B65\u9AA4\u6CA1\u6709 nextAction\u3002\u5982\u679C\u4E0B\u4E00\u6B65\u662F**\u5F53\u524D\u9875\u9762\u5185\u7684\u673A\u68B0\u70B9\u51FB/\u6309\u952E**\uFF08\u4E0D\u5199\u503C\u3001\u4E0D\u8DF3\u7AD9\uFF09\uFF0C\u8BF7\u8865\u4E0A\u5B83\uFF0C\u4F8B\u5982 {"tool":"click_element","name":"\u6DFB\u52A0\u6587\u7AE0\u6807\u7B7E"}\uFF1B\u5FEB\u8DEF\u4F1A\u5728\u4F60\u8FD9\u4E00\u8F6E\u4E4B\u540E\u76F4\u63A5\u6267\u884C\uFF0C\u7701\u4E00\u6B21\u5F80\u8FD4\u3002\u586B\u503C\uFF08type_text/select_option\uFF09\u4E0E\u5BFC\u822A\uFF08open_tab\uFF09\u4E0D\u8981\u5199\u8FDB nextAction\u3002'
+    );
+  }
+  return { result: "\u8BA1\u5212\u5DF2\u66F4\u65B0\uFF08" + plan.length + " \u6B65\uFF09\uFF1A\n" + (text || "\uFF08\u7A7A\u8BA1\u5212\uFF09") + (hints.length ? "\n\n\u63D0\u793A\uFF1A" + hints.join("\n") : "") };
 }
 function expandResult(ctx, args) {
   const id = String(args && args.id || "").trim();
@@ -5188,7 +5235,7 @@ async function typeText(deps, args) {
         deps.observedChange(before, after),
         verified ? whitespaceOnly ? "CDP \u5DF2\u8F93\u5165\uFF1B\u5185\u5BB9\u4E00\u81F4\uFF08\u7F16\u8F91\u5668\u5F52\u4E00\u5316\u4E86\u6362\u884C/\u7A7A\u767D\uFF09" : "\u5DF2\u7528 CDP \u53EF\u4FE1\u8F93\u5165\uFF0C\u5E76\u56DE\u8BFB\u786E\u8BA4" : whitespaceOnly ? "CDP \u5DF2\u8F93\u5165\uFF0C\u56DE\u8BFB\u53EA\u5DEE\u6362\u884C/\u7A7A\u767D\uFF08\u7F16\u8F91\u5668\u5F52\u4E00\u5316\u4E86\u6BB5\u843D\u7ED3\u6784\uFF09" : "CDP \u5DF2\u8F93\u5165\uFF0C\u4F46\u56DE\u8BFB\u503C\u4E0E\u9884\u671F\u4E0D\u4E00\u81F4"
       ),
-      result: verified ? "\u5DF2\u7528 CDP \u4E8B\u52A1\u5F0F\u8F93\u5165 " + expected.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u4E8B\u52A1\u5F0F\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + (whitespaceOnly ? "\u3002\u5DEE\u5F02\u53EA\u5728\u6362\u884C/\u7A7A\u767D\uFF1A\u975E\u7A7A\u767D\u5B57\u7B26\u5B8C\u5168\u4E00\u81F4\uFF0C\u662F\u7F16\u8F91\u5668\u628A\u6BB5\u843D\u7ED3\u6784\u5F52\u4E00\u5316\u4E86 \u2014\u2014 Markdown \u7684\u6807\u9898\u3001\u4EE3\u7801\u5757\u3001\u8868\u683C\u90FD\u9760\u6362\u884C\uFF0C\u6240\u4EE5\u8FD9**\u4E0D\u7B97**\u5199\u5BF9" : "\u3002") + "\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u5DE5\u5177\u5DF2\u5148\u6062\u590D\u5230\u5185\u5BB9\u811A\u672C\u5931\u8D25\u524D\u7684\u57FA\u7EBF\uFF0C\u518D\u7528\u4E00\u6B21\u6574\u4F53\u5199\u5165\u66FF\u6362\uFF1B\u4E0D\u8981\u539F\u6837\u91CD\u8BD5\u540C\u4E00\u8DEF\u5F84 \u2014\u2014 \u6362\u884C\u88AB\u5403\u6389\u65F6\u8981\u6539\u7528\u8BE5\u7AD9\u70B9\u7684\u5199\u5165\u65B9\u5F0F\uFF08\u5982\u771F\u5B9E paste / \u7F16\u8F91\u5668 API\uFF09\uFF0C\u800C\u4E0D\u662F\u7EE7\u7EED insertText\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
+      result: verified ? "\u5DF2\u7528 CDP \u4E8B\u52A1\u5F0F\u8F93\u5165 " + expected.length + " \u4E2A\u5B57\u7B26\uFF08" + strategy + "\uFF0C\u5DF2\u56DE\u8BFB\u786E\u8BA4\uFF09" + (after ? "\n" + deps.compactSnapshotSummary(after) : "") : "CDP \u4E8B\u52A1\u5F0F\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + (actualValue == null ? "\u65E0\u6CD5\u56DE\u8BFB" : summary.actualLength + " \u5B57\u7B26") + (summary.firstDifference.index >= 0 ? "\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index : "") + "\u3002\u5B9E\u9645\u503C\uFF1A" + JSON.stringify(String(actualValue == null ? "" : actualValue).slice(0, 120)) + "\u3002\u5DE5\u5177\u5DF2\u5148\u6062\u590D\u5230\u5185\u5BB9\u811A\u672C\u5931\u8D25\u524D\u7684\u57FA\u7EBF\uFF0C\u518D\u7528\u4E00\u6B21\u6574\u4F53\u5199\u5165\u66FF\u6362\uFF1B\u4E0D\u8981\u539F\u6837\u91CD\u8BD5\u540C\u4E00\u8DEF\u5F84 \u2014\u2014 \u6362\u884C\u88AB\u5403\u6389\u65F6\u8981\u6539\u7528\u8BE5\u7AD9\u70B9\u7684\u5199\u5165\u65B9\u5F0F\uFF08\u5982\u771F\u5B9E paste / \u7F16\u8F91\u5668 API\uFF09\uFF0C\u800C\u4E0D\u662F\u7EE7\u7EED insertText\u3002" + (after ? "\n" + deps.compactSnapshotSummary(after) : "")
     };
     if (result.verification) {
       result.verification.verified = verified && result.verification.verified;
@@ -6049,14 +6096,20 @@ async function loadSkill(deps, args) {
   }
   const planSteps = Array.isArray(skill.planSteps) ? skill.planSteps : [];
   if (planSteps.length) {
-    const template = planSteps.map((step, index) => ({
-      id: String(index + 1),
-      text: String(step && step.text || ""),
-      status: index === 0 ? "in_progress" : "pending",
-      ...Array.isArray(step && step.allowedOperations) && step.allowedOperations.length ? { allowedOperations: step.allowedOperations } : {}
-    }));
+    const template = planSteps.map((step, index) => {
+      const operations = Array.isArray(step && step.allowedOperations) ? step.allowedOperations : [];
+      return {
+        id: String(index + 1),
+        text: String(step && step.text || ""),
+        status: index === 0 ? "in_progress" : "pending",
+        ...operations.length ? { allowedOperations: operations } : {},
+        // 模板自带保守契约：声明 CLICK 就必须有 verify，否则 update_plan 会被拒绝。
+        // 打开新页的步骤可以把它改成 {"urlChanged":true}，更贴合本意。
+        ...operations.includes("CLICK") ? { verify: { fingerprintChanged: true } } : {}
+      };
+    });
     parts.push(
-      "\u8BA1\u5212\u6A21\u677F\uFF08\u9996\u8F6E\u76F4\u63A5\u4F5C\u4E3A update_plan \u7684 items \u63D0\u4EA4\uFF0C\u518D\u5F00\u59CB\u64CD\u4F5C\uFF09\uFF1A\n" + JSON.stringify(template) + "\n\u5F53\u524D\u6B65\u9AA4\u82E5\u662F\u672C\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB\uFF0C\u518D\u8865 nextAction\uFF1B\u586B\u503C\u4E0E\u5BFC\u822A\u4E0D\u8981\u5199\u8FDB nextAction\u3002"
+      "\u8BA1\u5212\u6A21\u677F\uFF08\u9996\u8F6E\u76F4\u63A5\u4F5C\u4E3A update_plan \u7684 items \u63D0\u4EA4\uFF0C\u518D\u5F00\u59CB\u64CD\u4F5C\uFF09\uFF1A\n" + JSON.stringify(template) + '\n\u6A21\u677F\u91CC\u7684 verify \u662F\u4FDD\u5B88\u9ED8\u8BA4\uFF08\u9875\u9762\u6307\u7EB9\u987B\u53D8\u5316\uFF09\uFF1B\u6253\u5F00\u65B0\u9875\u53EF\u6539\u6210 {"urlChanged":true}\u3002\u5F53\u524D\u6B65\u9AA4\u82E5\u662F\u672C\u9875\u4E0A\u7684\u673A\u68B0\u70B9\u51FB\uFF0C\u518D\u8865 nextAction\uFF1B\u586B\u503C\u4E0E\u5BFC\u822A\u4E0D\u8981\u5199\u8FDB nextAction\u3002'
     );
   }
   const toolWarnings = deps.validateSkillTools(skill);

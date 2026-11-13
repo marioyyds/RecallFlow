@@ -145,7 +145,9 @@ export const ENTRIES = [
   // measured 1148481 bytes (1121.6KB). Raise to 1122KB.
   // 2026-11-13: default verify for CLICK + delegation verify measured 1149734
   // bytes (1122.8KB). Raise to 1123KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1123 * 1024 },
+  // 2026-11-13: mandatory plan verify (update_plan contract check + schema
+  // wording) measured 1152085 bytes (1125KB). Raise to 1130KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1130 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.
@@ -190,7 +192,8 @@ export const ENTRIES = [
   // Raise to 640KB.
   // 2026-11-13: tab-churn guidance in tool descriptions measured 656321 bytes.
   // Raise to 642KB.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 642 * 1024 },
+  // 2026-11-13: mandatory plan verify wording measured 660199 bytes. Raise to 647KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 647 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -227,7 +230,10 @@ export const ENTRIES = [
   // 2026-11-13: plan verify schema measured 573429 bytes. Raise to 561KB.
   // 2026-11-13: tab-churn guidance + Enter hint measured 575126 bytes.
   // Raise to 563KB.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 563 * 1024 },
+  // 2026-11-13: mandatory plan verify (contract check in update_plan + skill
+  // template now carries verify + schema wording) measured 579004 bytes.
+  // Raise to 567KB; no dependency added.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 567 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

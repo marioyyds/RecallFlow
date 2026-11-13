@@ -17,38 +17,40 @@ import {
 
 // ---------------------------------------------------------------- 提示词判据
 
-test('提示词区分两类任务，判据不同', () => {
-  assert.match(VERIFIER_SYSTEM, /mutation/, '缺少「有写操作」一类');
-  assert.match(VERIFIER_SYSTEM, /read/, '缺少「纯阅读」一类');
-  assert.match(VERIFIER_SYSTEM, /两类任务性质|两类的判据不同|任务性质/, '要明确说明两类判据不同');
+test('提示词按「切题 + 不与证据矛盾」判，且默认从宽通过', () => {
+  assert.match(VERIFIER_SYSTEM, /切题/, '判据应围绕“是否回答对了问题”');
+  assert.match(VERIFIER_SYSTEM, /默认通过/, '必须写明从宽口径');
+  assert.match(VERIFIER_SYSTEM, /没有与页面证据冲突的硬事实/, '通过条件要具体到“无硬事实冲突”');
+  assert.match(VERIFIER_SYSTEM, /即使回答不如你希望的完整/, '不完整不等于错');
 });
 
-test('纯阅读类的判据是「矛盾/无据」，不是「证据能否覆盖全部细节」', () => {
-  assert.match(VERIFIER_SYSTEM, /具体矛盾/, '要允许「指出具体矛盾」才判否');
-  assert.match(VERIFIER_SYSTEM, /一致性与依据|一致/, '阅读类判据应是一致性与依据');
+test('ok=false 只有两种：明确矛盾 / 答非所问', () => {
+  assert.match(VERIFIER_SYSTEM, /明确矛盾/);
+  assert.match(VERIFIER_SYSTEM, /答非所问/);
+  assert.match(VERIFIER_SYSTEM, /只有两种/);
 });
 
-test('提示词明确禁止「证据里没出现 X 就判 X 是编造的」', () => {
-  // 这正是本次误否的直接触发条件
-  assert.match(VERIFIER_SYSTEM, /不要\*\*?因为「证据里没有出现/, '必须显式禁止这种推断');
-  assert.match(VERIFIER_SYSTEM, /片段/, '要说明证据是片段、不是全文');
-  // 措辞必须与证据里的覆盖率标注一致 —— 校验方是在那段标注旁边读到这句话的
-  assert.match(VERIFIER_SYSTEM, /未列出的部分不代表不存在/, '要说明未列出不等于不存在');
+test('提示词禁止因「证据不完整/细节不足」判否', () => {
+  // 这正是长页面任务被误否的直接触发条件
+  assert.match(VERIFIER_SYSTEM, /缺少页面证据/);
+  assert.match(VERIFIER_SYSTEM, /证据只覆盖一部分/);
+  assert.match(VERIFIER_SYSTEM, /写进 missing/, '这类缺口只作提醒，不能变成否决');
 });
 
 test('提示词禁止用页面标题推断页面状态（实测被「MCP SDK package missing error」带偏）', () => {
-  assert.match(VERIFIER_SYSTEM, /不要用「页面标题」推断页面状态/);
-  assert.match(VERIFIER_SYSTEM, /会话名/, '要说明标题常常只是会话名');
-  assert.match(VERIFIER_SYSTEM, /MCP SDK package missing error/, '要给出实测反例，否则模型仍会凭直觉判断');
+  assert.match(VERIFIER_SYSTEM, /页面标题不能作为状态依据/);
+  assert.match(VERIFIER_SYSTEM, /闲聊\/无需操作的任务判 true/, '无关任务不该被否');
 });
 
-test('提示词保留既有的「可见性不能用关键词否定」规则', () => {
-  assert.match(VERIFIER_SYSTEM, /可见性证据/);
-  assert.match(VERIFIER_SYSTEM, /textContent/);
+test('校验是提醒性的：判否不阻止交付、也不要求重做', () => {
+  assert.match(VERIFIER_SYSTEM, /提醒性校验/);
+  assert.match(VERIFIER_SYSTEM, /不会阻止交付/);
+  assert.match(VERIFIER_SYSTEM, /不要求 Agent 重做/);
 });
 
-test('提示词保留「不要因为 Agent 说完成就采信」', () => {
-  assert.match(VERIFIER_SYSTEM, /不要因为 Agent 说/);
+test('输出契约保留 missing / suggestion 两个提醒位', () => {
+  assert.match(VERIFIER_SYSTEM, /"missing"/);
+  assert.match(VERIFIER_SYSTEM, /"suggestion"/);
 });
 
 // ---------------------------------------------------------------- agent 接线
@@ -175,7 +177,7 @@ test('同一份证据重复送审要短路，不落在模型调用之后', () =>
   const block = sourceLines(completionSrc)
     .slice(start, indexOfLine(completionSrc, 'let verdict = null', start))
     .join('\n');
-  assert.match(block, /buildRepeatedVerificationReflection/, '短路时要给出"没有新证据"的反思');
+  assert.match(block, /advisory: true/, '重复证据只发提醒，不再要求重做');
   assert.doesNotMatch(block, /runCompletionVerification/, '短路分支必须在模型调用之前就结束');
 });
 

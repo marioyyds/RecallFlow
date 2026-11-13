@@ -66,6 +66,7 @@ test('update_plan：规范化 PlanCard 操作、租约并递增计划版本', ()
         status: 'in_progress',
         successPredicate: '标题输入框非空',
         allowedOperations: ['CLICK', 'click', 'READ_PAGE', 'not-real'],
+        verify: { fingerprintChanged: true },
         leaseActions: 999,
       },
       {
@@ -86,6 +87,7 @@ test('update_plan：规范化 PlanCard 操作、租约并递增计划版本', ()
   assert.deepEqual(ctx.plan[0].allowedOperations, ['CLICK', 'READ_PAGE']);
   assert.equal(ctx.plan[0].leaseActions, 50);
   assert.equal(ctx.plan[0].successPredicate, '标题输入框非空');
+  assert.deepEqual(ctx.plan[0].verify, { fingerprintChanged: true });
   assert.deepEqual(ctx.plan[1].allowedOperations, [], '显式空数组表示没有可执行快动作');
   assert.equal(ctx.plan[1].leaseActions, undefined);
   assert.deepEqual(ctx.plan[2].allowedOperations, [], '损坏的显式契约必须 fail-closed');

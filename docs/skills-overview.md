@@ -129,6 +129,7 @@
 | `get_ax_snapshot` | 3 |
 | `read_diagnostics` | 3 |
 | `fetch_webpage` | 2 |
+| `press_key` | 2 |
 | `click_at` | 1 |
 | `drag_element` | 1 |
 | `get_attribute` | 1 |
@@ -142,7 +143,6 @@
 | `load_skill` | 1 |
 | `macro` | 1 |
 | `open_tab` | 1 |
-| `press_key` | 1 |
 | `read_table` | 1 |
 | `remove_entry` | 1 |
 | `run_userscript` | 1 |

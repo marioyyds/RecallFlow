@@ -6,9 +6,10 @@ import {
   toolStepHtml,
 } from '../lib/ui/panel/tool-step-view.ts';
 
-test('工具步骤视图为快思考和慢思考渲染可区分的标签与颜色类', () => {
+test('工具步骤视图为快执行和慢思考渲染可区分的标签与颜色类', () => {
   assert.match(laneBadgeHtml('fast'), /agent-lane lane-fast/);
-  assert.match(laneBadgeHtml('fast'), /⚡ 快思考/);
+  // 2026-11-13 有意改名：JEV 只负责“执行”，不再暗示它会思考（面板统一为「快执行」）。
+  assert.match(laneBadgeHtml('fast'), /⚡ 快执行/);
   assert.match(laneBadgeHtml('slow'), /agent-lane lane-slow/);
   assert.match(laneBadgeHtml('slow'), /🧠 慢思考/);
   assert.equal(laneBadgeHtml('unknown'), '');

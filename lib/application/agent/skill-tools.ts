@@ -71,18 +71,25 @@ export async function loadSkill(deps: SkillDeps, args: Record<string, unknown>) 
   }
   const planSteps = Array.isArray((skill as any).planSteps) ? (skill as any).planSteps : [];
   if (planSteps.length) {
-    const template = planSteps.map((step: any, index: number) => ({
-      id: String(index + 1),
-      text: String((step && step.text) || ''),
-      status: index === 0 ? 'in_progress' : 'pending',
-      ...(Array.isArray(step && step.allowedOperations) && step.allowedOperations.length
-        ? { allowedOperations: step.allowedOperations }
-        : {}),
-    }));
+    const template = planSteps.map((step: any, index: number) => {
+      const operations = Array.isArray(step && step.allowedOperations)
+        ? step.allowedOperations
+        : [];
+      return {
+        id: String(index + 1),
+        text: String((step && step.text) || ''),
+        status: index === 0 ? 'in_progress' : 'pending',
+        ...(operations.length ? { allowedOperations: operations } : {}),
+        // 模板自带保守契约：声明 CLICK 就必须有 verify，否则 update_plan 会被拒绝。
+        // 打开新页的步骤可以把它改成 {"urlChanged":true}，更贴合本意。
+        ...(operations.includes('CLICK') ? { verify: { fingerprintChanged: true } } : {}),
+      };
+    });
     parts.push(
       '计划模板（首轮直接作为 update_plan 的 items 提交，再开始操作）：\n' +
         JSON.stringify(template) +
-        '\n当前步骤若是本页上的机械点击，再补 nextAction；填值与导航不要写进 nextAction。'
+        '\n模板里的 verify 是保守默认（页面指纹须变化）；打开新页可改成 {"urlChanged":true}。' +
+        '当前步骤若是本页上的机械点击，再补 nextAction；填值与导航不要写进 nextAction。'
     );
   }
   // ⛔ **不要**把通用纪律底座拼进技能返回里 —— 实测它会造成退化（第 26 轮）。

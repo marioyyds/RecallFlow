@@ -144,6 +144,64 @@ export function normalizePlanStep(
   return step;
 }
 
+/**
+ * 快路动作里**会改变页面**的那些。声明了它们就必须同时给 verify：
+ * 没有契约时快路只能拿保守默认（指纹必须变化）顶替，而默认经常不是模型的本意
+ * ——「打开第一个结果」应该看 URL，不是看指纹。契约写错比不写更糟。
+ */
+const MUTATING_FAST_OPERATIONS: ReadonlySet<string> = new Set(['CLICK']);
+
+/**
+ * 校验计划里的快路契约是否**可执行**，返回给人看的拒绝理由（空数组=通过）。
+ *
+ * 为什么在 `update_plan` 就拦，而不是等协调器：协调器只能说“本步不给快路”，
+ * 慢模型永远不知道自己为什么被降级；在这里拦，它同一轮就能改好。
+ * 只查当前步骤（in_progress 优先，其次第一条 pending）——后面的步骤还没轮到，
+ * 不要求提前写死契约。
+ */
+export function planContractViolations(
+  rawItems: unknown,
+  plan: PlanStep[]
+): string[] {
+  if (!Array.isArray(plan) || !plan.length) return [];
+  const raw = Array.isArray(rawItems) ? rawItems : [];
+  const inProgress = plan
+    .map((step, index) => ({ step, index }))
+    .filter((item) => item.step.status === 'in_progress');
+  const pendingIndex = plan.findIndex((step) => step.status === 'pending');
+  const targets = inProgress.length
+    ? inProgress
+    : pendingIndex >= 0
+      ? [{ step: plan[pendingIndex], index: pendingIndex }]
+      : [];
+  if (!targets.length) return [];
+  const issues: string[] = [];
+  for (const { step, index } of targets) {
+    const label = '第 ' + (index + 1) + ' 步「' + step.text + '」';
+    const source =
+      raw[index] && typeof raw[index] === 'object'
+        ? (raw[index] as Record<string, unknown>)
+        : {};
+    const declaredVerify =
+      Object.prototype.hasOwnProperty.call(source, 'verify') && source.verify != null;
+    if (declaredVerify && !step.verify) {
+      issues.push(
+        label +
+          '的 verify 无法识别（应为对象，如 {"urlChanged":true} 或 {"fingerprintChanged":true}），已丢弃。'
+      );
+      continue;
+    }
+    const operations = Array.isArray(step.allowedOperations) ? step.allowedOperations : [];
+    const mutating = operations.some((operation) => MUTATING_FAST_OPERATIONS.has(operation));
+    if (!step.verify && mutating && !step.nextAction) {
+      issues.push(
+        label + '声明了 CLICK（会改变页面），但没有 verify —— 快路点击后无法核对是否做对。'
+      );
+    }
+  }
+  return issues;
+}
+
 /** The first in-progress step owns the fast-lane contract; fall back to pending. */
 export function activePlanStep(plan: unknown): PlanStep | null {
   if (!Array.isArray(plan)) return null;

@@ -60,7 +60,14 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 - `plan`：当前 `in_progress` 子目标、完成条件、允许操作和剩余动作租约。
 - `observation.runtime`：结构化媒体状态（`paused`、`currentTime`、`readyState` 等）与 `aria-busy`，用于避免被“正在缓冲”等可能滞后的可见文案误导。
 
-`update_plan` 的每个步骤可声明 `allowedOperations` 与 `leaseActions`。一旦声明，JEV 的可执行集合会与当前子目标取交集；`DONE` 与 `BLOCKED` 始终保留作为安全出口。省略 `allowedOperations` 时保持旧的全动作空间；显式空数组表示该步骤不允许任何快动作。
+`update_plan` 的每个步骤可声明 `allowedOperations` 与 `leaseActions`。一旦声明，JEV 的可执行集合会与当前子目标取交集；`DONE` 与 `BLOCKED` 始终保留作为安全出口。**省略 `allowedOperations` 不再是"全动作空间"：协调器会整轮关闭快路**（`plan-no-verify`，fail-safe）；显式空数组表示该步骤只由慢思考做。
+
+**契约是写计划的必填项，不是可选装饰**：当前步骤（`in_progress` 优先，否则第一条
+`pending`）一旦声明 `CLICK`，就必须同时给 `verify`，否则 `update_plan` 直接拒绝、
+原计划与 `planVersion` 都不推进（`plan-contract.ts: planContractViolations`）。理由：
+协调器只能在"这一轮不给快路"这层兜底，慢模型永远不知道自己为什么被降级；而在写入
+那一刻拒绝，它同一轮就能补好。慢模型显式委托（`nextAction`）例外——那一次动作自带
+默认契约。`verify` 写成字符串/空对象同样会被拒绝并指出格式，而不是静默丢弃。
 
 所有 target head speculative 地并行评分；执行器只读取 selected operation 对应的 target head。高风险发布、发送、删除、支付等语义不会进入 CLICK 候选。
 
@@ -75,10 +82,10 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 **快执行（原“快思考”）与契约校验**：JEV 只负责在候选里选一个动作，它不理解页面语义，
 也无法判断动作是否推进了目标，因此面板统称“快执行”。自动快执行需要计划步骤携带
 结构化 `verify` 条件（`urlChanged` / `fingerprintChanged` / `minElementDelta` /
-`textIncludes`）；没有显式契约时，允许 CLICK 的步骤自动采用保守默认
-（`fingerprintChanged`），只读/滚动/等待步骤不强制契约。动作执行后由
-`action-verify.ts` 做确定性核对：`mismatch` 立即让位并（对边）封边，`unknown` 只记录不
-冒充成功。
+`textIncludes`）；没有显式契约时（只有绕过 `update_plan` 校验的旧计划/恢复的计划会
+走到这里），允许 CLICK 的步骤用保守默认（`fingerprintChanged`）兜底，只读/滚动/等待
+步骤不强制契约。动作执行后由 `action-verify.ts` 做确定性核对：`mismatch` 立即让位并
+（对边）封边，`unknown` 只记录不冒充成功。
 
 **Edge Confidence 阈值的边界**：这个设置只做“选定后的本地比较”——JEV 返回的
 `confidence` 低于阈值时把选择改判为 `low-confidence` 并交回慢思考；它**不会**

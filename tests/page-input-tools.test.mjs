@@ -228,12 +228,28 @@ test('type_text：CDP 输入后回读不一致必须失败（不许假报成功�
   assert.match(r.result, /不要原样重试同一路径/);
 });
 
-test('type_text：长正文换行被编辑器吞掉时，用一次真实 paste 重写并回读确认', async () => {
+test('type_text：换行被编辑器归一化时按「内容一致」判成功，不再多花一次 paste', async () => {
   const deps = mkDeps({
     contentResult: { ok: false, matchesIntent: false, partial: true },
     resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
-    // 三次回读：基线、insertText 之后（段落换行被归一化）、paste 之后（结构正确）
-    readValues: ['', '第一行第二行', '第一行\n第二行'],
+    // 基线、insertText 之后（段落换行被归一化，非空白字符一致）
+    readValues: ['', '第一行第二行'],
+  });
+  const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
+  assert.equal(r.ok, true, '非空白字符完全一致就算写对：' + r.result);
+  assert.equal(r.matchesIntent, true);
+  assert.equal(r.whitespaceOnly, true);
+  assert.equal(r.strategy, 'cdp-transactional');
+  assert.ok(!deps.calls.some((c) => c.op === 'cdp.paste'), '已经判成功就不该再 paste 一次');
+  assert.match(r.verification.reason, /归一化/);
+});
+
+test('type_text：换行被吞且内容也缺（不只是空白差异）时，用真实 paste 重写并回读确认', async () => {
+  const deps = mkDeps({
+    contentResult: { ok: false, matchesIntent: false, partial: true },
+    resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
+    // 三次回读：基线、insertText 之后（只剩第一行）、paste 之后（结构正确）
+    readValues: ['', '第一行', '第一行\n第二行'],
   });
   const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
   assert.equal(r.ok, true, 'paste 重写后回读一致就必须算成功：' + r.result);
@@ -297,7 +313,7 @@ test('type_text：paste 之前必须先清空（否则编辑器把新内容追�
   const deps = mkDeps({
     contentResult: { ok: false, matchesIntent: false, partial: true },
     resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
-    readValues: ['', '第一行第二行', '第一行\n第二行'],
+    readValues: ['', '第一行', '第一行\n第二行'],
   });
   const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
   assert.equal(r.ok, true);
@@ -322,17 +338,17 @@ test('type_text：回读比期望长（重复写入）时不再叠加 paste，�
   assert.doesNotMatch(r.result, /差异只在换行\/空白/);
 });
 
-test('type_text：只差换行/空白时判失败，但把原因说清楚（不算写对）', async () => {
+test('type_text：只差换行/空白时判成功，并把原因说清楚（归一化，不是内容丢失）', async () => {
   const deps = mkDeps({
     contentResult: { ok: false },
     resolveTarget: async () => ({ selector: '#q', contentEditable: true }),
-    readValues: ['', '第一行第二行', '第一行第二行'],
+    readValues: ['', '第一行第二行'],
   });
   const r = await typeText(deps, { value: '第一行\n第二行', clearFirst: true });
-  assert.equal(r.ok, false, 'Markdown 的换行是结构，不能判成功');
+  assert.equal(r.ok, true, '非空白字符完全一致就算写对（查内容不查字数）');
   assert.equal(r.whitespaceOnly, true);
-  assert.match(r.result, /差异只在换行\/空白/);
   assert.match(r.verification.reason, /归一化/);
+  assert.ok(!deps.calls.some((c) => c.op === 'cdp.paste'), '判成功就不再 paste');
 });
 
 test('press_key：合成成功但没有可观测变化时，不得把「已派发」当成功证据', async () => {

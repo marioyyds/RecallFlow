@@ -186,7 +186,8 @@ export const TOOL_SCHEMAS = [
     function: {
       name: 'update_plan',
       description:
-        '维护执行计划。当前步骤可声明快路动作、完成条件和租约；每次整体替换。',
+        '维护执行计划。当前步骤可声明快路动作、完成条件和租约；每次整体替换。' +
+        '当前步骤声明 CLICK 时必须同时给 verify，缺失会被拒绝且原计划不改动。',
       parameters: {
         type: 'object',
         properties: {
@@ -206,8 +207,8 @@ export const TOOL_SCHEMAS = [
                 verify: {
                   type: 'object',
                   description:
-                    '动作执行后的确定性校验条件。快路只在这个契约存在时自动执行；失败会立即交回慢思考。' +
-                    '至少给一项：urlChanged / fingerprintChanged / minElementDelta / textIncludes。',
+                    '动作执行后的确定性校验条件。声明 CLICK 的步骤**必须**给（否则 update_plan 被拒绝）；' +
+                    '只读/滚动/等待步骤可省略。至少给一项：urlChanged / fingerprintChanged / minElementDelta / textIncludes。',
                   properties: {
                     urlChanged: { type: 'boolean', description: '要求 URL 发生变化' },
                     fingerprintChanged: { type: 'boolean', description: '要求页面结构指纹发生变化' },
@@ -223,7 +224,7 @@ export const TOOL_SCHEMAS = [
                 },
                 allowedOperations: {
                   type: 'array',
-                  description: '允许的快路操作；省略=全动作，[]=无快动作',
+                  description: '允许的快路操作；省略=快路不会启动，[]=本步只由慢思考做；含 CLICK 时必须给 verify',
                   items: {
                     type: 'string',
                     enum: [

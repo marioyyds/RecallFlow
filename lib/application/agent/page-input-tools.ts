@@ -236,8 +236,9 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
       }
     }
     if (verified) deps.rememberTarget(deps.ctx, target);
-    // 差异定性：只差空白/换行 ≠ 内容丢失。Markdown 里换行就是结构（标题、代码块、
-    // 表格），所以**不能**把它判成成功，但必须把原因说清楚，否则模型会一直重写。
+    // 差异定性：只差空白/换行 = 编辑器把段落结构归一化了。按「查内容不查字数」的口径，
+    // 非空白字符完全一致就算写对；这个标记只用于把原因说清楚（面板会显示“归一化了换行/空白”），
+    // 不再当作失败理由 —— 否则模型会为一个 Markdown 编辑器永远重写同一段文字。
     const whitespaceOnly =
       actualValue != null &&
       !summary.matchesIntent &&
@@ -280,9 +281,7 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
           ' 字符，实际 ' +
           (actualValue == null ? '无法回读' : summary.actualLength + ' 字符') +
           (summary.firstDifference.index >= 0 ? '，首个差异在 ' + summary.firstDifference.index : '') +
-          (whitespaceOnly
-            ? '。差异只在换行/空白：非空白字符完全一致，是编辑器把段落结构归一化了 —— Markdown 的标题、代码块、表格都靠换行，所以这**不算**写对'
-            : '。') +
+          '。' +
           '实际值：' +
           JSON.stringify(String(actualValue == null ? '' : actualValue).slice(0, 120)) +
           '。工具已先恢复到内容脚本失败前的基线，再用一次整体写入替换；不要原样重试同一路径 —— 换行被吃掉时要改用该站点的写入方式（如真实 paste / 编辑器 API），而不是继续 insertText。' +

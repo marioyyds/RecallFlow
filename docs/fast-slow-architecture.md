@@ -103,7 +103,8 @@ sequenceDiagram
 | 闸门 | 判定位置 | 作用 | 默认/取值 |
 |---|---|---|---|
 | 计划只读 | `coordinator.decideAutoFast` | `allowedOperations: []` 时快路整轮不启动 | 计划字段 |
-| 无动作契约 | 同上 | 点击类无 verify 且非只读集合 → 不给快路 | `plan-no-verify` |
+| 无动作契约 | 同上 | 有可变动作但 `effectivePlanVerify` 与只读集合都不成立 → 不给快路 | `plan-no-verify` |
+| 契约必填 | `planContractViolations`（update_plan） | 当前步骤声明 CLICK 却没有 verify → 整条计划被拒绝，原计划不动 | 见 §6 |
 | 开关/凭据 | `canAttempt` | enabled、非 CHAT、apiKey/model/baseUrl | 设置 |
 | 计划租约 | `canAttempt` | `leaseActions` 用尽即停 | 计划字段 |
 | 尝试上限 | `canAttempt` | 每 run 快路尝试次数 | 36 |
@@ -139,6 +140,13 @@ sequenceDiagram
 | `fingerprintChanged` | 页面指纹变化（点击类默认） |
 | `minElementDelta` | 元素数变化 ≥ N |
 | `textIncludes` | 页面文本包含目标串 |
+
+写契约是**必填**的：`update_plan` 里当前步骤（`in_progress` 优先，否则第一条 `pending`）
+声明 `CLICK` 就必须给 `verify`，否则整条计划被拒绝、`planVersion` 不推进
+（`planContractViolations`）。这样快路拿到的判据来自本意，而不是“保守默认猜一下”。
+`verify` 写成字符串或空对象同样会被拒绝并说明格式，避免静默丢弃。
+慢模型显式委托（`nextAction`）例外；它的默认契约是 `click_element`/`press_key` 看指纹、
+`open_tab` 看 URL。
 
 校验失败的处理是**劝告式**的：记为 `verify` 警告，不撤回动作、不阻断
 `complete_task`；快路的 `mismatch` 才会封边/让位（因为那是快路自己的动作）。

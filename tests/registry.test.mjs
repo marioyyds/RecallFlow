@@ -243,7 +243,10 @@ test('工具总数记录在案（当前远超项目自定目标 ≤25，属待�
 // 2026-11-13：update_plan step 新增可选 verify（urlChanged/fingerprintChanged/
 // minElementDelta/textIncludes），给快路动作一个确定性的“做对了吗”契约。
 // 实测 43693，显式上调到 44000。
-const SCHEMA_BYTES_BUDGET = 44000;
+// 同日收紧契约：声明 CLICK 的步骤必须给 verify（update_plan 会拒绝），且
+// “省略 allowedOperations = 快路不启动”必须写进 schema —— 这两条不写，模型就
+// 会以为自己授权了快路、实际整轮被关掉。实测 44069，显式上调到 44300。
+const SCHEMA_BYTES_BUDGET = 44300;
 
 test('工具定义体积不得超出预算（防 prompt 无声膨胀）', () => {
   const bytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
