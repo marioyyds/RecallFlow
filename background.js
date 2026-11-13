@@ -15225,6 +15225,10 @@ var JevFastController = class {
   lastNoProgress = null;
   /** 同一页面（URL + fingerprint）最近一次读取，用于抑制重复 READ_PAGE。 */
   lastReadPage = null;
+  /** 同一站点连续“快路尝试但没执行任何动作”的次数：用来停掉空转。
+   * 只有快路真的执行了动作、或计划版本变化才清零；慢思考的点击/导航不清零，
+   * 否则“换页再试一次”会无限续命（2026-11-13 HF：6 次尝试 0 次执行）。 */
+  handoffStreak = { host: "", count: 0 };
   lastEdgeFallbackRoute = "";
   // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
   recentActions = [];
@@ -15250,6 +15254,7 @@ var JevFastController = class {
       this.lastHandoffNotice = null;
       this.lastAttempt = null;
       this.lastEdgeFallbackRoute = "";
+      this.handoffStreak = { host: "", count: 0 };
       this.state.trace({
         phase: "jev-plan",
         planVersion: version,
@@ -15411,13 +15416,26 @@ var JevFastController = class {
    */
   autoFastEligibility() {
     if (!this.canAttempt()) return { ok: false, reason: "not-due" };
+    if (this.handoffStreak.count >= 2 && this.handoffStreak.host === this.currentHost()) {
+      return { ok: false, reason: "handoff-streak" };
+    }
     if (this.routeCooldownActive()) return { ok: false, reason: "route-cooldown" };
     const gate = this.attemptGateReason();
     if (gate) return { ok: false, reason: gate };
     return { ok: true, reason: "ready" };
   }
+  currentHost() {
+    try {
+      return new URL(String(this.state.ctx.pageUrl || "")).hostname;
+    } catch (e) {
+      return "";
+    }
+  }
   async runAvailable(iter, persist) {
     if (!this.canAttempt()) return { kind: "skipped", reason: "not-due" };
+    if (this.handoffStreak.count >= 2 && this.handoffStreak.host === this.currentHost()) {
+      return { kind: "skipped", reason: "handoff-streak" };
+    }
     if (this.routeCooldownActive()) return { kind: "skipped", reason: "route-cooldown" };
     const gate = this.attemptGateReason();
     if (gate) {
@@ -15732,6 +15750,7 @@ var JevFastController = class {
       return { kind: "skipped", reason: "action-mismatch", latencyMs };
     }
     if (action.operation === "READ_PAGE") this.noteReadPage();
+    this.handoffStreak = { host: "", count: 0 };
     this.noteActionKey(cycleKey);
     return {
       kind: "act",
@@ -16155,6 +16174,7 @@ var JevFastController = class {
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastOutcome = "edge-act";
+    this.handoffStreak = { host: "", count: 0 };
     return {
       kind: "act",
       decisions: [action],
@@ -16436,6 +16456,7 @@ var JevFastController = class {
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastOutcome = "delegate-act";
+    this.handoffStreak = { host: "", count: 0 };
     return { kind: "act", decisions: [action], latencyMs: 0, toolOutcomes: [outcome, observed] };
   }
   /**
@@ -16473,6 +16494,8 @@ var JevFastController = class {
       toolCalls: this.state.toolCallCount,
       ranCount: this.state.ranToolNames.length
     };
+    const host = this.currentHost();
+    this.handoffStreak = this.handoffStreak.host === host ? { host, count: this.handoffStreak.count + 1 } : { host, count: 1 };
     this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason) ? { key, reason, toolCalls: this.state.toolCallCount, at: Date.now() } : null;
     const previous = this.lastHandoffNotice;
     const repeatedNotice = Boolean(

@@ -119,6 +119,10 @@ export class JevFastController {
   private lastNoProgress: { signature: string; count: number } | null = null;
   /** 同一页面（URL + fingerprint）最近一次读取，用于抑制重复 READ_PAGE。 */
   private lastReadPage: { url: string; fingerprint: string; at: number } | null = null;
+  /** 同一站点连续“快路尝试但没执行任何动作”的次数：用来停掉空转。
+   * 只有快路真的执行了动作、或计划版本变化才清零；慢思考的点击/导航不清零，
+   * 否则“换页再试一次”会无限续命（2026-11-13 HF：6 次尝试 0 次执行）。 */
+  private handoffStreak: { host: string; count: number } = { host: '', count: 0 };
   private lastEdgeFallbackRoute = '';
   // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
   private recentActions: string[] = [];
@@ -154,6 +158,7 @@ export class JevFastController {
       this.lastHandoffNotice = null;
       this.lastAttempt = null;
       this.lastEdgeFallbackRoute = '';
+      this.handoffStreak = { host: '', count: 0 };
       this.state.trace({
         phase: 'jev-plan',
         planVersion: version,
@@ -341,10 +346,26 @@ export class JevFastController {
    */
   autoFastEligibility(): { ok: boolean; reason: string } {
     if (!this.canAttempt()) return { ok: false, reason: 'not-due' };
+    // 同一站点连续 2 次“试了但没做任何动作”就停：换页面不等于有新动作可做，
+    // 继续起快路只会重复付 observe + systemone（HF 轨迹 4 连空转）。
+    if (
+      this.handoffStreak.count >= 2 &&
+      this.handoffStreak.host === this.currentHost()
+    ) {
+      return { ok: false, reason: 'handoff-streak' };
+    }
     if (this.routeCooldownActive()) return { ok: false, reason: 'route-cooldown' };
     const gate = this.attemptGateReason();
     if (gate) return { ok: false, reason: gate };
     return { ok: true, reason: 'ready' };
+  }
+
+  private currentHost(): string {
+    try {
+      return new URL(String(this.state.ctx.pageUrl || '')).hostname;
+    } catch (e) {
+      return '';
+    }
   }
 
   async runAvailable(
@@ -352,6 +373,12 @@ export class JevFastController {
     persist: (extra: Record<string, unknown>) => Promise<unknown>
   ): Promise<JevFastRunResult> {
     if (!this.canAttempt()) return { kind: 'skipped', reason: 'not-due' };
+    if (
+      this.handoffStreak.count >= 2 &&
+      this.handoffStreak.host === this.currentHost()
+    ) {
+      return { kind: 'skipped', reason: 'handoff-streak' };
+    }
     // 冷却期连快照都不必拍：同一视图、同一原因重试只会白付一次 observe。
     if (this.routeCooldownActive()) return { kind: 'skipped', reason: 'route-cooldown' };
     const gate = this.attemptGateReason();
@@ -739,6 +766,7 @@ export class JevFastController {
       return { kind: 'skipped', reason: 'action-mismatch', latencyMs };
     }
     if (action.operation === 'READ_PAGE') this.noteReadPage();
+    this.handoffStreak = { host: '', count: 0 };
     this.noteActionKey(cycleKey);
     return {
       kind: 'act',
@@ -1238,6 +1266,7 @@ export class JevFastController {
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.planActions += 1;
     this.state.jevLoop.lastOutcome = 'edge-act';
+    this.handoffStreak = { host: '', count: 0 };
     return {
       kind: 'act',
       decisions: [action],
@@ -1562,6 +1591,7 @@ private async tryDelegatedAction(
   this.state.jevLoop.consecutiveFastActions += 1;
   this.state.jevLoop.planActions += 1;
   this.state.jevLoop.lastOutcome = 'delegate-act';
+  this.handoffStreak = { host: '', count: 0 };
   return { kind: 'act', decisions: [action], latencyMs: 0, toolOutcomes: [outcome, observed] };
 }
 
@@ -1615,6 +1645,10 @@ private async tryDelegatedAction(
       toolCalls: this.state.toolCallCount,
       ranCount: this.state.ranToolNames.length,
     };
+    const host = this.currentHost();
+    this.handoffStreak = this.handoffStreak.host === host
+      ? { host, count: this.handoffStreak.count + 1 }
+      : { host, count: 1 };
     // 只有「有证据却选不出」才做路由级冷却；没证据/目标缺失只影响对应边，
     // 否则首访页面第一次 no-candidates 之后整轮都唤不回快路。
     this.blockedRoute = ROUTE_COOLDOWN_REASONS.has(reason) || TRANSIENT_FAILURE_REASONS.has(reason)

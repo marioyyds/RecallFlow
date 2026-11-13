@@ -695,6 +695,39 @@ test('CLICK 未写 verify 时用默认指纹校验拦下无变化点击', async 
   assert.equal(outcome.reason, 'action-mismatch');
 });
 
+test('同一站点连续两次空转后不再起快路', async () => {
+  const state = stateFor(false);
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async (request) => {
+      jevCalls += 1;
+      return operationLowConfidenceClick(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'low-confidence');
+
+  state.ctx.pageUrl = 'https://gitcode.com/other/page-one';
+  state.ctx.lastSnapshot = snapshot('fp-one');
+  state.toolCallCount += 1;
+  const second = await controller.runAvailable(1, async () => {});
+  assert.equal(second.reason, 'low-confidence');
+
+  state.ctx.pageUrl = 'https://gitcode.com/other/page-two';
+  state.ctx.lastSnapshot = snapshot('fp-two');
+  state.toolCallCount += 1;
+  const third = await controller.runAvailable(2, async () => {});
+  assert.equal(third.kind, 'skipped');
+  assert.equal(third.reason, 'handoff-streak');
+  assert.equal(jevCalls, 2);
+});
+
 test('计划 verify 不满足时动作判 mismatch 并交回慢思考', async () => {
   const state = stateFor(false);
   state.ctx.plan = [{
