@@ -111,6 +111,14 @@ get_page_snapshot
 
 `WAIT` 另有一条不受页面指纹影响的连续等待计数。动态广告、计时器或加载组件造成的 DOM 指纹变化不能把连续等待刷成“有进展”；达到 `maxRepeatedActionsWithoutProgress` 后直接交给慢思考。
 
+**调度权与去重（2026-11-13）**：自动快路不再由 agent-loop 无条件触发，而是先问
+`decideAutoFast`（`coordinator.ts`）——计划步骤 `allowedOperations: []` 时直接慢思考；
+其余情况沿用快路自己的资格判断（尝试上限、路由冷却、页面变化闸门）。
+`expand_result` / `update_plan` / `complete_task` / `get_attribute` 属于记账类工具，
+不计为页面变化，避免“每批工具后都快试一次”。快路 handoff 的说明里会附一段观察摘要
+（URL、fingerprint、可交互元素数），慢模型可据此决定是否还需要重拍快照；同一页面
+（URL + fingerprint）15 秒内的 `READ_PAGE` 会被判 `duplicate-read` 并跳过。
+
 `CLICK` 同时产生 operation 与目标 head。operation 是多分类判断；target 是条件判断，即使 operation 分支错误也可能给出 100%。因此目标动作须同时满足：匹配 target 达到该操作门槛，且 operation 达到独立的分支下限。没有 target head 的读取、等待、完成等操作仍使用 operation 门槛；`WAIT` 只读且可逆，使用独立的低风险阈值。真实校准结果见 [JEV 阈值校准记录](./jev-threshold-calibration.md)。
 
 重复动作保护绑定到 `action + args + phase + URL + fingerprint`。页面发生变化会立即清零无进展连击；只有同一动作在当前页面状态下连续达到配置次数，才移交慢思考。

@@ -26,6 +26,7 @@ import { AgentRunFinalizer } from './agent-finalizer.ts';
 import { CompletionCoordinator } from './agent-completion.ts';
 import { ToolCallPipeline } from './tool-call-pipeline.ts';
 import { JevFastController } from './jev-controller.ts';
+import { decideAutoFast } from './coordinator.ts';
 import type { JevFastDecision } from './jev-action-space.ts';
 
 const CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
@@ -177,7 +178,22 @@ export async function runAgentLoop(
       nextIteration: iter,
     }).catch(() => {});
 
-    const jevOutcome = await jevFast.runAvailable(iter, persist);
+    // 唯一调度者：只有协调器说“值得”才起快路；计划只读时直接慢思考。
+    const autoFast = decideAutoFast({
+      plan: state.ctx.plan,
+      eligibility: () => jevFast.autoFastEligibility(),
+    });
+    if (!autoFast.ok) {
+      state.trace({
+        phase: 'coordinator',
+        iter,
+        actor: 'slow',
+        reason: autoFast.reason,
+      });
+    }
+    const jevOutcome = autoFast.ok
+      ? await jevFast.runAvailable(iter, persist)
+      : ({ kind: 'skipped', reason: autoFast.reason } as const);
     if (jevOutcome.kind === 'cancelled') {
       await finalizer.cancelled(jevOutcome.reason, 'interrupted');
       return;

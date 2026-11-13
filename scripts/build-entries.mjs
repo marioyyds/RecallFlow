@@ -139,7 +139,9 @@ export const ENTRIES = [
   // measured 1138514 bytes (1111.8KB). Raise to 1112KB.
   // Same day: operation fallback thresholds exposed + clearer branch wording
   // measured 1139011 bytes (1112.3KB). Raise to 1113KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1113 * 1024 },
+  // 2026-11-13: coordinator decision + duplicate-read guard + handoff digest
+  // measured 1142394 bytes (1115.6KB). Raise to 1116KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1116 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

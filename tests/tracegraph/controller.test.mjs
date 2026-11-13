@@ -170,10 +170,31 @@ function abstainResponse(confidence = 0.9) {
   };
 }
 
+function operationReadResponse(confidence = 0.9) {
+  return {
+    model: 'jev',
+    answers: { operation: { type: 'choice', choice: 'READ_PAGE', confidence } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
 function operationBlockedResponse(confidence = 0.9) {
   return {
     model: 'jev',
     answers: { operation: { type: 'choice', choice: 'BLOCKED', confidence } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  };
+}
+
+function operationLowConfidenceClick(request) {
+  const targets = request && request.questions && request.questions.click_target;
+  const key = targets ? Object.keys(targets.criteria)[0] : '1';
+  return {
+    model: 'jev',
+    answers: {
+      operation: { type: 'choice', choice: 'CLICK', confidence: 0.2 },
+      click_target: { type: 'choice', choice: key, confidence: 0.9 },
+    },
     usage: { input_tokens: 1, output_tokens: 1 },
   };
 }
@@ -649,6 +670,59 @@ test('operation 判 BLOCKED 时做路由冷却；只读回合不唤醒，动作�
   const changed = await controller.runAvailable(3, async () => {});
   assert.equal(changed.reason, 'model-blocked');
   assert.equal(jevCalls, 2, '慢思考动过页面才允许再试');
+});
+
+test('同一页面 15 秒内重复 READ_PAGE 会被跳过', async () => {
+  const state = stateFor(false);
+  state.settings.jev.maxConsecutiveActions = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async () => {
+      jevCalls += 1;
+      return operationReadResponse();
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.kind, 'act');
+  assert.equal(first.decisions[0].operation, 'READ_PAGE');
+
+  state.settings.jev.maxConsecutiveActions = 5;
+  state.toolCallCount = state.jevLoop.lastToolCallCount + 1;
+  const second = await controller.runAvailable(1, async () => {});
+  assert.equal(second.kind, 'skipped');
+  assert.equal(second.reason, 'duplicate-read');
+  assert.equal(jevCalls, 2);
+});
+
+test('expand_result 之类的记账工具不算页面变化，不唤醒快路', async () => {
+  const state = stateFor(false);
+  const graph = emptyTraceGraph('https://gitcode.com');
+  let jevCalls = 0;
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state),
+    new AbortController().signal,
+    async (request) => {
+      jevCalls += 1;
+      return operationLowConfidenceClick(request);
+    },
+    async () => {},
+    async () => graph
+  );
+  const first = await controller.runAvailable(0, async () => {});
+  assert.equal(first.reason, 'low-confidence');
+
+  state.toolCallCount = state.jevLoop.lastToolCallCount + 1;
+  state.ranToolNames.push('expand_result');
+  const second = await controller.runAvailable(1, async () => {});
+  assert.equal(second.reason, 'no-page-change');
+  assert.equal(jevCalls, 1);
 });
 
 test('只读回合后若有委托，闸门放行并执行委托', async () => {

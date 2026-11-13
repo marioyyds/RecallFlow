@@ -56,6 +56,12 @@ const READ_ONLY_EXTRA: ReadonlySet<string> = new Set([
   'knowledge_read',
   'web_search',
   'take_screenshot',
+  // 记账类工具不碰页面，却会被误判成“页面可能变了”，把闸门重新打开：
+  // 2026-11-12 的轨迹里 update_plan / expand_result 每次都让快路白试一次。
+  'expand_result',
+  'update_plan',
+  'complete_task',
+  'get_attribute',
 ]);
 
 export function isReadOnlyTool(name: unknown): boolean {

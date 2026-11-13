@@ -116,6 +116,8 @@ export class JevFastController {
   private lastAttempt: { key: string; url: string; toolCalls: number; ranCount: number } | null = null;
   private lastHintLabel = '';
   private lastNoProgress: { signature: string; count: number } | null = null;
+  /** 同一页面（URL + fingerprint）最近一次读取，用于抑制重复 READ_PAGE。 */
+  private lastReadPage: { url: string; fingerprint: string; at: number } | null = null;
   private lastEdgeFallbackRoute = '';
   // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
   private recentActions: string[] = [];
@@ -280,6 +282,28 @@ export class JevFastController {
     return this.lastHintLabel;
   }
 
+  /**
+   * 同一页面（URL + fingerprint）在 15 秒内已经读过：READ_PAGE 与只读回退都跳过，
+   * 避免“快路读一次、慢模型又读一次”的重复（RF-AJJTSW 轨迹）。
+   */
+  private isDuplicateRead(): boolean {
+    const last = this.lastReadPage;
+    if (!last) return false;
+    const snap: any = this.state.ctx.lastSnapshot;
+    const url = String(snap?.url || this.state.ctx.pageUrl || '');
+    const fingerprint = String(snap?.fingerprint || '');
+    return last.url === url && last.fingerprint === fingerprint && Date.now() - last.at < 15_000;
+  }
+
+  private noteReadPage(): void {
+    const snap: any = this.state.ctx.lastSnapshot;
+    this.lastReadPage = {
+      url: String(snap?.url || this.state.ctx.pageUrl || ''),
+      fingerprint: String(snap?.fingerprint || ''),
+      at: Date.now(),
+    };
+  }
+
   private hasDelegatedNextAction(): boolean {
     const plan: PlanStep[] = Array.isArray(this.state.ctx.plan) ? this.state.ctx.plan : [];
     const step = plan.find((item) => item && item.status === 'in_progress') || plan[0];
@@ -308,6 +332,18 @@ export class JevFastController {
       String(this.state.ctx.pageUrl || ''),
       String(this.state.ctx.lastSnapshot?.fingerprint || ''),
     ].join('|');
+  }
+
+  /**
+   * 协调器专用：这一轮是否值得起快路。与 runAvailable 的前置检查同源，
+   * 供唯一调度者（coordinator）决定“自动快路 vs 直接慢思考”。
+   */
+  autoFastEligibility(): { ok: boolean; reason: string } {
+    if (!this.canAttempt()) return { ok: false, reason: 'not-due' };
+    if (this.routeCooldownActive()) return { ok: false, reason: 'route-cooldown' };
+    const gate = this.attemptGateReason();
+    if (gate) return { ok: false, reason: gate };
+    return { ok: true, reason: 'ready' };
   }
 
   async runAvailable(
@@ -447,6 +483,7 @@ export class JevFastController {
       decision.reason === 'low-confidence' &&
       decision.operation === 'READ_PAGE' &&
       readOperation?.toolName === 'read_current_page' &&
+      !this.isDuplicateRead() &&
       this.state.jevLoop.readFallbackKey !== fallbackKey
     ) {
       // A failed read classification is safe to resolve by reading. Do not spend
@@ -583,6 +620,11 @@ export class JevFastController {
       return { kind: 'skipped', reason: 'action-loop', latencyMs };
     }
 
+    if (action.operation === 'READ_PAGE' && this.isDuplicateRead()) {
+      this.appendBlocked(iter, 'duplicate-read', '同一页面 15 秒内已读过，跳过重复读取');
+      await persist({ phase: 'jev_decision' }).catch(() => {});
+      return { kind: 'skipped', reason: 'duplicate-read', latencyMs };
+    }
     if (action.operation === 'WAIT') {
       await sleep(100);
       const failuresBeforeWaitObservation = this.state.failedToolNames.length;
@@ -671,6 +713,7 @@ export class JevFastController {
       await persist({ phase: 'jev_decision' }).catch(() => {});
       return { kind: 'skipped', reason: 'tool-failure-limit', latencyMs };
     }
+    if (action.operation === 'READ_PAGE') this.noteReadPage();
     this.noteActionKey(cycleKey);
     return {
       kind: 'act',
@@ -1309,6 +1352,9 @@ private handoffExplanation(reason: string): string {
   if (reason === 'edge-action-loop' || reason === 'action-loop') {
     return '两个动作在来回切换（A→B→A→B），继续执行不会推进目标';
   }
+  if (reason === 'duplicate-read' || reason === 'edge-duplicate-read') {
+    return '同一页面刚读过，重复读取不会带来新信息';
+  }
   if (reason === 'edge-low-confidence') return '候选动作的置信度不足，快路径主动让位';
   if (reason === 'edge-invalid-answer') return '决策服务返回了无效选项，快路径不冒险';
   if (reason === 'edge-unbound-slots') return '当前指令缺少该动作需要的显式参数值';
@@ -1477,9 +1523,21 @@ private async tryDelegatedAction(
   ): void {
     const key = this.currentRouteKey();
     const hint = HINT_AWARE_REASONS.has(reason) ? this.firstHintLabel() : '';
+    // 观察摘要：慢模型拿到这一份就不必再拍一次同页快照（RF-AJJTSW 里每轮都重拍）。
+    const snap: any = this.state.ctx.lastSnapshot;
+    const elementCount = Array.isArray(snap?.elements) ? snap.elements.length : 0;
+    const digest = snap
+      ? '观察：' +
+        String(snap.url || this.state.ctx.pageUrl || '') +
+        ' · fp ' +
+        String(snap.fingerprint || '').slice(0, 8) +
+        ' · 可交互 ' +
+        elementCount
+      : '';
     const fullDetail = [
       detail,
       hint ? '页面提示「' + hint + '」是前置条件，不是可点击按钮' : '',
+      digest,
     ].filter(Boolean).join('；');
     this.lastAttempt = {
       key,

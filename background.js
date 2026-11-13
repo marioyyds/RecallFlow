@@ -13204,7 +13204,13 @@ var READ_ONLY_EXTRA = /* @__PURE__ */ new Set([
   "fetch_webpage",
   "knowledge_read",
   "web_search",
-  "take_screenshot"
+  "take_screenshot",
+  // 记账类工具不碰页面，却会被误判成“页面可能变了”，把闸门重新打开：
+  // 2026-11-12 的轨迹里 update_plan / expand_result 每次都让快路白试一次。
+  "expand_result",
+  "update_plan",
+  "complete_task",
+  "get_attribute"
 ]);
 function isReadOnlyTool(name) {
   const text2 = String(name || "");
@@ -15150,6 +15156,8 @@ var JevFastController = class {
   lastAttempt = null;
   lastHintLabel = "";
   lastNoProgress = null;
+  /** 同一页面（URL + fingerprint）最近一次读取，用于抑制重复 READ_PAGE。 */
+  lastReadPage = null;
   lastEdgeFallbackRoute = "";
   // 最近执行过的动作键（edge id 或 operation+目标）。用于识别 A→B→A→B 的来回切换。
   recentActions = [];
@@ -15283,6 +15291,26 @@ var JevFastController = class {
     }
     return this.lastHintLabel;
   }
+  /**
+   * 同一页面（URL + fingerprint）在 15 秒内已经读过：READ_PAGE 与只读回退都跳过，
+   * 避免“快路读一次、慢模型又读一次”的重复（RF-AJJTSW 轨迹）。
+   */
+  isDuplicateRead() {
+    const last = this.lastReadPage;
+    if (!last) return false;
+    const snap = this.state.ctx.lastSnapshot;
+    const url = String(snap?.url || this.state.ctx.pageUrl || "");
+    const fingerprint = String(snap?.fingerprint || "");
+    return last.url === url && last.fingerprint === fingerprint && Date.now() - last.at < 15e3;
+  }
+  noteReadPage() {
+    const snap = this.state.ctx.lastSnapshot;
+    this.lastReadPage = {
+      url: String(snap?.url || this.state.ctx.pageUrl || ""),
+      fingerprint: String(snap?.fingerprint || ""),
+      at: Date.now()
+    };
+  }
   hasDelegatedNextAction() {
     const plan = Array.isArray(this.state.ctx.plan) ? this.state.ctx.plan : [];
     const step = plan.find((item) => item && item.status === "in_progress") || plan[0];
@@ -15309,6 +15337,17 @@ var JevFastController = class {
       String(this.state.ctx.pageUrl || ""),
       String(this.state.ctx.lastSnapshot?.fingerprint || "")
     ].join("|");
+  }
+  /**
+   * 协调器专用：这一轮是否值得起快路。与 runAvailable 的前置检查同源，
+   * 供唯一调度者（coordinator）决定“自动快路 vs 直接慢思考”。
+   */
+  autoFastEligibility() {
+    if (!this.canAttempt()) return { ok: false, reason: "not-due" };
+    if (this.routeCooldownActive()) return { ok: false, reason: "route-cooldown" };
+    const gate = this.attemptGateReason();
+    if (gate) return { ok: false, reason: gate };
+    return { ok: true, reason: "ready" };
   }
   async runAvailable(iter, persist) {
     if (!this.canAttempt()) return { kind: "skipped", reason: "not-due" };
@@ -15416,7 +15455,7 @@ var JevFastController = class {
     let readFallback = false;
     const readOperation = bundle.operations.READ_PAGE;
     const fallbackKey = Math.max(0, Math.floor(Number(this.state.ctx.planVersion) || 0)) + "|" + String(this.state.ctx.pageUrl || "");
-    if (decision.kind === "blocked" && decision.reason === "low-confidence" && decision.operation === "READ_PAGE" && readOperation?.toolName === "read_current_page" && this.state.jevLoop.readFallbackKey !== fallbackKey) {
+    if (decision.kind === "blocked" && decision.reason === "low-confidence" && decision.operation === "READ_PAGE" && readOperation?.toolName === "read_current_page" && !this.isDuplicateRead() && this.state.jevLoop.readFallbackKey !== fallbackKey) {
       decision = {
         kind: "act",
         operation: "READ_PAGE",
@@ -15522,6 +15561,12 @@ var JevFastController = class {
       });
       return { kind: "skipped", reason: "action-loop", latencyMs };
     }
+    if (action.operation === "READ_PAGE" && this.isDuplicateRead()) {
+      this.appendBlocked(iter, "duplicate-read", "\u540C\u4E00\u9875\u9762 15 \u79D2\u5185\u5DF2\u8BFB\u8FC7\uFF0C\u8DF3\u8FC7\u91CD\u590D\u8BFB\u53D6");
+      await persist({ phase: "jev_decision" }).catch(() => {
+      });
+      return { kind: "skipped", reason: "duplicate-read", latencyMs };
+    }
     if (action.operation === "WAIT") {
       await sleep2(100);
       const failuresBeforeWaitObservation = this.state.failedToolNames.length;
@@ -15596,6 +15641,7 @@ var JevFastController = class {
       });
       return { kind: "skipped", reason: "tool-failure-limit", latencyMs };
     }
+    if (action.operation === "READ_PAGE") this.noteReadPage();
     this.noteActionKey(cycleKey);
     return {
       kind: "act",
@@ -16127,6 +16173,9 @@ var JevFastController = class {
     if (reason === "edge-action-loop" || reason === "action-loop") {
       return "\u4E24\u4E2A\u52A8\u4F5C\u5728\u6765\u56DE\u5207\u6362\uFF08A\u2192B\u2192A\u2192B\uFF09\uFF0C\u7EE7\u7EED\u6267\u884C\u4E0D\u4F1A\u63A8\u8FDB\u76EE\u6807";
     }
+    if (reason === "duplicate-read" || reason === "edge-duplicate-read") {
+      return "\u540C\u4E00\u9875\u9762\u521A\u8BFB\u8FC7\uFF0C\u91CD\u590D\u8BFB\u53D6\u4E0D\u4F1A\u5E26\u6765\u65B0\u4FE1\u606F";
+    }
     if (reason === "edge-low-confidence") return "\u5019\u9009\u52A8\u4F5C\u7684\u7F6E\u4FE1\u5EA6\u4E0D\u8DB3\uFF0C\u5FEB\u8DEF\u5F84\u4E3B\u52A8\u8BA9\u4F4D";
     if (reason === "edge-invalid-answer") return "\u51B3\u7B56\u670D\u52A1\u8FD4\u56DE\u4E86\u65E0\u6548\u9009\u9879\uFF0C\u5FEB\u8DEF\u5F84\u4E0D\u5192\u9669";
     if (reason === "edge-unbound-slots") return "\u5F53\u524D\u6307\u4EE4\u7F3A\u5C11\u8BE5\u52A8\u4F5C\u9700\u8981\u7684\u663E\u5F0F\u53C2\u6570\u503C";
@@ -16276,9 +16325,13 @@ var JevFastController = class {
   appendBlocked(iter, reason, detail = "") {
     const key = this.currentRouteKey();
     const hint = HINT_AWARE_REASONS.has(reason) ? this.firstHintLabel() : "";
+    const snap = this.state.ctx.lastSnapshot;
+    const elementCount = Array.isArray(snap?.elements) ? snap.elements.length : 0;
+    const digest = snap ? "\u89C2\u5BDF\uFF1A" + String(snap.url || this.state.ctx.pageUrl || "") + " \xB7 fp " + String(snap.fingerprint || "").slice(0, 8) + " \xB7 \u53EF\u4EA4\u4E92 " + elementCount : "";
     const fullDetail = [
       detail,
-      hint ? "\u9875\u9762\u63D0\u793A\u300C" + hint + "\u300D\u662F\u524D\u7F6E\u6761\u4EF6\uFF0C\u4E0D\u662F\u53EF\u70B9\u51FB\u6309\u94AE" : ""
+      hint ? "\u9875\u9762\u63D0\u793A\u300C" + hint + "\u300D\u662F\u524D\u7F6E\u6761\u4EF6\uFF0C\u4E0D\u662F\u53EF\u70B9\u51FB\u6309\u94AE" : "",
+      digest
     ].filter(Boolean).join("\uFF1B");
     this.lastAttempt = {
       key,
@@ -16350,6 +16403,15 @@ var JevFastController = class {
     });
   }
 };
+
+// lib/application/agent/coordinator.ts
+function decideAutoFast(input) {
+  const step = activePlanStep(input.plan);
+  if (step && Array.isArray(step.allowedOperations) && step.allowedOperations.length === 0) {
+    return { ok: false, reason: "plan-slow-only" };
+  }
+  return input.eligibility();
+}
 
 // lib/application/agent/agent-loop.ts
 var CONTEXT_COLLAPSE_TOKENS = CONTEXT_TUNING.collapseTokens;
@@ -16470,7 +16532,19 @@ async function runAgentLoop(port, payload, settings, book, signal, tabId, observ
       nextIteration: iter
     }).catch(() => {
     });
-    const jevOutcome = await jevFast.runAvailable(iter, persist);
+    const autoFast = decideAutoFast({
+      plan: state2.ctx.plan,
+      eligibility: () => jevFast.autoFastEligibility()
+    });
+    if (!autoFast.ok) {
+      state2.trace({
+        phase: "coordinator",
+        iter,
+        actor: "slow",
+        reason: autoFast.reason
+      });
+    }
+    const jevOutcome = autoFast.ok ? await jevFast.runAvailable(iter, persist) : { kind: "skipped", reason: autoFast.reason };
     if (jevOutcome.kind === "cancelled") {
       await finalizer.cancelled(jevOutcome.reason, "interrupted");
       return;
