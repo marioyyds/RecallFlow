@@ -188,7 +188,9 @@ export const ENTRIES = [
   // Raise to 638KB.
   // 2026-11-13: plan verify schema + 快执行 labels measured 654624 bytes.
   // Raise to 640KB.
-  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 640 * 1024 },
+  // 2026-11-13: tab-churn guidance in tool descriptions measured 656321 bytes.
+  // Raise to 642KB.
+  { src: 'entries/options.ts', out: 'options.js', format: 'esm', budget: 642 * 1024 },
   // 58 KB：manager 与 popup 共用 KnowledgeRepository（缓存、串行写入、外部变更订阅）。
   // 共享状态边界增加了约 3.5 KB 自包含产物；未引入新依赖。
   { src: 'entries/manager.ts', out: 'manager.js', format: 'esm', budget: 58 * 1024 },
@@ -223,7 +225,9 @@ export const ENTRIES = [
   // Same day: semantic risk + delegation hint measured 568673 bytes. Raise to 556KB.
   // Same day: skill plan templates measured 571464 bytes. Raise to 559KB.
   // 2026-11-13: plan verify schema measured 573429 bytes. Raise to 561KB.
-  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 561 * 1024 },
+  // 2026-11-13: tab-churn guidance + Enter hint measured 575126 bytes.
+  // Raise to 563KB.
+  { src: 'entries/skills-page.ts', out: 'skills-page.js', format: 'esm', budget: 563 * 1024 },
   { src: 'entries/userscripts.ts', out: 'userscripts.js', format: 'esm', budget: 27 * 1024 },
   // 两个产物不在仓库根的：`lib/userscript/manager.js:237` 与 `module-references`
   // 的豁免清单都按这两个字面路径找它们。

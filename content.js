@@ -2877,6 +2877,11 @@
   function normalizeEditableText(value) {
     return String(value === void 0 || value === null ? "" : value).replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ").replace(/\u200b/g, "").replace(/\n+$/g, "");
   }
+  function editableTextOnlyWhitespaceDiffers(expected, actual) {
+    const a = normalizeEditableText(expected).replace(/\s+/g, "");
+    const b = normalizeEditableText(actual).replace(/\s+/g, "");
+    return a === b;
+  }
   function firstEditableDifference(expected, actual) {
     const a = normalizeEditableText(expected);
     const b = normalizeEditableText(actual);
@@ -3176,13 +3181,15 @@
     await nextPaint();
     const after = editableValue(el) || "";
     const summary = editableTextSummary(next, after);
-    const matched = summary.matchesIntent;
+    const whitespaceOnly = !summary.matchesIntent && editableTextOnlyWhitespaceDiffers(next, after);
+    const matched = summary.matchesIntent || whitespaceOnly;
     const clip = (s) => JSON.stringify(String(s).slice(0, 80));
     const result = {
       ok: matched,
       changed: before !== next,
       alreadySatisfied: before === next,
       valuePresent: Boolean(next),
+      whitespaceOnly,
       valueBefore: before,
       valueAfter: after,
       matchesIntent: matched,
@@ -3192,7 +3199,7 @@
       actualLength: summary.actualLength,
       firstDifference: summary.firstDifference,
       selector: elementSelector(el),
-      result: matched ? (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u5B9E\u9645\u503C\uFF08" + summary.actualLength + " \u5B57\u7B26\uFF09\uFF1A" + clip(after) : "\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08strategy=" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + summary.actualLength + " \u5B57\u7B26\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index + "\u3002\u5B9E\u9645\u503C\uFF1A" + clip(after) + "\u3002\u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26 \u2014\u2014 \u9884\u671F\u4E3A " + clip(next) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u8BFB\u7F16\u8F91\u5668\u6216\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u3002"
+      result: matched ? (params.clearFirst === true ? "\u5DF2\u6E05\u7A7A\u5E76\u8F93\u5165 " : "\u5DF2\u8F93\u5165 ") + text.length + " \u4E2A\u5B57\u7B26\uFF1B\u5B9E\u9645\u503C\uFF08" + summary.actualLength + " \u5B57\u7B26\uFF09\uFF1A" + clip(after) + (whitespaceOnly ? "\uFF08\u5185\u5BB9\u4E00\u81F4\uFF0C\u4EC5\u6362\u884C/\u7A7A\u767D\u88AB\u7F16\u8F91\u5668\u5F52\u4E00\u5316\uFF09" : "") : "\u8F93\u5165\u672A\u8FBE\u5230\u9884\u671F\uFF08strategy=" + strategy + "\uFF09\uFF1A\u9884\u671F " + summary.expectedLength + " \u5B57\u7B26\uFF0C\u5B9E\u9645 " + summary.actualLength + " \u5B57\u7B26\uFF0C\u9996\u4E2A\u5DEE\u5F02\u5728 " + summary.firstDifference.index + "\u3002\u5B9E\u9645\u503C\uFF1A" + clip(after) + "\u3002\u26A0 \u4E0E\u9884\u671F\u4E0D\u7B26 \u2014\u2014 \u9884\u671F\u4E3A " + clip(next) + "\u3002\u4E0D\u8981\u5047\u8BBE\u5DF2\u5199\u5165\uFF0C\u8BF7\u91CD\u8BFB\u7F16\u8F91\u5668\u6216\u6539\u7528\u7C98\u8D34/\u7F16\u8F91\u5668\u4E13\u7528\u5199\u5165\u3002"
     };
     return result;
   }

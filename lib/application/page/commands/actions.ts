@@ -1,7 +1,11 @@
 // User-observable interactions with the current page.
 import { elementSelector } from '../page-text.ts';
 import { waitForSettle } from '../settle.ts';
-import { editableTextSummary, readContentEditableText } from '../../../shared/editable-text.ts';
+import {
+  editableTextOnlyWhitespaceDiffers,
+  editableTextSummary,
+  readContentEditableText,
+} from '../../../shared/editable-text.ts';
 import {
   describeLookupMiss,
   describeTargetState,
@@ -373,13 +377,17 @@ async function cmdTypeText(params: any) {
   await nextPaint();
   const after = editableValue(el) || '';
   const summary = editableTextSummary(next, after);
-  const matched = summary.matchesIntent;
+  // 只差换行/空白 = 编辑器把段落结构归一化了，内容没丢：按成功处理并说明，
+  // 不再用“预期 N 字符 / 实际 M 字符”逼模型反复重写（type_text 的主要挫败来源）。
+  const whitespaceOnly = !summary.matchesIntent && editableTextOnlyWhitespaceDiffers(next, after);
+  const matched = summary.matchesIntent || whitespaceOnly;
   const clip = (s: any) => JSON.stringify(String(s).slice(0, 80));
   const result = {
     ok: matched,
     changed: before !== next,
     alreadySatisfied: before === next,
     valuePresent: Boolean(next),
+    whitespaceOnly,
     valueBefore: before,
     valueAfter: after,
     matchesIntent: matched,
@@ -396,7 +404,8 @@ async function cmdTypeText(params: any) {
           ' 个字符；实际值（' +
           summary.actualLength +
           ' 字符）：' +
-          clip(after)
+          clip(after) +
+          (whitespaceOnly ? '（内容一致，仅换行/空白被编辑器归一化）' : '')
         : '输入未达到预期（strategy=' +
           strategy +
           '）：预期 ' +

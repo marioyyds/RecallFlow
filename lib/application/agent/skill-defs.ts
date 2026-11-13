@@ -327,6 +327,8 @@ export const SKILL_REGISTRY = Object.freeze([
       '## 原则\n' +
       '- 一次只做一步可验证的操作，避免长链未校验；\n' +
       '- 写入类操作（填表、提交）遵循审批策略，必要时先征得用户确认；\n' +
+      '- 文本输入后用 `press_key` 发送 Enter 提交，别再找搜索按钮；\n' +
+      '- 列表/筛选优先在当前页改查询参数，不要在同一个站点连开标签页（最多 2 个）；\n' +
       '- 截图/读取仅用于理解页面，不泄露敏感信息。',
   },
   {
@@ -347,7 +349,7 @@ export const SKILL_REGISTRY = Object.freeze([
       '## 步骤（顺序有理由，不要跳）\n' +
       '1. `get_page_snapshot` 看页面，找到搜索输入框与提交按钮；\n' +
       '2. `type_text` 填查询词 —— **`value` 是要输入的内容、`text` 是定位用的文本片段**，两者语义不同，别混用；\n' +
-      '3. `click_element` 点搜索按钮；\n' +
+      '3. 提交：优先 `press_key` 发送 Enter（搜索框已聚焦时最稳），只有 Enter 无效时才 `click_element` 点搜索按钮；\n' +
       '4. **等结果渲染出来**再读 —— 用 `wait_for_element({ selector, state: "visible" })` 等**结果条目**出现\n' +
       '   （别等容器：容器一开始就在，等它等于没等），然后 `inspect_element({op:"text"})` 取**结果列表容器**的文本，\n' +
       '   不要把整页倒回来；\n' +
@@ -361,11 +363,13 @@ export const SKILL_REGISTRY = Object.freeze([
       '  而不是先断言"页面上没有这个输入框"。\n' +
       '- **广告条目和真实结果要分开判断。** 检索阶段先把带 "广告/推广/赞助" 标记的条目照原样取回，\n' +
       '  不要悄悄丢掉 —— 丢不丢是用户的选择，不是检索这一层的决定。\n' +
-      '- **别把整页文本丢给自己当"结果"。** 结构化字段（标题/价格）才是可核对的交付物。',
+      '- **别把整页文本丢给自己当"结果"。** 结构化字段（标题/价格）才是可核对的交付物。\n' +
+      '- **排序/筛选不要开新页。** 需要“最新/最热/≤2B”等条件时，优先在当前页改 URL 查询参数（`sort=`、`num_parameters=` 等）\n' +
+      '  或用页面筛选控件；连开多个同站点标签页只会撞上切换上限，也比直接读 API 慢。',
     x: {
       intents: ['browser_task'],
       keywords: ['站内搜|站内检索|搜一下|搜索|检索', '结果|列表|条目|前几条'],
-      tools: ['get_page_snapshot', 'type_text', 'click_element', 'wait_for_element', 'inspect_element', 'complete_task'],
+      tools: ['get_page_snapshot', 'type_text', 'press_key', 'click_element', 'wait_for_element', 'inspect_element', 'complete_task'],
       // 快路只做页内机械动作；查询词必须由慢思考写（值只能来自当前指令）。
       fastActions: ['CLICK', 'SCROLL_DOWN', 'WAIT'],
       slowActions: ['type_text'],

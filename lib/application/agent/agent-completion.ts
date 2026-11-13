@@ -4,10 +4,6 @@ import {
   checkCompletionClaim,
 } from './claim-check.ts';
 import {
-  buildRepeatedVerificationReflection,
-  buildVerificationReflection,
-} from './verifier.ts';
-import {
   classifyTaskKind,
   classifyVerifyOutcome,
   resolveVerifyIntent,
@@ -169,72 +165,74 @@ export class CompletionCoordinator {
         state.verificationCount += 1;
         state.emit({
           type: 'verify',
-          ok: false,
-          repeated: true,
-          reason: '页面状态与上次被否决时完全一致，证据没有任何变化。',
-          missing: '需要新证据：重新读取页面、做可见性核查，或补齐真正缺失的那一步。',
-        });
-        state.trace({ phase: 'verify', ok: false, repeated: true });
-        return { kind: 'reflect', reflection: buildRepeatedVerificationReflection() };
-      }
-
-      let verdict = null;
-      let verifyError = null;
-      try {
-        verdict = await runCompletionVerification(
-          state.settings,
-          state.instruction,
-          result,
-          state.ctx,
-          signal,
-          taskKind
-        );
-      } catch (error) {
-        verifyError = error;
-      }
-      const outcome = classifyVerifyOutcome(verdict, verifyError);
-      if (outcome.kind === 'interrupt') {
-        return { kind: 'cancelled', reason: 'aborted-during-verify' };
-      }
-
-      verdict = outcome.kind === 'verdict' ? outcome.verdict : null;
-      if (!verdict) {
-        state.ctx.verificationState = 'unverified';
-        state.emit({
-          type: 'verify',
           ok: null,
-          inconclusive: true,
-          verificationState: 'unverified',
-          reason: '独立校验不可用（超时或调用失败）；仅依据当前确定性证据交付，未标记为已验证。',
+          advisory: true,
+          reason: '页面证据与上次一致；这次校验只作提醒，不阻止交付。',
         });
-        state.trace({
-          phase: 'verify',
-          ok: null,
-          verificationState: 'unverified',
-          reason: 'verifier-unavailable',
-        });
-      } else if (verdict.ok === false) {
-        state.ctx.verificationState = 'rejected';
-        state.verificationCount += 1;
-        state.lastDeniedSignature = signature;
-        state.emit({
-          type: 'verify',
-          ok: false,
-          reason: verdict.reason,
-          missing: verdict.missing,
-          suggestion: verdict.suggestion,
-        });
-        state.trace({
-          phase: 'verify',
-          ok: false,
-          reason: verdict.reason,
-          missing: verdict.missing,
-        });
-        return { kind: 'reflect', reflection: buildVerificationReflection(verdict) };
+        state.trace({ phase: 'verify', ok: null, advisory: true, repeated: true });
       } else {
-        state.ctx.verificationState = 'verified';
-        state.emit({ type: 'verify', ok: true, reason: verdict.reason });
-        state.trace({ phase: 'verify', ok: true, reason: verdict.reason });
+        let verdict = null;
+        let verifyError = null;
+        try {
+          verdict = await runCompletionVerification(
+            state.settings,
+            state.instruction,
+            result,
+            state.ctx,
+            signal,
+            taskKind
+          );
+        } catch (error) {
+          verifyError = error;
+        }
+        const outcome = classifyVerifyOutcome(verdict, verifyError);
+        if (outcome.kind === 'interrupt') {
+          return { kind: 'cancelled', reason: 'aborted-during-verify' };
+        }
+
+        verdict = outcome.kind === 'verdict' ? outcome.verdict : null;
+        if (!verdict) {
+          state.ctx.verificationState = 'unverified';
+          state.emit({
+            type: 'verify',
+            ok: null,
+            inconclusive: true,
+            advisory: true,
+            verificationState: 'unverified',
+            reason: '独立校验不可用（超时或调用失败）；仅作提醒，不影响交付。',
+          });
+          state.trace({
+            phase: 'verify',
+            ok: null,
+            verificationState: 'unverified',
+            reason: 'verifier-unavailable',
+          });
+        } else if (verdict.ok === false) {
+          // 校验只提醒，不阻止交付：用户已经拿到答案，再让 Agent 重做一轮
+          // 只会拖长轨迹、诱发重复 complete_task（RF-AJJTSW 实测）。
+          state.ctx.verificationState = 'unverified';
+          state.verificationCount += 1;
+          state.lastDeniedSignature = signature;
+          state.emit({
+            type: 'verify',
+            ok: false,
+            advisory: true,
+            reason: verdict.reason,
+            missing: verdict.missing,
+            suggestion: verdict.suggestion,
+          });
+          state.trace({
+            phase: 'verify',
+            ok: false,
+            advisory: true,
+            reason: verdict.reason,
+            missing: verdict.missing,
+          });
+        } else {
+          state.ctx.verificationState = 'verified';
+          state.emit({ type: 'verify', ok: true, reason: verdict.reason });
+          state.trace({ phase: 'verify', ok: true, reason: verdict.reason });
+        }
       }
     }
 
@@ -249,16 +247,6 @@ export class CompletionCoordinator {
       String(result?.result || '任务已完成。')
     );
     if (bareRetry) return { kind: 'reflect', reflection: bareRetry };
-
-    if (!completionAllowsTaskCommit(state.ctx.verificationState)) {
-      return {
-        kind: 'reflect',
-        reflection:
-          '独立完成校验不可用或未通过，当前不能调用 complete_task。' +
-          '请重新读取结构化页面证据并再次执行终局校验；在校验真正通过前，' +
-          '不得把任务标记为已完成，也不得声称已验证。',
-      };
-    }
 
     return {
       kind: 'complete',

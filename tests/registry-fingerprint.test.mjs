@@ -251,7 +251,11 @@ test('工具注册表指纹稳定（搬运式重构不得改变对外契约）',
   //                       对象（urlChanged/fingerprintChanged/minElementDelta/
   //                       textIncludes），给快路动作一个确定性校验契约。
   //                       工具数量、权限、风险均不变。
-  const EXPECTED = '50506b58dff27d60';
+  //   8d440b62229a36ad — **有意改动**：open_tab / switch_tab 的描述加入
+  //                       “同一站点最多 2 个标签页；列表/筛选优先当前页查询参数
+  //                       或 fetch_webpage”，抑制连开标签页的探索策略。
+  //                       工具数量、权限、参数均不变。
+  const EXPECTED = '8d440b62229a36ad';
   assert.equal(
     fp,
     EXPECTED,

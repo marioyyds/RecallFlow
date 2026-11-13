@@ -509,7 +509,8 @@ export const TOOL_SCHEMAS = [
       name: 'switch_tab',
       description:
         '切换当前 Agent 后续操作要控制的标签页。优先在当前页完成；只有缺数据时才切换。' +
-        '不要为验证/对比反复 A→B→A；切换到当前已绑定页是 no-op，达到本任务上限后会被拒绝。',
+        '不要为验证/对比反复 A→B→A；同一站点最多保留 2 个标签页，超出后改在当前页筛选或用 fetch_webpage。' +
+        '切换到当前已绑定页是 no-op，达到本任务上限后会被拒绝。',
       parameters: {
         type: 'object',
         properties: {
@@ -525,7 +526,8 @@ export const TOOL_SCHEMAS = [
       name: 'open_tab',
       description:
         '打开一个 URL 并自动把后续 DOM 操作绑定到该标签页。默认复用已打开的同 URL 标签页，' +
-        '已在前台的复用页不会再次激活。优先留在当前页；不要为验证/对比反复开页或来回切换，' +
+        '已在前台的复用页不会再次激活。优先留在当前页；同一站点最多保留 2 个标签页。' +
+        '列表/筛选类数据优先在当前页改查询参数或用 fetch_webpage，不要为比较排序连开新页。' +
         '只有 newTab=true 时才强制新建。',
       parameters: {
         type: 'object',

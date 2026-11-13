@@ -196,7 +196,11 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
     await delay(60);
     let actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
     let summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
-    let verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
+    let verified =
+      actualValue !== null &&
+      actualValue !== undefined &&
+      (summary.matchesIntent ||
+        editableTextOnlyWhitespaceDiffers(expected, actualValue));
     // 段落结构建不起来（编辑器把换行归一化掉）时，用一次真实 paste 让编辑器按自己的
     // input rule 重建段落，再回读确认。
     // ⚠ 必须先清空再 paste：编辑器的 paste 处理会追加到光标处（CSDN 实测 2993 → 5992，
@@ -224,15 +228,19 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
         await delay(80);
         actualValue = await readEditableValue(deps, deps.ctx.tabId, target.selector, isSubframe, typeFrame as number);
         summary = editableTextSummary(expected, actualValue == null ? '' : actualValue);
-        verified = actualValue !== null && actualValue !== undefined && summary.matchesIntent;
+        verified =
+          actualValue !== null &&
+          actualValue !== undefined &&
+          (summary.matchesIntent ||
+            editableTextOnlyWhitespaceDiffers(expected, actualValue));
       }
     }
     if (verified) deps.rememberTarget(deps.ctx, target);
     // 差异定性：只差空白/换行 ≠ 内容丢失。Markdown 里换行就是结构（标题、代码块、
     // 表格），所以**不能**把它判成成功，但必须把原因说清楚，否则模型会一直重写。
     const whitespaceOnly =
-      !verified &&
       actualValue != null &&
+      !summary.matchesIntent &&
       editableTextOnlyWhitespaceDiffers(expected, actualValue);
     const before = deps.ctx.lastSnapshot || null;
     const after = await deps.getPageSnapshot(deps.ctx.tabId, { maxElements: 40, maxText: 1000, frameId: isSubframe ? (typeFrame as number) : undefined }).catch(() => null);
@@ -251,7 +259,9 @@ export async function typeText(deps: PageInputDeps, args: Record<string, unknown
       verification: deps.buildActionVerification(
         deps.observedChange(before, after),
         verified
-          ? '已用 CDP 可信输入，并回读确认'
+          ? whitespaceOnly
+            ? 'CDP 已输入；内容一致（编辑器归一化了换行/空白）'
+            : '已用 CDP 可信输入，并回读确认'
           : whitespaceOnly
             ? 'CDP 已输入，回读只差换行/空白（编辑器归一化了段落结构）'
             : 'CDP 已输入，但回读值与预期不一致'

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeEditableText,
   editableTextMatches,
+  editableTextOnlyWhitespaceDiffers,
   firstEditableDifference,
   editableTextSummary,
   readContentEditableText,
@@ -40,6 +41,17 @@ test('editableTextSummary：长度按归一化后的文本计算', () => {
   assert.equal(s.matchesIntent, true);
   assert.equal(s.expectedLength, 3);
   assert.equal(s.actualLength, 3);
+});
+
+test('只差换行/空白：内容一致，不应判输入失败', () => {
+  const expected = '# 标题\n\n正文第一段\n\n正文第二段';
+  const actual = '# 标题\n正文第一段\n正文第二段';
+  assert.equal(editableTextSummary(expected, actual).matchesIntent, false);
+  assert.equal(editableTextOnlyWhitespaceDiffers(expected, actual), true);
+});
+
+test('内容被截断：不能当作一致', () => {
+  assert.equal(editableTextOnlyWhitespaceDiffers('完整的正文内容', '完整的正文'), false);
 });
 
 test('readContentEditableText：块级段落只贡献一个逻辑换行', () => {
