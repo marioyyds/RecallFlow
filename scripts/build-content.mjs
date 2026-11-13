@@ -116,7 +116,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // Follow-page blank-panel fix (keep the last known partial answer visible when the
 // follow layer is torn down, patient adopt polling, persistence skips the local
 // fallback message) measured 547236 bytes. Raise explicitly to 535KB; in-repo only.
-export const SIZE_BUDGET_BYTES = 535 * 1024;
+// Follow-loop fix (settledRunId: a finished run is followed exactly once; teardown
+// renders through the content signature instead of forcing) plus the same adaptive
+// paint throttle on the follower path measured 549655 bytes. Raise to 537KB.
+export const SIZE_BUDGET_BYTES = 537 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

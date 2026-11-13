@@ -31,6 +31,9 @@ import {
 const STREAM_INSTRUCTION = '验证流式上滚';
 const SAMPLE_MS = 30;
 const BLANK_BUDGET_MS = 400;
+// 一次 ~10 秒的流式场景里，整段正文重建正常情况下只有个位数（开面板、会话落地、
+// 截图重绘）。实测缺陷是 19 秒 58 次 —— 这个上限就是那条"自激活循环"的红线。
+const REBUILD_BUDGET = 8;
 
 let context;
 
@@ -71,6 +74,19 @@ async function installProbe(page) {
         samples.push({ t: Math.round(performance.now() - t0), gone: true });
         return;
       }
+      // ---- 重建计数：整段正文重建会换掉所有节点 ----
+      // 实测缺陷（导出记录里 19 秒 58 次 follow-committed）就是整段 innerHTML 反复重画：
+      // 1 万多像素的对话每次都要全量重排 ⇒ 用户感受到的是「卡顿 / 白屏」。
+      // 用一个哨兵属性判断"树是不是被换掉了"，比事后看日志更直接。
+      let rebuilds = Number(window.__rfRebuilds) || 0;
+      const marked = body.querySelector('[data-rf-probe-mark="1"]');
+      if (!marked) {
+        if (window.__rfProbeStartsWithMark === true) rebuilds += 1;
+        window.__rfRebuilds = rebuilds;
+        window.__rfProbeStartsWithMark = true;
+        const first = body.firstElementChild;
+        if (first) first.setAttribute('data-rf-probe-mark', '1');
+      }
       const bodyRect = body.getBoundingClientRect();
       // 用户能看见的"字"不只是正文段落：思考记录的折叠条、工具步骤条同样是内容。
       // 只数 .agent-content 会把"思考阶段只有折叠条"误判成白屏（实测踩到）。
@@ -99,6 +115,7 @@ async function installProbe(page) {
         flows: flows.length,
         contentEls: contents.length,
         lastText: last ? String(last.textContent || '').trim().length : -1,
+        rebuilds,
         bodyH: Math.round(bodyRect.height),
         scrollTop: Math.round(body.scrollTop),
         scrollH: body.scrollHeight,
@@ -182,6 +199,7 @@ function analyze(samples) {
     else closeRun('hiddenAnswer', s);
   }
   const last = samples[samples.length - 1] || null;
+  const rebuilds = samples.reduce((max, s) => (Number.isFinite(s.rebuilds) ? Math.max(max, s.rebuilds) : max), 0);
   for (const kind of Object.keys(open)) {
     if (open[kind] !== null && last) runs[kind].push({ from: open[kind], to: last });
   }
@@ -189,6 +207,7 @@ function analyze(samples) {
     list.reduce((max, w) => Math.max(max, w.to.t - w.from.t), 0);
   return {
     count: samples.length,
+    rebuilds,
     longestBlankMs: longest(runs.blank),
     longestBodyZeroMs: longest(runs.bodyZero),
     longestHiddenAnswerMs: longest(runs.hiddenAnswer),
@@ -233,7 +252,7 @@ function report(label, samples, warnings) {
     prevCount = s.aiBlocks.length;
   }
   const lines = [
-    `[blank-panel] ${label}: 采样 ${a.count} 次`,
+    `[blank-panel] ${label}: 采样 ${a.count} 次，整段重建 ${a.rebuilds} 次`,
     `  最长"看不见任何正文": ${a.longestBlankMs}ms`,
     `  最长"正文容器完全为空": ${a.longestBodyZeroMs}ms`,
     `  最长"有正文但不在可视区": ${a.longestHiddenAnswerMs}ms`,
@@ -419,6 +438,7 @@ test('⑧ 另一个标签页跟随（面板在跟随页里看别人跑）', asyn
   const a = report('⑧ 另一标签页跟随', samples, warnings);
   console.log('[blank-panel] ⑧ 结构: ' + JSON.stringify(await dumpStructure(follower)));
   expect(a.longestBlankMs, '跟随页不该长时间白屏').toBeLessThanOrEqual(BLANK_BUDGET_MS);
+  expect(a.rebuilds, '跟随页不该反复整段重建（卡顿/白屏的来源）').toBeLessThanOrEqual(REBUILD_BUDGET);
   expect(a.last.visibleChars, '跟随页在收尾后必须还看得见正文').toBeGreaterThan(0);
   await follower.close();
   await owner.close();
@@ -453,6 +473,7 @@ test('⑨ 运行中才打开的标签页（跟随页中途加入，对应 open_t
   const a = report('⑨ 中途加入的跟随页', samples, warnings);
   console.log('[blank-panel] ⑨ 结构: ' + JSON.stringify(await dumpStructure(follower)));
   expect(a.longestBlankMs, '中途加入的跟随页不该白屏').toBeLessThanOrEqual(BLANK_BUDGET_MS);
+  expect(a.rebuilds, '中途加入的跟随页不该反复整段重建').toBeLessThanOrEqual(REBUILD_BUDGET);
   expect(a.last.visibleChars, '跟随页收尾后必须还看得见回答').toBeGreaterThan(0);
   await follower.close();
   await owner.close();

@@ -2273,7 +2273,12 @@ function followedRunCommitted() {
     }
   }
   if (userIndex < 0) return false;
-  return panelSessionState.conversation.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant' && !m.live);
+  // ⚠ 必须有**正文**才算"这一轮已经落盘"：发起页在跑的过程中也可能把一份只有 parts、
+  //   没有 content 的半截写进会话（跳转/刷新时），那不算收尾 —— 认了它会让跟随页
+  //   提前 settle，把剩下的流式输出全部丢掉。
+  return panelSessionState.conversation
+    .slice(userIndex + 1)
+    .some((m: any) => m && m.role === 'assistant' && !m.live && String(m.content || '').trim().length > 0);
 }
 
 /** 一条已定稿 part 的 DOM 节点（跟随页增量渲染用）。 */
@@ -2349,7 +2354,7 @@ function renderFollowedLive() {
   //   再挂一份（通常是半截、甚至是个空块），而置底会停在那一份上 —— 这正是
   //   "跳转之后回答闪一下又空了"的来源之一。这里直接退回落盘会话（权威来源）。
   if (followedRunCommitted()) {
-    resetFollowedRun({ render: true, reason: 'follow-committed' });
+    settleFollowedRun('follow-committed');
     return;
   }
   if (!followedRun.followedLiveReady) {
@@ -2420,10 +2425,8 @@ function renderFollowedLive() {
       dom.liveTextEl.className = 'agent-content';
       dom.liveEl.appendChild(dom.liveTextEl);
     }
-    if (dom.liveText !== liveNarration.text) {
-      showStreamingAnswer(dom.liveTextEl, liveNarration.text, assistant.citations);
-      dom.liveText = liveNarration.text;
-    }
+    // 与发起页同一套节流：长正文的逐帧重解析是"同步卡顿"的主因（见 paintFollowedNarration）。
+    paintFollowedNarration(dom);
   } else if (dom.liveTextEl) {
     removeStreamCursor(dom.liveTextEl);
     dom.liveTextEl.remove();
@@ -2447,6 +2450,35 @@ function renderFollowedLive() {
   if (streamView.usageEl) streamView.usageEl.textContent = followedRun.followedRunState.tokens ? 'tokens ' + followedRun.followedRunState.tokens : '';
   fitPanelHeight();
   pinToBottom();
+}
+
+/**
+ * 跟随页的正文重绘。
+ *
+ * ⚠ 必须和发起页共用同一套**自适应节流**（`throttleStreamPaint`）：正文重绘要对
+ * 累积全文重跑一遍 Markdown 解析，长度上超线性。发起页早就有节流，跟随页原先没有——
+ * 于是长回答在跟随页上逐帧重解析（实测：11,592px 的对话，每秒数十次），
+ * 用户感受到的就是"流式同步卡顿、时有时无"。
+ *
+ * 延迟的回调**不能在闭包里捕获旧文本**：它执行时要从当前跟随状态重新取，
+ * 否则被推迟的那一帧会把已经过时的片段画上去。
+ */
+function paintFollowedNarration(dom: any) {
+  const startedAt = Date.now();
+  const paint = () => {
+    if (!dom || !dom.liveTextEl || !dom.liveTextEl.isConnected) return;
+    const assistant = runStateToAssistantMessage(followedRun.followedRunState);
+    const parts = assistant && Array.isArray(assistant.parts) ? assistant.parts : [];
+    const live = parts.find((p: any) => p && p.type === 'narration' && p.live);
+    const text = live && live.text ? String(live.text) : '';
+    if (!text || dom.liveText === text) return;
+    showStreamingAnswer(dom.liveTextEl, text, assistant ? assistant.citations : null);
+    dom.liveText = text;
+    noteStreamPaint(startedAt);
+  };
+  // 上一次重绘很贵时让位一帧；被跳过的那次一定由兜底定时器补上（见 throttleStreamPaint）。
+  if (throttleStreamPaint(paint)) return;
+  paint();
 }
 
 function renderFollowedRun() {
@@ -2483,6 +2515,13 @@ function ensureFollowedRunWatch() {
     const res = await sendPanelMessage('panel:run:subscribe', { sessionId });
     if (sessionId !== panelSessionState.panelSessionId) return;
     if (res && res.ok && res.snapshot && res.snapshot.status === 'running') {
+      // 已收尾落盘的 run 不再跟（否则会和"撤层重建"互相激活，见 settleFollowedRun）。
+      if (isSettledRun(res.snapshot.runId)) {
+        clearInterval(followedRun.followStatusTimer);
+        followedRun.followStatusTimer = null;
+        resetFollowedRun({ render: false, reason: 'follow-settled' });
+        return;
+      }
       const cursor = Number(res.snapshot.cursor) || 0;
       const stalled =
         String(res.snapshot.runId || '') === String(followedRun.followedRunId || '') &&
@@ -2505,6 +2544,25 @@ function ensureFollowedRunWatch() {
     // 这里用轮询作为兜底；最终以落盘会话为准。
     scheduleFollowedRunRefresh();
   }, 1200);
+}
+
+/**
+ * 结束一次跟随：这个 run 已经收尾并落盘，**记住它的 runId**，之后再收到它的
+ * 快照/增量一律忽略。
+ *
+ * 为什么必须有这一步（实测缺陷）：`renderFollowedLive` 发现"已落盘"就撤层重建，
+ * 而 SW 侧那个 run 的快照仍可能被再次订阅到；于是"订阅 → 跟随 → 判已落盘 → 撤层
+ * 强制重建 → 再订阅"形成自激活循环。19 秒 58 次全量重建、11,592px 正文 ⇒ 卡顿 + 白屏。
+ */
+function settleFollowedRun(reason: string) {
+  if (followedRun.followedRunId) followedRun.settledRunId = String(followedRun.followedRunId);
+  resetFollowedRun({ render: true, reason });
+}
+
+/** 这个快照/增量是否属于某个"已经收尾落盘"的 run（是的话就不该再跟随）。 */
+function isSettledRun(runId: any) {
+  const id = String(runId || '');
+  return Boolean(id) && id === String(followedRun.settledRunId || '');
 }
 
 function resetFollowedRun(options?: any) {
@@ -2537,8 +2595,11 @@ function resetFollowedRun(options?: any) {
   if (opts.render) {
     // 撤跟随层之前先把"已知的部分回答"留在正文里（除非正式回答已经落盘）。
     if (lastSnapshot) keepFollowedPartialVisible(lastSnapshot, reason);
-    // force：跟随结束 = 临时覆盖层作废，必须真的把正文换成落盘会话。
-    renderConversation({ reason, force: true });
+    // ⚠ 覆盖层是临时 DOM：先摘掉它，再用**内容指纹**决定要不重建。
+    //   这里不能无条件 force —— 覆盖层摘掉后正文与落盘会话一模一样时，重建毫无意义，
+    //   而每次重建都会把 1 万多像素的正文整体重排一遍（卡顿/白屏的直接来源）。
+    sweepFollowOverlay();
+    renderConversation({ reason, force: opts.force === true });
     fitPanelHeight();
   }
 }
@@ -2584,6 +2645,11 @@ function applyFollowedSnapshot(snapshot: any) {
     resetFollowedRun({ render: true, reason: 'follow-no-run' });
     return;
   }
+  // 这个 run 已经跟随到底并落盘了：再跟一次只会把同一条回答重挂一遍。
+  if (isSettledRun(snapshot.runId)) {
+    resetFollowedRun({ render: false, reason: 'follow-settled' });
+    return;
+  }
   if (snapshot.status !== 'running') {
     scheduleFollowedRunRefresh();
     return;
@@ -2612,10 +2678,17 @@ async function subscribePanelRun() {
       String(res.snapshot.runId || '') === String(runSession.runId || '')
   );
   if (locallyRunning) {
-    resetFollowedRun({ render: false });
+    resetFollowedRun({ render: false, reason: 'follow-local-run' });
     return;
   }
-  if (res.snapshot && res.snapshot.status === 'running') applyFollowedSnapshot(res.snapshot);
+  if (res.snapshot && res.snapshot.status === 'running') {
+    // 已经收尾落盘的 run：不要重新开始跟随（否则会与"撤层重建"互相激活）。
+    if (isSettledRun(res.snapshot.runId)) {
+      resetFollowedRun({ render: false, reason: 'follow-settled' });
+      return;
+    }
+    applyFollowedSnapshot(res.snapshot);
+  }
   else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: 'subscribe-not-running' });
   else if (followedRun.followedRunState) resetFollowedRun({ render: true, reason: 'subscribe-empty' });
 }
@@ -2659,11 +2732,19 @@ function scheduleFollowedRunRefresh() {
 
 function handleRunStarted(msg: any) {
   if (!msg || String(msg.sessionId || '') !== panelSessionState.panelSessionId) return;
+  // 新 run 到来 ⇒ 上一次的"已收尾"标记作废（同一个 runId 才继续忽略）。
+  const runId = String(msg.runId || '');
+  if (runId && followedRun.settledRunId && runId !== String(followedRun.settledRunId)) {
+    followedRun.settledRunId = '';
+  }
+  if (isSettledRun(runId)) return;
   subscribePanelRun().catch(() => {});
 }
 
 function handleRunDelta(msg: any) {
   if (!msg || String(msg.sessionId || '') !== panelSessionState.panelSessionId) return;
+  // 已收尾落盘的 run 的迟到增量：忽略（否则每次都会触发一次重新订阅）。
+  if (isSettledRun(msg.runId)) return;
   if (!followedRun.followedRunState || String(msg.runId || '') !== followedRun.followedRunId) {
     subscribePanelRun().catch(() => {});
     return;
@@ -4914,6 +4995,8 @@ const resuming =
       resetReasoning();
     }
     runSession.setRunning(true);
+    // 本页自己开始跑这一轮 ⇒ 之前那条"已收尾"的跟随标记作废（runId 一定不同）。
+    followedRun.settledRunId = '';
     progressController.start();
     if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
     updateRunControlState();

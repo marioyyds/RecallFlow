@@ -5443,6 +5443,16 @@
     followedCursor = 0;
     /** 连续多少次轮询没有新 cursor：用来发现“run 已死但状态仍标 running”。 */
     followedIdleTicks = 0;
+    /**
+     * 已经"跟随 → 收尾落盘"过的 runId。
+     *
+     * 为什么必须记住它：那个 run 在 SW 里可能还会被订阅/广播返回（快照仍标 running，
+     * 但包里已经没有任何新内容）。若每次都重新跟随、再判"已落盘"、再撤层强制重建，
+     * 就形成**自激活循环** —— 实测 19 秒内整段正文重建 58 次（11,592px 的对话，
+     * 每次全量 innerHTML + 强制布局），表现正是「卡顿 / 白屏」。
+     * 同一个 runId 只允许收尾一次；新 run 到来（runId 变了）时才清空。
+     */
+    settledRunId = "";
     followedMessages = [];
     followedLiveReady = false;
     followedDom = null;
@@ -9251,7 +9261,7 @@
       }
     }
     if (userIndex < 0) return false;
-    return panelSessionState.conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live);
+    return panelSessionState.conversation.slice(userIndex + 1).some((m) => m && m.role === "assistant" && !m.live && String(m.content || "").trim().length > 0);
   }
   function followedPartElement(part, citations) {
     if (!part) return null;
@@ -9309,7 +9319,7 @@
       return;
     }
     if (followedRunCommitted()) {
-      resetFollowedRun({ render: true, reason: "follow-committed" });
+      settleFollowedRun("follow-committed");
       return;
     }
     if (!followedRun.followedLiveReady) {
@@ -9373,10 +9383,7 @@
         dom.liveTextEl.className = "agent-content";
         dom.liveEl.appendChild(dom.liveTextEl);
       }
-      if (dom.liveText !== liveNarration.text) {
-        showStreamingAnswer(dom.liveTextEl, liveNarration.text, assistant.citations);
-        dom.liveText = liveNarration.text;
-      }
+      paintFollowedNarration(dom);
     } else if (dom.liveTextEl) {
       removeStreamCursor(dom.liveTextEl);
       dom.liveTextEl.remove();
@@ -9398,6 +9405,22 @@
     if (streamView.usageEl) streamView.usageEl.textContent = followedRun.followedRunState.tokens ? "tokens " + followedRun.followedRunState.tokens : "";
     fitPanelHeight();
     pinToBottom();
+  }
+  function paintFollowedNarration(dom) {
+    const startedAt = Date.now();
+    const paint2 = () => {
+      if (!dom || !dom.liveTextEl || !dom.liveTextEl.isConnected) return;
+      const assistant = runStateToAssistantMessage(followedRun.followedRunState);
+      const parts = assistant && Array.isArray(assistant.parts) ? assistant.parts : [];
+      const live = parts.find((p) => p && p.type === "narration" && p.live);
+      const text = live && live.text ? String(live.text) : "";
+      if (!text || dom.liveText === text) return;
+      showStreamingAnswer(dom.liveTextEl, text, assistant ? assistant.citations : null);
+      dom.liveText = text;
+      noteStreamPaint(startedAt);
+    };
+    if (throttleStreamPaint(paint2)) return;
+    paint2();
   }
   function renderFollowedRun() {
     if (!panelBody) return;
@@ -9432,6 +9455,12 @@
       const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
       if (sessionId !== panelSessionState.panelSessionId) return;
       if (res && res.ok && res.snapshot && res.snapshot.status === "running") {
+        if (isSettledRun(res.snapshot.runId)) {
+          clearInterval(followedRun.followStatusTimer);
+          followedRun.followStatusTimer = null;
+          resetFollowedRun({ render: false, reason: "follow-settled" });
+          return;
+        }
         const cursor = Number(res.snapshot.cursor) || 0;
         const stalled = String(res.snapshot.runId || "") === String(followedRun.followedRunId || "") && cursor === followedRun.followedCursor;
         followedRun.followedIdleTicks = stalled ? followedRun.followedIdleTicks + 1 : 0;
@@ -9448,6 +9477,14 @@
       }
       scheduleFollowedRunRefresh();
     }, 1200);
+  }
+  function settleFollowedRun(reason) {
+    if (followedRun.followedRunId) followedRun.settledRunId = String(followedRun.followedRunId);
+    resetFollowedRun({ render: true, reason });
+  }
+  function isSettledRun(runId) {
+    const id = String(runId || "");
+    return Boolean(id) && id === String(followedRun.settledRunId || "");
   }
   function resetFollowedRun(options) {
     const opts = options || {};
@@ -9474,7 +9511,8 @@
     updateRunControlState();
     if (opts.render) {
       if (lastSnapshot) keepFollowedPartialVisible(lastSnapshot, reason);
-      renderConversation({ reason, force: true });
+      sweepFollowOverlay();
+      renderConversation({ reason, force: opts.force === true });
       fitPanelHeight();
     }
   }
@@ -9508,6 +9546,10 @@
       resetFollowedRun({ render: true, reason: "follow-no-run" });
       return;
     }
+    if (isSettledRun(snapshot.runId)) {
+      resetFollowedRun({ render: false, reason: "follow-settled" });
+      return;
+    }
     if (snapshot.status !== "running") {
       scheduleFollowedRunRefresh();
       return;
@@ -9531,11 +9573,16 @@
       runSession.isRunning && res.snapshot && String(res.snapshot.runId || "") === String(runSession.runId || "")
     );
     if (locallyRunning) {
-      resetFollowedRun({ render: false });
+      resetFollowedRun({ render: false, reason: "follow-local-run" });
       return;
     }
-    if (res.snapshot && res.snapshot.status === "running") applyFollowedSnapshot(res.snapshot);
-    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: "subscribe-not-running" });
+    if (res.snapshot && res.snapshot.status === "running") {
+      if (isSettledRun(res.snapshot.runId)) {
+        resetFollowedRun({ render: false, reason: "follow-settled" });
+        return;
+      }
+      applyFollowedSnapshot(res.snapshot);
+    } else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: "subscribe-not-running" });
     else if (followedRun.followedRunState) resetFollowedRun({ render: true, reason: "subscribe-empty" });
   }
   function scheduleFollowedRunRefresh() {
@@ -9573,11 +9620,17 @@
   }
   function handleRunStarted(msg) {
     if (!msg || String(msg.sessionId || "") !== panelSessionState.panelSessionId) return;
+    const runId = String(msg.runId || "");
+    if (runId && followedRun.settledRunId && runId !== String(followedRun.settledRunId)) {
+      followedRun.settledRunId = "";
+    }
+    if (isSettledRun(runId)) return;
     subscribePanelRun().catch(() => {
     });
   }
   function handleRunDelta(msg) {
     if (!msg || String(msg.sessionId || "") !== panelSessionState.panelSessionId) return;
+    if (isSettledRun(msg.runId)) return;
     if (!followedRun.followedRunState || String(msg.runId || "") !== followedRun.followedRunId) {
       subscribePanelRun().catch(() => {
       });
@@ -11426,6 +11479,7 @@
         resetReasoning();
       }
       runSession.setRunning(true);
+      followedRun.settledRunId = "";
       progressController.start();
       if (resumeSnapshot) applyResumeSnapshot(resumeSnapshot);
       updateRunControlState();
