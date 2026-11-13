@@ -158,7 +158,6 @@ export class JevFastController {
       this.lastHandoffNotice = null;
       this.lastAttempt = null;
       this.lastEdgeFallbackRoute = '';
-      this.handoffStreak = { host: '', count: 0 };
       this.state.trace({
         phase: 'jev-plan',
         planVersion: version,
