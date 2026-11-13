@@ -672,6 +672,29 @@ test('operation 判 BLOCKED 时做路由冷却；只读回合不唤醒，动作�
   assert.equal(jevCalls, 2, '慢思考动过页面才允许再试');
 });
 
+test('CLICK 未写 verify 时用默认指纹校验拦下无变化点击', async () => {
+  const state = stateFor(false);
+  state.ctx.plan = [{
+    id: 'd1',
+    text: '点开结果',
+    status: 'in_progress',
+    allowedOperations: ['CLICK'],
+  }];
+  state.ctx.planVersion = 1;
+  const graph = emptyTraceGraph('https://gitcode.com');
+  const controller = new JevFastController(
+    state,
+    pipelineFor(state, { clickChangesPage: false }),
+    new AbortController().signal,
+    async (request) => operationClickResponse(request),
+    async () => {},
+    async () => graph
+  );
+  const outcome = await controller.runAvailable(0, async () => {});
+  assert.equal(outcome.kind, 'skipped');
+  assert.equal(outcome.reason, 'action-mismatch');
+});
+
 test('计划 verify 不满足时动作判 mismatch 并交回慢思考', async () => {
   const state = stateFor(false);
   state.ctx.plan = [{

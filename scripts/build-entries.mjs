@@ -143,7 +143,9 @@ export const ENTRIES = [
   // measured 1142394 bytes (1115.6KB). Raise to 1116KB.
   // 2026-11-13: action verify contract (plan verify + verifier + 快执行 labels)
   // measured 1148481 bytes (1121.6KB). Raise to 1122KB.
-  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1122 * 1024 },
+  // 2026-11-13: default verify for CLICK + delegation verify measured 1149734
+  // bytes (1122.8KB). Raise to 1123KB.
+  { src: 'entries/background.ts', out: 'background.js', format: 'esm', budget: 1123 * 1024 },
   { src: 'entries/popup.ts', out: 'popup.js', format: 'esm', budget: 38 * 1024 },
   // 536 KB：同步合并后的工具、桥接与评测设置说明，实测 530 KB。
   // 2026-10-31: shared logical readback measured 549620 bytes (537KB); 538KB.

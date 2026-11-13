@@ -75,7 +75,8 @@ https://llm-wxhrhq33nuvg2yw6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/sys
 **快执行（原“快思考”）与契约校验**：JEV 只负责在候选里选一个动作，它不理解页面语义，
 也无法判断动作是否推进了目标，因此面板统称“快执行”。自动快执行需要计划步骤携带
 结构化 `verify` 条件（`urlChanged` / `fingerprintChanged` / `minElementDelta` /
-`textIncludes`）；没有契约、或 `allowedOperations: []` 时直接交给慢思考。动作执行后由
+`textIncludes`）；没有显式契约时，允许 CLICK 的步骤自动采用保守默认
+（`fingerprintChanged`），只读/滚动/等待步骤不强制契约。动作执行后由
 `action-verify.ts` 做确定性核对：`mismatch` 立即让位并（对边）封边，`unknown` 只记录不
 冒充成功。
 

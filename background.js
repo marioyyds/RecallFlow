@@ -15173,8 +15173,26 @@ function verifyActionResult(before, after, contract) {
     evidence: failures.length ? failures.join("\uFF1B") : "\u6821\u9A8C\u901A\u8FC7\uFF1A" + checks.join("\u3001")
   };
 }
-function verifyContractForStep(step) {
-  return step && step.verify ? step.verify : void 0;
+var SAFE_FAST_OPERATIONS = /* @__PURE__ */ new Set([
+  "READ_PAGE",
+  "READ_TABLE",
+  "ACCESSIBILITY",
+  "DIAGNOSTICS",
+  "SCROLL_UP",
+  "SCROLL_DOWN",
+  "WAIT"
+]);
+function isSafeFastOperationSet(operations) {
+  if (!Array.isArray(operations) || operations.length === 0) return false;
+  return operations.every((operation) => SAFE_FAST_OPERATIONS.has(String(operation)));
+}
+function effectivePlanVerify(step) {
+  if (!step) return void 0;
+  if (step.verify) return step.verify;
+  if (Array.isArray(step.allowedOperations) && step.allowedOperations.includes("CLICK")) {
+    return { fingerprintChanged: true };
+  }
+  return void 0;
 }
 
 // lib/application/agent/jev-diagnostics.ts
@@ -15733,7 +15751,7 @@ var JevFastController = class {
     const verified = verifyActionResult(
       beforeSnapshot,
       this.state.ctx.lastSnapshot,
-      verifyContractForStep(verifyStep)
+      effectivePlanVerify(verifyStep)
     );
     this.state.trace({
       phase: "action-verify",
@@ -16135,7 +16153,7 @@ var JevFastController = class {
     const edgeVerified = verifyActionResult(
       before,
       this.state.ctx.lastSnapshot,
-      verifyContractForStep(planStep)
+      effectivePlanVerify(planStep)
     );
     this.state.trace({
       phase: "action-verify",
@@ -16424,6 +16442,7 @@ var JevFastController = class {
       args
     });
     const failuresBefore = this.state.failedToolNames.length;
+    const delegateBefore = this.state.ctx.lastSnapshot;
     const outcome = await this.processTool(iter, persist, action);
     if (outcome.kind === "cancelled") return outcome;
     if (outcome.kind === "complete") return { kind: "skipped", reason: "complete-tool" };
@@ -16433,6 +16452,24 @@ var JevFastController = class {
     }
     const observed = await this.observeAfterAction(iter, persist, next.tool);
     if (observed.kind === "cancelled") return observed;
+    const delegateVerify = verifyActionResult(
+      delegateBefore,
+      this.state.ctx.lastSnapshot,
+      effectivePlanVerify(planStep)
+    );
+    this.state.trace({
+      phase: "action-verify",
+      iter,
+      head: "delegate",
+      tool: next.tool,
+      verdict: delegateVerify.verdict,
+      checks: delegateVerify.checks,
+      evidence: delegateVerify.evidence
+    });
+    if (delegateVerify.verdict === "mismatch") {
+      this.traceEdgeHandoff(iter, "delegate-action-mismatch", delegateVerify.evidence);
+      return { kind: "skipped", reason: "delegate-action-mismatch" };
+    }
     this.state.jevLoop.fastActions += 1;
     this.state.jevLoop.consecutiveFastActions += 1;
     this.state.jevLoop.planActions += 1;
@@ -16545,7 +16582,7 @@ function decideAutoFast(input) {
   if (step && Array.isArray(step.allowedOperations) && step.allowedOperations.length === 0) {
     return { ok: false, reason: "plan-slow-only" };
   }
-  if (step && !step.nextAction && !step.verify) {
+  if (step && !step.nextAction && !effectivePlanVerify(step) && !isSafeFastOperationSet(step.allowedOperations)) {
     return { ok: false, reason: "plan-no-verify" };
   }
   return input.eligibility();

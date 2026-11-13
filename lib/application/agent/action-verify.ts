@@ -87,3 +87,41 @@ export function verifyActionResult(
 export function verifyContractForStep(step: PlanStep | null | undefined): PlanVerifyContract | undefined {
   return step && step.verify ? step.verify : undefined;
 }
+
+/** 只读/可逆操作：失败代价低，不需要结构性 verify 也能放行。 */
+const SAFE_FAST_OPERATIONS: ReadonlySet<string> = new Set([
+  'READ_PAGE',
+  'READ_TABLE',
+  'ACCESSIBILITY',
+  'DIAGNOSTICS',
+  'SCROLL_UP',
+  'SCROLL_DOWN',
+  'WAIT',
+]);
+
+export function isSafeFastOperationSet(operations: unknown): boolean {
+  if (!Array.isArray(operations) || operations.length === 0) return false;
+  return operations.every((operation) => SAFE_FAST_OPERATIONS.has(String(operation)));
+}
+
+/**
+ * 实际生效的校验契约：慢模型写了就用它；没写但步骤允许 CLICK 时，
+ * 给一个保守默认（页面指纹必须变化）。只读/滚动/等待步骤不强制。
+ */
+export function effectivePlanVerify(
+  step: PlanStep | null | undefined
+): PlanVerifyContract | undefined {
+  if (!step) return undefined;
+  if (step.verify) return step.verify;
+  if (Array.isArray(step.allowedOperations) && step.allowedOperations.includes('CLICK')) {
+    return { fingerprintChanged: true };
+  }
+  return undefined;
+}
+
+/** 委托动作（慢模型显式点名）的默认契约：开页看 URL，点击看指纹。 */
+export function defaultVerifyForTool(tool: string): PlanVerifyContract | undefined {
+  if (tool === 'open_tab') return { urlChanged: true };
+  if (tool === 'click_element' || tool === 'press_key') return { fingerprintChanged: true };
+  return undefined;
+}

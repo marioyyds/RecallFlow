@@ -24,7 +24,7 @@ import {
   resolveEdgeTarget,
 } from './trace-graph.ts';
 import { loadTraceGraph } from './tracegraph-store.ts';
-import { verifyActionResult, verifyContractForStep } from './action-verify.ts';
+import { verifyActionResult, effectivePlanVerify } from './action-verify.ts';
 import { REPLAYABLE_TOOLS } from './macros.ts';
 import type { Evidence } from './trace-graph-types.ts';
 import type { PlanStep } from './types.ts';
@@ -721,7 +721,7 @@ export class JevFastController {
     const verified = verifyActionResult(
       beforeSnapshot,
       this.state.ctx.lastSnapshot as any,
-      verifyContractForStep(verifyStep)
+      effectivePlanVerify(verifyStep)
     );
     this.state.trace({
       phase: 'action-verify',
@@ -1196,7 +1196,7 @@ export class JevFastController {
     const edgeVerified = verifyActionResult(
       before as any,
       this.state.ctx.lastSnapshot as any,
-      verifyContractForStep(planStep)
+      effectivePlanVerify(planStep)
     );
     this.state.trace({
       phase: 'action-verify',
@@ -1529,6 +1529,7 @@ private async tryDelegatedAction(
     args,
   });
   const failuresBefore = this.state.failedToolNames.length;
+  const delegateBefore = this.state.ctx.lastSnapshot as any;
   const outcome = await this.processTool(iter, persist, action);
   if (outcome.kind === 'cancelled') return outcome;
   if (outcome.kind === 'complete') return { kind: 'skipped', reason: 'complete-tool' };
@@ -1538,6 +1539,25 @@ private async tryDelegatedAction(
   }
   const observed = await this.observeAfterAction(iter, persist, next.tool);
   if (observed.kind === 'cancelled') return observed;
+  // 委托动作也要核对：开页看 URL，点击/按键看页面指纹。
+  const delegateVerify = verifyActionResult(
+    delegateBefore,
+    this.state.ctx.lastSnapshot as any,
+    effectivePlanVerify(planStep)
+  );
+  this.state.trace({
+    phase: 'action-verify',
+    iter,
+    head: 'delegate',
+    tool: next.tool,
+    verdict: delegateVerify.verdict,
+    checks: delegateVerify.checks,
+    evidence: delegateVerify.evidence,
+  });
+  if (delegateVerify.verdict === 'mismatch') {
+    this.traceEdgeHandoff(iter, 'delegate-action-mismatch', delegateVerify.evidence);
+    return { kind: 'skipped', reason: 'delegate-action-mismatch' };
+  }
   this.state.jevLoop.fastActions += 1;
   this.state.jevLoop.consecutiveFastActions += 1;
   this.state.jevLoop.planActions += 1;

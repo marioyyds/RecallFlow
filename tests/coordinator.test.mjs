@@ -18,7 +18,7 @@ test('协调器：计划步骤显式只读时不启动快路', () => {
   assert.equal(decision.reason, 'plan-slow-only');
 });
 
-test('协调器：计划没有结构化 verify 时不给快路自动执行权', () => {
+test('协调器：允许 CLICK 但没写 verify 时用保守默认放行', () => {
   const decision = decideAutoFast({
     plan: [
       {
@@ -30,8 +30,22 @@ test('协调器：计划没有结构化 verify 时不给快路自动执行权', 
     ],
     eligibility: () => ({ ok: true, reason: 'ready' }),
   });
-  assert.equal(decision.ok, false);
-  assert.equal(decision.reason, 'plan-no-verify');
+  assert.equal(decision.ok, true);
+});
+
+test('协调器：只读/滚动步骤不需要 verify 也能放行', () => {
+  const decision = decideAutoFast({
+    plan: [
+      {
+        id: 's2b',
+        text: '读取列表',
+        status: 'in_progress',
+        allowedOperations: ['READ_PAGE', 'SCROLL_DOWN'],
+      },
+    ],
+    eligibility: () => ({ ok: true, reason: 'ready' }),
+  });
+  assert.equal(decision.ok, true);
 });
 
 test('协调器：计划带 verify 契约时放行', () => {

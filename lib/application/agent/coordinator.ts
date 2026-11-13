@@ -9,6 +9,7 @@
 // 只额外负责“计划明确只读”这类跨泳道判断。
 
 import { activePlanStep } from './plan-contract.ts';
+import { effectivePlanVerify, isSafeFastOperationSet } from './action-verify.ts';
 import type { PlanStep } from './types.ts';
 
 export interface AutoFastDecision {
@@ -27,9 +28,14 @@ export function decideAutoFast(input: AutoFastInput): AutoFastDecision {
   if (step && Array.isArray(step.allowedOperations) && step.allowedOperations.length === 0) {
     return { ok: false, reason: 'plan-slow-only' };
   }
-  // 动作契约：没有结构化 verify 条件，执行后无法判定对错。慢模型显式委托
-  // （nextAction）例外——那是它自己已经选好并愿意承担的动作。
-  if (step && !step.nextAction && !step.verify) {
+  // 动作契约：点击类没有 verify 时用保守默认（指纹必须变化）；只读/滚动/等待
+// 可逆操作不强制契约。慢模型显式委托（nextAction）例外——那是它自己选好的动作。
+  if (
+    step &&
+    !step.nextAction &&
+    !effectivePlanVerify(step) &&
+    !isSafeFastOperationSet(step.allowedOperations)
+  ) {
     return { ok: false, reason: 'plan-no-verify' };
   }
   return input.eligibility();
