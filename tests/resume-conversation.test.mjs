@@ -37,3 +37,36 @@ test('正式 assistant 消息不被恢复清理误删', () => {
   assert.equal(result.changed, false);
   assert.equal(result.messages.length, 2);
 });
+
+test('正文为空、只剩 parts 的半截 assistant 也要清掉（跳转后续跑会重复显示）', () => {
+  // 实测：旧文档在跑的过程中落下一份只有 parts、没有 content 的 assistant，
+  // 新页面把它当正式消息渲染了一遍，于是正文里同时出现"半截回答"和"正在输出的回答"。
+  // 收尾入库的 assistant 一定有 content（哪怕只有错误文案），所以"没有 content"就是半截。
+  const messages = [
+    { role: 'user', content: '任务' },
+    {
+      role: 'assistant',
+      content: '',
+      parts: [
+        { type: 'notice', text: '🧭 意图识别：浏览器操作' },
+        { type: 'narration', text: '第 1 段流式内容…' },
+      ],
+    },
+  ];
+  const result = pruneResumableAssistantTail(messages, '任务');
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.messages, [{ role: 'user', content: '任务' }]);
+});
+
+test('前面几轮的正式回答不受影响 —— 只清当前指令之后的尾部', () => {
+  const messages = [
+    { role: 'user', content: '第一轮' },
+    { role: 'assistant', content: '第一轮答复' },
+    { role: 'user', content: '第二轮' },
+    { role: 'assistant', content: '', parts: [{ type: 'narration', text: '半截' }] },
+  ];
+  const result = pruneResumableAssistantTail(messages, '第二轮');
+  assert.equal(result.changed, true);
+  assert.equal(result.messages.length, 3);
+  assert.equal(result.messages[1].content, '第一轮答复');
+});

@@ -4660,7 +4660,7 @@
     return "";
   }
   function buildTranscript(input = {}) {
-    const { title, url, exportedAt, handoffId: handoffId2, conversation, maxResultLen = 500 } = input;
+    const { title, url, exportedAt, handoffId: handoffId2, conversation, maxResultLen = 500, panelDiag } = input;
     const out = [];
     out.push("# RecallFlow \u5BF9\u8BDD\u8BB0\u5F55");
     out.push("");
@@ -4674,6 +4674,12 @@
     const list = Array.isArray(conversation) ? conversation : [];
     if (!list.length) {
       out.push("\uFF08\u6682\u65E0\u5BF9\u8BDD\uFF09");
+      if (panelDiag) {
+        out.push("");
+        out.push("## \u9762\u677F\u8BCA\u65AD");
+        out.push("");
+        out.push(String(panelDiag));
+      }
       return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
     }
     for (const m of list) {
@@ -4773,6 +4779,14 @@
         }
         out.push("");
       }
+    }
+    if (panelDiag) {
+      out.push("## \u9762\u677F\u8BCA\u65AD");
+      out.push("");
+      out.push('> \u9762\u677F\u6E32\u67D3\u65F6\u95F4\u7EBF\uFF08\u6700\u8FD1\u7684"\u91CD\u5EFA / \u6302\u8F7D / \u6458\u5757"\u4E8B\u4EF6\uFF09\u3002\u9762\u677F\u767D\u5C4F\u6216\u767D\u95EA\u65F6\uFF0C\u8FD9\u4E00\u6BB5\u662F\u552F\u4E00\u80FD\u8FD8\u539F\u5148\u540E\u987A\u5E8F\u7684\u8BC1\u636E\u3002');
+      out.push("");
+      out.push(String(panelDiag));
+      out.push("");
     }
     return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
   }
@@ -4901,7 +4915,9 @@
     const next = list.filter((message, index) => {
       if (index <= userIndex) return true;
       if (!message || message.role !== "assistant") return true;
-      return !(message.live === true || message.interrupted === true);
+      const partial = message.live === true || message.interrupted === true;
+      const emptyContent = !String(message.content == null ? "" : message.content).trim();
+      return !(partial || emptyContent);
     });
     return {
       alreadyHasUser: true,
@@ -8621,6 +8637,10 @@
     const reuse = Boolean(existing && existing.isConnected && existing.parentNode === panelBody);
     const aiMsg = reuse ? existing : document.createElement("div");
     if (!reuse) aiMsg.className = "msg ai";
+    aiMsg.dataset.rfLive = "1";
+    pruneLiveBlocks(reuse ? aiMsg : null);
+    sweepFollowOverlay();
+    tracePanelRender(reuse ? "\u91CD\u5EFA\u6D41\u5F0F\u5757\uFF08\u590D\u7528\u8282\u70B9\uFF09" : "\u91CD\u5EFA\u6D41\u5F0F\u5757\uFF08\u65B0\u5EFA\u8282\u70B9\uFF09", liveBlockTrace());
     if (reuse) aiMsg.innerHTML = "";
     const flow = document.createElement("div");
     flow.className = "agent-flow";
@@ -8964,11 +8984,58 @@
   }
   var conversationRenderSig = "";
   var conversationRenderLog = [];
+  var panelDiagEvents = [];
+  var PANEL_DIAG_MAX = 60;
+  function tracePanelRender(tag, detail) {
+    try {
+      console.debug("[RecallFlow] " + tag, detail === void 0 ? "" : detail);
+    } catch (e) {
+    }
+    try {
+      panelDiagEvents.push({ at: Date.now(), tag: String(tag || ""), detail: detail === void 0 ? "" : detail });
+      if (panelDiagEvents.length > PANEL_DIAG_MAX) panelDiagEvents.shift();
+    } catch (e) {
+    }
+  }
+  function formatPanelDiag() {
+    if (!panelDiagEvents.length && !panel) return "";
+    const lines = [];
+    const vp = panelViewport();
+    lines.push("- \u89C6\u53E3\uFF1A" + vp.width + "\xD7" + vp.height + "\uFF0CdevicePixelRatio=" + (window.devicePixelRatio || 1));
+    if (panel && panelBody) {
+      const bodyRect = panelBody.getBoundingClientRect();
+      lines.push(
+        "- \u9762\u677F\uFF1A\u9AD8 " + Math.round(panel.getBoundingClientRect().height) + "px\uFF0C\u6B63\u6587\u9AD8 " + Math.round(bodyRect.height) + "px\uFF0CscrollTop=" + Math.round(panelBody.scrollTop) + "\uFF0CscrollHeight=" + panelBody.scrollHeight + "\uFF0CoverflowY=" + (getComputedStyle(panelBody).overflowY || "") + "\uFF0C\u8FD0\u884C\u4E2D=" + (runSession.isRunning ? "yes" : "no")
+      );
+      lines.push("- \u6B63\u6587\u8282\u70B9\uFF1A" + JSON.stringify(liveBlockTrace()));
+    }
+    lines.push("");
+    for (const e of panelDiagEvents) {
+      const time = new Date(e.at).toLocaleTimeString();
+      const detail = typeof e.detail === "object" && e.detail ? JSON.stringify(e.detail) : String(e.detail || "");
+      lines.push("- " + time + " " + e.tag + (detail ? " " + detail : ""));
+    }
+    return lines.join("\n");
+  }
+  function liveBlockTrace() {
+    const pending = streamView.pendingAiMsg;
+    return {
+      running: runSession.isRunning,
+      parts: streamState.parts.length,
+      narration: String(streamState.narration || "").length,
+      think: String(streamView.thinkSeg && streamView.thinkSeg.text || "").length,
+      pendingConnected: Boolean(pending && pending.isConnected),
+      contentConnected: Boolean(streamView.pendingContentEl && streamView.pendingContentEl.isConnected),
+      bodyTurnNodes: countConversationTurnNodes(panelBody),
+      conversation: panelSessionState.conversation.length
+    };
+  }
   function noteConversationRender(reason, rebuilt) {
     const now = Date.now();
     conversationRenderLog.push({ at: now, reason: String(reason || ""), rebuilt });
     if (conversationRenderLog.length > 40) conversationRenderLog.shift();
     if (!rebuilt) return;
+    tracePanelRender("\u5BF9\u8BDD\u533A\u91CD\u5EFA\uFF08" + (reason || "unknown") + "\uFF09", liveBlockTrace());
     const recent = conversationRenderLog.filter((e) => e.rebuilt && now - e.at < 2e3);
     if (recent.length !== 5) return;
     console.warn(
@@ -8983,8 +9050,69 @@
     if (pendingAlive && streamView.pendingContentEl && streamView.pendingContentEl.isConnected) return false;
     const hasSomethingToShow = streamState.parts.length > 0 || Boolean(streamState.narration) || Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
     if (!hasSomethingToShow) return false;
+    detachStaleLiveBlock();
     mountLiveStreamingBlock();
     return true;
+  }
+  function detachStaleLiveBlock() {
+    const pending = streamView.pendingAiMsg;
+    if (!pending) return false;
+    if (pending.parentNode === panelBody && pending.isConnected) return false;
+    try {
+      if (pending.parentNode) pending.parentNode.removeChild(pending);
+    } catch (e) {
+    }
+    streamView.pendingAiMsg = null;
+    streamView.pendingContentEl = null;
+    streamView.typingEl = null;
+    tracePanelRender("\u6458\u6389\u8131\u79BB\u6587\u6863\u7684\u6D41\u5F0F\u5757", liveBlockTrace());
+    return true;
+  }
+  function pruneEmptyPlaceholder() {
+    if (!panelBody) return 0;
+    let removed = 0;
+    for (const el of Array.from(panelBody.querySelectorAll(".msg.ai"))) {
+      if (!el || !el.classList) continue;
+      if (el.dataset && el.dataset.rfLive === "1") continue;
+      if (el.querySelector(".agent-flow")) continue;
+      try {
+        el.remove();
+        removed += 1;
+      } catch (e) {
+      }
+    }
+    if (removed) tracePanelRender("\u6458\u6389\u7A7A\u5BF9\u8BDD\u5360\u4F4D \xD7 " + removed, liveBlockTrace());
+    return removed;
+  }
+  function pruneLiveBlocks(keep) {
+    if (!panelBody) return 0;
+    let removed = 0;
+    for (const el of Array.from(panelBody.querySelectorAll(".msg.ai"))) {
+      if (!el || el === keep) continue;
+      if (!el.dataset || el.dataset.rfLive !== "1") continue;
+      try {
+        el.remove();
+        removed += 1;
+      } catch (e) {
+      }
+    }
+    if (removed) tracePanelRender("\u6458\u6389\u591A\u4F59\u7684\u6D41\u5F0F\u5757 \xD7 " + removed, liveBlockTrace());
+    return removed;
+  }
+  function sweepFollowOverlay() {
+    if (!panelBody) return 0;
+    const nodes = Array.from(panelBody.querySelectorAll(".follow-live-ai, .follow-live-user"));
+    if (!nodes.length) return 0;
+    for (const el of nodes) {
+      try {
+        el.remove();
+      } catch (e) {
+      }
+    }
+    followedRun.followedDom = null;
+    followedRun.followedLiveReady = false;
+    tracePanelRender("\u6458\u6389\u8DDF\u968F\u8986\u76D6\u5C42 \xD7 " + nodes.length, liveBlockTrace());
+    return nodes.length;
   }
   function countConversationTurnNodes(body) {
     if (!body) return 0;
@@ -8999,7 +9127,7 @@
     const opts = options || {};
     const force = opts.force === true;
     if (!panelBody) return;
-    const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
+    const view = panelSessionState.conversation;
     if (!view.length) {
       const sig2 = conversationRenderSignature([], []);
       if (!force && sig2 === conversationRenderSig && countConversationTurnNodes(panelBody) === 1) {
@@ -9018,9 +9146,7 @@
     const withPlan = [...view].reverse().find((m) => m && m.role === "assistant" && Array.isArray(m.plan) && m.plan.length);
     const plan = withPlan ? withPlan.plan : [];
     const sig = conversationRenderSignature(view, plan);
-    const liveDomPresent = Boolean(
-      streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected || followedRun.followedDom && followedRun.followedDom.aiEl && followedRun.followedDom.aiEl.isConnected
-    );
+    const liveDomPresent = Boolean(streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected);
     const domIntact = countConversationTurnNodes(panelBody) === view.length + (liveDomPresent ? 1 : 0);
     if (!force && sig === conversationRenderSig && domIntact) {
       noteConversationRender(opts.reason, false);
@@ -9141,6 +9267,7 @@
     const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
     if (!panelSessionState.conversation.length) panelBody.innerHTML = "";
     panelBody.querySelectorAll(".follow-live-user,.follow-live-ai").forEach((el) => el.remove());
+    pruneLiveBlocks(null);
     let userEl = null;
     if (instruction && !alreadyHasUser) {
       userEl = document.createElement("div");
@@ -9150,6 +9277,7 @@
     }
     const aiEl = document.createElement("div");
     aiEl.className = "msg ai follow-live-ai";
+    aiEl.dataset.rfFollow = "1";
     const flowEl = document.createElement("div");
     flowEl.className = "agent-flow";
     const committedEl = document.createElement("div");
@@ -9176,6 +9304,14 @@
   }
   function renderFollowedLive() {
     if (!panelBody || !followedRun.followedRunState) return;
+    if (followedRun.followedRunState.status !== "running") {
+      resetFollowedRun({ render: true });
+      return;
+    }
+    if (followedRunCommitted()) {
+      resetFollowedRun({ render: true });
+      return;
+    }
     if (!followedRun.followedLiveReady) {
       followedRun.followedMessages = [];
       renderConversation({ reason: "follow-live" });
@@ -9335,7 +9471,7 @@
     }
     updateRunControlState();
     if (opts.render) {
-      renderConversation({ reason: "follow-reset" });
+      renderConversation({ reason: "follow-reset", force: true });
       fitPanelHeight();
     }
   }
@@ -9487,6 +9623,8 @@
       exportedAt: (/* @__PURE__ */ new Date()).toLocaleString(),
       handoffId: handoffId || "",
       conversation: messagesForExport(),
+      // 渲染时间线跟着记录一起走：白屏/白闪只在真实页面偶发，事后唯一能还原现场的就是它。
+      panelDiag: formatPanelDiag(),
       // ⚠ `maxResultLen` 是本模块**唯一**的裁剪点（用户与助手正文原样输出），
       // 所以给足上限就等于无损 —— 不要以为这里还有别的暗坑。
       ...mode === "full" ? { maxResultLen: 1e9 } : {}
@@ -9646,7 +9784,18 @@
     panelSessionState.panelSessionId = session.id;
     panelSessionState.panelSessionSeq = Number(session.seq) || 0;
     if (opts.activeId) panelSessionState.panelSessionActiveId = String(opts.activeId);
-    panelSessionState.conversation = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
+    let adopted = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
+    if (runSession.isRunning || followedRun.followedRunState) {
+      const lastUser = [...adopted].reverse().find((m) => m && m.role === "user");
+      if (lastUser && lastUser.content) {
+        const prunedAdopted = pruneResumableAssistantTail(adopted, lastUser.content);
+        if (prunedAdopted.changed) {
+          adopted = prunedAdopted.messages;
+          tracePanelRender("\u4F1A\u8BDD\u843D\u5730\u65F6\u4E22\u6389\u534A\u622A\u56DE\u7B54", { kept: adopted.length });
+        }
+      }
+    }
+    panelSessionState.conversation = adopted;
     handoffId = normalizeHandoffId(session.handoffId || "") || loadHandoffId() || newHandoffId();
     try {
       localStorage.setItem(HANDOFF_ID_KEY, handoffId);
@@ -9658,7 +9807,7 @@
       else rebuildFollowedMessages();
     }
     if (panelBody && !runSession.isRunning) {
-      renderConversation({ reason: "session-adopt" });
+      renderConversation({ reason: "session-adopt", force: true });
       renderHandoffChip();
       fitPanelHeight();
       pinToBottom();
@@ -11134,12 +11283,13 @@
       const pickedForMessage = summarizePickedForMessage(streamView.pickedElements);
       const selectedForMessage = activeSelection;
       const skipUserTurn = Boolean(runOptions.skipUserTurn);
-      if (skipUserTurn && runOptions.resumeSnapshot) {
+      const resuming = skipUserTurn || runOptions.reattach === true || runOptions.continuation === true || Boolean(runOptions.resumeSnapshot);
+      if (resuming) {
         const pruned = pruneResumableAssistantTail(panelSessionState.conversation, instruction);
         if (pruned.changed) {
           panelSessionState.conversation = pruned.messages;
           saveConversation();
-          if (panelBody) renderConversation({ reason: "resume-prune" });
+          if (panelBody) renderConversation({ reason: "resume-prune", force: true });
         }
       }
       if (!skipUserTurn) {
@@ -11159,6 +11309,10 @@
       }
       const aiMsg = document.createElement("div");
       aiMsg.className = "msg ai";
+      aiMsg.dataset.rfLive = "1";
+      pruneLiveBlocks(aiMsg);
+      sweepFollowOverlay();
+      pruneEmptyPlaceholder();
       streamView.flowEl = document.createElement("div");
       streamView.flowEl.className = "agent-flow";
       const contentEl = document.createElement("div");
@@ -11524,6 +11678,7 @@
             );
           }
           commitPendingVerifyPass();
+          pruneLiveBlocks(streamView.pendingAiMsg);
           const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p) => {
             if (p.type === "narration" || p.type === "text") {
               return p.text ? Object.assign({}, p, { text: renumbered.apply(collapseImmediateRepeatedText(p.text)) }) : p;

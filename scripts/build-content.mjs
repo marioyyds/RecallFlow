@@ -105,7 +105,15 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // idempotent live-block mount shared by mount/restore, plan-bar repaint signature,
 // repair cooldown, and refusing to paint into detached content nodes)
 // measured 538935 bytes. Raise explicitly to 527KB; in-repo only, no new dependency.
-export const SIZE_BUDGET_BYTES = 527 * 1024;
+// Live-block bookkeeping (data-rf-live marker, prune of duplicate/orphan live blocks
+// and of the empty-conversation placeholder, panel render trace) measured 541796
+// bytes. Raise explicitly to 530KB; in-repo only, no new dependency.
+// Panel render timeline in the export handoff (formatPanelDiag + transcript
+// section) measured 544213 bytes. Raise explicitly to 532KB; in-repo only.
+// Single-live-block invariant enforced at every creation site (run(), mount), the
+// follow overlay sweep, and dropping the followed snapshot from renderConversation's
+// view measured 545580 bytes. Raise explicitly to 533KB; in-repo only.
+export const SIZE_BUDGET_BYTES = 533 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

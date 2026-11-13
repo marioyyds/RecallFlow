@@ -633,10 +633,19 @@ export interface TranscriptInput {
   handoffId?: string;
   conversation?: TranscriptMessage[];
   maxResultLen?: number;
+  /**
+   * 面板渲染诊断（可选）。
+   *
+   * 为什么放进对话记录：白屏/白闪是**只在真实页面上偶发**的一类问题，
+   * 事后既没有日志也没有现场。把渲染时间线（谁在什么时候重建/挂载了面板正文）
+   * 跟着记录一起带走，用户只要点一下「导出」或「交接」，接手的人就能看到现场，
+   * 而不必让用户去开 DevTools 抓控制台。
+   */
+  panelDiag?: string;
 }
 
 export function buildTranscript(input: TranscriptInput = {}): string {
-  const { title, url, exportedAt, handoffId, conversation, maxResultLen = 500 } = input;
+  const { title, url, exportedAt, handoffId, conversation, maxResultLen = 500, panelDiag } = input;
   const out = [];
   out.push('# RecallFlow 对话记录');
   out.push('');
@@ -653,6 +662,13 @@ export function buildTranscript(input: TranscriptInput = {}): string {
   const list: TranscriptMessage[] = Array.isArray(conversation) ? conversation : [];
   if (!list.length) {
     out.push('（暂无对话）');
+    // 正文空白到连一条对话都没有时，诊断段反而是唯一有用的东西（别在这里丢掉）。
+    if (panelDiag) {
+      out.push('');
+      out.push('## 面板诊断');
+      out.push('');
+      out.push(String(panelDiag));
+    }
     return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
   }
 
@@ -787,6 +803,15 @@ export function buildTranscript(input: TranscriptInput = {}): string {
       }
       out.push('');
     }
+  }
+
+  if (panelDiag) {
+    out.push('## 面板诊断');
+    out.push('');
+    out.push('> 面板渲染时间线（最近的"重建 / 挂载 / 摘块"事件）。面板白屏或白闪时，这一段是唯一能还原先后顺序的证据。');
+    out.push('');
+    out.push(String(panelDiag));
+    out.push('');
   }
 
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';

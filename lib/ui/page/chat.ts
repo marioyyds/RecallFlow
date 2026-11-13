@@ -1357,6 +1357,12 @@ function mountLiveStreamingBlock() {
   const reuse = Boolean(existing && existing.isConnected && existing.parentNode === panelBody);
   const aiMsg = reuse ? existing : document.createElement('div');
   if (!reuse) aiMsg.className = 'msg ai';
+  aiMsg.dataset.rfLive = '1';
+  // 新建之前先清掉正文里其它"流式块"标记的节点：句柄被换掉过的情况下它们不会自己消失。
+  pruneLiveBlocks(reuse ? aiMsg : null);
+  // 本页在跑 ⇒ 跟随页的覆盖层已经过期（同一轮回答不能有两条）。
+  sweepFollowOverlay();
+  tracePanelRender(reuse ? '重建流式块（复用节点）' : '重建流式块（新建节点）', liveBlockTrace());
   // 复用节点时把它清空重建（流式块的结构只有 flow + 正文两段，重建代价小于整段正文）。
   if (reuse) aiMsg.innerHTML = '';
   const flow = document.createElement('div');
@@ -1894,6 +1900,73 @@ let conversationRenderSig = '';
 const conversationRenderLog: { at: number; reason: string; rebuilt: boolean }[] = [];
 
 /**
+ * 面板渲染取证日志。
+ *
+ * 为什么留着它：白屏/白闪的定位难点是"事后什么都看不出来"——总字数与 DOM 结构
+ * 都已经被重建过一遍，唯独**没人记得住顺序**。这几行只记录"谁在什么时候重建了什么"，
+ * 平时安静（每次重建一行），出事时（控制台里连续的 `[RecallFlow]` 行，或
+ * **导出/交接记录末尾的「面板诊断」段**）能一眼看出是"重建"出的问题还是"挂载"出的问题。
+ * 它不做任何兜底、不改任何行为。
+ */
+const panelDiagEvents: { at: number; tag: string; detail: any }[] = [];
+const PANEL_DIAG_MAX = 60;
+
+function tracePanelRender(tag: string, detail?: any) {
+  try {
+    console.debug('[RecallFlow] ' + tag, detail === undefined ? '' : detail);
+  } catch (e) {}
+  try {
+    panelDiagEvents.push({ at: Date.now(), tag: String(tag || ''), detail: detail === undefined ? '' : detail });
+    if (panelDiagEvents.length > PANEL_DIAG_MAX) panelDiagEvents.shift();
+  } catch (e) {}
+}
+
+/**
+ * 把渲染时间线变成一段可以直接贴给外部 AI 的文本（导出/交接时附在记录末尾）。
+ *
+ * 只在真的有事件时才有内容；头部带上"现场参数"（视口、面板尺寸、正文是否溢出），
+ * 因为同一套代码在小视口/手动改过尺寸的面板上行为并不相同。
+ */
+function formatPanelDiag() {
+  if (!panelDiagEvents.length && !panel) return '';
+  const lines: string[] = [];
+  const vp = panelViewport();
+  lines.push('- 视口：' + vp.width + '×' + vp.height + '，devicePixelRatio=' + (window.devicePixelRatio || 1));
+  if (panel && panelBody) {
+    const bodyRect = panelBody.getBoundingClientRect();
+    lines.push(
+      '- 面板：高 ' + Math.round(panel.getBoundingClientRect().height) + 'px，正文高 ' +
+        Math.round(bodyRect.height) + 'px，scrollTop=' + Math.round(panelBody.scrollTop) +
+        '，scrollHeight=' + panelBody.scrollHeight + '，overflowY=' +
+        (getComputedStyle(panelBody).overflowY || '') +
+        '，运行中=' + (runSession.isRunning ? 'yes' : 'no')
+    );
+    lines.push('- 正文节点：' + JSON.stringify(liveBlockTrace()));
+  }
+  lines.push('');
+  for (const e of panelDiagEvents) {
+    const time = new Date(e.at).toLocaleTimeString();
+    const detail = typeof e.detail === 'object' && e.detail ? JSON.stringify(e.detail) : String(e.detail || '');
+    lines.push('- ' + time + ' ' + e.tag + (detail ? ' ' + detail : ''));
+  }
+  return lines.join('\n');
+}
+
+function liveBlockTrace() {
+  const pending: any = streamView.pendingAiMsg;
+  return {
+    running: runSession.isRunning,
+    parts: streamState.parts.length,
+    narration: String(streamState.narration || '').length,
+    think: String((streamView.thinkSeg && streamView.thinkSeg.text) || '').length,
+    pendingConnected: Boolean(pending && pending.isConnected),
+    contentConnected: Boolean(streamView.pendingContentEl && streamView.pendingContentEl.isConnected),
+    bodyTurnNodes: countConversationTurnNodes(panelBody),
+    conversation: panelSessionState.conversation.length,
+  };
+}
+
+/**
  * 记录一次 renderConversation，并在「2 秒内重建 5 次」时告警一次。
  *
  * 这条日志是为了取证，不是为了兜底：白闪的根因永远是"有人在不该重建的时候重建"，
@@ -1904,6 +1977,7 @@ function noteConversationRender(reason: any, rebuilt: boolean) {
   conversationRenderLog.push({ at: now, reason: String(reason || ''), rebuilt });
   if (conversationRenderLog.length > 40) conversationRenderLog.shift();
   if (!rebuilt) return;
+  tracePanelRender('对话区重建（' + (reason || 'unknown') + '）', liveBlockTrace());
   const recent = conversationRenderLog.filter((e) => e.rebuilt && now - e.at < 2000);
   if (recent.length !== 5) return;
   console.warn(
@@ -1928,8 +2002,100 @@ function ensureLiveBlockAttached() {
     Boolean(streamState.narration) ||
     Boolean(streamView.thinkSeg && streamView.thinkSeg.text);
   if (!hasSomethingToShow) return false;
+  // ⚠ 重建之前先把**已脱离文档**的旧块摘掉：留着它就成了"第二条 ai 消息" ——
+  //   它永远不会再被更新（正文只往 pendingContentEl 里画），而置底会把视图停在
+  //   这个旧块/空块附近，看起来正是白屏。摘完之后整支正文里只有一份流式块。
+  detachStaleLiveBlock();
   mountLiveStreamingBlock();
   return true;
+}
+
+/**
+ * 摘掉不在 panelBody 里的旧流式块（它就是"重复那条 AI 消息"）。
+ *
+ * 只在确定要重建时调用，并且必须先确认它真的不在正文里 —— 还在正文里的块
+ * 由 mountLiveStreamingBlock 原地复用，绝不能摘。
+ */
+function detachStaleLiveBlock() {
+  const pending: any = streamView.pendingAiMsg;
+  if (!pending) return false;
+  if (pending.parentNode === panelBody && pending.isConnected) return false;
+  try {
+    if (pending.parentNode) pending.parentNode.removeChild(pending);
+  } catch (e) {}
+  streamView.pendingAiMsg = null;
+  streamView.pendingContentEl = null;
+  streamView.typingEl = null;
+  tracePanelRender('摘掉脱离文档的流式块', liveBlockTrace());
+  return true;
+}
+
+/**
+ * 摘掉"空对话占位"（`.msg.ai` 但里面没有 `.agent-flow`）。
+ *
+ * 为什么必须有：占位在正文里也是一个 `.msg` 节点。第一轮消息到来后它还留在那儿，
+ * 于是"正文节点数 = 对话条数 + 1（占位）+ 1（流式块）"，而 renderConversation 只预期
+ * "+1（流式块）" ⇒ 每次调用都被判成"DOM 不完整"而整块重建 —— 划词、自检、
+ * 会话同步每来一次就是一次白闪，正好对应用户反馈的现象。
+ */
+function pruneEmptyPlaceholder() {
+  if (!panelBody) return 0;
+  let removed = 0;
+  for (const el of Array.from(panelBody.querySelectorAll('.msg.ai')) as any[]) {
+    if (!el || !el.classList) continue;
+    if (el.dataset && el.dataset.rfLive === '1') continue; // 流式块，绝不碰
+    if (el.querySelector('.agent-flow')) continue; // 有内容的助手消息
+    try {
+      el.remove();
+      removed += 1;
+    } catch (e) {}
+  }
+  if (removed) tracePanelRender('摘掉空对话占位 × ' + removed, liveBlockTrace());
+  return removed;
+}
+
+/**
+ * 保证正文里**只有一条**流式块。
+ *
+ * 为什么必须有：流式块的句柄（`pendingAiMsg`）可能与正文里实际挂着的那条不是同一个节点
+ * （面板重建、恢复、自检各条路径都会碰到）。只靠"复用句柄"是不够的 ——
+ * 已经被换掉的那条会永远留在正文里，既不再更新、也占据置底的位置：
+ * 用户看到的就是"回答停在半截 / 下面一段是空白"。这里按标记清扫，只保留 `keep`。
+ */
+function pruneLiveBlocks(keep?: any) {
+  if (!panelBody) return 0;
+  let removed = 0;
+  for (const el of Array.from(panelBody.querySelectorAll('.msg.ai')) as any[]) {
+    if (!el || el === keep) continue;
+    if (!el.dataset || el.dataset.rfLive !== '1') continue;
+    try {
+      el.remove();
+      removed += 1;
+    } catch (e) {}
+  }
+  if (removed) tracePanelRender('摘掉多余的流式块 × ' + removed, liveBlockTrace());
+  return removed;
+}
+
+/**
+ * 摘掉跟随页的临时覆盖层（`.follow-live-*`）。
+ *
+ * 本页一旦自己接管了这一轮（本地 run 在跑），覆盖层就已经过期：它不会再收到增量，
+ * 却仍然是正文里的一个真实节点 —— 两条"当前回答"并列，置底很容易停在旧的那条上。
+ */
+function sweepFollowOverlay() {
+  if (!panelBody) return 0;
+  const nodes = Array.from(panelBody.querySelectorAll('.follow-live-ai, .follow-live-user')) as any[];
+  if (!nodes.length) return 0;
+  for (const el of nodes) {
+    try {
+      el.remove();
+    } catch (e) {}
+  }
+  followedRun.followedDom = null;
+  followedRun.followedLiveReady = false;
+  tracePanelRender('摘掉跟随覆盖层 × ' + nodes.length, liveBlockTrace());
+  return nodes.length;
 }
 
 /** 正文里"一条消息"级的节点数（user-turn / msg），忽略提示条等临时插入物。 */
@@ -1947,7 +2113,7 @@ function renderConversation(options?: any) {
   const opts = options || {};
   const force = opts.force === true;
   if (!panelBody) return;
-  const view = followedRun.followedMessages.length ? panelSessionState.conversation.concat(followedRun.followedMessages) : panelSessionState.conversation;
+  const view = panelSessionState.conversation;
   if (!view.length) {
     const sig = conversationRenderSignature([], []);
     if (!force && sig === conversationRenderSig && countConversationTurnNodes(panelBody) === 1) {
@@ -1969,13 +2135,12 @@ function renderConversation(options?: any) {
   const withPlan = [...view].reverse().find((m) => m && m.role === 'assistant' && Array.isArray(m.plan) && m.plan.length);
   const plan = withPlan ? withPlan.plan : [];
   const sig = conversationRenderSignature(view, plan);
-  // 正文里另有**一条**"不在 conversation 里"的消息：本页正在流式输出的那条，
-  // 或跟随页自己挂的那条。它不该让 DOM 判定为"不完整"，否则流式期间每次调用都会
-  // 强制整块重建（那正是白闪）。
-  const liveDomPresent = Boolean(
-    (streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected) ||
-      (followedRun.followedDom && followedRun.followedDom.aiEl && followedRun.followedDom.aiEl.isConnected)
-  );
+  // 正文里另有**一条**"不在 conversation 里"的消息：本页正在流式输出的那条。
+  // ⚠ 跟随页自己挂的那条（`.follow-live-ai`）**不算**这个"+1" —— 它是对同一轮回答的
+  //   临时覆盖层，落到"节点数与对话一致"的判据里会让重建被跳过，于是它就一直留在
+  //   正文里（一条半截回答 + 一条正式回答）。它只在真正跟随期间存在，收尾时由
+  //   resetFollowedRun / 会话落地那一步整块重建带走。
+  const liveDomPresent = Boolean(streamView.pendingAiMsg && streamView.pendingAiMsg.isConnected);
   const domIntact = countConversationTurnNodes(panelBody) === view.length + (liveDomPresent ? 1 : 0);
   if (!force && sig === conversationRenderSig && domIntact) {
     noteConversationRender(opts.reason, false);
@@ -2127,6 +2292,10 @@ function ensureFollowedDom() {
   const alreadyHasUser = hasInstructionUserTurn(panelSessionState.conversation, instruction);
   if (!panelSessionState.conversation.length) panelBody.innerHTML = '';
   panelBody.querySelectorAll('.follow-live-user,.follow-live-ai').forEach((el: any) => el.remove());
+  // ⚠ 同一时刻正文里**只能有一条**"当前轮回答"：本页自己的流式块与跟随页的覆盖层
+  //   是同一件事的两种画法。跟随开始就意味着本页那条流式块已经过期（它不会再收到
+  //   增量）—— 留着它就等于把同一轮回答挂两遍，而置底会停在旧的那一份上。
+  pruneLiveBlocks(null);
   let userEl = null;
   if (instruction && !alreadyHasUser) {
     userEl = document.createElement('div');
@@ -2136,6 +2305,7 @@ function ensureFollowedDom() {
   }
   const aiEl = document.createElement('div');
   aiEl.className = 'msg ai follow-live-ai';
+  aiEl.dataset.rfFollow = '1';
   const flowEl = document.createElement('div');
   flowEl.className = 'agent-flow';
   const committedEl = document.createElement('div');
@@ -2169,6 +2339,19 @@ function ensureFollowedDom() {
  */
 function renderFollowedLive() {
   if (!panelBody || !followedRun.followedRunState) return;
+  // 快照可能比真实状态旧（订阅响应在路上时 run 已经结束）。不是 running 就别画 ——
+  // 画出来的那条覆盖层永远等不到收尾，只会把半截回答留在正文里。
+  if (followedRun.followedRunState.status !== 'running') {
+    resetFollowedRun({ render: true });
+    return;
+  }
+  // ⚠ 落盘消息里已经有这一轮的正式回答 ⇒ 跟随层就是多余的：它只会把同一条回答
+  //   再挂一份（通常是半截、甚至是个空块），而置底会停在那一份上 —— 这正是
+  //   "跳转之后回答闪一下又空了"的来源之一。这里直接退回落盘会话（权威来源）。
+  if (followedRunCommitted()) {
+    resetFollowedRun({ render: true });
+    return;
+  }
   if (!followedRun.followedLiveReady) {
     followedRun.followedMessages = [];
     // 跟随页每次（重新）订阅都会走到这里。只有第一帧需要把历史铺开，之后
@@ -2346,7 +2529,8 @@ function resetFollowedRun(options?: any) {
   }
   updateRunControlState();
   if (opts.render) {
-    renderConversation({ reason: 'follow-reset' });
+    // force：跟随结束 = 临时覆盖层作废，必须真的把正文换成落盘会话。
+    renderConversation({ reason: 'follow-reset', force: true });
     fitPanelHeight();
   }
 }
@@ -2556,6 +2740,8 @@ function buildTranscriptMarkdown(mode: any) {
     exportedAt: new Date().toLocaleString(),
     handoffId: handoffId || '',
     conversation: messagesForExport(),
+    // 渲染时间线跟着记录一起走：白屏/白闪只在真实页面偶发，事后唯一能还原现场的就是它。
+    panelDiag: formatPanelDiag(),
     // ⚠ `maxResultLen` 是本模块**唯一**的裁剪点（用户与助手正文原样输出），
     // 所以给足上限就等于无损 —— 不要以为这里还有别的暗坑。
     ...(mode === 'full' ? { maxResultLen: 1e9 } : {}),
@@ -2743,7 +2929,21 @@ function adoptPanelSession(session: any, options: any) {
   panelSessionState.panelSessionId = session.id;
   panelSessionState.panelSessionSeq = Number(session.seq) || 0;
   if (opts.activeId) panelSessionState.panelSessionActiveId = String(opts.activeId);
-  panelSessionState.conversation = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
+  let adopted = normalizeConversationDuplicates(Array.isArray(session.messages) ? session.messages : []);
+  // ⚠ 运行中（本页或跟随页）：本轮的回答只存在于**正文里的流式块**中，落盘里那份
+  //   是旧文档在跑的过程中落下的半截（无 content、只有当时的 parts）。留着它就会在
+  //   正文里渲染成"另一条 AI 消息"—— 半截回答 + 完整回答并排，正是白屏/重复的来源。
+  if (runSession.isRunning || followedRun.followedRunState) {
+    const lastUser = [...adopted].reverse().find((m: any) => m && m.role === 'user');
+    if (lastUser && lastUser.content) {
+      const prunedAdopted = pruneResumableAssistantTail(adopted, lastUser.content);
+      if (prunedAdopted.changed) {
+        adopted = prunedAdopted.messages;
+        tracePanelRender('会话落地时丢掉半截回答', { kept: adopted.length });
+      }
+    }
+  }
+  panelSessionState.conversation = adopted;
   handoffId = normalizeHandoffId(session.handoffId || '') || loadHandoffId() || newHandoffId();
   try {
     localStorage.setItem(HANDOFF_ID_KEY, handoffId);
@@ -2756,7 +2956,9 @@ function adoptPanelSession(session: any, options: any) {
     else rebuildFollowedMessages();
   }
   if (panelBody && !runSession.isRunning) {
-    renderConversation({ reason: 'session-adopt' });
+    // force：会话落地是"权威内容变了"，哪怕指纹碰巧相同也必须重建 ——
+    // 否则跟随页留下的临时覆盖块会一直挂在正文里（半截回答 + 正式回答各一份）。
+    renderConversation({ reason: 'session-adopt', force: true });
     renderHandoffChip();
     fitPanelHeight();
     pinToBottom();
@@ -4501,12 +4703,22 @@ function createPanelWithLayout(
     // 整页刷新后的自动续跑会传 skipUserTurn：对话历史里已经有这条用户消息
     //（persist 后恢复的），不要再重复 push、也不要重复渲染。
     const skipUserTurn = Boolean(runOptions.skipUserTurn);
-    if (skipUserTurn && runOptions.resumeSnapshot) {
+    // 半截回答（live / interrupted / 无正文的 assistant 尾）绝不能和新一轮的流式块并存：
+// 它会以"另一条 ai 消息"的形式**永久**留在正文里（实测：整页跳转后续跑，
+// 旧文档落盘了半截，新页面既渲染那半截、又渲染新的流式块 ⇒ 一条半截 + 一条完整）。
+//
+// 只在"续跑/接管"这条路上做：用户手动重发同一句话时，那条旧的完整回答必须留着。
+const resuming =
+      skipUserTurn ||
+      runOptions.reattach === true ||
+      runOptions.continuation === true ||
+      Boolean(runOptions.resumeSnapshot);
+    if (resuming) {
       const pruned = pruneResumableAssistantTail(panelSessionState.conversation, instruction);
       if (pruned.changed) {
         panelSessionState.conversation = pruned.messages;
         saveConversation();
-        if (panelBody) renderConversation({ reason: 'resume-prune' });
+        if (panelBody) renderConversation({ reason: 'resume-prune', force: true });
       }
     }
     if (!skipUserTurn) {
@@ -4531,6 +4743,18 @@ function createPanelWithLayout(
     }
     const aiMsg = document.createElement('div');
     aiMsg.className = 'msg ai';
+    // 标记"这是流式块"：同一时刻正文里**只允许存在一条**（见 pruneLiveBlocks）。
+    aiMsg.dataset.rfLive = '1';
+    // 这里也是"新开一条当前回答"的入口（跳转后接管/续跑会再走一次 run）。
+    // 同一时刻正文里只能有一条：把上一条还挂着的流式块与跟随覆盖层清掉，
+    // 否则先挂上的那一条会带着半截内容永远留在正文里。
+    pruneLiveBlocks(aiMsg);
+    sweepFollowOverlay();
+    // ⚠ 新一轮的第一条消息进来时，正文里可能还挂着"空对话占位"
+    //   （`.msg.ai` 里没有 `.agent-flow` 的那种）。它必须在建流式块之前摘掉：
+    //   否则正文的"消息节点数"永远比对话多一个 ⇒ renderConversation 的
+    //   "内容没变就不重建"永远失效（划词 / 自检每来一次就整块重建一次 = 白闪）。
+    pruneEmptyPlaceholder();
     streamView.flowEl = document.createElement('div');
     streamView.flowEl.className = 'agent-flow';
     const contentEl = document.createElement('div');
@@ -4971,6 +5195,9 @@ function createPanelWithLayout(
           );
         }
         commitPendingVerifyPass();
+        // 收尾前把"孤儿流式块"清掉：它们不会再有数据写进来，却是正文里的真节点 ——
+        // 留在那里既会重复显示半个回答，也会让置底停在一条空块上（看起来就是白屏）。
+        pruneLiveBlocks(streamView.pendingAiMsg);
         // 整条消息的每一段都过同一张映射表，保证正文、工具结果与参考来源区三者一致。
         const finalParts = dedupeAdjacentTextParts(streamState.parts.map((p: any) => {
           if (p.type === 'narration' || p.type === 'text') {

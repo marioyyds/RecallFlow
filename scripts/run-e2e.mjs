@@ -100,6 +100,9 @@ function runE2E() {
     { name: '滚动跟随', spec: 'scroll-follow.spec.mjs', hold: '', visionShot: '' },
     // 流式输出中用户上滚：必须尊重用户的滚动意图，不能被后续增量拉回底部。
     { name: '流式上滚', spec: 'stream-scroll.spec.mjs', hold: '', visionShot: '' },
+    // 白屏/白闪回归门禁：流式窗口内逐采样点检查"正文还看得见吗"。
+    // 覆盖划词、关面板再开、整页跳转、思考流、多步工具、跨标签页跟随、小视口。
+    { name: '面板白屏', spec: 'blank-panel.spec.mjs', hold: '', visionShot: '' },
     { name: '刷新时序边界', spec: 'reattach-edge.spec.mjs', hold: '', visionShot: '' },
     // 存档自毁闸：实时页面必须看得见悬浮球，而按「另存为」形态重建的副本必须看不见。
     // 不依赖 LLM，用默认夹具即可。

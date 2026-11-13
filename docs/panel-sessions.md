@@ -92,12 +92,31 @@ Agent 事件先进入 Service Worker 的 `RunStreamHub`，再由它定向广播�
 4. **计划条按指纹重画**。跟随页路径每帧都会调用 `renderPlan`，它现在只在计划内容或
    用户的展开/折叠选择变化时才碰 DOM，也不在那条路上无谓地触发 `fitPanelHeight()`。
 5. **自检修复有冷却**（3 秒）。自检是为了兜底，不能变成新的闪烁源。
-6. 2 秒内重建 5 次会在控制台留下告警，列出每次重建的 `reason` —— 再出现白闪时，
-   `read_diagnostics({ kind: "console" })` 里直接看得到是谁触发的。
+6. **正文里只有一条"当前回答"**。流式块（`data-rf-live`）、跟随页覆盖层（`.follow-live-ai`）
+   是同一件事的两种画法，任何时刻最多存在一条：`mountLiveStreamingBlock` / `run()` 新建
+   之前先 `pruneLiveBlocks(keep)` + `sweepFollowOverlay()`，收尾时也扫一遍孤儿块。
+   否则旧的那条会带着半截内容留在正文里，置底还会停在一个不再更新的块上 —— 看起来就是白屏。
+7. **`renderConversation` 只渲染落盘对话**（`panelSessionState.conversation`），**不渲染**
+   `followedMessages`：跟随内容由跟随页自己的覆盖层负责。这条是"跳转后正文里同时出现
+   半截回答与完整回答"的根因 —— 会话落地那次重绘把跟随快照当成正式消息画了一遍。
+8. **续跑/接管时丢掉半截 assistant 尾**：`pruneResumableAssistantTail` 现在把
+   "`live`/`interrupted` **或正文为空**"的 assistant 都视为半截（收尾入库的那条一定有
+   content），并且在 `adoptPanelSession` 里也会对"运行中落地的会话"做一次同样的清理。
+9. **新一轮开始前摘掉"空对话占位"**：占位也是一个 `.msg` 节点，留着会让 DOM 节点数恒比
+   对话多一个 ⇒ 第 1 条的短路永远失效（划词/自检每来一次就整块重建 = 白闪）。
+10. 2 秒内重建 5 次会在控制台留下告警，列出每次重建的 `reason`。
+11. **诊断随记录一起走**：导出/交接记录末尾会附一段「面板诊断」（视口、面板/正文尺寸、
+    最近 60 条"重建/挂载/摘块"事件）。白屏/白闪只在真实页面偶发，这段是事后唯一能还原
+    先后顺序的证据 —— 用户点一下「导出」或「交接」就能把它带出来。
 
 ## 验证
 
 - `tests/panel-sessions.test.mjs`：迁移、过期写入、同 tab 连写、锁冲突 / TTL / 关页释放、裁剪、并发创建。
 - `tests/run-hub.test.mjs`：事件归约、40ms 合并、快照隔离与结束冲刷。
+- `tests/resume-conversation.test.mjs`：续跑时只清理当前指令之后的半截回答，正式回答与前面几轮不受影响。
+- `tests/e2e/blank-panel.spec.mjs`：**白屏/白闪回归门禁**。在流式窗口内每 30ms 采样面板正文
+  （可视字数、消息节点数、每条 ai 块长度、滚动位置、面板高度），覆盖 8 个场景：纯流式、
+  流式中划词、流式中关面板再开、流式中整页跳转、思考流、多步工具、另一标签页跟随、小视口。
+  断言"看不见任何正文"的连续时长 ≤ 400ms，并打印正文骨架（多了/少了一条 `.msg.ai` 一眼可见）。
 - `tests/e2e/sessions.spec.mjs`：新建并切回历史、跨 tab 加载与 active 同步、面板开合双向同步，以及中途加入后继续看到思考/正文增量。
 - `tests/e2e/persistence.spec.mjs`：关闭整个浏览器上下文，再用同一用户数据目录重启，验证 IndexedDB 历史仍存在。
