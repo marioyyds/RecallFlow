@@ -113,7 +113,10 @@ const OUT_FILE = path.join(ROOT, 'content.js');
 // Single-live-block invariant enforced at every creation site (run(), mount), the
 // follow overlay sweep, and dropping the followed snapshot from renderConversation's
 // view measured 545580 bytes. Raise explicitly to 533KB; in-repo only.
-export const SIZE_BUDGET_BYTES = 533 * 1024;
+// Follow-page blank-panel fix (keep the last known partial answer visible when the
+// follow layer is torn down, patient adopt polling, persistence skips the local
+// fallback message) measured 547236 bytes. Raise explicitly to 535KB; in-repo only.
+export const SIZE_BUDGET_BYTES = 535 * 1024;
 
 // 入口候选。TITA-75（Batch 1b）迁移完成后入口只剩 `.ts` 一份 ——
 // 同一模块 `.ts`/`.js` 双存是明令禁止的，这里不再保留 `.js` 候选；

@@ -9305,11 +9305,11 @@
   function renderFollowedLive() {
     if (!panelBody || !followedRun.followedRunState) return;
     if (followedRun.followedRunState.status !== "running") {
-      resetFollowedRun({ render: true });
+      resetFollowedRun({ render: true, reason: "follow-not-running" });
       return;
     }
     if (followedRunCommitted()) {
-      resetFollowedRun({ render: true });
+      resetFollowedRun({ render: true, reason: "follow-committed" });
       return;
     }
     if (!followedRun.followedLiveReady) {
@@ -9451,6 +9451,8 @@
   }
   function resetFollowedRun(options) {
     const opts = options || {};
+    const lastSnapshot = followedRun.followedRunState;
+    const reason = String(opts.reason || "follow-reset");
     if (followedRun.followRefreshTimer) {
       clearTimeout(followedRun.followRefreshTimer);
       followedRun.followRefreshTimer = null;
@@ -9471,13 +9473,39 @@
     }
     updateRunControlState();
     if (opts.render) {
-      renderConversation({ reason: "follow-reset", force: true });
+      if (lastSnapshot) keepFollowedPartialVisible(lastSnapshot, reason);
+      renderConversation({ reason, force: true });
       fitPanelHeight();
     }
   }
+  function keepFollowedPartialVisible(snapshot, reason) {
+    if (!snapshot || typeof snapshot !== "object") return false;
+    const list = panelSessionState.conversation;
+    if (!Array.isArray(list)) return false;
+    const instruction = String(snapshot.instruction || "").trim();
+    let userIndex = -1;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (!instruction) break;
+      if (list[i] && list[i].role === "user" && String(list[i].content || "").trim() === instruction) {
+        userIndex = i;
+        break;
+      }
+    }
+    if (userIndex >= 0 && list.slice(userIndex + 1).some((m) => m && m.role === "assistant")) return false;
+    const msg = runStateToAssistantMessage(snapshot);
+    if (!msg) return false;
+    const hasBody = String(msg.content || "").trim().length > 0 || Array.isArray(msg.parts) && msg.parts.length > 0;
+    if (!hasBody) return false;
+    msg.live = false;
+    msg.partial = true;
+    msg.partialFromFollow = true;
+    list.push(msg);
+    tracePanelRender("\u8DDF\u968F\u5C42\u64A4\u6389\uFF0C\u7528\u5DF2\u77E5\u90E8\u5206\u56DE\u7B54\u515C\u4F4F\u6B63\u6587\uFF08" + reason + "\uFF09", liveBlockTrace());
+    return true;
+  }
   function applyFollowedSnapshot(snapshot) {
     if (!snapshot || !snapshot.runId) {
-      resetFollowedRun({ render: true });
+      resetFollowedRun({ render: true, reason: "follow-no-run" });
       return;
     }
     if (snapshot.status !== "running") {
@@ -9496,7 +9524,7 @@
     const res = await sendPanelMessage("panel:run:subscribe", { sessionId });
     if (sessionId !== panelSessionState.panelSessionId) return;
     if (!res || !res.ok) {
-      resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
+      resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: "subscribe-failed" });
       return;
     }
     const locallyRunning = Boolean(
@@ -9507,8 +9535,8 @@
       return;
     }
     if (res.snapshot && res.snapshot.status === "running") applyFollowedSnapshot(res.snapshot);
-    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
-    else if (followedRun.followedRunState) resetFollowedRun({ render: true });
+    else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: "subscribe-not-running" });
+    else if (followedRun.followedRunState) resetFollowedRun({ render: true, reason: "subscribe-empty" });
   }
   function scheduleFollowedRunRefresh() {
     if (followedRun.followRefreshTimer) clearTimeout(followedRun.followRefreshTimer);
@@ -9529,16 +9557,16 @@
       }
       const hasCommittedTurn = userIndex >= 0 && messages.slice(userIndex + 1).some((m) => m && m.role === "assistant");
       if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionState.panelSessionSeq || hasCommittedTurn)) {
-        resetFollowedRun();
+        resetFollowedRun({ reason: "follow-adopted" });
         adoptPanelSession(got.session, { activeId: got.activeId || sessionId });
         subscribePanelRun().catch(() => {
         });
         return;
       }
-      if (attempts < 6) {
-        followedRun.followRefreshTimer = setTimeout(tick, 300);
+      if (attempts < 24) {
+        followedRun.followRefreshTimer = setTimeout(tick, attempts < 6 ? 300 : 1e3);
       } else {
-        resetFollowedRun({ render: true });
+        resetFollowedRun({ render: true, reason: "follow-giveup" });
       }
     };
     followedRun.followRefreshTimer = setTimeout(tick, 250);
@@ -9631,7 +9659,9 @@
     });
   }
   function serializeConversation() {
-    return serializeCompleteConversationMessages(panelSessionState.conversation);
+    return serializeCompleteConversationMessages(
+      panelSessionState.conversation.filter((m) => !(m && m.partialFromFollow === true))
+    );
   }
   function sendPanelMessage(type, payload) {
     if (!isExtContextAlive()) {

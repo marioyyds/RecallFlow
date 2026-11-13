@@ -424,6 +424,40 @@ test('⑧ 另一个标签页跟随（面板在跟随页里看别人跑）', asyn
   await owner.close();
 });
 
+test('⑨ 运行中才打开的标签页（跟随页中途加入，对应 open_tab 换页）', async () => {
+  // 实测形态：agent 用 open_tab 不断换页，用户在**新开的那个标签页**里看面板。
+  // 那里本页并没有在跑（runSession.isRunning=false），内容全靠跟随层和落盘会话 ——
+  // 跟随层一旦撤掉、而正式回答还没落盘，正文就只剩用户那条 = 白屏。
+  await configureSettings(context);
+  const owner = await openFixturePage(context);
+  await openPanel(owner);
+  await sendInstruction(owner, STREAM_INSTRUCTION);
+  await expect
+    .poll(() => owner.locator(PANEL + ' .p-body').evaluate((el) => el.innerText.trim().length), { timeout: 25_000 })
+    .toBeGreaterThan(30);
+  // 流到一半才打开跟随页（等价于 agent 的 open_tab）
+  const follower = await openFixturePage(context);
+  await openPanel(follower);
+  const warnings = [];
+  collectWarnings(follower, warnings);
+  await installProbe(follower);
+  await expect
+    .poll(
+      () => follower.locator(PANEL + ' .p-body').evaluate((el) => String(el.innerText || '').includes('第 80 段')),
+      { timeout: 40_000 }
+    )
+    .toBe(true);
+  // 跟随层撤掉后必须还看得见正文（不是只剩用户消息）。
+  await expect.poll(() => follower.locator(PANEL + ' .msg-actions').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+  const samples = await readProbe(follower);
+  const a = report('⑨ 中途加入的跟随页', samples, warnings);
+  console.log('[blank-panel] ⑨ 结构: ' + JSON.stringify(await dumpStructure(follower)));
+  expect(a.longestBlankMs, '中途加入的跟随页不该白屏').toBeLessThanOrEqual(BLANK_BUDGET_MS);
+  expect(a.last.visibleChars, '跟随页收尾后必须还看得见回答').toBeGreaterThan(0);
+  await follower.close();
+  await owner.close();
+});
+
 test('⑦ 小视口（面板停靠、正文只剩一百多像素高）', async () => {
   await configureSettings(context);
   const page = await openFixturePage(context);

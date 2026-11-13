@@ -2342,14 +2342,14 @@ function renderFollowedLive() {
   // 快照可能比真实状态旧（订阅响应在路上时 run 已经结束）。不是 running 就别画 ——
   // 画出来的那条覆盖层永远等不到收尾，只会把半截回答留在正文里。
   if (followedRun.followedRunState.status !== 'running') {
-    resetFollowedRun({ render: true });
+    resetFollowedRun({ render: true, reason: 'follow-not-running' });
     return;
   }
   // ⚠ 落盘消息里已经有这一轮的正式回答 ⇒ 跟随层就是多余的：它只会把同一条回答
   //   再挂一份（通常是半截、甚至是个空块），而置底会停在那一份上 —— 这正是
   //   "跳转之后回答闪一下又空了"的来源之一。这里直接退回落盘会话（权威来源）。
   if (followedRunCommitted()) {
-    resetFollowedRun({ render: true });
+    resetFollowedRun({ render: true, reason: 'follow-committed' });
     return;
   }
   if (!followedRun.followedLiveReady) {
@@ -2509,6 +2509,12 @@ function ensureFollowedRunWatch() {
 
 function resetFollowedRun(options?: any) {
   const opts = options || {};
+  // ⚠ 先把快照留住：撤掉跟随层之后，正文只剩"落盘对话"里的内容。如果这一轮的回答
+  //   还没落盘（发起页还在跑、或落盘消息还在路上），正文就只剩用户那条 ——
+  //   用户看到的就是白屏。这正是实测「跟随页 19 秒空白」的形态（见导出记录的
+  //   「面板诊断」：follow-reset 两次都发生在 conversation 只有 1 条时）。
+  const lastSnapshot = followedRun.followedRunState;
+  const reason = String(opts.reason || 'follow-reset');
   if (followedRun.followRefreshTimer) {
     clearTimeout(followedRun.followRefreshTimer);
     followedRun.followRefreshTimer = null;
@@ -2529,15 +2535,53 @@ function resetFollowedRun(options?: any) {
   }
   updateRunControlState();
   if (opts.render) {
+    // 撤跟随层之前先把"已知的部分回答"留在正文里（除非正式回答已经落盘）。
+    if (lastSnapshot) keepFollowedPartialVisible(lastSnapshot, reason);
     // force：跟随结束 = 临时覆盖层作废，必须真的把正文换成落盘会话。
-    renderConversation({ reason: 'follow-reset', force: true });
+    renderConversation({ reason, force: true });
     fitPanelHeight();
   }
 }
 
+/**
+ * 跟随层撤掉时，把已知的部分回答补进正文（本地兜底消息）。
+ *
+ * 判据：这一轮（按 instruction 定位的用户轮）后面**还没有 assistant 消息**。
+ * 有的话什么都不做 —— 那是正式回答，权威。
+ *
+ * 这条消息只用于显示：`partialFromFollow` 标记会让持久化跳过它，
+ * 等发起页把正式回答落盘后，`adoptPanelSession` 会用整份会话把它换掉。
+ */
+function keepFollowedPartialVisible(snapshot: any, reason: string) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const list = panelSessionState.conversation;
+  if (!Array.isArray(list)) return false;
+  const instruction = String(snapshot.instruction || '').trim();
+  let userIndex = -1;
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (!instruction) break;
+    if (list[i] && list[i].role === 'user' && String(list[i].content || '').trim() === instruction) {
+      userIndex = i;
+      break;
+    }
+  }
+  if (userIndex >= 0 && list.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant')) return false;
+  const msg: any = runStateToAssistantMessage(snapshot);
+  if (!msg) return false;
+  const hasBody =
+    String(msg.content || '').trim().length > 0 || (Array.isArray(msg.parts) && msg.parts.length > 0);
+  if (!hasBody) return false;
+  msg.live = false;
+  msg.partial = true;
+  msg.partialFromFollow = true;
+  list.push(msg);
+  tracePanelRender('跟随层撤掉，用已知部分回答兜住正文（' + reason + '）', liveBlockTrace());
+  return true;
+}
+
 function applyFollowedSnapshot(snapshot: any) {
   if (!snapshot || !snapshot.runId) {
-    resetFollowedRun({ render: true });
+    resetFollowedRun({ render: true, reason: 'follow-no-run' });
     return;
   }
   if (snapshot.status !== 'running') {
@@ -2557,7 +2601,7 @@ async function subscribePanelRun() {
   const res = await sendPanelMessage('panel:run:subscribe', { sessionId });
   if (sessionId !== panelSessionState.panelSessionId) return;
   if (!res || !res.ok) {
-    resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
+    resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: 'subscribe-failed' });
     return;
   }
   // selfOwned 只说明“同一个 tabId”，而整页跳转后新页面会复用同一个 tabId。
@@ -2572,8 +2616,8 @@ async function subscribePanelRun() {
     return;
   }
   if (res.snapshot && res.snapshot.status === 'running') applyFollowedSnapshot(res.snapshot);
-  else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState) });
-  else if (followedRun.followedRunState) resetFollowedRun({ render: true });
+  else if (res.snapshot) resetFollowedRun({ render: Boolean(followedRun.followedRunState), reason: 'subscribe-not-running' });
+  else if (followedRun.followedRunState) resetFollowedRun({ render: true, reason: 'subscribe-empty' });
 }
 
 function scheduleFollowedRunRefresh() {
@@ -2596,15 +2640,18 @@ function scheduleFollowedRunRefresh() {
     const hasCommittedTurn =
       userIndex >= 0 && messages.slice(userIndex + 1).some((m: any) => m && m.role === 'assistant');
     if (got && got.ok && got.session && (Number(got.session.seq) > panelSessionState.panelSessionSeq || hasCommittedTurn)) {
-      resetFollowedRun();
+      resetFollowedRun({ reason: 'follow-adopted' });
       adoptPanelSession(got.session, { activeId: got.activeId || sessionId });
       subscribePanelRun().catch(() => {});
       return;
     }
-    if (attempts < 6) {
-      followedRun.followRefreshTimer = setTimeout(tick, 300);
+    // ⚠ 没落盘就**不要**收摊：发起页可能还在写（实测间隔 19 秒），而这期间把跟随层
+    //   撤掉就等于把正文清空（用户看到白屏）。前 6 次快轮询，之后转成 1 秒一次，
+    //   最多等约 20 秒；期间原有内容由 keepFollowedPartialVisible 兜着。
+    if (attempts < 24) {
+      followedRun.followRefreshTimer = setTimeout(tick, attempts < 6 ? 300 : 1000);
     } else {
-      resetFollowedRun({ render: true });
+      resetFollowedRun({ render: true, reason: 'follow-giveup' });
     }
   };
   followedRun.followRefreshTimer = setTimeout(tick, 250);
@@ -2751,7 +2798,12 @@ function buildTranscriptMarkdown(mode: any) {
 function serializeConversation() {
   // 完整副本持久化到 IndexedDB；模型上下文由 agent.js 单独做 token 限制。
   // 不能再用导出口径的 20 条/2KB 裁剪来当存储策略。
-  return serializeCompleteConversationMessages(panelSessionState.conversation);
+  //
+  // ⚠ 跟随页补进来的"已知部分回答"（partialFromFollow）**不落盘**：它只是显示兜底，
+  //   真正的权威回答由发起页落盘；若把它写进去，反而会和正式回答重复。
+  return serializeCompleteConversationMessages(
+    panelSessionState.conversation.filter((m: any) => !(m && m.partialFromFollow === true))
+  );
 }
 
 function sendPanelMessage(type: any, payload?: any): Promise<any> {
